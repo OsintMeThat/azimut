@@ -62,6 +62,26 @@ describe('the add-a-layer dialog', () => {
     expect(document.body.textContent).toContain('fetched once, now');
   });
 
+  it('keeps every note to one sentence, and never says the layer stays out of the case', () => {
+    show();
+    const notes = () =>
+      [...document.body.querySelectorAll('.lead, .note')].map((node) => node.textContent.trim());
+    const [file] = ticks();
+    const read = [...notes()];
+    file.checked = true;
+    file.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    read.push(...notes());
+
+    expect(read.length).toBeGreaterThan(3);
+    for (const note of read) {
+      expect(note.replace(/\s+/g, ' ').replace(/[.?!]$/, ''), note).not.toMatch(/[.?!] /);
+      expect(note).not.toContain('—');
+      // a layer is saved with the case and travels in its bundles
+      expect(note).not.toMatch(/joins the case/);
+    }
+  });
+
   it('hands the answer to the caller with the address', () => {
     const onurl = vi.fn();
     show({ onurl });

@@ -123,7 +123,7 @@ describe('deleting a selection', () => {
   });
 
   it('names the row when there is one, and previews what goes with it', async () => {
-    const get = vi.fn(async () => ({ cascade: [{ label: 'Inspect session' }], tombstone: [] }));
+    const get = vi.fn(async () => ({ cascade: [{ label: 'Inspect work' }], tombstone: [] }));
     const prompt = await entityDeletePrompt('case-1', [rows[1]], { get });
 
     expect(get).toHaveBeenCalledWith('/api/cases/case-1/entities/e2/dependents');

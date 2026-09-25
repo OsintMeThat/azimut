@@ -194,11 +194,6 @@ export function footerBand(footerSize = FOOTER_SIZE, lines = 1) {
   return Math.round(footerSize + 13) * Math.max(1, lines);
 }
 
-// Default band heights, derived from the size defaults so they can't drift out
-// of sync when those change (they mirror legendLineHeight()/footerBand()).
-export const LEGEND_LINE_H = legendLineHeight();
-export const FOOTER_H = footerBand();
-
 /** Distinct row indices in ascending order (default row 0). */
 function rowOrder(panels) {
   return [...new Set(panels.map((p) => p.row ?? 0))].sort((a, b) => a - b);

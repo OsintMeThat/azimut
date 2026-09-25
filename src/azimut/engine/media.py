@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from PIL import Image
 
 from .. import config, layout
-from ..workspace import Case, CaseError, ensure_dir
+from ..workspace import Case, CaseError, ensure_dir, write_text_atomic
 from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
 from . import links as link_engine
@@ -1335,21 +1335,16 @@ def _replace_exact(value: Any, old: str, new: str) -> Any:
 
 
 def write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    ensure_dir(path.parent)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temporary.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def rename_path(source: Path, destination: Path) -> None:
-    """Rename one file, including a case-only rename on Windows/macOS."""
-    if source == destination:
+    """Rename one file, including a case-only rename on Windows/macOS.
+
+    Compared as strings: a Windows path compares without regard to case, so
+    `Roof.json == roof.json` there and the case-only rename would never run.
+    """
+    if str(source) == str(destination):
         return
     ensure_dir(destination.parent)
     if (

@@ -510,7 +510,8 @@ def test_sentinel_layers_check_falls_back_to_the_catalogue_and_says_why(client, 
     body = client.get("/api/satellite/sentinel/layers?check=true").json()
     # a failed discovery leaves a usable list rather than an empty dropdown
     assert body["source"] == "catalogue"
-    assert "offline" in body["detail"]
+    # the reason is said, and never the address the instance id travels in
+    assert body["detail"] == "could not read the instance's layers: the provider could not be reached (ConnectError)"
 
 
 def test_sentinel_dates_lists_passes_and_counts_the_request(client, monkeypatch):

@@ -29,12 +29,14 @@ export default defineConfig({
   build: {
     outDir: '../src/azimut/static',
     emptyOutDir: true,
-    // Mermaid's Langium parser lands in one ~660 kB chunk, read off local disk
-    // and only when a note holds a diagram whose grammar needs it. The default
-    // 500 kB limit flags it on every build, which trains us to ignore the
-    // warning. Our own chunks top out under 200 kB, so anything reaching this
-    // ceiling is still a regression worth reading.
-    chunkSizeWarningLimit: 700,
+    // Two third-party chunks are large on purpose, and each loads only when it is
+    // needed: MapLibre GL (the `basemap-*` chunk, about 1,030 kB, for the tools
+    // that draw a map) and Mermaid's Langium parser (about 660 kB, when a note
+    // holds a diagram whose grammar needs it). A limit below MapLibre warns on every
+    // build, which trains us to ignore the warning, so the ceiling sits just
+    // above it. Our own chunks top out near 310 kB (the entry), so anything
+    // reaching this ceiling is still a regression worth reading.
+    chunkSizeWarningLimit: 1100,
   },
   server: {
     proxy: {

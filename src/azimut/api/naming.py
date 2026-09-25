@@ -18,7 +18,30 @@ from typing import Any
 
 from ..layout import MAX_SLUG, slugify
 
-__all__ = ["MAX_SLUG", "slugify", "read_created_at"]
+__all__ = ["MAX_SLUG", "slugify", "read_created_at", "holders", "case_only"]
+
+
+def holders(folder: Path, name: str, *, source: str | None = None) -> list[str]:
+    """The stems in `folder` that Windows and macOS would take for `name`.
+
+    Compared without case: Linux keeps `Harbour` beside `harbour`, the other two
+    systems see one file, and a bundle refuses the pair, so the stricter rule is
+    the one a name answers to. `source` is the stem the save starts from, which
+    never collides with itself, a change of case included.
+    """
+    if not folder.is_dir():
+        return []
+    folded = name.casefold()
+    return [
+        path.stem
+        for path in folder.glob("*.json")
+        if path.stem.casefold() == folded and path.stem != source
+    ]
+
+
+def case_only(old: str | None, new: str) -> bool:
+    """Whether a rename changes only the case, which is one file on Windows and macOS."""
+    return old is not None and old != new and old.casefold() == new.casefold()
 
 
 def read_created_at(path: Path) -> str | None:

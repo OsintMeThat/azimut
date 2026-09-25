@@ -148,17 +148,17 @@
         </div>
 
         {#if tab === 'detection'}
-          <label title="Colour compares appearance; structure compares edges; index compares Sentinel-2 spectral bands.">Method
+          <label title="What to compare: colour, edges or a spectral index.">Method
             <select aria-label="Method" bind:value={settings.method}>
               {#each CHANGE_METHODS as method}<option value={method.id} disabled={!status.methods.includes(method.id)}>{method.label}</option>{/each}
             </select>
           </label>
           {#if settings.method === 'index'}
-            <label title="Select the spectral quantity to compare between the two passes.">Index
+            <label title="The spectral index compared between the two passes.">Index
               <select bind:value={settings.index}>{#each CHANGE_INDICES as entry}<option value={entry.id}>{entry.label} · {entry.hint}</option>{/each}</select>
             </label>
           {:else}
-            <label title="Automatic adapts to this view; manual keeps a sensitivity-based threshold.">Threshold
+            <label title="Adapt the threshold to this view, or follow the sensitivity.">Threshold
               <select bind:value={settings.threshold}><option value="auto">Automatic</option><option value="manual">Manual</option></select>
             </label>
           {/if}
@@ -176,10 +176,10 @@
         {/if}
 
         {#if tab === 'display'}
-          <label title="Show the detected pixels as classes, a signal heatmap or outlines.">Display
+          <label title="Draw the change as classes, a signal heatmap or outlines.">Display
             <select bind:value={settings.display}>{#each CHANGE_DISPLAYS as display}<option value={display.id}>{display.label}</option>{/each}</select>
           </label>
-          <label title="Change only the overlay colours; Thermal is a palette, not a thermal sensor.">Palette
+          <label title="Overlay colours only, none of them a sensor reading.">Palette
             <select bind:value={settings.palette}><option value="directional">Directional</option><option value="colourblind">Colour-blind</option><option value="thermal">Thermal</option></select>
           </label>
           <div class="classes">{#each CHANGE_CLASSES as entry}<label class="check"><input type="checkbox" bind:group={settings.classes} value={entry} /> {entry}</label>{/each}</div>
@@ -189,7 +189,7 @@
         {/if}
 
         {#if tab === 'filters'}
-          <label title="Reduce exposure differences; this may suppress broad real changes.">Tone matching
+          <label title="Even out exposure, at the risk of hiding a broad change.">Tone matching
             <select bind:value={settings.normalize}>
               <option value="auto">Automatic</option><option value="none">None</option>
               <option value="mean">Mean brightness</option><option value="histogram">Histogram</option>
@@ -205,13 +205,13 @@
             </p>
           {/if}
           <label title="Search for a small image offset before comparing pixels.">Alignment · ±{settings.alignment}px<input type="range" min="0" max="8" bind:value={settings.alignment} /></label>
-          <label title="Reduce pixel noise before thresholding; zero preserves small details.">Smoothing · {settings.smoothing}px<input type="range" min="0" max="4" bind:value={settings.smoothing} /></label>
-          <label title="Remove isolated speckles; larger settings can also remove small real changes.">Cleanup · {settings.cleanup}<input type="range" min="0" max="3" bind:value={settings.cleanup} /></label>
+          <label title="Reduce pixel noise before thresholding.">Smoothing · {settings.smoothing}px<input type="range" min="0" max="4" bind:value={settings.smoothing} /></label>
+          <label title="Remove isolated speckles.">Cleanup · {settings.cleanup}<input type="range" min="0" max="3" bind:value={settings.cleanup} /></label>
           <label title="Discard connected regions below this ground area.">Minimum area (m²)<input type="number" min="0" max="1000000" bind:value={settings.min_area} /></label>
           {#if status.clouds}
             <label class="check" title="Exclude cloud, read from Sentinel-2's scene classification."><input type="checkbox" bind:checked={settings.ignore_clouds} /> Mask clouds</label>
             <label class="check" title="Exclude the shadow cloud casts, which moves with the sun."><input type="checkbox" bind:checked={settings.ignore_shadows} /> Mask shadows</label>
-            <label title="Grow the cloud and shadow mask, to take the soft edge a mask leaves behind.">Mask margin · {settings.cloud_margin} m<input aria-label="Cloud mask margin" type="range" min="0" max="200" step="10" bind:value={settings.cloud_margin} /></label>
+            <label title="Grow the mask over the soft edge a cloud leaves.">Mask margin · {settings.cloud_margin} m<input aria-label="Cloud mask margin" type="range" min="0" max="200" step="10" bind:value={settings.cloud_margin} /></label>
           {/if}
           <label class="check"><input type="checkbox" bind:checked={settings.zones} /> List change zones</label>
           <button class="link" onclick={() => (settings = changeSettings())}>Reset settings</button>

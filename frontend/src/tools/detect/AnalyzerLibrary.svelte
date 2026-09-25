@@ -139,7 +139,7 @@
 {#if mode === 'list'}
   <div class="cmp-dock-body">
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
-    <p class="hint">An analyzer is what a detection looks for. Start from an example, build your own from rules you try on the map, or copy a calibrated built-in to tune it.</p>
+    <p class="hint">Start from an example, build your own from rules you try on the map, or copy a calibrated built-in to tune it.</p>
     <button class="btn btn-primary" onclick={() => (mode = 'base')}><Icon name="plus" size={14} /> New analyzer</button>
 
     <section aria-label="My analyzers">
@@ -185,7 +185,7 @@
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
     {#if examples.length}
       <h3>Start from an example</h3>
-      <p class="hint">A ready analyzer with its checks. Run them, change a rule and see which check turns red.</p>
+      <p class="hint">A ready analyzer whose checks turn red when a rule you change breaks one.</p>
       <div class="examples">
         {#each examples as example (example.id)}
           <button class="pick base grow" style={`--tint: ${example.recipe.colour}`} disabled={busy}
@@ -201,7 +201,7 @@
       <span class="name">Build your own rules<small>Say what a pixel has to show, on A, on B or between them, and watch each rule on the map as you set it.</small></span>
     </button>
     <h3>Or start from a built-in</h3>
-    <p class="hint">Its calibrated method comes with it; you tune how picky it is. The ones marked rules open as the rules they apply.</p>
+    <p class="hint">A built-in brings its calibrated method for you to tune, and one marked rules opens as the rules it applies.</p>
     <div class="bases">
       {#each [...builtins, ...custom] as entry (entry.id)}
         {@const rules = catalogue?.as_rules?.[entry.id]}
@@ -227,7 +227,7 @@
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
     <h3>{isNew ? 'New analyzer' : readonly ? recipe.name : `Edit ${recipe.name}`}</h3>
     <p class="measures"><span>Measures</span> {capability.label ?? recipe.method}</p>
-    {#if readonly}<p class="hint">A built-in can't be changed. Copy it to tune your own.</p>{/if}
+    {#if readonly}<p class="hint">A built-in can't be changed, so copy it to tune your own.</p>{/if}
     <fieldset class="fields" disabled={readonly}>
       <label title="The name shown in the analyzer library across all cases.">Name
         <input aria-label="Analyzer name" bind:value={recipe.name} maxlength="120" />

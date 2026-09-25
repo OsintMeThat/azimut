@@ -250,7 +250,7 @@ def sentinel_layers(check: bool = False) -> dict[str, Any]:
         return {
             "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
             "source": "catalogue",
-            "detail": f"could not read the instance's layers: {exc}",
+            "detail": f"could not read the instance's layers: {tiles.upstream_failure(exc)}",
         }
     if not found:
         return {
@@ -286,7 +286,7 @@ def sentinel_dates(
         config.record_usage("sentinelhub", 1)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"date lookup failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"date lookup failed: {tiles.upstream_failure(exc)}") from exc
     config.record_usage("sentinelhub", 1)
     return {"dates": found, "start": start, "end": end}
 
@@ -328,7 +328,7 @@ def sentinel_acquisitions(body: AcquisitionQuery) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"pass lookup failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"pass lookup failed: {tiles.upstream_failure(exc)}") from exc
     config.record_usage("sentinelhub", 1)
     return {**found, "start": body.start, "end": body.end}
 
@@ -378,7 +378,7 @@ def sentinel1_layer(body: RadarLayerQuery) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"layer check failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"layer check failed: {tiles.upstream_failure(exc)}") from exc
     detail = (tried[-1]["detail"] if body.layer and tried else
               "no layer of this instance reads Sentinel-1 VV and VH")
     return {"ok": False, "layer": body.layer, "serves": None if body.layer else True,
@@ -407,7 +407,7 @@ def sentinel_coverage(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"coverage check failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"coverage check failed: {tiles.upstream_failure(exc)}") from exc
     config.record_usage("sentinelhub", 1)
     return result
 
@@ -422,7 +422,7 @@ def wayback_releases() -> dict[str, Any]:
     try:
         listed = wayback.releases()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"could not read the release list: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"could not read the release list: {tiles.upstream_failure(exc)}") from exc
     return {"releases": [{"release": r.number, "date": r.date} for r in listed]}
 
 
@@ -442,7 +442,7 @@ def wayback_changes(
     try:
         found = wayback.local_changes(lat, lon, zoom)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"could not read this point's history: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"could not read this point's history: {tiles.upstream_failure(exc)}") from exc
     return {
         "changes": [
             {"release": c.release, "acquired": c.acquired, "source": c.source} for c in found
@@ -496,7 +496,7 @@ def _serve_tile(
         try:
             upstream = _client().get(url)
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"tile fetch failed: {exc}") from exc
+            raise HTTPException(status_code=502, detail=f"tile fetch failed: {tiles.upstream_failure(exc)}") from exc
         # a stale Google session token answers 401/403 — re-mint once, transparently
         if attempt == 1 and provider.session and upstream.status_code in (401, 403):
             google_tiles.invalidate(google_tiles.key_from_url(provider.url))
@@ -714,7 +714,7 @@ def firms_answer(url: str) -> Response:
     try:
         response = httpx.get(url, headers={"User-Agent": tiles.USER_AGENT}, timeout=20)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"FIRMS unreachable: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"FIRMS unreachable: {tiles.upstream_failure(exc)}") from exc
     if response.status_code >= 400 or "xml" in response.headers.get("content-type", ""):
         raise HTTPException(
             status_code=502, detail=firms.service_error(response.text) or "FIRMS refused the request"
@@ -1065,7 +1065,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     except tiles.TileFetchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # network / provider failure
-        raise HTTPException(status_code=502, detail=f"tile fetch failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"tile fetch failed: {tiles.upstream_failure(exc)}") from exc
 
     # the recorded point is the marker (== center unless it was moved off-center)
     marker_lat, marker_lon = provenance["lat"], provenance["lon"]

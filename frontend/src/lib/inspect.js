@@ -388,33 +388,6 @@ export function quadEdgeMidpoints(quad) {
   }));
 }
 
-/**
- * Move one edge of `quad` by the drag (dx, dy) *projected onto that edge's
- * outward normal* — a resize that keeps the edge parallel and the opposite edge
- * fixed. Works on a warped quad (both endpoints shift together) and composes
- * with the per-corner warp, since it only moves two of the four points.
- */
-export function moveQuadEdge(quad, side, dx, dy) {
-  const [a, b] = QUAD_SIDES[side];
-  const ex = quad[b][0] - quad[a][0];
-  const ey = quad[b][1] - quad[a][1];
-  const len = Math.hypot(ex, ey) || 1;
-  let nx = -ey / len;
-  let ny = ex / len;
-  const [cx, cy] = quadCentroid(quad);
-  const mx = (quad[a][0] + quad[b][0]) / 2;
-  const my = (quad[a][1] + quad[b][1]) / 2;
-  if ((mx - cx) * nx + (my - cy) * ny < 0) {
-    nx = -nx;
-    ny = -ny;
-  }
-  const t = dx * nx + dy * ny; // drag projected onto the outward normal
-  const out = quad.map(([x, y]) => [x, y]);
-  out[a] = [quad[a][0] + nx * t, quad[a][1] + ny * t];
-  out[b] = [quad[b][0] + nx * t, quad[b][1] + ny * t];
-  return out;
-}
-
 /** Centroid (mean of the 4 corners) of a quad. */
 export function quadCentroid(quad) {
   const cx = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4;
@@ -449,13 +422,6 @@ export function collageBounds(nodes, pad = 0) {
     width: Math.max(1, Math.round(Math.max(...xs) + pad - minX)),
     height: Math.max(1, Math.round(Math.max(...ys) + pad - minY)),
   };
-}
-
-/** Mean distance from the centroid to the corners — the quad's "radius". */
-export function quadRadius(quad) {
-  const [cx, cy] = quadCentroid(quad);
-  const d = quad.reduce((s, [x, y]) => s + Math.hypot(x - cx, y - cy), 0);
-  return d / quad.length || 1;
 }
 
 /** Rotate a quad by `rad` radians around a fixed point (its centroid by default). */

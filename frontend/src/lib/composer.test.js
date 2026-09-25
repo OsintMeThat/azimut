@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  PAD, PANEL_H, GAP, ROW_GAP, FOOTER_H, LEGEND_LINE_H,
+  PAD, PANEL_H, GAP, ROW_GAP,
   layoutPanels, layoutPanelsFree, freeNormalizeDelta, panelsBottom,
   panelsBlockHeight, panelHeight, panelScale, captionBand, legendLineHeight, footerBand,
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
@@ -210,7 +210,7 @@ describe('docSize — free layout', () => {
     ];
     const { width, height } = docSize(panels, [], {}, {}, [], 'free');
     expect(width).toBe(2720 + PAD);
-    expect(height).toBe(1020 + FOOTER_H + PAD);
+    expect(height).toBe(1020 + footerBand() + PAD);
   });
 });
 
@@ -276,7 +276,7 @@ describe('docSize', () => {
   it('sizes a single panel with no legend', () => {
     const { width, height } = docSize([landscape(1000, 500, { caption: 'c' })], [], {});
     expect(width).toBe(PAD + 1440 + PAD);
-    expect(height).toBe(PAD + (PANEL_H + captionBand()) + FOOTER_H + PAD);
+    expect(height).toBe(PAD + (PANEL_H + captionBand()) + footerBand() + PAD);
   });
 
   it('accounts for custom caption / legend / footer sizes', () => {
@@ -295,8 +295,8 @@ describe('docSize', () => {
     const shapes = [{ kind: 'rect', color: '#ff5252', panel: 'p1' }];
     const notes = { '#ff5252': 'road junction' };
     const { height } = docSize(panels, shapes, notes);
-    const legendH = 10 + 1 * LEGEND_LINE_H;
-    expect(height).toBe(PAD + panelsBlockHeight(panels) + legendH + FOOTER_H + PAD);
+    const legendH = 10 + 1 * legendLineHeight();
+    expect(height).toBe(PAD + panelsBlockHeight(panels) + legendH + footerBand() + PAD);
   });
 });
 
@@ -1640,7 +1640,7 @@ describe('docSize — footer can be switched off', () => {
     const panels = [landscape(1000, 500)];
     const on = docSize(panels, [], {}, { footerEnabled: true });
     const off = docSize(panels, [], {}, { footerEnabled: false });
-    expect(on.height - off.height).toBe(FOOTER_H);
+    expect(on.height - off.height).toBe(footerBand());
   });
 
   it('footer off + no captions + no margins reduces to just the panels', () => {

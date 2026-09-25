@@ -444,7 +444,7 @@
   {#if statementColumn}
     <p class="label">What <em>{statementColumn}</em> states</p>
     <div class="nested">
-      <SheetDate {table} {meta} {count} subject={subjectColumn} {onanchors}
+      <SheetDate {table} {meta} subject={subjectColumn} {onanchors}
                  onchoices={(answer) => (statement = answer)} />
     </div>
   {/if}

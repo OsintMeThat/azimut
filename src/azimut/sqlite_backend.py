@@ -306,7 +306,6 @@ CREATE INDEX idx_temporal_kind   ON temporal_items(kind);
 # `running`; it finishes `ready` or, past its retry budget, `failed`; an explicit
 # cancel makes it `cancelled`. An interrupted `running` job (a crash mid-work) is
 # recovered on open back to `queued` or `failed` per its retry count.
-JOB_STATES = ("queued", "running", "ready", "failed", "cancelled")
 _JOB_TERMINAL = frozenset({"ready", "failed", "cancelled"})
 
 T = TypeVar("T")

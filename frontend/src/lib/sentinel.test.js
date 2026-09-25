@@ -10,7 +10,6 @@ import {
   daysBefore,
   validWindow,
   validDay,
-  windowLabel,
   cloudLabel,
   cloudClass,
   monthOf,
@@ -18,7 +17,6 @@ import {
   monthLabel,
   monthBounds,
   monthGrid,
-  defaultSearchWindow,
   sentinelPlaceKey,
   coverageRequestPath,
   dateAfterCoverage,
@@ -128,15 +126,6 @@ describe('validWindow', () => {
   });
 });
 
-describe('windowLabel', () => {
-  it('reads as a day, a range, or the layer default', () => {
-    expect(windowLabel('2026-05-01', '2026-05-01')).toBe('2026-05-01');
-    expect(windowLabel('2026-05-01', '2026-05-31')).toBe('2026-05-01 → 2026-05-31');
-    expect(windowLabel('', '')).toBe('most recent');
-    expect(windowLabel('2026-05-31', '2026-05-01')).toBe('most recent');
-  });
-});
-
 describe('cloudLabel', () => {
   it('is the reason to skip a date without paying to find out', () => {
     expect(cloudLabel(3.4)).toBe('3% cloud');
@@ -213,13 +202,6 @@ describe('monthGrid', () => {
     const cells = monthGrid('2026-02');
     expect(cells.slice(0, 6)).toEqual([null, null, null, null, null, null]);
     expect(cells[6]).toBe('2026-02-01');
-  });
-});
-
-describe('defaultSearchWindow', () => {
-  it('covers several revisits (Sentinel-2 passes every ~5 days)', () => {
-    const now = new Date(Date.UTC(2026, 6, 14));
-    expect(defaultSearchWindow(30, now)).toEqual({ from: '2026-06-14', to: '2026-07-14' });
   });
 });
 

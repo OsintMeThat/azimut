@@ -80,6 +80,11 @@ BUNDLED_ROOTS = frozenset(
 #: first open — refusing the member outright would strand every bundle already
 #: exported. Format 2 never uses these, so this set dies with format 1.
 IMPORTABLE_ROOTS = BUNDLED_ROOTS | {"case.db", "exports", "inspect", "search"}
+
+#: SQLite's own files beside the database. A journal exists while any connection is
+#: writing, holds pages of the database from before the export cleaned it, and
+#: opened beside an imported database it would be rolled back into it.
+DB_COMPANIONS = ("-journal", "-wal", "-shm")
 NOT_BUNDLED = {
     layout.TRASH_DIR: "deleted artifacts do not travel",
     "media/.thumbs": "content-addressed thumbnails are rebuilt",
@@ -89,6 +94,15 @@ NOT_BUNDLED = {
     f"{layout.LAYERS_DIR}/{layout.LAYER_CACHE_DIR}": (
         "a map layer's parsed copy is rebuilt from its snapshot"
     ),
+    # A 0.3.0 session kept as it was, for the machine that merged it to undo by
+    # hand; the work it became is what travels.
+    f"{layout.INSPECT_DIR}/.v1": "a pre-0.3.1 session copy stays on the machine that merged it",
+    **{
+        f"{layout.DATA_DIR}/{layout.PRE_HIDDEN_DB}{suffix}": (
+            "SQLite's transaction state belongs to this machine"
+        )
+        for suffix in DB_COMPANIONS
+    },
 }
 
 #: Extensions whose bytes are already compressed. Deflating them burns CPU on
@@ -242,9 +256,16 @@ def _validate_member_names(names: list[str]) -> None:
         )
     if any(not _safe_member(name) for name in names):
         raise BundleError("the bundle contains a path that is not portable")
-    portable = [_portable_member_key(name) for name in names]
-    if len(portable) != len(set(portable)):
-        raise BundleError("the bundle contains paths that collide on another operating system")
+    seen: dict[str, str] = {}
+    for name in names:
+        key = _portable_member_key(name)
+        if key in seen:
+            # Named, since the analyst has to rename one of the two to export.
+            raise BundleError(
+                f"'{seen[key]}' and '{name}' are one file on Windows and macOS; "
+                "rename one of them"
+            )
+        seen[key] = name
 
 
 def disk_reserve(total: int) -> int:
@@ -311,8 +332,35 @@ def _included(rel: str) -> bool:
     return PurePosixPath(rel).parts[0] in BUNDLED_ROOTS
 
 
+def _tool_member(name: str, version: int) -> str | None:
+    """A member's path under the tool root, or None when it is the analyst's own."""
+    if version < WRAPPED_MEMBERS:
+        return name
+    parts = PurePosixPath(name).parts
+    if len(parts) >= 3 and parts[0] == BUNDLE_ROOT and parts[1] == layout.TOOL_DIR:
+        return "/".join(parts[2:])
+    return None
+
+
+def _db_companion(name: str, version: int) -> bool:
+    """Whether a member is a journal an Azimut before 0.3.1 could export.
+
+    It is accepted, so those bundles still import, and dropped after its digest is
+    checked, so it never lands beside the database it would roll back into.
+    """
+    inside = _tool_member(name, version)
+    if inside is None:
+        return False
+    member = PurePosixPath(inside)
+    return member.parent.as_posix() in (layout.DATA_DIR, ".") and any(
+        member.name == f"{layout.PRE_HIDDEN_DB}{suffix}" for suffix in DB_COMPANIONS
+    )
+
+
 def _importable(rel: str, version: int) -> bool:
     """Whether a bundle member may land, at the naming its format declares."""
+    if _db_companion(rel, version):
+        return True
     if version < WRAPPED_MEMBERS:
         return PurePosixPath(rel).parts[0] in IMPORTABLE_ROOTS
     parts = PurePosixPath(rel).parts
@@ -411,7 +459,11 @@ def _clean_database(source: Path, target: Path) -> None:
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("DELETE FROM trash")
-        conn.execute("DELETE FROM jobs WHERE state IN ('queued', 'running')")
+        # Every job, finished ones too: the queue is this machine's work, and an
+        # export's or an import's payload names folders on it (the workspace, the
+        # Downloads folder a bundle came from), which is the account's own name.
+        # An import rebuilds what it needs, thumbnails first.
+        conn.execute("DELETE FROM jobs")
         conn.commit()
         conn.execute("VACUUM")
     finally:
@@ -901,6 +953,8 @@ def _verify_and_extract(
                         sink.write(chunk)
             if size != expected_size or digest.hexdigest() != record["sha256"]:
                 raise BundleError(f"bundle member '{info.filename}' failed verification")
+            if _db_companion(info.filename, declared):
+                destination.unlink()
         return header
 
 
@@ -1039,7 +1093,10 @@ def import_into(
         ensure_dir(layout.data_dir(imported.path))
         for directory in layout.content_dirs(imported.path):
             ensure_dir(directory)
-        from . import thumbnails
+        from . import maplayers, thumbnails
+
+        # A followed layer re-read on first switch-on would call the sender's server.
+        maplayers.receive(imported)
 
         for item in imported.list_media_items():
             if item.get("kind") in thumbnails.THUMBNAILED_KINDS:

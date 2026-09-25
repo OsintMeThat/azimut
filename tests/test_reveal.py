@@ -230,21 +230,14 @@ def test_case_route_takes_no_path_from_the_caller(client, shown):
     assert not shown
 
 
-def test_workspace_route_reveals_the_root(client, shown):
-    res = client.post("/api/settings/reveal-workspace")
-
-    assert res.status_code == 200
-    assert res.json()["path"] == str(config.workspace_root())
-    assert shown == [config.workspace_root()]
-
-
 def test_a_refusal_reaches_the_ui_as_a_reason(client, monkeypatch):
     def refuse(_path):
         raise reveal.RevealError("no file manager found (xdg-open is missing)")
 
     monkeypatch.setattr(reveal, "reveal", refuse)
+    cid = client.post("/api/cases", json={"name": "Reveal refused"}).json()["id"]
 
-    res = client.post("/api/settings/reveal-workspace")
+    res = client.post(f"/api/cases/{cid}/reveal")
 
     assert res.status_code == 409
     assert "xdg-open" in res.json()["detail"]

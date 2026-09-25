@@ -37,18 +37,6 @@ export function slugify(text, fallback) {
 }
 
 /**
- * A name that doesn't collide with `taken`: `base` when free, else `base 2`,
- * `base 3`, … `taken` is a Set or array of names already in the case.
- */
-export function uniqueName(base, taken) {
-  const set = taken instanceof Set ? taken : new Set(taken);
-  if (!set.has(base)) return base;
-  let n = 2;
-  while (set.has(`${base} ${n}`)) n += 1;
-  return `${base} ${n}`;
-}
-
-/**
  * Name for a fresh item of `kind`: "Collage 1", "Proof 1", … taking the lowest
  * free number so the case doesn't count past the gaps deletions leave behind.
  */
@@ -104,16 +92,6 @@ export function savedEntities(entities, kind) {
     const spec = e.attrs?.[attr];
     return typeof spec === 'string' && spec.startsWith(dir) && spec.endsWith('.json');
   });
-}
-
-/** The name one filed entity is saved under, or '' if it carries no spec.
- *  This is the name the tools reopen by, so it has to follow the spec's folder
- *  wherever the case layout moves it. */
-export function specStem(entity, kind) {
-  const { dir, attr } = SPEC_ATTR[kind];
-  const spec = entity?.attrs?.[attr];
-  if (typeof spec !== 'string' || !spec.startsWith(dir) || !spec.endsWith('.json')) return '';
-  return spec.slice(dir.length, -5);
 }
 
 /** Slugs of everything of `kind` already saved — the collision set. */

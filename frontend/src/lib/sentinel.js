@@ -107,12 +107,6 @@ export function validDay(day) {
   return validWindow(day, day);
 }
 
-/** How a window reads in the UI: a day, a range, or the layer's own default. */
-export function windowLabel(from, to) {
-  if (!validWindow(from, to)) return 'most recent';
-  return from === to ? from : `${from} → ${to}`;
-}
-
 /**
  * The calendar month a day belongs to, and month arithmetic on 'YYYY-MM'.
  * Day 1 of the target month, so a 31st can never spill into the next one.
@@ -199,13 +193,4 @@ export function coverageRequestPath({ lat, lon, layer, date, maxcc = DEFAULT_MAX
 /** Keep the working map unless the candidate day passed its coverage check. */
 export function dateAfterCoverage(current, candidate, available) {
   return available ? candidate : current;
-}
-
-/**
- * The date range a date search should default to: the last `days` days, ending
- * today. Sentinel-2 revisits every ~5 days, so a month is several passes —
- * enough that the list is never empty, short enough to stay readable.
- */
-export function defaultSearchWindow(days = 30, now = new Date()) {
-  return { from: daysBefore(days, now), to: isoDay(now) };
 }

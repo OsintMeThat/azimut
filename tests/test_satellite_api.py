@@ -1364,3 +1364,108 @@ def test_a_denser_screen_states_the_ground_it_really_covers(client):
     assert drawn_1x == expected_1x
     assert drawn_2x == expected_2x
     assert drawn_1x != drawn_2x
+
+
+# -- a refused key never comes back in an error (AUD-019) --------------------------
+
+INSTANCE = "a1b2c3d4-0000-4bad-beef-instance0secret"
+MAPBOX = "pk.eyJ1IjoidGVzdCJ9.secret-mapbox-token"
+
+
+def _refusing(url, params=None, **_kwargs):
+    import httpx
+
+    return httpx.Response(401, request=httpx.Request("GET", url, params=params), text="denied")
+
+
+@pytest.fixture
+def keys_refused(monkeypatch):
+    import httpx
+
+    from azimut import config
+
+    config.save_settings({**config.load_settings(), "api_keys": {"sentinelhub": INSTANCE, "mapbox": MAPBOX}})
+    monkeypatch.setattr(httpx, "get", _refusing)
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: _refusing(url, **{k: v for k, v in kw.items() if k == "params"}))
+
+
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
+        ("get", "/api/satellite/sentinel/dates?lat=48.8&lon=2.3&start=2026-01-01&end=2026-02-01", None),
+        ("get", "/api/satellite/sentinel/layers?check=true", None),
+        ("post", "/api/satellite/sentinel1/layer", {}),
+        ("get", "/api/satellite/sentinel/coverage?lat=48.8&lon=2.3&layer=TRUE-COLOR&date=2026-01-02", None),
+    ],
+)
+def test_a_refused_sentinel_key_is_never_echoed(client, keys_refused, method, path, body):
+    answer = getattr(client, method)(path, **({"json": body} if body is not None else {}))
+
+    assert INSTANCE not in answer.text
+    assert "https://" not in answer.text
+
+
+def test_a_refused_capture_key_is_never_echoed(client, keys_refused, monkeypatch):
+    import httpx
+
+    def refuse(_client, url):
+        raise httpx.HTTPStatusError("401", request=httpx.Request("GET", url), response=httpx.Response(401))
+
+    monkeypatch.setattr(tiles, "_default_fetch", lambda c, url: refuse(c, f"{url}?access_token={MAPBOX}"))
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+
+    answer = client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 48.8584, "lon": 2.2945, "zoom": 16, "width": 256, "height": 256,
+              "provider": "mapbox-satellite"},
+    )
+
+    assert answer.status_code == 502
+    assert MAPBOX not in answer.text and "answered 401" in answer.text
+
+
+def test_an_upstream_failure_names_the_code_and_not_the_address():
+    import httpx
+
+    request = httpx.Request("GET", f"https://services.sentinel-hub.com/ogc/wfs/{INSTANCE}?x=1")
+    refused = httpx.HTTPStatusError("x", request=request, response=httpx.Response(403, request=request))
+    assert tiles.upstream_failure(refused) == "the provider answered 403"
+    assert tiles.upstream_failure(httpx.ConnectTimeout("t", request=request)) == "the provider did not answer in time"
+    assert INSTANCE not in tiles.upstream_failure(ValueError(f"bad reply from {request.url}"))
+
+
+# -- the tile cache expires what nobody reads again (AUD-024) ----------------------
+
+
+def test_the_tile_cache_sweep_drops_what_is_past_its_days_and_keeps_the_rest(tmp_workspace):
+    import os
+    import time
+
+    from azimut import config
+    from azimut.engine import tilecache
+
+    tilecache.put("s2-2025-01-01", 12, 1, 2, b"old", "image/png")
+    tilecache.put("s2-2026-09-01", 12, 1, 2, b"new", "image/png")
+    root = config.tile_cache_dir()
+    old = root / "s2-2025-01-01" / "12" / "1_2.png"
+    past = time.time() - (tilecache.TTL_DAYS + 1) * 86400
+    os.utime(old, (past, past))
+
+    assert tilecache.sweep() == 1
+
+    assert not old.exists() and not (root / "s2-2025-01-01").exists()
+    assert tilecache.get("s2-2026-09-01", 12, 1, 2) == (b"new", "image/png")
+
+
+def test_opening_the_workspace_sweeps_the_tile_cache(tmp_workspace, monkeypatch):
+    import threading
+
+    from azimut import workspace
+    from azimut.engine import tilecache
+
+    swept = threading.Event()
+    monkeypatch.setattr(tilecache, "sweep", lambda: swept.set())
+
+    workspace.open_workspace()
+
+    assert swept.wait(5)

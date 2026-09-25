@@ -313,3 +313,45 @@ def test_single_image_methods_need_no_reference_and_pin_after_only(client, scena
     assert pinned.json()["entity"]["attrs"]["geometry"]["type"] == "Point"
     with Image.open(case.resolve_inside(pinned.json()["image"])) as image:
         assert image.format == "PNG" and image.width <= 400
+
+
+def _routine_on_its_own_area(client, case, body, title="Harbour watch"):
+    base = f"/api/cases/{case.id}/analysis"
+    area = client.post(base + "/areas", json={**area_body(body["zones"][0]), "name": "Harbour"}).json()
+    shared = {**body, "zones": [], "area_dates": [{"area_id": area["id"], "a": body["a"], "b": body["b"], "date_rule": "manual"}]}
+    routine = client.post(base + "/followups", json={**shared, "title": title}).json()
+    return base, area, routine
+
+
+def test_a_routine_is_not_restored_without_the_area_it_draws_on(client, scenario):
+    case, body = scenario
+    base, area, routine = _routine_on_its_own_area(client, case, body)
+    routine_group = client.delete(base + "/followups/" + routine["id"]).json()["trash"]
+    area_group = client.delete(base + "/areas/" + area["id"]).json()["trash"]
+
+    refused = client.post(f"/api/cases/{case.id}/trash/{routine_group}/restore")
+    assert refused.status_code == 409
+    assert "Harbour" in refused.json()["detail"] and "restore" in refused.json()["detail"]
+    assert client.get(base + "/followups").json() == []
+
+    assert client.post(f"/api/cases/{case.id}/trash/{area_group}/restore").status_code == 200
+    assert client.post(f"/api/cases/{case.id}/trash/{routine_group}/restore").status_code == 200
+    assert [row["id"] for row in client.get(base + "/followups").json()] == [routine["id"]]
+    opened = client.get(base + "/followups/" + routine["id"]).json()
+    assert opened["zones"][0]["name"] == "Harbour" and "missing_areas" not in opened
+
+
+def test_a_routine_whose_area_is_gone_for_good_still_opens_and_says_so(client, scenario):
+    case, body = scenario
+    base, area, routine = _routine_on_its_own_area(client, case, body)
+    routine_group = client.delete(base + "/followups/" + routine["id"]).json()["trash"]
+    area_group = client.delete(base + "/areas/" + area["id"]).json()["trash"]
+    assert client.delete(f"/api/cases/{case.id}/trash/{area_group}").status_code == 200
+
+    assert client.post(f"/api/cases/{case.id}/trash/{routine_group}/restore").status_code == 200
+
+    assert [row["id"] for row in client.get(base + "/followups").json()] == [routine["id"]]
+    opened = client.get(base + "/followups/" + routine["id"]).json()
+    assert opened["zones"] == [] and opened["missing_areas"] == [area["id"]]
+    ran = client.post(base + "/followups/" + routine["id"] + "/run", json={})
+    assert ran.status_code == 422 and "area" in ran.json()["detail"]

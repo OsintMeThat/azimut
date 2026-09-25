@@ -45,13 +45,6 @@ export function mediaKindOf(e) {
   return 'file';
 }
 
-/** Media entities normally carry the same `kind` the Media Library uses to tell
- *  video from image; fall back to the file extension for entities filed before
- *  that attr existed. */
-export function isVideoEntity(e) {
-  return mediaKindOf(e) === 'video';
-}
-
 /** The icon a media kind is drawn with. The registry cannot make this call: a
  *  `media` is one type, and what the bytes are is a property of the file. */
 const MEDIA_ICONS = { image: 'image', video: 'video', audio: 'audio', file: 'file' };

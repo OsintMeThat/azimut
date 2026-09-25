@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAP_ACTIONS,
-  MAP_LAYERS,
   MAP_MODES,
   arm,
   armedId,
@@ -132,13 +131,8 @@ describe('the declarations themselves', () => {
     }
   });
 
-  it('keeps every id unique across modes, actions and layers', () => {
-    const ids = [...MAP_MODES, ...MAP_ACTIONS, ...MAP_LAYERS].map((entry) => entry.id);
+  it('keeps every id unique across modes and actions', () => {
+    const ids = [...MAP_MODES, ...MAP_ACTIONS].map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it('gives no layer a rail seat', () => {
-    const rail = new Set(railEntries().map((entry) => entry.id));
-    for (const layer of MAP_LAYERS) expect(rail.has(layer.id)).toBe(false);
   });
 });

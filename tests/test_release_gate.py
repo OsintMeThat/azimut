@@ -322,6 +322,22 @@ def test_release_binary_runs_the_application_smoke_test():
         assert f"ffmpeg_target: {target}" in workflow
 
 
+def test_the_node_floor_for_the_frontend_build_is_the_one_vite_declares():
+    """vite and rolldown refuse to start below their range, so the README and the
+    frontend's own `engines` state that range rather than a rounder number."""
+    import json
+
+    root = Path(__file__).resolve().parent.parent
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    package = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((root / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
+
+    vite = lock["packages"]["node_modules/vite"]["engines"]["node"]
+    assert vite == "^20.19.0 || >=22.12.0"
+    assert package["engines"]["node"] == vite
+    assert "Node.js 20.19+ or 22.12+" in readme
+
+
 def test_intel_macos_package_support_floor_matches_the_lock():
     root = Path(__file__).resolve().parent.parent
     readme = (root / "README.md").read_text(encoding="utf-8")
@@ -351,3 +367,53 @@ def test_intel_macos_package_support_floor_matches_the_lock():
     )
     assert "cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl" in lock
     assert "cryptography-50.0.0-cp311-abi3-macosx_11_0_arm64.whl" in lock
+
+
+def _glibc_floor():
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "check_glibc_floor.py"
+    spec = importlib.util.spec_from_file_location("check_glibc_floor", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_linux_binary_states_and_holds_its_glibc_floor():
+    """The binary carries the runner's own libstdc++, so the runner sets its floor.
+
+    `ubuntu-latest` would move it without a word; the README says the floor, the
+    workflow pins the image that gives it, and a step fails a build that asks more.
+    """
+    floor = _glibc_floor()
+    root = Path(__file__).resolve().parent.parent
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    stated = ".".join(str(part) for part in floor.FLOOR)
+
+    binaries = workflow.split("  binaries:\n", maxsplit=1)[1].split("\n  artifacts:\n")[0]
+    assert "- os: ubuntu-24.04" in binaries and "ubuntu-latest" not in binaries
+    assert "scripts/check_glibc_floor.py dist-bin/azimut" in binaries
+    assert f"| Linux (glibc {stated}+) |" in readme
+    assert f"glibc {stated} or newer" in readme
+
+
+def test_the_glibc_floor_reads_versions_off_an_elf_image():
+    floor = _glibc_floor()
+
+    image = b"\x7fELF\0libc.so.6\0GLIBC_2.17\0GLIBC_2.34\0GLIBCXX_3.4.32\0GLIBC_2.3.4\0"
+    assert floor.glibc_versions(image) == {(2, 17), (2, 34), (2, 3, 4)}
+    newer = b"\x7fELF\0GLIBC_2.39\0"
+
+    assert floor.over_floor(iter([("libstdc++.so.6", image)])) == []
+    assert floor.over_floor(iter([("libstdc++.so.6", newer)])) == [("libstdc++.so.6", (2, 39))]
+
+
+def test_the_macos_first_run_makes_the_download_executable():
+    """A browser download carries no exec bit, and right-click → Open left in macOS 15."""
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+    macos = readme.split("- **macOS**:", maxsplit=1)[1].split("- **Windows**:", maxsplit=1)[0]
+
+    assert "chmod +x azimut-macos-arm64" in macos
+    assert "right-click" not in macos

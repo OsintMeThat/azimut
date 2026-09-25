@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  MAX_SLUG, NAME_PREFIX, slugify, uniqueName, nextName, isDefaultName,
+  MAX_SLUG, NAME_PREFIX, slugify, nextName, isDefaultName,
   savedEntities, savedSlugs, savedTitles, savedTitle, specAttr, specPath,
 } from './naming.js';
 
@@ -37,18 +37,6 @@ describe('nextName — the default name of a fresh item', () => {
 
   it('numbers a name that still slugs to a distinct filename', () => {
     expect(slugify(nextName('proof', ['Proof 1']), 'proof')).toBe('Proof 2');
-  });
-});
-
-describe('uniqueName — a typed name that has to read apart', () => {
-  it('returns the base when it is free', () => {
-    expect(uniqueName('Rooftop', new Set())).toBe('Rooftop');
-    expect(uniqueName('Rooftop', ['Bridge'])).toBe('Rooftop');
-  });
-
-  it('numbers past the base and any run already taken', () => {
-    expect(uniqueName('Rooftop', new Set(['Rooftop']))).toBe('Rooftop 2');
-    expect(uniqueName('Rooftop', ['Rooftop', 'Rooftop 2', 'Rooftop 3'])).toBe('Rooftop 4');
   });
 });
 

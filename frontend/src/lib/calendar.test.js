@@ -6,7 +6,6 @@ import {
   monthOf,
   monthOutOfRange,
   outOfRange,
-  parseDay,
   shiftMonth,
   today,
   yearMonths,
@@ -14,19 +13,6 @@ import {
 } from './calendar.js';
 
 describe('reading a day', () => {
-  it('takes the one form the services and the fields agree on', () => {
-    expect(parseDay('2026-09-12')?.toISOString()).toBe('2026-09-12T00:00:00.000Z');
-    for (const bad of ['', null, '12/09/2026', '2026-9-1', '2026-09-12T10:00']) {
-      expect(parseDay(bad), String(bad)).toBe(null);
-    }
-  });
-
-  it('refuses a day that does not exist, rather than sliding into the next month', () => {
-    // `new Date('2026-02-31')` is March 3rd, which is not the day that was typed
-    expect(parseDay('2026-02-31')).toBe(null);
-    expect(parseDay('2024-02-29')).not.toBe(null); // …and a leap day does exist
-  });
-
   it('reads today in UTC, the clock the fire layer keeps', () => {
     expect(today(new Date('2026-09-12T23:30:00Z'))).toBe('2026-09-12');
   });

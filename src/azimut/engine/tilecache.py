@@ -10,6 +10,7 @@ never a permanent offline imagery store.
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -55,3 +56,31 @@ def put(provider_id: str, z: int, x: int, y: int, content: bytes, media_type: st
         (base / f"{int(x)}_{int(y)}.{ext}").write_bytes(content)
     except OSError:
         pass
+
+
+def sweep(now: float | None = None) -> int:
+    """Delete every entry past `TTL_DAYS`, read again or not. Returns how many went.
+
+    `get` drops a stale entry only when it is asked for, and a tile of a date
+    nobody asks for again (most of what a Detect sweep reads) would otherwise
+    stay for good, which is the permanent imagery store this cache must not
+    become. Never raises: a file another process holds is left for next time.
+    """
+    root = config.tile_cache_dir()
+    cutoff = (time.time() if now is None else now) - TTL_DAYS * 86400
+    dropped = 0
+    for folder, _subfolders, files in os.walk(root, topdown=False):
+        for name in files:
+            path = Path(folder) / name
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    dropped += 1
+            except OSError:
+                continue
+        if Path(folder) != root:
+            try:
+                Path(folder).rmdir()  # refused while anything is left in it
+            except OSError:
+                pass
+    return dropped

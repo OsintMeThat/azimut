@@ -7,9 +7,7 @@
   //
   // `entries` are the picker's items already narrowed by its own chips/filters,
   // each carrying `id` and `attrs.folder`; `matches` then hides the ones the
-  // search box excludes without collapsing the folders around them. A picker
-  // with a richer flat row (Satellite's saved work) passes it as the `row`
-  // snippet instead of settling for icon + label.
+  // search box excludes without collapsing the folders around them.
   import Icon from './Icon.svelte';
   import { buildTree } from '../lib/folderTree.js';
   import { browseCrumbs, browserView } from '../lib/folderBrowse.js';
@@ -25,9 +23,6 @@
     emptyText = 'Nothing here.',
     icon = () => 'file',
     label = (entry) => entry.label ?? '',
-    // A picker whose flat list has its own row (thumbnail, actions) passes it
-    // here rather than dropping to icon+label the moment you open a folder.
-    row = null,
     onnavigate,
     onselect,
     onconfirm,
@@ -53,21 +48,17 @@
     </button>
   {/each}
   {#each files as entry (entry.id)}
-    {#if row}
-      {@render row(entry)}
-    {:else}
-      <button
-        type="button"
-        class="browser-row"
-        class:selected={isSelected(entry)}
-        aria-pressed={mark ? isSelected(entry) : undefined}
-        onclick={() => onselect?.(entry)}
-        ondblclick={() => onconfirm?.(entry)}
-      >
-        <Icon name={icon(entry)} size={18} /><span>{label(entry)}</span>
-        {#if mark && isSelected(entry)}<Icon name="check" size={14} />{/if}
-      </button>
-    {/if}
+    <button
+      type="button"
+      class="browser-row"
+      class:selected={isSelected(entry)}
+      aria-pressed={mark ? isSelected(entry) : undefined}
+      onclick={() => onselect?.(entry)}
+      ondblclick={() => onconfirm?.(entry)}
+    >
+      <Icon name={icon(entry)} size={18} /><span>{label(entry)}</span>
+      {#if mark && isSelected(entry)}<Icon name="check" size={14} />{/if}
+    </button>
   {/each}
   {#if view.children.length === 0 && files.length === 0}
     <p class="browser-empty">{emptyText}</p>

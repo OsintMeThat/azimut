@@ -37,7 +37,7 @@ Two roads, because the browsers disagree about what a permanent extension is.
 ### Chrome, Edge, Brave (Windows, macOS, Linux)
 
 In Azimut → **Settings → Capture extension**, press **Install**. The app writes
-the extension into a folder it owns and shows you the path. Copy that path —
+the extension into a folder it owns and shows you the path. Copy that path:
 pasting it into the browser's picker works everywhere, and the folder is hidden
 under `.azimut/`, so navigating to it is the harder road.
 
@@ -67,7 +67,7 @@ addons.mozilla.org.
 
 **Chrome, Edge, Brave**: Settings → **Capture extension** → **Update**, once the
 button lights up. Azimut rewrites the folder and the extension restarts and
-re-attaches itself, so nothing needs reloading — not the extension, not the page.
+re-attaches itself, so neither the extension nor the page needs reloading.
 Your pairing survives. Even without pressing anything it lands eventually, since
 Chrome re-reads unpacked extensions when it starts.
 
@@ -78,7 +78,7 @@ Two things worth knowing there:
 - Chrome derives an extension's identity from its folder, so if you already had
   the extension loaded from a folder of your own, that copy and this one are two
   extensions. Settings names the one to remove. Removing it loses its stored
-  pairing, so paste the token again afterwards — once.
+  pairing, so paste the token again afterwards, once.
 
 **Firefox**: nothing to press. A signed package is sealed, so Azimut cannot
 rewrite it and the Update button does not apply. Firefox reads Azimut's update
@@ -94,7 +94,7 @@ than hidden:
   to check earlier: it does not implement the API that would.
 - Firefox updates the add-on without knowing which Azimut sits beside it, so an
   app left un-updated can end up paired with a newer add-on. Settings and the
-  extension's own options page both say so, and the answer is to update the app —
+  extension's own options page both say so, and the answer is to update the app:
   its newer flows report that they could not run rather than misbehave.
 
 ## Map tools
@@ -105,14 +105,14 @@ on. Press it again to close it. Six tools share it:
 | Tool | What it does |
 |---|---|
 | Measure | Distance along a clicked path, or the area it encloses. Same formulas and same wording as the app. |
-| Points | Draws one of the case's three positions — its located media, its places, its captures — on the map, and files a new point. |
+| Points | Draws one of the case's three positions (its located media, its places, its captures) on the map, and files a new point. |
 | Sun & moon | Plants a point and draws the day's sun and moon arcs around it, with a date and an hour slider. |
 | Grid | Drags a box or clicks out a shape, cuts it into metric cells, and marks each cleared or flagged. The grid is saved into the case and opens in the app's own Grid Search. |
 | Refs | Floats an image or a video from the case over the map, to compare against the imagery while you pan. |
-| Fires | Lays NASA FIRMS thermal detections over the site: the last 24 h to 7 days, or any past day or range up to 31 days picked from a calendar drawn inside the panel. Needs a FIRMS key in Azimut's own Settings — without one the seat is greyed and says so — and stops at z14 where one mark stops meaning one detection. |
+| Fires | Lays NASA FIRMS thermal detections over the site: the last 24 h to 7 days, or any past day or range up to 31 days picked from a calendar drawn inside the panel. Needs a FIRMS key in Azimut's own Settings (without one the seat is greyed and says so), and stops at z14 where one mark stops meaning one detection. |
 
 Only the open tool draws, and pressing it again puts it down: the map goes back to
-being a map. What you told a tool stays in it — a measured path, a planted point,
+being a map. What you told a tool stays in it: a measured path, a planted point,
 an open sweep all come back when you pick it up again. Reference windows and the
 fire layer are the exceptions: the windows are not on the map, and the fires are
 ground rather than drawing, so both stay while you measure over them.
@@ -150,7 +150,7 @@ say so, and pressing the toolbar button on that tab puts it back.
 **A reference window is scratch.** Drag it by its header, resize it from the
 corner, wheel to zoom into the image, double-click the title bar to fold it away.
 Nothing about it is filed, nothing comes back next visit, and the panel and its
-windows step out of the frame before a capture is taken — a reference floating
+windows step out of the frame before a capture is taken, because a reference floating
 over a map must never end up inside the evidence.
 
 **Add reference** lists the case's images and videos, searched, filtered by kind
@@ -158,15 +158,15 @@ and ordered by the app rather than by this tab: what crosses is one page of a ca
 never the case. A video plays in the window, with its own controls.
 
 Two limits worth knowing. A reference has to be **under 512 MB**, and it crosses in
-pieces, so a long clip opens the way it does in the app's own Satellite tab — the
+pieces, so a long clip opens the way it does in the app's own Satellite tab: the
 window counts up while it arrives. A published thread's attachments answer to a
 lower ceiling, **48 MB**, since those are pushed into the composer's page whole.
 And a video is the one thing here a site can refuse: an image is decoded and
 painted on a canvas, which asks the page's content policy nothing, while a video
 needs a URL and some sites will not load one. When that happens the window says so.
 
-Reference windows work where the geometric tools do not — Street View, a pitched
-camera, a globe — since nothing about holding a reference up needs the ground to
+Reference windows work where the geometric tools do not (Street View, a pitched
+camera, a globe), since nothing about holding a reference up needs the ground to
 be measurable, and they stay on screen while you use another tool.
 
 **It works from what the site writes about itself.** Every one of these maps states
@@ -183,8 +183,8 @@ bar is not under the middle of the window on most of these sites: Yandex draws i
 210 px to the right of it, behind its results panel, Bing 40 px down under its
 header. The app ships what its own calibration run measured, so a fresh install
 draws from the right pixel on the sites whose chrome does not move
-(`docs/MAP_SITES.md`). Apple's sidebar does move — it folds away in a narrow
-window — so Apple starts at the middle and is measured instead.
+(`docs/MAP_SITES.md`). Apple's sidebar does move (it folds away in a narrow
+window), so Apple starts at the middle and is measured instead.
 
 Measuring it takes a zoom. A pan can never see the offset, because it slides along
 with the map; a zoom can, since every one of these maps zooms about a point it
@@ -192,7 +192,7 @@ holds still while the centre moves underneath. So the first zoom you make measur
 it, the panel remembers it for that site and that window shape, and every zoom
 after checks it again. Until then the status line says "zoom once to place it",
 and the tooltip on that line carries the offset being drawn from and where it came
-from — which is what to read when something lands somewhere the ground is not.
+from, which is what to read when something lands somewhere the ground is not.
 
 **Google Earth is read like the others.** Its 2D map is Web Mercator, drawn about
 the middle of the window, and `d` and `y` in its address bar give the scale. A link
@@ -201,8 +201,8 @@ it, and Earth draws it nearer than it says. So until you move the map once, whic
 is when Earth writes the ground in, the panel shows "Move the map once so its
 address bar gives the scale" and draws nothing.
 
-Apple states a live span but a stale `z` — it carries whatever the opening
-link had and never rewrites it — so the span is read and the `z` ignored. Bing
+Apple states a live span but a stale `z` (it carries whatever the opening
+link had and never rewrites it), so the span is read and the `z` ignored. Bing
 rounds: its wheel moves a third of a level and it writes one decimal, so the
 fraction is worked out from the same held pixel rather than read. Whole levels are
 exact everywhere, which is what a double-click lands on.
@@ -227,7 +227,7 @@ app's own Saved layer merges them.
 **One position is drawn at a time**, the same three the app's Saved panel offers
 and in the same order: the located media the case collected, the places dropped
 by hand, the captures taken of them. The panel opens on the media, and switching
-position reads that position — a file carries no coordinates of its own and is
+position reads that position, because a file carries no coordinates of its own and is
 not in the index the other two come from. Filing a point goes to Places, so the
 point just filed is drawn rather than swallowed.
 
@@ -237,7 +237,7 @@ in any other map you have the panel open on. Nothing needs reloading and nothing
 needs pressing: the app says what changed and each side re-reads that much.
 
 A grid swept from two places at once both lands, because what travels is the
-cells you marked and never a copy of the grid — so two sweeps of different cells
+cells you marked and never a copy of the grid, so two sweeps of different cells
 keep each other's work, and the same cell twice is simply the last mark. A grid
 discarded elsewhere closes here and says so.
 
@@ -247,13 +247,13 @@ map rather than Street View, 2D rather than 3D. A degree or two is not pitched:
 these viewers never come back to a clean zero, and a view that looks level is
 treated as level. Placing a point
 still works wherever geometry is off, anchored on the point the address bar
-names — where the camera stands — and the panel says so.
+names (where the camera stands), and the panel says so.
 
 **Turning the map is fine.** Drag Google Earth's compass and the drawing turns
 with it. Only tilting the camera switches the geometric tools off.
 
 Zoomed far out there are two cases and they get different answers. On a **flat
-map drawn small** — Google and Bing below level 8 — the tools stay on: the middle
+map drawn small** (Google and Bing below level 8), the tools stay on: the middle
 of the screen is still right, the edges drift, and the drawing is dimmed and says
 so rather than disappearing. It is a look at a region's work, not a measurement;
 zoom in and it is exact again. Sun & moon is the exception and is never dimmed:
@@ -282,8 +282,8 @@ measured places the drawing again without asking.
    token → **Save & test**.
 
 The token allows this extension to file captures through the local Azimut
-server, to read back the media and proofs a thread attaches, and — for the map
-tools — the points, search grids, images and videos of the case you pick. Rotate it in
+server, to read back the media and proofs a thread attaches, and, for the map
+tools, the points, search grids, images and videos of the case you pick. Rotate it in
 Settings to revoke existing pairings.
 
 ## Fill the composer
@@ -292,7 +292,7 @@ Geo Report's **Publish** opens the site's full composer, types each post of the
 thread and attaches its pictures. Nothing is posted: the composer is left filled
 and the button is yours.
 
-There is one switch and it is in the app — **Settings → Publishing → Let the
+There is one switch and it is in the app: **Settings → Publishing → Let the
 extension fill the composer**, on by default. Nothing to set here.
 
 The filling runs in the page's own world, which is the only place a composer
@@ -316,9 +316,9 @@ without you pasting or dragging anything.
 
 This is the one flow where the page acts on what it is given: an engine searches
 the moment it holds a picture. That is what the button was pressed for, and it
-still takes that press — nothing is sent to an engine you did not open.
+still takes that press: nothing is sent to an engine you did not open.
 
-The switch is in the app — **Settings → General → Let the extension open the
+The switch is in the app: **Settings → General → Let the extension open the
 engine with the image**, on by default. Nothing to set here.
 
 If the engine has changed its markup, or the image is too large to carry, the

@@ -346,21 +346,6 @@ class StatusIn(BaseModel):
     detail: str = ""
 
 
-@router.post("/settings/reveal-workspace")
-def reveal_workspace() -> dict[str, str]:
-    """Open the workspace folder in the system file manager.
-
-    About already prints the path; this saves copying it into a file manager by
-    hand, which is what the first analyst to ask ended up doing with a shortcut.
-    """
-    root = config.workspace_root()
-    try:
-        reveal.reveal(root)
-    except reveal.RevealError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"path": str(root)}
-
-
 # ---- the capture extension's own folder --------------------------------------
 #
 # Deliberately here and not under /api/ingest/: that prefix is the token-gated

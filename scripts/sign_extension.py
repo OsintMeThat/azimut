@@ -16,9 +16,11 @@ a release is what moves it (see the release checklist).
 
 Usage, from the repo root, after the release carrying this version exists::
 
-    export AMO_JWT_ISSUER=user:12345:67
-    export AMO_JWT_SECRET=<secret from the AMO developer hub>
+    source ~/.config/azimut/amo.env   # AMO_JWT_ISSUER + AMO_JWT_SECRET, 0600 file outside the repo
     python3 scripts/sign_extension.py
+
+Never type the secret at a prompt or pass it as an argument, where the shell
+history keeps it.
 
 The tag defaults to ``v{extension version}``, because the extension carries the
 version of the release that last changed it — the same number the update button

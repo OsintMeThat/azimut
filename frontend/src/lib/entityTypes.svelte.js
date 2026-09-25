@@ -124,12 +124,6 @@ export function entityTypes() {
   return registry.types;
 }
 
-/** The families, in the order the registry lists their types. What the board
- *  filters by first: a handful of readings is a menu, every type is a list. */
-export function entityFamilies() {
-  return [...new Set(registry.types.map((entry) => entry.family))];
-}
-
 /** The types an analyst creates by hand, for a create menu. A `media` is born
  *  from an import, so it is not one of them. */
 export function creatableTypes() {
@@ -145,11 +139,6 @@ export function creatableTypes() {
  *  guessing from `manual`. */
 export function promotableTypes() {
   return registry.types.filter((entry) => entry.promotable);
-}
-
-/** Whether this type is entered as a graph record rather than born from a tool. */
-export function isManualEntityType(type) {
-  return Boolean(entryFor(type)?.manual);
 }
 
 /** Whether Details may attach presentation photos to this type. */

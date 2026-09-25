@@ -244,6 +244,24 @@ def slugify(text: str | None, fallback: str, *, limit: int = MAX_SLUG) -> str:
     return value
 
 
+def free_stem(taken: set[str], title: str | None, fallback: str) -> str:
+    """`title` as a filename stem, numbered past whatever `taken` already holds.
+
+    `taken` is casefolded: two stems differing only by case are one file on Windows
+    and macOS, and a bundle refuses the pair.
+    """
+    base = slugify(title, fallback)
+    if base.casefold() not in taken:
+        return base
+    n = 2
+    while True:
+        suffix = f" {n}"
+        candidate = slugify(f"{base[: MAX_SLUG - len(suffix)]}{suffix}", fallback)
+        if candidate.casefold() not in taken:
+            return candidate
+        n += 1
+
+
 def visible_filename(title: str | None, suffix: str, fallback: str = "file") -> str:
     """Canonical visible filename for ``title`` while preserving ``suffix``."""
     clean_suffix = suffix if suffix.startswith(".") else f".{suffix}" if suffix else ""
@@ -485,8 +503,18 @@ def compare_session_rel(name: str) -> str:
     return f"{COMPARE_DIR}/{name}.json"
 
 
+def analysis_rel(kind: str, ident: str) -> str:
+    """One Detect record: an area, a zone set, a routine or a run."""
+    return f"{ANALYSIS_DIR}/{kind}-{ident}.json"
+
+
 def analysis_assets_rel(name: str) -> str:
     return f"{ANALYSIS_DIR}/{name}.assets"
+
+
+def analysis_asset_rel(run_id: str, key: str) -> str:
+    """One frame a run read, kept as its evidence under the run's own folder."""
+    return f"{analysis_assets_rel(f'runs-{run_id}')}/{key}.png"
 
 
 def grid_rel(name: str) -> str:

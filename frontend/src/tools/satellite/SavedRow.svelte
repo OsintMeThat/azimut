@@ -18,7 +18,6 @@
     coords,
     fullscreen = false,
     dense = false,
-    active = false,
     hovered = false,
     // set only by the folder view of the tree, where there is somewhere to drop
     draggable = false,
@@ -67,7 +66,6 @@
 <div
   class="row"
   class:dense
-  class:active
   class:hovered
   class:draggable
   data-saved-id={row.key ?? row.id}
@@ -172,10 +170,6 @@
   .row:hover,
   .row.hovered {
     background: var(--bg-2);
-  }
-  .row.active {
-    background: var(--accent-soft);
-    box-shadow: inset 2px 0 0 var(--accent);
   }
   .row.draggable {
     cursor: grab;
@@ -315,9 +309,6 @@
   .row.hovered .actions {
     opacity: 1;
     pointer-events: auto;
-  }
-  .row.active .actions {
-    background: linear-gradient(to right, transparent, var(--bg-2) 16px);
   }
   .act {
     display: grid;

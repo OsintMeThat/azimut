@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import zipfile
 from contextlib import closing
@@ -90,6 +91,109 @@ def test_plain_bundle_has_ordered_manifests_and_a_clean_database(bundle_case):
         assert conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE state IN ('queued', 'running')"
         ).fetchone()[0] == 0
+
+
+def _machine_strings(*folders: Path) -> set[bytes]:
+    """How a folder of this machine would read inside a bundle, raw or JSON-escaped."""
+    out = set()
+    for folder in folders:
+        text = str(folder)
+        out |= {text.encode(), json.dumps(text)[1:-1].encode()}
+    return out
+
+
+def _members_naming(bundle: Path, needles: set[bytes]) -> list[str]:
+    with zipfile.ZipFile(bundle) as archive:
+        return [
+            name for name in archive.namelist()
+            if any(needle in archive.read(name) for needle in needles)
+        ]
+
+
+def _bundle_jobs(bundle: Path, case: Case) -> int:
+    member = f"{bundles.BUNDLE_ROOT}/{case.db_path.relative_to(case.path).as_posix()}"
+    extracted = config.bundles_dir() / "jobs-check.db"
+    with zipfile.ZipFile(bundle) as archive:
+        extracted.write_bytes(archive.read(member))
+    with closing(sqlite3.connect(extracted)) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    extracted.unlink()
+    return count
+
+
+def test_a_bundle_carries_no_job_and_no_folder_of_this_machine(bundle_case, tmp_path):
+    # The first export's finished job, with its output path, sits in the database
+    # the second export packs.
+    for _ in range(2):
+        job = bundles.queue_export(bundle_case)
+        workqueue.drain(bundle_case)
+    exported = Path(job["payload"]["output"])
+    root = config.workspace_root()
+
+    assert _members_naming(exported, _machine_strings(root)) == []
+    assert _bundle_jobs(exported, bundle_case) == 0
+
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    received = downloads / exported.name
+    shutil.copyfile(exported, received)
+    imported, _ = bundles.queue_import(received)
+    workqueue.drain(imported)
+    imported = Case.open(imported.id)
+    again = bundles.queue_export(imported)
+    workqueue.drain(imported)
+    reexported = Path(again["payload"]["output"])
+
+    assert _members_naming(reexported, _machine_strings(root, downloads)) == []
+    assert _bundle_jobs(reexported, imported) == 0
+
+
+def test_an_export_during_a_write_leaves_sqlites_journal_behind(bundle_case):
+    writer = sqlite3.connect(bundle_case.db_path, isolation_level=None)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("INSERT INTO meta(key, value) VALUES('probe', 'x')")
+        companions = [
+            bundle_case.db_path.with_name(bundle_case.db_path.name + suffix)
+            for suffix in bundles.DB_COMPANIONS
+        ]
+        assert any(path.exists() for path in companions)
+        exported = bundles.export_case(bundle_case)
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()
+
+    with zipfile.ZipFile(exported) as archive:
+        assert [n for n in archive.namelist() if n.endswith(bundles.DB_COMPANIONS)] == []
+
+
+def test_a_journal_in_a_received_bundle_never_lands_beside_the_database(bundle_case):
+    """An Azimut before 0.3.1 could pack one; the bundle still imports, without it."""
+    exported = bundles.export_case(bundle_case)
+    db_member = f"{bundles.BUNDLE_ROOT}/{bundle_case.db_path.relative_to(bundle_case.path).as_posix()}"
+    journal_member = f"{db_member}-journal"
+    forged = config.bundles_dir() / "with-journal.azimut.zip"
+    with zipfile.ZipFile(exported) as source:
+        header = json.loads(source.read(bundles.HEADER_NAME))
+        members = [
+            (name, source.read(name)) for name in source.namelist()[1:-1]
+        ] + [(journal_member, b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7" + b"\0" * 504)]
+    header["total_size"] = sum(len(body) for _, body in members)
+    records = []
+    with zipfile.ZipFile(forged, "w") as archive:
+        bundles._write_bytes(archive, bundles.HEADER_NAME, bundles._json_bytes(header), records)
+        for name, body in members:
+            bundles._write_bytes(archive, name, body, records)
+        archive.writestr(
+            bundles._zip_info(bundles.MANIFEST_NAME, compressed=True),
+            bundles._json_bytes({"format_version": header["format_version"], "members": records}),
+        )
+
+    destination = Case.create("Journal import")
+    imported = Case.open(bundles.import_into(destination, forged)["case_id"])
+
+    assert [entity["label"] for entity in imported.list_entities()] == ["Witness"]
+    assert not imported.db_path.with_name(imported.db_path.name + "-journal").exists()
 
 
 def test_sealed_bundle_hides_the_zip_and_rejects_a_wrong_password(bundle_case):
@@ -488,7 +592,8 @@ def test_bundle_member_names_are_safe_on_every_supported_os(names):
 
 
 def test_bundle_members_cannot_alias_on_case_insensitive_filesystems():
-    with pytest.raises(bundles.BundleError, match="collide"):
+    # named, so the analyst knows which of the two to rename
+    with pytest.raises(bundles.BundleError, match="'media/Photo.jpg' and 'media/photo.jpg' are one file"):
         bundles._validate_member_names(["media/Photo.jpg", "media/photo.jpg"])
 
 

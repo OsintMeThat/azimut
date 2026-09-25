@@ -94,7 +94,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pinned, not -latest: the binary carries this image's libstdc++, so
+          # the image sets the oldest glibc it starts on (README: 2.38+).
+          - os: ubuntu-24.04
             asset: azimut-linux-x86_64
             ffmpeg_target: linux-x86_64
           - os: windows-latest
@@ -137,6 +139,9 @@ jobs:
           BIN=dist-bin/azimut
           [ "${{ runner.os }}" = "Windows" ] && BIN=dist-bin/azimut.exe
           uv run --no-sync python scripts/smoke_binary.py "$BIN"
+      - name: Hold the glibc floor the README states
+        if: runner.os == 'Linux'
+        run: uv run --no-sync python scripts/check_glibc_floor.py dist-bin/azimut
       - name: Name the asset per-OS
         shell: bash
         run: |

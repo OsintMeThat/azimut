@@ -131,7 +131,7 @@ function open({ bytes, chunk }) {
     undefined
   );
   const panel = window.__AZIMUT_MAP_TOOLS__;
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
   return {
     ...panel,
     root,

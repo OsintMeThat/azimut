@@ -85,3 +85,58 @@ def test_a_name_holding_a_hash_is_served_under_its_encoded_url(client):
 
     # what the browser asked for before the encoding: the directory, not a file
     assert client.get(f"/files/{cid}/media/").status_code == 404
+
+
+SCRIPTED_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+    b"<script>fetch('/api/settings')</script><rect width='10' height='10'/></svg>"
+)
+
+
+def _upload_bytes(client, cid, name, data, mime):
+    res = client.post(
+        f"/api/cases/{cid}/media/upload", files={"file": (name, io.BytesIO(data), mime)}
+    )
+    assert res.status_code == 200, res.text
+    return res.json()["item"]
+
+
+def test_a_case_svg_is_served_sandboxed_so_its_script_never_runs_here(client):
+    cid = client.post("/api/cases", json={"name": "Files"}).json()["id"]
+    item = _upload_bytes(client, cid, "map.svg", SCRIPTED_SVG, "image/svg+xml")
+
+    served = client.get(f"/files/{cid}/{item['path']}")
+
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("image/svg+xml")
+    policy = served.headers["content-security-policy"]
+    assert policy.startswith("sandbox;") and "allow-scripts" not in policy
+    assert "default-src 'none'" in policy
+    assert served.headers["x-content-type-options"] == "nosniff"
+    # still the file, so an <img> of it keeps drawing
+    assert served.content == SCRIPTED_SVG
+
+    again = client.get(f"/files/{cid}/{item['path']}", headers={"If-None-Match": served.headers["etag"]})
+    assert again.status_code == 304
+    assert again.headers["content-security-policy"] == policy
+
+
+def test_a_case_page_or_an_unnamed_type_is_sandboxed_too(client):
+    cid = client.post("/api/cases", json={"name": "Files"}).json()["id"]
+    page = _upload_bytes(client, cid, "saved.html", b"<script>alert(1)</script>", "text/html")
+    odd = _upload_bytes(client, cid, "blob.weird", b"<script>alert(1)</script>", "application/octet-stream")
+
+    for item in (page, odd):
+        served = client.get(f"/files/{cid}/{item['path']}")
+        assert served.headers["content-security-policy"].startswith("sandbox;")
+        assert served.headers["x-content-type-options"] == "nosniff"
+
+
+def test_pictures_are_not_sandboxed_but_never_sniffed(client):
+    cid = client.post("/api/cases", json={"name": "Files"}).json()["id"]
+    item = _upload(client, cid)
+
+    served = client.get(f"/files/{cid}/{item['path']}")
+
+    assert "content-security-policy" not in served.headers
+    assert served.headers["x-content-type-options"] == "nosniff"

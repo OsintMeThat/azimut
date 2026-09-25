@@ -41,12 +41,6 @@ export const COMPARE_LAYERS = Object.freeze([
   { id: 'saved', label: 'Saved work', hint: 'Places and captures in this case', group: 'case' },
 ]);
 
-export const LAYER_GROUPS = Object.freeze([
-  { id: 'reference', label: 'Reference' },
-  { id: 'events', label: 'Dated observations' },
-  { id: 'case', label: 'This case' },
-]);
-
 const LAYER_IDS = new Set(COMPARE_LAYERS.map((layer) => layer.id));
 
 /** Keep a session's layer list ordered, unique and supported. */

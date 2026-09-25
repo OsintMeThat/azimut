@@ -130,13 +130,6 @@ export function entryOf(entries, archive, side) {
   return day ? entries.find((entry) => entry.key === day) ?? null : null;
 }
 
-/** What a side becomes when the strip shows a row on it. */
-export function sidePatch(archive, entry) {
-  if (archive === WAYBACK_ID) return { wayback_release: entry.release };
-  if (archive === RADAR_ID) return { radar: { date: entry.date, time: entry.time } };
-  return { sentinel: { date: entry.date } };
-}
-
 // -- the bracket ------------------------------------------------------------------
 
 /**

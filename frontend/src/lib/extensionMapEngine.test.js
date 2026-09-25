@@ -158,23 +158,15 @@ function open({ recording, size, ratio = 1, parse, storage = {}, firefox = false
     status: () =>
       panel.state.collapsed
         ? ''
-        : document
-            .getElementById('azimut-map-tools')
-            .shadowRoot.querySelector('.status span').textContent,
-    canvas: () => document.getElementById('azimut-map-tools').shadowRoot.querySelector('canvas'),
+        : window.__AZIMUT_MAP_TOOLS__.root.querySelector('.status span').textContent,
+    canvas: () => window.__AZIMUT_MAP_TOOLS__.root.querySelector('canvas'),
     /** The offset the panel settled on, where the analyst can read it. */
     statusTitle: () =>
-      document
-        .getElementById('azimut-map-tools')
-        .shadowRoot.querySelector('.status span')
-        .getAttribute('title') ?? '',
+      window.__AZIMUT_MAP_TOOLS__.root.querySelector('.status span').getAttribute('title') ?? '',
     /** Pick a tool up, the way the analyst does — nothing is drawn until one
      *  is open, so nothing about the drawing can be asserted until one is. */
     pick: (id) =>
-      document
-        .getElementById('azimut-map-tools')
-        .shadowRoot.querySelector(`[data-tab="${id}"]`)
-        .click(),
+      window.__AZIMUT_MAP_TOOLS__.root.querySelector(`[data-tab="${id}"]`).click(),
   };
 }
 
@@ -880,7 +872,7 @@ describe('zoomed out', () => {
  * them — so out there the panel refuses and says what to do instead.
  */
 describe('a globe camera, which is not a map', () => {
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
   const google = () => fixture.recordings.find((r) => r.site === 'google-maps');
   const keyed = {
     '/api/ingest/firms/sensors': { keyed: true, sensors: [{ id: 'viirs', label: 'VIIRS' }] },
@@ -1094,7 +1086,7 @@ describe('Google Earth', () => {
  */
 describe('a reference whose name does not fit', () => {
   const LONG = 'Long clip - 10. Mykhailivka railway bridge battles, 05 September, drone footage';
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
 
   it('keeps the name reachable, and lets every box round it shrink', async () => {
     const recording = fixture.recordings.find((r) => r.site === 'google-maps');
@@ -1126,7 +1118,7 @@ describe('a reference whose name does not fit', () => {
  * labelled, like everything else drawn out there, but never switched off.
  */
 describe('the sky tool, zoomed out', () => {
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
 
   it('stays available on a globe, where only the distances are doubtful', async () => {
     const recording = fixture.recordings.find((r) => r.site === 'google-maps');
@@ -1162,7 +1154,7 @@ describe('the sky tool, zoomed out', () => {
  * click.
  */
 describe('the fire layer in the panel', () => {
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
   const seat = () => root().querySelector('[data-tab="fires"]');
   const google = () => fixture.recordings.find((r) => r.site === 'google-maps');
 
@@ -1226,7 +1218,7 @@ describe('the fire layer in the panel', () => {
     const nw = M.toScreen({ lat: asked.north, lon: asked.west }, view, area);
     const se = M.toScreen({ lat: asked.south, lon: asked.east }, view, area);
 
-    const img = document.getElementById('azimut-map-tools').shadowRoot.querySelector('img');
+    const img = window.__AZIMUT_MAP_TOOLS__.root.querySelector('img');
     const px = (name) => Number.parseFloat(img.style[name]);
     // the box is centred and pulled back by half itself, so its north edge is
     // the top of the ground it was drawn for
@@ -1302,5 +1294,55 @@ describe('the fire layer in the panel', () => {
     expect([...root().querySelectorAll('.tabs button')].filter((b) => b.disabled)).toEqual([]);
     live.pick('fires');
     expect(live.state.tool).toBe('fires');
+  });
+});
+
+// --- the page the panel is drawn over ----------------------------------------
+
+/**
+ * The panel lives in someone else's page, and that page's scripts share the DOM.
+ * Neither what it shows (case names, points, pictures) nor its buttons may be
+ * reachable from them.
+ */
+describe('the site under the panel', () => {
+  const untrusted = (type) => {
+    const event = new window.MouseEvent(type, { bubbles: true, composed: true });
+    Object.defineProperty(event, 'isTrusted', { value: false });
+    return event;
+  };
+
+  it('reads no shadow root off the panel', async () => {
+    panel = open({ parse: () => null });
+    await tick();
+
+    expect(document.getElementById('azimut-map-tools').shadowRoot).toBeNull();
+    expect(window.__AZIMUT_MAP_TOOLS__.root.querySelector('[data-tab="measure"]')).not.toBeNull();
+  });
+
+  it('cannot press a button for the analyst', async () => {
+    panel = open({ parse: () => null });
+    await tick();
+    const tab = window.__AZIMUT_MAP_TOOLS__.root.querySelector('[data-tab="pins"]');
+
+    tab.dispatchEvent(untrusted('click'));
+    await tick();
+    expect(panel.state.tool).not.toBe('pins');
+
+    tab.click();
+    await tick();
+    expect(panel.state.tool).toBe('pins');
+  });
+
+  it('cannot click the map through the panel either', async () => {
+    panel = open({ parse: () => null });
+    await tick();
+    const asked = panel.api.runtime.sendMessage.mock.calls.length;
+
+    for (const type of ['pointerdown', 'pointerup', 'click', 'dblclick']) {
+      window.dispatchEvent(untrusted(type));
+    }
+    await tick();
+
+    expect(panel.api.runtime.sendMessage.mock.calls.length).toBe(asked);
   });
 });

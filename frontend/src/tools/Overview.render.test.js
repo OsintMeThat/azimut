@@ -386,7 +386,8 @@ describe('with no case open', () => {
     await open();
     expect(target.querySelector('.door')).toBeTruthy();
     expect(target.querySelectorAll('.stage')).toHaveLength(4); // the rail, as a sequence
-    expect(target.textContent).toContain('Nothing leaves this machine.');
+    // it opened having asked GitHub and PyPI for versions, so it promises no silence
+    expect(target.textContent).not.toContain('Nothing leaves this machine');
   });
 
   it('names the first case from the door itself', async () => {

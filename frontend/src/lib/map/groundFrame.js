@@ -174,15 +174,4 @@ export function compassAngle(value) {
   return folded >= 360 - 1e-9 ? 0 : folded;
 }
 
-/**
- * The ground corners of a view, as `[lon, lat]`, clockwise from top-left.
- * What a computed overlay remembers about where it lies.
- */
-export function frameCorners(frame) {
-  const toGround = screenToMercator(frame);
-  return [[0, 0], [frame.width, 0], [frame.width, frame.height], [0, frame.height]].map(
-    ([x, y]) => fromMercator(...apply(toGround, x, y))
-  );
-}
-
 export const cssMatrix = (m) => `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.e}, ${m.f})`;

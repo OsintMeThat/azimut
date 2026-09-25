@@ -16,6 +16,7 @@ import pytest
 
 from azimut import layout
 from azimut.api.naming import slugify
+from azimut.engine import analyzers
 from azimut.engine.media import safe_filename
 from azimut.engine.thumbnails import THUMB_GEN
 from azimut.layout import CASE_SUBDIRS, TRASH_DIR
@@ -59,6 +60,7 @@ THUMB_NAME = 24 + len(f"-g{THUMB_GEN}") + len(".jpg")
 ASSET_NAME = 16 + len(".webp")
 TRASH_GROUP_ID = len("t_0123456789")
 TRASH_SLOT = 3  # "999" worth of artifacts in one delete
+ANALYSIS_KEY = 32  # `analyzers._key`: a sha256 cut to 32 hex
 
 
 def _branches() -> dict[str, int]:
@@ -105,6 +107,9 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "map layer snapshot": len(layout.layer_snapshot_rel(longest_name)),
         "map layer icons": len(layout.layer_icons_rel(longest_name)),
         "map layer cache": len(layout.layer_cache_rel(longest_name)),
+        # Detect names its records and frames by id and hash, never by title
+        "analysis item": max(len(layout.analysis_rel(kind, "a" * 12)) for kind in analyzers.KINDS),
+        "analysis frame": len(layout.analysis_asset_rel("a" * 12, "k" * ANALYSIS_KEY)),
         "trash slot": len(f"{layout.TRASH_DIR}/") + TRASH_GROUP_ID + 1 + TRASH_SLOT,
     }
 

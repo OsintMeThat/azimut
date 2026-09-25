@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import FolderBrowser from './FolderBrowser.svelte';
 import { UNFILED } from '../lib/folderBrowse.js';
@@ -55,25 +54,5 @@ describe('FolderBrowser', () => {
     const body = at('field', { icon: () => 'satellite', label: (entry) => `${entry.label}!` });
 
     expect(body).toContain('Bridge!');
-  });
-
-  it('hands the entries to the caller’s row snippet when it passes one', () => {
-    const row = createRawSnippet((entry) => ({
-      render: () => `<div class="rich-row">${entry().label} with a thumbnail</div>`,
-    }));
-
-    const body = at('field', { row });
-
-    expect(body).toContain('Bridge with a thumbnail');
-    expect(body).not.toContain('browser-row"'); // the default entry button stays out
-  });
-
-  it('keeps its own folders and crumbs around a caller’s rows', () => {
-    const row = createRawSnippet((entry) => ({ render: () => `<div>${entry().label}</div>` }));
-
-    const body = at('field', { row });
-
-    expect(body).toContain('folder-row'); // field/day-1
-    expect(body).toContain('Case media');
   });
 });

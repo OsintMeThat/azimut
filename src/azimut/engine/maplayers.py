@@ -50,6 +50,7 @@ import hashlib
 import json
 import re
 import zipfile
+import zlib
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
@@ -66,6 +67,7 @@ from defusedxml.ElementTree import ParseError, fromstring as parse_xml
 from xml.etree.ElementTree import Element
 
 from .. import layout
+from ..workspace import write_text_atomic
 from .tiles import USER_AGENT
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -267,12 +269,16 @@ def parse(
         source_format = fmt
 
     icons: dict[str, dict[str, Any]] = {}
-    if fmt == "geojson":
-        features, name = _from_geojson(data, filename)
-    elif fmt == "kml":
-        features, name, icons = _from_kml(data)
-    else:
-        features, name = _from_gpx(data)
+    try:
+        if fmt == "geojson":
+            features, name = _from_geojson(data, filename)
+        elif fmt == "kml":
+            features, name, icons = _from_kml(data)
+        else:
+            features, name = _from_gpx(data)
+    except RecursionError as exc:
+        # JSON a few thousand arrays deep, before any bound on depth could be read
+        raise LayerError("this file nests deeper than any map layer does") from exc
 
     if not features:
         raise LayerError("the file holds no points, lines or areas")
@@ -720,8 +726,14 @@ def _kml_out_of_kmz(data: bytes) -> tuple[bytes, str]:
         member = _main_kml(entries)
         if member is None:
             raise LayerError("this KMZ holds no KML file")
-        with archive.open(member) as handle:
-            return handle.read(MAX_SOURCE_BYTES + 1), member.filename
+        # The member is only inflated here, so this is where a damaged archive
+        # shows: a bad checksum, a broken deflate stream, a method or an
+        # encryption the zip module does not read.
+        try:
+            with archive.open(member) as handle:
+                return handle.read(MAX_SOURCE_BYTES + 1), member.filename
+        except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError, EOFError) as exc:
+            raise LayerError("this KMZ could not be read: it is damaged or packed in a way Azimut does not read") from exc
 
 
 def _escapes(name: str) -> bool:
@@ -1238,12 +1250,13 @@ def _gpx_point(element: Element) -> list[float] | None:
 
 
 def icon_images(
-    descriptors: dict[str, dict[str, Any]], *, source: bytes = b""
+    descriptors: dict[str, dict[str, Any]], *, source: bytes = b"", web: bool = True
 ) -> dict[str, bytes]:
     """key → the PNG to store for it, skipping every one that could not be made.
 
     `source` is the original bytes, which is how a KMZ's own icons are found: its
-    hrefs name members of the archive the layer was read from.
+    hrefs name members of the archive the layer was read from. `web` false reads
+    only those, and asks no other host for anything.
     """
     if not descriptors:
         return {}
@@ -1255,7 +1268,7 @@ def icon_images(
         for key in list(descriptors)[:MAX_ICONS]:
             descriptor = descriptors[key]
             if _on_the_web(descriptor):
-                if fetched >= MAX_FETCHED_ICONS:
+                if not web or fetched >= MAX_FETCHED_ICONS:
                     continue
                 fetched += 1
             raw = _icon_bytes(descriptor, archive)
@@ -1314,8 +1327,11 @@ def _zipped_icon(archive: zipfile.ZipFile, href: str) -> bytes:
             continue
         if entry.file_size > MAX_ICON_BYTES:
             return b""
-        with archive.open(entry) as handle:
-            return handle.read(MAX_ICON_BYTES + 1)
+        try:
+            with archive.open(entry) as handle:
+                return handle.read(MAX_ICON_BYTES + 1)
+        except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError, EOFError):
+            return b""
     return b""
 
 
@@ -1641,29 +1657,91 @@ def _read_spec(case: "Case", name: str) -> dict[str, Any]:
 def _write_spec(case: "Case", name: str, spec: dict[str, Any]) -> None:
     case.subdir(layout.LAYERS_DIR)
     path = case.resolve_inside(layout.layer_spec_rel(name))
-    path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    write_text_atomic(path, json.dumps(spec, indent=2, ensure_ascii=False) + "\n")
 
 
 def _free_name(case: "Case", title: str) -> str:
-    """A stem no other layer holds. Two files called `Roads` are two layers."""
-    case.subdir(layout.LAYERS_DIR)
+    """A stem no other layer holds. Two files called `Roads` are two layers.
+
+    Held means whatever the case, since `Roads` and `roads` are one file on Windows
+    and macOS, and held by a layer in the Trash too, which would not come back.
+    """
+    folder = case.subdir(layout.LAYERS_DIR)
+    taken = {path.stem.casefold() for path in folder.glob("*.json")}
+    taken |= case.trashed_stems(layout.LAYERS_DIR)
     base = layout.slugify(title, "Layer")
     name, counter = base, 1
-    while case.resolve_inside(layout.layer_spec_rel(name)).exists():
+    while name.casefold() in taken:
         suffix = f"-{counter}"
         name = f"{base[: layout.MAX_SLUG - len(suffix)]}{suffix}"
         counter += 1
     return name
 
 
+def _pictograms(
+    parsed: dict[str, Any], data: bytes, *, icons: bool, web: bool = True
+) -> dict[str, bytes]:
+    """The source's own pictograms, composed: the one place `icons` decides anything.
+
+    False and no href is read, off the web or out of the archive, and the map draws
+    the app's own shapes. This is the half that may reach the network, so it runs
+    before the case is locked rather than while it is.
+    """
+    return icon_images(parsed["icons"] if icons else {}, source=data, web=web)
+
+
+def _kept_web_icons(case: "Case", name: str, parsed: dict[str, Any]) -> dict[str, bytes]:
+    """The web pictograms already stored for a layer, for the keys its source still names.
+
+    A layer's icons leave for a third-party host on the tick at import and never
+    afterwards (SPEC §9), so a refresh keeps the ones it has rather than asking
+    again, and a pictogram new to the source is drawn as the app's own shape.
+    """
+    out = {}
+    for key, descriptor in (parsed.get("icons") or {}).items():
+        if not _on_the_web(descriptor):
+            continue
+        try:
+            out[key] = icon(case, name, key)
+        except LayerError:
+            continue
+    return out
+
+
+def receive(case: "Case") -> int:
+    """Hand a received case's followed layers to the analyst who opened it.
+
+    `refresh.on_open` re-reads a layer the first time it is switched on. In a
+    bundle it was set by whoever sent it, for an address they chose, so switching
+    the layer on would tell their server who opened it, and when. Turned off here,
+    a received layer reads its source only on a Refresh pressed on this machine.
+    Returns how many were turned off.
+    """
+    folder = case.tool_root / layout.LAYERS_DIR
+    turned = 0
+    if not folder.is_dir():
+        return 0
+    with case.lock:
+        for path in sorted(folder.glob("*.json")):
+            try:
+                spec = _read_spec(case, path.stem)
+            except LayerError:
+                continue
+            if (spec.get("source") or {}).get("kind") not in FOLLOWED:
+                continue
+            if (spec.get("refresh") or {}).get("on_open"):
+                spec["refresh"] = {**spec["refresh"], "on_open": False}
+                _write_spec(case, path.stem, spec)
+                turned += 1
+    return turned
+
+
 def _store(
-    case: "Case", name: str, data: bytes, parsed: dict[str, Any], *, icons: bool
+    case: "Case", name: str, data: bytes, parsed: dict[str, Any], images: dict[str, bytes]
 ) -> dict[str, Any]:
     """Write the snapshot, its pictograms and its derived cache.
 
-    The one place `icons` decides anything: false and no href is read, off the
-    web or out of the archive, and the map draws the app's own shapes. The spec
-    is the caller's to write.
+    The spec is the caller's to write.
     """
     case.subdir(layout.LAYERS_DIR)
     case.resolve_inside(layout.layer_snapshot_rel(name)).write_bytes(data)
@@ -1672,14 +1750,12 @@ def _store(
         "sha256": digest(data),
         "bytes": len(data),
         "at": _now(),
-        "icons": _write_icons(case, name, parsed["icons"] if icons else {}, source=data),
+        "icons": _write_icons(case, name, images),
     }
 
 
-def _write_icons(
-    case: "Case", name: str, descriptors: dict[str, dict[str, Any]], *, source: bytes
-) -> int:
-    """Compose what a source asked for into one zip, and say how many landed.
+def _write_icons(case: "Case", name: str, images: dict[str, bytes]) -> int:
+    """Put the composed pictograms into one zip, and say how many landed.
 
     Built whole in memory before anything is written, so a fetch that dies
     halfway leaves the layer with the icons it had rather than half a set. Stored
@@ -1687,7 +1763,6 @@ def _write_icons(
     directory that happens to be one file.
     """
     path = case.resolve_inside(layout.layer_icons_rel(name))
-    images = icon_images(descriptors, source=source)
     if not images:
         path.unlink(missing_ok=True)
         return 0
@@ -1703,15 +1778,41 @@ _ICON_KEY = re.compile(r"[0-9a-f]{1,32}")
 
 
 def icon(case: "Case", name: str, key: str) -> bytes:
-    """One stored pictogram, by the key the features that draw it name it with."""
+    """One stored pictogram, by the key the features that draw it name it with.
+
+    The icons file travels in bundles, so the one read here may have been made by
+    somebody else. It is bounded before a byte is inflated, and decoded and
+    re-encoded before it is served, so the browser still only loads PNGs this
+    process produced.
+    """
     if not _ICON_KEY.fullmatch(str(key or "")):
         raise LayerError("that is not an icon of this layer")
     path = case.resolve_inside(layout.layer_icons_rel(name))
+    missing = LayerError("this layer has no such icon")
     try:
         with zipfile.ZipFile(path) as archive:
-            return archive.read(f"{key}.png")
-    except (OSError, KeyError, zipfile.BadZipFile) as exc:
-        raise LayerError("this layer has no such icon") from exc
+            entry = archive.getinfo(f"{key}.png")
+            if entry.file_size > MAX_ICON_BYTES or (
+                entry.compress_size and entry.file_size / entry.compress_size > MAX_COMPRESSION_RATIO
+            ):
+                raise missing
+            with archive.open(entry) as handle:
+                data = handle.read(MAX_ICON_BYTES + 1)
+    except (OSError, KeyError, EOFError, RuntimeError, NotImplementedError,
+            zipfile.BadZipFile, zlib.error) as exc:
+        raise missing from exc
+    if len(data) > MAX_ICON_BYTES:
+        raise missing
+    try:
+        with Image.open(BytesIO(data)) as opened:
+            if opened.format != "PNG" or max(opened.size) > MAX_ICON_CANVAS:
+                raise missing
+            opened.load()
+            buffer = BytesIO()
+            opened.save(buffer, format="PNG")
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise missing from exc
+    return buffer.getvalue()
 
 
 def _write_cache(case: "Case", name: str, geojson: dict[str, Any]) -> Path:
@@ -1799,13 +1900,14 @@ def save_detection_snapshot(case: "Case", key: str, title: str,
         return add_source(case, data, parsed, title=title, icons=False,
                           source={"kind": "file", "name": "detect.geojson", "format": "geojson", "detection_key": key})
     name = existing["name"]
-    spec = _read_spec(case, name)
-    spec["snapshot"] = _store(case, name, data, parsed, icons=False)
-    spec["summary"] = parsed["summary"]
-    spec["updated_at"] = _now()
-    live = {row["name"] for row in parsed["summary"]["categories"]}
-    spec["hidden"] = [entry for entry in spec.get("hidden", []) if entry in live]
-    _write_spec(case, name, spec)
+    with case.lock:
+        spec = _read_spec(case, name)
+        spec["snapshot"] = _store(case, name, data, parsed, {})
+        spec["summary"] = parsed["summary"]
+        spec["updated_at"] = _now()
+        live = {row["name"] for row in parsed["summary"]["categories"]}
+        spec["hidden"] = [entry for entry in spec.get("hidden", []) if entry in live]
+        _write_spec(case, name, spec)
     return row(name, spec)
 
 
@@ -1853,28 +1955,30 @@ def add_source(
     start switched off — only those the source actually holds.
     """
     summary = parsed["summary"]
-    name = _free_name(case, title or summary["title"])
     live = {entry["name"] for entry in summary["categories"]}
-    spec: dict[str, Any] = {
-        "azimut_layer": SPEC_VERSION,
-        "title": summary["title"],
-        "source": source,
-        "hidden": sorted(set(hidden) & live),
-        # What the analyst asked for at import, kept so a refresh composes the
-        # same layer again rather than a differently dressed one.
-        "source_icons": bool(icons),
-        "created_at": _now(),
-        "updated_at": _now(),
-        "summary": summary,
-        "snapshot": _store(case, name, data, parsed, icons=bool(icons)),
-    }
-    if on_open is not None:
-        # Re-read the first time it is switched on in a session, which is what
-        # "subscribed" means; off leaves a layer that only moves on Refresh.
-        # Named for when it began as "on case open", kept so no case migrates.
-        spec["refresh"] = {"on_open": bool(on_open)}
-    _write_spec(case, name, spec)
-    _file_entity(case, name, spec)
+    images = _pictograms(parsed, data, icons=bool(icons))
+    with case.lock:
+        name = _free_name(case, title or summary["title"])
+        spec: dict[str, Any] = {
+            "azimut_layer": SPEC_VERSION,
+            "title": summary["title"],
+            "source": source,
+            "hidden": sorted(set(hidden) & live),
+            # What the analyst asked for at import, kept so a refresh composes the
+            # same layer again rather than a differently dressed one.
+            "source_icons": bool(icons),
+            "created_at": _now(),
+            "updated_at": _now(),
+            "summary": summary,
+            "snapshot": _store(case, name, data, parsed, images),
+        }
+        if on_open is not None:
+            # Re-read the first time it is switched on in a session, which is what
+            # "subscribed" means; off leaves a layer that only moves on Refresh.
+            # Named for when it began as "on case open", kept so no case migrates.
+            spec["refresh"] = {"on_open": bool(on_open)}
+        _write_spec(case, name, spec)
+        _file_entity(case, name, spec)
     return row(name, spec)
 
 
@@ -1888,9 +1992,14 @@ def refresh(case: "Case", name: str) -> dict[str, Any]:
     For GeoConfirmed the bytes are half of it: the factions that name the
     legend are read beside the export, and a faction added since is a reason
     to read the same bytes again.
+
+    The read takes seconds and the case is not locked through it, so the analyst
+    can hide a group, retitle the layer or delete it meanwhile. What the read
+    brings back is therefore merged into the spec as it stands once the read is
+    over, and a layer deleted meanwhile stays deleted.
     """
-    spec = _read_spec(case, name)
-    before = spec.get("source") or {}
+    read = _read_spec(case, name)
+    before = read.get("source") or {}
     if before.get("kind") not in FOLLOWED:
         raise LayerError("this layer came from a file, so there is nothing to refresh")
 
@@ -1899,30 +2008,38 @@ def refresh(case: "Case", name: str) -> dict[str, Any]:
         from . import geoconfirmed
 
         data, source = geoconfirmed.read_again(before)
-        spec["source"] = source
     else:
         data, _ = fetch(str(before.get("url") or ""))
-    snapshot = spec.get("snapshot") or {}
-    now = _now()
-    if digest(data) == snapshot.get("sha256") and source == before:
-        spec["snapshot"] = {**snapshot, "checked_at": now}
-    else:
+    unchanged = digest(data) == (read.get("snapshot") or {}).get("sha256") and source == before
+    parsed = images = None
+    if not unchanged:
         parsed = parse(
             data,
-            filename=_source_name(spec),
-            title=spec.get("title", ""),
+            filename=_source_name(read),
+            title=read.get("title", ""),
             reading=_reading(source),
         )
-        spec["summary"] = parsed["summary"]
-        spec["snapshot"] = {
-            **_store(case, name, data, parsed, icons=bool(spec.get("source_icons"))),
-            "checked_at": now,
-        }
-        # A category the source has since dropped is no longer a thing to hide.
-        live = {entry["name"] for entry in parsed["summary"]["categories"]}
-        spec["hidden"] = [name_ for name_ in spec.get("hidden") or [] if name_ in live]
-    spec["updated_at"] = now
-    _write_spec(case, name, spec)
+        # Out of the archive only: a refresh never asks an icon host again.
+        images = _pictograms(parsed, data, icons=bool(read.get("source_icons")), web=False)
+
+    with case.lock:
+        if not case.resolve_inside(layout.layer_spec_rel(name)).is_file():
+            raise LayerError("this layer was removed while it was being read")
+        spec = _read_spec(case, name)
+        spec["source"] = source
+        now = _now()
+        if parsed is None:
+            spec["snapshot"] = {**(spec.get("snapshot") or {}), "checked_at": now}
+        else:
+            spec["summary"] = parsed["summary"]
+            if spec.get("source_icons"):
+                images = {**_kept_web_icons(case, name, parsed), **(images or {})}
+            spec["snapshot"] = {**_store(case, name, data, parsed, images or {}), "checked_at": now}
+            # A category the source has since dropped is no longer a thing to hide.
+            live = {entry["name"] for entry in parsed["summary"]["categories"]}
+            spec["hidden"] = [name_ for name_ in spec.get("hidden") or [] if name_ in live]
+        spec["updated_at"] = now
+        _write_spec(case, name, spec)
     return row(name, spec)
 
 
@@ -1946,6 +2063,21 @@ def update(
     Not the switch. Whether a layer is drawn lives in the page and starts off on
     every load, so a layer that crashed the tab is not drawn again by the reload.
     """
+    with case.lock:
+        return _update_locked(
+            case, name, hidden=hidden, period=period, on_open=on_open, title=title
+        )
+
+
+def _update_locked(
+    case: "Case",
+    name: str,
+    *,
+    hidden: list[str] | None,
+    period: tuple[str, str] | None,
+    on_open: bool | None,
+    title: str | None,
+) -> dict[str, Any]:
     spec = _read_spec(case, name)
     if hidden is not None:
         live = {entry["name"] for entry in (spec.get("summary") or {}).get("categories", [])}

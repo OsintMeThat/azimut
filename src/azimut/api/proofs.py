@@ -37,14 +37,13 @@ from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
-from .naming import read_created_at, slugify
+from .naming import case_only, holders, read_created_at, slugify
 from .satellite import locate_on_save
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["proofs"])
 
 
-ASSETS_SUFFIX = ".assets"
 ASSET_NAME = re.compile(r"^[0-9a-f]{16}\.(?:png|jpe?g|webp)$")
 MAX_ASSET_BYTES = 20 * 1024 * 1024
 MAX_ASSETS = 12
@@ -103,8 +102,7 @@ def _now() -> str:
 
 
 def _write_spec(path: Path, spec: dict[str, Any]) -> None:
-    ensure_dir(path.parent)
-    path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    media_engine.write_json_atomic(path, spec)
 
 
 #: What a proof says about itself in words and in time, beside the composition.
@@ -307,10 +305,12 @@ def load_proof(case_id: str, name: str) -> dict[str, Any]:
     if isinstance(spec, dict) and proof is not None:
         opened = satellite_engine.open_spec(case, proof["id"], spec)
         attrs = proof.get("attrs") or {}
+        # Present at all, it wins, blank included: clearing a date in Details is
+        # the analyst taking it back, and the spec still holding it is stale.
         for key, attr in (("when", "when"), ("description", "notes")):
-            stated = attrs.get(attr)
-            if isinstance(stated, str) and stated.strip():
-                opened[key] = stated.strip()
+            if attr in attrs:
+                stated = attrs[attr]
+                opened[key] = (stated.strip() or None) if isinstance(stated, str) else None
         return opened
     return spec
 
@@ -361,10 +361,13 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # holds would leave two entities pointing at one spec, and there is no sane
     # merge of the two. The first save of an unbound composer still writes over
     # a same-named proof — there the analyst is updating that one.
+    # Taken is judged without case, the proof being saved excepted: two names that
+    # differ only by case are one file on Windows and macOS.
     old = slugify(body.rename_from, "proof") if body.rename_from else None
     old_rel = layout.proof_spec_rel(old) if old and old != name else None
-    if old_rel and spec_path.exists():
+    if holders(spec_path.parent, name, source=old if old_rel else name):
         raise HTTPException(status_code=409, detail="another proof already uses that name")
+    recased = case_only(old, name)
 
     # Decoded up front: a bad batch must be refused before anything is written.
     incoming = _decode_assets(body.assets)
@@ -387,9 +390,17 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
                 detail=f"the export must be under {MAX_EXPORT_BYTES // 1024 // 1024} MB",
             )
 
+    if recased and old:
+        # One file under both names on Windows and macOS: each is renamed in place,
+        # and nothing is deleted as "the old one", which there is the same file.
+        for rel_of in (layout.proof_spec_rel, layout.proof_export_rel, layout.proof_assets_rel):
+            source = case.resolve_inside(rel_of(old))
+            if source.exists():
+                media_engine.rename_path(source, source.with_name(Path(rel_of(name)).name))
+        spec_path = case.resolve_inside(rel)
     # The export moves with the spec, so a rename saved without fresh pixels
     # keeps the PNG the proof already had rather than dropping it.
-    if old_rel and old:
+    elif old_rel and old:
         old_png = case.resolve_inside(layout.proof_export_rel(old))
         if old_png.exists():
             if png_bytes is not None:
@@ -417,7 +428,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     spec["title"] = name
     spec["when"] = when or None
     spec["description"] = description or None
-    previous = case.resolve_inside(layout.proof_spec_rel(old or name))
+    previous = case.resolve_inside(layout.proof_spec_rel(name if recased else old or name))
     spec.setdefault("created_at", read_created_at(previous) or _now())
     spec["updated_at"] = _now()
     if png_rel:
@@ -474,7 +485,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             },
             by="proof-composer",
         )["id"]
-    if old_rel:
+    if old_rel and not recased:
         case.resolve_inside(layout.proof_spec_rel(str(old))).unlink(missing_ok=True)
 
     # A proof is derived from what it composes *and* from what it rests on: the same

@@ -179,7 +179,6 @@ describe('the three tabs', () => {
 
   it('does not collapse hand-made entities into a different one-scroll layout', () => {
     expect(source).not.toContain('unifiedDetails');
-    expect(source).not.toContain('isManualEntityType');
     expect(source).toContain("{#if tab === 'info'}");
     expect(source).toContain("{#if tab === 'connections'}");
     expect(source).toContain("{#if tab === 'time'}");

@@ -177,3 +177,47 @@ def test_draft_rejects_unsafe_or_unbounded_paths(client, path):
         json={"title": "Bad path", "state": {"mediaPaths": [path]}},
     )
     assert response.status_code == 422
+
+
+def test_a_draft_named_with_a_hash_is_opened_and_deleted_on_its_own(client):
+    from urllib.parse import quote
+
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    for title in ("Thread", "Thread #2"):
+        client.post(f"/api/cases/{cid}/drafts", json={"title": title, "state": STATE})
+
+    assert client.get(f"/api/cases/{cid}/drafts/{quote('Thread #2', safe='')}").json()["title"] == "Thread #2"
+    assert client.delete(f"/api/cases/{cid}/drafts/{quote('Thread #2', safe='')}").status_code == 200
+
+    assert [row["title"] for row in client.get(f"/api/cases/{cid}/drafts").json()] == ["Thread"]
+
+
+@pytest.mark.parametrize("folded", [False, True], ids=["linux", "windows-macos"])
+def test_a_change_of_case_renames_the_draft_in_place(client, monkeypatch, folded):
+    import casefold
+
+    from azimut import layout
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Thread", "state": STATE})
+    if folded:
+        casefold.fold_names(monkeypatch, layout.DRAFTS_DIR)
+
+    renamed = client.post(
+        f"/api/cases/{cid}/drafts", json={"title": "thread", "rename_from": "Thread", "state": STATE}
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    folder = Case.open(cid).tool_root / layout.DRAFTS_DIR
+    assert [p.name for p in folder.glob("*.json")] == ["thread.json"]
+    assert client.get(f"/api/cases/{cid}/drafts/thread").json()["state"]["place"] == STATE["place"]
+
+
+def test_two_drafts_differing_only_by_case_cannot_both_be_saved(client):
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Thread", "state": STATE})
+
+    again = client.post(f"/api/cases/{cid}/drafts", json={"title": "thread", "state": STATE})
+
+    assert again.status_code == 409

@@ -33,7 +33,7 @@ const grow = (box, share) => {
 const covers = (outer, inner) => outer.west <= inner.west && outer.east >= inner.east
   && outer.south <= inner.south && outer.north >= inner.north;
 
-/** Only for tests and for a case being closed: the held frames are per session. */
+/** For tests only: the held frames otherwise last as long as the page. */
 export function forgetBandFrames() {
   held.clear();
 }

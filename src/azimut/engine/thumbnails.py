@@ -16,8 +16,8 @@ to the original file. This module owns their whole lifecycle.
   drained by the shared single worker (`engine/workqueue.py`), so several imports
   never spawn several ffmpegs at once. A failed inline render is enqueued for the
   worker to retry.
-- **Recovery**: a job left `running` by a crashed process is reclaimed on case
-  open (`Case.recover_jobs`), so work resumes instead of stalling.
+- **Recovery**: a job left `running` by a crashed process is reclaimed at startup
+  (`workqueue.recover_all`), so work resumes instead of stalling.
 - **Budget**: `prune_cache` evicts least-recently-used thumbnails past a size
   budget; it only ever touches the cache, never originals or database rows.
 """
@@ -213,14 +213,6 @@ workqueue.register(THUMB_KIND, _handle)
 
 def _thumb_dir(case: "CaseType") -> Path:
     return case.subdir("media") / THUMB_DIR
-
-
-def cache_size(case: "CaseType") -> int:
-    """Total bytes held by the thumbnail cache."""
-    thumbs = _thumb_dir(case)
-    if not thumbs.is_dir():
-        return 0
-    return sum(p.stat().st_size for p in thumbs.iterdir() if p.is_file())
 
 
 def _proof_thumbs(case: "CaseType") -> set[str]:

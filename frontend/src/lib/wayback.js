@@ -26,13 +26,6 @@ export function waybackId(baseId, release) {
   return `${baseId}${SEP}${release}`;
 }
 
-/** …and back: the release an id names, or null for the plain basemap. */
-export function releaseOf(providerId) {
-  const [base, spec] = String(providerId ?? '').split(SEP);
-  if (base !== WAYBACK_ID || !/^\d{1,9}$/.test(spec ?? '')) return null;
-  return Number(spec);
-}
-
 /**
  * The releases the picker walks through, newest first.
  *

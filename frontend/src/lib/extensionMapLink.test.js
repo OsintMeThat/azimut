@@ -271,7 +271,7 @@ function open({ extra = {}, href = 'https://www.openstreetmap.org/#map=17/50.45/
     undefined
   );
   const panel = window.__AZIMUT_MAP_TOOLS__;
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
   const link = () => links.at(-1);
   return {
     ...panel,

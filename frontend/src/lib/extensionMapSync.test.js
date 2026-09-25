@@ -137,7 +137,7 @@ function open({ answers } = {}) {
     undefined
   );
   const panel = window.__AZIMUT_MAP_TOOLS__;
-  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const root = () => window.__AZIMUT_MAP_TOOLS__.root;
   return {
     ...panel,
     app,
@@ -359,7 +359,7 @@ describe('an open sweep', () => {
 
 describe('the beta badge', () => {
   const badge = () =>
-    document.getElementById('azimut-map-tools').shadowRoot.querySelector('header .beta');
+    window.__AZIMUT_MAP_TOOLS__.root.querySelector('header .beta');
 
   it('marks every tool that draws on the ground, on whichever map', async () => {
     // It used to name Google Earth. The caveat was never about the site: these

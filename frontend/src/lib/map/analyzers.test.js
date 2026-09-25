@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzerGroups, analyzerLock, coverage, describeMeasure, displayGroups, framesPerTile, mapSource, marksToZones, readableDuration, sizeBand, sizeOf, sourceLabel, viewZone, zoneMarks, zoneRing } from './analyzers.js';
+import { analyzerGroups, analyzerLock, coverage, describeMeasure, displayGroups, framesPerTile, marksToZones, readableDuration, sizeBand, sizeOf, sourceLabel, viewZone, zoneMarks, zoneRing } from './analyzers.js';
 
 describe('saved analysis geometry', () => {
   it('keeps geographic points and names when drawings are edited', () => {
@@ -8,11 +8,7 @@ describe('saved analysis geometry', () => {
     expect(marksToZones(marks, zones)).toEqual(zones);
     expect(marksToZones([{ ...marks[0], points: [[2, 2], [3, 2], [3, 3]] }], zones)[0].name).toBe('Port');
   });
-  it('takes only Sentinel-2 from the maps, because Detect reads its bands', () => {
-    expect(mapSource({ provider: 'google' })).toBeNull();
-    expect(mapSource({ provider: 'esri-wayback', wayback_release: 123 })).toBeNull();
-    expect(mapSource({ provider: 'sentinel2', sentinel: { date: '2026-05-11', layer: 'SWIR', maxcc: 20 } }))
-      .toEqual({ provider: 'sentinel2', date: '2026-05-11', layer: 'SWIR', maxcc: 20 });
+  it('names a run by the date it read, or the release an older run read', () => {
     expect(sourceLabel({ provider: 'sentinel2', date: '2026-05-11' })).toBe('2026-05-11');
     // runs saved before still say what they read
     expect(sourceLabel({ provider: 'esri-wayback', release: 7 })).toBe('Wayback release 7');

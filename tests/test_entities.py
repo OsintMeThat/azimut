@@ -5,12 +5,15 @@ make semantic sense. A new type therefore joins no connection accidentally. This
 file locks the exact matrix exposed by the API and enforced on writes.
 """
 
+from pathlib import Path
+
 import pytest
 
 from azimut.engine import artifacts
 from azimut.engine import entities
 from azimut.engine import links as link_engine
-from azimut.workspace import Case, CaseError
+from azimut.sqlite_backend import SQLITE_SCHEMA
+from azimut.workspace import CASE_SCHEMA, Case, CaseError
 
 
 def _new_case(client, name):
@@ -175,6 +178,67 @@ def test_every_declared_type_says_what_it_is_for_when_the_case_is_drawn():
     assert {entry.role for entry in entities.ENTITY_TYPES} == set(entities.ROLES)
     for role in entities.ROLES:
         assert entities.types_with_role(role), role
+
+
+ONTOLOGY = Path(__file__).resolve().parent.parent / "docs" / "ONTOLOGY.md"
+
+
+def _doc_table(text: str, header: str) -> list[list[str]]:
+    """The body rows of the Markdown table under `header`, cells unquoted."""
+    lines = text.splitlines()
+    start = lines.index(header) + 2  # past the header and its |---| rule
+    rows = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        rows.append([cell.strip().replace("`", "") for cell in line.strip("|").split("|")])
+    return rows
+
+
+def _members(rows: list[list[str]]) -> dict[str, str]:
+    return {member.strip(): row[0] for row in rows for member in row[2].split(",")}
+
+
+def test_the_filing_contract_lists_every_type_where_the_code_files_it():
+    """ONTOLOGY.md is the contract a new tool files against, so a type the code
+    declares and the document leaves out is one nobody learns the rules of."""
+    text = ONTOLOGY.read_text(encoding="utf-8")
+    families = _members(_doc_table(text, "| Family | Reads as | Members |"))
+    roles = _members(_doc_table(text, "| Role | Reads as | Members | In the drawing |"))
+    registry = {
+        row[0]: (row[1], row[2])
+        for row in _doc_table(
+            text,
+            "| Type | Family | Role | State | Produced by | Key `attrs` | File-backed |",
+        )
+    }
+    for entry in entities.ENTITY_TYPES:
+        assert families.get(entry.type) == entry.family, entry.type
+        assert roles.get(entry.type) == entry.role, entry.type
+        assert registry.get(entry.type) == (entry.family, entry.role), entry.type
+
+
+def test_a_type_is_shown_by_the_name_its_tool_gives_it(client):
+    """The type id is storage and keeps its old word; the label is what Board, Files,
+    Details and Trash print, so it follows the tool: Inspect keeps one work per file,
+    Detect reruns a routine, and the areas serve Detect, not Compare."""
+    rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
+
+    assert rows["inspect-session"]["label"] == "Inspect work"
+    assert rows["analysis-follow-up"]["label"] == "Detect routine"
+    assert "Detect analyzer" in rows["analysis-zones"]["hint"]
+    for row in rows.values():
+        assert "session" not in row["label"].lower() or row["type"] == "compare-session"
+        assert "watch" not in row["label"].lower(), row["type"]
+    for type_ in ("analysis-zones", "analysis-area", "analysis-follow-up", "analysis-run"):
+        assert "Compare" not in rows[type_]["hint"], type_
+
+
+def test_the_filing_contract_states_the_schemas_the_code_writes():
+    text = " ".join(ONTOLOGY.read_text(encoding="utf-8").split())
+    assert f"**Storage schema: `{CASE_SCHEMA}`.**" in text
+    assert f'{{"azimut": {{"schema": {CASE_SCHEMA},' in text
+    assert f"The internal SQLite schema is at version {SQLITE_SCHEMA}:" in text
 
 
 def test_the_role_is_not_the_manual_flag_under_another_name():

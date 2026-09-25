@@ -25,6 +25,7 @@ from ..engine.analysis_models import (
     AreaGeometry, Bounds, Check, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId, Source, Zone,
     ZoneSet, is_single,
 )
+from ..workspace import Case
 from .cases import delete_by_path, delete_entities_deep, get_case
 
 router = APIRouter(prefix="/api", tags=["analyzers"])
@@ -635,6 +636,25 @@ def promote(case_id: str, ident: str, result_id: str, body: Promotion) -> dict[s
         return {"entity": entity, "image": filed["item"]["path"], "claim": claim, "result": result}
 
 
+def _own_evidence(case: Case, place: dict[str, Any] | None, claim: str | None) -> str | None:
+    """The picture Keep filed for this pin, while nothing else has come to use it.
+
+    It was imported for the pin alone, so undoing the pin takes it along. Anything
+    tied to it since (a proof composed from it, a statement kept because the
+    analyst wrote to it) keeps it in the case.
+    """
+    path = ((place or {}).get("attrs") or {}).get("evidence")
+    media_entity = case.find_entity(attr="path", value=path) if path else None
+    if media_entity is None or place is None:
+        return None
+    ours = {place["id"], claim}
+    for link in case.links_of(media_entity["id"]):
+        other = link["to"] if link["from"] == media_entity["id"] else link["from"]
+        if other not in ours:
+            return None
+    return str(media_entity["id"])
+
+
 @router.delete("/cases/{case_id}/analysis/runs/{ident}/results/{result_id}/promote")
 def unpromote(case_id: str, ident: str, result_id: str) -> dict[str, Any]:
     """Undo keeping: the pin and its evidence go to Trash, the candidate returns.
@@ -648,7 +668,8 @@ def unpromote(case_id: str, ident: str, result_id: str) -> dict[str, Any]:
         result = result_of(saved, result_id)
         entity = kept_entity(case, result)
         claim = analysis_dating.withdrawable(case, ident, result_id)
-        going = [each for each in (entity["id"] if entity else None, claim) if each]
+        evidence = _own_evidence(case, entity, claim)
+        going = [each for each in (entity["id"] if entity else None, claim, evidence) if each]
         removed = delete_entities_deep(case, going) if going else None
         result.update(entity_id=None, review="new", reviewed_at=engine.now())
         engine.persist_run(case, saved)
