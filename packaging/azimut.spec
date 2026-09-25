@@ -84,6 +84,13 @@ a = Analysis(
     noarchive=False,
 )
 
+# libmvec is glibc's own vector maths library, and PyInstaller's list of system
+# libraries to leave out misses it. The vendored Linux ffmpeg links it, so the
+# runner's copy was packed in, and that copy asks the system's libm for the
+# runner's glibc: the binary stopped starting ffmpeg below glibc 2.39. Every x86_64
+# glibc since 2.22 ships its own, so the system's loads, like libm and libc.
+a.binaries = [entry for entry in a.binaries if not entry[0].startswith("libmvec.so")]
+
 pyz = PYZ(a.pure)
 
 # The .exe icon. Windows is the only shipped artifact that embeds one: Linux
