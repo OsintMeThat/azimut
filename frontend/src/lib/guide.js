@@ -231,8 +231,8 @@ export const GUIDE = [
         text: 'Read two locked views side by side, by swipe, fade or blink. On a matched pair, Difference highlights what changed over any of them; notes, shapes and stamped markers stay editable in the saved comparison and appear in its outputs.',
       },
       {
-        label: 'All dates, and when it appeared',
-        text: 'With the same dated archive on both sides, All dates lists every picture of the point under the crosshair. Put one without the thing on A and one with it on B, and Date it halves the gap until they are neighbours.',
+        label: 'All dates of one point',
+        text: 'With the same dated archive on both sides, All dates lists every picture of the point under the crosshair, oldest first. Press one to show it on B, or its A button to show it on A.',
       },
       {
         label: 'Detect sweeps ground, once or again and again',

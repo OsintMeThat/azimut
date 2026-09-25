@@ -2220,7 +2220,7 @@
         onmode={setMode} ondifference={setDifference} onswap={swapSides} />
       <button class="btn btn-sm" class:active={stripOpen} disabled={!archive} aria-pressed={stripOpen}
         onclick={() => (stripOpen = !stripOpen)}
-        title={archive ? 'Every dated picture of this point, and when a change appeared'
+        title={archive ? 'Every dated picture of this point'
           : 'Show the same dated archive on A and B to list its pictures'}>
         <Icon name="clock" size={13} /> All dates
       </button>

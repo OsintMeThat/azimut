@@ -68,17 +68,3 @@ it('shows a picture on B with a press, and on A from its own button', async () =
   target.querySelectorAll('li')[1].querySelector('.set').click();
   expect(onassign).toHaveBeenLastCalledWith('a', expect.objectContaining({ date: '2026-05-08' }));
 });
-
-it('dates a change by halving the gap, and says what it found', async () => {
-  open();
-  await settle();
-  button('Date it').click(); await settle();
-  expect(target.textContent).toContain('Is it there on B, 2026-05-13?');
-  button('It is there').click(); await settle();
-  expect(target.textContent).toContain('Is it there on B, 2026-05-08?');
-  button('Not yet').click(); await settle();
-  expect(target.textContent).toContain(
-    'Absent on 2026-05-08, present on 2026-05-13 (Sentinel-2).');
-  button('Undo').click(); await settle();
-  expect(target.textContent).toContain('Is it there on B, 2026-05-08?');
-});

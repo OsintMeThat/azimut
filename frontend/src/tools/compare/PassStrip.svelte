@@ -1,13 +1,10 @@
 <script>
   /**
-   * Every dated picture of the point under the crosshair, and the bracket that
-   * dates a change on them.
+   * Every dated picture of the point under the crosshair.
    *
    * It opens on the archive A and B share, lists what that archive holds for
    * the middle of the view from oldest to newest, and puts any row on either
-   * side with one press. Narrowing starts from A (the thing absent) and B (the
-   * thing there) and shows the middle picture on B, one question at a time,
-   * until the two ends are neighbours. The pure part is `lib/map/passStrip.js`.
+   * side with one press. The pure part is `lib/map/passStrip.js`.
    *
    * The list costs one request for the Copernicus archives and none for Esri,
    * and is read only when the strip opens or the analyst asks again. Pictures
@@ -19,17 +16,11 @@
   import { orbitMark } from '../../lib/radar.js';
   import {
     THUMB,
-    answerProbe,
-    between,
-    bracketSentence,
     entryOf,
     lookupPath,
     lookupWindow,
-    nextProbe,
-    startBracket,
     stripEntries,
     thumbTiles,
-    undoAnswer,
   } from '../../lib/map/passStrip.js';
 
   let {
@@ -57,8 +48,6 @@
   let note = $state('');
   let readAt = $state(null);
   let pictures = $state(null); // the view the pictures were drawn for, or null
-  let bracket = $state(null);
-  let copied = $state(false);
 
   // Radar compares one track: the track is the pass on B, or on A.
   const track = $derived(archive === 'sentinel1' ? (b?.radar?.time || a?.radar?.time || '') : '');
@@ -66,9 +55,6 @@
   const onA = $derived(entryOf(entries, archive, a));
   const onB = $derived(entryOf(entries, archive, b));
   const moved = $derived(!!readAt && distance(readAt, view) > 1000);
-  const left = $derived(bracket ? between(entries, bracket).length : 0);
-  const done = $derived(!!bracket && !bracket.probe && !left);
-  const canNarrow = $derived(!bracket && !!startBracket(entries, onA, onB));
   const perPicture = $derived(pictures ? thumbTiles({ ...pictures }, provider).length : 0);
   const priced = $derived(thumbTiles({ ...view, viewWidth }, provider).length * entries.length);
 
@@ -86,7 +72,6 @@
     try {
       answer = await api.get(lookupPath(archive, at, lookupWindow(a, b)));
       readAt = at;
-      bracket = null;
       pictures = null;
       if (metered) onbilled();
     } catch (error) {
@@ -108,39 +93,6 @@
   function assign(letter, entry) {
     if (!entry.usable && archive === 'sentinel2') return;
     onassign(letter, entry);
-  }
-
-  function probe(next) {
-    const row = nextProbe(entries, next);
-    bracket = row ? { ...next, probe: row.key } : next;
-    const before = entries.find((entry) => entry.key === bracket.before);
-    const after = entries.find((entry) => entry.key === bracket.after);
-    if (before) onassign('a', before);
-    if (row) onassign('b', row);
-    else if (after) onassign('b', after);
-  }
-
-  function narrow() {
-    const start = startBracket(entries, onA, onB);
-    if (start) probe(start);
-  }
-
-  function answerIt(verdict) {
-    probe(answerProbe(bracket, verdict));
-  }
-
-  function undo() {
-    probe(undoAnswer(bracket));
-  }
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(bracketSentence(entries, bracket, NAMES[archive]));
-      copied = true;
-      setTimeout(() => (copied = false), 1500);
-    } catch {
-      copied = false;
-    }
   }
 
   const label = (entry) => (entry.time ? `${entry.date} ${entry.time.slice(0, 5)}` : entry.date);
@@ -179,8 +131,7 @@
       {#each entries as entry (entry.key)}
         {@const isA = onA?.key === entry.key}
         {@const isB = onB?.key === entry.key}
-        {@const inside = bracket && between(entries, bracket).includes(entry)}
-        <li class:off={!entry.usable} class:inside class:probe={bracket?.probe === entry.key}>
+        <li class:off={!entry.usable}>
           <button class="card" disabled={!entry.usable && archive === 'sentinel2'}
             onclick={(event) => assign(event.altKey ? 'a' : 'b', entry)}
             title={entry.usable ? 'Show on B · Alt to show on A'
@@ -210,30 +161,6 @@
     {/if}
   {/if}
 
-  {#if entries.length}
-    <footer class="bracket">
-      {#if !bracket}
-        {#if canNarrow}
-          <span class="hint">A shows it absent and B present? Narrow it down one picture at a time.</span>
-          <button class="btn btn-sm btn-primary" onclick={narrow}>Date it</button>
-        {:else}
-          <span class="hint">Put a picture without it on A and one with it on B, A the older, to date when it appeared.</span>
-        {/if}
-      {:else if bracket.probe}
-        <span class="question">Is it there on B, <strong class="mono">{label(entries.find((entry) => entry.key === bracket.probe))}</strong>?
-          <span class="hint">{left} left to check</span></span>
-        <button class="btn btn-sm" onclick={() => answerIt('there')}>It is there</button>
-        <button class="btn btn-sm" onclick={() => answerIt('absent')}>Not yet</button>
-        <button class="btn btn-sm" onclick={() => answerIt('unclear')} title="Cloud, a smear, or a look that settles nothing">Can’t tell</button>
-        {#if bracket.history.length}<button class="linkish" onclick={undo}>Undo</button>{/if}
-      {:else if done}
-        <span class="question">{bracketSentence(entries, bracket, NAMES[archive])}</span>
-        <button class="btn btn-sm" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-        {#if bracket.history.length}<button class="linkish" onclick={undo}>Undo</button>{/if}
-        <button class="linkish" onclick={() => (bracket = null)}>Done</button>
-      {/if}
-    </footer>
-  {/if}
 </section>
 
 <style>
@@ -264,11 +191,7 @@
     position: relative;
     flex: 0 0 auto;
     display: grid;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
   }
-  li.inside { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  li.probe { border-color: var(--accent); }
   li.off { opacity: 0.45; }
   .card {
     display: grid;
@@ -311,14 +234,6 @@
   .tag.b { background: var(--side-b, #f59e0b); color: #0b0d11; }
   .set { display: none; border: 1px solid var(--glass-line, var(--border)); color: var(--glass-muted, var(--text-3)); }
   li:hover .set { display: block; }
-  .bracket {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--fs-xs);
-  }
-  .question { color: var(--glass-ink, var(--text-1)); }
   .linkish {
     background: none;
     border: 0;

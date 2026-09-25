@@ -1322,14 +1322,6 @@ ceiling and a radar pass off the pair's track are greyed. **Show pictures** draw
 each one small from the tile proxy, priced before it is pressed and cached once
 read, and a view that moved says so rather than refreshing on its own.
 
-**Date it** answers "between which two pictures did this appear". With a picture
-without the thing on A and one with it on B, A the older, it shows the middle
-picture between them on B and asks: *It is there*, *Not yet*, or *Can't tell* for
-cloud or a look that settles nothing. Each answer halves what is left, so a year
-of passes takes a handful of looks, and Undo takes one back. It ends on a
-sentence to copy — absent on one date, present on the next, and how many
-pictures between them could not tell.
-
 Difference opens no column: its strip joins the view's own controls in the footer
 under the stage, and its full settings open above that strip only from the gear.
 The strip keeps one width through a read, so the panel hanging from it stays put;

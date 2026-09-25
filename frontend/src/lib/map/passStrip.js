@@ -1,13 +1,9 @@
 /**
- * Every dated picture of one point, in a row, and the bracket that dates a change.
+ * Every dated picture of one point, in a row.
  *
- * Compare reads two pictures. Dating an event asks a different question: not
- * "what changed between A and B" but "between which two pictures did it
- * appear". The strip lists every picture the archive A and B share holds for
- * the point in the middle of the view, oldest to newest, and the bracket halves
- * the gap between a picture where the thing is absent and one where it is
- * present until they are neighbours, a question at a time: log2 of the gap
- * rather than the whole of it.
+ * Compare reads two pictures. The strip lists every picture the archive A and
+ * B share holds for the point in the middle of the view, oldest to newest, so
+ * either side can be set to any of them with one press.
  *
  * Three archives answer it: Sentinel-2 days, Sentinel-1 passes of one track,
  * and the Esri Wayback releases that changed the point. The lookups are the
@@ -78,8 +74,7 @@ export function lookupPath(archive, { lat, lon, zoom }, window) {
  * The strip's rows, oldest first, whatever archive answered.
  *
  * `usable` is false for a Sentinel-2 day over the cloud ceiling, and for a
- * radar pass off the track the pair is read on: both are shown, neither is
- * offered to the bracket.
+ * radar pass off the track the pair is read on: both are shown greyed.
  */
 export function stripEntries(archive, answer, { maxcc = 100, track = '' } = {}) {
   if (archive === WAYBACK_ID) {
@@ -130,83 +125,6 @@ export function entryOf(entries, archive, side) {
   }
   const day = side.sentinel?.date;
   return day ? entries.find((entry) => entry.key === day) ?? null : null;
-}
-
-// -- the bracket ------------------------------------------------------------------
-
-/**
- * A bracket from what A and B show: A before the thing, B after it.
- * Null when they do not make one — a side the strip does not hold, or A not
- * older than B.
- */
-export function startBracket(entries, before, after) {
-  if (!before || !after) return null;
-  const from = entries.indexOf(before);
-  const to = entries.indexOf(after);
-  if (from < 0 || to < 0 || from >= to) return null;
-  return { before: before.key, after: after.key, probe: null, skipped: [], history: [] };
-}
-
-/** The usable rows strictly between the bracket's ends. */
-export function between(entries, bracket) {
-  const from = entries.findIndex((entry) => entry.key === bracket.before);
-  const to = entries.findIndex((entry) => entry.key === bracket.after);
-  if (from < 0 || to < 0) return [];
-  return entries.slice(from + 1, to)
-    .filter((entry) => entry.usable && !bracket.skipped.includes(entry.key));
-}
-
-/** The next row to look at: the middle of what is left, or null when done. */
-export function nextProbe(entries, bracket) {
-  const left = between(entries, bracket);
-  return left.length ? left[Math.floor((left.length - 1) / 2)] : null;
-}
-
-/**
- * The bracket after one answer about the probe.
- *
- * `there` moves the "after" end to the probe, `absent` the "before" end, and
- * `unclear` (cloud, a smear, a look that settles nothing) drops the probe
- * without moving either. Every answer can be taken back.
- */
-export function answerProbe(bracket, verdict) {
-  const probe = bracket.probe;
-  if (!probe) return bracket;
-  const history = [...bracket.history, { before: bracket.before, after: bracket.after, skipped: bracket.skipped }];
-  if (verdict === 'there') return { ...bracket, after: probe, probe: null, history };
-  if (verdict === 'absent') return { ...bracket, before: probe, probe: null, history };
-  return { ...bracket, skipped: [...bracket.skipped, probe], probe: null, history };
-}
-
-/** Take the last answer back. */
-export function undoAnswer(bracket) {
-  const last = bracket.history.at(-1);
-  if (!last) return bracket;
-  return { ...bracket, ...last, probe: null, history: bracket.history.slice(0, -1) };
-}
-
-/** Whether nothing usable is left between the ends. */
-export function settled(entries, bracket) {
-  return !nextProbe(entries, bracket);
-}
-
-/**
- * The finding, in a sentence the analyst can paste into a note. It says how
- * many pictures between the ends could not settle it, because "between the
- * 3rd and the 18th" hides a cloudy week that "no clear pass between" does not.
- */
-export function bracketSentence(entries, bracket, label) {
-  const before = entries.find((entry) => entry.key === bracket.before);
-  const after = entries.find((entry) => entry.key === bracket.after);
-  if (!before || !after) return '';
-  const name = (entry) => (entry.time ? `${entry.date} ${entry.time.slice(0, 5)} UTC` : entry.date);
-  const from = entries.indexOf(before);
-  const to = entries.indexOf(after);
-  const unread = entries.slice(from + 1, to).length;
-  const tail = unread
-    ? `; ${unread === 1 ? 'one picture' : `${unread} pictures`} between them could not tell`
-    : '';
-  return `Absent on ${name(before)}, present on ${name(after)} (${label})${tail}.`;
 }
 
 // -- pictures ------------------------------------------------------------------------

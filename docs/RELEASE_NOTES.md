@@ -29,8 +29,8 @@ maps made elsewhere on yours.
 
 - Compare opens on Wayback a year back against today's World Imagery, with no
   key needed.
-- **All dates** lists every dated picture of a point and narrows down when a
-  change appeared.
+- **All dates** lists every dated picture of a point, oldest first, to set on
+  either side.
 - Sentinel-1 radar passes are a basemap in Satellite, Compare and Detect.
 - A saved comparison stands on the map, dated A → B, and reopens in Compare.
 - "Change assist" is now **Difference**, a switch over any of the four views.
