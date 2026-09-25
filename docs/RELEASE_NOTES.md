@@ -96,6 +96,8 @@ maps made elsewhere on yours.
 
 ## Fixes
 
+- The Labels map layer is gone: CARTO's tiles now ask for a key and covered the
+  map with a watermark. Borders still names places, and Roads names streets.
 - Changing only the case of a name renames it on Windows and macOS, where it
   used to delete a collage or be refused.
 - Two names differing only by case no longer block a bundle export on Linux.

@@ -46,7 +46,7 @@ class Provider:
     needs_key: bool = False
     subdomains: tuple[str, ...] = field(default_factory=tuple)  # for {s} templates
     # True for satellite/aerial imagery, False for street/base maps. Drives the UI:
-    # the OSM labels overlay is only useful over imagery (§ Satellite item 1).
+    # the roads overlay is only useful over imagery, a street map draws its own.
     imagery: bool = True
     capturable: bool = True  # may a saved capture be filed from it?
     cacheable: bool = True  # may its tiles be written to a disk cache?

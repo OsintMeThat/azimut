@@ -25,8 +25,8 @@ describe('compare helpers', () => {
   });
 
   it('keeps layers ordered, unique and supported', () => {
+    // 'labels' is a layer that was retired: a session saved with it opens without it
     expect(comparisonLayers(['saved', 'roads', 'roads', 'buildings', 'labels'])).toEqual([
-      'labels',
       'roads',
       'saved',
     ]);

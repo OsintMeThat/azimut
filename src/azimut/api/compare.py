@@ -46,6 +46,7 @@ from .. import config, layout
 from ..engine import artifacts as artifact_engine
 from ..engine import comparisons, exportdir, sentinel, tiles
 from ..engine import links as link_engine
+from ..engine.analysis_models import RETIRED_OVERLAYS
 from ..engine import media as media_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
@@ -55,7 +56,7 @@ from .satellite import locate_on_save, saved_changed
 router = APIRouter(prefix="/api", tags=["compare"])
 
 OVERLAYS = frozenset({
-    "labels", "boundaries", "roads", "railway", "power", "seamarks", "gpstraces",
+    "boundaries", "roads", "railway", "power", "seamarks", "gpstraces",
     "firms", "nightlights", "saved",
 })
 MAX_FRAME_BYTES = 24_000_000
@@ -125,7 +126,8 @@ class CompareNightlights(BaseModel):
 class CompareSide(BaseModel):
     present: bool = False
     provider: str = Field(default="esri-world-imagery", min_length=1, max_length=500)
-    overlays: list[str] = Field(default_factory=list, max_length=len(OVERLAYS))
+    # Room for a retired layer too: it is dropped after, not refused here.
+    overlays: list[str] = Field(default_factory=list, max_length=len(OVERLAYS) + len(RETIRED_OVERLAYS))
     sentinel: CompareSentinel = Field(default_factory=CompareSentinel)
     wayback_release: int | None = Field(default=None, ge=1)
     radar: CompareRadar = Field(default_factory=CompareRadar)
@@ -303,6 +305,8 @@ def _validated_spec(spec: CompareSpec) -> dict[str, Any]:
             tiles.get_provider(side["provider"])
         except KeyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # A layer that was retired drops out of a session saved with it.
+        side["overlays"] = [entry for entry in side["overlays"] if entry not in RETIRED_OVERLAYS]
         unknown = set(side["overlays"]) - OVERLAYS
         if unknown:
             raise HTTPException(

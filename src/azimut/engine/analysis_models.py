@@ -19,6 +19,7 @@ from pydantic import (
     Field,
     FiniteFloat,
     SerializerFunctionWrapHandler,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -76,12 +77,25 @@ class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+#: Map layers that no longer exist. A saved preference or a settings backup that
+#: still names one drops it rather than being refused: CARTO's labels went when
+#: their tiles began asking for a key, and the borders already name places.
+RETIRED_OVERLAYS = frozenset({"labels"})
+
+
 class DetectPrefs(Model):
     collapsed: bool = False
     basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
-    overlays: list[Literal["boundaries", "labels", "roads", "railway", "power", "seamarks", "gpstraces"]] = Field(
-        default=["boundaries"], max_length=7)
+    overlays: list[Literal["boundaries", "roads", "railway", "power", "seamarks", "gpstraces"]] = Field(
+        default=["boundaries"], max_length=6)
     saved: bool = True
+
+    @field_validator("overlays", mode="before")
+    @classmethod
+    def _drop_retired(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return [entry for entry in value if entry not in RETIRED_OVERLAYS]
+        return value
 
 
 class Parameters(Model):

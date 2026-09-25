@@ -1108,3 +1108,13 @@ def test_update_then_reset_round_trip(client, monkeypatch):
 def test_scrapers_live_in_the_workspace_not_the_install(client):
     """The runtime dir has to be somewhere writable — the binary's own dir isn't."""
     assert config.runtime_dir().parent == config.internal_dir()
+
+
+def test_detect_prefs_drop_the_retired_labels_layer(client):
+    # A preference saved while the Labels layer existed is not refused for it.
+    saved = client.put(
+        "/api/settings/prefs",
+        json={"detect_view": {"overlays": ["labels", "boundaries", "roads"]}},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["detect_view"]["overlays"] == ["boundaries", "roads"]

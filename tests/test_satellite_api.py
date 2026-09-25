@@ -20,7 +20,7 @@ def _fake_tile(client, url):  # offline: every tile is a solid green square
 
 
 def test_providers_flag_imagery_vs_street(client):
-    # the UI uses `imagery` to disable the OSM labels overlay over street maps
+    # the UI uses `imagery` to disable the roads overlay over street maps
     providers = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
     assert providers["esri-world-imagery"]["imagery"] is True
     assert providers["osm"]["imagery"] is False

@@ -350,19 +350,23 @@ describe('what is laid over the imagery', () => {
     );
   });
 
-  it('offers the railways over any basemap and the labels only over imagery', () => {
-    // OSM's own street map already draws its labels twice; it draws a railway
-    // as one more line, which is the thing OpenRailwayMap is for
-    expect(source).toContain("osmOverlay && baseIsImagery && 'labels'");
+  it('offers the railways over any basemap and the roads only over imagery', () => {
+    // OSM's own street map already draws its roads; it draws a railway as one
+    // more line, which is the thing OpenRailwayMap is for
+    expect(source).toContain("refLayers.roads && baseIsImagery && 'roads'");
     expect(source).toContain("railOverlay && 'railway'");
     const rows = source.slice(source.indexOf('const layerRows = $derived(['));
     expect(rows.slice(0, 900)).toContain("label: 'OSM railways'");
     expect(rows.slice(0, 900)).toContain('toggle: () => (railOverlay = !railOverlay)');
   });
 
-  it('gives neither of them a rail seat', () => {
+  it('gives the railways no rail seat', () => {
     expect(rail).not.toContain('railOverlay');
-    expect(rail).not.toContain('osmOverlay');
+  });
+
+  it('has no labels layer: its tiles now ask for a key, and Borders names places', () => {
+    expect(source).not.toContain("'labels'");
+    expect(source).not.toContain('OSM labels');
   });
 
   it('fetches no railway tile until it is asked for', () => {
@@ -395,7 +399,7 @@ describe('what is laid over the imagery', () => {
 
   it('says a layer is for imagery only when the basemap is not imagery', () => {
     const rows = source.slice(source.indexOf('const layerRows = $derived(['));
-    expect(rows.match(/detail: baseIsImagery \? '' : 'imagery only'/g)).toHaveLength(2);
+    expect(rows.match(/detail: baseIsImagery \? '' : 'imagery only'/g)).toHaveLength(1);
   });
 
   it('asks for no tile until the choice is one the service can answer', () => {

@@ -777,3 +777,20 @@ def test_a_colour_list_the_app_never_writes_is_refused(client, keep):
         data={"animation": "blink", "filename": "Bad", "keep": keep},
     )
     assert response.status_code == 422
+
+
+def test_a_session_saved_with_the_retired_labels_layer_saves_without_it(client):
+    # CARTO's labels went when their tiles began asking for a key. A session kept
+    # from before, or a tab left open across the update, still sends the id.
+    cid = _case(client, "Retired labels")
+    spec = _spec()
+    spec["a"]["overlays"] = ["labels", "roads", "labels"]
+    everything = ["labels", "boundaries", "roads", "railway", "power", "seamarks",
+                  "gpstraces", "firms", "nightlights", "saved"]
+    spec["b"]["overlays"] = everything
+    res = _save(client, cid, "Before the key", spec=spec)
+    assert res.status_code == 200, res.text
+    loaded = client.get(f"/api/cases/{cid}/compare/sessions/Before%20the%20key").json()
+    assert loaded["spec"]["a"]["overlays"] == ["roads"]
+    assert "labels" not in loaded["spec"]["b"]["overlays"]
+    assert len(loaded["spec"]["b"]["overlays"]) == len(everything) - 1

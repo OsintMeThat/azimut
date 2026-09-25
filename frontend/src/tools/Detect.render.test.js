@@ -129,7 +129,7 @@ const setOverlay = vi.fn();
 const setAlternate = vi.fn();
 const showAlternate = vi.fn();
 vi.mock('../lib/map/basemap.js', () => ({
-  OVERLAY_IDS: ['boundaries', 'roads', 'labels'],
+  OVERLAY_IDS: ['boundaries', 'roads'],
   createBasemaps: vi.fn(() => ({ show: showBasemap, setOverlay, setAlternate, showAlternate,
     setZoomCeiling: vi.fn(), dispose: vi.fn() })),
 }));
@@ -270,6 +270,15 @@ describe('Detect', () => {
     expect(setOverlay).toHaveBeenCalledWith('roads', true, null);
     expect(setOverlay).toHaveBeenCalledWith('boundaries', false, undefined);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('drops a retired layer from the saved overlays, so the next save is not refused', async () => {
+    prefs.detectView = { collapsed: false, basemap: 'esri-world-imagery', overlays: ['labels', 'roads'], saved: true };
+    await open();
+    expect(setOverlay).not.toHaveBeenCalledWith('labels', true, expect.anything());
+    target.querySelector('[aria-label="Collapse Detect panel"]').click(); await settle();
+    expect(put).toHaveBeenLastCalledWith('/api/settings/prefs', {
+      detect_view: expect.objectContaining({ overlays: ['roads'] }) });
   });
 
   it('takes the current view as an area to sweep', async () => {

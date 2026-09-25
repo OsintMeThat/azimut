@@ -234,7 +234,7 @@ test('carries the coordinates on a dragged pin, and drops it on exit', async ({ 
   await expect(pin).toHaveCount(0);
 });
 
-test('lays the OSM labels over the imagery, and lifts them off again', async ({ page }) => {
+test('lays the railways over the imagery, and lifts them off again', async ({ page }) => {
   // The toggle sat on the tool while the layer never heard about it: the effect
   // that carries it down read the map first, and while the map was still being
   // built the switch it was watching was never read at all.
@@ -245,17 +245,17 @@ test('lays the OSM labels over the imagery, and lifts them off again', async ({ 
   });
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  // the labels are a layer, listed with the others in the panel on the right
-  const labels = page.getByLabel('OSM labels');
+  // the railways are a layer, listed with the others in the panel on the right
+  const rails = page.getByLabel('OSM railways');
 
-  expect(fixture.labelTiles).toEqual([]);
-  await labels.click();
-  await expect.poll(() => fixture.labelTiles.length).toBeGreaterThan(0);
+  expect(fixture.railTiles).toEqual([]);
+  await rails.click();
+  await expect.poll(() => fixture.railTiles.length).toBeGreaterThan(0);
 
   // off again, and a pan proves it: the imagery is still being fetched and the
-  // labels are not
-  await labels.click();
-  const laid = fixture.labelTiles.length;
+  // railways are not
+  await rails.click();
+  const laid = fixture.railTiles.length;
   const painted = imagery.length;
   const box = await page.locator('.map').boundingBox();
   await page.mouse.move(box.x + 400, box.y + 300);
@@ -263,7 +263,7 @@ test('lays the OSM labels over the imagery, and lifts them off again', async ({ 
   await page.mouse.move(box.x + 120, box.y + 120, { steps: 8 });
   await page.mouse.up();
   await expect.poll(() => imagery.length).toBeGreaterThan(painted);
-  expect(fixture.labelTiles.length).toBe(laid);
+  expect(fixture.railTiles.length).toBe(laid);
 });
 
 test('measures a path clicked on the map, and clears it', async ({ page }) => {

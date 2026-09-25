@@ -205,11 +205,8 @@
   let mapReady = $state(false);
   let mapRefused = $state(false);
 
-  // OSM labels overlay: a transparent labels-only layer laid over the imagery so
-  // roads / place names are readable without hiding the satellite view (item 1).
-  let osmOverlay = $state(false);
-  // OpenRailwayMap over the same imagery: which of two parallel strips is a
-  // railway, where a siding ends, what a yard is made of. Unlike the labels it
+  // OpenRailwayMap over the imagery: which of two parallel strips is a
+  // railway, where a siding ends, what a yard is made of. Unlike the roads it
   // is worth having over a street base map too, which draws tracks as one
   // undifferentiated line.
   let railOverlay = $state(false);
@@ -359,7 +356,6 @@
   /** What the surface is asked to lay over the picture (lib/map/basemap.js). */
   const overlays = $derived(
     [
-      osmOverlay && baseIsImagery && 'labels',
       refLayers.boundaries && 'boundaries',
       refLayers.roads && baseIsImagery && 'roads',
       railOverlay && 'railway',
@@ -631,10 +627,9 @@
     if (fullscreen && !document.fullscreenElement) toggleFullscreen();
   }
 
-  // force the labels overlay off whenever the base isn't imagery (item 1), and
-  // the roads with it: a street map already draws both
+  // force the roads off whenever the base isn't imagery: a street map already
+  // draws them
   $effect(() => {
-    if (!baseIsImagery && osmOverlay) osmOverlay = false;
     if (!baseIsImagery && refLayers.roads) refLayers.roads = false;
   });
 
@@ -1137,17 +1132,6 @@
    * different intentions and used to be the same button.
    */
   const layerRows = $derived([
-    {
-      id: 'labels',
-      label: 'OSM labels',
-      on: osmOverlay,
-      disabled: !baseIsImagery,
-      detail: baseIsImagery ? '' : 'imagery only',
-      title: baseIsImagery
-        ? 'Roads and place names over the imagery'
-        : 'Only useful over satellite imagery',
-      toggle: () => (osmOverlay = !osmOverlay),
-    },
     {
       id: 'railway',
       label: 'OSM railways',
