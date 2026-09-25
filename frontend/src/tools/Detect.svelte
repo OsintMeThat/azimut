@@ -76,9 +76,10 @@
    *  its Copernicus layer and day, but none is remembered as the basemap: Detect
    *  opens on free imagery every time. */
   const PASSES = [SENTINEL, RADAR_ID];
+  const OVERLAY_ROWS = [['boundaries', 'Borders'], ['roads', 'Roads'], ['railway', 'Railways'],
+    ['power', 'Power lines'], ['seamarks', 'Seamarks'], ['gpstraces', 'GPS traces']];
   const layerRows = $derived([
-    ...[['boundaries', 'Borders'], ['labels', 'Labels'], ['roads', 'Roads'], ['railway', 'Railways'],
-      ['power', 'Power lines'], ['seamarks', 'Seamarks'], ['gpstraces', 'GPS traces']].map(([id, label]) => ({
+    ...OVERLAY_ROWS.map(([id, label]) => ({
       id, label, on: overlays.includes(id), toggle: () => {
         overlays = overlays.includes(id) ? overlays.filter((value) => value !== id) : [...overlays, id];
       },
@@ -194,7 +195,9 @@
       collapsed = saved?.collapsed ?? false;
       chosenBasemap = saved?.basemap && !PASSES.includes(saved.basemap) ? saved.basemap : 'esri-world-imagery';
       providerId = chosenBasemap;
-      overlays = [...(saved?.overlays ?? ['boundaries'])];
+      // Only the layers still offered: a retired one (Labels) would be sent back
+      // with the next save and refused.
+      overlays = (saved?.overlays ?? ['boundaries']).filter((id) => OVERLAY_ROWS.some(([row]) => row === id));
       savedVisible = saved?.saved ?? true;
       prefsLoaded = true;
       home = { ...prefs.homeView };

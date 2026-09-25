@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { rasterSource, sourceMaxZoom, tileTemplate, tileUrls } from './basemap.js';
+import { OVERLAY_IDS, rasterSource, sourceMaxZoom, tileTemplate, tileUrls } from './basemap.js';
 
 /**
  * The provider shapes are the ones `/api/satellite/providers` really answers
@@ -380,12 +380,12 @@ describe('the layers on a map', () => {
   it('stops an overlay at its own last level rather than blowing it up', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
-      createBasemaps(stubEngine(map)).setOverlay('labels', true);
+      createBasemaps(stubEngine(map)).setOverlay('railway', true);
       // the deepest tile, and the deepest view, which the engine counts one
       // shallower — the same number, two questions
-      expect(map.sources.get('basemap-labels').maxzoom).toBe(20);
-      expect(map.getLayer('basemap-labels').maxzoom).toBe(20);
-      expect(map.sources.get('basemap-labels').tiles).toHaveLength(4);
+      expect(map.sources.get('basemap-railway').maxzoom).toBe(19);
+      expect(map.getLayer('basemap-railway').maxzoom).toBe(19);
+      expect(map.sources.get('basemap-railway').tiles).toHaveLength(3);
     });
   });
 
@@ -408,10 +408,10 @@ describe('the layers on a map', () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
-      basemaps.setOverlay('labels', true);
-      basemaps.setOverlay('labels', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-labels']);
-      basemaps.setOverlay('labels', false);
+      basemaps.setOverlay('boundaries', true);
+      basemaps.setOverlay('boundaries', true);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries']);
+      basemaps.setOverlay('boundaries', false);
       expect(map.layers).toEqual([]);
     });
   });
@@ -463,11 +463,11 @@ describe('the layers on a map', () => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
       basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '24h' });
-      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
       expect(map.layers.map((l) => l.id)).toEqual([
         'basemap-railway',
-        'basemap-labels',
+        'basemap-boundaries',
         'basemap-firms',
       ]);
     });
@@ -479,9 +479,9 @@ describe('the layers on a map', () => {
       const basemaps = createBasemaps(stubEngine(map));
       // the names last, whichever order they arrive in: a station label under
       // its own track is a label nobody can read
-      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-labels']);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-boundaries']);
     });
   });
 
@@ -491,7 +491,7 @@ describe('the layers on a map', () => {
       const basemaps = createBasemaps(stubEngine(map));
       basemaps.show(ESRI, ESRI.id, 256);
       basemaps.setOverlay('railway', true);
-      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('boundaries', true);
       // a tool's own layer, appended above all three
       map.addLayer({ id: 'sfc-1-fill' });
       // and now a different provider, which must not land on top of any of them
@@ -499,7 +499,7 @@ describe('the layers on a map', () => {
       expect(map.layers.map((l) => l.id)).toEqual([
         'basemap-imagery',
         'basemap-railway',
-        'basemap-labels',
+        'basemap-boundaries',
         'sfc-1-fill',
       ]);
     });
@@ -534,13 +534,13 @@ describe('the layers on a map', () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
-      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
       basemaps.setOverlay('power', true);
       const ids = map.layers.map((l) => l.id);
       // over the tracks, under the names
       expect(ids[0]).toBe('basemap-railway');
-      expect(ids.at(-1)).toBe('basemap-labels');
+      expect(ids.at(-1)).toBe('basemap-boundaries');
       expect(ids.slice(1, -1).every((id) => id.startsWith('basemap-power-'))).toBe(true);
     });
   });
@@ -550,7 +550,7 @@ describe('the layers on a map', () => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
       basemaps.show(ESRI, ESRI.id, 256);
-      for (const id of ['firms', 'labels', 'boundaries', 'seamarks', 'railway', 'roads', 'gpstraces']) {
+      for (const id of ['firms', 'boundaries', 'seamarks', 'railway', 'roads', 'gpstraces']) {
         basemaps.setOverlay(id, true, id === 'firms' ? { sensor: 'viirs', window: '24h' } : undefined);
       }
       basemaps.setOverlay('nightlights', true, { source: 'noaa20', day: '2026-09-12' });
@@ -562,10 +562,13 @@ describe('the layers on a map', () => {
         'basemap-railway',
         'basemap-seamarks',
         'basemap-boundaries',
-        'basemap-labels',
         'basemap-firms',
       ]);
     });
+  });
+
+  it('has no CARTO labels layer: its tiles now ask for a key, and the borders name places', () => {
+    expect(OVERLAY_IDS).not.toContain('labels');
   });
 
   it('asks GIBS for the night it was given, and lets its coarse pixels be read zoomed in', async () => {

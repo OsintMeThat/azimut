@@ -62,7 +62,7 @@ vi.mock('../../lib/map/engine.js', () => ({
 
 const setOverlay = vi.fn();
 vi.mock('../../lib/map/basemap.js', () => ({
-  OVERLAY_IDS: ['labels', 'roads', 'boundaries', 'railway', 'power', 'seamarks', 'gpstraces'],
+  OVERLAY_IDS: ['roads', 'boundaries', 'railway', 'power', 'seamarks', 'gpstraces'],
   createBasemaps: vi.fn(() => ({
     show: vi.fn(),
     setOverlay,
@@ -155,10 +155,10 @@ describe('moving a proof point on the map', () => {
     expect(onpick).not.toHaveBeenCalled();
   });
 
-  it('offers the reference layers, labels first and already on', async () => {
+  it('offers the reference layers, the borders already on for their place names', async () => {
     await open();
 
-    expect(setOverlay).toHaveBeenCalledWith('labels', true, null);
+    expect(setOverlay).toHaveBeenCalledWith('boundaries', true, null);
     expect(setOverlay).toHaveBeenCalledWith('railway', false, undefined);
 
     button('Layers').click();
@@ -167,7 +167,6 @@ describe('moving a proof point on the map', () => {
       entry.textContent.trim()
     );
     expect(names).toEqual([
-      'Labels',
       'Borders',
       'Roads',
       'Railways',

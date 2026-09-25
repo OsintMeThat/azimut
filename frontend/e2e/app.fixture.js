@@ -694,7 +694,7 @@ function fixtureTemporalReading(raw) {
  */
 export async function installAppFixture(page, options = {}) {
   const unexpected = [];
-  const labelTiles = [];
+  const railTiles = [];
   const referenceTiles = [];
   const captures = [];
   const placeWrites = [];
@@ -952,12 +952,12 @@ export async function installAppFixture(page, options = {}) {
     const url = new URL(request.url());
     const path = url.pathname;
 
-    // The labels overlay is the one layer served straight from its provider —
-    // the proxy cannot expand a `{s}` template. Answered here, with the same
-    // bytes as a proxied tile, so a spec can prove the overlay was asked for
-    // without the run touching the network.
-    if (url.hostname.endsWith('.basemaps.cartocdn.com')) {
-      labelTiles.push(request.url());
+    // The railways are served straight from their provider — the proxy cannot
+    // expand a `{s}` template. Answered here, with the same bytes as a proxied
+    // tile, so a spec can prove the overlay was asked for without the run
+    // touching the network.
+    if (url.hostname.endsWith('.tiles.openrailwaymap.org')) {
+      railTiles.push(request.url());
       return route.fulfill({ contentType: 'image/png', body: TILE_PNG });
     }
 
@@ -1979,7 +1979,7 @@ export async function installAppFixture(page, options = {}) {
   return {
     captures,
     placeWrites,
-    labelTiles,
+    railTiles,
     referenceTiles,
     widgetLoads,
     gridWrites,

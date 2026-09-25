@@ -366,3 +366,12 @@ def test_a_backup_naming_a_dropped_target_still_restores(client):
     # The live route is the other side of that: there the caller is the UI, and a
     # target it does not offer is a bug rather than a machine's history.
     assert client.put("/api/settings/prefs", json={"post_target": "mastodon"}).status_code == 422
+
+
+def test_a_backup_naming_the_retired_labels_layer_still_imports(client):
+    res = client.post(
+        "/api/settings/import",
+        json={"settings": {"detect_view": {"collapsed": True, "overlays": ["labels", "roads"]}}},
+    )
+    assert res.status_code == 200, res.text
+    assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["roads"]

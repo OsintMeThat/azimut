@@ -531,7 +531,7 @@ describe('Compare', () => {
     const layers = document.querySelector('[role="dialog"]');
     expect(layers.getAttribute('aria-label')).toBe('Layers · A / B');
     expect(layers.querySelectorAll('.layer-pane')).toHaveLength(2);
-    expect(layers.querySelectorAll('.layer-row')).toHaveLength(20);
+    expect(layers.querySelectorAll('.layer-row')).toHaveLength(18);
     expect(layers.textContent).toContain('Active fires');
     expect(layers.textContent).toContain('Night lights');
     expect(layers.textContent).toContain('Saved work');

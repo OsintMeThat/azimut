@@ -1591,8 +1591,8 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
 - **Its settings** open in the rail's one **panel slot**, beside it. One mode is
   armed, so one panel is open; a panel cannot cross another or the map's own
   controls.
-- **Layers** — what is drawn over the imagery: OSM labels, borders, roads, OSM
-  railways, power lines, sea marks, GPS traces, active fires, night lights, the
+- **Layers** — what is drawn over the imagery: borders with their place names,
+  roads, OSM railways, power lines, sea marks, GPS traces, active fires, night lights, the
   case's saved work, and the points another tool handed over (a sheet's
   coordinate column, a Timeline window). None of them changes what the
   pointer does, so none takes a rail seat: they are a list in the panel beside

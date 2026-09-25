@@ -536,8 +536,7 @@ Checked 2026-09-13.
 
 | Layer | Source | Licence / terms | Notes |
 |---|---|---|---|
-| OSM labels | CARTO `voyager_only_labels` | © OSM contributors © CARTO | imagery only |
-| Borders | Esri `Reference/World_Boundaries_and_Places` | Esri terms, as World Imagery | |
+| Borders | Esri `Reference/World_Boundaries_and_Places` | Esri terms, as World Imagery | carries the place names |
 | Roads | Esri `Reference/World_Transportation` | Esri terms, as World Imagery | imagery only |
 | OSM railways | OpenRailwayMap `standard` | © OSM contributors, style © OpenRailwayMap | |
 | Power lines | Open Infrastructure Map vector tiles (`/map/power`, `/telecoms`, `/petroleum`) | data ODbL, analysis CC-BY 4.0, credit and link required | no published tile usage policy, so the style is ours, requests only follow the view, and nothing is prefetched |

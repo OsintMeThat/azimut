@@ -118,17 +118,6 @@ const OVERLAYS = [
     maxZoom: 19,
   },
   {
-    // Roads and place names readable without hiding the satellite view. Over a
-    // street basemap it would only double its own labels, which is why the tool
-    // keeps it to imagery.
-    id: 'labels',
-    layer: 'basemap-labels',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
-    subdomains: ['a', 'b', 'c', 'd'],
-    attribution: '© OpenStreetMap contributors © CARTO',
-    maxZoom: 20,
-  },
-  {
     // Active fire detections, live or from the archive (engine/firms.py). The
     // key is NASA's and stays on the backend, so this one address is ours.
     id: 'firms',

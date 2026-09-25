@@ -40,8 +40,8 @@
   } = $props();
 
   const PIN = 'point';
-  /** Only these two read wrongly over a street basemap, which draws its own. */
-  const IMAGERY_ONLY = new Set(['labels', 'roads']);
+  /** Only the roads read wrongly over a street basemap, which draws its own. */
+  const IMAGERY_ONLY = new Set(['roads']);
   const REFERENCE = COMPARE_LAYERS.filter((layer) => layer.group === 'reference');
 
   const imagery = createImageryState({ api });
@@ -53,7 +53,8 @@
   // Where the pin starts: the opening camera, read once. The dialog is opened on
   // one row and closed on it, so a later view would be a different question.
   let at = $state(untrack(() => ({ lat: view.lat, lon: view.lon })));
-  let on = $state(['labels']);
+  // The borders carry the place names, which is what finding a spot needs.
+  let on = $state(['boundaries']);
   let layersOpen = $state(false);
   let surface = null;
 
