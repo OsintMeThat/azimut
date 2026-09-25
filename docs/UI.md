@@ -2298,7 +2298,9 @@ A view moved off the ground its passes were picked for drops them. A check with 
 pins counts the candidates of its whole view, which its row says costs more frames
 than pins, each read on its own tile. The open check's view is framed on the map
 with its name, and its pins drawn: a filled ring where a candidate should come out,
-a struck ring where none should, green or red once read. While the builder has
+a struck ring where none should, green or red once read. While a check is open the
+preview and its candidates stay inside its frame and the ground outside is veiled,
+so what the map paints is what the check judges. While the builder has
 passes, a bar on the map switches the imagery under the preview between **A**,
 **B** and **Blink**, and back to the basemap. Checks reread themselves
 from the tile cache a moment after every change to the rules, with no request, so

@@ -32,6 +32,21 @@ it('draws the open check’s view as a frame with its name', () => {
   flushSync();
   expect(target.querySelector('polygon').getAttribute('points')).toBe('100,100 200,100 200,200 100,200');
   expect(target.querySelector('.ground-name').textContent).toBe('Check 4');
+  // The ground outside the frame is veiled: the frame is cut out of a ring past the screen.
+  const veil = target.querySelector('path.veil');
+  expect(veil.getAttribute('fill-rule')).toBe('evenodd');
+  expect(veil.getAttribute('d')).toBe('M-1e5,-1e5H1e5V1e5H-1e5Z M100,100 L200,100 L200,200 L100,200Z');
+  unmount(live);
+  target.remove();
+});
+
+it('veils nothing while no check is open', () => {
+  const engine = { on: () => () => {}, latLngToContainerPoint: () => ({ x: 0, y: 0 }) };
+  const target = document.createElement('div');
+  document.body.append(target);
+  const live = mount(CheckMarks, { target, props: { engine, marks: [{ point: [1, 48], expect: 'found', ok: null }] } });
+  flushSync();
+  expect(target.querySelector('path.veil')).toBeNull();
   unmount(live);
   target.remove();
 });

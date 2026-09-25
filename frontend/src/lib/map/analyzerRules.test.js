@@ -4,8 +4,10 @@ import {
   formatValue, fromDifference, newRecipe, newRule, opsFor, paintMask, productCount, recipeBands,
   recipeCapability, recipeProblem, retarget, scaleOf, signalOf, toEngine,
   checkState, checksSummary, describeChecks, describeOutcome, markOutcomes, newCheck, signature, withMark, withoutMark,
+  clipToBounds, insideBounds,
 } from './analyzerRules.js';
 import { changeSettings } from './changeAssist.js';
+import { toMercator } from './groundFrame.js';
 
 const METHODS = [
   { id: 'rules', single: false, clouds: true, sensor: 'sentinel2', frames: 4, sizes: { medium: { min_area: 2000, cleanup: 1 } }, rules: true },
@@ -239,5 +241,36 @@ describe('checks', () => {
     expect(describeChecks({ ...built, checks: [check([true]), check([false])] })).toBe('2 checks · 1 fails');
     expect(describeChecks({ ...built, checks: [check([true]), check([true], 'old')] })).toBe('2 checks · 1 pass');
     expect(checksSummary({ ...built, checks: [check([true]), check(null)] })).toMatchObject({ total: 2, pass: 1, waiting: 1 });
+  });
+});
+
+
+describe('an open check keeps the preview to its frame', () => {
+  // A 4x4 mask over a box of four degrees a side, every pixel painted.
+  const [west, north] = toMercator(0, 4);
+  const [east, south] = toMercator(4, 0);
+  const box = { west, east, north, south };
+  const painted = () => new Uint8ClampedArray(4 * 4 * 4).fill(255);
+  const alphaAt = (rgba, x, y) => rgba[(y * 4 + x) * 4 + 3];
+
+  it('clears every pixel outside the frame and keeps the ones inside', () => {
+    // the frame covers the west half, full height
+    const kept = clipToBounds(painted(), 4, 4, box, { west: 0, south: 0, east: 2, north: 4 });
+    expect([0, 1].every((x) => [0, 1, 2, 3].every((y) => alphaAt(kept, x, y) === 255))).toBe(true);
+    expect([2, 3].every((x) => [0, 1, 2, 3].every((y) => alphaAt(kept, x, y) === 0))).toBe(true);
+  });
+
+  it('keeps nothing when the frame is off the mask, and everything when it holds it', () => {
+    const off = clipToBounds(painted(), 4, 4, box, { west: 10, south: 10, east: 12, north: 12 });
+    expect(off.every((value) => value === 0)).toBe(true);
+    const all = clipToBounds(painted(), 4, 4, box, { west: -1, south: -1, east: 5, north: 5 });
+    expect(all.every((value) => value === 255)).toBe(true);
+  });
+
+  it('says whether a candidate stands inside the frame', () => {
+    const frame = { west: 0, south: 0, east: 2, north: 4 };
+    expect(insideBounds([1, 2], frame)).toBe(true);
+    expect(insideBounds([3, 2], frame)).toBe(false);
+    expect(insideBounds([1, 5], frame)).toBe(false);
   });
 });

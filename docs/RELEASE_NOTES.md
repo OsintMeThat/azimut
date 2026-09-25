@@ -100,6 +100,7 @@ maps made elsewhere on yours.
   used to delete a collage or be refused.
 - Two names differing only by case no longer block a bundle export on Linux.
 - A proof, draft or grid with "#" in its name opens and deletes the right one.
+- Renaming a file to the name of one deleted earlier no longer fails halfway.
 - Notes, proofs and drafts are written whole, so an interrupted save keeps the
   previous version.
 - The Wayback map no longer slows down while you pan, and its picker lists every

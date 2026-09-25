@@ -539,6 +539,34 @@ def test_replace_path_references_updates_exact_structured_values(repo):
     assert queued["payload"] == {"path": new, "nested": [new], "notes": sentence}
 
 
+def test_replace_path_references_moves_a_job_over_a_deleted_files_leftover(repo):
+    # A file deleted from media/after.png leaves its finished enrich row behind, and
+    # a later rename onto that name must not trip the (kind, key) uniqueness.
+    stale = repo.enqueue_job("enrich", key="media/after.png", payload={"path": "media/after.png"})
+    repo.complete_job(stale["id"])
+    moving = repo.enqueue_job("enrich", key="media/before.png", payload={"path": "media/before.png"})
+    repo.complete_job(moving["id"])
+
+    repo.replace_path_references("media/before.png", "media/after.png")
+
+    assert repo.get_job(stale["id"]) is None
+    moved = repo.get_job(moving["id"])
+    assert moved["key"] == "media/after.png"
+    assert moved["payload"] == {"path": "media/after.png"}
+
+
+def test_replace_path_references_leaves_a_running_leftover_to_its_worker(repo):
+    stale = repo.enqueue_job("enrich", key="media/after.png")
+    claimed = repo.claim_job(kinds=["enrich"])
+    assert claimed["id"] == stale["id"]
+    moving = repo.enqueue_job("enrich", key="media/before.png")
+
+    repo.replace_path_references("media/before.png", "media/after.png")
+
+    assert repo.get_job(stale["id"])["state"] == "running"
+    assert repo.get_job(moving["id"]) is None
+
+
 def test_claim_takes_one_queued_job_oldest_first(repo):
     a = repo.enqueue_job("thumbnail", key="media/a.jpg")
     repo.enqueue_job("thumbnail", key="media/b.jpg")
