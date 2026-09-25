@@ -455,6 +455,10 @@ def test_the_change_route_answers_for_a_point(client, monkeypatch):
     ).json()
     assert [change["release"] for change in body["changes"]] == [64776, 25982]
     assert body["changes"][0]["acquired"] and body["changes"][0]["source"] == "Maxar WV03"
+    # Each picture carries its release's date, for the rows that have no acquisition date.
+    listed = {release.number: release.date for release in wayback.releases()}
+    assert [change["date"] for change in body["changes"]] == [listed[64776], listed[25982]]
+    assert all(change["date"] for change in body["changes"])
     assert body["zoom"] == 16
 
 

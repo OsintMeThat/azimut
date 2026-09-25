@@ -207,6 +207,8 @@ proof for publication.
 | ✅ **One camera for the map tabs** | Satellite, Compare and Detect show the same ground, and the link carries it to other windows; a Detect review and a saved comparison keep theirs, and Settings turns it off. |
 | ✅ **Comparisons in Saved work** | A saved comparison stands on the map with the captures, at its frame's centre with the frame outlined, dated A → B, and reopens in Compare; an export can also be kept in the case under it. |
 | ✅ **Dated pins and pictures** | A kept Detect candidate files a claim at its pin (a change between two passes, or a thing seen on one); comparisons and pinned evidence carry each picture's date, estimates marked; Detect layers filter a change by its span; exports are named by their pictures' dates. |
+| ✅ **An evolution of one point** | Exports Sentinel-2 passes or Wayback pictures ticked by hand on their previews, back to 2015, as one GIF or one sheet drawn from the tile proxy on the same ground, repeats and empty pictures left out and counted. |
+| ✅ **Signed exports, marks in their colours** | Compare exports close their credits line with the Azimut logo and name unless unticked, and a GIF keeps every mark's colour exact. |
 | ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame like a wheel about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back, Shift+← / → steps. |
 
 ---

@@ -74,6 +74,7 @@ class BulkBodyLimit:
         ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("compare", "gif"), "compare", "MAX_GIF_BODY_BYTES"),
+        ("POST", ("compare", "sequence"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "preview"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "images"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("proofs",), "proofs", "MAX_PROOF_BODY_BYTES"),

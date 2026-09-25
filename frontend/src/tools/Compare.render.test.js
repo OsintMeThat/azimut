@@ -65,6 +65,9 @@ const ANALYZERS = {
 
 // Newest first. Empty by default, so the opening pair has no "then" to show.
 let releases = [];
+// The releases that first published a picture of the point, newest first; the
+// release list stands in when a test sets none.
+let changes = null;
 const get = vi.fn(async (path) => {
   if (path === '/api/compare/analyzers') return structuredClone(ANALYZERS);
   if (path.startsWith('/api/cases/case-a/analysis/')) return [];
@@ -82,6 +85,7 @@ const get = vi.fn(async (path) => {
   if (path.includes('/satellite/index')) return [];
   if (path.includes('/imagery-date')) return { supported: true, date: '2024-01-02' };
   if (path === '/api/satellite/wayback/releases') return { releases: structuredClone(releases) };
+  if (path.startsWith('/api/satellite/wayback/changes')) return { changes: structuredClone(changes ?? releases) };
   if (path === '/api/cases/case-a/compare/sessions') {
     return [
       { name: 'Harbour change', title: 'Harbour change', provider_a: 'esri-world-imagery', provider_b: 'esri-wayback', mode: 'swipe' },
@@ -183,6 +187,21 @@ vi.mock('../lib/map/basemap.js', () => ({
   })),
 }));
 
+// An evolution's pictures come from the tile proxy; here each one is a stand-in
+// canvas, so the dialog's choices and the request it posts can be read.
+const pictureCanvas = () => ({ width: 400, height: 300, toBlob: (done) => done(new Blob(['png'])) });
+const drawPictures = vi.fn(async ({ entries, variantFor, onpicture, onprogress }) => {
+  for (const [index, entry] of entries.entries()) {
+    onprogress?.(index, entries.length);
+    variantFor(entry);
+    await onpicture({ entry, index, picture: { canvas: pictureCanvas(), frame: {} } });
+  }
+  return { drawn: entries.length, empty: 0, repeated: 0 };
+});
+const composeEvolutionFrame = vi.fn(() => pictureCanvas());
+const composeEvolutionSheet = vi.fn(() => pictureCanvas());
+vi.mock('../lib/map/evolutionExport.js', () => ({ drawPictures, composeEvolutionFrame, composeEvolutionSheet }));
+
 const { default: Compare } = await import('./Compare.svelte');
 
 let live;
@@ -243,6 +262,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   engines.length = 0;
   releases = [];
+  changes = null;
   uiState.tool = 'compare';
   uiState.openCompare = null;
   uiState.compareAt = null;
@@ -541,9 +561,108 @@ describe('Compare', () => {
       'PNG',
       'GIF · Blink',
       'GIF · Slide',
+      'GIF · Evolution',
+      'PNG · Evolution sheet',
     ]);
+    // World Imagery on both sides has no history to play.
+    expect([...output.querySelectorAll('input[value="evolution"], input[value="sheet"]')]
+      .map((input) => input.disabled)).toEqual([true, true]);
+    expect(output.textContent).toContain('Needs Sentinel-2 or Wayback on both sides');
+    const sign = [...output.querySelectorAll('.keep-choice')].find((entry) => entry.textContent.includes('Sign it Azimut'));
+    expect(sign.querySelector('input').checked).toBe(true);
     expect(output.textContent).not.toContain('Save to this case');
     expect(output.textContent).toContain('Export copy');
+  });
+
+  async function openThenAndNow() {
+    releases = [
+      { release: 30, date: '2026-09-01' },
+      { release: 20, date: '2025-06-01' },
+      { release: 10, date: '2014-02-20' },
+    ];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-23T12:00:00Z'));
+    try {
+      await openFresh();
+    } finally {
+      vi.useRealTimers();
+    }
+    button('Export', target).click();
+    await settle();
+    return document.querySelector('[role="dialog"]');
+  }
+
+  it('plays the Wayback pictures from A to B as one GIF, each shown as it will play', async () => {
+    // A shows the 2025 release, which republished the 2020 picture; the newest
+    // release carries an older one than 2020's, so the GIF plays it first.
+    changes = [
+      { release: 30, date: '2026-09-01', acquired: '2018-05-05' },
+      { release: 15, date: '2020-01-01', acquired: '2019-03-02' },
+      { release: 5, date: '2010-01-01' },
+    ];
+    const dialog = await openThenAndNow();
+    // The export dialog alone reads nothing of the point's history.
+    expect(get.mock.calls.some(([path]) => path.includes('/wayback/changes'))).toBe(false);
+    const choice = dialog.querySelector('input[value="evolution"]');
+    expect(choice.disabled).toBe(false);
+    choice.click();
+    await settle();
+    expect(get.mock.calls.filter(([path]) => path.includes('/wayback/changes'))).toHaveLength(1);
+    expect(dialog.textContent).toContain('An evolution is written out only');
+    expect(dialog.textContent).not.toContain('Also keep it in this case');
+    const rows = [...dialog.querySelectorAll('.cards li')];
+    expect(rows.map((row) => row.querySelector('.mono').textContent)).toEqual([
+      'Release 2010-01-01', '~2018-05-05', '~2019-03-02',
+    ]);
+    expect(rows.map((row) => row.querySelector('small')?.textContent ?? '')).toEqual([
+      '', 'release 2026-09-01', 'release 2020-01-01',
+    ]);
+    // A to B: the 2020 picture A shows and the newest B shows, not the 2010 one.
+    expect(rows.map((row) => row.querySelector('input').checked)).toEqual([false, true, true]);
+    expect(rows.map((row) => [...row.querySelectorAll('.tag')].map((tag) => tag.textContent).join(''))).toEqual(['', 'B', 'A']);
+    // Each row shows its picture, drawn from its own release.
+    expect(rows[0].querySelector('.thumb img').getAttribute('src')).toMatch(/^\/api\/tiles\/esri-wayback~5\//);
+    button('All', dialog.querySelector('.presets')).click();
+    flushSync();
+    expect(dialog.textContent).toContain('3 chosen');
+    button('A to B', dialog.querySelector('.presets')).click();
+    flushSync();
+    expect(dialog.textContent).toContain('2 chosen');
+
+    button('Export copy', dialog).click();
+    await settle();
+    const asked = drawPictures.mock.calls[0][0];
+    expect(asked.entries.map((entry) => entry.release)).toEqual([30, 15]);
+    expect(asked.variantFor(asked.entries[0])).toBe('esri-wayback~30');
+    expect(composeEvolutionFrame.mock.calls.map(([input]) => [input.date, input.current, input.signed])).toEqual([
+      ['~2018-05-05', 0, true], ['~2019-03-02', 1, true],
+    ]);
+    const [, form] = post.mock.calls.find(([path]) => path === '/api/cases/case-a/compare/sequence');
+    expect(form.getAll('frames')).toHaveLength(2);
+    expect(form.get('interval')).toBe('800');
+    expect(form.get('filename')).toContain('2018-05-05_2019-03-02');
+    expect(form.get('keep').split(',')).toEqual(expect.arrayContaining(['#e8a33d', '#e3e3e3']));
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('written to'), 'ok', expect.any(Number), expect.any(Object));
+  });
+
+  it('lays an evolution out as one sheet, unsigned when asked', async () => {
+    const dialog = await openThenAndNow();
+    dialog.querySelector('input[value="sheet"]').click();
+    await settle();
+    button('All', dialog.querySelector('.presets')).click();
+    flushSync();
+    const sign = [...dialog.querySelectorAll('.keep-choice')].find((entry) => entry.textContent.includes('Sign it Azimut'));
+    sign.querySelector('input').click();
+    flushSync();
+    button('Export copy', dialog).click();
+    await settle();
+    const [input] = composeEvolutionSheet.mock.calls[0];
+    expect(input.cells.map((cell) => cell.date)).toEqual(['Release 2014-02-20', 'Release 2025-06-01', 'Release 2026-09-01']);
+    expect(input.signed).toBe(false);
+    expect(input.span).toBe('2014-02-20 to 2026-09-01');
+    const [, body] = post.mock.calls.find(([path]) => path === '/api/cases/case-a/plates');
+    expect(body).toMatchObject({ format: 'png', overwrite: false });
+    expect(body.filename).toMatch(/2014-02-20_2026-09-01 evolution$/);
   });
 
   it('frames an export on the ground and keeps the frame with the comparison', async () => {

@@ -4,17 +4,21 @@
    *
    * Thin on purpose: `lib/map/addedLayer.js` owns the engine side, this owns the
    * lifecycle — which layers are drawn right now, which have to be torn down,
-   * and what a click on one of their features opens.
+   * and what a click or a right-click on one of their features opens.
    *
    * That card is **read-only, by construction rather than by restraint**: it is
-   * built from the strings the source stated and offers no control at all. There
-   * is no route from a feature into the case, because a feature here is somebody
-   * else's claim and the case is this analyst's work. How it is laid out lives in
-   * `lib/map/layerCard.js`; only its lifecycle lives here.
+   * built from the strings the source stated, and its one control copies the
+   * feature's point. There is no route from a feature into the case, because a
+   * feature here is somebody else's claim and the case is this analyst's work.
+   * The right-click opens the map's own point menu on the pin's point: a place
+   * saved from it is the analyst's, and carries nothing of the feature. How the
+   * card is laid out lives in `lib/map/layerCard.js`; only its lifecycle lives
+   * here.
    */
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
-  import { attribution } from '../../lib/map/addedLayers.js';
+  import { attribution, UNNAMED } from '../../lib/map/addedLayers.js';
   import { layerCard } from '../../lib/map/layerCard.js';
+  import { fmtCoords, toast } from '../../lib/state.svelte.js';
 
   let {
     engine = null,
@@ -23,7 +27,19 @@
     drawing,
     /** The search result the panel sent here: `{ name, index, at }`, or null. */
     picked = null,
+    /** `({ lat, lon, x, y, feature?, layer? })`: the map's point menu, opened on
+     *  a feature. `feature` and `layer` name a pin whose point the menu is on. */
+    onmenu = null,
   } = $props();
+
+  async function copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Coordinates copied', 'ok', 1600);
+    } catch {
+      toast('The browser refused the clipboard', 'warn');
+    }
+  }
 
   /** name → { layer, sha } so a refreshed snapshot redraws and nothing else does. */
   const live = new Map();
@@ -62,8 +78,10 @@
       }
       if (existing) drop(row.name);
       const layer = createAddedLayer(engine, {
-        card: layerCard(row.title),
+        card: layerCard(row.title, { coords: fmtCoords, copy }),
         iconUrl: iconUrlFor(row),
+        menu: (at, properties) =>
+          onmenu?.(properties ? { ...at, feature: properties.name || UNNAMED, layer: row.title } : at),
       });
       live.set(row.name, { layer, sha: row.sha256 });
       drawing(caseId, row.name)
@@ -115,6 +133,27 @@
     margin: 2px 0 0;
     color: var(--text-3);
     font-size: 10px;
+  }
+  /* The point, read like the Saved card's and pressed to copy: text first,
+     the glyph only saying that it can be pressed. */
+  :global(.layer-card-where) {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 4px 0 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-align: left;
+  }
+  :global(button.layer-card-where) {
+    cursor: pointer;
+  }
+  :global(button.layer-card-where:hover),
+  :global(button.layer-card-where:focus-visible) {
+    color: var(--text-1);
   }
   :global(.layer-card-body) {
     margin: 6px 0 0;

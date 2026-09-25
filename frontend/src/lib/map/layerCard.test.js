@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readBlocks, readLinks, fillText, layerCard } from './layerCard.js';
 
 describe('readBlocks', () => {
@@ -108,5 +108,41 @@ describe('layerCard', () => {
     const element = card({ name: 'Ua Position', description: 'code: UA' });
     expect(element.querySelector('button')).toBeNull();
     expect(element.querySelector('input')).toBeNull();
+  });
+});
+
+describe("a pin's point on its card", () => {
+  const POINT = { lat: 48.8584, lon: 2.2945 };
+
+  it('states where the pin stands, in the format it is given', () => {
+    const coords = vi.fn(() => '48°51′30″N 2°17′40″E');
+    const element = layerCard('Paris', { coords })({ name: 'Tower' }, POINT);
+
+    expect(coords).toHaveBeenCalledWith(48.8584, 2.2945);
+    expect(element.querySelector('.layer-card-where').textContent).toBe('48°51′30″N 2°17′40″E');
+  });
+
+  it('writes decimal degrees when no format was given', () => {
+    const element = layerCard('Paris')({ name: 'Tower' }, POINT);
+    expect(element.querySelector('.layer-card-where').textContent).toBe('48.858400, 2.294500');
+  });
+
+  it('copies those coordinates, and that is the only control it has', () => {
+    const copy = vi.fn();
+    const element = layerCard('Paris', { copy })({ name: 'Tower', description: 'code: UA' }, POINT);
+    const buttons = element.querySelectorAll('button');
+
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].title).toBe('Copy coordinates');
+    buttons[0].click();
+    expect(copy).toHaveBeenCalledWith(element.querySelector('.layer-card-where span').textContent);
+    // still nothing that files, confirms or saves
+    expect(element.querySelector('input, form')).toBeNull();
+  });
+
+  it('states no point for a line or an area, which has no one point', () => {
+    const element = layerCard('Paris', { copy: vi.fn() })({ name: 'District' }, null);
+    expect(element.querySelector('.layer-card-where')).toBeNull();
+    expect(element.querySelector('button')).toBeNull();
   });
 });

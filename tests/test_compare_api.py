@@ -551,6 +551,77 @@ def test_compare_gif_scales_large_frames_before_building_the_animation():
     assert frames[0].size == (MAX_GIF_EDGE, 150)
 
 
+# -- evolutions -------------------------------------------------------------------
+
+
+def _sequence(client, cid: str, frames: list[bytes], **data):
+    return client.post(
+        f"/api/cases/{cid}/compare/sequence",
+        files=[("frames", (f"{index}.png", frame, "image/png")) for index, frame in enumerate(frames)],
+        data={"filename": "Harbour 2024-05-03_2026-09-02", **data},
+    )
+
+
+def test_an_evolution_is_one_gif_of_every_picture_in_order_with_the_last_held(client):
+    cid = _case(client, "Compare evolution")
+    colours = [(220, 30, 30), (30, 220, 30), (20, 40, 220), (240, 240, 20)]
+    response = _sequence(client, cid, [_png(colour) for colour in colours], interval="600")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["file"] == "Harbour 2024-05-03_2026-09-02-evolution.gif"
+    assert body["frames"] == 4
+    with Image.open(Path(body["path"]) / body["file"]) as gif:
+        assert gif.n_frames == 4
+        durations, firsts = [], []
+        for index in range(gif.n_frames):
+            gif.seek(index)
+            durations.append(gif.info["duration"])
+            firsts.append(gif.convert("RGB").getpixel((5, 5)))
+    assert durations == [600, 600, 600, 600 * compare_api.SEQUENCE_HOLD]
+    for seen, colour in zip(firsts, colours):
+        assert all(abs(a - b) < 12 for a, b in zip(seen, colour))
+
+
+def test_an_evolution_takes_the_first_pictures_size_and_the_gif_edge(client):
+    cid = _case(client, "Compare evolution sizes")
+    wide = (MAX_GIF_EDGE * 2, 200)
+    response = _sequence(client, cid, [_png((0, 0, 0), wide), _png((255, 255, 255), (40, 40))])
+    assert response.status_code == 200, response.text
+    with Image.open(Path(response.json()["path"]) / response.json()["file"]) as gif:
+        assert gif.size == (MAX_GIF_EDGE, 100)
+
+
+def test_an_evolution_is_refused_outside_its_bounds(client, monkeypatch):
+    cid = _case(client, "Compare evolution bounds")
+    one = _sequence(client, cid, [_png((0, 0, 0))])
+    assert one.status_code == 422
+    assert "2 to" in one.json()["detail"]
+    monkeypatch.setattr(compare_api, "MAX_SEQUENCE_FRAMES", 3)
+    assert _sequence(client, cid, [_png((index, 0, 0)) for index in range(4)]).status_code == 422
+    unreadable = _sequence(client, cid, [_png((0, 0, 0)), b"not an image"])
+    assert unreadable.status_code == 422
+    assert unreadable.json()["detail"] == "comparison frame 2 is unreadable"
+    assert _sequence(client, cid, [_png((0, 0, 0))] * 2, interval="50").status_code == 422
+
+
+def test_an_evolution_frame_is_refused_by_its_header_before_it_is_decoded(client, monkeypatch):
+    cid = _case(client, "Compare evolution pixels")
+    monkeypatch.setattr(compare_api, "MAX_SEQUENCE_FRAME_PIXELS", 96 * 64 - 1)
+    response = _sequence(client, cid, [_png((0, 0, 0)), _png((9, 9, 9))])
+    assert response.status_code == 413
+    assert response.json()["detail"] == "comparison frame 1 has too many pixels"
+    monkeypatch.setattr(compare_api, "MAX_SEQUENCE_FRAME_BYTES", 20)
+    assert _sequence(client, cid, [_png((0, 0, 0)), _png((9, 9, 9))]).status_code == 413
+
+
+def test_the_body_limit_covers_the_evolution_route(client, monkeypatch):
+    cid = _case(client, "Compare evolution body")
+    monkeypatch.setattr(compare_api, "MAX_SEQUENCE_BODY_BYTES", 200)
+    response = _sequence(client, cid, [_png((0, 0, 0)), _png((9, 9, 9))])
+    assert response.status_code == 413
+    assert response.json()["detail"] == "request body too large"
+
+
 # -- Sentinel-2 band frames ------------------------------------------------------
 
 
@@ -632,3 +703,77 @@ def test_two_comparisons_differing_only_by_case_cannot_both_be_saved(client):
     assert _save(client, cid, "harbour").status_code == 409
     _save(client, cid, "Quay")
     assert _save(client, cid, "harbour", rename_from="Quay").status_code == 409
+
+
+# -- mark colours in a GIF -------------------------------------------------------------
+
+MARKS = {"red": (0xEF, 0x44, 0x44), "blue": (0x38, 0xBD, 0xF8), "green": (0x22, 0xC5, 0x5E)}
+
+
+def _marked_imagery() -> bytes:
+    """Grey-green fields with three thin outlines, the case median cut got wrong."""
+    import random
+
+    from PIL import ImageDraw
+
+    rng = random.Random(1)
+    image = Image.new("RGB", (800, 500))
+    image.putdata([
+        (g, g + rng.randint(-10, 20), g - rng.randint(0, 25))
+        for g in (rng.randint(60, 140) for _ in range(800 * 500))
+    ])
+    draw = ImageDraw.Draw(image)
+    for index, colour in enumerate(MARKS.values()):
+        draw.rectangle((50 + index * 150, 200, 150 + index * 150, 300), outline=colour, width=3)
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def _first_frame_marks(path: Path) -> list[tuple[int, int, int]]:
+    with Image.open(path) as gif:
+        gif.seek(0)
+        frame = gif.convert("RGB")
+    return [frame.getpixel((51 + index * 150, 250)) for index in range(len(MARKS))]
+
+
+def test_a_gif_keeps_the_colours_it_is_asked_to_keep(client):
+    cid = _case(client, "Compare GIF colours")
+    keep = ",".join("#%02x%02x%02x" % colour for colour in MARKS.values())
+    written = {}
+    for asked in ("", keep):
+        response = client.post(
+            f"/api/cases/{cid}/compare/gif",
+            files={
+                "image_a": ("a.png", _marked_imagery(), "image/png"),
+                "image_b": ("b.png", _marked_imagery(), "image/png"),
+            },
+            data={"animation": "blink", "filename": f"Colours {len(asked)}", "keep": asked},
+        )
+        assert response.status_code == 200, response.text
+        written[asked] = _first_frame_marks(Path(response.json()["path"]) / response.json()["file"])
+    assert written[keep] == list(MARKS.values())
+    # Without the list, median cut spends the palette on the fields.
+    assert written[""] != list(MARKS.values())
+
+
+def test_an_evolution_keeps_its_mark_colours_too(client):
+    cid = _case(client, "Compare evolution colours")
+    keep = ",".join("#%02x%02x%02x" % colour for colour in MARKS.values())
+    response = _sequence(client, cid, [_marked_imagery(), _marked_imagery()], keep=keep)
+    assert response.status_code == 200, response.text
+    assert _first_frame_marks(Path(response.json()["path"]) / response.json()["file"]) == list(MARKS.values())
+
+
+@pytest.mark.parametrize("keep", ["red", "#12345", "#123456,", ",".join(["#123456"] * 33)])
+def test_a_colour_list_the_app_never_writes_is_refused(client, keep):
+    cid = _case(client, "Compare GIF bad colours")
+    response = client.post(
+        f"/api/cases/{cid}/compare/gif",
+        files={
+            "image_a": ("a.png", _png((0, 0, 0)), "image/png"),
+            "image_b": ("b.png", _png((9, 9, 9)), "image/png"),
+        },
+        data={"animation": "blink", "filename": "Bad", "keep": keep},
+    )
+    assert response.status_code == 422

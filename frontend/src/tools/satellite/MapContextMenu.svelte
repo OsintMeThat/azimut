@@ -19,7 +19,9 @@
   } from '../../lib/map/contextMenu.js';
 
   let {
-    /** `{ lat, lon, x, y }`: the point, and where it was clicked in the map. */
+    /** `{ lat, lon, x, y }`: the point, and where it was clicked in the map.
+     *  Opened on a pin of an added layer, `feature` and `layer` name it: the
+     *  point is then the pin's own, not the ground under the cursor. */
     at,
     /** The map's own size, which the menu must stay inside. */
     frame = { width: 0, height: 0 },
@@ -178,6 +180,14 @@
   {onkeydown}
   oncontextmenu={(event) => event.preventDefault()}
 >
+  {#if at.feature}
+    <p class="snap" title="The menu acts on this pin's point">
+      <span class="snap-name">{at.feature}</span>
+      {#if at.layer}<small>{at.layer}</small>{/if}
+    </p>
+    <div class="rule" role="separator"></div>
+  {/if}
+
   {#each copies as row (row.id)}
     <button
       class="item copy"
@@ -358,6 +368,30 @@
     font-size: var(--fs-xs);
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* Whose point this is, when it is a pin's: stated above the copies, which
+     would otherwise read as the ground under the cursor. */
+  .snap {
+    display: grid;
+    gap: 1px;
+    margin: 0;
+    padding: 4px 8px 2px;
+    font-size: var(--fs-sm);
+    color: var(--text-1);
+    white-space: normal;
+  }
+  /* A GeoConfirmed event is named by its first line, which can run long. */
+  .snap-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .snap small {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
   .rule {
     height: 1px;

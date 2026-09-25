@@ -433,19 +433,27 @@ def wayback_changes(
     zoom: int = Query(ge=1, le=22),
 ) -> dict[str, Any]:
     """The distinct pictures of a point, newest first, each with the release
-    that first published it and when it was taken.
+    that first published it, that release's date, and when it was taken.
 
     A few small requests per picture found, so it is asked only when the
     analyst asks for the changes, and answered from memory for the same tile
-    afterwards.
+    afterwards. The release dates come from the list the walk has just read.
     """
     try:
         found = wayback.local_changes(lat, lon, zoom)
+        listed = wayback.releases()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"could not read this point's history: {tiles.upstream_failure(exc)}") from exc
+    published = {release.number: release.date for release in listed}
     return {
         "changes": [
-            {"release": c.release, "acquired": c.acquired, "source": c.source} for c in found
+            {
+                "release": c.release,
+                "date": published.get(c.release),
+                "acquired": c.acquired,
+                "source": c.source,
+            }
+            for c in found
         ],
         "zoom": min(zoom, wayback.MAX_ZOOM),
     }

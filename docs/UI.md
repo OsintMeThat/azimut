@@ -1434,11 +1434,36 @@ shared Views destination, named by the comparison and its two pictures' dates, a
 never over an earlier file. **Also keep it in this case** files the same image in My
 work under the comparison, stamped with the reading on screen and never replaced by a
 later save; asked on a comparison never saved, it asks for a name first. An optional
-ground-anchored frame cuts any of the three to the
+ground-anchored frame cuts any export to the
 chosen area, while Full view remains the default. The frame keeps the bearing it was
 drawn at: turning the camera turns it with the ground rather than reshaping it, and
 the export comes out upright as it was drawn, once all four corners are in view. Copy current PNG uses the clipboard.
-Exports include projected annotations, a scale bar and north arrow. Tile captures wait
+Exports include projected annotations, a scale bar and north arrow. **Sign it Azimut**,
+ticked by default, closes the credits line under the imagery with the logo and the
+wordmark of the app's corner. A GIF keeps the colour of every mark exactly: the
+palette of each frame is built around them, and the imagery gets the rest.
+
+**GIF · Evolution** and **PNG · Evolution sheet** play the pictures of one archive in
+order, on Sentinel-2 or Wayback on both sides, or Wayback against World Imagery.
+Choosing one reads the crosshair's pictures, each shown as a card with its picture of
+the export's ground to tick by hand. Wayback lists the whole history at once, in the
+order the pictures were taken with each release beside its date, and opens on A to B
+(a release that republished an older picture counts as that picture); **One a
+month**, **One a year** and **All** retick it. Sentinel-2 is read a month at a time,
+one Copernicus request each: it opens on A's month and B's with both passes ticked,
+and the arrows or the month field go back to any month since June 2015. A pass over
+the cloud ceiling is shown and can still be ticked, **Clearest of the month** ticks
+the least cloudy, and the chosen passes stay listed as chips across months. One export
+holds 2 to 40 pictures, and the price in Copernicus requests is stated before it runs.
+Each picture is drawn from the tile proxy on the export frame's ground, or A's view,
+so A and B stay as they are and every picture covers the same ground at one scale; it
+may lie off screen. A frame carries its date on the imagery and a line of dates in its
+footer, the last one held three times as long, at the pace chosen; a sheet lays the
+pictures out in rows under one scale bar. Only the marks set on both sides are drawn,
+reference layers and the Difference stay out, and the tones are the archive's. A
+picture with no imagery, or with the same pixels as the one before, is left out and
+the toast counts it. **Stop** ends it between two tiles. An evolution is written to the
+Views destination only, never kept in the case. Tile captures wait
 for loaded frames and reject incomplete tiles. Google Maps JS uses the
 user-triggered Azimut Capture extension and retains its on-map credits.
 
@@ -1651,7 +1676,14 @@ or GPX file opened from the computer, a public My Maps or map URL followed, or a
 GeoConfirmed conflict. All of them land in the same section, because the question the row answers is who put
 this on my map. **A layer is drawn and never adopted** — clicking a feature opens
 what the source says about it, its name, its group and its description, with
-nothing to confirm and no way from there into the case. A description written as
+nothing to confirm and no way from there into the case. A pin's card also states
+its point in the analyst's format, pressed to copy: read from the file rather
+than from what the map drew, which a tile rounds by tens of metres far out. A
+right-click on a pin opens the map's own point menu on that point, headed by the
+pin's name and its layer, since the pin is pressed on its head, well above the
+ground it names. On a line or inside an area it opens on the ground pressed. A
+place saved from that menu is the analyst's and carries nothing of the feature.
+A description written as
 columns is drawn as columns, one label and its value per row, because a My Maps
 keeps its fields in a table and a table flattened into a paragraph is unreadable.
 Addresses in it are links, and they open in a new tab: a feature sourced from a
@@ -1870,7 +1902,8 @@ is there, answered inside the menu; save a place there; start a distance from
 it; anchor the sun and moon on it; open its Wayback history; centre the map
 on it; compare it across time; or open it in Compare, in Detect or in another
 map site. A right-click on a shape that answers
-its own (a search-grid cell) stays that shape's. The menu flips away from the
+its own (a search-grid cell) stays that shape's; on a pin of an added layer the
+menu is on the pin's point (see **Added map layers**). The menu flips away from the
 map's edges, walks with the arrow keys, and closes on Escape, a press outside,
 or a zoom that moves the ground from under it.
 
