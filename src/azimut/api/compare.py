@@ -21,7 +21,8 @@ Finished copies go to the configured export destination and are not case state.
 They are named by those dates, so two comparisons of one pair would share a name,
 and none ever overwrites another. An export may also be kept in the case: it is then
 a media file of its own, stamped with the reading it shows and never replaced
-(`engine/comparisons.py`).
+(`engine/comparisons.py`). An evolution, the dated pictures of one archive played
+in order, is only ever a finished copy.
 
 A saved comparison stands on the map as saved work, at its frame's centre or its
 view's, and is listed with the captures in the Saved panel.
@@ -62,6 +63,15 @@ MAX_GIF_PIXELS = 16_000_000
 MAX_GIF_EDGE = 1280
 #: Two PNGs plus multipart framing, enforced before uploads are materialised.
 MAX_GIF_BODY_BYTES = MAX_FRAME_BYTES * 2 + 1_000_000
+#: An evolution: the pictures of one point, one after another. The browser draws
+#: each at most `MAX_GIF_EDGE` across plus its header band, so a frame is a few
+#: megabytes at most and its pixel count is checked before it is decoded.
+MAX_SEQUENCE_FRAMES = 40
+MAX_SEQUENCE_FRAME_BYTES = 8_000_000
+MAX_SEQUENCE_FRAME_PIXELS = MAX_GIF_EDGE * MAX_GIF_EDGE * 2
+MAX_SEQUENCE_BODY_BYTES = MAX_SEQUENCE_FRAMES * MAX_SEQUENCE_FRAME_BYTES + 1_000_000
+#: How many intervals the last picture stays up, so the loop reads as an ending.
+SEQUENCE_HOLD = 3
 #: What a saved comparison's media sidecar records as its producer.
 SOURCE_TYPE = "compare"
 #: The reading a kept image carries, as JSON. A session holds at most 200
@@ -71,6 +81,13 @@ MAX_SPEC_CHARS = 400_000
 _DAY = r"^(|\d{4}-\d{2}-\d{2})$"
 #: A picture's date as the browser states it: a day, or a radar pass's UTC instant.
 _PICTURE_DATE = r"^(|\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ)?)$"
+#: The colours a GIF keeps exactly, comma-separated: the marks drawn on the
+#: pictures and the export's own inks. Median cut spends a palette on the
+#: imagery, so a thin red outline over fields came out a dull brown and a green
+#: and a blue mark came out one teal.
+GIF_COLOURS = 192
+MAX_KEPT_COLOURS = 32
+_KEPT_COLOURS = r"^(#[0-9a-fA-F]{6}(,#[0-9a-fA-F]{6}){0,31})?$"
 
 
 class CompareCamera(BaseModel):
@@ -544,12 +561,44 @@ def _save_session(
     return {"name": name, "title": name, "spec_path": rel}, located
 
 
-def _gif_bytes(a: Image.Image, b: Image.Image, animation: str, interval: int = 700) -> bytes:
+def _kept_colours(text: str) -> list[tuple[int, int, int]]:
+    """The validated `keep` field as RGB triples, each once, in order."""
+    kept: list[tuple[int, int, int]] = []
+    for entry in filter(None, text.split(",")):
+        rgb = (int(entry[1:3], 16), int(entry[3:5], 16), int(entry[5:7], 16))
+        if rgb not in kept:
+            kept.append(rgb)
+    return kept[:MAX_KEPT_COLOURS]
+
+
+def _quantize(frame: Image.Image, kept: list[tuple[int, int, int]]) -> Image.Image:
+    """One frame in 192 colours, the kept ones among them exactly.
+
+    The rest of the palette is median cut's answer for the imagery. Mapping onto a
+    fixed palette dithers by default, which would speckle the marks' edges and change
+    how the imagery has always looked, so it maps to the nearest entry instead.
+    """
+    if not kept:
+        return frame.quantize(colors=GIF_COLOURS, method=Image.Quantize.MEDIANCUT)
+    base = frame.quantize(colors=GIF_COLOURS - len(kept), method=Image.Quantize.MEDIANCUT)
+    ground = (base.getpalette() or [])[: 3 * (GIF_COLOURS - len(kept))]
+    entries = [channel for rgb in kept for channel in rgb] + ground
+    # A palette image holds 256 entries; the spare ones repeat the first kept colour.
+    entries += list(kept[0]) * ((768 - len(entries)) // 3)
+    palette = Image.new("P", (1, 1))
+    palette.putpalette(entries)
+    return frame.quantize(palette=palette, dither=Image.Dither.NONE)
+
+
+def _gif_bytes(
+    a: Image.Image,
+    b: Image.Image,
+    animation: str,
+    interval: int = 700,
+    kept: list[tuple[int, int, int]] | None = None,
+) -> bytes:
     frames = _gif_frames(a, b, animation)
-    palette = [
-        frame.quantize(colors=192, method=Image.Quantize.MEDIANCUT)
-        for frame in frames
-    ]
+    palette = [_quantize(frame, kept or []) for frame in frames]
     buf = io.BytesIO()
     palette[0].save(
         buf,
@@ -582,6 +631,7 @@ async def save_session_preview(
     image_b: UploadFile | None = File(default=None),
     format_: Literal["png", "blink"] = Form(alias="format"),
     interval: int = Form(default=800, ge=200, le=4000),
+    keep: str = Form(default="", pattern=_KEPT_COLOURS),
     imagery_a: str = Form(default="", pattern=_PICTURE_DATE),
     imagery_b: str = Form(default="", pattern=_PICTURE_DATE),
     imagery_a_exact: bool = Form(default=True),
@@ -606,7 +656,7 @@ async def save_session_preview(
         if image_b is None:
             raise HTTPException(status_code=422, detail="a blink preview needs image B")
         b = await _read_png(image_b, "B")
-        data = _gif_bytes(a, b, "blink", interval)
+        data = _gif_bytes(a, b, "blink", interval, _kept_colours(keep))
         suffix = ".gif"
     else:
         out = io.BytesIO()
@@ -677,6 +727,7 @@ async def keep_image(
     image_b: UploadFile | None = File(default=None),
     format_: Literal["png", "blink", "slide"] = Form(alias="format"),
     interval: int = Form(default=800, ge=200, le=4000),
+    keep: str = Form(default="", pattern=_KEPT_COLOURS),
     filename: str = Form(min_length=1, max_length=120),
     spec: str = Form(min_length=2, max_length=MAX_SPEC_CHARS),
     imagery_a: str = Form(default="", pattern=_PICTURE_DATE),
@@ -710,7 +761,7 @@ async def keep_image(
         if image_b is None:
             raise HTTPException(status_code=422, detail="an animated image needs image B")
         b = await _read_png(image_b, "B")
-        data, suffix = _gif_bytes(a, b, format_, interval), ".gif"
+        data, suffix = _gif_bytes(a, b, format_, interval, _kept_colours(keep)), ".gif"
 
     placed = comparisons.placement(reading)
     source: dict[str, Any] = {
@@ -760,9 +811,15 @@ def delete_session(case_id: str, name: str) -> dict[str, Any]:
     return result
 
 
-async def _read_png(upload: UploadFile, side: str) -> Image.Image:
-    raw = await upload.read(MAX_FRAME_BYTES + 1)
-    if len(raw) > MAX_FRAME_BYTES:
+async def _read_png(
+    upload: UploadFile,
+    side: str,
+    *,
+    max_bytes: int = MAX_FRAME_BYTES,
+    max_pixels: int = MAX_GIF_PIXELS,
+) -> Image.Image:
+    raw = await upload.read(max_bytes + 1)
+    if len(raw) > max_bytes:
         raise HTTPException(status_code=413, detail=f"comparison frame {side} is too large")
     try:
         with warnings.catch_warnings():
@@ -770,23 +827,36 @@ async def _read_png(upload: UploadFile, side: str) -> Image.Image:
             opened = Image.open(io.BytesIO(raw))
             if opened.format != "PNG":
                 raise ValueError("not a PNG")
+            # The header states the size, so an oversized frame is refused
+            # before its pixels are decoded.
+            if opened.width * opened.height > max_pixels:
+                raise _TooManyPixels
             frame = opened.convert("RGB")
+    except _TooManyPixels as exc:
+        raise HTTPException(status_code=413, detail=f"comparison frame {side} has too many pixels") from exc
     except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
         raise HTTPException(status_code=413, detail=f"comparison frame {side} is too large") from exc
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"comparison frame {side} is unreadable") from exc
-    if frame.width * frame.height > MAX_GIF_PIXELS:
-        raise HTTPException(status_code=413, detail=f"comparison frame {side} has too many pixels")
     return frame
 
 
+class _TooManyPixels(Exception):
+    """A frame whose header states more pixels than the route accepts."""
+
+
+def _fit_edge(frame: Image.Image, edge: int = MAX_GIF_EDGE) -> Image.Image:
+    if max(frame.size) <= edge:
+        return frame
+    scale = edge / max(frame.size)
+    return frame.resize(
+        (max(1, round(frame.width * scale)), max(1, round(frame.height * scale))),
+        Image.Resampling.LANCZOS,
+    )
+
+
 def _gif_frames(a: Image.Image, b: Image.Image, animation: str) -> list[Image.Image]:
-    if max(a.size) > MAX_GIF_EDGE:
-        scale = MAX_GIF_EDGE / max(a.size)
-        a = a.resize(
-            (max(1, round(a.width * scale)), max(1, round(a.height * scale))),
-            Image.Resampling.LANCZOS,
-        )
+    a = _fit_edge(a)
     if b.size != a.size:
         b = b.resize(a.size, Image.Resampling.LANCZOS)
     if animation == "blink":
@@ -809,13 +879,14 @@ async def export_gif(
     image_b: UploadFile,
     animation: Literal["blink", "slide"] = Form(),
     interval: int = Form(default=800, ge=200, le=4000),
+    keep: str = Form(default="", pattern=_KEPT_COLOURS),
     filename: str = Form(default="comparison", min_length=1, max_length=120),
 ) -> dict[str, str]:
     """Write a bounded animation to the configured export destination."""
     case = get_case(case_id)
     a = await _read_png(image_a, "A")
     b = await _read_png(image_b, "B")
-    data = _gif_bytes(a, b, animation, interval)
+    data = _gif_bytes(a, b, animation, interval, _kept_colours(keep))
     name = f"{layout.slugify(filename, 'comparison')}-{animation}.gif"
     try:
         export_destination = exportdir.destination("views", case.path)
@@ -823,6 +894,67 @@ async def export_gif(
     except (OSError, exportdir.ExportDirError) as exc:
         raise HTTPException(status_code=409, detail=f"could not write the GIF: {exc}") from exc
     return {"file": path.name, "path": str(export_destination), "animation": animation}
+
+
+def _sequence_bytes(frames: list[Image.Image], interval: int) -> bytes:
+    """One looping GIF of already-quantized frames, the last held longer."""
+    durations = [interval] * (len(frames) - 1) + [interval * SEQUENCE_HOLD]
+    buf = io.BytesIO()
+    frames[0].save(
+        buf,
+        "GIF",
+        save_all=True,
+        append_images=frames[1:],
+        duration=durations,
+        loop=0,
+        optimize=True,
+        disposal=2,
+    )
+    return buf.getvalue()
+
+
+@router.post("/cases/{case_id}/compare/sequence")
+async def export_sequence(
+    case_id: str,
+    frames: list[UploadFile] = File(),
+    interval: int = Form(default=800, ge=200, le=4000),
+    keep: str = Form(default="", pattern=_KEPT_COLOURS),
+    filename: str = Form(default="comparison", min_length=1, max_length=120),
+) -> dict[str, Any]:
+    """Write an evolution, several dated pictures of one point in order, as a GIF.
+
+    Each frame is quantized as soon as it is read, so the pictures wait at one byte
+    a pixel rather than three. Every frame takes the first one's size.
+    """
+    case = get_case(case_id)
+    if not 2 <= len(frames) <= MAX_SEQUENCE_FRAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"an evolution holds 2 to {MAX_SEQUENCE_FRAMES} pictures",
+        )
+    kept = _kept_colours(keep)
+    shown: list[Image.Image] = []
+    size: tuple[int, int] | None = None
+    for index, upload in enumerate(frames, start=1):
+        frame = await _read_png(
+            upload,
+            str(index),
+            max_bytes=MAX_SEQUENCE_FRAME_BYTES,
+            max_pixels=MAX_SEQUENCE_FRAME_PIXELS,
+        )
+        frame = _fit_edge(frame) if size is None else frame
+        if size is not None and frame.size != size:
+            frame = frame.resize(size, Image.Resampling.LANCZOS)
+        size = frame.size
+        shown.append(_quantize(frame, kept))
+    data = _sequence_bytes(shown, interval)
+    name = f"{layout.slugify(filename, 'comparison')}-evolution.gif"
+    try:
+        export_destination = exportdir.destination("views", case.path)
+        path = exportdir.write_out(data, export_destination, name)
+    except (OSError, exportdir.ExportDirError) as exc:
+        raise HTTPException(status_code=409, detail=f"could not write the GIF: {exc}") from exc
+    return {"file": path.name, "path": str(export_destination), "frames": len(shown)}
 
 
 class BandFrameIn(BaseModel):

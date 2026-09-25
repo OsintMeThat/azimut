@@ -95,4 +95,23 @@ describe('the right-click menu', () => {
     expect(body).toContain('DMS');
     expect(body).toContain('Open in…');
   });
+
+  it('names the pin it was opened on, whose point the copies are', () => {
+    const { body } = render(MapContextMenu, {
+      props: props({
+        at: { lat: 48.85, lon: 2.35, x: 10, y: 10, feature: 'North gate', layer: 'Checkpoints map' },
+      }),
+    });
+    expect(body).toContain('North gate');
+    expect(body).toContain('Checkpoints map');
+    expect(body).toContain('48.850000, 2.350000');
+    // everything the ground menu offers, on that point
+    expect(body).toContain('Save place here…');
+    expect(body).toContain('Open in…');
+  });
+
+  it('names nothing on the ground', () => {
+    const { body } = render(MapContextMenu, { props: props() });
+    expect(body).not.toContain('class="snap');
+  });
 });

@@ -288,7 +288,8 @@
     border-radius: 3px;
     background: #14171d;
   }
-  .thumb img { position: absolute; image-rendering: auto; }
+  /* larger than the box and placed by its offset, so the global img rule must not shrink it */
+  .thumb img { position: absolute; max-width: none; image-rendering: auto; }
   .note { color: var(--glass-muted, var(--text-3)); font-size: 10px; }
   .tags {
     position: absolute;

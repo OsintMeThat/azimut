@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   blobBase64,
   canvasBlob,
@@ -6,6 +6,7 @@ import {
   comparisonFilename,
   pictureDateFields,
   composeComparison,
+  gifColours,
   scaleBarLength,
 } from './compareExport.js';
 
@@ -47,6 +48,7 @@ function fakeCanvas() {
     closePath: record('closePath'),
     translate: record('translate'),
     rotate: record('rotate'),
+    scale: record('scale'),
     transform: record('transform'),
     setTransform: record('setTransform'),
     setLineDash: record('setLineDash'),
@@ -251,5 +253,51 @@ describe('comparison image encoding', () => {
   it('reports a tainted provider canvas clearly', async () => {
     const canvas = { toBlob: vi.fn(() => { throw new DOMException('tainted'); }) };
     await expect(canvasBlob(canvas)).rejects.toThrow('cannot be exported');
+  });
+});
+
+describe('keeping colours in a GIF', () => {
+  it('names every mark colour, the numeral inks and the export inks, each once', () => {
+    const marks = [
+      { id: 'a', kind: 'rect', colour: '#EF4444', points: [[0, 0], [1, 1]] },
+      { id: 'b', kind: 'number', colour: '#f6a81a', number: 1, points: [[0, 0]] },
+      { id: 'c', kind: 'line', colour: '#ef4444', points: [[0, 0], [1, 1]] },
+    ];
+    const kept = gifColours(marks).split(',');
+    expect(kept.slice(0, 3)).toEqual(['#ef4444', '#f6a81a', '#14161a']);
+    expect(kept).toEqual(expect.arrayContaining(['#e8a33d', '#f3f4f6', '#0f1114']));
+    expect(new Set(kept).size).toBe(kept.length);
+    expect(kept).not.toContain('#e3e3e3');
+    expect(gifColours([], { signed: true }).split(',')).toContain('#e3e3e3');
+  });
+
+  it('stays inside what the server reads', () => {
+    const marks = Array.from({ length: 60 }, (_, index) => ({
+      id: `m${index}`, kind: 'line', colour: `#${index.toString(16).padStart(6, '0')}`, points: [[0, 0], [1, 1]],
+    }));
+    const field = gifColours(marks, { signed: true });
+    expect(field.split(',')).toHaveLength(32);
+    expect(field).toMatch(/^(#[0-9a-f]{6})(,#[0-9a-f]{6})*$/);
+  });
+});
+
+describe('signing an export', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('closes the credits line with the lockup, and shortens the credits to make room', () => {
+    const paths = [];
+    vi.stubGlobal('Path2D', class { constructor(d) { paths.push(d); } });
+    const plain = composeComparison({ ...BASE, mode: 'side' });
+    expect(paths).toHaveLength(0);
+    const signed = composeComparison({ ...BASE, mode: 'side', signed: true });
+    expect(paths).toHaveLength(9);
+    const credits = (out) => out.context.calls.filter(([name, text]) => name === 'fillText' && String(text).startsWith('A: '));
+    expect(credits(signed)[0][4]).toBeLessThan(credits(plain)[0][4]);
+    expect([signed.width, signed.height]).toEqual([plain.width, plain.height]);
+  });
+
+  it('leaves the picture whole where the browser cannot trace the lockup', () => {
+    vi.stubGlobal('Path2D', undefined);
+    expect(() => composeComparison({ ...BASE, mode: 'side', signed: true })).not.toThrow();
   });
 });

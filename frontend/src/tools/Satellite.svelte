@@ -886,9 +886,10 @@
   // --- the right-click menu: acts on the point under the cursor -------------
   //
   // Every act here already exists for the map centre; the menu hands each one
-  // the clicked point instead (lib/map/contextMenu.js). Session chrome, never
-  // part of a capture.
-  let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup }
+  // the clicked point instead (lib/map/contextMenu.js). On a pin of an added
+  // layer the point is the pin's, and `feature` and `layer` name it. Session
+  // chrome, never part of a capture.
+  let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup, feature?, layer? }
   let pointLookupSeq = 0;
   const pointActions = actionsFor(['lookup', 'place', 'measure', 'sky', 'history', 'centre']);
   const pointTools = otherMapTools('satellite');
@@ -2221,6 +2222,7 @@
         layers={addedLayers.drawn}
         drawing={addedLayers.drawing}
         picked={addedLayers.picked}
+        onmenu={onMapContextMenu}
       />
 
       {#if sheetPoints && sheetShown}

@@ -43,6 +43,15 @@ describe('brand assets', () => {
     }
   });
 
+  it('the canvas signature exports sign with draws the same mark and letters', async () => {
+    const { LETTERS, MARK } = await import('../lib/brandMark.js');
+    expect([`d="${MARK.west}"`, `d="${MARK.east}"`]).toEqual([WEST, EAST]);
+    expect(LETTERS.map((letter) => letter.d)).toEqual(paths(read('./Wordmark.svelte')));
+    const shifts = [...read('./Wordmark.svelte').matchAll(/<path(?: transform="translate\(([\d.]+) 0\)")? d=/g)]
+      .map((match) => Number(match[1] ?? 0));
+    expect(LETTERS.map((letter) => letter.dx)).toEqual(shifts);
+  });
+
   it('each lockup carries the ink of the background it is served on', () => {
     // A file fetched outside the app has no theme to read, so the pair exists
     // precisely to spell the ink out: the light one dark, the dark one light.

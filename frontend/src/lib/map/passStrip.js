@@ -89,6 +89,8 @@ export function stripEntries(archive, answer, { maxcc = 100, track = '' } = {}) 
         date: entry.acquired || entry.date || '',
         note: entry.acquired ? 'taken' : '',
         release: entry.release,
+        // when the release was published, which dates a picture with no acquisition date
+        released: entry.date || '',
         usable: true,
       }))
       .reverse();

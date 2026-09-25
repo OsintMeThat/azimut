@@ -39,6 +39,7 @@
  */
 import { Popup } from 'maplibre-gl';
 import { paths } from '../../components/Icon.svelte';
+import { wrapLon } from '../coords.js';
 import { categoryColour } from './addedLayers.js';
 
 /** The pictogram per geometry kind. Three shapes is the whole vocabulary, and
@@ -286,17 +287,23 @@ export function periodFilter(period = null) {
 /**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
- * @param {(feature: object) => HTMLElement} [opts.card] the read-only popup's body
+ * @param {(properties: object, point: { lat: number, lon: number } | null) => HTMLElement} [opts.card]
+ *   the read-only popup's body, handed the feature's own point when it has one
  * @param {(offset: number) => object} [opts.popup] the card itself, swappable so
  *   the click path can be read off a test without standing up the engine's own popup
  * @param {(key: string) => string} [opts.iconUrl] where this case keeps the
  *   source's composed icons. Absent — a layer added without the box ticked, or one
  *   whose icons could not be made — and every point draws the app's own pictogram.
  * @param {(map: object, url: string) => Promise<object|null>} [opts.loadIcon]
+ * @param {(at: { lat: number, lon: number, x: number, y: number }, properties: object | null) => void} [opts.menu]
+ *   what a right-click on a feature opens: the map's own point menu, on the
+ *   feature's point when it is a pin (with its properties), on the ground under
+ *   the cursor for a line or an area (with none). The features claim their
+ *   clicks, so without this a right-click on one opens nothing at all.
  */
 export function createAddedLayer(
   engine,
-  { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon } = {}
+  { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null } = {}
 ) {
   const map = engine.impl;
   const prefix = `added-${++layers}`;
@@ -422,10 +429,28 @@ export function createAddedLayer(
   }
 
   /**
-   * The card, and the only thing a feature answers.
+   * Where a pin stands, as the source wrote it, or null for a line or an area.
    *
-   * Read-only by construction: it is given what the source states and offers no
-   * way out of itself. Nothing in an added layer enters the case.
+   * Read off the collection rather than off the feature the engine hands back:
+   * that one is rebuilt out of a tile, its position rounded to the tile's grid,
+   * which far out is tens of metres. The number the backend gave every feature
+   * finds the original.
+   */
+  function pointOf(feature) {
+    const original = featureAt(collection, feature?.properties?.index);
+    const geometry = original?.geometry ?? feature?.geometry;
+    if (geometry?.type !== 'Point') return null;
+    const [lon, lat] = geometry.coordinates ?? [];
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { lat, lon: wrapLon(lon) };
+  }
+
+  /**
+   * The card and the point menu, the only two things a feature answers.
+   *
+   * The card is read-only by construction: it is given what the source states,
+   * and copying its point is the one thing it does. The menu is the map's own,
+   * moved onto the pin's point. Nothing in an added layer enters the case.
    */
   function bindHandlers() {
     const bind = (type, handler) => {
@@ -436,6 +461,16 @@ export function createAddedLayer(
       const feature = event.features?.[0];
       if (!feature) return;
       showCard(feature, event.lngLat);
+    });
+    bind('contextmenu', (event) => {
+      if (!menu) return;
+      const features = event.features ?? [];
+      // a pin drawn over an area is the pin that was meant
+      const feature = features.find((one) => pointOf(one)) ?? features[0];
+      if (!feature) return;
+      const point = pointOf(feature);
+      const at = point ?? { lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) };
+      menu({ ...at, x: event.point.x, y: event.point.y }, point ? (feature.properties ?? {}) : null);
     });
     bind('mouseenter', () => {
       map.getCanvas().style.cursor = 'pointer';
@@ -459,10 +494,10 @@ export function createAddedLayer(
   function showCard(feature, at) {
     if (!card) return;
     closeCard();
-    const point = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : null;
+    const point = pointOf(feature);
     open = popup(point ? PIN_CARD_OFFSET : EDGE_CARD_OFFSET)
-      .setLngLat(point ?? at)
-      .setDOMContent(card(feature.properties ?? {}))
+      .setLngLat(point ? [point.lon, point.lat] : at)
+      .setDOMContent(card(feature.properties ?? {}, point))
       .addTo(map);
     open.on('close', () => {
       open = null;
@@ -601,7 +636,7 @@ export function createAddedLayer(
      *
      * The second way into this layer, and deliberately the same one: it ends at
      * the card a click ends at, which states what the source says and offers no
-     * route out of itself. Finding a feature is not adopting it.
+     * route from it into the case. Finding a feature is not adopting it.
      *
      * False when the number names nothing here, which is what a card opened on
      * the wrong feature would otherwise be.

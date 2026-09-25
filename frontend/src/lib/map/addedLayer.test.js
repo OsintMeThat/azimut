@@ -110,6 +110,13 @@ const DRESSED = {
   ],
 };
 
+/** The first feature as the engine hands it back: rebuilt out of a tile, so its
+ *  position is the tile grid's, a little off the file's. */
+const ROUNDED_PIN = {
+  ...COLLECTION.features[0],
+  geometry: { type: 'Point', coordinates: [2.3507, 48.8503] },
+};
+
 /** Which symbol layer is which, told apart by the image each one draws. */
 function symbolLayers(engine) {
   const symbols = [...engine.map.layers.values()].filter((layer) => layer.type === 'symbol');
@@ -485,7 +492,7 @@ describe('an added layer on the map', () => {
     const [, , click] = engine.map.handlers.find(([type]) => type === 'click');
     click({ lngLat: [2.35, 48.85], features: [COLLECTION.features[0]] });
 
-    expect(card).toHaveBeenCalledWith(COLLECTION.features[0].properties);
+    expect(card).toHaveBeenCalledWith(COLLECTION.features[0].properties, { lat: 48.85, lon: 2.35 });
     // nothing to confirm, nothing to save, no path out of it into the case
     expect(popup.body.querySelectorAll('button, a, input, form')).toHaveLength(0);
   });
@@ -511,6 +518,94 @@ describe('an added layer on the map', () => {
 
     expect(popup.at).toEqual([2.05, 48.05]);
     expect(popup.offset).toBeLessThan(22);
+  });
+
+  it("hands the card the pin's point as the file wrote it, not as a tile rounded it", async () => {
+    // A rendered feature is rebuilt out of a tile, its position snapped to the
+    // tile's grid: far out that is tens of metres, and it is what gets copied.
+    const engine = stubEngine();
+    const { card, popup, opts } = stubCard();
+    await createAddedLayer(engine, opts).set(COLLECTION, { categories: CATEGORIES });
+    const [, , click] = engine.map.handlers.find(([type]) => type === 'click');
+
+    click({ lngLat: [2.3511, 48.8511], features: [ROUNDED_PIN] });
+
+    expect(card).toHaveBeenCalledWith(ROUNDED_PIN.properties, { lat: 48.85, lon: 2.35 });
+    expect(popup.at).toEqual([2.35, 48.85]);
+  });
+});
+
+/**
+ * The right-click, which the features claim along with their clicks.
+ *
+ * Claimed and answered by nobody, it opened nothing at all: not on a pin, not
+ * anywhere inside an area. It opens the map's own point menu instead, on the
+ * pin's point, since the pin's head is clicked some twenty pixels above it.
+ */
+describe('a right-click on an added layer', () => {
+  /** The right-click the engine would deliver, and what the layer made of it. */
+  async function rightClick(event, { menu = vi.fn() } = {}) {
+    const engine = stubEngine();
+    const { opts } = stubCard();
+    await createAddedLayer(engine, { ...opts, menu }).set(COLLECTION, { categories: CATEGORIES });
+    const handler = engine.map.handlers.find(([type]) => type === 'contextmenu');
+    handler?.[2](event);
+    return { menu, engine, handler };
+  }
+
+  it("opens the point menu on the pin's own point, not the ground under its head", async () => {
+    const { menu } = await rightClick({
+      lngLat: { lat: 48.8511, lng: 2.3511 },
+      point: { x: 140, y: 90 },
+      features: [ROUNDED_PIN],
+    });
+
+    expect(menu).toHaveBeenCalledWith(
+      { lat: 48.85, lon: 2.35, x: 140, y: 90 },
+      COLLECTION.features[0].properties
+    );
+  });
+
+  it('opens it where it was pressed inside an area, which has no one point', async () => {
+    // a world copy away, as the map counts past the antimeridian
+    const { menu } = await rightClick({
+      lngLat: { lat: 48.05, lng: 362.05 },
+      point: { x: 300, y: 200 },
+      features: [COLLECTION.features[1]],
+    });
+
+    const [at, named] = menu.mock.calls[0];
+    expect(at.lat).toBe(48.05);
+    expect(at.lon).toBeCloseTo(2.05, 9);
+    expect([at.x, at.y]).toEqual([300, 200]);
+    // nothing to name: the menu is on the ground, not on a feature's point
+    expect(named).toBeNull();
+  });
+
+  it('takes the pin over the area it stands in', async () => {
+    const { menu } = await rightClick({
+      lngLat: { lat: 48.05, lng: 2.05 },
+      point: { x: 10, y: 10 },
+      features: [COLLECTION.features[1], COLLECTION.features[0]],
+    });
+
+    expect(menu.mock.calls[0][0]).toMatchObject({ lat: 48.85, lon: 2.35 });
+  });
+
+  it('is claimed from the map, so the ground menu does not open a second time behind it', async () => {
+    const { engine } = await rightClick({ lngLat: { lat: 0, lng: 0 }, point: { x: 0, y: 0 }, features: [] });
+    expect(engine.claimClicks).toHaveBeenCalled();
+  });
+
+  it('opens nothing when nobody asked for a menu, and does not throw', async () => {
+    const engine = stubEngine();
+    const { opts } = stubCard();
+    await createAddedLayer(engine, opts).set(COLLECTION, { categories: CATEGORIES });
+    const [, , handler] = engine.map.handlers.find(([type]) => type === 'contextmenu');
+
+    expect(() =>
+      handler({ lngLat: { lat: 48.85, lng: 2.35 }, point: { x: 1, y: 1 }, features: [COLLECTION.features[0]] })
+    ).not.toThrow();
   });
 });
 
@@ -579,7 +674,8 @@ describe('going to one feature', () => {
       { west: 2, east: 2.1, south: 48, north: 48.1 },
       expect.objectContaining({ maxZoom: 17, animate: true })
     );
-    expect(card).toHaveBeenCalledWith(COLLECTION.features[1].properties);
+    // an area has no one point to state
+    expect(card).toHaveBeenCalledWith(COLLECTION.features[1].properties, null);
     // nothing to confirm, nothing to save: a found feature is not an adopted one
     expect(popup.body.querySelectorAll('button, a, input, form')).toHaveLength(0);
   });

@@ -22,6 +22,7 @@
   import { saveRelation } from '../lib/relations.svelte.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { openMapAt } from '../lib/navigate.js';
+  import { wrapLon } from '../lib/coords.js';
   import {
     COMPARE_LAYERS,
     COMPARE_MODES,
@@ -42,8 +43,22 @@
     canvasBlob,
     comparisonFilename,
     composeComparison,
+    gifColours,
     pictureDateFields,
   } from '../lib/map/compareExport.js';
+  import {
+    DEFAULT_INTERVAL,
+    GIF_EDGE,
+    MAX_EVOLUTION_FRAMES,
+    evolutionArchive,
+    evolutionFrame,
+    pictureLabel,
+    pictureScale,
+    pictureTiles,
+    sheetCellScale,
+    timelinePositions,
+  } from '../lib/map/evolution.js';
+  import { composeEvolutionFrame, composeEvolutionSheet, drawPictures } from '../lib/map/evolutionExport.js';
   import {
     changeCompatibility,
     changeNeedsFrames,
@@ -94,6 +109,7 @@
   import DifferenceBar from './compare/DifferenceBar.svelte';
   import { fromDifference } from '../lib/map/analyzerRules.js';
   import PassStrip from './compare/PassStrip.svelte';
+  import EvolutionPicker from './compare/EvolutionPicker.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
   import { copernicusNeed } from '../lib/copernicusSetup.js';
   import { stripArchive } from '../lib/map/passStrip.js';
@@ -138,7 +154,15 @@
   let rightPanel = $state(null); // 'export' | 'layers' | null
   let grabbing = $state(false);
   let captureSide = $state(null); // surface visible during an extension frame
-  let exportKind = $state('png'); // 'png' | 'blink' | 'slide'
+  let exportKind = $state('png'); // 'png' | 'blink' | 'slide' | 'evolution' | 'sheet'
+  // Every export is signed with the Azimut lockup unless this is unticked.
+  let signExport = $state(true);
+  // The pictures an evolution plays, as the picker has them ticked, and how far
+  // a running one has got. Aborting the controller stops it between two tiles.
+  let evolutionChosen = $state([]);
+  let evolutionInterval = $state(DEFAULT_INTERVAL);
+  let evolutionProgress = $state(null); // { done, total } | null
+  let evolutionAbort = null;
   // What an export is cut to, as two ground corners, and whether one is being
   // drawn right now. No frame means the whole view, which is the default.
   let exportFrame = $state(null);
@@ -351,6 +375,14 @@
     if (!archive) stripOpen = false;
   });
 
+  // The archive an evolution plays, which Then and now also has: World Imagery's
+  // history is Wayback.
+  const evolution = $derived(evolutionArchive(sideSpec(a, s2a, wba, s1a), sideSpec(b, s2b, wbb, s1b)));
+  const evolutionKind = $derived(exportKind === 'evolution' || exportKind === 'sheet');
+  $effect(() => {
+    if (!evolution && (exportKind === 'evolution' || exportKind === 'sheet')) exportKind = 'png';
+  });
+
   /** Show one of the strip's pictures on a side. */
   function assignFromStrip(letter, entry) {
     const [target, sentinel, wayback, radar] = letter === 'a' ? [a, s2a, wba, s1a] : [b, s2b, wbb, s1b];
@@ -365,6 +397,12 @@
   function stripVariant(entry) {
     if (archive === RADAR_ID) return radarId(RADAR_ID, entry);
     if (archive === WAYBACK_ID) return waybackId(WAYBACK_ID, entry.release);
+    return variantId(SENTINEL_ID, { layer: s2b.layer, from: entry.date, to: entry.date });
+  }
+
+  /** The provider id one picture of an evolution is drawn from: B's layer, on that row's date. */
+  function evolutionVariant(entry) {
+    if (evolution === WAYBACK_ID) return waybackId(WAYBACK_ID, entry.release);
     return variantId(SENTINEL_ID, { layer: s2b.layer, from: entry.date, to: entry.date });
   }
 
@@ -1741,7 +1779,7 @@
 
   function compose(
     sources,
-    { renderMode = mode, renderBlinkB = blinkB, renderChangeMap = null } = {}
+    { renderMode = mode, renderBlinkB = blinkB, renderChangeMap = null, renderSigned = false } = {}
   ) {
     const provenanceA = a.surface?.provenance?.() ?? {};
     const provenanceB = b.surface?.provenance?.() ?? {};
@@ -1762,6 +1800,7 @@
       attributionA: shownA.provider?.attribution,
       attributionB: shownB.provider?.attribution,
       view,
+      signed: renderSigned,
       // A framed export comes out upright at the bearing its frame was drawn at.
       // A frame counts the compass direction that is up; the app counts the
       // map's clockwise turn, the same angle the other way.
@@ -1783,10 +1822,10 @@
     return changeResult;
   }
 
-  async function comparisonBlob() {
+  async function comparisonBlob({ signed = false } = {}) {
     const renderChangeMap = await exportedChange();
     const sources = await exportSources();
-    return canvasBlob(compose(sources, { renderChangeMap }));
+    return canvasBlob(compose(sources, { renderChangeMap, renderSigned: signed }));
   }
 
   /** When each picture on screen was taken, as the surfaces that drew them say. */
@@ -1813,6 +1852,7 @@
       form.append('image_b', frameB, 'comparison-b.png');
       form.append('format', 'blink');
       form.append('interval', String(blinkInterval));
+      form.append('keep', gifColours(annotations));
     } else {
       form.append('image_a', await comparisonBlob(), 'comparison.png');
       form.append('format', 'png');
@@ -1848,6 +1888,7 @@
     if (imageB) form.append('image_b', imageB, 'comparison-b.png');
     form.append('format', format);
     form.append('interval', String(blinkInterval));
+    if (format !== 'png') form.append('keep', gifColours(annotations, { signed: signExport }));
     form.append('filename', exportName());
     form.append('spec', JSON.stringify(sessionSpec()));
     for (const [field, value] of pictureDateFields(pictureDates())) form.append(field, value);
@@ -1869,7 +1910,7 @@
     outputBusy = 'png';
     try {
       const owner = await ensureCase();
-      const blob = await comparisonBlob();
+      const blob = await comparisonBlob({ signed: signExport });
       const result = await api.post(`/api/cases/${owner.id}/plates`, {
         filename: exportName(),
         format: 'png',
@@ -1897,13 +1938,15 @@
       const owner = await ensureCase();
       const renderChangeMap = await exportedChange();
       const sources = await exportSources();
-      const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false, renderChangeMap }));
-      const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true, renderChangeMap }));
+      const blink = { renderMode: 'blink', renderChangeMap, renderSigned: signExport };
+      const frameA = await canvasBlob(compose(sources, { ...blink, renderBlinkB: false }));
+      const frameB = await canvasBlob(compose(sources, { ...blink, renderBlinkB: true }));
       const form = new FormData();
       form.append('image_a', frameA, 'comparison-a.png');
       form.append('image_b', frameB, 'comparison-b.png');
       form.append('animation', animation);
       form.append('interval', String(blinkInterval));
+      form.append('keep', gifColours(annotations, { signed: signExport }));
       form.append('filename', exportName());
       const result = await api.post(`/api/cases/${owner.id}/compare/gif`, form);
       const kept = await keepExport(owner.id, animation, frameA, frameB);
@@ -1919,7 +1962,151 @@
     }
   }
 
+  /**
+   * The ground and scale an evolution is drawn at: the export frame, or A's view,
+   * at the screen's density held under the GIF's edge, or shared out across a sheet.
+   */
+  function evolutionPlan(kind, count) {
+    const target = a.engine ? a : b.engine ? b : null;
+    if (!target) return null;
+    const frame = evolutionFrame(surfaceFrame(target), exportFrame);
+    const density = window.devicePixelRatio || 1;
+    const pixelScale = kind === 'sheet'
+      ? sheetCellScale(frame, count, density)
+      : pictureScale(frame, GIF_EDGE, density);
+    return { frame, pixelScale };
+  }
+
+  /**
+   * A side as the evolution picker reads it: with its Wayback release's date, and
+   * a Sentinel-2 side on its latest pass named by that pass's day.
+   */
+  function evolutionSide(target, sentinel, wayback, radar) {
+    const spec = sideSpec(target, sentinel, wayback, radar);
+    if (target.providerId === WAYBACK_ID) return { ...spec, wayback_date: wayback.date };
+    return { ...spec, sentinel: { ...spec.sentinel, date: sentinel.date || sentinel.latest || '' } };
+  }
+
+  /** The ground a picker row's picture shows: the evolution's centre, at its scale. */
+  const evolutionThumbView = $derived.by(() => {
+    if (!evolutionKind || rightPanel !== 'export' || !evolution) return null;
+    void [view, bearing, exportFrame];
+    const plan = evolutionPlan('evolution', 2);
+    if (!plan) return null;
+    // The frame counts the engine's zoom, one level short of the app's.
+    return { lat: plan.frame.lat, lon: wrapLon(plan.frame.lng), zoom: plan.frame.zoom + 1, viewWidth: plan.frame.width };
+  });
+
+  /** Tiles one picture of the evolution takes as the export stands, for its price. */
+  const evolutionTiles = $derived.by(() => {
+    if (!evolutionKind || rightPanel !== 'export' || !evolution) return 0;
+    void [view, bearing, exportFrame];
+    const plan = evolutionPlan(exportKind, Math.max(2, evolutionChosen.length));
+    return plan ? pictureTiles(plan.frame, imagery.find(evolution), plan.pixelScale).tiles.length : 0;
+  });
+
+  function closeExport() {
+    evolutionAbort?.abort();
+    rightPanel = null;
+  }
+
+  $effect(() => () => evolutionAbort?.abort());
+
+  /** What was left out of an evolution, said in the toast that reports it. */
+  function leftOut({ empty, repeated }) {
+    const parts = [];
+    if (repeated) parts.push(`${repeated} repeated ${repeated === 1 ? 'picture' : 'pictures'}`);
+    if (empty) parts.push(`${empty} with no imagery here`);
+    return parts.length ? ` (left out: ${parts.join(', ')})` : '';
+  }
+
+  async function exportEvolution(kind) {
+    if (outputBusy || !evolution) return;
+    const pictures = [...evolutionChosen];
+    if (pictures.length < 2 || pictures.length > MAX_EVOLUTION_FRAMES) {
+      toast(`An evolution plays 2 to ${MAX_EVOLUTION_FRAMES} pictures`, 'warn');
+      return;
+    }
+    const plan = evolutionPlan(kind, pictures.length);
+    if (!plan) {
+      toast('Open a map before exporting', 'warn');
+      return;
+    }
+    const controller = new AbortController();
+    evolutionAbort = controller;
+    outputBusy = 'evolution';
+    evolutionProgress = { done: 0, total: pictures.length };
+    const archiveId = evolution;
+    const provider = imagery.find(archiveId);
+    const label = provider?.label ?? (archiveId === WAYBACK_ID ? 'Esri Wayback' : 'Sentinel-2');
+    const common = {
+      title: sessionName,
+      label,
+      attribution: provider?.attribution,
+      annotations,
+      units: prefs.units,
+      signed: signExport,
+    };
+    const positions = timelinePositions(pictures.map((entry) => entry.date));
+    const frames = [];
+    const cells = [];
+    try {
+      const owner = await ensureCase();
+      const tally = await drawPictures({
+        entries: pictures,
+        frame: plan.frame,
+        pixelScale: plan.pixelScale,
+        provider,
+        variantFor: evolutionVariant,
+        signal: controller.signal,
+        onprogress: (done, total) => (evolutionProgress = { done, total }),
+        onpicture: async ({ entry, picture, index }) => {
+          const date = pictureLabel(archiveId, entry);
+          if (kind === 'sheet') cells.push({ picture, date });
+          else frames.push(await canvasBlob(composeEvolutionFrame({ ...common, picture, date, current: index, positions })));
+        },
+      });
+      if (tally.drawn < 2) throw new Error(`fewer than two distinct pictures of this ground came back${leftOut(tally)}`);
+      const name = comparisonFilename(sessionName, { a: pictures[0].date, b: pictures.at(-1).date });
+      let result;
+      if (kind === 'sheet') {
+        const span = `${pictures[0].date} to ${pictures.at(-1).date}`;
+        const blob = await canvasBlob(composeEvolutionSheet({ ...common, cells, span }));
+        result = await api.post(`/api/cases/${owner.id}/plates`, {
+          filename: `${name} evolution`,
+          format: 'png',
+          png: await blobBase64(blob),
+          overwrite: false,
+        }, { signal: controller.signal });
+      } else {
+        const form = new FormData();
+        frames.forEach((blob, index) => form.append('frames', blob, `evolution-${index + 1}.png`));
+        form.append('interval', String(evolutionInterval));
+        form.append('filename', name);
+        form.append('keep', gifColours(annotations.filter((mark) => mark.side === 'both'), { signed: signExport }));
+        result = await api.post(`/api/cases/${owner.id}/compare/sequence`, form, { signal: controller.signal });
+      }
+      rightPanel = null;
+      toast(`${result.file} written to ${destinationLabel(result.path)}${leftOut(tally)}`, 'ok', 7000, {
+        label: 'Show',
+        onClick: () => showExports(),
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') toast('Evolution export stopped', 'info');
+      else outputError('Evolution export failed', error);
+    } finally {
+      if (archiveId !== WAYBACK_ID) imagery.refreshUsage();
+      if (evolutionAbort === controller) evolutionAbort = null;
+      outputBusy = '';
+      evolutionProgress = null;
+    }
+  }
+
   async function runExport() {
+    if (evolutionKind) {
+      await exportEvolution(exportKind);
+      return;
+    }
     if (keepInCase && !openedSession) {
       exportAfterSave = true;
       saveDialog = true;
@@ -1945,7 +2132,7 @@
       if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
         throw new Error('this browser cannot copy an image');
       }
-      const blob = await comparisonBlob();
+      const blob = await comparisonBlob({ signed: signExport });
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       toast('Comparison copied as an image', 'ok');
     } catch (error) {
@@ -2372,7 +2559,7 @@
     </div>
   {/if}
   {#if rightPanel === 'export'}
-    <Modal title="Export a copy" onclose={() => (rightPanel = null)} width="540px">
+    <Modal title="Export a copy" onclose={closeExport} width="540px">
       <div class="export-dialog">
         <div class="output-list">
           <label class="output-choice" class:selected={exportKind === 'png'}>
@@ -2390,7 +2577,39 @@
             <Icon name="panelRight" size={17} />
             <span><strong>GIF · Slide</strong><small>Sweeps the divider across the image.</small></span>
           </label>
+          <label class="output-choice" class:selected={exportKind === 'evolution'} class:locked={!evolution}>
+            <input type="radio" bind:group={exportKind} value="evolution" disabled={!evolution || !!outputBusy} />
+            <Icon name="video" size={17} />
+            <span><strong>GIF · Evolution</strong><small>{evolution
+              ? 'Every picture you tick, oldest to newest.'
+              : 'Needs Sentinel-2 or Wayback on both sides, or Wayback against World Imagery.'}</small></span>
+          </label>
+          <label class="output-choice" class:selected={exportKind === 'sheet'} class:locked={!evolution}>
+            <input type="radio" bind:group={exportKind} value="sheet" disabled={!evolution || !!outputBusy} />
+            <Icon name="grid" size={17} />
+            <span><strong>PNG · Evolution sheet</strong><small>The same pictures side by side on one page.</small></span>
+          </label>
         </div>
+
+        {#if evolutionKind && evolution}
+          {#key evolution}
+            <EvolutionPicker archive={evolution} a={evolutionSide(a, s2a, wba, s1a)} b={evolutionSide(b, s2b, wbb, s1b)}
+              {view} maxcc={s2b.maxcc} perPicture={evolutionTiles} disabled={!!outputBusy}
+              provider={imagery.find(evolution)} variantFor={evolutionVariant} thumbView={evolutionThumbView}
+              onchoose={(chosen) => (evolutionChosen = chosen)} onbilled={() => imagery.refreshUsage()} />
+          {/key}
+          {#if exportKind === 'evolution'}
+            <label class="pace">
+              <span class="field-label">Pace</span>
+              <input type="range" min="300" max="3000" step="100" bind:value={evolutionInterval}
+                disabled={!!outputBusy} aria-label="Time each picture stays up" />
+              <span class="mono">{(evolutionInterval / 1000).toFixed(1)} s a picture</span>
+            </label>
+          {/if}
+          {#if difference}
+            <p class="panel-note"><Icon name="info" size={13} /> Difference highlights stay out of an evolution; they read one pair.</p>
+          {/if}
+        {/if}
 
         <div class="destination">
           <span class="field-label">Frame</span>
@@ -2411,13 +2630,25 @@
           <button class="link" onclick={() => (exportPicker = true)}>Change…</button>
         </div>
 
+        {#if evolutionKind}
+          <p class="panel-note"><Icon name="info" size={13} /> An evolution is written out only, not kept in the case.</p>
+        {:else}
+          <label class="keep-choice">
+            <input type="checkbox" bind:checked={keepInCase} />
+            <span>
+              <strong>Also keep it in this case</strong>
+              <small>{openedSession
+                ? `Filed under ${openedSession.title}, with its dates and point.`
+                : 'Saves the comparison first, then files the image under it.'}</small>
+            </span>
+          </label>
+        {/if}
+
         <label class="keep-choice">
-          <input type="checkbox" bind:checked={keepInCase} />
+          <input type="checkbox" bind:checked={signExport} />
           <span>
-            <strong>Also keep it in this case</strong>
-            <small>{openedSession
-              ? `Filed under ${openedSession.title}, with its dates and point.`
-              : 'Saves the comparison first, then files the image under it.'}</small>
+            <strong>Sign it Azimut</strong>
+            <small>The logo and name close the credits line, under the imagery.</small>
           </span>
         </label>
 
@@ -2429,8 +2660,21 @@
           <button class="btn" disabled={!!outputBusy} onclick={copyComparison}>
             <Icon name="copy" size={13} /> {outputBusy === 'copy' ? 'Copying…' : 'Copy current PNG'}
           </button>
-          <button class="btn btn-primary" disabled={!!outputBusy} onclick={runExport}>
-            <Icon name="download" size={13} /> {outputBusy === 'png' || outputBusy === 'gif' ? 'Exporting…' : 'Export copy'}
+          {#if outputBusy === 'evolution'}
+            <button class="btn" onclick={() => evolutionAbort?.abort()}>
+              <Icon name="x" size={13} /> Stop
+            </button>
+          {/if}
+          <button class="btn btn-primary" onclick={runExport}
+            disabled={!!outputBusy || (evolutionKind && (evolutionChosen.length < 2 || evolutionChosen.length > MAX_EVOLUTION_FRAMES))}>
+            <Icon name="download" size={13} />
+            {#if outputBusy === 'evolution' && evolutionProgress}
+              {evolutionProgress.done < evolutionProgress.total
+                ? `Drawing ${evolutionProgress.done + 1} of ${evolutionProgress.total}…`
+                : 'Writing…'}
+            {:else}
+              {outputBusy === 'png' || outputBusy === 'gif' ? 'Exporting…' : 'Export copy'}
+            {/if}
           </button>
         </div>
 
@@ -2909,6 +3153,10 @@
   .output-choice small { display: block; }
   .output-choice strong { color: var(--text-1); font-size: var(--fs-sm); }
   .output-choice small { margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.35; }
+  .output-choice.locked { cursor: default; opacity: .6; }
+  .output-choice.locked:hover { border-color: var(--border); color: inherit; background: none; }
+  .pace { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+  .pace .mono { color: var(--text-2); font-size: var(--fs-xs); }
   .destination { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; padding-top: 13px; border-top: 1px solid var(--border); }
   .destination .field-label { grid-column: 1 / -1; }
   .keep-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 9px; padding-top: 13px; border-top: 1px solid var(--border); cursor: pointer; }

@@ -12,7 +12,8 @@
  * a change mask computed for an earlier camera is laid where its ground is.
  */
 
-import { drawAnnotations, onSide } from './compareAnnotations.js';
+import { comparisonAnnotations, drawAnnotations, onSide, stampInk } from './compareAnnotations.js';
+import { AMBER, INK_ON_DARK, drawSignature, signatureWidth } from '../brandMark.js';
 import {
   apply,
   compose,
@@ -33,6 +34,45 @@ const BAND = '#0f1114';
 const ACCENT = '#e8a33d';
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const MONO = 'ui-monospace, "SF Mono", "Cascadia Code", monospace';
+
+/** The inks an export is laid out in, for the other composers to share. */
+export const EXPORT_STYLE = Object.freeze({ INK, MUTED, BAND, ACCENT, FONT, MONO });
+
+/** The plate a mark's label sits on, and the ink written on it (`compareAnnotations.js`). */
+const LABEL_INKS = ['#f5f6f7'];
+
+/**
+ * The colours a GIF must keep exactly, as the `keep` form field: every mark's
+ * colour and the ink of its numeral, then the export's own inks and the
+ * signature's. The server builds each frame's palette around them; the imagery
+ * gets the rest.
+ */
+export function gifColours(annotations = [], { signed = false } = {}) {
+  const colours = [];
+  for (const mark of comparisonAnnotations(annotations)) {
+    colours.push(mark.colour);
+    if (mark.kind === 'number') colours.push(stampInk(mark));
+  }
+  colours.push(ACCENT, INK, MUTED, BAND, ...LABEL_INKS);
+  if (signed) colours.push(INK_ON_DARK, AMBER);
+  const kept = [];
+  for (const colour of colours) {
+    const hex = String(colour).toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(hex) && !kept.includes(hex)) kept.push(hex);
+  }
+  return kept.slice(0, 32).join(',');
+}
+
+/**
+ * Sign a footer band: the Azimut lockup at its right end, centred on `middle`.
+ * Answers the width it took, so the credits beside it can stop short.
+ */
+export function signFooter(ctx, right, middle, scale) {
+  return drawSignature(ctx, right, middle, { height: 15 * scale });
+}
+
+/** How much of a footer row the signature takes, gap included. */
+export const signatureRoom = (scale) => signatureWidth(15 * scale) + 18 * scale;
 
 /**
  * What an exported comparison is called: its title, then the dates of its two
@@ -104,7 +144,8 @@ export function scaleBarLength(metresPerPixel, target = 120) {
 const readableLength = (metres) =>
   metres >= 1000 ? `${metres / 1000} km` : `${metres} m`;
 
-function drawTag(ctx, text, x, y, { scale, accent = false, align = 'left' }) {
+/** A label on a dark rounded plate, as the corners of an export carry them. */
+export function drawTag(ctx, text, x, y, { scale, accent = false, align = 'left' }) {
   ctx.font = `700 ${Math.round(12 * scale)}px ${FONT}`;
   const padX = 8 * scale;
   const height = 22 * scale;
@@ -120,8 +161,13 @@ function drawTag(ctx, text, x, y, { scale, accent = false, align = 'left' }) {
   ctx.textBaseline = 'alphabetic';
 }
 
-function drawScaleAndNorth(ctx, frame, x, y, { scale, bearing, units }) {
-  const perPixel = groundPerPixel(frame) / scale;
+/**
+ * The scale bar and north needle, bottom-aligned at `y`. `pixelScale` is how many
+ * output pixels one CSS pixel of `frame` became, when the marks are drawn at
+ * another size than the picture was.
+ */
+export function drawScaleAndNorth(ctx, frame, x, y, { scale, bearing, units, pixelScale = scale }) {
+  const perPixel = groundPerPixel(frame) / pixelScale;
   let { metres, pixels } = scaleBarLength(perPixel, 120 * scale);
   let label = readableLength(metres);
   if (units === 'imperial') {
@@ -213,6 +259,7 @@ export function composeComparison({
   view,
   bearing = 0,
   units = 'metric',
+  signed = false,
   makeCanvas,
 }) {
   if (!a?.canvas?.width || !b?.canvas?.width || !a?.frame || !b?.frame) {
@@ -404,7 +451,13 @@ export function composeComparison({
   ctx.fillStyle = MUTED;
   ctx.font = `${Math.round(10 * s)}px ${FONT}`;
   const credits = `A: ${attributionA || labelA}   |   B: ${attributionB || labelB}`;
-  ctx.fillText(credits, left, output.height - 9 * s, Math.max(0, mapWidth - 32 * s));
+  // The signature closes the credits row, off the imagery and clear of the scale bar.
+  const signature = signed && signFooter(ctx, mapWidth - 14 * s, output.height - 13 * s, s)
+    ? signatureRoom(s)
+    : 0;
+  ctx.fillStyle = MUTED;
+  ctx.font = `${Math.round(10 * s)}px ${FONT}`;
+  ctx.fillText(credits, left, output.height - 9 * s, Math.max(0, mapWidth - 32 * s - signature));
   return output;
 }
 
