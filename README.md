@@ -22,7 +22,7 @@
   <a href="https://github.com/OsintMeThat/azimut/releases/latest"><img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-6b7280"></a>
 </p>
 
-![One case in Azimut, from the clip that arrives to the proof, the analysis surfaces and the published report](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
+![A tour of Azimut: a clip downloaded into a case, examined and stitched, placed on satellite imagery, compared across dates, swept by Detect, then turned into a proof, a report and a note](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
 
 ## Install & run
 
