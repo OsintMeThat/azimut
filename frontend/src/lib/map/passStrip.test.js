@@ -1,17 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  answerProbe,
-  between,
-  bracketSentence,
   entryOf,
   lookupPath,
   lookupWindow,
-  nextProbe,
-  startBracket,
   stripArchive,
   stripEntries,
   thumbTiles,
-  undoAnswer,
 } from './passStrip.js';
 
 const s2 = (date) => ({ present: true, provider: 'sentinel2', sentinel: { date, layer: 'TRUE_COLOR', maxcc: 100 } });
@@ -56,41 +50,6 @@ describe('the strip', () => {
       { release: 55, acquired: '2025-02-20' }, { release: 41, acquired: '2023-06-11' }] });
     expect(wayback.map((row) => row.release)).toEqual([41, 55]);
     expect(entryOf(wayback, 'esri-wayback', { wayback_release: null })).toBe(wayback[1]);
-  });
-});
-
-describe('dating a change', () => {
-  const rows = stripEntries('sentinel2', optical, { maxcc: 30 });
-  const start = () => startBracket(rows, rows[0], rows[6]);
-
-  it('needs A older than B, both on the strip', () => {
-    expect(startBracket(rows, rows[6], rows[0])).toBe(null);
-    expect(startBracket(rows, null, rows[0])).toBe(null);
-    expect(between(rows, start()).map((row) => row.date)).toEqual(
-      ['2026-05-08', '2026-05-18', '2026-05-23', '2026-05-28']);   // the cloudy 13th left out
-  });
-
-  it('halves the gap an answer at a time until the ends are neighbours', () => {
-    let bracket = start();
-    const ask = () => ({ ...bracket, probe: nextProbe(rows, bracket).key });
-    bracket = ask();
-    expect(bracket.probe).toBe('2026-05-18');
-    bracket = answerProbe(bracket, 'there');           // it is on the 18th
-    bracket = ask();
-    expect(bracket.probe).toBe('2026-05-08');
-    bracket = answerProbe(bracket, 'absent');          // not yet on the 8th
-    expect(nextProbe(rows, bracket)).toBe(null);
-    expect(bracketSentence(rows, bracket, 'Sentinel-2')).toBe(
-      'Absent on 2026-05-08, present on 2026-05-18 (Sentinel-2); one picture between them could not tell.');
-  });
-
-  it('drops a picture that settles nothing, and takes an answer back', () => {
-    let bracket = { ...start(), probe: '2026-05-18' };
-    bracket = answerProbe(bracket, 'unclear');
-    expect(between(rows, bracket).map((row) => row.date)).not.toContain('2026-05-18');
-    const undone = undoAnswer(bracket);
-    expect(between(rows, undone).map((row) => row.date)).toContain('2026-05-18');
-    expect(undoAnswer(undone)).toBe(undone);
   });
 });
 

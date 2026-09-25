@@ -62,7 +62,7 @@ to fix a point on the map.*
 | **Inspect** | Reads any photo or video closely: sharpest-frame capture onto a strip, frame adjustments, editable crop and ELA hints. Frames and edits are kept with the file as you make them; a frame or an adjusted video enters the Media Library only when you save it to the case. |
 | **Collage** | Lays out frames and images from any number of files on one canvas, with per-piece warp, scale, rotate and crop, and auto-stitch to solve a panorama's layout. Saved as you go; the picture it exports is case media. |
 | **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture with an optional scale bar and north arrow, map rotation, measurement tools, a right-click menu on any point, stacked overlays (borders, roads, railways, power lines, fires, night lights), your own KML, KMZ, GeoJSON, GPX or My Maps layers, GeoConfirmed conflicts narrowed to a period, and editable AOI grids for area review. Esri/OSM by default, plus the Esri Wayback archive, Sentinel-2 with a date calendar and a cloud-ceiling slider, and Sentinel-1 radar passes; add a Mapbox or Google key for more basemaps. Open it in several tabs and they stay in sync. |
-| **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights laid over any of them. All dates lists every picture of a point and narrows down when a change appeared. Ground-anchored notes, shapes, numbered markers and measurements follow both maps. Editable sessions and rendered previews stay in the case; attributed PNG/GIF copies go to exports. |
+| **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights laid over any of them. All dates lists every picture of a point, oldest first, to set on either side. Ground-anchored notes, shapes, numbered markers and measurements follow both maps. Editable sessions and rendered previews stay in the case; attributed PNG/GIF copies go to exports. |
 | **Detect** | Sweeps drawn areas of Sentinel-2 for vessels, fires, construction, burn scars and other changes, and of Sentinel-1 radar for vessels, razed buildings, new structures and floods through cloud, once or as a saved routine. Only a candidate you keep becomes a case pin, dated by the passes that found it. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, turn or crop them, annotate with colored shapes, fills, symbols, numbered markers, blur boxes, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
@@ -91,8 +91,8 @@ Detect sweeps an area for what appeared, and the map takes layers made elsewhere
 - Build your own analyzer from rules on bands, indices, ground classes or radar,
   with checks that turn red when a rule stops holding. Five examples ship with
   theirs.
-- A candidate opens in Compare with one press, and All dates in Compare narrows
-  down between which two pictures a change appeared.
+- A candidate opens in Compare with one press, and All dates in Compare lists
+  every picture of a point to set on either side.
 - Satellite, Compare and Detect share one camera, and a middle-drag turns any map.
 - Inspect keeps one work per file, saved as you go, and Collage is a tab of its own.
 - Open KML, KMZ, GeoJSON and GPX files or a public My Maps as map layers, and add

@@ -198,7 +198,7 @@ proof for publication.
 | ✅ **A claim from where you are** | Files a claim from Details, a Board row or a Graph node with the entity already seated, asking a count and a condition where its family calls for them and writing the sentence from the fields. |
 | ✅ **Radar Detect** | Five Sentinel-1 analyzers (vessels, any change, razed buildings, new structures, floods) through the user's own radar layer, calibrated on real scenes, held to one track. |
 | ✅ **Sentinel-1 basemap** | Radar passes as a dated basemap in Satellite, Compare and Detect, named by day, UTC time and direction. |
-| ✅ **All dates** | Lists every dated picture of the point in Compare and narrows down, a question at a time, between which two a change appeared. |
+| ✅ **All dates** | Lists every dated picture of the point in Compare, oldest first, to set on either side. |
 | ✅ **Copernicus where it is needed** | Detect and Compare say in the middle of the tool what Copernicus still lacks, with the free account, the Sentinel-2 configuration and the Sentinel-1 layer form field by field. |
 | ✅ **A candidate in Compare** | Opens a Detect candidate in Compare on the passes that found it, or against high-resolution imagery for a thing present on one pass. |
 | ✅ **Sizes in Detect** | Right-clicks Detect's map for its own point menu, measures a hull with a ruler, sizes each candidate along its footprint, walks the largest first, and hides the drawing or blinks A against B from the review. |
