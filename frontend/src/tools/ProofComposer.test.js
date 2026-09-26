@@ -63,7 +63,8 @@ describe('Proof Composer header', () => {
     expect(source).toContain('onchosen={useExportFolder}');
     expect(source).toContain('api.post(`/api/cases/${cid}/proofs/${encodeURIComponent(savedName)}/export`)');
     expect(source).toContain('/proofs/export/reveal`');
-    expect(source).toContain('if (dirty || !savedName) await save();');
+    // a save that stops to check a point resumes the export once it lands
+    expect(source).toContain('if (dirty || !savedName) await save({ then: exportProof });');
     expect(source).toContain('if (dirty || !savedName) return;');
   });
 
@@ -643,7 +644,11 @@ describe('the points a proof states', () => {
   it('materialises the auto point before a second one sits under it', () => {
     // an empty field means "whatever the imagery says", and that answer has to
     // become the conclusion in writing before the list can grow
-    expect(source).toContain("if (!proof.points[0].coords.trim()) proof.points[0].coords = displayedCoords;");
+    const state = bodyOfFn('statePoint0');
+    expect(state).toContain('if (proof.points[0].coords.trim()) return;');
+    expect(state).toContain('proof.points[0].coords = displayedCoords;');
+    // …and still as unchecked as it was: naming a point is not checking where it is
+    expect(state).toContain('if (pointProposed(proof.points, 0, proof.panels)) proof.points[0].proposed = true;');
     expect(bodyOfFn('addPoint')).toContain('statePoint0();');
   });
 
@@ -682,15 +687,17 @@ describe('the points a proof states', () => {
     // canvas; in grid layout the second place was simply never heard.
     const body = bodyOfFn('addPanel');
     expect(body).toContain('const answered = displayedCoords;');
+    expect(body).toContain('const answeredProposed = pointProposed(proof.points, 0, proof.panels);');
     expect(body.indexOf('const answered')).toBeLessThan(body.indexOf('proof.panels.unshift(panel)'));
+    expect(body.indexOf('const answeredProposed')).toBeLessThan(body.indexOf('proof.panels.unshift(panel)'));
     expect(body).toContain(
-      'proof.points = statePanelPoint(proof.points, panel, answered, prefs.coordFormat);'
+      'proof.points = statePanelPoint(proof.points, panel, answered, prefs.coordFormat, answeredProposed);'
     );
   });
 
   it('opens a row on the ground it names, or on the point above it', () => {
     // six decimals is a tenth of a metre: the pin is the instrument, not the digits
-    expect(source).toContain('title="Move this point on the map"');
+    expect(source).toContain(": 'Move this point on the map'}");
     expect(source).toContain('onclick={() => (pointMap = { row: i, view: pointMapView(i) })}');
     const view = bodyOfFn('pointMapView');
     expect(view).toContain('proof.points.slice(0, i).map((one) => one.coords).reverse()');
@@ -699,6 +706,34 @@ describe('the points a proof states', () => {
     expect(bodyOfFn('movePoint')).toContain(
       'proof.points[i].coords = formatCoords(point, prefs.coordFormat);'
     );
+  });
+
+  it('greys a point the imagery proposed until it is typed or placed', () => {
+    expect(source).toContain('class:proposed={pointProposed(proof.points, i, proof.panels)}');
+    expect(source).toContain('class:check={pointProposed(proof.points, i, proof.panels)}');
+    expect(source).toContain("'Not checked yet. Check it on the map'");
+    const typed = source.slice(source.indexOf('placeholder="lat, lon"'), source.indexOf('class="field-act"'));
+    expect(typed).toContain('proof.points[i].proposed = false;');
+    expect(bodyOfFn('movePoint')).toContain('proof.points[i].proposed = false;');
+  });
+
+  it('shows every unchecked point on the map before a save or a post', () => {
+    const body = bodyOfFn('save');
+    expect(body).toContain('const rows = checked ? [] : uncheckedPoints(proof.points, proof.panels);');
+    expect(body).toContain('checking = { rows, at: 0, andPost, then };');
+    // the check comes before anything is written, the overwrite question included
+    expect(body.indexOf('uncheckedPoints')).toBeLessThan(body.indexOf('overwritePrompt'));
+    expect(body.indexOf('uncheckedPoints')).toBeLessThan(body.indexOf('performSave'));
+    // one point at a time, then the save it was holding
+    const pick = bodyOfFn('checkPick');
+    expect(pick).toContain('movePoint(rows[at], point);');
+    expect(pick).toContain('checking = { ...checking, at: at + 1 };');
+    expect(bodyOfFn('finishCheck')).toContain('await save({ andPost, checked: true, then });');
+    // a post publishes the point, so only a plain save can leave it for later
+    expect(source).toContain('later: !checking.andPost,');
+    expect(source).toContain('onlater={checkStep?.later ? () => finishCheck(true) : null}');
+    expect(source).toContain('{#key checking?.at}');
+    expect(source).toContain('|| checking !== null');
   });
 
   it('redraws the plate when a point or the footer switch changes', () => {

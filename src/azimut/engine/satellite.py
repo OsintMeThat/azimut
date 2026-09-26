@@ -697,6 +697,8 @@ def _stated_once(spec: dict[str, Any]) -> list[dict[str, Any]]:
         # nothing was typed, so the row carries no text: the composer shows the
         # panels' own answer there and the reset arrow stays away, as it always has
         point = {**frozen, "coords": ""} if frozen else None
+        if point is not None and isinstance(coords, dict) and coords.get("proposed") is True:
+            point["proposed"] = True
     if point is None:
         return []
     return [{**point, "label": "", "pov": bool(spec.get("pov"))}]
@@ -737,6 +739,12 @@ def spec_points(spec: dict[str, Any]) -> list[dict[str, Any]]:
     two entries a metre apart are one place, so the second is dropped rather than
     drawn as a second mark on the same roof.
 
+    **``proposed`` marks a point nobody checked**: the middle of a capture the
+    composer read off the panels, which the analyst chose to save before looking at
+    it on the map. It rides along so the save can keep it off the case map. Absent
+    means checked, so every spec written before it and every road that states its
+    own point (a sheet row, an import) reads as the analyst's answer.
+
     A spec holding no list falls back to the single point it was written with
     (:func:`_stated_once`), so nothing has to be migrated and nothing that states
     one point has to learn the list.
@@ -756,6 +764,8 @@ def spec_points(spec: dict[str, Any]) -> list[dict[str, Any]]:
             point = _typed_point(entry.get("coords"))
             if point is None:
                 continue
+            if entry.get("proposed") is True:
+                point["proposed"] = True
             points.append(
                 {
                     **point,
@@ -937,6 +947,8 @@ def state_points(spec: dict[str, Any], entries: list[dict[str, Any]]) -> dict[st
             point["label"] = label
         if entry.get("pov"):
             point["pov"] = True
+        if entry.get("proposed") is True:
+            point["proposed"] = True
         points.append(point)
     spec["points"] = points
     first = points[0] if points else {}

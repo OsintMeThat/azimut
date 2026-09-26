@@ -705,6 +705,12 @@ def _state_points(
     to answer a question the Locate pass answers for free: the first point is
     resolved because the analyst is about to look at it, and the rest are born
     unlocated for that pass to pick up, exactly as an offline save already is.
+
+    **A point nobody checked is never filed** (``proposed``, see
+    ``satellite.spec_points``): it is the middle of a capture, and filing it would
+    put a guess on the case map as a conclusion. It is not asked about either, since
+    the composer just offered to check it and heard "later". A place the case
+    already holds there stays, so an older proof re-saved unchecked keeps its point.
     """
     stated: list[dict[str, Any]] = []
     filed: list[dict[str, Any]] = []
@@ -713,6 +719,8 @@ def _state_points(
         standing = satellite_engine.place_at(case, point["lat"], point["lon"], keyed_only=False)
         if standing is not None:
             stated.append({"id": standing["id"], "pov": point["pov"]})
+            continue
+        if point.get("proposed"):
             continue
         if not auto:
             # the point moved somewhere the case cannot hold yet: the old claim is

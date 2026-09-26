@@ -1804,7 +1804,7 @@ export async function installAppFixture(page, options = {}) {
     // Two different reads: the capture shelf (pickers list it beside media) and
     // the geo index the Map panel groups. Both are needed — a picker whose
     // shelf 404s shows no panels at all.
-    if (path === `/api/cases/${CASE_ID}/satellite`) return json(route, []);
+    if (path === `/api/cases/${CASE_ID}/satellite`) return json(route, options.satCaptures ?? []);
     if (path === `/api/cases/${CASE_ID}/drafts`) {
       return json(route, Object.entries(fixtureDrafts).map(([name, draft]) => ({
         name,

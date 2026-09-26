@@ -1226,6 +1226,101 @@ def test_reopening_a_proof_never_rewrites_what_was_typed(client):
     assert [one["coords"] for one in spec["points"]] == [typed]
 
 
+# -- a point nobody checked (the composer's "Later") -----------------------------
+#
+# The middle of a capture is a guess until somebody looks at it on the map. The
+# composer walks each one through the map before a save, and a point saved without
+# that check stays off the case map rather than landing there as a conclusion.
+
+
+def test_an_unchecked_point_is_not_filed(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    spec = _points(("64.1466, -21.9426", "hangar", False), ("64.1502, -21.9350", "", False))
+    spec["points"][1]["proposed"] = True
+    saved = _save(client, cid, "Airbase", spec)
+
+    assert [p["attrs"]["lat"] for p in _places(cid)] == [64.1466]
+    assert [one["label"] for one in saved["place"]["filed"]] == ["hangar"]
+    # never asked about either: the composer just offered to check it
+    assert saved["place"]["asking"] == []
+
+
+def test_an_unchecked_point_is_not_asked_about_when_filing_asks(client):
+    client.put("/api/settings/prefs", json={"proof_place_auto": False})
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    spec = _points(("64.1466, -21.9426", "", False))
+    spec["points"][0]["proposed"] = True
+    saved = _save(client, cid, "Airbase", spec)
+
+    assert saved.get("place") is None
+    # and the yes to an earlier question files nothing unchecked either
+    name = saved["name"]
+    assert client.post(f"/api/cases/{cid}/proofs/{name}/place").json() == []
+    assert _places(cid) == []
+
+
+def test_the_panels_unchecked_answer_is_not_filed(client, sat_tiles):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    cap = _sat(client, cid, 50.4501, 30.5234)
+    _save(client, cid, "Unchecked", _with_coords(None, {"lat": 50.4501, "lon": 30.5234, "proposed": True}, cap["path"]))
+    assert _places(cid) == []
+
+    # once somebody checked it, the same answer is the conclusion
+    _save(client, cid, "Checked", _with_coords(None, {"lat": 50.4501, "lon": 30.5234}, cap["path"]))
+    assert [p["attrs"]["lat"] for p in _places(cid)] == [50.4501]
+
+
+def test_a_point_already_on_the_map_stays_when_saved_unchecked(client):
+    """An older proof reopened reads its capture as unchecked. Saving it for later
+    must not take back the place it filed before the check existed."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Airbase", _points(("64.1466, -21.9426", "", False)))
+    [place] = _places(cid)
+
+    spec = _points(("64.1466, -21.9426", "", False))
+    spec["points"][0]["proposed"] = True
+    saved = _save(client, cid, "Airbase", spec)
+
+    assert saved["orphans"] == []
+    assert [lk["to"] for lk in _depicts(cid)] == [place["id"]]
+
+
+def test_an_unchecked_point_reopens_unchecked(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    spec = _points(("64.1466, -21.9426", "", False), ("64.1502, -21.9350", "", False))
+    spec["points"][1]["proposed"] = True
+    _save(client, cid, "Airbase", spec)
+
+    reopened = client.get(f"/api/cases/{cid}/proofs/Airbase").json()
+    assert [one.get("proposed") for one in reopened["points"]] == [None, True]
+
+    from azimut.engine import satellite
+
+    assert [one.get("proposed", False) for one in satellite.spec_points(reopened)] == [False, True]
+    written = satellite.state_points({}, satellite.spec_points(reopened))
+    assert written["points"][1] == {"coords": "64.1502, -21.9350", "proposed": True}
+
+
+def test_a_capture_says_where_its_frame_was_centred(client, sat_tiles):
+    """What tells the composer a pin was aimed: the point and the frame's centre
+    differ only when the pin was moved onto the target."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 50.45, "lon": 30.52, "zoom": 16, "width": 256, "height": 256,
+              "marker_style": "pin", "marker_x": 40, "marker_y": -20,
+              "marker_lat": 50.4501, "marker_lon": 30.5234},
+    )
+    client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 48.85, "lon": 2.35, "zoom": 16, "width": 256, "height": 256},
+    )
+    captures = {c["lat"]: c for c in client.get(f"/api/cases/{cid}/satellite").json()}
+
+    assert (captures[50.4501]["center_lat"], captures[50.4501]["center_lon"]) == (50.45, 30.52)
+    assert (captures[48.85]["center_lat"], captures[48.85]["center_lon"]) == (48.85, 2.35)
+
+
 def test_a_proof_the_panels_place_opens_with_an_empty_field(client, sat_tiles):
     """Nothing was typed, so nothing is written into the row: the field shows the
     panels' own answer and the reset arrow stays away."""

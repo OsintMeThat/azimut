@@ -91,10 +91,10 @@ async function settle() {
   flushSync();
 }
 
-async function open(view = VIEW) {
+async function open(view = VIEW, extra = {}) {
   const target = document.createElement('div');
   document.body.append(target);
-  live = mount(PointMapDialog, { target, props: { view, onpick, onclose } });
+  live = mount(PointMapDialog, { target, props: { view, onpick, onclose, ...extra } });
   flushSync();
   await settle();
 }
@@ -181,6 +181,30 @@ describe('moving a proof point on the map', () => {
       .click();
     await settle();
     expect(setOverlay).toHaveBeenCalledWith('railway', true, null);
+  });
+
+  it('checks a point before a save, handing it back without closing', async () => {
+    const onlater = vi.fn();
+    await open(VIEW, { check: { step: '1 of 2', label: 'Hangar' }, onlater });
+
+    expect(document.body.textContent).toContain('Check point 1 of 2');
+    expect(document.body.textContent).toContain('Hangar');
+    expect(document.body.textContent).toContain('Taken from the imagery.');
+
+    // kept where it is: the point is right as proposed
+    button('Use this point').click();
+    expect(onpick).toHaveBeenCalledWith({ lat: 48.8584, lon: 2.2945 });
+    // the composer moves on to the next point, so the dialog does not close itself
+    expect(onclose).not.toHaveBeenCalled();
+
+    button('Later').click();
+    expect(onlater).toHaveBeenCalled();
+  });
+
+  it('offers no Later before a post, which publishes the point', async () => {
+    await open(VIEW, { check: { step: '', label: '' } });
+    expect(document.body.textContent).toContain('Check the point');
+    expect(button('Later')).toBeUndefined();
   });
 
   it('writes nothing: the dialog answers one question and files nothing', async () => {

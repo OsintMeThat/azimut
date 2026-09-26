@@ -13,6 +13,11 @@
    * tool. The camera opens where the caller says (the row's own point, else the
    * one above it) so a row added with `+` starts beside the point it belongs with
    * rather than on the empty Atlantic.
+   *
+   * The same map checks a point before a save or a post (`check`). A point the
+   * imagery proposed is the middle of a capture until somebody looks, so the
+   * composer walks each one through here and the analyst either moves the pin or
+   * says the point is right.
    */
   import { onMount, untrack } from 'svelte';
   import Modal from '../../components/Modal.svelte';
@@ -34,9 +39,14 @@
   let {
     /** Where the map opens, `{ lat, lon, zoom }`. The pin starts on it. */
     view,
-    /** The point chosen, `{ lat, lon }`. The dialog closes itself after. */
+    /** The point chosen, `{ lat, lon }`. The dialog closes itself after, unless it
+     *  is checking: then the caller moves on to the next point. */
     onpick,
     onclose,
+    /** `{ step, label }` when checking a point before a save or a post. */
+    check = null,
+    /** Checking before a save only: save now, leaving the point unchecked. */
+    onlater = null,
   } = $props();
 
   const PIN = 'point';
@@ -135,7 +145,13 @@
 
 <svelte:window onkeydown={(event) => turnFromKey(engine, event)} />
 
-<Modal title="Move the point" {onclose} width="900px">
+<Modal title={check ? (check.step ? `Check point ${check.step}` : 'Check the point') : 'Move the point'} {onclose} width="900px">
+  {#if check}
+    <p class="check">
+      {#if check.label}<strong>{check.label}</strong>{/if}
+      <span>Taken from the imagery. Put the pin on what the proof shows, or keep it if it is right.</span>
+    </p>
+  {/if}
   <div class="stage">
     <MapSurface
       bind:engine
@@ -167,18 +183,31 @@
   <div class="foot">
     <span class="hint">Click the map to move the pin.</span>
     <span class="reading mono">{reading}</span>
+    {#if onlater}
+      <button class="btn btn-ghost btn-sm" title="Save now and keep the point off the case map" onclick={onlater}>Later</button>
+    {/if}
     <button class="btn btn-ghost btn-sm" onclick={onclose}>Cancel</button>
     <button
       class="btn btn-ok btn-sm"
       onclick={() => {
         onpick(at);
-        onclose();
+        if (!check) onclose();
       }}>Use this point</button
     >
   </div>
 </Modal>
 
 <style>
+  .check {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .check strong {
+    color: var(--text-1);
+  }
   .stage {
     position: relative;
     display: flex;

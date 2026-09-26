@@ -447,6 +447,32 @@ export function autoCoords(panels) {
 }
 
 /**
+ * True when the panel `autoCoords` reads was aimed: its point is a pin somebody
+ * put on the target, not the middle of whatever the capture framed.
+ */
+export function autoAimed(panels) {
+  for (const p of panels ?? []) {
+    if (p.meta?.lat != null && p.meta?.lon != null) return p.meta.aimed === true;
+  }
+  return false;
+}
+
+/**
+ * True when a capture's point is a pin moved onto the target before it was taken.
+ *
+ * Otherwise the point is the middle of the frame: the screen's centre, or the
+ * rectangle's, which is only where the analyst stood the camera. A wide capture of
+ * an airbase puts that hundreds of metres from the hangar the proof is about. A
+ * map screenshot the extension filed reads its point off the page address, which is
+ * the page's centre, and records no second point, so it is never aimed.
+ */
+export function captureAimed(s) {
+  if (s?.center_lat == null || s?.center_lon == null || s.lat == null || s.lon == null) return false;
+  return Math.abs(Number(s.lat) - Number(s.center_lat)) > 1e-6
+    || Math.abs(Number(s.lon) - Number(s.center_lon)) > 1e-6;
+}
+
+/**
  * A {lat, lon} rendered in the reader's coordinate format, or '' when null.
  * Defaults to decimal degrees so this stays a pure function — components pass
  * the user's preference in (state.svelte.js `prefs.coordFormat`).
@@ -608,6 +634,7 @@ export function specPoints(p) {
           coords: String(one.coords ?? '').trim(),
           label: String(one.label ?? '').trim(),
           pov: one.pov === true,
+          ...(one.proposed === true ? { proposed: true } : {}),
         }))
         .filter((one) => one.coords)
     : [];
@@ -638,12 +665,14 @@ export function statePoints(spec, points) {
       coords: String(one?.coords ?? '').trim(),
       label: String(one?.label ?? '').trim(),
       pov: one?.pov === true,
+      proposed: one?.proposed === true,
     }))
     .filter((one) => one.coords)
     .map((one) => ({
       coords: one.coords,
       ...(one.label ? { label: one.label } : {}),
       ...(one.pov ? { pov: true } : {}),
+      ...(one.proposed ? { proposed: true } : {}),
     }));
   spec.points = stated;
   spec.coordsText = stated[0]?.coords ?? '';
@@ -668,12 +697,17 @@ export function statePoints(spec, points) {
  * alone: that panel *is* the answer, and the field reads it off the panels as it
  * always has.
  *
+ * Both rows keep saying whether anyone checked them: the new one is proposed
+ * unless its capture was aimed, and the answer written down stays as proposed as
+ * it was while the field read it.
+ *
  * @param {Array} points the rows as edited, at least one
  * @param {object} panel the panel that just landed
  * @param {string} answered what the proof answered with before it did
  * @param {string} format the reader's coordinate format
+ * @param {boolean} answeredProposed whether that answer was the panels' unchecked one
  */
-export function statePanelPoint(points, panel, answered, format = 'dd') {
+export function statePanelPoint(points, panel, answered, format = 'dd', answeredProposed = false) {
   const { lat, lon } = panel?.meta ?? {};
   if (lat == null || lon == null) return points;
   const text = formatCoords({ lat: Number(lat), lon: Number(lon) }, format);
@@ -686,10 +720,33 @@ export function statePanelPoint(points, panel, answered, format = 'dd') {
   if ((stated.length ? stated : [answered]).includes(text)) return points;
   return [
     ...rows.map((one, at) =>
-      at === 0 && !String(one.coords ?? '').trim() ? { ...one, coords: answered } : one
+      at === 0 && !String(one.coords ?? '').trim()
+        ? { ...one, coords: answered, ...(answeredProposed ? { proposed: true } : {}) }
+        : one
     ),
-    { coords: text, label: '', pov: false },
+    { coords: text, label: '', pov: false, ...(panel.meta.aimed === true ? {} : { proposed: true }) },
   ];
+}
+
+/**
+ * True when row `i` holds a point nobody checked: one the imagery proposed.
+ *
+ * A first row with no text reads the panels, so it is proposed exactly when there
+ * is a panel answer and its capture was not aimed. Any other row says so itself,
+ * and typing coordinates or placing them on the map is what clears it.
+ */
+export function pointProposed(points, i, panels) {
+  const row = points?.[i];
+  if (!row) return false;
+  if (i === 0 && !String(row.coords ?? '').trim()) {
+    return autoCoords(panels) != null && !autoAimed(panels);
+  }
+  return row.proposed === true && Boolean(String(row.coords ?? '').trim());
+}
+
+/** The rows a save or a post has to have checked first, in the order they show. */
+export function uncheckedPoints(points, panels) {
+  return (points ?? []).map((_, i) => i).filter((i) => pointProposed(points, i, panels));
 }
 
 /** Effective coordinates text for a proof/spec: what it concludes on, else auto. */
@@ -1117,6 +1174,12 @@ function surfaceGeometry(surface) {
   return { ...(crop ? { crop } : {}), ...(rotation ? { rotation } : {}) };
 }
 
+/** What the panels answer with, frozen for the spec, marked when nobody aimed it. */
+function frozenCoords(panels) {
+  const auto = autoCoords(panels);
+  return auto && !autoAimed(panels) ? { ...auto, proposed: true } : auto;
+}
+
 /** Serializable spec from runtime state (drops live image objects). */
 export function toSpec(proof) {
   return {
@@ -1125,7 +1188,10 @@ export function toSpec(proof) {
     // A proof keeps the selected house-style identity as well as its copied
     // style values, so reopening it can restore the template picker.
     templateId: typeof proof.templateId === 'string' ? proof.templateId : null,
-    coords: autoCoords(proof.panels), // auto geo (first geo panel), for reference
+    // auto geo (first geo panel), for reference. A first row left empty is stated by
+    // this, so it carries whether anyone checked it, or the save would file the
+    // middle of a capture as the proof's conclusion.
+    coords: frozenCoords(proof.panels),
     // The points the proof concludes on, and the mirror of the first for a build
     // that predates the list. Whether a point is where the camera stood rather
     // than what it filmed rides on the point itself: the proof cannot deduce it —
@@ -1372,7 +1438,7 @@ export function satPanelInput(s, format = 'dd') {
     src: s.path,
     meta: {
       kind: 'satellite', attribution: s.attribution, lat: s.lat, lon: s.lon,
-      zoom: s.zoom, provider: s.provider_label,
+      aimed: captureAimed(s), zoom: s.zoom, provider: s.provider_label,
       date: s.fetched_at?.slice(0, 10), imagery_date: s.imagery_date ?? null,
     },
     caption: parts.join(' · '),
