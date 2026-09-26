@@ -2289,7 +2289,11 @@ dot hides or shows them, and pointing at a row shows that rule alone), the
 candidates a run would return are outlined with their pins, and each row says what
 share of the measured ground it keeps, alone and with the rules above it. The
 preview runs the engine's own evaluation, cleanup, sizes, shape and grouping, so
-what it outlines is what a sweep of the same ground returns. A click on the map
+what it outlines is what a sweep of the same ground returns. **Rules** and
+**Detections** beside the count switch the map between that painting and the
+outlined candidates alone, as a run shows them; the dots keep their state for the
+way back, and one pressed from Detections returns to Rules. While a check is open
+the count is the check's own, since the map shows its frame only. A click on the map
 reads every rule at that point: the value, before and after for a change, and a
 tick or a cross, so a thing that was not kept says which rule let it go. Under
 cloud or off the passes the card says so instead.
