@@ -3,23 +3,32 @@
    * Pick a case image or video to float over the map.
    *
    * A reference window is a pure scratch aid — never captured, never saved — so
-   * this reads the case's media and hands one back. Two ways in, because a case
-   * with two hundred images is a different problem from a case with four: the
-   * grid, and the folder browser behind "…". The search box only appears once
-   * the grid is long enough to need it.
+   * this reads the case's media and hands one back. A short list is a plain
+   * grid. Once it is long enough to need narrowing, the picker grows a search
+   * box, one chip per type or source (the Media Library's facets, one click
+   * each), a switch for the case's working files, and the folder browser.
+   *
+   * The working files start held back. The reference is almost always the shot
+   * being geolocated, which the case collected, and a case that ran Detect or
+   * Compare holds dozens of renders beside it. A case that collected nothing
+   * shows them anyway rather than an empty grid.
    */
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import FolderBrowser from '../../components/FolderBrowser.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
-  import { matchesQuery } from '../../lib/mediaFilter.js';
+  import { isMadeHere, matchesQuery, MEDIA_CATEGORIES } from '../../lib/mediaFilter.js';
 
   let {
     /** The case's images and videos, already loaded. */
     media = [],
     loading = false,
     caseId,
+    /** The chip picked last; the caller keeps it for the session. */
+    category = $bindable(null),
+    /** Whether the working files are in the grid; kept the same way. */
+    showWorking = $bindable(false),
     /** Take this one as a reference window. */
     onpick,
     onclose,
@@ -28,16 +37,36 @@
   const SEARCH_MIN = 6; // below that, the grid is easier to scan than to search
 
   let query = $state('');
-  let browsing = $state(false); // "…" swaps the grid for the folder browser
+  let browsing = $state(false); // the folder button swaps the grid for the browser
   let path = $state('');
   let selection = $state(null);
 
+  const narrowing = $derived(media.length > SEARCH_MIN);
+  const working = $derived(media.filter(isMadeHere));
+  const collectedCount = $derived(media.length - working.length);
+  // Offered only when it has something to hide and something to leave.
+  const canHold = $derived(narrowing && working.length > 0 && collectedCount > 0);
+  const pool = $derived(canHold && !showWorking ? media.filter((item) => !isMadeHere(item)) : media);
+  // A chip that would hide nothing narrows nothing, so it stays out of the row.
+  const chips = $derived(
+    MEDIA_CATEGORIES.map((c) => ({ ...c, count: pool.filter(c.match).length })).filter(
+      (c) => c.count > 0 && c.count < pool.length
+    )
+  );
+  // A choice the pool no longer offers (the switch hid what it picked) reads as
+  // All, and comes back with the switch.
+  const active = $derived(narrowing ? chips.find((c) => c.key === category) ?? null : null);
+  const narrowed = $derived(active ? pool.filter(active.match) : pool);
   // Same free-text match as the Media Library (filename, title, notes, folder,
   // download source), so what works there works here.
-  const visible = $derived(media.filter((item) => matchesQuery(item, query)));
-  const entries = $derived(
-    media.map((item) => ({ ...item, id: item.path, attrs: { folder: item.folder ?? '' } }))
+  const visible = $derived(narrowed.filter((item) => matchesQuery(item, query)));
+  const heldMatches = $derived(
+    canHold && !showWorking && query.trim() && working.some((item) => matchesQuery(item, query))
   );
+  const entries = $derived(
+    narrowed.map((item) => ({ ...item, id: item.path, attrs: { folder: item.folder ?? '' } }))
+  );
+  const plural = (n) => (n > 1 ? 's' : '');
 
   function resetBrowser() {
     path = '';
@@ -53,6 +82,11 @@
     resetBrowser();
     browsing = true;
   }
+
+  function pickCategory(key) {
+    category = key;
+    resetBrowser();
+  }
 </script>
 
 <Modal title="Add reference" {onclose} width="560px">
@@ -67,20 +101,69 @@
       No images or videos in this case yet. Import one in the Media Library first.
     </div>
   {:else}
-    {#if browsing || media.length > SEARCH_MIN}
+    {#if narrowing}
       <div class="ref-search">
         <SearchInput
           bind:value={query}
           placeholder="Search media…"
-          count={`${visible.length}/${media.length}`}
+          count={`${visible.length}/${pool.length}`}
           width="100%"
         />
+        {#if canHold}
+          <button
+            type="button"
+            class="ref-chip ref-working"
+            class:active={showWorking}
+            aria-pressed={showWorking}
+            title={showWorking
+              ? 'Show only what the case collected'
+              : `Show the ${working.length} file${plural(working.length)} the case produced itself`}
+            onclick={() => {
+              showWorking = !showWorking;
+              resetBrowser();
+            }}
+          >
+            <Icon name="layers" size={12} />
+            {showWorking
+              ? 'Hide working files'
+              : `Show ${working.length} working file${plural(working.length)}`}
+          </button>
+        {/if}
         <button
           class="btn btn-ghost btn-sm browse-btn"
-          title={browsing ? 'Show every image' : 'Browse folders'}
+          class:on={browsing}
+          aria-pressed={browsing}
+          title={browsing ? 'Back to the grid' : 'Browse folders'}
           onclick={toggleBrowser}
-        >…</button>
+        >
+          <Icon name="folder" size={15} />
+        </button>
       </div>
+      {#if chips.length}
+        <div class="ref-chips" role="group" aria-label="Filter by type or source">
+          <button
+            type="button"
+            class="ref-chip"
+            class:active={!active}
+            aria-pressed={!active}
+            onclick={() => pickCategory(null)}
+          >
+            All <span>{pool.length}</span>
+          </button>
+          {#each chips as chip (chip.key)}
+            <button
+              type="button"
+              class="ref-chip"
+              class:active={active?.key === chip.key}
+              aria-pressed={active?.key === chip.key}
+              onclick={() => pickCategory(chip.key)}
+            >
+              <Icon name={chip.icon} size={12} />
+              {chip.label} <span>{chip.count}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     {/if}
     {#if browsing}
       <FolderBrowser
@@ -112,7 +195,9 @@
         </button>
       </div>
     {:else if !visible.length}
-      <div class="ref-empty">No media matches this search.</div>
+      <div class="ref-empty">
+        {heldMatches ? 'Only working files match this search.' : 'No media matches this search.'}
+      </div>
     {:else}
       <div class="ref-grid">
         {#each visible as item (item.path)}
@@ -145,7 +230,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
   .ref-search :global(.search-box) {
     flex: 1;
@@ -153,8 +238,43 @@
   .browse-btn {
     flex-shrink: 0;
     padding: 0 8px;
-    font-size: var(--fs-md);
-    line-height: 1;
+  }
+  .browse-btn.on {
+    color: var(--accent);
+  }
+  .ref-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .ref-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .ref-chip:hover {
+    border-color: var(--border-strong);
+    color: var(--text-1);
+  }
+  .ref-chip.active {
+    border-color: var(--accent);
+    color: var(--text-1);
+  }
+  .ref-chip span {
+    color: var(--text-3);
+  }
+  .ref-working {
+    flex-shrink: 0;
+    align-self: stretch;
   }
   .ref-actions {
     display: flex;

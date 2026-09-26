@@ -77,6 +77,20 @@ describe('the picker', () => {
     await reading;
     expect(refs.loading).toBe(false);
   });
+
+  it('opens on collected media with every type, then keeps the narrowing picked', async () => {
+    const refs = store();
+    expect(refs.category).toBe(null);
+    expect(refs.showWorking).toBe(false);
+
+    await refs.openPicker();
+    refs.category = 'video';
+    refs.showWorking = true;
+    refs.add(CLIP); // closes the picker
+    await refs.openPicker();
+    expect(refs.category).toBe('video');
+    expect(refs.showWorking).toBe(true);
+  });
 });
 
 describe('spawning a window', () => {

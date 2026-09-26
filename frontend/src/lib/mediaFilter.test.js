@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   hasMediaForFilters,
+  isComparison,
   isGenericImage,
   isBroughtIn,
   isMadeHere,
+  MEDIA_CATEGORIES,
   isSatelliteMedia,
   mediaDisplayKind,
   matchesQuery,
@@ -86,6 +89,48 @@ describe('media categories', () => {
     expect(
       mediaDisplayKind({ kind: 'image', source: { type: 'screenshot', imagery_mode: 'satellite' } })
     ).toBe('satellite');
+  });
+
+  it('files a Compare render or a kept Detect finding under Comparisons, not Images', () => {
+    const render = { kind: 'image', source: { type: 'compare' } };
+    expect(isComparison(render)).toBe(true);
+    expect(isGenericImage(render)).toBe(false);
+    expect(isComparison({ kind: 'image', source: { type: 'upload' } })).toBe(false);
+  });
+});
+
+describe('the shared facet list', () => {
+  // Read off the server's own source: the Media Library asks it for these facets
+  // on a large case and counts them itself on a small one, and the reference
+  // picker counts them again, so a facet added on one side has to exist on both.
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+  const quoted = (text) => [...text.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+
+  it('has the server categories, in the server order', () => {
+    const rows = read('../../../src/azimut/store/rows.py');
+    const tuple = rows.match(/^_MEDIA_CATEGORIES = \(([^)]*)\)/m)[1];
+    expect(MEDIA_CATEGORIES.map((c) => c.key)).toEqual(quoted(tuple));
+  });
+
+  it('holds back every source the server calls produced here', () => {
+    const links = read('../../../src/azimut/engine/links.py');
+    const types = [
+      ...quoted(links.match(/^MADE_HERE: .* = \(([^)]*)\)/m)[1]),
+      ...quoted(links.match(/^PRODUCED_HERE: .* = \(([^)]*)\)/m)[1]),
+    ];
+    expect(types).toContain('compare');
+    for (const type of types) expect(isMadeHere({ source: { type } }), type).toBe(true);
+  });
+
+  it('gives each item every facet it matches, since the facets overlap', () => {
+    const facets = (it) => MEDIA_CATEGORIES.filter((c) => c.match(it)).map((c) => c.key);
+    expect(facets({ kind: 'video', source: { type: 'download' } })).toEqual(['video', 'download']);
+    expect(facets({ kind: 'image', source: { type: 'upload' } })).toEqual(['image', 'upload']);
+    expect(facets({ kind: 'image', source: { type: 'inspect', op: 'collage' } })).toEqual([
+      'image',
+      'collage',
+    ]);
+    expect(facets({ kind: 'document', source: { type: 'upload' } })).toEqual(['upload', 'other']);
   });
 });
 
@@ -240,6 +285,8 @@ describe('what the case made, apart from what it collected', () => {
     // extension's window: a map view grabbed on purpose.
     expect(isMadeHere(capture)).toBe(true);
     expect(isMadeHere(grabbed)).toBe(true);
+    // A Compare render and a kept Detect finding: before/after the app drew.
+    expect(isMadeHere(item({ source: { type: 'compare' } }))).toBe(true);
     expect(isMadeHere(upload)).toBe(false);
     expect(isMadeHere(item())).toBe(false);
     expect(isMadeHere(null)).toBe(false);
