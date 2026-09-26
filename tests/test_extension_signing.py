@@ -188,6 +188,47 @@ def test_signing_credentials_are_passed_in_the_private_environment(monkeypatch, 
     assert captured["kwargs"]["env"]["WEB_EXT_API_SECRET"] == "synthetic-secret"
 
 
+def test_an_earlier_xpi_in_the_output_is_never_taken_for_the_new_one(monkeypatch, tmp_path):
+    """dist-xpi/ outlives a cut. An XPI already sitting there under the asset
+    name must be replaced by what AMO returns, and the manifest must hash the new
+    bytes, whatever the two files sort as."""
+    monkeypatch.setenv("AMO_JWT_ISSUER", "synthetic-issuer")
+    monkeypatch.setenv("AMO_JWT_SECRET", "synthetic-secret")
+    manifest = tmp_path / "updates.json"
+    monkeypatch.setattr(sign_extension, "UPDATE_MANIFEST", manifest)
+    output = tmp_path / "dist-xpi"
+    output.mkdir()
+    version = extinstall.bundled_version()
+    stale = output / sign_extension.ASSET_NAME.format(version=version)
+    stale.write_bytes(b"an earlier release")
+
+    def fake_run(argv, **kwargs):
+        artifacts = Path(argv[argv.index("--artifacts-dir") + 1])
+        (artifacts / f"0a1b2c-{version}.xpi").write_bytes(b"freshly signed")
+
+    monkeypatch.setattr(sign_extension.subprocess, "run", fake_run)
+    assert sign_extension.main(["--output", str(output)]) == 0
+
+    assert [path.name for path in output.iterdir()] == [stale.name]
+    assert stale.read_bytes() == b"freshly signed"
+    offered = json.loads(manifest.read_text(encoding="utf-8"))["addons"]
+    (entry,) = next(iter(offered.values()))["updates"]
+    assert entry["update_hash"] == "sha256:" + hashlib.sha256(b"freshly signed").hexdigest()
+
+
+def test_the_signer_refuses_to_guess_between_two_xpis(monkeypatch, tmp_path):
+    monkeypatch.setenv("AMO_JWT_ISSUER", "synthetic-issuer")
+    monkeypatch.setenv("AMO_JWT_SECRET", "synthetic-secret")
+
+    def fake_run(argv, **kwargs):
+        (tmp_path / "a.xpi").write_bytes(b"one")
+        (tmp_path / "b.xpi").write_bytes(b"two")
+
+    monkeypatch.setattr(sign_extension.subprocess, "run", fake_run)
+    with pytest.raises(SystemExit, match="more than one"):
+        sign_extension.sign(tmp_path / "payload", tmp_path)
+
+
 def test_a_signer_failure_cannot_serialize_the_secret(monkeypatch, tmp_path):
     monkeypatch.setenv("AMO_JWT_ISSUER", "synthetic-issuer")
     monkeypatch.setenv("AMO_JWT_SECRET", "synthetic-secret")
