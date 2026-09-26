@@ -227,10 +227,12 @@ def sign(staging: Path, artifacts: Path) -> Path:
         check=True,
         env=signer_env,
     )
-    signed = sorted(artifacts.glob("*.xpi"))
+    signed = list(artifacts.glob("*.xpi"))
     if not signed:
         raise SystemExit("web-ext reported success but produced no .xpi")
-    return signed[-1]
+    if len(signed) > 1:
+        raise SystemExit(f"more than one .xpi in {artifacts}, cannot tell which AMO signed")
+    return signed[0]
 
 
 # ---- the command ------------------------------------------------------------
@@ -280,13 +282,17 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"no such file: {signed}")
     else:
         options.output.mkdir(parents=True, exist_ok=True)
+        signed = options.output / ASSET_NAME.format(version=version)
         with tempfile.TemporaryDirectory(prefix="azimut-xpi-") as scratch:
             staging = Path(scratch) / "payload"
             stage_payload(staging)
-            produced = sign(staging, options.output)
-        signed = options.output / ASSET_NAME.format(version=version)
-        if produced != signed:
-            produced.replace(signed)
+            # web-ext signs into an empty directory of its own. In the output
+            # directory, an XPI left from an earlier cut would be picked up
+            # instead of the one AMO just returned (it once shipped 0.3.0 bytes
+            # as 0.3.1).
+            fresh = Path(scratch) / "signed"
+            fresh.mkdir()
+            shutil.move(str(sign(staging, fresh)), str(signed))
 
     manifest = build_update_manifest(
         facts["id"],
