@@ -7,9 +7,8 @@
    * name.
    */
   import CloudFilter from '../compare/CloudFilter.svelte';
-  import { sizeBand, sizeOf } from '../../lib/map/analyzers.js';
+  import AnalyzerSize from './AnalyzerSize.svelte';
 
-  const SIZES = [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large'], ['all', 'All']];
   const INDICES = [
     ['ndvi', 'NDVI · vegetation'], ['nbr', 'NBR · burn scars'], ['mndwi', 'MNDWI · open water'],
     ['ndwi', 'NDWI · open water'], ['bsi', 'BSI · bare soil'], ['ndbi', 'NDBI · built-up'],
@@ -21,6 +20,8 @@
     /** Thresholds shown outright rather than behind a link. */
     expanded = false,
     readonly = false,
+    /** The wizard asks for the size first, above the analyzers, and not here. */
+    showSize = true,
   } = $props();
 
   let showThresholds = $state(false);
@@ -30,12 +31,6 @@
    *  sensitivity or direction here, and it cleans and smooths on one date too. */
   const rules = $derived(recipe.method === 'rules');
   const SHAPES = [['any', 'Any shape'], ['compact', 'Compact: roofs, craters, vehicles'], ['elongated', 'Long and thin: roads, tracks, trenches']];
-  const size = $derived(sizeOf(recipe.parameters, capability.sizes));
-
-  function setSize(name) {
-    if (readonly || !capability.sizes?.[name]) return;
-    recipe.parameters = { ...recipe.parameters, ...capability.sizes[name] };
-  }
 
   function setWeather(on) {
     if (readonly) return;
@@ -44,17 +39,7 @@
 </script>
 
 <fieldset class="settings" disabled={readonly}>
-  {#if capability.sizes}
-    <div class="cmp-seg fill" role="group" aria-label="Target size">
-      {#each SIZES as [name, label] (name)}
-        {#if capability.sizes[name]}
-          <button type="button" class:on={size === name} aria-pressed={size === name}
-            title={sizeBand(capability.sizes[name])} onclick={() => setSize(name)}>{label}</button>
-        {/if}
-      {/each}
-    </div>
-    <p class="hint">{size ? sizeBand(capability.sizes[size]) : 'Sizes are set by hand below.'}</p>
-  {/if}
+  {#if showSize}<AnalyzerSize bind:recipe {capability} {readonly} />{/if}
   {#if capability.clouds}
     <CloudFilter clouds={recipe.parameters.ignore_clouds} shadows={recipe.parameters.ignore_shadows}
       ontoggle={setWeather} />

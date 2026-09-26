@@ -9,15 +9,24 @@
    * cells in five are dead. So this lists what exists, newest first, with the
    * two facts that decide between them: how much of the areas the pass reaches,
    * and how much of it was cloud.
+   *
+   * The calendar has its place one step up, for where to look: past the year the
+   * presets reach, two days picked in it bound the lookup. The catalogue gives at
+   * most 100 passes, newest first, so a list it cut short offers the older ones.
    */
   import Icon from '../../components/Icon.svelte';
-  import { LOOKBACK_WINDOWS, coverClass, coverLabel, passKey } from '../../lib/map/acquisitions.js';
+  import MonthGrid from '../../components/MonthGrid.svelte';
+  import {
+    LOOKBACK_WINDOWS, MISSION_START, coverClass, coverLabel, lookupSpan, olderSpan, passKey, spanProblem,
+  } from '../../lib/map/acquisitions.js';
+  import { isoDay } from '../../lib/sentinel.js';
   import { cloudClass, cloudLabel } from '../../lib/sentinel.js';
   import { orbitMark, sameTrack } from '../../lib/radar.js';
 
   let {
     list = [],
-    days,
+    /** Days back from today, or two days picked in the calendar, `{ start, end }`. */
+    lookback,
     busy = false,
     error = '',
     truncated = false,
@@ -31,10 +40,25 @@
     /** The chosen sources, `{ date, time }` each, or null. */
     a = null,
     b = null,
-    ondays,
+    onlookback,
     onlook,
+    /** Look again before the oldest pass listed, when the catalogue cut the list. */
+    onolder,
     onpick,
   } = $props();
+
+  const picked = $derived(typeof lookback === 'object' && lookback !== null);
+  const problem = $derived(spanProblem(lookback));
+  const older = $derived(truncated && onolder ? olderSpan(lookback, list) : null);
+  const first = $derived(MISSION_START[radar ? 'sentinel1' : 'sentinel2']);
+  const today = isoDay(new Date());
+  /** Which picked day has its month open: 'start', 'end' or ''. */
+  let calendar = $state('');
+
+  function pickDay(day) {
+    onlookback({ ...lookback, [calendar]: day });
+    calendar = '';
+  }
 
   /** Whether a row is the pass a side names: a typed radar day matches its day. */
   function names(source, entry) {
@@ -49,16 +73,42 @@
       {#each LOOKBACK_WINDOWS as option (option.id)}
         <button
           type="button"
-          class:on={days === option.id}
+          class:on={lookback === option.id}
           disabled={busy}
-          onclick={() => ondays(option.id)}
+          onclick={() => { calendar = ''; onlookback(option.id); }}
         >{option.label}</button>
       {/each}
+      <button
+        type="button"
+        class:on={picked}
+        disabled={busy}
+        title="Pick the first and the last day in the calendar"
+        onclick={() => { if (!picked) onlookback(lookupSpan(lookback)); }}
+      >Dates…</button>
     </div>
-    <button class="btn btn-sm" disabled={busy || !areas} onclick={onlook}>
+    <button class="btn btn-sm" disabled={busy || !areas || !!problem} onclick={onlook}>
       {busy ? 'Looking…' : searched ? 'Look again' : 'Find passes'}
     </button>
   </div>
+
+  {#if picked}
+    <div class="span">
+      <button type="button" class="day cmp-mono" class:open={calendar === 'start'} disabled={busy}
+        aria-label="First day" aria-expanded={calendar === 'start'}
+        onclick={() => (calendar = calendar === 'start' ? '' : 'start')}>{lookback.start || 'First day'}</button>
+      <span aria-hidden="true">→</span>
+      <button type="button" class="day cmp-mono" class:open={calendar === 'end'} disabled={busy}
+        aria-label="Last day" aria-expanded={calendar === 'end'}
+        onclick={() => (calendar = calendar === 'end' ? '' : 'end')}>{lookback.end || 'Last day'}</button>
+    </div>
+    {#if calendar}
+      <MonthGrid value={lookback[calendar]} label={calendar === 'start' ? 'First day' : 'Last day'}
+        min={calendar === 'start' ? first : lookback.start || first}
+        max={calendar === 'start' ? lookback.end || today : today}
+        onpick={pickDay} />
+    {/if}
+    {#if problem}<p class="warn">{problem}</p>{/if}
+  {/if}
 
   {#if !areas}
     <p class="hint">Draw an area in step 1, then look up the passes it has.</p>
@@ -72,7 +122,8 @@
     <p class="warn">No pass reaches these areas in this window. Try a longer one.</p>
   {:else}
     {#if truncated}
-      <p class="warn">The catalogue stopped at 100 passes, so older ones are missing. Shorten the window for a complete list.</p>
+      <p class="warn">The catalogue stopped at 100 passes, so older ones are missing.
+        {#if older}<button type="button" class="link" disabled={busy} onclick={onolder}>Older passes</button>{/if}</p>
     {/if}
     <ul class="list">
       {#each list as entry (passKey(entry))}
@@ -139,6 +190,28 @@
     justify-content: space-between;
     gap: 8px;
     flex-wrap: wrap;
+  }
+  /* Underlined: it sits in the warning's own orange. */
+  .link { color: var(--accent); font-size: inherit; text-decoration: underline; }
+  .link:disabled { color: var(--text-3); }
+  .span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .day {
+    padding: 3px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+  }
+  .day:hover:not(:disabled),
+  .day.open {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .hint {
     display: flex;

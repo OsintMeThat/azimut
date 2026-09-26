@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 from PIL import Image
+from pydantic import ValidationError
 
 from .. import config, layout
 from ..workspace import Case
@@ -40,7 +41,9 @@ from .analysis_models import (
     Area,
     AreaDates,
     AreaGeometry,
+    Model,
     Parameters,
+    Recipe,
     RunInput,
     Source,
     Zone,
@@ -48,6 +51,8 @@ from .analysis_models import (
     is_single,
     recipe_products,
     recipe_sensor,
+    stored,
+    unreadable,
 )
 
 # What one run may sweep. The ceiling is not memory — tiles are read one at a
@@ -269,7 +274,66 @@ def read(case: Case, kind: str, ident: str) -> dict[str, Any]:
             saved["zones"], saved["area_dates"] = zones, kept
             if missing:
                 saved["missing_areas"] = missing
+        return current(saved)
+    if kind == "runs" and isinstance(saved.get("input"), dict):
+        saved["input"] = current(saved["input"])
     return saved
+
+
+#: The parts of a saved detection that editing it sends back as they were read.
+PARTS: dict[str, type[Model]] = {"recipe": Recipe, "a": Source, "b": Source}
+LISTS: dict[str, type[Model]] = {"zones": Zone, "area_dates": AreaDates}
+
+
+def _today(model: type[Model], part: Any) -> Any:
+    try:
+        model.model_validate(part)
+        return part
+    except ValueError:
+        pass
+    try:
+        return stored(model, part).model_dump()
+    except ValueError:
+        return part
+
+
+def current(body: dict[str, Any]) -> dict[str, Any]:
+    """A saved detection with its parts in the shape this version reads.
+
+    Editing a routine or a run sends its recipe, dates and areas back to a route
+    that refuses any field it does not know, so a field an earlier version wrote
+    has to be gone before they leave. A part that reads as it is stays untouched,
+    and one that no longer reads at all is left for the route to refuse with its
+    reason.
+    """
+    body = dict(body)
+    for key, model in PARTS.items():
+        if isinstance(body.get(key), dict):
+            body[key] = _today(model, body[key])
+    for key, model in LISTS.items():
+        if isinstance(body.get(key), list):
+            body[key] = [_today(model, part) for part in body[key]]
+    return body
+
+
+def ready_runs(case: Case, followup_id: str | None = None) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Every finished run, as its list row and its record, newest first.
+
+    Something reading other runs to decide about this one (a repeat, the pass
+    before, what a routine found) skips a run it cannot read, rather than let
+    that one run fail every launch in the case.
+    """
+    found = []
+    for row in listing(case, "runs"):
+        if row.get("status") != "ready" or (followup_id and row.get("followup_id") != followup_id):
+            continue
+        try:
+            run = read(case, "runs", row["id"])
+        except (OSError, ValueError):
+            continue
+        if isinstance(run.get("input"), dict):
+            found.append((row, run))
+    return found
 
 
 def area_zone(area: dict[str, Any]) -> Zone:
@@ -284,7 +348,7 @@ def share_areas(case: Case, data: dict[str, Any], ident: str) -> dict[str, Any]:
     linked = []
     zones = data.get("zones") or data.get("recipe", {}).get("zones") or []
     for raw in zones:
-        zone = Zone.model_validate(raw)
+        zone = stored(Zone, raw)
         try:
             read(case, "areas", zone.id)
             area_id = zone.id
@@ -378,10 +442,7 @@ def findings(case: Case, followup_id: str) -> list[dict[str, Any]]:
     separate sweeps, but what they found is one growing list, and this is it.
     """
     rows: list[dict[str, Any]] = []
-    for summary in listing(case, "runs"):
-        if summary.get("followup_id") != followup_id or summary.get("status") != "ready":
-            continue
-        run = read(case, "runs", summary["id"])
+    for _, run in ready_runs(case, followup_id):
         day = (run["input"].get("b") or {}).get("date", "")
         for result in run.get("results", []):
             if result.get("review") not in KEPT:
@@ -948,7 +1009,7 @@ def _changes(before: Any, after: Any, valid: Any) -> tuple[Any, Any]:
     return stacked, stacked.mean(-1)
 
 
-def _spots(before: Any, after: Any, valid: Any, metres: float, threshold: float,
+def _spots(before: Any, after: Any, valid: Any, seen: Any, metres: float, threshold: float,
            options: Parameters) -> tuple[Any, Any, Any]:
     """Change against the change around it, and whether the surroundings held.
 
@@ -957,10 +1018,14 @@ def _spots(before: Any, after: Any, valid: Any, metres: float, threshold: float,
     takes the target itself for background, and a 90 m mark in the Yemeni desert
     then measured 3.5% where it had really moved 7%.
 
-    Only pixels the sweep can measure feed that ring. Where a granule ends or a
-    cloud sits, one date has ground and the other has nothing, and letting that
-    difference into the background raised every neighbour it reached: a quiet
-    tile cut in half by a granule edge produced a candidate the size of the cut.
+    Only imaged ground feeds that ring, `seen`, which runs past the area and
+    into the tile's padding. Where a granule ends or a cloud sits, one date has
+    ground and the other has nothing, and letting that difference into the
+    background raised every neighbour it reached: a quiet tile cut in half by a
+    granule edge produced a candidate the size of the cut. The ground past the
+    area's edge was imaged all the same, and counting it as ground that held
+    still made the sliver of every field the edge cut look isolated, which
+    lined an airbase's edge with candidates.
     """
     import cv2
     import numpy as np
@@ -973,15 +1038,16 @@ def _spots(before: Any, after: Any, valid: Any, metres: float, threshold: float,
     residual, moved = [], []
     for old, new in zip(_reflectance(before), _reflectance(after)):
         delta = (new - old).astype(np.float64)
-        mean, _, share = ring_statistics(delta, valid, ring, guard)
+        mean, _, share = ring_statistics(delta, seen, ring, guard)
         residual.append(np.where(share > 0, delta - mean, 0.0))
         # The passes' overall shift in light is not the neighbourhood changing.
         shift = float(np.median(delta[valid])) if valid.any() else 0.0
         moved.append(delta - max(-MAX_SHIFT, min(MAX_SHIFT, shift)))
     spot = np.stack(residual, -1)
     changed = ((np.sqrt((np.stack(moved, -1) ** 2).mean(-1)) >= threshold * GROW)
-               & valid).astype(np.float32)
-    share = cv2.blur(changed, (wide, wide))
+               & seen).astype(np.float32)
+    imaged = cv2.blur(seen.astype(np.float32), (wide, wide))
+    share = cv2.blur(changed, (wide, wide)) / np.maximum(imaged, 1e-6)
     return np.sqrt((spot ** 2).mean(-1)), spot.mean(-1), share < SPOT_SHARE
 
 
@@ -1076,24 +1142,26 @@ def sar_window(smoothing: int, metres: float) -> int:
     return max(3, round(SAR_WINDOW_M * max(1, smoothing) / metres) | 1)
 
 
-def _sar_change(before: Any, after: Any, valid: Any, metres: float,
+def _sar_change(before: Any, after: Any, valid: Any, seen: Any, metres: float,
                 options: Parameters) -> tuple[Any, Any, Any, float, dict[str, tuple[Any, str]]]:
     """Backscatter that moved between two passes of one track, in decibels.
 
     Both passes are averaged as power over the same ground before they are
-    compared, so speckle does not read as change. What the recipe's ground
-    setting asks for then gates it: bright ground on the side that has it, or
-    water coming or going.
+    compared, so speckle does not read as change. That ground is all the radar
+    imaged, `seen`, past the area's edge too, so a pixel by the edge averages
+    as many samples as any other. What the recipe's ground setting asks for
+    then gates it: bright ground on the side that has it, or water coming or
+    going.
     """
     import numpy as np
 
     window = sar_window(options.smoothing, metres)
-    old = _power_mean(before[:, :, 0], valid, window)
-    new = _power_mean(after[:, :, 0], valid, window)
+    old = _power_mean(before[:, :, 0], seen, window)
+    new = _power_mean(after[:, :, 0], seen, window)
     # Both polarisations vote: a building that falls or a field that floods
     # darkens in each, while speckle in one is not speckle in the other.
-    delta = (new - old + _power_mean(after[:, :, 1], valid, window)
-             - _power_mean(before[:, :, 1], valid, window)) / 2
+    delta = (new - old + _power_mean(after[:, :, 1], seen, window)
+             - _power_mean(before[:, :, 1], seen, window)) / 2
     shift = float(np.median(delta[valid])) if valid.any() else 0.0
     delta = delta - max(-MAX_SAR_SHIFT, min(MAX_SAR_SHIFT, shift))
     ground = options.sar_ground
@@ -1146,14 +1214,16 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
         binary, stat, threshold, measures = _sar_vessels(products[1], water, inside, metres, options)
     else:
         before, after = products
-        valid = inside & ~blocked
+        # Ground both passes imaged, inside the area or past it: what a change is
+        # read against. Only the area can hold a candidate.
+        seen = (before[:, :, 0] > 0) & (after[:, :, 0] > 0) & ~blocked
+        valid = inside & seen
         if method == "sar-change":
-            valid &= (before[:, :, 0] > 0) & (after[:, :, 0] > 0)
-            stat, signed, state, threshold, measures = _sar_change(before, after, valid, metres, options)
+            stat, signed, state, threshold, measures = _sar_change(before, after, valid, seen,
+                                                                   metres, options)
         elif method == "index":
             old = before[:, :, 0].astype(np.float32) / 127.5 - 1
             new = after[:, :, 0].astype(np.float32) / 127.5 - 1
-            valid &= (before[:, :, 0] > 0) & (after[:, :, 0] > 0)
             delta = new - old
             absent, present = INDEX_STATES[options.index]
             gone, came = new < absent, old < absent
@@ -1167,13 +1237,12 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
             signed = delta
             measures = {"before": (old, "mean"), "after": (new, "mean")}
         else:
-            valid &= (before[:, :, 0] > 0) & (after[:, :, 0] > 0)
             state = np.ones(valid.shape, bool)
             # In reflectance: 2% is noise over bright desert in a week, 20% is
             # a new roof on sand.
             threshold = _scale(options.sensitivity, 0.02, 0.2)
             if method == "spots":
-                stat, signed, state = _spots(before, after, valid, metres, threshold, options)
+                stat, signed, state = _spots(before, after, valid, seen, metres, threshold, options)
                 measures = {"signed": (signed * 100, "mean")}
             else:
                 deltas, signed = _changes(before, after, valid)
@@ -1192,9 +1261,14 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
         if options.direction != "both":
             valid &= signed > 0 if options.direction == "gain" else signed < 0
         stat = np.clip(stat, -10, 10).astype(np.float32)
-        # Radar change was already averaged as power over this window.
+        # Radar change was already averaged as power over this window. The blur
+        # only averages imaged ground, so a granule's end does not bleed into
+        # the pixels beside it.
         if options.smoothing and method not in RADAR_METHODS:
-            stat = cv2.GaussianBlur(stat, (options.smoothing * 2 + 1,) * 2, 0)
+            blur = (options.smoothing * 2 + 1,) * 2
+            total = cv2.GaussianBlur(np.where(seen, stat, 0).astype(np.float32), blur, 0)
+            weight = cv2.GaussianBlur(seen.astype(np.float32), blur, 0)
+            stat = np.where(weight > 1e-3, total / np.maximum(weight, 1e-3), 0).astype(np.float32)
         grow = valid & (np.abs(signed if method == "structure" else stat) >= threshold * GROW)
         binary = hysteresis(valid & state & (stat >= threshold), grow & state)
         if options.cleanup:
@@ -1275,40 +1349,145 @@ def keeps(row: dict[str, Any], options: Parameters) -> bool:
     return ratio <= COMPACT_MAX if options.shape == "compact" else ratio >= ELONGATED_MIN
 
 
-def merge(rows: list[dict[str, Any]], distance: float) -> list[dict[str, Any]]:
-    """Join touching seam components or explicitly requested nearby candidates.
+# Two outlines closer than this, in metres, touch: pieces of one component cut
+# by a tile seam share the seam's edge exactly.
+TOUCH_M = 0.01
 
-    A joined candidate keeps the reading of its stronger half: the margin is
+
+def _outline(row: dict[str, Any]) -> Any:
+    """Every edge of a candidate's footprint as (x0, y0, x1, y1), in metres of
+    the Mercator plane, or None for a candidate without one."""
+    import numpy as np
+
+    geometry = row.get("geometry")
+    if not geometry or geometry.get("type") not in ("Polygon", "MultiPolygon"):
+        return None
+    polygons = [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+    edges = []
+    for polygon in polygons:
+        for ring in polygon:
+            points = np.array([mercator(lon, lat) for lon, lat in ring], np.float64) * WORLD
+            if len(points) and (points[0] != points[-1]).any():
+                points = np.vstack([points, points[:1]])
+            if len(points) > 1:
+                edges.append(np.hstack([points[:-1], points[1:]]))
+    return np.vstack(edges) if edges else None
+
+
+def _within(first: Any, second: Any, reach: float) -> bool:
+    """Whether two outlines come within `reach` of each other anywhere.
+
+    Outlines of different components never cross, so the gap between them is
+    always measured from a corner of one to an edge of the other.
+    """
+    import numpy as np
+
+    def bounds(edges: Any) -> Any:
+        return np.array([np.minimum(edges[:, 0], edges[:, 2]).min(), np.minimum(edges[:, 1], edges[:, 3]).min(),
+                         np.maximum(edges[:, 0], edges[:, 2]).max(), np.maximum(edges[:, 1], edges[:, 3]).max()])
+
+    def corners_to_edges(corners: Any, edges: Any) -> bool:
+        box = bounds(edges)
+        corners = corners[(corners[:, 0] >= box[0] - reach) & (corners[:, 0] <= box[2] + reach)
+                          & (corners[:, 1] >= box[1] - reach) & (corners[:, 1] <= box[3] + reach)]
+        if not len(corners):
+            return False
+        near = bounds(np.hstack([corners, corners]))
+        edges = edges[(np.maximum(edges[:, 0], edges[:, 2]) >= near[0] - reach)
+                      & (np.minimum(edges[:, 0], edges[:, 2]) <= near[2] + reach)
+                      & (np.maximum(edges[:, 1], edges[:, 3]) >= near[1] - reach)
+                      & (np.minimum(edges[:, 1], edges[:, 3]) <= near[3] + reach)]
+        if not len(edges):
+            return False
+        start, step = edges[:, :2], edges[:, 2:] - edges[:, :2]
+        length = np.maximum((step ** 2).sum(-1), 1e-12)
+        # Blocks keep the corner-by-edge table to a few million entries.
+        for block in range(0, len(corners), max(1, 2_000_000 // len(edges))):
+            points = corners[block:block + max(1, 2_000_000 // len(edges)), None, :]
+            t = np.clip(((points - start) * step).sum(-1) / length, 0, 1)
+            gap = points - (start + t[..., None] * step)
+            if ((gap ** 2).sum(-1) <= reach * reach).any():
+                return True
+        return False
+
+    return corners_to_edges(first[:, :2], second) or corners_to_edges(second[:, :2], first)
+
+
+def merge(rows: list[dict[str, Any]], distance: float) -> list[dict[str, Any]]:
+    """Join candidates whose footprints come within `distance` metres, and at
+    zero the pieces of one component that a tile seam cut apart.
+
+    The gap is measured between the footprints themselves. Boxes alone once
+    joined everything: two boxes overlap without their shapes touching, and
+    each join grew the box that the next one was tested against, until the
+    667 marks of an airbase's seasonal pair became one candidate of 31 km²,
+    which its size then dropped.
+
+    A joined candidate keeps the reading of its stronger part: the margin is
     how far the best of it got past the line, and that is what it is sorted by.
     """
+    count = len(rows)
+    parent = list(range(count))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    outlines: dict[int, Any] = {}
+
+    def outline(i: int) -> Any:
+        if i not in outlines:
+            outlines[i] = _outline(rows[i])
+        return outlines[i]
+
+    reach = [0.0] * count
+    dx = [0.0] * count
+    dy = distance / 111_320
+    for i, row in enumerate(rows):
+        lat = (row["bbox"][1] + row["bbox"][3]) / 2
+        # Mercator metres run longer than ground metres by 1 / cos(latitude).
+        reach[i] = (distance + TOUCH_M) / max(.08, math.cos(math.radians(lat)))
+        dx[i] = dy / max(.08, math.cos(math.radians(lat)))
+    widest = max(dx, default=0.0)
+    active: list[int] = []
+    for i in sorted(range(count), key=lambda k: rows[k]["bbox"][0]):
+        a = rows[i]["bbox"]
+        active = [j for j in active if rows[j]["bbox"][2] + widest + 1e-10 >= a[0]]
+        for j in active:
+            b = rows[j]["bbox"]
+            if root(i) == root(j):
+                continue
+            if not (a[0] <= b[2] + dx[i] + 1e-10 and b[0] <= a[2] + dx[i] + 1e-10
+                    and a[1] <= b[3] + dy + 1e-10 and b[1] <= a[3] + dy + 1e-10):
+                continue
+            first, second = outline(i), outline(j)
+            if first is None or second is None or _within(first, second, max(reach[i], reach[j])):
+                parent[root(i)] = root(j)
+        active.append(i)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(count):
+        groups.setdefault(root(i), []).append(i)
+    if len(groups) > MAX_RESULTS * 2:
+        raise ValueError("too many candidates; reduce the area or pick a larger size")
     kept: list[dict[str, Any]] = []
-    for row in rows:
-        i = 0
-        while i < len(kept):
-            other = kept[i]
-            a, b = row["bbox"], other["bbox"]
-            lat = (a[1] + a[3]) / 2
-            dy = distance / 111_320
-            dx = dy / max(.08, math.cos(math.radians(lat)))
-            if a[0] <= b[2] + dx + 1e-10 and b[0] <= a[2] + dx + 1e-10 and \
-                    a[1] <= b[3] + dy + 1e-10 and b[1] <= a[3] + dy + 1e-10:
-                kept.pop(i)
-                if other["margin"] > row["margin"]:
-                    row.update(margin=other["margin"], strength=other["strength"],
-                               measure=other["measure"])
-                row["area"] += other["area"]
-                row["bbox"] = [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
-                row["parts"].extend(other["parts"])
-                if "geometry" in row and "geometry" in other:
-                    row["geometry"] = analysis_geometry.joined(row["geometry"], other["geometry"])
-                a = row["bbox"]
-                row["coordinates"] = [(a[0] + a[2]) / 2, (a[1] + a[3]) / 2]
-                i = 0
-            else:
-                i += 1
+    for members in sorted(groups.values(), key=lambda group: group[0]):
+        row = rows[members[0]]
+        if len(members) > 1:
+            parts = [rows[i] for i in members]
+            best = max(parts, key=lambda part: part["margin"])
+            boxes = [part["bbox"] for part in parts]
+            box = [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                   max(b[2] for b in boxes), max(b[3] for b in boxes)]
+            row.update(margin=best["margin"], strength=best["strength"], measure=best["measure"],
+                       area=sum(part["area"] for part in parts), bbox=box,
+                       coordinates=[(box[0] + box[2]) / 2, (box[1] + box[3]) / 2],
+                       parts=[piece for part in parts for piece in part["parts"]])
+            if all("geometry" in part for part in parts):
+                row["geometry"] = analysis_geometry.joined_all([part["geometry"] for part in parts])
         kept.append(row)
-        if len(kept) > MAX_RESULTS * 2:
-            raise ValueError("too many candidates; reduce the area or pick a larger size")
     return kept
 
 
@@ -1341,23 +1520,23 @@ def previous_pass(case: Case, body: RunInput) -> Source:
     if not body.followup_id:
         return body.a
     best: tuple[tuple[str, str], Source] | None = None
-    for summary in listing(case, "runs"):
-        if summary.get("followup_id") != body.followup_id or summary.get("status") != "ready":
-            continue
-        previous = read(case, "runs", summary["id"])
+    for summary, previous in ready_runs(case, body.followup_id):
         area_id = body.zones[0].id
-        if previous.get("area_runs"):
-            area = next((p for p in previous["area_runs"] if p["area_id"] == area_id
-                         and p["status"] == "ready"), None)
-            if not area:
-                continue
-            candidate = Source.model_validate(area["b"])
-        else:
-            if not any(z["id"] == area_id or hashlib.sha256(
-                    f"{body.followup_id}:{z['id']}".encode()).hexdigest()[:12] == area_id
-                    for z in previous["input"].get("zones", [])):
-                continue
-            candidate = Source.model_validate(previous["input"]["b"])
+        try:
+            if previous.get("area_runs"):
+                area = next((p for p in previous["area_runs"] if p["area_id"] == area_id
+                             and p["status"] == "ready"), None)
+                if not area:
+                    continue
+                candidate = stored(Source, area["b"])
+            else:
+                if not any(z["id"] == area_id or hashlib.sha256(
+                        f"{body.followup_id}:{z['id']}".encode()).hexdigest()[:12] == area_id
+                        for z in previous["input"].get("zones", [])):
+                    continue
+                candidate = stored(Source, previous["input"]["b"])
+        except (KeyError, ValueError):
+            continue
         if candidate.layer != body.b.layer or not candidate.date:
             continue
         if body.b.date and candidate.date >= body.b.date:
@@ -1542,14 +1721,22 @@ def prepare_areas(case: Case, body: RunInput) -> tuple[RunInput, list[dict[str, 
     return body.model_copy(update={"area_dates": pairs}), outcomes
 
 
+def _same_pass(saved: Any, asked: dict[str, Any]) -> bool:
+    """Whether a pass a run recorded is the one asked for, read as this version reads it."""
+    try:
+        return stored(Source, saved).model_dump() == asked
+    except ValueError:
+        return False
+
+
 def duplicates(case: Case, body: RunInput, outcomes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Exact geometry, recipe and source pairs only; overlapping dates do not match."""
     found = []
-    for summary in listing(case, "runs"):
-        if summary.get("status") != "ready":
-            continue
-        run = read(case, "runs", summary["id"])
-        old = RunInput.model_validate(run["input"])
+    for _, run in ready_runs(case):
+        try:
+            old = stored(RunInput, run["input"])
+        except ValueError:
+            continue  # a run this version cannot read is not the one being launched
         if old.recipe.model_dump() != body.recipe.model_dump():
             continue
         for outcome in outcomes:
@@ -1561,9 +1748,9 @@ def duplicates(case: Case, body: RunInput, outcomes: list[dict[str, Any]]) -> li
                 continue
             records = run.get("area_runs") or [{"area_id": zone.id, "status": "ready",
                         "a": old.a.model_dump(), "b": old.b.model_dump()}]
-            match = next((r for r in records if r["area_id"] == zone.id and r["status"] == "ready"
-                          and r["b"] == outcome["b"] and
-                          (is_single(body.recipe) or r["a"] == outcome["a"])), None)
+            match = next((r for r in records if r.get("area_id") == zone.id and r.get("status") == "ready"
+                          and _same_pass(r.get("b"), outcome["b"]) and
+                          (is_single(body.recipe) or _same_pass(r.get("a"), outcome["a"]))), None)
             if match:
                 found.append({"run_id": run["id"], "title": run["title"], "area_id": zone.id,
                               "area_name": zone.name, "a": outcome["a"], "b": outcome["b"]})
@@ -1575,7 +1762,11 @@ def execute(case: Case, job: dict[str, Any]) -> None:
     check_active(case, ident)
     run = read(case, "runs", ident)
     try:
-        original = hydrate(case, RunInput.model_validate(run["input"]))
+        try:
+            original = hydrate(case, stored(RunInput, run["input"]))
+        except ValidationError as exc:
+            raise ValueError(f"this detection no longer reads ({unreadable(exc)}); "
+                             "edit it and run it again") from exc
         outcomes = run.get("area_runs")
         if outcomes is None:
             _, outcomes = prepare_areas(case, original)
@@ -1593,8 +1784,8 @@ def execute(case: Case, job: dict[str, Any]) -> None:
                 continue
             zone = next(zone for zone in original.zones if zone.id == outcome["area_id"])
             body = for_area(original, zone).model_copy(update={
-                "a": Source.model_validate(outcome["b"] if single else outcome["a"]),
-                "b": Source.model_validate(outcome["b"]), "date_rule": "manual"})
+                "a": stored(Source, outcome["b"] if single else outcome["a"]),
+                "b": stored(Source, outcome["b"]), "date_rule": "manual"})
             resolved.append(AreaDates(area_id=zone.id, a=body.a, b=body.b, date_rule="manual"))
             if not single and body.a == body.b:
                 outcome.update(status="no_new_imagery", message=f"{zone.name}: No different dated imagery is available")

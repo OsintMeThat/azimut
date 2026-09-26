@@ -89,10 +89,10 @@ def footprint(mask: Any, x: int, y: int, z: int, size: int, offset=(0, 0)) -> di
         "type": "MultiPolygon", "coordinates": polygons}
 
 
-def joined(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+def joined_all(shapes: list[dict[str, Any]]) -> dict[str, Any]:
     def parts(shape: dict[str, Any]) -> list:
         return [shape["coordinates"]] if shape["type"] == "Polygon" else shape["coordinates"]
-    return {"type": "MultiPolygon", "coordinates": parts(a) + parts(b)}
+    return {"type": "MultiPolygon", "coordinates": [part for shape in shapes for part in parts(shape)]}
 
 
 def interior(geometry: dict[str, Any], preferred: tuple[float, float]) -> tuple[float, float]:

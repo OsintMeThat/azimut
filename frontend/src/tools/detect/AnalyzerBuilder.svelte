@@ -18,7 +18,7 @@
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { api } from '../../lib/api.js';
-  import { acquisitionQuery } from '../../lib/map/acquisitions.js';
+  import { acquisitionQuery, olderSpan, withOlder } from '../../lib/map/acquisitions.js';
   import { clone, viewZone } from '../../lib/map/analyzers.js';
   import {
     RULE_COLOURS, checksSummary, describeRecipe, formatShare, markOutcomes, newCheck, newRule, readsOneDate,
@@ -86,11 +86,13 @@
   let error = $state('');
   let saving = $state(false);
   let shown = $state([]);
+  /** What the map paints: each rule's pixels, or only what a run would return. */
+  let view = $state('rules');
   let hover = $state(null);
   let probe = $state(null);
   let showing = $state('basemap');
   let layer = $state('TRUE_COLOR');
-  let passes = $state({ list: [], days: 90, busy: false, error: '', searched: false, truncated: false, open: false });
+  let passes = $state({ list: [], lookback: 90, busy: false, error: '', searched: false, truncated: false, open: false });
   /** The check on the bench, and what each check's last read left. */
   let active = $state(null);
   let readings = $state({});
@@ -101,6 +103,10 @@
   const current = $derived(signature(recipe));
   const summary = $derived(checksSummary(recipe));
   const bench = $derived(recipe.checks.find((check) => check.id === active) ?? null);
+  /** The open check's own count, while its last read matches the rules and passes on the map:
+   *  the map then shows its frame only, so the view's count would not be what is seen. */
+  const framed = $derived(bench?.result && bench.result.signature === current && bench.b.date === b.date
+    && (single || (bench.a?.date ?? '') === a.date) ? bench.result : null);
 
   /** The view, held inside the ranges the engine accepts. */
   function bounded(bounds) {
@@ -148,8 +154,13 @@
   /** A rule's eye; one added since the last toggle starts open. */
   const isShown = (i) => shown[i] ?? true;
   function toggle(i) {
-    shown = recipe.rules.map((_, k) => (k === i ? !isShown(k) : isShown(k)));
+    // With the detections alone on the map every eye reads closed, so one
+    // pressed there opens its rule and brings the others back as they were.
+    const opening = view === 'detections';
+    view = 'rules';
+    shown = recipe.rules.map((_, k) => (k === i ? opening || !isShown(k) : isShown(k)));
   }
+  const painted = (i) => view === 'rules' && isShown(i);
 
   /** What a reading depends on; the name, label, colour and checks do not. */
   const readingRecipe = $derived({ name: 'Preview', method: 'rules', rules: recipe.rules, match: recipe.match,
@@ -372,8 +383,8 @@
     builder = {
       preview, probe,
       // A hidden rule stays hidden while the pointer is on its row.
-      hover: hover !== null && isShown(hover) ? hover : null,
-      shown: recipe.rules.map((_, i) => isShown(i)),
+      hover: hover !== null && painted(hover) ? hover : null,
+      shown: recipe.rules.map((_, i) => painted(i)),
       rules: clone(recipe.rules),
       colour: recipe.colour, style: recipe.style, phenomenon: recipe.phenomenon,
       colours: RULE_COLOURS,
@@ -450,13 +461,17 @@
     if (source.date) show(letter);
   }
 
-  async function lookUp() {
-    if (!region) return;
+  const lookUp = () => search(passes.lookback, false);
+  const lookOlder = () => search(olderSpan(passes.lookback, passes.list), true);
+
+  async function search(span, more) {
+    if (!region || !span) return;
     passes = { ...passes, busy: true, error: '', open: true };
     try {
       const found = await api.post('/api/satellite/sentinel/acquisitions',
-        acquisitionQuery([viewZone(region, 'Preview')], passes.days, new Date(), radar ? 'sentinel1' : 'sentinel2'));
-      passes = { ...passes, list: found.dates ?? [], searched: true, truncated: !!found.truncated };
+        acquisitionQuery([viewZone(region, 'Preview')], span, new Date(), radar ? 'sentinel1' : 'sentinel2'));
+      const list = more ? withOlder(passes.list, found.dates) : found.dates ?? [];
+      passes = { ...passes, list, searched: true, truncated: !!found.truncated };
     } catch (e) {
       passes = { ...passes, error: e.message };
     } finally {
@@ -509,10 +524,10 @@
       </button>
     </div>
     {#if passes.open}
-      <AcquisitionPicker list={passes.list} days={passes.days} busy={passes.busy} error={passes.error}
+      <AcquisitionPicker list={passes.list} lookback={passes.lookback} busy={passes.busy} error={passes.error}
         searched={passes.searched} truncated={passes.truncated} areas={region ? 1 : 0} {single} {radar}
         wantsReference={!single} wantsCompare={true} {a} {b}
-        ondays={(days) => (passes = { ...passes, days })} onlook={lookUp}
+        onlookback={(lookback) => (passes = { ...passes, lookback })} onlook={lookUp} onolder={lookOlder}
         onpick={(letter, entry) => setDate(letter, entry.date, entry.time ?? '')} />
     {/if}
     <div class="row under">
@@ -539,8 +554,21 @@
         <p class="hint">{needs}</p>
       {:else}
         {#if preview}
-          <p class="result"><strong>{preview.count} candidate{preview.count === 1 ? '' : 's'}</strong> on the map
-            · {formatShare(preview.kept)} of the measured ground kept{#if working} · updating…{/if}</p>
+          <div class="row">
+            {#if framed}
+              <p class="result grow"><strong>{framed.count} candidate{framed.count === 1 ? '' : 's'}</strong>
+                in “{bench.name}”{#if working} · updating…{/if}</p>
+            {:else}
+              <p class="result grow"><strong>{preview.count} candidate{preview.count === 1 ? '' : 's'}</strong> on the map
+                · {formatShare(preview.kept)} of the measured ground kept{#if working} · updating…{/if}</p>
+            {/if}
+            <div class="cmp-seg" role="group" aria-label="What the map shows">
+              <button type="button" class:on={view === 'rules'} aria-pressed={view === 'rules'}
+                title="Each rule's pixels in its colour" onclick={() => (view = 'rules')}>Rules</button>
+              <button type="button" class:on={view === 'detections'} aria-pressed={view === 'detections'}
+                title="Only what a detection would return" onclick={() => (view = 'detections')}>Detections</button>
+            </div>
+          </div>
           {#if preview.candidates.length && preview.count > preview.candidates.length}<p class="hint">The {preview.candidates.length} strongest are drawn.</p>{/if}
           {#if preview.note}<p class="warn">{preview.note}</p>{/if}
         {:else if working && !missing}
@@ -583,7 +611,7 @@
       </div>
       {#each recipe.rules as _, i (i)}
         <RuleRow bind:rule={recipe.rules[i]} index={i} colour={RULE_COLOURS[i % RULE_COLOURS.length]}
-          signal={i === signal} reading={preview?.rules?.[i] ?? null} match={recipe.match} shown={isShown(i)} ontoggle={() => toggle(i)}
+          signal={i === signal} reading={preview?.rules?.[i] ?? null} match={recipe.match} shown={painted(i)} ontoggle={() => toggle(i)}
           bands={limits.bands} classes={limits.classes} maxAround={limits.max_around}
           canRemove={recipe.rules.length > 1} onremove={() => remove(i)} onsignal={() => rank(i)}
           onhover={(index) => (hover = index)} />

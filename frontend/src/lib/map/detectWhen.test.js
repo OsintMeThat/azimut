@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  areaLine, setSide, sharedSide, sideLine, uniform, whenNeed, whenSummary, withRule,
+  areaLine, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform, whenNeed, whenSummary, withRule,
 } from './detectWhen.js';
 
 const pair = (id, a = '', b = '', extra = {}) => ({
@@ -96,5 +96,41 @@ describe('the When step of a detection', () => {
       .toBe('Each run: the newest pass');
     const radar = [{ ...pair('x', '2026-08-01'), a: { date: '2026-08-01', time: '16:32:10' } }];
     expect(whenSummary({ ...once, radar: true, pairs: radar })).toBe('2026-08-01 16:32 UTC → newest pass');
+  });
+});
+
+describe('the shadow warning', () => {
+  // The Isfahan airbase, where a January and a September pass put a candidate
+  // on most buildings.
+  const airbase = { id: 'base', kind: 'rect', points: [[51.81, 32.72], [51.96, 32.82]] };
+
+  it('works the shadow out from the sun at the pass, as the engine does', () => {
+    expect(shadowLength('2026-01-21', 32.77)).toBeCloseTo(14.7, 0);
+    expect(shadowLength('2026-09-25', 32.77)).toBeCloseTo(7.2, 0);
+  });
+
+  it('warns when the shadows of a pair differ by half a pixel or more', () => {
+    const text = shadowWarning([pair('base', '2026-01-21', '2026-09-25')], [airbase]);
+    expect(text).toBe('A 10 m building casts 15 m of shadow on 2026-01-21 and 7 m on 2026-09-25, '
+      + 'so most buildings will read as changed. Passes closer together avoid it.');
+    expect(shadowWarning([pair('base', '2026-01-16', '2026-01-21')], [airbase])).toBe('');
+  });
+
+  it('names the worst of several areas', () => {
+    const other = { ...airbase, id: 'other' };
+    const text = shadowWarning([pair('base', '2026-01-16', '2026-01-21'), pair('other', '2026-06-21', '2026-12-21')],
+      [airbase, other]);
+    expect(text).toContain('on 2026-06-21');
+  });
+
+  it('says nothing without two chosen days, on one image, or on radar', () => {
+    const far = [pair('base', '2026-01-21', '2026-09-25')];
+    expect(shadowWarning([pair('base', '2026-01-21', '')], [airbase])).toBe('');
+    expect(shadowWarning(far, [airbase], { single: true })).toBe('');
+    expect(shadowWarning(far, [airbase], { radar: true })).toBe('');
+  });
+
+  it('stays finite where the sun barely rises', () => {
+    expect(Number.isFinite(shadowLength('2026-12-21', 68))).toBe(true);
   });
 });

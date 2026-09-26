@@ -14,8 +14,8 @@
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
-  import { acquisitionQuery, areaKey, coverageWarning, passKey } from '../../lib/map/acquisitions.js';
-  import { areaLine, setSide, sharedSide, uniform, withRule } from '../../lib/map/detectWhen.js';
+  import { acquisitionQuery, areaKey, coverageWarning, olderSpan, passKey, withOlder } from '../../lib/map/acquisitions.js';
+  import { areaLine, setSide, shadowWarning, sharedSide, uniform, withRule } from '../../lib/map/detectWhen.js';
   import AcquisitionPicker from './AcquisitionPicker.svelte';
   import AreaDates from './AreaDates.svelte';
   import DateField from '../../components/DateField.svelte';
@@ -43,7 +43,7 @@
   ];
 
   const radar = $derived(sensor === 'sentinel1');
-  let days = $state(untrack(() => lookup?.days ?? 90));
+  let lookback = $state(untrack(() => lookup?.lookback ?? 90));
   let busy = $state(false);
   let error = $state('');
   let perArea = $state(false);
@@ -72,15 +72,21 @@
     .map((side) => coverageWarning(fresh.list.find((pass) => passKey(pass) === passKey(side)
       || (!side.time && pass.date === side.date))))
     .filter(Boolean));
+  const shadows = $derived(shadowWarning(pairs, zones, { single, radar }));
 
-  async function look() {
+  const look = () => search(lookback, false);
+  const lookOlder = () => search(olderSpan(lookback, fresh?.list), true);
+
+  async function search(span, more) {
+    if (!span) return;
     busy = true; error = '';
     const mine = ++generation;
     try {
       const found = await api.post('/api/satellite/sentinel/acquisitions',
-        acquisitionQuery(zones, days, new Date(), sensor));
+        acquisitionQuery(zones, span, new Date(), sensor));
       if (mine !== generation) return;
-      lookup = { key, days, list: found.dates ?? [], truncated: !!found.truncated };
+      const list = more ? withOlder(fresh?.list, found.dates) : found.dates ?? [];
+      lookup = { key, lookback, list, truncated: !!found.truncated };
     } catch (e) { if (mine === generation) error = e.message; }
     finally { if (mine === generation) busy = false; }
   }
@@ -163,12 +169,14 @@
       {/if}
     </div>
 
+    {#if shadows}<p class="warn" role="note">{shadows}</p>{/if}
+
     <p class="passes-title"><strong>Passes over {ground}</strong>
       <span>{radar ? 'with their time and track' : 'with their cloud cover'}</span></p>
-    <AcquisitionPicker list={fresh?.list ?? []} {days} {busy} {error} searched={!!fresh} truncated={!!fresh?.truncated}
+    <AcquisitionPicker list={fresh?.list ?? []} {lookback} {busy} {error} searched={!!fresh} truncated={!!fresh?.truncated}
       areas={zones.length} {radar} {single} wantsReference={!single} wantsCompare={!routine}
       a={single ? null : a} b={routine ? null : b}
-      ondays={(value) => (days = value)} onlook={look}
+      onlookback={(value) => (lookback = value)} onlook={look} onolder={lookOlder}
       onpick={(letter, entry) => pick(letter, entry.date, entry.time ?? '')} />
     {#each warnings as warning (warning)}<p class="warn">{warning}</p>{/each}
   {/if}
@@ -242,6 +250,7 @@
   .passes-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 2px 0 0; font-size: var(--fs-xs); }
   .passes-title span { color: var(--text-3); font-size: 10.5px; }
   .link { color: var(--accent); font-size: var(--fs-xs); }
+  .warn { margin: 0; color: var(--warn, #e2a03f); font-size: 10.5px; line-height: 1.35; }
   .dates { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
   .dates li { display: flex; gap: 8px; font-size: var(--fs-xs); }
   .dates .who { flex: 1; min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }

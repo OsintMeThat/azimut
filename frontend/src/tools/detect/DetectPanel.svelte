@@ -600,7 +600,7 @@
            survives a detour to make the analyzer it needs. -->
       <div class="pane" hidden={view !== 'new'}>
         {#key draft}
-          <DetectWizard {caseId} {catalogue} areaSets={lists.zones} areas={lists.areas} seed={draft} {offer} {busy}
+          <DetectWizard {caseId} {catalogue} areaSets={lists.zones} areas={lists.areas} seed={draft} {offer} {busy} failure={error}
             bind:zones bind:drawing bind:selectedZone bind:showZones
             {onfocus} {onusecurrentview} {onshow} onlibrary={openLibrary}
             onareas={(id) => refresh(id)} onsubmit={(request) => act(() => submit(request))} />

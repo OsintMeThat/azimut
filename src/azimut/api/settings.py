@@ -33,7 +33,7 @@ from ..engine import (
     workspacemove,
 )
 from .templates import MAX_PER_KIND as MAX_TEMPLATES_PER_KIND
-from ..engine.analysis_models import DetectPrefs, Recipe
+from ..engine.analysis_models import DetectPrefs, Recipe, stored
 
 # A backup carries the signature logo as base64: 4 characters per 3 bytes, plus
 # slack for padding and any line breaks a hand-edited file picked up.
@@ -125,6 +125,14 @@ class PrefsIn(BaseModel):
     export_dirs: dict[str, str] | None = None
 
 
+def _detect_view(saved: Any) -> dict[str, Any]:
+    """Detect's saved view in the shape the prefs PUT takes back."""
+    try:
+        return stored(DetectPrefs, saved).model_dump()
+    except ValueError:
+        return dict(config.DEFAULT_SETTINGS["detect_view"])
+
+
 def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
     """The preference block shared by GET /settings and PUT /settings/prefs."""
     return {
@@ -139,7 +147,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
         "map_sync": bool(settings.get("map_sync", True)),
-        "detect_view": settings.get("detect_view", config.DEFAULT_SETTINGS["detect_view"]),
+        "detect_view": _detect_view(settings.get("detect_view")),
         "sentinel1_layer": settings.get("sentinel1_layer", ""),
         "capture_scale_north": bool(settings.get("capture_scale_north", False)),
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
@@ -654,6 +662,33 @@ class ImportedSettings(BaseModel):
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
     download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
+
+    @field_validator("analyzers", mode="before")
+    @classmethod
+    def readable_analyzers(cls, value: Any) -> Any:
+        """Analyzers read the way the library reads its own.
+
+        A field a later version dropped is ignored, and one that no longer reads
+        at all is left out, as the library leaves it out, rather than refusing
+        the whole backup over it.
+        """
+        if not isinstance(value, list):
+            return value
+        kept = []
+        for raw in value:
+            try:
+                kept.append(stored(Recipe, raw))
+            except ValueError:
+                continue
+        return kept
+
+    @field_validator("detect_view", mode="before")
+    @classmethod
+    def readable_detect_view(cls, value: Any) -> Any:
+        try:
+            return stored(DetectPrefs, value)
+        except ValueError:
+            return DetectPrefs()
 
     @field_validator("api_keys")
     @classmethod

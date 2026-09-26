@@ -9,6 +9,12 @@
  * A is the picture before, B the one to look in. An empty B date is the
  * newest pass, looked up when the run starts; a routine never holds one.
  */
+import { sunPosition } from './changeDetect.js';
+import { zoneRing } from './analyzers.js';
+
+/** How much a 10 m building's shadow may change length between two passes,
+ *  in metres, before it reads as a change: half a Sentinel-2 pixel. */
+export const SHADOW_SHIFT_M = 5;
 
 /** A side as a line: its day, and a radar pass's time. */
 export function sideLine(source, radar = false) {
@@ -89,4 +95,36 @@ export function whenSummary({ single, routine, against, pairs, radar = false }) 
   }
   if (single) return b.charAt(0).toUpperCase() + b.slice(1);
   return `${a || 'A not chosen'} → ${b}`;
+}
+
+/** A 10 m building's shadow when Sentinel-2 passes on `day`, in metres. */
+export function shadowLength(day, lat) {
+  const zenith = Math.min(85, sunPosition(day, lat).zenith);
+  return 10 * Math.tan((zenith * Math.PI) / 180);
+}
+
+/**
+ * A pair whose passes see the sun at very different heights, as a warning, or ''.
+ *
+ * Every building's shadow then changes length between A and B and reads as a
+ * change: a January and a September pass over an airbase put a candidate on
+ * most of its buildings. Only a picture has shadows, and only a pair of days
+ * both chosen can be judged.
+ */
+export function shadowWarning(pairs, zones, { single = false, radar = false } = {}) {
+  if (single || radar) return '';
+  let worst = null;
+  for (const pair of pairs ?? []) {
+    const zone = (zones ?? []).find((entry) => entry.id === pair.area_id);
+    if (!zone || !pair.a?.date || !pair.b?.date) continue;
+    const ring = zoneRing(zone);
+    const lat = ring.reduce((sum, point) => sum + point[1], 0) / ring.length;
+    const a = shadowLength(pair.a.date, lat);
+    const b = shadowLength(pair.b.date, lat);
+    if (!worst || Math.abs(a - b) > Math.abs(worst.a - worst.b)) worst = { a, b, pair };
+  }
+  if (!worst || Math.abs(worst.a - worst.b) < SHADOW_SHIFT_M) return '';
+  return `A 10 m building casts ${Math.round(worst.a)} m of shadow on ${worst.pair.a.date} and `
+    + `${Math.round(worst.b)} m on ${worst.pair.b.date}, so most buildings will read as changed. `
+    + 'Passes closer together avoid it.';
 }

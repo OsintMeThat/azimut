@@ -1,6 +1,6 @@
 <script>
   import { api } from '../../lib/api.js';
-  import { acquisitionQuery, coverageWarning, passKey } from '../../lib/map/acquisitions.js';
+  import { acquisitionQuery, coverageWarning, olderSpan, passKey, withOlder } from '../../lib/map/acquisitions.js';
   import AcquisitionPicker from './AcquisitionPicker.svelte';
   import DateField from '../../components/DateField.svelte';
 
@@ -13,7 +13,7 @@
   const radar = $derived(sensor === 'sentinel1');
   let looking = $state(null);
   let passes = $state([]);
-  let days = $state(90);
+  let lookback = $state(90);
   let busy = $state(false);
   let error = $state('');
   let searched = $state(false);
@@ -21,14 +21,19 @@
   let generation = 0;
   const pairFor = (id) => pairs.find((p) => p.area_id === id);
 
-  async function lookup(zone) {
-    looking = zone.id; busy = true; error = ''; searched = false; passes = [];
+  /** The passes over one area, or with `more` those before the oldest listed. */
+  async function lookup(zone, more = false) {
+    const span = more ? olderSpan(lookback, passes) : lookback;
+    if (!span) return;
+    looking = zone.id; busy = true; error = '';
+    if (!more) { searched = false; passes = []; }
     const mine = ++generation;
     try {
       const found = await api.post('/api/satellite/sentinel/acquisitions',
-        acquisitionQuery([zone], days, new Date(), sensor));
+        acquisitionQuery([zone], span, new Date(), sensor));
       if (mine !== generation) return;
-      passes = found.dates ?? []; searched = true; truncated = !!found.truncated;
+      passes = more ? withOlder(passes, found.dates) : found.dates ?? [];
+      searched = true; truncated = !!found.truncated;
     } catch (e) { if (mine === generation) error = e.message; }
     finally { if (mine === generation) busy = false; }
   }
@@ -74,9 +79,10 @@
 {#if looking}
   {@const pair = pairFor(looking)}
   <p class="hint">{zones.find((zone) => zone.id === looking)?.name}</p>
-  <AcquisitionPicker list={passes} {days} {busy} {error} {searched} {truncated} areas={1} {radar}
+  <AcquisitionPicker list={passes} {lookback} {busy} {error} {searched} {truncated} areas={1} {radar}
     {single} wantsReference={!single} wantsCompare={!baselineOnly} a={pair?.a ?? null} b={pair?.b ?? null}
-    ondays={(value) => (days = value)} onlook={() => lookup(zones.find((zone) => zone.id === looking))}
+    onlookback={(value) => (lookback = value)} onlook={() => lookup(zones.find((zone) => zone.id === looking))}
+    onolder={() => lookup(zones.find((zone) => zone.id === looking), true)}
     onpick={(letter, entry) => pick(looking, letter, entry.date, entry.time ?? '')} />
   {#each [single ? null : pair?.a, pair?.b].filter((source) => source?.date) as source}
     {@const warning = coverageWarning(passes.find((pass) => passKey(pass) === passKey(source)

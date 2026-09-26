@@ -351,12 +351,12 @@ export const DEFAULT_PARAMETERS = Object.freeze({
   sar_ground: 'any', ignore_clouds: true, ignore_shadows: true, cloud_margin: 5, merge_metres: 0, shape: 'any',
 });
 
-/** A new analyzer of your own: one change rule, at the medium size. */
+/** A new analyzer of your own: one change rule, at All sizes like every built-in. */
 export function newRecipe(methods = []) {
   const sizes = methods.find((entry) => entry.id === 'rules')?.sizes;
   return {
     id: 'custom', name: '', description: '', phenomenon: 'Candidate', method: 'rules',
-    parameters: { ...DEFAULT_PARAMETERS, ...(sizes?.medium ?? {}) },
+    parameters: { ...DEFAULT_PARAMETERS, ...(sizes?.all ?? {}) },
     colour: '#f6a81a', style: 'both', rules: [newRule('index', 'change')], match: 'all', checks: [],
   };
 }

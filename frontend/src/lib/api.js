@@ -21,9 +21,15 @@ function detailLine(detail) {
     .join('; ');
 }
 
+/** What a failure says when its body gave no reason: a crash on the server
+ *  answers with a bare "Internal Server Error". */
+function fallback(status) {
+  return status >= 500 ? `Azimut hit an unexpected error (HTTP ${status}). Settings → System → Report an issue has its log.` : `HTTP ${status}`;
+}
+
 class ApiError extends Error {
   constructor(status, detail) {
-    super(detailLine(detail) || `HTTP ${status}`);
+    super(detailLine(detail) || fallback(status));
     this.status = status;
   }
 }
