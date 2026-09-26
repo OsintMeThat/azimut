@@ -10,7 +10,7 @@ maps made elsewhere on yours.
 
 - **Detect** is a new tab under Map. Draw areas and it sweeps them on Sentinel-2
   at full resolution for vessels, fires, construction, burn scars, vegetation
-  loss, new water or any change.
+  loss, new water, burned or destroyed buildings, or any change.
 - Radar analyzers read Sentinel-1 through cloud and at night: vessels, damaged
   buildings, new structures, floods. Settings → Imagery shows how to add the
   Sentinel-1 layer they need.
@@ -18,7 +18,10 @@ maps made elsewhere on yours.
   or radar. Checks on places you trust turn red when a rule stops holding. Five
   examples ship with their checks.
 - **Find passes** lists the dates your areas really have, with coverage and
-  cloud. The cost in Copernicus requests shows before anything is fetched.
+  cloud, up to a year back or between two days you pick. The cost in Copernicus
+  requests shows before anything is fetched.
+- The When step warns when two passes see the sun at very different heights,
+  since every building's shadow then reads as a change.
 - Candidates come strongest first. **Pin** files one in the case with its
   evidence crop and a dated claim, or open it in Compare.
 - A routine keeps an analyzer, its areas and a date rule, and **Run routine**
@@ -65,6 +68,9 @@ maps made elsewhere on yours.
 - A proof can carry one sentence and the date its material was taken, shown on
   the Timeline.
 - Place a proof's point on a map instead of typing it.
+- A point taken from a capture is only the middle of its frame, so it shows
+  greyed until you check it. Save and To post open the map on each unchecked
+  point first. **Later** saves the proof and keeps those points off the case map.
 
 ## Inspect and Collage
 

@@ -81,8 +81,8 @@ plain directory holding the whole investigation.
 Detect sweeps an area for what appeared, and the map takes layers made elsewhere.
 
 - **Detect**, a tab of its own, sweeps drawn areas of Sentinel-2 for vessels, fires and
-  flares, construction, small spots, surface change, burn scars, vegetation loss
-  or new water. Candidates come strongest first, and only one you keep becomes a
+  flares, construction, small spots, surface change, burn scars, vegetation loss,
+  new water or burned buildings. Candidates come strongest first, and only one you keep becomes a
   case pin.
 - Difference and Detect share one Sentinel-2 cloud and shadow mask.
 - Radar: five Sentinel-1 analyzers (vessels, any change, razed buildings, new

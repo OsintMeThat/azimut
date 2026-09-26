@@ -1163,7 +1163,7 @@ one pin glyph — coordinates in the tooltip, not in the title — and clicking 
 flies the map there. **Show N working files** sits on the same independent axis: a
 switch rather than another chip, because the chips answer *show me only X* and are
 single-select where this one is *put X back*. The library opens on what the case
-collected, the frames, collages and captures it produced itself held back — a capture
+collected, the frames, collages, captures and Compare or Detect renders it produced itself held back — a capture
 is a map the app drew out of tiles or the extension grabbed off the screen, where an
 upload, a paste and a download came from outside — and the switch says how
 many those are rather than leaving them unannounced; the counts and the paging are
@@ -1579,7 +1579,10 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   map's top-left corner with the zoom buttons stacked under it, grouped by a
   hairline. An armed seat wears the accent as an edge, not as a filled square.
   Adding a reference window is in the rail too, as a seat that runs instead of
-  arming.
+  arming. Its picker narrows like the Media Library: past six items it grows a
+  search, one chip per facet that would hide something, a folder button, and
+  **Show N working files**, held back by default since the reference is nearly
+  always collected material. The chip and the switch stay as set for the session.
 - **Its settings** open in the rail's one **panel slot**, beside it. One mode is
   armed, so one panel is open; a panel cannot cross another or the map's own
   controls.
@@ -2139,7 +2142,10 @@ and the reason is written under the Next button. **Passes over the area** lists
 what exists right under the question, each row with its A and B buttons, and a
 typed day works too. One choice stands for every area; **Set them per area…**
 opens the per-area table for areas far enough apart to sit under different swaths,
-and the step then lists each area's days. The last step reads the choice back in
+and the step then lists each area's days. When the two days see the sun at very
+different heights, the step says how long a 10 m building's shadow is on each: past
+half a pixel of difference most buildings read as changed, as a January and a
+September pass over an airbase showed. The last step reads the choice back in
 one line. A radar pass is a day and a UTC time,
 since Sentinel-1 can see a place twice in a day from opposite directions: the list
 shows each pass with its time and direction, and A and B must share
@@ -2148,7 +2154,11 @@ hand is pinned to the pass on the other side's track at launch, and an automatic
 pass is looked for on the reference's track.
 
 **Find passes** explicitly asks Copernicus about the areas and counts one request
-against its quota. The picker shows cloud and coverage over all of them. At launch, each area independently resolves its latest usable pass
+against its quota. The picker shows cloud and coverage over all of them. It looks
+30 days, 90 days or a year back, or under **Dates…** between two days picked in a
+calendar that starts at the satellite's launch. The catalogue gives at most 100
+passes, newest first, so a list it cut short offers **Older passes**, one more
+request for the ones before the oldest listed. At launch, each area independently resolves its latest usable pass
 under the cloud ceiling. Different tracks can therefore use different days.
 An unresolved area fails by name without stopping the rest. Opening Detect reads
 local state only; pass lookups happen only on request or during an explicit run.
@@ -2164,10 +2174,10 @@ optical ones approximate, since a hull answers the radar through cloud and glint
 alike; two radar passes read damage roughly. An analyzer that cannot run yet
 carries a key and *set up*: all of them without a Copernicus key, the radar ones
 until Settings has found their layer. It can still be picked and read about, and
-the step says what is missing with a way to Settings. Eight ship built in, for big things and small ones:
+the step says what is missing with a way to Settings. Nine ship built in, for big things and small ones:
 vessels, fires and gas flares, construction and earthworks, small spots (impacts,
-burn marks, vehicles), any surface change, burn scars, vegetation loss, and
-flooding or new water. Each reads its own band product, and each was tuned on real
+burn marks, vehicles), any surface change, burn scars, vegetation loss,
+flooding or new water, and burned or destroyed buildings. Each reads its own band product, and each was tuned on real
 scenes rather than synthetic ones: rough sea under glint, a dense anchorage under
 cumulus, oil fires and wildfires, bright roofs, a construction site across seven
 months, dry-season pastures. Vessels stand out from their own patch of sea in near
@@ -2176,9 +2186,15 @@ bulk land is a coast. What counts as sea comes from the water index or from the
 classification, either one is enough: under sun glint the index alone read a whole
 strait as dry. Fires take the published short-wave ratios on B8A, which
 shares B12's grid. Construction is ground that moved the same way in every band
-while its vegetation held; a small spot changed while the ring of ground around it
+while its vegetation held, and burned or destroyed buildings are the same reading
+darkening only, past a 9% drop: soot, char and wreckage, where burn scars need
+vegetation to have burned. On pairs from Planetary Computer it took Hodeidah's
+burned tank farm, an Isfahan depot and Beirut's blasted port warehouses, and gave
+one to three candidates on quiet pairs of the same places; rain-wet ground is its
+look-alike; a small spot changed while the ring of ground around it
 did not, that ring read with a hole in its middle so the spot cannot sit in its own
-background and over measured ground only, so a granule edge raises nothing; a burn has to end dark, which a dried pasture does not.
+background and over imaged ground only, past the area's edge too, so neither a
+granule edge nor the area's own edge raises anything; a burn has to end dark, which a dried pasture does not.
 
 Five radar analyzers read Sentinel-1 through the layer Settings → Imagery found,
 and see through cloud and at night: vessels, any radar change, damaged or razed
@@ -2194,7 +2210,7 @@ water; the radar decides only where that pass saw cloud. In a large port a
 terminal that Sentinel-2 took for water still gives candidates among the ships at
 berth, which no mask tried could remove without dropping the ships too. A radar
 change is the power of both polarisations averaged over ground, 45 m a step of the
-size's averaging (90 m at Medium), and compared between two passes of one track: a
+size's averaging (90 m at Medium and All), and compared between two passes of one track: a
 window counted in pixels held too few radar samples, and ground that did not change
 came back as thousands of pieces or one region kilometres wide. *Bright* ground is ground that answered like walls on the
 side that had them, and *water* is ground that went as dark as calm water. Two
@@ -2202,13 +2218,16 @@ passes only flag where to look: the razed-buildings analyzer says so, and the
 flood one starts at Large, since a flood is fields wide. Without the radar layer
 the wizard says where to find it and stops before its dates.
 
-**Small**, **Medium**, **Large** and **All** under the analyzer set the target
-size as a whole: floor and ceiling area, cleanup and grouping together, since a
-small target needs no cleanup that would erase it. What the chosen one accepts is
-written under the buttons in ground terms — a mark outside that band is found and
-then dropped, which reads as "nothing found" unless it is said. **All** sets no
-floor and no ceiling, for the mark that falls between two bands. Tuning any of
-those by hand leaves no size selected. The **Clouds & shadows** switch reads Sentinel-2's classification, grows a
+**Small**, **Medium**, **Large** and **All** come first in the What step, above
+the analyzers, and set the target size as a whole: floor and ceiling area, cleanup
+and grouping together, since a small target needs no cleanup that would erase it.
+What the chosen one accepts is written under the buttons in ground terms — a mark
+outside that band is found and then dropped, which reads as "nothing found" unless
+it is said. Every analyzer starts at **All**, no floor and no ceiling, because a
+size taken without noticing hid an airbase's change behind Medium's 20 ha ceiling;
+radar flooding alone starts at Large. **All** keeps the radar's 90 m averaging.
+A size pressed holds for the next analyzer picked, and tuning any of those by hand
+leaves no size selected. The **Clouds & shadows** switch reads Sentinel-2's classification, grows a
 real cloud into the unsure pixels touching it, ignores classified "clouds" too small
 to be one (white hulls and roofs), and casts each cloud away from the sun to find the
 shadows the classification missed. The fire detector offers no switch: its band
@@ -2346,7 +2365,9 @@ again returns to the run's order.
 A candidate that crosses a tile edge is one candidate with one picture, stitched
 from the tiles it touches. New candidates use the detector mask's simplified
 outline; merged components retain their parts as a MultiPolygon. The bounding
-box still drives crops and merge tests. Existing results keep their
+box still drives crops. **Group within** measures the gap between the footprints
+themselves, not their boxes, so one join never widens the next: joined by boxes,
+an airbase's 667 marks once became one candidate of 31 km². Existing results keep their
 stored rectangle geometry.
 
 Opening a run puts the map on the candidate the panel is about, close enough to
@@ -2429,6 +2450,14 @@ behind a hairline and on a panel of its own, which is how every field here offer
 the one act that belongs to it — the map on a coordinate, the eye that says the
 camera stood there, the tab a source opens in, the calendar that builds a date. A row added with `+` opens on
 the point above it, which is the only thing that says which ground it belongs on.
+**A point the imagery proposed reads greyed**, its pin in amber, until somebody checks
+it. A capture's point is the middle of its frame unless its pin was moved onto the
+target in Satellite, and a wide frame puts that middle far from what the proof is
+about. Typing the row or using the map checks it. **Save and To post walk every
+unchecked point through the map first**, one at a time: *Use this point* keeps or
+moves it and goes on to the next. *Later*, offered by Save only, saves the proof and
+keeps those points off the case map, where they would read as conclusions; a place
+already there stays. To post has no *Later*, since the post publishes the point.
 The exported picture prints them only when asked (Advanced → Show coordinates):
 unnamed points share one line, a named one takes its own, and the plate grows by
 what it prints. **Show text** switches the credit line off beside it, so a plate
