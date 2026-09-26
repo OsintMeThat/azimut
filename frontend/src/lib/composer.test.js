@@ -22,6 +22,7 @@ import {
   newPaste, pasteBoxes, pasteInsertScale, clampPasteScale, clampPaste,
   surfaces, surfaceHitTest, PASTE_SCALE_MAX, PASTE_SHARE,
   specPoints, statePoints, statePanelPoint, MAX_POINTS,
+  captureAimed, pointProposed, uncheckedPoints,
   proofCoordsLines, coordsPlateLines, coordsPostLines,
   footerLines, footerBand,
 } from './composer.js';
@@ -818,7 +819,10 @@ describe('toSpec — coordinates + source persistence', () => {
       shapes: [],
     };
     const spec = toSpec(proof);
-    expect(spec.coords).toEqual({ lat: 3, lon: 4 });
+    // the middle of a capture nobody aimed: the save must not file it as checked
+    expect(spec.coords).toEqual({ lat: 3, lon: 4, proposed: true });
+    const aimed = { ...proof, panels: [{ ...proof.panels[0], meta: { lat: 3, lon: 4, aimed: true } }] };
+    expect(toSpec(aimed).coords).toEqual({ lat: 3, lon: 4 });
     expect(spec.points).toEqual([]); // nothing stated: the panels answer for it
     expect(spec.coordsText).toBe('');
     expect(spec.sources).toBeNull();
@@ -1917,15 +1921,25 @@ describe('a panel that carries a place', () => {
     // the next panel would take its place without saying so
     expect(statePanelPoint(blank, panel(48.8738, 2.295), '48.858400, 2.294500')).toEqual([
       { coords: '48.858400, 2.294500', label: '', pov: false },
-      { coords: '48.873800, 2.295000', label: '', pov: false },
+      { coords: '48.873800, 2.295000', label: '', pov: false, proposed: true },
     ]);
+  });
+
+  it('keeps both points as checked, or not, as they were', () => {
+    // the answer written down was the panels' unchecked one, and stays so
+    const [first] = statePanelPoint(blank, panel(48.8738, 2.295), '48.858400, 2.294500', 'dd', true);
+    expect(first.proposed).toBe(true);
+    // a capture aimed with the pin is the analyst's own point
+    const aimed = { ...panel(48.8738, 2.295), meta: { ...panel(48.8738, 2.295).meta, aimed: true } };
+    const [, added] = statePanelPoint(blank, aimed, '48.858400, 2.294500');
+    expect(added).toEqual({ coords: '48.873800, 2.295000', label: '', pov: false });
   });
 
   it('leaves a stated conclusion where it is', () => {
     const stated = [{ coords: 'the camera', label: 'pov', pov: true }];
     expect(statePanelPoint(stated, panel(1, 2), 'the camera')).toEqual([
       { coords: 'the camera', label: 'pov', pov: true },
-      { coords: '1.000000, 2.000000', label: '', pov: false },
+      { coords: '1.000000, 2.000000', label: '', pov: false, proposed: true },
     ]);
   });
 
@@ -1950,6 +1964,51 @@ describe('a panel that carries a place', () => {
   it('states the place in the reader’s own format', () => {
     const [, added] = statePanelPoint(blank, panel(48.8584, 2.2945), '48.873800, 2.295000', 'dms');
     expect(added.coords).toBe('48°51\'30.24"N 2°17\'40.20"E');
+  });
+});
+
+describe('a point nobody checked', () => {
+  const capture = (meta) => [{ id: 'p1', src: 'a.png', meta: { kind: 'satellite', lat: 1, lon: 2, ...meta } }];
+
+  it('is a capture framed on its middle, not one aimed with the pin', () => {
+    const at = { lat: 48.8584, lon: 2.2945 };
+    expect(captureAimed({ ...at, center_lat: 48.8584, center_lon: 2.2945 })).toBe(false);
+    expect(captureAimed({ ...at, center_lat: 48.8591, center_lon: 2.2945 })).toBe(true);
+    // a map screenshot the extension filed records no second point
+    expect(captureAimed(at)).toBe(false);
+    expect(satPanelInput({ ...at, center_lat: 48.8591, center_lon: 2.2945 }).meta.aimed).toBe(true);
+    expect(satPanelInput({ ...at, center_lat: 48.8584, center_lon: 2.2945 }).meta.aimed).toBe(false);
+  });
+
+  it('is the first row while it reads an unaimed capture', () => {
+    const blank = [{ coords: '', label: '', pov: false }];
+    expect(pointProposed(blank, 0, capture({}))).toBe(true);
+    expect(pointProposed(blank, 0, capture({ aimed: true }))).toBe(false);
+    // no panel answers: there is nothing to check, only a blank to fill
+    expect(pointProposed(blank, 0, [])).toBe(false);
+    expect(pointProposed([{ coords: '1, 2', label: '', pov: false }], 0, capture({}))).toBe(false);
+  });
+
+  it('is any other row that says so, until it is typed or placed', () => {
+    const rows = [
+      { coords: '1, 2', label: '', pov: false },
+      { coords: '3, 4', label: '', pov: false, proposed: true },
+      { coords: '5, 6', label: '', pov: false, proposed: false },
+    ];
+    expect(uncheckedPoints(rows, [])).toEqual([1]);
+    expect(uncheckedPoints([{ coords: '', label: '', pov: false }, rows[1]], capture({}))).toEqual([0, 1]);
+  });
+
+  it('is written down as such, and read back', () => {
+    const spec = statePoints({}, [
+      { coords: '1, 2', label: '', pov: false },
+      { coords: '3, 4', label: '', pov: false, proposed: true },
+    ]);
+    expect(spec.points).toEqual([{ coords: '1, 2' }, { coords: '3, 4', proposed: true }]);
+    expect(specPoints(spec)).toEqual([
+      { coords: '1, 2', label: '', pov: false },
+      { coords: '3, 4', label: '', pov: false, proposed: true },
+    ]);
   });
 });
 

@@ -14,8 +14,8 @@ function render(props = {}) {
   const live = mount(AcquisitionPicker, {
     target,
     props: {
-      list: passes, days: 30, searched: true, areas: 1,
-      ondays: () => {}, onlook: () => {}, onpick: () => {}, ...props,
+      list: passes, lookback: 30, searched: true, areas: 1,
+      onlookback: () => {}, onlook: () => {}, onpick: () => {}, ...props,
     },
   });
   flushSync();
@@ -87,6 +87,72 @@ describe('the acquisition picker', () => {
   it('says when the catalogue stopped short instead of implying a full list', () => {
     const { target, done } = render({ truncated: true });
     expect(target.textContent).toContain('stopped at 100 passes');
+    done();
+  });
+
+  it('opens the calendar on the window the presets were showing', () => {
+    const onlookback = vi.fn();
+    const { target, done } = render({ onlookback });
+    button(target, 'Dates…').click();
+    const [span] = onlookback.mock.calls[0];
+    expect(span.end).toBe(new Date().toISOString().slice(0, 10));
+    expect(span.start < span.end).toBe(true);
+    done();
+  });
+
+  it('bounds a lookup by two days picked in the calendar, however old', () => {
+    const onlookback = vi.fn();
+    const { target, done } = render({ lookback: { start: '2019-03-01', end: '2019-06-30' }, onlookback });
+    expect(button(target, 'Dates…').classList.contains('on')).toBe(true);
+    target.querySelector('[aria-label="First day"]').click(); flushSync();
+    target.querySelector('.cal button[title="2019-03-12"]').click(); flushSync();
+    expect(onlookback).toHaveBeenLastCalledWith({ start: '2019-03-12', end: '2019-06-30' });
+    // the calendar closes on the day it was opened for
+    expect(target.querySelector('.cal')).toBe(null);
+    done();
+  });
+
+  it('keeps each picked day on its side of the other', () => {
+    const { target, done } = render({ lookback: { start: '2019-06-10', end: '2019-06-20' } });
+    const day = (iso) => target.querySelector(`.cal button[title="${iso}"]`);
+    target.querySelector('[aria-label="First day"]').click(); flushSync();
+    expect([day('2019-06-15').disabled, day('2019-06-25').disabled]).toEqual([false, true]);
+    target.querySelector('[aria-label="Last day"]').click(); flushSync();
+    expect([day('2019-06-05').disabled, day('2019-06-15').disabled]).toEqual([true, false]);
+    done();
+  });
+
+  it('starts the calendar at the launch of the satellite the passes come from', () => {
+    const lookback = { start: '2014-04-01', end: '2014-04-30' };
+    const optical = render({ lookback });
+    optical.target.querySelector('[aria-label="First day"]').click(); flushSync();
+    expect(optical.target.querySelector('.cal button[title="2014-04-10"]').disabled).toBe(true);
+    optical.done();
+    const radar = render({ lookback, radar: true, list: [] });
+    radar.target.querySelector('[aria-label="First day"]').click(); flushSync();
+    const day = (iso) => radar.target.querySelector(`.cal button[title="${iso}"]`);
+    expect([day('2014-04-02').disabled, day('2014-04-10').disabled]).toEqual([true, false]);
+    radar.done();
+  });
+
+  it('will not look up two days in the wrong order', () => {
+    const { target, done } = render({ lookback: { start: '2020-06-01', end: '2020-01-01' } });
+    expect(target.textContent).toContain('The first day comes after the last.');
+    expect(button(target, 'Look again').disabled).toBe(true);
+    done();
+  });
+
+  it('offers the older passes a cut list is missing', () => {
+    const onolder = vi.fn();
+    const { target, done } = render({ truncated: true, lookback: { start: '2026-01-01', end: '2026-05-31' }, onolder });
+    button(target, 'Older passes').click();
+    expect(onolder).toHaveBeenCalledOnce();
+    done();
+  });
+
+  it('offers nothing older once the list reaches the first day asked', () => {
+    const { target, done } = render({ truncated: true, lookback: { start: '2026-05-08', end: '2026-05-31' }, onolder: vi.fn() });
+    expect(button(target, 'Older passes')).toBeUndefined();
     done();
   });
 

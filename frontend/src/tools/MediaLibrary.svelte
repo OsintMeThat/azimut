@@ -8,13 +8,11 @@
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import {
     hasMediaForFilters,
-    isBroughtIn,
-    isGenericImage,
     isMadeHere,
-    isSatelliteMedia,
     mediaDisplayKind,
     mediaPoint,
     visibleMedia,
+    MEDIA_CATEGORIES as CATEGORIES,
     SORTS,
   } from '../lib/mediaFilter.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
@@ -86,16 +84,8 @@
 
   // --- category facets (auto-derived from kind + source) ---
   // Overlapping filters (a downloaded video matches both Videos and Downloads);
-  // clicking one narrows the grid to that facet. Order matches the sidebar bar.
-  const CATEGORIES = [
-    { key: 'image', label: 'Images', icon: 'image', match: isGenericImage },
-    { key: 'video', label: 'Videos', icon: 'video', match: (i) => i.kind === 'video' },
-    { key: 'collage', label: 'Collages', icon: 'layers', match: (i) => i.source?.op === 'collage' },
-    { key: 'satellite', label: 'Satellite', icon: 'satellite', match: isSatelliteMedia },
-    { key: 'upload', label: 'Imports', icon: 'upload', match: isBroughtIn },
-    { key: 'download', label: 'Downloads', icon: 'download', match: (i) => i.source?.type === 'download' },
-    { key: 'other', label: 'Other files', icon: 'file', match: (i) => i.kind !== 'image' && i.kind !== 'video' },
-  ];
+  // picking one narrows the grid to that facet. The list is shared with the
+  // Satellite reference picker (MEDIA_CATEGORIES), so the two can't drift.
 
   let catFilter = $state(null); // null = All types
 

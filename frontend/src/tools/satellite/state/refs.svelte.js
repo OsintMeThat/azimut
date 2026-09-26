@@ -39,6 +39,10 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
   let media = $state([]); // what the case has to offer
   let loading = $state(false);
   let spawned = 0; // id source, so two windows on the same media stay distinct
+  // The picker's chip and working-files switch, kept for the session so the
+  // next reference opens on the same narrowing as the last one.
+  let category = $state(null);
+  let showWorking = $state(false);
 
   return {
     get picking() {
@@ -46,6 +50,18 @@ export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
     },
     set picking(value) {
       picking = value;
+    },
+    get category() {
+      return category;
+    },
+    set category(value) {
+      category = value;
+    },
+    get showWorking() {
+      return showWorking;
+    },
+    set showWorking(value) {
+      showWorking = value;
     },
     get media() {
       return media;

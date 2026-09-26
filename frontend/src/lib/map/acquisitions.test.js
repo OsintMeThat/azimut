@@ -7,7 +7,11 @@ import {
   coverClass,
   coverLabel,
   coverageWarning,
+  lookupSpan,
+  olderSpan,
+  spanProblem,
   sweptNote,
+  withOlder,
 } from './acquisitions.js';
 
 const zone = (id) => ({
@@ -27,6 +31,39 @@ describe('acquisitions over drawn areas', () => {
     // only the shape the backend's Zone model accepts; extra:'forbid' there
     // turns a stray key into a 422 rather than an ignored field
     expect(Object.keys(query.zones[0]).sort()).toEqual(['id', 'kind', 'name', 'points']);
+  });
+
+  it('asks about two days picked in the calendar as they are', () => {
+    const query = acquisitionQuery([zone('a')], { start: '2019-03-01', end: '2019-06-30' }, undefined, 'sentinel1');
+    expect([query.start, query.end, query.collection]).toEqual(['2019-03-01', '2019-06-30', 'sentinel1']);
+    expect(lookupSpan(90, new Date('2026-05-31T09:00:00Z'))).toEqual({ start: '2026-03-02', end: '2026-05-31' });
+  });
+
+  it('needs both days, in order, and nothing of a preset', () => {
+    expect(spanProblem(30)).toBe('');
+    expect(spanProblem({ start: '2019-03-01', end: '' })).toBe('Pick the first and the last day.');
+    expect(spanProblem({ start: '2019-06-30', end: '2019-03-01' })).toBe('The first day comes after the last.');
+    expect(spanProblem({ start: '2019-03-01', end: '2019-03-01' })).toBe('');
+  });
+
+  it('looks for what a cut list lacks before its oldest pass, that day included', () => {
+    const list = [{ date: '2026-05-11' }, { date: '2026-02-03' }];
+    expect(olderSpan({ start: '2025-01-01', end: '2026-05-31' }, list)).toEqual({ start: '2025-01-01', end: '2026-02-03' });
+    expect(olderSpan(365, list, new Date('2026-05-31T09:00:00Z'))).toEqual({ start: '2025-05-31', end: '2026-02-03' });
+    // the list already reaches the first day asked, or there is no list
+    expect(olderSpan({ start: '2026-02-03', end: '2026-05-31' }, list)).toBe(null);
+    expect(olderSpan(365, [])).toBe(null);
+  });
+
+  it('adds the older passes under the list, each pass once and the fuller copy kept', () => {
+    const cut = { date: '2026-02-03', coverage: 0.4 };
+    const whole = { date: '2026-02-03', coverage: 1 };
+    const merged = withOlder([{ date: '2026-05-11' }, cut], [whole, { date: '2026-01-29' }]);
+    expect(merged.map((entry) => entry.date)).toEqual(['2026-05-11', '2026-02-03', '2026-01-29']);
+    expect(merged[1]).toBe(whole);
+    // a radar day holds two passes, told apart by their time
+    const radar = withOlder([{ date: '2026-05-14', time: '17:33:02' }], [{ date: '2026-05-14', time: '05:42:10' }]);
+    expect(radar.map((entry) => entry.time)).toEqual(['17:33:02', '05:42:10']);
   });
 
   it('drops nothing a stray editor field added to a zone', () => {

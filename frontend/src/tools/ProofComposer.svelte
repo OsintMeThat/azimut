@@ -38,7 +38,7 @@
     layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources, openableSource,
-    specPoints, statePanelPoint, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
+    specPoints, statePanelPoint, pointProposed, uncheckedPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
     templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
@@ -1071,11 +1071,12 @@
       }, img);
       // what the proof answers with today, read before the panel can change it
       const answered = displayedCoords;
+      const answeredProposed = pointProposed(proof.points, 0, proof.panels);
       // grid: append (rightmost / bottom row); free: a new panel lands in front
       if (proof.layout === 'free') proof.panels.unshift(panel);
       else proof.panels.push(panel);
       // a panel that carries a place states it, under the point already there
-      proof.points = statePanelPoint(proof.points, panel, answered, prefs.coordFormat);
+      proof.points = statePanelPoint(proof.points, panel, answered, prefs.coordFormat, answeredProposed);
       dirty = true;
       requestAnimationFrame(fit);
     } catch (e) {
@@ -3574,7 +3575,7 @@
     if (!proofHasContent || exporting || saving) return;
     exporting = true;
     try {
-      if (dirty || !savedName) await save();
+      if (dirty || !savedName) await save({ then: exportProof });
       // A failed save leaves the proof dirty; a title collision opens the
       // overwrite prompt without binding a name. In either case there is no
       // confirmed PNG to copy yet.
@@ -3732,8 +3733,34 @@
     }
   }
 
-  async function save({ andPost = false } = {}) {
+  // The points a save or a post has to have looked at first, walked one at a time:
+  // { rows, at, andPost, then } while it runs.
+  let checking = $state(null);
+  // What the dialog is asked about, read once per point. The dialog's props are
+  // read again while it closes, after `checking` is already gone.
+  const checkStep = $derived(
+    checking
+      ? {
+          view: pointMapView(checking.rows[checking.at]),
+          check: {
+            step: checking.rows.length > 1 ? `${checking.at + 1} of ${checking.rows.length}` : '',
+            label: proof.points[checking.rows[checking.at]]?.label ?? '',
+          },
+          later: !checking.andPost,
+        }
+      : null
+  );
+
+  async function save({ andPost = false, checked = false, then = null } = {}) {
     if (!proof.panels.length || saving) return;
+    // A point the imagery proposed is the middle of a capture until somebody looks.
+    // A save files it on the case map and a post publishes it, so each one is shown
+    // on the map first. `then` is what asked for the save, resumed once it lands.
+    const rows = checked ? [] : uncheckedPoints(proof.points, proof.panels);
+    if (rows.length) {
+      checking = { rows, at: 0, andPost, then };
+      return;
+    }
     // The name in the header is the filename. A bound proof writes back over
     // itself, and renaming it moves the file — the backend refuses a rename onto
     // a name another proof holds. An unbound proof landing on a saved name is
@@ -3742,7 +3769,24 @@
       overwritePrompt = { slug: slugify(proof.title, 'proof'), andPost };
       return;
     }
-    return performSave(andPost);
+    await performSave(andPost);
+    if (then && !dirty) then();
+  }
+
+  /** The point on screen is right, or was moved: on to the next one, or the save. */
+  function checkPick(point) {
+    const { rows, at } = checking;
+    movePoint(rows[at], point);
+    if (at + 1 < rows.length) checking = { ...checking, at: at + 1 };
+    else finishCheck();
+  }
+
+  /** Save now. `later` keeps the points left unchecked off the case map. */
+  async function finishCheck(later = false) {
+    const { andPost, then } = checking;
+    checking = null;
+    await save({ andPost, checked: true, then });
+    if (later && !dirty) toast('Unchecked points stay off the case map until you check them.', 'warn', 5200);
   }
 
   async function performSave(andPost = false) {
@@ -4000,7 +4044,7 @@
     picker || newProofOpen || importOpen || openList !== null || discardConfirm
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
       || placeOffer !== null || orphanOffer !== null || deleteEntry !== null
-      || sourcePick !== null || pointMap !== null
+      || sourcePick !== null || pointMap !== null || checking !== null
   );
   const editableShape = $derived(editableShapes.length === 1 ? editableShapes[0] : null);
   const fillableSelection = $derived(editableShapes.some((s) => canFill(s.kind)));
@@ -4061,7 +4105,10 @@
    * answer first, which is what adding a second row already did.
    */
   function statePoint0() {
-    if (!proof.points[0].coords.trim()) proof.points[0].coords = displayedCoords;
+    if (proof.points[0].coords.trim()) return;
+    // naming a point is not checking where it is
+    if (pointProposed(proof.points, 0, proof.panels)) proof.points[0].proposed = true;
+    proof.points[0].coords = displayedCoords;
   }
 
   /** Add a row. The first one is materialised first: that answer has to become the
@@ -4122,6 +4169,7 @@
   /** The point the map handed back, written where the row reads it. */
   function movePoint(i, point) {
     proof.points[i].coords = formatCoords(point, prefs.coordFormat);
+    proof.points[i].proposed = false;
     dirty = true;
   }
 
@@ -4512,16 +4560,29 @@
                    of a building by editing digits — so the map is one press from
                    the field, inside the same box, the way the date beside it
                    opens its calendar. -->
-              <div class="field-with-act coords-field" class:warn={i === 0 && !displayedCoords}>
+              <!-- A point the imagery proposed reads greyed until somebody checks it:
+                   typed, or placed on the map. -->
+              <div
+                class="field-with-act coords-field"
+                class:warn={i === 0 && !displayedCoords}
+                class:proposed={pointProposed(proof.points, i, proof.panels)}
+              >
                 <input
                   class="input meta-input"
                   placeholder="lat, lon"
                   value={i === 0 ? displayedCoords : point.coords}
-                  oninput={(e) => { proof.points[i].coords = e.target.value; dirty = true; }}
+                  oninput={(e) => {
+                    proof.points[i].coords = e.target.value;
+                    proof.points[i].proposed = false;
+                    dirty = true;
+                  }}
                 />
                 <button
                   class="field-act"
-                  title="Move this point on the map"
+                  class:check={pointProposed(proof.points, i, proof.panels)}
+                  title={pointProposed(proof.points, i, proof.panels)
+                    ? 'Not checked yet. Check it on the map'
+                    : 'Move this point on the map'}
                   onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
                 >
                   <Icon name="pin" size={13} />
@@ -4938,6 +4999,19 @@
     onpick={(point) => movePoint(pointMap.row, point)}
     onclose={() => (pointMap = null)}
   />
+{/if}
+
+<!-- One point at a time, each on its own map: the dialog reads where it opens once. -->
+{#if checkStep}
+  {#key checking?.at}
+    <PointMapDialog
+      view={checkStep?.view}
+      check={checkStep?.check}
+      onpick={checkPick}
+      onlater={checkStep?.later ? () => finishCheck(true) : null}
+      onclose={() => (checking = null)}
+    />
+  {/key}
 {/if}
 
 {#if importOpen && caseState.current}
@@ -5415,6 +5489,8 @@
   .point-row + .point-row { margin-top: 4px; }
   .point-row .meta-input { flex: 1; min-width: 0; }
   .point-row .coords-field { flex: 1; min-width: 0; }
+  .coords-field.proposed .meta-input { color: var(--text-3); font-style: italic; }
+  .coords-field .field-act.check { color: var(--warn, #e8a33d); }
   /* The name is as wide as a name needs to be; the coordinate takes the rest. */
   .point-row .label-field { width: 110px; flex: none; }
   .point-label { width: 100%; min-width: 0; font-size: var(--fs-xs); padding: 5px 8px; }

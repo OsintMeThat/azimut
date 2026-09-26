@@ -23,7 +23,7 @@ from ..engine import (
 from ..engine.analysis_models import (
     BUILTINS, GROUPS, MAX_AROUND, MAX_BANDS, MAX_CHECKS, MAX_MARKS, MAX_RULES, METHODS, RELIABILITY, Area, AreaDates,
     AreaGeometry, Bounds, Check, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId, Source, Zone,
-    ZoneSet, is_single,
+    ZoneSet, is_single, stored, unreadable,
 )
 from ..workspace import Case
 from .cases import delete_by_path, delete_entities_deep, get_case
@@ -37,7 +37,7 @@ def recipes() -> dict[str, Any]:
     custom = []
     for raw in settings.get("analyzers", []):
         try:
-            custom.append(Recipe.model_validate(raw).model_dump())
+            custom.append(stored(Recipe, raw).model_dump())
         except ValueError:
             continue
     return {"builtins": [r.model_dump() for r in BUILTINS], "custom": custom, "methods": METHODS,
@@ -222,7 +222,10 @@ def start(case: Any, body: RunInput) -> dict[str, Any]:
     detection twice is refused, since the second would sweep what the first
     is already sweeping."""
     with engine.LOCK, case._lock:
-        body = engine.hydrate(case, body)
+        try:
+            body = engine.hydrate(case, body)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "an area of this detection was deleted; choose its areas again") from exc
         if body.followup_id:
             read(case, "followups", body.followup_id)
             if any(row.get("status") in engine.ACTIVE and row.get("followup_id") == body.followup_id
@@ -273,7 +276,7 @@ def run_followup(case_id: str, ident: str, body: RunAgain | None = None) -> dict
     fields = {key: saved[key] for key in RunInput.model_fields if key in saved}
     chosen = body or RunAgain()
     try:
-        run = RunInput.model_validate({**fields, "followup_id": ident})
+        run = stored(RunInput, {**fields, "followup_id": ident})
         if chosen.area_dates is not None:
             run = RunInput.model_validate({**run.model_dump(), "area_dates": chosen.area_dates})
         if chosen.date:
@@ -288,8 +291,7 @@ def run_followup(case_id: str, ident: str, body: RunAgain | None = None) -> dict
                                                "b": {**pair.b.model_dump(), "date": chosen.date}}
                                                for pair in run.area_dates]})
     except ValidationError as exc:
-        reason = str(exc.errors()[0].get("msg", "")).removeprefix("Value error, ")
-        raise HTTPException(422, reason or "this detection needs editing before it can run") from exc
+        raise HTTPException(422, unreadable(exc) or "this detection needs editing before it can run") from exc
     return start(case, run.model_copy(update={"run_anyway": chosen.run_anyway}))
 
 
@@ -388,7 +390,7 @@ def add_manual(case_id: str, ident: str, body: ManualCandidate) -> dict[str, Any
             raise HTTPException(409, "finish the run before adding a candidate")
         if len(saved["results"]) >= engine.MAX_RESULTS:
             raise HTTPException(409, "this run has reached the candidate limit")
-        zone = next((Zone.model_validate(z) for z in saved["input"]["zones"] if z["id"] == body.area_id), None)
+        zone = next((stored(Zone, z) for z in saved["input"]["zones"] if z["id"] == body.area_id), None)
         outcome = next((p for p in saved.get("area_runs", []) if p["area_id"] == body.area_id), None)
         if zone is None or (outcome and outcome["status"] != "ready"):
             raise HTTPException(422, "choose an area successfully read by this run")
@@ -407,7 +409,7 @@ def add_manual(case_id: str, ident: str, body: ManualCandidate) -> dict[str, Any
         parts = []
         for ty in range(top // size, (bottom - 1) // size + 1):
             for tx in range(left // size, (right - 1) // size + 1):
-                keys = [engine._key(Source.model_validate(s), z, tx, ty, None) for s in sources]
+                keys = [engine._key(stored(Source, s), z, tx, ty, None) for s in sources]
                 if not all(key in saved["frames"] for key in keys):
                     continue
                 px, py = max(left, tx * size), max(top, ty * size)

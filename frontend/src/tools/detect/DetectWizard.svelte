@@ -30,6 +30,7 @@
   import { openCopernicusSettings } from '../../lib/navigate.js';
   import { uniform, whenNeed, whenSummary } from '../../lib/map/detectWhen.js';
   import AnalyzerSettings from './AnalyzerSettings.svelte';
+  import AnalyzerSize from './AnalyzerSize.svelte';
   import WhenStep from './WhenStep.svelte';
   import Icon from '../../components/Icon.svelte';
 
@@ -44,6 +45,8 @@
     /** An analyzer just made in the library, to pick. */
     offer = null,
     busy = false,
+    /** Why the last launch or save failed, said beside the button that did it. */
+    failure = '',
     zones = $bindable([]),
     drawing = $bindable('select'),
     selectedZone = $bindable(null),
@@ -65,6 +68,8 @@
   let kind = $state('once');
   let recipe = $state(null);
   let chosen = $state('');
+  /** A size pressed in this detection, which holds for the next analyzer picked. */
+  let pickedSize = $state('');
   let title = $state('');
   let note = $state('');
   let a = $state({ ...EMPTY_SOURCE });
@@ -144,7 +149,10 @@
   function choose(id) {
     const found = [...builtins, ...custom].find((r) => r.id === id);
     if (!found) return;
-    recipe = clone(found);
+    const next = clone(found);
+    const sizes = recipeCapability(next, catalogue?.methods ?? []).sizes;
+    if (pickedSize && sizes?.[pickedSize]) next.parameters = { ...next.parameters, ...sizes[pickedSize] };
+    recipe = next;
     chosen = id;
   }
 
@@ -372,6 +380,12 @@
   {:else if step === 2}
     <section class="step" aria-label="What to look for">
       <h3>What to look for</h3>
+      {#if recipe}
+        <div class="size">
+          <p class="group">Target size</p>
+          <AnalyzerSize bind:recipe {capability} onpick={(name) => (pickedSize = name)} />
+        </div>
+      {/if}
       <div class="choices" role="radiogroup" aria-label="Analyzer">
         {#each groups as group (group.label)}
           <p class="group">{group.label}</p>
@@ -395,7 +409,7 @@
         {/if}
       </div>
       {#if recipe.description}<p class="hint">{recipe.description}</p>{/if}
-      <AnalyzerSettings bind:recipe {capability} />
+      <AnalyzerSettings bind:recipe {capability} showSize={false} />
       <button class="link" onclick={onlibrary}>Make an analyzer of your own…</button>
     </section>
   {:else if step === 3}
@@ -457,6 +471,7 @@
 </div>
 
 <div class="cmp-dock-foot">
+  {#if failure}<p class="warn" role="alert">{failure}</p>{/if}
   <div class="row">
     {#if step > 1}<button class="btn btn-sm" onclick={() => step--}>Back</button>{/if}
     {#if step < 4}
@@ -541,6 +556,7 @@
   .link:disabled { opacity: 0.5; }
   .link small { display: block; color: var(--text-3); font-size: 10px; }
   .centre { justify-self: center; text-align: center; }
+  .size { display: grid; gap: 5px; }
   .choices { display: grid; gap: 2px; }
   .group {
     margin: 6px 0 2px;

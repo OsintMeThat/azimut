@@ -31,9 +31,15 @@ export function isSatelliteMedia(item) {
     (source.type === 'screenshot' && source.imagery_mode === 'satellite');
 }
 
-/** Images that are not already classified as satellite captures. */
+/** A Compare render or a kept Detect finding: before/after pictures the app drew. */
+export function isComparison(item) {
+  return item?.source?.type === 'compare';
+}
+
+/** Images that are neither satellite captures nor comparisons, as the server's
+ *  `image` facet counts them. */
 export function isGenericImage(item) {
-  return item?.kind === 'image' && !isSatelliteMedia(item);
+  return item?.kind === 'image' && !isSatelliteMedia(item) && !isComparison(item);
 }
 
 /** How material the analyst brought in by hand arrives: dropped or picked off a
@@ -52,11 +58,11 @@ export function isBroughtIn(item) {
  *  where the two and the reason they differ by a capture are written down. The server
  *  filters on the same set, and this is the in-memory pass a case small enough for one
  *  page takes instead. */
-const MADE_HERE = new Set(['inspect', 'satellite', 'screenshot']);
+const MADE_HERE = new Set(['inspect', 'satellite', 'screenshot', 'compare']);
 
 /** Whether the app produced this file rather than the analyst gathering it: an
  *  extracted frame, an adjustment, a collage, a capture drawn out of tiles, a map
- *  the extension grabbed off the screen.
+ *  the extension grabbed off the screen, a Compare render or a kept Detect finding.
  *
  *  Reads **how the file entered the case**, not everything true about it. Bytes
  *  imported first and later found identical to a frame keep `upload`, because that
@@ -65,6 +71,21 @@ const MADE_HERE = new Set(['inspect', 'satellite', 'screenshot']);
 export function isMadeHere(item) {
   return MADE_HERE.has(item?.source?.type);
 }
+
+/** The type and source facets, shared by the Media Library's filter and the
+ *  Satellite reference picker's chips. They overlap on purpose: a downloaded
+ *  video is both a Video and a Download. Keys and order are the server's
+ *  `_MEDIA_CATEGORIES`, and `_MEDIA_CATEGORY_SQL` counts the same facets. */
+export const MEDIA_CATEGORIES = [
+  { key: 'image', label: 'Images', icon: 'image', match: isGenericImage },
+  { key: 'video', label: 'Videos', icon: 'video', match: (i) => i.kind === 'video' },
+  { key: 'collage', label: 'Collages', icon: 'layers', match: (i) => i.source?.op === 'collage' },
+  { key: 'satellite', label: 'Satellite', icon: 'satellite', match: isSatelliteMedia },
+  { key: 'comparison', label: 'Comparisons', icon: 'compare', match: isComparison },
+  { key: 'upload', label: 'Imports', icon: 'upload', match: isBroughtIn },
+  { key: 'download', label: 'Downloads', icon: 'download', match: (i) => i.source?.type === 'download' },
+  { key: 'other', label: 'Other files', icon: 'file', match: (i) => i.kind !== 'image' && i.kind !== 'video' },
+];
 
 /** User-facing kind label for the Media Library card. */
 export function mediaDisplayKind(item) {

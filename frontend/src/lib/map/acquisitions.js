@@ -14,12 +14,55 @@
 
 import { daysBefore, isoDay } from '../sentinel.js';
 
-/** How far back to look. A month is several passes; a year is a last resort. */
+/**
+ * How far back to look. A month is several passes, a year the most one preset
+ * reaches; anything older is two days picked in the calendar, `{ start, end }`.
+ */
 export const LOOKBACK_WINDOWS = Object.freeze([
   { id: 30, label: '30 days' },
   { id: 90, label: '90 days' },
   { id: 365, label: '1 year' },
 ]);
+
+/** The day each collection's first satellite was launched: no pass is older. */
+export const MISSION_START = Object.freeze({ sentinel2: '2015-06-23', sentinel1: '2014-04-03' });
+
+/** The days a lookback asks about: a number of days up to today, or two picked days. */
+export function lookupSpan(lookback, now = new Date()) {
+  return typeof lookback === 'number'
+    ? { start: daysBefore(lookback, now), end: isoDay(now) }
+    : { start: lookback?.start ?? '', end: lookback?.end ?? '' };
+}
+
+/** What stops two picked days from being looked up, or '' when nothing does. */
+export function spanProblem(lookback) {
+  if (typeof lookback === 'number') return '';
+  if (!lookback?.start || !lookback?.end) return 'Pick the first and the last day.';
+  return lookback.start > lookback.end ? 'The first day comes after the last.' : '';
+}
+
+/**
+ * Where to look for what a list stopped short of, or null when nothing is left.
+ *
+ * The catalogue answers newest first, so what a cut list lacks is older than its
+ * last row. The same start, then, up to that row's day, which is asked again
+ * because the cut may have fallen among its granules.
+ */
+export function olderSpan(lookback, list, now = new Date()) {
+  const oldest = list?.at(-1)?.date;
+  const { start } = lookupSpan(lookback, now);
+  return oldest && start && oldest > start ? { start, end: oldest } : null;
+}
+
+/**
+ * A list with the older passes found after it, newest first and each pass once.
+ * The older lookup's copy of the day they share wins: it read all of its granules.
+ */
+export function withOlder(list, older) {
+  const passes = new Map((list ?? []).map((entry) => [passKey(entry), entry]));
+  for (const entry of older ?? []) passes.set(passKey(entry), entry);
+  return [...passes.values()].sort((x, y) => passKey(y).localeCompare(passKey(x)));
+}
 
 /**
  * Coverage at or above this counts as covering the whole area. Not 1.0 because
@@ -30,11 +73,10 @@ export const LOOKBACK_WINDOWS = Object.freeze([
 export const FULL_COVER = 0.98;
 
 /** The request body for a lookup over the areas currently drawn. */
-export function acquisitionQuery(zones, days, now = new Date(), collection = 'sentinel2') {
+export function acquisitionQuery(zones, lookback, now = new Date(), collection = 'sentinel2') {
   return {
     zones: zones.map(({ id, name, kind, points }) => ({ id, name, kind, points })),
-    start: daysBefore(days, now),
-    end: isoDay(now),
+    ...lookupSpan(lookback, now),
     collection,
   };
 }

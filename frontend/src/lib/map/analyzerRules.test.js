@@ -10,7 +10,7 @@ import { changeSettings } from './changeAssist.js';
 import { toMercator } from './groundFrame.js';
 
 const METHODS = [
-  { id: 'rules', single: false, clouds: true, sensor: 'sentinel2', frames: 4, sizes: { medium: { min_area: 2000, cleanup: 1 } }, rules: true },
+  { id: 'rules', single: false, clouds: true, sensor: 'sentinel2', frames: 4, sizes: { medium: { min_area: 2000, cleanup: 1 }, all: { min_area: 0, cleanup: 0 } }, rules: true },
   { id: 'sar-change', single: false, clouds: false, sensor: 'sentinel1', frames: 4, sizes: { medium: { smoothing: 2 } }, smoothing_m: 45 },
   { id: 'vessels', single: true, clouds: true, sensor: 'sentinel2', frames: 2 },
 ];

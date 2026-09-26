@@ -2753,6 +2753,8 @@
     media={refs.media}
     loading={refs.loading}
     caseId={caseState.current?.id}
+    bind:category={refs.category}
+    bind:showWorking={refs.showWorking}
     onpick={(item) => refs.add(item)}
     onclose={() => (refs.picking = false)}
   />

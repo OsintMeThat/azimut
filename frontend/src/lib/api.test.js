@@ -46,8 +46,13 @@ describe('API errors', () => {
   });
 
   it('falls back to the status when the body says nothing usable', async () => {
+    answers(404, { detail: [] });
+    await expect(api.get('/api/x')).rejects.toThrow('HTTP 404');
+  });
+
+  it('says a server crash is one, rather than a bare status', async () => {
     answers(500, { detail: [] });
-    await expect(api.get('/api/x')).rejects.toThrow('HTTP 500');
+    await expect(api.get('/api/x')).rejects.toThrow('Azimut hit an unexpected error (HTTP 500). Settings → System → Report an issue has its log.');
   });
 
   it('carries the status for callers that branch on it', async () => {

@@ -8,6 +8,9 @@ const area = { id: 'aaaaaaaaaaaa', name: 'North site', colour: '#38bdf8',
   geometry: { type: 'Polygon', coordinates: [[[2.29, 48.855], [2.3, 48.855], [2.3, 48.862], [2.29, 48.862], [2.29, 48.855]]] } };
 const zone = { id: area.id, name: area.name, kind: 'polygon', points: area.geometry.coordinates[0].slice(0, -1) };
 const source = (date) => ({ provider: 'sentinel2', date, layer: 'TRUE_COLOR', maxcc: 30 });
+const size = (min_area, max_area, cleanup, smoothing, merge_metres) => ({ min_area, max_area, cleanup, smoothing, merge_metres });
+const SIZES = { small: size(300, 0, 0, 0, 0), medium: size(2000, 0, 1, 0, 30), large: size(20000, 0, 1, 1, 100),
+  all: size(0, 0, 0, 0, 0) };
 
 async function openDetect(page, withRun = false) {
   await installAppFixture(page);
@@ -26,7 +29,7 @@ async function openDetect(page, withRun = false) {
     area_runs: [{ area_id: area.id, name: area.name, a, b, status: 'ready' }] };
   await page.route('**/api/compare/analyzers', (route) => route.fulfill({ json: {
     builtins: [recipe, { ...recipe, id: 'boats', name: 'Vessels', method: 'vessels' }], custom: [],
-    methods: [{ id: 'surface', single: false, sizes: {} }, { id: 'vessels', single: true, sizes: {} }],
+    methods: [{ id: 'surface', single: false, sizes: SIZES }, { id: 'vessels', single: true, sizes: {} }],
     grid: [13, 512], max_tiles: 4096, max_results: 2000,
   } }));
   await page.route('**/api/settings/prefs', (route) => {
@@ -102,6 +105,32 @@ test('landing, dock rail and the When step fit the existing map workspace', asyn
   expect((await map.boundingBox()).height).toBe(before.height);
   expect(calls).toEqual([]);
   await page.screenshot({ path: test.info().outputPath('detect-dates.png') });
+  expect(errors).toEqual([]);
+});
+
+test('the size is asked before the analyzers, and a pair months apart warns about shadows', async ({ page }) => {
+  const { errors, calls } = await openDetect(page);
+  await page.getByRole('button', { name: 'New detection', exact: true }).click();
+  await page.getByRole('button', { name: 'New one pass', exact: true }).click();
+  await page.getByRole('button', { name: 'North site', exact: true }).click();
+  await page.getByRole('button', { name: 'Next: What' }).click();
+  const step = page.getByRole('region', { name: 'What to look for' });
+  const sizes = step.getByRole('group', { name: 'Target size' });
+  await expect(sizes).toHaveCount(1);
+  await expect(sizes.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const [above, list] = [await sizes.boundingBox(), await step.getByRole('radiogroup', { name: 'Analyzer' }).boundingBox()];
+  expect(above.y + above.height).toBeLessThanOrEqual(list.y);
+  await page.screenshot({ path: test.info().outputPath('detect-what.png') });
+  await page.getByRole('button', { name: 'Next: When' }).click();
+  await page.getByLabel('Day of A').fill('21/01/2026');
+  await expect(page.getByRole('note')).toHaveCount(0);
+  await page.getByRole('radio', { name: 'A day I choose' }).click();
+  await page.getByLabel('Day of B').fill('25/09/2026');
+  await expect(page.getByRole('note')).toContainText('most buildings will read as changed');
+  await page.screenshot({ path: test.info().outputPath('detect-shadows.png') });
+  await page.getByLabel('Day of B').fill('02/02/2026');
+  await expect(page.getByRole('note')).toHaveCount(0);
+  expect(calls).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -231,6 +260,14 @@ test('an analyzer of your own is built over the map: its rules painted, a point 
   await page.getByRole('button', { name: 'Hide rule 2 on the map', exact: true }).click();
   await expect.poll(tint([250, 204, 21, 110])).toBe(true);
   expect(await layers.evaluate((canvas) => canvas.getContext('2d').getImageData(10, 10, 1, 1).data[3])).toBe(0);
+
+  // the detections alone, as a run would return them: no rule painted, the candidate still outlined
+  const shows = page.getByRole('group', { name: 'What the map shows' });
+  await shows.getByRole('button', { name: 'Detections', exact: true }).click();
+  await expect.poll(tint([0, 0, 0, 0])).toBe(true);
+  await expect(page.locator('svg.analysis-overlay [role="button"]')).toHaveCount(1);
+  await shows.getByRole('button', { name: 'Rules', exact: true }).click();
+  await expect.poll(tint([250, 204, 21, 110])).toBe(true);
 
   const map = page.locator('.detect-tool .map');
   const box = await map.boundingBox();

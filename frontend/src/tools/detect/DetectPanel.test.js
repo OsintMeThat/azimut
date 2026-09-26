@@ -321,6 +321,46 @@ it('walks a single pass through its steps and runs it once', async () => {
   }));
 });
 
+it('pages back through a pass list the catalogue cut short', async () => {
+  answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
+  const ago = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  await open({ opening: 'zones-aaaaaaaaaaaa' });
+  button('Next: What').click(); await settle();
+  button('Next: When').click(); await settle();
+  button('1 year').click(); await settle();
+  post.mockResolvedValueOnce({ dates: [{ date: ago(10), cloud: 2, coverage: 1 }, { date: ago(100), cloud: 5, coverage: 0.4 }],
+    truncated: true });
+  post.mockResolvedValueOnce({ dates: [{ date: ago(100), cloud: 5, coverage: 1 }, { date: ago(120), cloud: 9, coverage: 1 }],
+    truncated: false });
+  button('Find passes').click(); await settle();
+  expect(target.textContent).toContain('stopped at 100 passes');
+  button('Older passes').click(); await settle();
+  expect(post).toHaveBeenLastCalledWith('/api/satellite/sentinel/acquisitions',
+    expect.objectContaining({ start: ago(365), end: ago(100) }));
+  const listed = [...target.querySelectorAll('.passes li strong')].map((node) => node.textContent);
+  expect(listed).toEqual([ago(10), ago(100), ago(120)]);
+  expect(target.textContent).not.toContain('stopped at 100 passes');
+  expect(target.textContent).not.toContain('40% of the areas');
+});
+
+it('says why a pass did not start, beside the button that started it', async () => {
+  answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
+  post.mockRejectedValue(new Error('an area of this detection was deleted; choose its areas again'));
+  await open({ opening: 'zones-aaaaaaaaaaaa' });
+  button('Next: What').click(); await settle();
+  button('Next: When').click(); await settle();
+  button('A day I choose').click(); await settle();
+  for (const [label, day] of [['Day of A', '01/08/2026'], ['Day of B', '06/09/2026']]) {
+    const field = target.querySelector(`[aria-label="${label}"]`);
+    field.value = day; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  }
+  button('Next: Start').click(); await settle();
+  button('Run this pass').click(); await settle();
+  expect(heading()).toBe('Name and start');
+  expect(target.querySelector('.cmp-dock-foot [role="alert"]')?.textContent)
+    .toBe('an area of this detection was deleted; choose its areas again');
+});
+
 it('asks a routine what each pass compares against, not which day to read', async () => {
   const set = { id: 'aaaaaaaaaaaa', title: 'Port', zones: area, areas: 1 };
   let saved = [];
@@ -502,6 +542,22 @@ it('sets a size as a whole set of numbers, and shows when it was tuned by hand',
   expect(minimum.value).toBe('300');
   minimum.value = '120'; minimum.dispatchEvent(new Event('input', { bubbles: true })); await settle();
   expect(pressed()).toEqual([]);
+});
+
+it('asks the size above the analyzers, and holds a pressed size for the next one picked', async () => {
+  answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
+  await open({ opening: 'zones-aaaaaaaaaaaa' });
+  button('Next: What').click(); await settle();
+  const step = target.querySelector('section[aria-label="What to look for"]');
+  const sizes = step.querySelectorAll('[aria-label="Target size"]');
+  const list = step.querySelector('[aria-label="Analyzer"]');
+  expect(sizes.length).toBe(1);
+  expect(sizes[0].compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const pressed = () => [...step.querySelectorAll('[aria-label="Target size"] button')]
+    .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent.trim());
+  button('Large').click(); await settle();
+  [...list.querySelectorAll('[role="radio"]')].find((b) => b.textContent.includes('Vessels')).click(); await settle();
+  expect(pressed()).toEqual(['Large']);
 });
 
 it('offers the cloud switch on by default, and none for a method that rejects cloud itself', async () => {
@@ -769,6 +825,43 @@ it('marks a point read on the map in a check, which turns red when a rule loses 
   expect(saved.checks).toEqual([expect.objectContaining({ name: 'Check 1',
     result: expect.objectContaining({ count: 1, covered: [false] }) })]);
   expect(saved.checks[0].result.signature).toMatch(/^[0-9a-z]+$/);
+});
+
+it('shows the detections alone on the map, keeps each eye for the way back, and counts an open check', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus(PREVIEWED, () => ({ ready: true, missing: 0, count: 2, covered: [true] }));
+  await openBuilder();
+  button('Add a rule').click(); await settle();
+  await readTheView();
+  const eye = (n) => target.querySelector(`button.eye[aria-label$="rule ${n} on the map"]`).getAttribute('aria-pressed');
+  const view = (name) => target.querySelector(`[aria-label="What the map shows"]`)
+    .querySelector(`button:nth-child(${name === 'Rules' ? 1 : 2})`);
+  labelled('Hide rule 2 on the map').click(); await settle();
+  expect([eye(1), eye(2)]).toEqual(['true', 'false']);
+
+  // the detections alone: nothing of the rules is painted, so every eye reads closed
+  view('Detections').click(); await settle();
+  expect(view('Detections').getAttribute('aria-pressed')).toBe('true');
+  expect([eye(1), eye(2)]).toEqual(['false', 'false']);
+  // back to the rules, each eye as it was left
+  view('Rules').click(); await settle();
+  expect([eye(1), eye(2)]).toEqual(['true', 'false']);
+
+  // an eye pressed from the detections opens its rule and brings the rules back
+  view('Detections').click(); await settle();
+  labelled('Show rule 2 on the map').click(); await settle();
+  expect(view('Rules').getAttribute('aria-pressed')).toBe('true');
+  expect([eye(1), eye(2)]).toEqual(['true', 'true']);
+
+  // an open check counts its own frame, which is all the map shows, and the choice rides along
+  view('Detections').click(); await settle();
+  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
+  live.markProbe('found'); await settle();
+  await debounce(900); await settle();
+  expect(tab('Checks').getAttribute('aria-selected')).toBe('true');
+  expect(target.textContent).toContain('2 candidates in “Check 1”');
+  expect(target.textContent).not.toContain('candidate on the map');
+  expect(view('Detections').getAttribute('aria-pressed')).toBe('true');
 });
 
 it('adds a check where the map is: pick its passes, drop pins with the map, done', async () => {

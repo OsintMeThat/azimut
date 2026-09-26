@@ -597,7 +597,10 @@ def test_every_method_publishes_sizes_and_words_for_its_reading():
     assert all(entry["sizes"]["small"]["cleanup"] == 0 for entry in METHODS)
 
 
-def test_builtins_cover_big_and_small_things_and_start_at_medium():
+def test_builtins_cover_big_and_small_things_and_start_at_all_sizes():
+    """A size picked without noticing drops what falls outside it, so a
+    detection starts with none: Medium's 20 ha ceiling once dropped an
+    airbase's worth of change."""
     ids = {recipe.id for recipe in BUILTINS}
     assert {"boats", "anomaly", "structures", "impacts", "large-change", "burn-scars",
             "vegetation-loss", "new-water"} <= ids
@@ -605,9 +608,17 @@ def test_builtins_cover_big_and_small_things_and_start_at_medium():
     # out in some 280 pieces, so the radar flood detector starts at Large.
     starts = {"radar-flood": "large"}
     for recipe in BUILTINS:
-        size = SIZES[recipe.method][starts.get(recipe.id, "medium")]
+        size = SIZES[recipe.method][starts.get(recipe.id, "all")]
         assert {key: getattr(recipe.parameters, key) for key in size} == size, recipe.id
         assert len(recipe.description) < 200, recipe.id
+
+
+def test_all_sizes_drops_the_limits_but_keeps_the_radar_averaging():
+    for method, sizes in SIZES.items():
+        assert sizes["all"]["min_area"] == sizes["all"]["max_area"] == 0, method
+        # the panel tells the sizes apart by their numbers
+        assert len({tuple(size.values()) for size in sizes.values()}) == 4, method
+    assert SIZES["sar-change"]["all"]["smoothing"] == SIZES["sar-change"]["medium"]["smoothing"]
 
 
 # -- vessels ---------------------------------------------------------------------------
@@ -801,6 +812,24 @@ def test_construction_is_ground_that_moved_the_same_way_in_every_band(client, co
     assert saved["results"][0]["measure"]["signed"] > 5
 
 
+def test_burned_buildings_are_ground_that_went_dark_in_every_band(client, copernicus):
+    """Soot, char and wreckage darken every band. A new roof brightens, the
+    desert drifting a few percent stays under the line, and a burned field is
+    Burn scars' to find."""
+    body = sentinel_input("burned-buildings")
+    before, after = surface(0.33, 0.39, 0.45, BARE), surface(0.33, 0.39, 0.45, BARE)
+    after[at(100, 100, 12, 12)] = code(0.20, 0.24, 0.30, BARE)      # a burned hangar
+    after[at(300, 100, 12, 12)] = code(0.45, 0.50, 0.55, BARE)      # a new bright roof
+    after[at(100, 300, 30, 30)] = code(0.30, 0.36, 0.42, BARE)      # the desert drifting
+    before[at(300, 300, 30, 30)] = code(0.05, 0.40, 0.18)           # a field...
+    after[at(300, 300, 30, 30)] = code(0.04, 0.12, 0.16, BARE)      # ...that burned
+    seed(body, before, after)
+    saved = run(client, copernicus, body)
+    assert saved["status"] == "ready", saved
+    assert saved["count"] == 1, [(r["coordinates"], r["area"]) for r in saved["results"]]
+    assert saved["results"][0]["measure"]["signed"] < -9
+
+
 def test_small_spots_are_found_where_everything_around_them_held_still(client, copernicus):
     body = sentinel_input("impacts")
     before, after = surface(0.20, 0.30, 0.30), surface(0.20, 0.30, 0.30)
@@ -847,18 +876,93 @@ def test_a_cloud_edge_is_not_a_spot(client, copernicus):
     assert saved["count"] == 0, [(r["coordinates"], r["area"]) for r in saved["results"]]
 
 
+def test_a_field_the_area_edge_cuts_is_not_a_spot(client, copernicus):
+    """Past the area's edge nothing was measured, so it is not ground that held
+    still. Counted as still, it made the sliver of a field left inside the edge
+    look isolated, and lined an airbase's edge with candidates."""
+    before, after = surface(0.20, 0.30, 0.30), surface(0.20, 0.30, 0.30)
+    after[at(458, 150, 60, 120)] = code(0.35, 0.40, 0.45)       # a field, 3 px of it inside
+    after[at(100, 100, 2, 2)] = code(0.08, 0.12, 0.10)          # a real mark
+    body = sentinel_input("impacts", **SIZES["spots"]["all"])
+    seed(body, before, after)
+    saved = run(client, copernicus, body)
+    assert saved["status"] == "ready", saved
+    assert saved["count"] == 1, [(r["coordinates"], r["area"]) for r in saved["results"]]
+    assert saved["results"][0]["area"] < 500
+
+
+def test_smoothing_does_not_carry_a_granule_edge_into_the_ground_beside_it(client, copernicus):
+    """The blur averages measured ground only; nodata read as a change bled
+    into the pixels next to it and drew a line along the granule's end."""
+    before, after = surface(0.20, 0.28, 0.32), surface(0.20, 0.28, 0.32)
+    after[:, PAD + 300:] = 0
+    body = sentinel_input("structures", min_area=0, max_area=0, cleanup=0, smoothing=3,
+                          merge_metres=0)
+    seed(body, before, after)
+    saved = run(client, copernicus, body)
+    assert saved["status"] == "ready", saved
+    assert saved["count"] == 0, [(r["coordinates"], r["area"]) for r in saved["results"]]
+
+
+def candidates_of(mask):
+    """The rows one tile's detection gives for `mask`, as a sweep builds them."""
+    reading = analyzers.Reading(binary=mask.astype(np.uint8), stat=mask.astype(np.float32),
+                                threshold=0.5)
+    return analyzers._candidates(reading, "test", SENTINEL_TILE[1], SENTINEL_TILE[2], 0, [])
+
+
+def test_merging_measures_the_gap_between_footprints_not_their_boxes():
+    """A hollow mark's box holds the dots inside it, but its outline is far from
+    them. Joined by boxes, and each join growing the box the next was tested
+    against, an airbase's 667 marks became one candidate of 31 km²."""
+    mask = np.zeros((512, 512), bool)
+    mask[100:200, 100:104] = mask[100:104, 100:200] = mask[196:200, 100:200] = True   # a C, 650 m wide
+    for x, y in ((140, 130), (160, 150), (140, 170), (170, 130), (170, 170)):
+        mask[y:y + 3, x:x + 3] = True                           # dots 200 m inside it
+    rows = candidates_of(mask)
+    assert len(rows) == 6
+    merged = analyzers.merge(rows, 20)
+    assert len(merged) == 6, [row["area"] for row in merged]
+
+
+def test_merging_joins_within_the_distance_and_not_past_it():
+    mask = np.zeros((512, 512), bool)
+    mask[100:104, 100:104] = mask[100:104, 106:110] = True       # 2 px apart, about 13 m
+    mask[300:304, 100:104] = mask[300:304, 109:113] = True       # 5 px apart, about 33 m
+    merged = analyzers.merge(candidates_of(mask), 20)
+    assert sorted(len(row["parts"]) for row in merged) == [1, 1, 2]
+    joined = next(row for row in merged if len(row["parts"]) == 2)
+    assert joined["bbox"][3] == max(row["bbox"][3] for row in merged)   # the northern pair
+    assert joined["geometry"]["type"] == "MultiPolygon" and len(joined["geometry"]["coordinates"]) == 2
+
+
+def test_a_tile_edge_between_two_pieces_joins_them_even_at_zero():
+    left = np.zeros((512, 512), bool)
+    left[200:220, 492:512] = True
+    right = np.zeros((512, 512), bool)
+    right[200:220, 0:20] = True
+    right[400:404, 0:4] = True                                   # touches nothing
+    z, x, y = SENTINEL_TILE
+    rows = candidates_of(left) + analyzers._candidates(
+        analyzers.Reading(binary=right.astype(np.uint8), stat=right.astype(np.float32), threshold=0.5),
+        "test", x + 1, y, 1, [])
+    piece = rows[0]["area"]
+    merged = analyzers.merge(rows, 0)
+    assert sorted(round(row["area"] / piece, 2) for row in merged) == [0.04, 2.0]
+
+
 def test_a_mark_wider_than_its_window_still_reads_its_own_contrast(client, copernicus):
     """A median box the size of the target takes the target for its background.
 
     The background is read from a ring with a hole in it instead, so a 90 m mark
-    in the desert measures what it really moved. Small then drops it for its
+    in the desert measures what it really moved. Medium then drops it for its
     size, with nothing to show for it — which is what All is for.
     """
     ground = surface(0.37, 0.40, 0.55)
     marked = surface(0.37, 0.40, 0.55)
     marked[at(200, 200, 10, 10)] = code(0.29, 0.30, 0.45)
 
-    body = sentinel_input("impacts")
+    body = sentinel_input("impacts", **SIZES["spots"]["medium"])
     seed(body, ground, marked)
     assert run(client, copernicus, body)["count"] == 0
 

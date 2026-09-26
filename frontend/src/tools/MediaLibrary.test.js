@@ -239,9 +239,10 @@ describe('Media Library search empty state', () => {
 });
 
 describe('Media Library browse controls', () => {
-  it('separates satellite captures from generic Images', () => {
-    expect(source).toContain("match: isGenericImage");
-    expect(source).toContain("match: isSatelliteMedia");
+  it('filters on the shared facet list, which separates satellite captures from Images', () => {
+    // The facets themselves are tested in lib/mediaFilter.test.js.
+    expect(source).toContain('MEDIA_CATEGORIES as CATEGORIES');
+    expect(source).not.toContain('const CATEGORIES = [');
     expect(source).toContain('mediaDisplayKind(item)');
   });
 

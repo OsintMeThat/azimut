@@ -179,10 +179,10 @@ proof for publication.
 | ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed on request to the ones that changed the point, and dates the pixels apart from the release. |
 | ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
 | ✅ **Detect sweep** | Native Sentinel-2 detectors, mask footprints, manual candidates and Keep / Dismiss / Pin review with PNG evidence stamped with its dates and point. |
-| ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, each with the share of them its swath reached, and reports what a finished run actually swept. |
+| ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, up to a year back or between two days picked in a calendar, each with the share of them its swath reached, and reports what a finished run actually swept. |
 | ✅ **Cloud & shadow filter** | One click in Difference and Detect, both on Sentinel-2's scene classification: unsure edges taken, classified "clouds" too small to be one dropped, and shadows cast away from the sun, including the ones the classification read as water. |
 | ✅ **Difference over any view** | A switch beside Compare's four views, offered on a matched pair only, laying its highlights on A, B or both (the default). |
-| ✅ **Detect** | Map-first tab, collapsible dock, shared case areas reshaped in place, an A/B When step with per-area dates, one-off and routine runs grouped in Saved, repeat notices and explicit SAT layer snapshots. |
+| ✅ **Detect** | Map-first tab, collapsible dock, shared case areas reshaped in place, an A/B When step with per-area dates that warns when the two passes' shadows differ, one-off and routine runs grouped in Saved, repeat notices and explicit SAT layer snapshots. |
 | ✅ **Capture scale & north** | Adds a scale bar and true-north needle to app and extension captures when resolution and heading are known. |
 | ✅ **Footprint tracing** | Traces a place's uncertainty as a polygon around its pin, in place of the radius. |
 | ✅ **Extension map tools** | Draws measure, the case's points one position at a time, sun and moon, search grids and case media over third-party maps, calibrated per site by a replayable command. |
@@ -202,7 +202,7 @@ proof for publication.
 | ✅ **Copernicus where it is needed** | Detect and Compare say in the middle of the tool what Copernicus still lacks, with the free account, the Sentinel-2 configuration and the Sentinel-1 layer form field by field. |
 | ✅ **A candidate in Compare** | Opens a Detect candidate in Compare on the passes that found it, or against high-resolution imagery for a thing present on one pass. |
 | ✅ **Sizes in Detect** | Right-clicks Detect's map for its own point menu, measures a hull with a ruler, sizes each candidate along its footprint, walks the largest first, and hides the drawing or blinks A against B from the review. |
-| ✅ **Analyzers of your own** | Builds a Detect analyzer from up to six rules on any band, index, ground class or radar polarisation, read on A, B or the change, tried live on the map over any Copernicus layer with a point reading; optional checks (marked places reread as the rules change) and five calibrated examples that ship with theirs; also opened from a built-in or a Difference reading, with a shape filter for every analyzer. |
+| ✅ **Analyzers of your own** | Builds a Detect analyzer from up to six rules on any band, index, ground class or radar polarisation, read on A, B or the change, tried live on the map over any Copernicus layer, painted rule by rule or as the detections alone, with a point reading; optional checks (marked places reread as the rules change) and five calibrated examples that ship with theirs; also opened from a built-in or a Difference reading, with a shape filter for every analyzer. |
 | ✅ **Examine: Inspect and Collage** | Keeps one work per file, saved as it is made, with its frames on a strip; lays collages out of frames and images from any file; merges a case's 0.3.0 sessions on open. |
 | ✅ **One camera for the map tabs** | Satellite, Compare and Detect show the same ground, and the link carries it to other windows; a Detect review and a saved comparison keep theirs, and Settings turns it off. |
 | ✅ **Comparisons in Saved work** | A saved comparison stands on the map with the captures, at its frame's centre with the frame outlined, dated A → B, and reopens in Compare; an export can also be kept in the case under it. |
@@ -210,6 +210,7 @@ proof for publication.
 | ✅ **An evolution of one point** | Exports Sentinel-2 passes or Wayback pictures ticked by hand on their previews, back to 2015, as one GIF or one sheet drawn from the tile proxy on the same ground, repeats and empty pictures left out and counted. |
 | ✅ **Signed exports, marks in their colours** | Compare exports close their credits line with the Azimut logo and name unless unticked, and a GIF keeps every mark's colour exact. |
 | ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame like a wheel about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back, Shift+← / → steps. |
+| ✅ **Checked proof points** | A proof point taken from a capture's centre reads greyed until checked; Save and To post show each one on the map first, and one saved for later stays off the case map. |
 
 ---
 

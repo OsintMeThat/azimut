@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from datetime import date
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -19,6 +19,8 @@ from pydantic import (
     Field,
     FiniteFloat,
     SerializerFunctionWrapHandler,
+    ValidationError,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -73,8 +75,34 @@ def sensor_for(method: str) -> str:
     return "sentinel1" if method in RADAR_METHODS else "sentinel2"
 
 
+#: Validation context for data Azimut wrote itself and reads back (`stored`).
+STORED = {"stored": True}
+
+
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _known_fields(cls, data: Any, info: ValidationInfo) -> Any:
+        """Drop the fields this version does not know, when the data is Azimut's own.
+
+        A request naming an unknown field is a bug in its caller and is refused.
+        A saved run, routine or analyzer is history instead: a field an earlier
+        version wrote and a later one dropped must not make it unreadable, and
+        one such run once turned every launch in its case into a server error.
+        """
+        if isinstance(data, dict) and isinstance(info.context, dict) and info.context.get("stored"):
+            return {key: value for key, value in data.items() if key in cls.model_fields}
+        return data
+
+
+M = TypeVar("M", bound=Model)
+
+
+def stored(model: type[M], data: Any) -> M:
+    """Read back something Azimut saved, ignoring the fields it no longer has."""
+    return model.model_validate(data, context=STORED)
 
 
 #: Map layers that no longer exist. A saved preference or a settings backup that
@@ -138,14 +166,15 @@ class Parameters(Model):
 # pieces grouped. The panel applies these; nothing stores which size was picked.
 _SIZE_KEYS = ("min_area", "max_area", "cleanup", "smoothing", "merge_metres")
 #: No floor and no ceiling, so nothing is dropped for its size. A mark that
-#: falls between two sizes is the one an analyst hunts for and never sees.
+#: falls between two sizes is the one an analyst hunts for and never sees, so
+#: this is where every built-in starts.
 _ALL = dict(zip(_SIZE_KEYS, (0.0, 0.0, 0, 0, 0.0)))
 
 
-def _sizes(*rows: tuple[float, float, int, int, float]) -> dict[str, dict[str, float]]:
+def _sizes(*rows: tuple[float, float, int, int, float], averaging: int = 0) -> dict[str, dict[str, float]]:
     named = {name: dict(zip(_SIZE_KEYS, row))
              for name, row in zip(("small", "medium", "large"), rows)}
-    return {**named, "all": dict(_ALL)}
+    return {**named, "all": {**_ALL, "smoothing": averaging}}
 
 
 _CHANGE_SIZES = _sizes((300, 0, 0, 0, 0), (2000, 0, 1, 0, 30), (20000, 0, 1, 1, 100))
@@ -160,7 +189,10 @@ SIZES: dict[str, dict[str, dict[str, float]]] = {
     # works against: for radar change a step of it is 45 m of ground
     # (`SAR_WINDOW_M`), and a small target keeps the finest window.
     "sar-vessels": _sizes((0, 150_000, 0, 0, 30), (250, 150_000, 0, 0, 50), (2500, 400_000, 0, 0, 100)),
-    "sar-change": _sizes((300, 0, 0, 1, 0), (2000, 0, 1, 2, 30), (20000, 0, 1, 3, 100)),
+    # All keeps Medium's 90 m of averaging: it is what took Istanbul's false
+    # "razed" from 111 to 25 (`analyzers.SAR_WINDOW_M`), and All is the size a
+    # detection starts at, so it drops the size limits and not that.
+    "sar-change": _sizes((300, 0, 0, 1, 0), (2000, 0, 1, 2, 30), (20000, 0, 1, 3, 100), averaging=2),
     # Your own rules measure change like the index methods do. Radar rules
     # take radar change's sizes instead (`METHODS`, the panel picks them).
     "rules": _CHANGE_SIZES,
@@ -510,7 +542,16 @@ class RunInput(Model):
 
 
 def _as_recipe(recipe: Recipe | dict[str, Any]) -> Recipe:
-    return recipe if isinstance(recipe, Recipe) else Recipe.model_validate(recipe)
+    # A request's recipe is already a model; a dict is one read off disk.
+    return recipe if isinstance(recipe, Recipe) else stored(Recipe, recipe)
+
+
+def unreadable(exc: ValidationError) -> str:
+    """The first thing a saved detection fails on, in one line an analyst can act on."""
+    error = exc.errors()[0]
+    where = " › ".join(str(part) for part in error.get("loc", ()) if part != "body")
+    reason = str(error.get("msg", "")).removeprefix("Value error, ")
+    return f"{where}: {reason}" if where and error.get("type") != "value_error" else reason
 
 
 def is_radar(recipe: Recipe | dict[str, Any]) -> bool:
@@ -576,7 +617,7 @@ def frames_for(recipe: Recipe | dict[str, Any]) -> int:
     return (1 if is_single(recipe) else 2) * (1 + len(recipe_products(recipe)))
 
 
-def _recipe(size: str = "medium", **fields: Any) -> Recipe:
+def _recipe(size: str = "all", **fields: Any) -> Recipe:
     parameters = {**SIZES[fields["method"]][size], **fields.pop("parameters", {})}
     return Recipe(parameters=Parameters(**parameters), **fields)
 
@@ -625,6 +666,19 @@ BUILTINS = [
             description="Ground that now reads as open water in the modified water index.",
             parameters={"sensitivity": 56, "index": "mndwi", "direction": "gain"},
             colour="#0ea5e9"),
+    # Construction's reading, darkening only and at a firmer line: a 9% drop in
+    # every band. On pairs from Planetary Computer it took Hodeidah's burned tank
+    # farm (July 2024) whole, an Isfahan depot and its soot with a hangar beside
+    # it (spring 2026), and Beirut's blasted port warehouses (August 2020).
+    # Hodeidah, Saky and Isfahan days apart with nothing happening gave one to
+    # three. A Dubai pair after April 2024's rain gave two hundred, which is why
+    # it says so.
+    _recipe(id="burned-buildings", name="Burned or destroyed buildings", method="structure",
+            phenomenon="Burn or blast mark",
+            description="Ground and roofs that went darker in every band: soot, char and "
+            "wreckage. Rain-wet ground darkens too, and a roof that fell without burning "
+            "rarely shows.",
+            parameters={"sensitivity": 60, "direction": "loss"}, colour="#b45309"),
     # Sentinel-1. The radar sees through cloud and at night, and a metal hull
     # or a standing wall answers it far louder than water or open ground.
     _recipe(id="radar-vessels", name="Vessels by radar", method="sar-vessels",
@@ -649,6 +703,7 @@ BUILTINS = [
             "vehicles, containers, moored ships.",
             parameters={"sensitivity": 60, "direction": "gain", "sar_ground": "bright"},
             colour="#eab308"),
+    # A flood is fields wide: without a floor it comes back in hundreds of pieces.
     _recipe("large", id="radar-flood", name="Flooding by radar", method="sar-change",
             phenomenon="New open water (radar)",
             description="Ground that went as radar-dark as calm water, under the cloud a flood "
@@ -663,7 +718,8 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("vessels", "Vessels", ["radar-vessels", "boats"]),
     ("fire", "Fires and burns", ["anomaly", "burn-scars"]),
     ("water", "Water and floods", ["radar-flood", "new-water"]),
-    ("built", "Buildings and earthworks", ["structures", "radar-new-objects", "radar-razed"]),
+    ("built", "Buildings and earthworks", ["structures", "radar-new-objects", "radar-razed",
+                                           "burned-buildings"]),
     ("ground", "Vegetation and small marks", ["vegetation-loss", "impacts"]),
     ("any", "Any change", ["radar-change", "large-change"]),
 ]
@@ -679,6 +735,7 @@ RELIABILITY: dict[str, Literal["reliable", "approximate", "rough"]] = {
     "anomaly": "reliable", "burn-scars": "reliable",
     "radar-flood": "reliable", "new-water": "approximate",
     "structures": "approximate", "radar-new-objects": "approximate", "radar-razed": "rough",
+    "burned-buildings": "rough",
     "vegetation-loss": "reliable", "impacts": "rough",
     "radar-change": "rough", "large-change": "rough",
 }
