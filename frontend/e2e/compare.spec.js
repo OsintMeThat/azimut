@@ -592,7 +592,7 @@ test('takes the whole screen with both maps, and gives it up to the tab it hands
   await page.getByRole('menu', { name: 'This point' }).getByRole('menuitem', { name: /^Open in/ }).click();
   await page.getByRole('menu', { name: 'Open this point in' }).getByRole('menuitem', { name: 'Satellite', exact: true }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
-  await expect(page.locator('.tool-host:not(.hidden) h2')).toHaveText('Satellite');
-  await expect(page.locator('.hud-coords')).toContainText('z17');
+  await expect(page.locator('.tabstrip .tab-btn.active')).toHaveText('Satellite');
+  await expect(page.locator('.tool-host:not(.hidden) .hud-coords')).toContainText('z17');
   expect(errors).toEqual([]);
 });
