@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture, restingCamera } from './app.fixture.js';
 
 async function openCompare(page, providerB = 'Esri World Imagery') {
   const fixture = await installAppFixture(page);
@@ -31,6 +31,8 @@ async function openCompare(page, providerB = 'Esri World Imagery') {
     await page.locator('.provider-card').filter({ hasText: letter === 'A' ? 'Esri World Imagery' : providerB }).click();
   }
   await awaitMapReady(page, 2);
+  // the drawing rail starts folded, and these tests draw
+  await page.getByRole('button', { name: 'Show the annotation tools', exact: true }).click();
   return { fixture, errors, saved };
 }
 
@@ -81,7 +83,7 @@ test('linked maps keep annotations on the ground through pan, modes and save', a
   await expect(page.getByRole('slider', { name: 'B opacity' })).toBeVisible();
   await page.getByRole('button', { name: 'Blink', exact: true }).click();
   await page.getByRole('button', { name: 'Slow', exact: true }).click();
-  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Save comparison', exact: true }).click();
   await expect.poll(() => saved.length).toBe(1);
   expect(saved[0].spec.version).toBe(2);
@@ -130,7 +132,7 @@ test('stamps a numbered marker and a symbol on the ground, and saves both', asyn
   await page.getByTitle('Numbered marker (N)', { exact: true }).click();
   await expect(page.getByTitle('Select and move (V)', { exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Save comparison', exact: true }).click();
   await expect.poll(() => saved.length).toBe(1);
   const marks = saved[0].spec.annotations;
@@ -169,7 +171,7 @@ test('an export frame can be drawn across every overlaid reading mode', async ({
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   }
 
-  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('dialog', { name: 'Save comparison' })
     .getByRole('button', { name: 'Save comparison', exact: true }).click();
   await expect.poll(() => saved.length).toBe(1);
@@ -219,8 +221,13 @@ test('spectral frames are requested only by Run, including after reopening and m
   await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   await expect(page.getByLabel('Method', { exact: true })).toHaveValue('index');
   expect(requests).toHaveLength(0);
+  // Nothing held covers this view, so Read is lit and the legend asks for it.
+  const read = page.locator('.difference-bar button.read');
+  await expect(read).toHaveText('Read');
+  await expect(read).toHaveClass(/\bdue\b/);
+  await expect(page.locator('.change-legend')).toContainText('Not read yet, press Read');
   // Read sits on the strip, so pressing it leaves the settings open.
-  await page.getByRole('button', { name: 'Read', exact: true }).click();
+  await read.click();
   await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
   await expect(page.locator('aside.settings')).toBeVisible();
   expect(requests.map((request) => request.day)).toEqual(['2026-08-01', '2026-09-01']);
@@ -232,16 +239,115 @@ test('spectral frames are requested only by Run, including after reopening and m
   // The press on the map put the settings away, and the pan spent nothing.
   await expect(page.locator('aside.settings')).toBeHidden();
   await expect(page.locator('.secondary .change-map')).not.toHaveCSS('transform', 'none');
-  await expect(page.getByRole('button', { name: 'Read', exact: true })).toBeEnabled();
+  // The reading followed on the frames it holds, and Read says there is nothing to do.
+  await expect(read).toHaveText('Up to date');
+  await expect(read).toBeDisabled();
   expect(requests).toHaveLength(2);
+  // Choosing another index is asking for it: its bands come without a second
+  // press, and the follow-up the choice schedules does not throw them away.
+  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
+  await page.locator('aside.settings select').nth(1).selectOption('nbr');
+  await expect.poll(() => requests.length).toBe(4);
+  expect(requests.slice(2).map((request) => request.product)).toEqual(['nbr', 'nbr']);
+  await expect(read).toHaveText('Up to date', { timeout: 20000 });
   // The cloud filter reads Sentinel-2's own classification, so switching it on
   // over a picture method asks for the sky then and there, rather than leaving
   // an unfiltered reading up behind an "on" switch.
-  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   await page.getByLabel('Method', { exact: true }).selectOption('colour');
   await page.getByRole('button', { name: /Clouds & shadows/ }).click();
-  await expect.poll(() => requests.length).toBe(4);
-  expect(requests.slice(2).map((request) => request.product)).toEqual(['sky', 'sky']);
+  await expect.poll(() => requests.length).toBe(6);
+  expect(requests.slice(4).map((request) => request.product)).toEqual(['sky', 'sky']);
+  expect(errors).toEqual([]);
+});
+
+test('the cloud filter reads the sky at 20 m, keeps a Read the map moved under, and follows the map once it rests', async ({ page }) => {
+  await installAppFixture(page);
+  const errors = [];
+  const requests = [];
+  let slow = 0;
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [
+    { id: 'sentinel2', label: 'Sentinel-2', url: 'https://tiles.invalid/{z}/{x}/{y}.png',
+      imagery: true, max_zoom: 19, tile_size: 256, oversample: 1, attribution: 'Browser fixture' },
+  ] }));
+  await page.route('**/api/satellite/sentinel/**', (route) => route.fulfill({ json:
+    route.request().url().includes('/layers') ? { layers: [{ id: 'TRUE_COLOR', title: 'True colour' }] } : { days: [] },
+  }));
+  const side = (day) => ({ present: true, provider: 'sentinel2', overlays: [],
+    sentinel: { layer: 'TRUE_COLOR', date: day, maxcc: 100 } });
+  await page.route('**/api/cases/*/compare/sessions', (route) => route.fulfill({ json: [{ name: 'Clouds', title: 'Clouds', mode: 'change' }] }));
+  await page.route('**/api/cases/*/compare/sessions/Clouds', (route) => route.fulfill({ json: {
+    title: 'Clouds', spec: { version: 2, camera: { lat: 48.8584, lon: 2.2945, zoom: 14, bearing: 0 }, mode: 'change',
+      change_assist: { method: 'colour', ignore_clouds: true, ignore_shadows: true },
+      a: side('2026-08-01'), b: side('2026-09-01') },
+  } }));
+  await page.route('**/api/compare/sentinel-frame', async (route) => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    const png = await page.evaluate(({ width, height }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgb(128,4,0)';
+      ctx.fillRect(0, 0, width, height);
+      return canvas.toDataURL().split(',')[1];
+    }, body);
+    if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
+    await route.fulfill({ contentType: 'image/png', body: Buffer.from(png, 'base64') });
+  });
+  await page.goto('/#compare');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await page.locator('.session-open').click();
+  await awaitMapReady(page, 2);
+  const read = page.locator('.difference-bar button.read');
+  const map = await page.locator('.compare-stage .surface-shell').first().boundingBox();
+  const pan = async (dx) => {
+    const x = map.x + map.width / 2;
+    const y = map.y + map.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y, { steps: 10 });
+    await page.mouse.up();
+  };
+  await expect(read).toHaveText('Read');
+
+  // Bands slow to come, and the map nudged while they do: the read still lands.
+  slow = 2500;
+  await read.click();
+  await page.waitForTimeout(400);
+  await pan(30);
+  await expect(read).toHaveText('Up to date', { timeout: 15000 });
+  expect(requests).toHaveLength(2);
+  slow = 0;
+
+  // The sky is asked for at the classification's own 20 m, not the screen's.
+  // a Mercator metre is 1/cos(latitude) of a ground one, and cos(latitude) = 1/cosh(y/R)
+  const ground = (asked) => (asked.east - asked.west) / asked.width / Math.cosh((asked.north + asked.south) / 2 / 6378137);
+  expect(requests.map((asked) => asked.product)).toEqual(['sky', 'sky']);
+  for (const asked of requests) expect(ground(asked)).toBeGreaterThan(19);
+
+  // So its margin reaches a whole view: a third of the map away is still free.
+  await pan(Math.round(map.width / 3));
+  await page.waitForTimeout(300);
+  await expect(read).toHaveText('Up to date', { timeout: 15000 });
+  expect(requests).toHaveLength(2);
+
+  // Far past it, the pair already read follows: its sky comes once the map
+  // rests, and only then, however many drags it took to get there.
+  const sweep = async () => {
+    const y = map.y + map.height / 2;
+    await page.mouse.move(map.x + 20, y);
+    await page.mouse.down();
+    await page.mouse.move(map.x + map.width - 20, y, { steps: 10 });
+    await page.mouse.up();
+  };
+  for (let drag = 0; drag < 3; drag += 1) await sweep();
+  await expect.poll(() => requests.length, { timeout: 15000 }).toBe(4);
+  await page.waitForTimeout(1500);
+  expect(requests).toHaveLength(4);
+  await expect(read).toHaveText('Up to date', { timeout: 15000 });
+  expect(requests.slice(2).map((asked) => asked.product)).toEqual(['sky', 'sky']);
   expect(errors).toEqual([]);
 });
 
@@ -320,7 +426,7 @@ test('on a turned map a box runs along the screen, and turns from its grip', asy
   expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(80, -1);
   expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(160, -1);
 
-  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Save comparison', exact: true }).click();
   await expect.poll(() => saved.length).toBe(1);
   // Drawn with the map turned 30° clockwise (compass 330° up), then a quarter turn.
@@ -438,5 +544,55 @@ test("Difference's settings stay put through a read, lie over the highlights, an
   const stage = await page.locator('.compare-stage').boundingBox();
   await page.mouse.click(stage.x + 80, stage.y + 80);
   await expect(panel).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('takes the whole screen with both maps, and gives it up to the tab it hands over to', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  const held = () => page.evaluate(() => document.fullscreenElement?.classList.contains('compare-tool') ?? false);
+  const stage = page.locator('.compare-stage');
+  const before = await stage.boundingBox();
+  await page.getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect.poll(held).toBe(true);
+  await expect.poll(async () => (await stage.boundingBox()).height).toBeGreaterThan(before.height);
+  // both maps were told: each draws across the whole of its new box
+  await expect.poll(() => page.locator('.compare-stage .map').evaluateAll((maps) => maps.map((map) =>
+    Math.abs(map.querySelector('canvas').getBoundingClientRect().width - map.getBoundingClientRect().width) < 2)))
+    .toEqual([true, true]);
+
+  // the header came along, and a dialog opened from it is painted over the screen
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Open comparison' })).toBeVisible();
+  await page.getByRole('dialog', { name: 'Open comparison' }).getByRole('button', { name: 'Close' }).click();
+  expect(await held()).toBe(true);
+
+  // the ground and the zoom reached in full screen are the ones the window gets back
+  const map = page.locator('.surface-shell.primary .map');
+  const box = await map.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -120);
+  await expect(page.locator('.camera-readout')).toHaveText('z17.0');
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 150, box.y + box.height / 2 - 60, { steps: 8 });
+  await page.mouse.up();
+  const there = await restingCamera(page, map);
+  await page.getByRole('button', { name: 'Exit full screen', exact: true }).click();
+  await expect.poll(held).toBe(false);
+  const back = await restingCamera(page, map);
+  expect(back.lat).toBeCloseTo(there.lat, 4);
+  expect(back.lon).toBeCloseTo(there.lon, 4);
+  expect(back.span / there.span).toBeCloseTo(1, 1);
+  await expect(page.locator('.camera-readout')).toHaveText('z17.0');
+
+  // Open in… another tab leaves the screen on the way, and that tab opens at this zoom
+  await page.getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect.poll(held).toBe(true);
+  const full = await map.boundingBox();
+  await page.mouse.click(full.x + full.width / 2, full.y + full.height / 2, { button: 'right' });
+  await page.getByRole('menu', { name: 'This point' }).getByRole('menuitem', { name: /^Open in/ }).click();
+  await page.getByRole('menu', { name: 'Open this point in' }).getByRole('menuitem', { name: 'Satellite', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+  await expect(page.locator('.tool-host:not(.hidden) h2')).toHaveText('Satellite');
+  await expect(page.locator('.hud-coords')).toContainText('z17');
   expect(errors).toEqual([]);
 });

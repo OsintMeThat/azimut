@@ -167,6 +167,26 @@ def test_a_kml_folder_is_a_legend_category():
     assert summary["categories"][0]["kinds"] == ["line", "point"]
 
 
+def test_a_coordinate_with_space_after_its_comma_is_still_a_point():
+    """NASA FIRMS writes its fire points as `7.31866000,  52.46726000`. Split on
+    whitespace alone that is two halves and no point, and the whole feed was
+    refused as holding nothing to draw."""
+    firms = (
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
+        "<Folder><name> Fire Points List </name>"
+        "<Placemark><name>VIIRS FIRE</name>"
+        "<Point><coordinates>   7.31866000,  52.46726000</coordinates></Point></Placemark>"
+        "<Placemark><name>Line</name><LineString><coordinates>"
+        "1.0 , 2.0 ,0  3.0,4.0</coordinates></LineString></Placemark>"
+        "</Folder></Document></kml>"
+    ).encode()
+
+    features = maplayers.parse(firms, filename="J1_VIIRS_C2_Europe_24h.kml")["geojson"]["features"]
+
+    assert features[0]["geometry"] == {"type": "Point", "coordinates": [7.31866, 52.46726]}
+    assert features[1]["geometry"]["coordinates"] == [[1.0, 2.0], [3.0, 4.0]]
+
+
 def test_a_kml_colour_is_honoured_through_its_style_map():
     """`aabbggrr` with the alpha dropped, and the *normal* half of a StyleMap —
     which is the one Google writes and the one the map draws."""

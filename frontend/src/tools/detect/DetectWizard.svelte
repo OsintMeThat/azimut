@@ -28,7 +28,7 @@
   import { plural } from '../../lib/map/detections.js';
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { openCopernicusSettings } from '../../lib/navigate.js';
-  import { uniform, whenNeed, whenSummary } from '../../lib/map/detectWhen.js';
+  import { ADVISED_MAXCC, uniform, whenNeed, whenSummary } from '../../lib/map/detectWhen.js';
   import AnalyzerSettings from './AnalyzerSettings.svelte';
   import AnalyzerSize from './AnalyzerSize.svelte';
   import WhenStep from './WhenStep.svelte';
@@ -60,7 +60,7 @@
     onareas = async () => {},
   } = $props();
 
-  const EMPTY_SOURCE = { provider: 'sentinel2', date: '', layer: 'TRUE_COLOR', maxcc: 30 };
+  const EMPTY_SOURCE = { provider: 'sentinel2', date: '', layer: 'TRUE_COLOR', maxcc: ADVISED_MAXCC };
   const STEPS = [[1, 'Where'], [2, 'What'], [3, 'When'], [4, 'Start']];
   const SIZE_NAMES = { small: 'Small', medium: 'Medium', large: 'Large', all: 'All sizes' };
 
@@ -138,7 +138,7 @@
     : zones.length === 1 ? `${recipe.name} · ${zones[0].name}`
     : `${recipe.name} · ${plural(zones.length, 'area')}`
   );
-  const timing = $derived(whenSummary({ single: isSingle, routine, against, pairs, radar }));
+  const timing = $derived(whenSummary({ single: isSingle, routine, against, pairs, radar, maxcc: b.maxcc }));
 
   /** A detection saved against Wayback reopens undated, which is what it is
    *  for Copernicus. A radar run's sources keep their day and pass time; the
@@ -414,6 +414,7 @@
     </section>
   {:else if step === 3}
     <WhenStep {zones} bind:pairs {routine} single={isSingle} sensor={capability.sensor} {followupId}
+      maxcc={radar ? 100 : b.maxcc} onmaxcc={radar ? null : (value) => setPicture({ maxcc: value })}
       bind:against bind:chooseB bind:lookup {onshow} />
     {#if radar}
       {#if !routine}
@@ -423,14 +424,11 @@
       {/if}
     {:else}
       <details>
-        <summary>Picture and cloud ceiling</summary>
+        <summary>{routine ? 'Picture' : 'Picture and local images'}</summary>
         <label title="Image used for review">Picture
           <select value={b.layer} onchange={(e) => setPicture({ layer: e.currentTarget.value })}>
             <option value="TRUE_COLOR">True colour</option><option value="FALSE_COLOR">False colour</option><option value="SWIR">SWIR</option>
           </select>
-        </label>
-        <label title="Reject scenes above this cloud ceiling">Maximum cloud cover · {b.maxcc}%
-          <input type="range" min="0" max="100" value={b.maxcc} oninput={(e) => setPicture({ maxcc: Number(e.currentTarget.value) })} />
         </label>
         {#if !routine}
           <label class="check" title="Use cached or retained frames without downloading">

@@ -391,6 +391,64 @@ def test_acquisitions_says_when_the_catalogue_stopped_short():
     assert sentinel.acquisitions("inst-uuid", [area], "2026-05-01", "2026-05-31", get=get)["truncated"]
 
 
+def _paged(pages):
+    """A catalogue that answers ``pages`` in turn, by FEATURE_OFFSET."""
+    asked = []
+
+    def get(url, params=None, **kwargs):
+        offset = int(params.get("FEATURE_OFFSET", 0))
+        asked.append(offset)
+        return _response(url, {"features": pages[offset // sentinel._MAX_FEATURES]})
+
+    return get, asked
+
+
+def test_a_full_page_is_followed_by_the_next_until_one_is_short():
+    """Granules come newest first, so the first 100 of a long window are its
+    newest weeks: stopping there lost the oldest passes, silently for a point."""
+    area = _rect(2.0, 48.0, 2.5, 48.5)
+    newer = [_granule(f"2026-05-{day:02d}", 1.5, 47.5, 3.0, 49.5) for day in range(31, 1, -1)] * 4
+    older = [_granule("2026-04-30", 1.5, 47.5, 3.0, 49.5)]
+    get, asked = _paged([newer[:100], older])
+    metered = []
+
+    found = sentinel.acquisitions("inst-uuid", [area], "2026-04-01", "2026-05-31", get=get,
+                                  on_request=lambda: metered.append(1))
+    assert asked == [0, 100]
+    assert len(metered) == 2  # each page a request on the meter
+    assert not found["truncated"]
+    assert found["dates"][-1]["date"] == "2026-04-30"
+
+
+def test_a_lookup_stops_after_its_last_page_and_says_it_was_cut():
+    crowd = [_granule("2026-05-01", 1.5, 47.5, 3.0, 49.5)] * sentinel._MAX_FEATURES
+    get, asked = _paged([crowd] * (sentinel._MAX_PAGES + 2))
+    found = sentinel.acquisitions("inst-uuid", [_rect(2.0, 48.0, 2.5, 48.5)], "2026-05-01", "2026-05-31", get=get)
+    assert len(asked) == sentinel._MAX_PAGES
+    assert found["truncated"]
+
+
+def test_a_point_lookup_pages_too():
+    first = [{"properties": {"date": f"2026-05-{1 + i % 28:02d}", "cloudCoverPercentage": 5.0}}
+             for i in range(sentinel._MAX_FEATURES)]
+    last = [{"properties": {"date": "2026-04-02", "cloudCoverPercentage": 5.0}}]
+    get, asked = _paged([first, last])
+    found = sentinel.dates("inst-uuid", 48.0, 2.0, "2026-04-01", "2026-05-31", get=get)
+    assert asked == [0, 100]
+    assert found[-1]["date"] == "2026-04-02"
+
+
+def test_a_failed_page_is_still_counted():
+    def get(url, params=None, **kwargs):
+        return _response(url, text="busy", status=503)
+
+    metered = []
+    with pytest.raises(httpx.HTTPStatusError):
+        sentinel.dates("inst-uuid", 48.0, 2.0, "2026-05-01", "2026-05-31", get=get,
+                       on_request=lambda: metered.append(1))
+    assert metered == [1]
+
+
 @pytest.mark.parametrize("start,end", [
     ("2026-13-01", "2026-05-31"), ("2026-05-01", "not-a-date"), ("2026-05-31", "2026-05-01"),
 ])

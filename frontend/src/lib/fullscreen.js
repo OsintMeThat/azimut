@@ -1,4 +1,4 @@
-// Fullscreen-aware overlays.
+// A tool on the whole screen, and the overlays that have to follow it there.
 //
 // The Fullscreen API paints *only* the fullscreen element's subtree, so an
 // overlay parked on <body> (modals, confirms, toasts) is simply invisible while
@@ -35,4 +35,29 @@ export function portal(node, doc = document) {
       node.remove();
     },
   };
+}
+
+/**
+ * Hand `element` the whole screen, or give it back. Rejects when the browser
+ * refuses, so the tool can say so.
+ */
+export async function toggleFullscreen(element, doc = document) {
+  if (doc.fullscreenElement) await doc.exitFullscreen().catch(() => {});
+  else await element.requestFullscreen();
+}
+
+/**
+ * Tell `onchange` whether `element` holds the screen, each time that changes.
+ * Esc leaves fullscreen without asking the page, so a tool reads its state back
+ * from here rather than flipping a flag itself. Returns the unsubscribe.
+ */
+export function followFullscreen(element, onchange, doc = document) {
+  const changed = () => onchange(doc.fullscreenElement === element);
+  doc.addEventListener('fullscreenchange', changed);
+  return () => doc.removeEventListener('fullscreenchange', changed);
+}
+
+/** Give the screen back, if anything holds it. */
+export function leaveFullscreen(doc = document) {
+  if (doc.fullscreenElement) void doc.exitFullscreen().catch(() => {});
 }

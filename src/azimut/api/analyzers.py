@@ -409,7 +409,8 @@ def add_manual(case_id: str, ident: str, body: ManualCandidate) -> dict[str, Any
         parts = []
         for ty in range(top // size, (bottom - 1) // size + 1):
             for tx in range(left // size, (right - 1) // size + 1):
-                keys = [engine._key(stored(Source, s), z, tx, ty, None) for s in sources]
+                keys = [engine._key(stored(Source, s), z, tx, ty, None, saved.get("engine_version", 4))
+                        for s in sources]
                 if not all(key in saved["frames"] for key in keys):
                     continue
                 px, py = max(left, tx * size), max(top, ty * size)

@@ -120,6 +120,25 @@ test('closes on Escape and on a press elsewhere', async ({ page }) => {
 
   await bar(page).click();
   await expect(page.locator('#sat-suggestions')).toBeVisible();
-  await page.getByRole('heading', { name: 'Satellite' }).click();
+  await page.locator('.tabstrip').getByRole('button', { name: 'Satellite', exact: true }).click();
   await expect(page.locator('#sat-suggestions')).toHaveCount(0);
+});
+
+test('drops its suggestions over the tool rail, not behind it', async ({ page }) => {
+  await installAppFixture(page);
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+
+  await bar(page).fill('kr');
+  const list = page.locator('#sat-suggestions');
+  await expect(list).toBeVisible();
+  const rail = await page.locator('.map-tools').boundingBox();
+  const drop = await list.boundingBox();
+  // a point both cover: whatever answers there is what the eye sees
+  const x = Math.max(rail.x, drop.x) + 4;
+  const y = Math.max(rail.y, drop.y) + 4;
+  expect(x).toBeLessThan(Math.min(rail.x + rail.width, drop.x + drop.width));
+  expect(y).toBeLessThan(Math.min(rail.y + rail.height, drop.y + drop.height));
+  const onTop = await page.evaluate(([px, py]) => !!document.elementFromPoint(px, py)?.closest('#sat-suggestions'), [x, y]);
+  expect(onTop).toBe(true);
 });

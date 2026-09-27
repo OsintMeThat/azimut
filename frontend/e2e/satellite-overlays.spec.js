@@ -246,7 +246,7 @@ test('lays the railways over the imagery, and lifts them off again', async ({ pa
   await page.goto('/#satellite');
   await awaitMapReady(page);
   // the railways are a layer, listed with the others in the panel on the right
-  const rails = page.getByLabel('OSM railways');
+  const rails = page.getByLabel('Railways', { exact: true });
 
   expect(fixture.railTiles).toEqual([]);
   await rails.click();
@@ -264,6 +264,50 @@ test('lays the railways over the imagery, and lifts them off again', async ({ pa
   await page.mouse.up();
   await expect.poll(() => imagery.length).toBeGreaterThan(painted);
   expect(fixture.railTiles.length).toBe(laid);
+});
+
+/**
+ * The map's picture without its bottom edge, where the credit line sits. A
+ * layer switched on adds its credit there, which changes the picture whether
+ * or not the layer drew anything.
+ */
+async function groundPicture(page) {
+  await expect(page.locator('.map[data-map-ready="true"]')).toBeVisible();
+  const box = await page.locator('.map').boundingBox();
+  return page.screenshot({ clip: { ...box, height: box.height - 60 } });
+}
+
+/** The ground once it has stopped changing: every tile in, every fade done. */
+async function settledGround(page) {
+  let last = await groundPicture(page);
+  await expect.poll(async () => {
+    const next = await groundPicture(page);
+    const still = next.equals(last);
+    last = next;
+    return still;
+  }).toBe(true);
+  return last;
+}
+
+test('opens with the village names written over the imagery, and lifts them at the switch', async ({ page }) => {
+  const fixture = await installAppFixture(page, { placeNames: 'Qushayhi' });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+  // on from the start, like Borders: the tiles are found through the TileJSON,
+  // which names the current build
+  await expect.poll(() => fixture.placeNameTiles.some((url) => url.endsWith('.pbf'))).toBe(true);
+  expect(fixture.placeNameTiles[0]).toBe('https://tiles.openfreemap.org/planet');
+  await expect(page.getByText(/OpenFreeMap © OpenMapTiles/)).toBeVisible();
+
+  const names = page.getByLabel('Place names', { exact: true });
+  await names.click();
+  const bare = await settledGround(page);
+
+  // back on, the names are written again, and off, the ground is as it was
+  await names.click();
+  await expect.poll(async () => repainted(bare, await groundPicture(page))).toBe(true);
+  await names.click();
+  await expect.poll(async () => repainted(bare, await groundPicture(page))).toBe(false);
 });
 
 test('measures a path clicked on the map, and clears it', async ({ page }) => {

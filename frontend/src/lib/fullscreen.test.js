@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { overlayHost, portal } from './fullscreen.js';
+import { describe, it, expect, vi } from 'vitest';
+import { followFullscreen, leaveFullscreen, overlayHost, portal, toggleFullscreen } from './fullscreen.js';
 
 // Minimal DOM stand-ins: the action only ever appends and removes, so a couple
 // of objects tracking parentage are enough (no jsdom in this suite).
@@ -133,5 +133,97 @@ describe('portal', () => {
     expect(doc.listeners).toEqual([]);
     expect(body.children).toEqual([]);
     expect(node.parent).toBe(null);
+  });
+});
+
+// A document whose browser grants the screen and gives it back, as a real one
+// would: the element changes, then `fullscreenchange` fires.
+function makeScreenDoc() {
+  const doc = makeDoc(makeHost('body'));
+  doc.exitFullscreen = vi.fn(async () => {
+    doc.fullscreenElement = null;
+    doc.fire();
+  });
+  return doc;
+}
+function makeTool(doc, { refuse = false } = {}) {
+  const tool = makeHost('tool');
+  tool.requestFullscreen = vi.fn(async () => {
+    if (refuse) throw new TypeError('Permissions check failed');
+    doc.fullscreenElement = tool;
+    doc.fire();
+  });
+  return tool;
+}
+
+describe('toggleFullscreen', () => {
+  it('hands the tool the screen, then gives it back', async () => {
+    const doc = makeScreenDoc();
+    const tool = makeTool(doc);
+
+    await toggleFullscreen(tool, doc);
+    expect(doc.fullscreenElement).toBe(tool);
+
+    await toggleFullscreen(tool, doc);
+    expect(doc.exitFullscreen).toHaveBeenCalledOnce();
+    expect(doc.fullscreenElement).toBe(null);
+  });
+
+  it('rejects when the browser refuses, so the tool can say so', async () => {
+    const doc = makeScreenDoc();
+    await expect(toggleFullscreen(makeTool(doc, { refuse: true }), doc)).rejects.toThrow('Permissions');
+    expect(doc.fullscreenElement).toBe(null);
+  });
+});
+
+describe('followFullscreen', () => {
+  it('reads the state back from the browser, Esc included', async () => {
+    const doc = makeScreenDoc();
+    const tool = makeTool(doc);
+    const seen = [];
+    followFullscreen(tool, (on) => seen.push(on), doc);
+
+    await toggleFullscreen(tool, doc);
+    // Esc: the browser leaves on its own and only tells the page afterwards
+    doc.fullscreenElement = null;
+    doc.fire();
+
+    expect(seen).toEqual([true, false]);
+  });
+
+  it('says false while another element holds the screen', () => {
+    const doc = makeScreenDoc();
+    const seen = [];
+    followFullscreen(makeTool(doc), (on) => seen.push(on), doc);
+
+    doc.fullscreenElement = makeHost('video');
+    doc.fire();
+
+    expect(seen).toEqual([false]);
+  });
+
+  it('unhooks when its effect is torn down', () => {
+    const doc = makeScreenDoc();
+    followFullscreen(makeTool(doc), () => {}, doc)();
+    expect(doc.listeners).toEqual([]);
+  });
+});
+
+describe('leaveFullscreen', () => {
+  it('gives the screen back when something holds it', async () => {
+    const doc = makeScreenDoc();
+    const tool = makeTool(doc);
+    await toggleFullscreen(tool, doc);
+
+    leaveFullscreen(doc);
+
+    expect(doc.exitFullscreen).toHaveBeenCalledOnce();
+    expect(doc.fullscreenElement).toBe(null);
+  });
+
+  it('asks nothing of the browser when nothing does', () => {
+    const doc = makeScreenDoc();
+    leaveFullscreen(doc);
+    expect(doc.exitFullscreen).not.toHaveBeenCalled();
   });
 });

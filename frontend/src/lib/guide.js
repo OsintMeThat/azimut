@@ -208,7 +208,7 @@ export const GUIDE = [
       },
       {
         label: 'Layers cost nothing until they are on',
-        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Layers tab of the side panel, and none of them is fetched before its switch is pressed. Borders are the one layer the map opens with.',
+        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Layers tab of the side panel, and none of them is fetched before its switch is pressed. Borders and place names are the layers the map opens with.',
       },
       {
         label: 'Somebody else’s map over yours',

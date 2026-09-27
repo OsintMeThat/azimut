@@ -1167,7 +1167,7 @@ describe('the fire layer in the panel', () => {
   const keyed = {
     '/api/ingest/firms/sensors': {
       keyed: true,
-      sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' }],
+      sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP, NOAA-20, NOAA-21)' }],
     },
   };
 
@@ -1252,7 +1252,7 @@ describe('the fire layer in the panel', () => {
       answers: {
         '/api/ingest/firms/sensors': {
           keyed: true,
-          sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' }],
+          sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP, NOAA-20, NOAA-21)' }],
         },
       },
     });
@@ -1286,7 +1286,7 @@ describe('the fire layer in the panel', () => {
       answers: {
         '/api/ingest/firms/sensors': {
           keyed: true,
-          sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' }],
+          sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP, NOAA-20, NOAA-21)' }],
         },
       },
     });

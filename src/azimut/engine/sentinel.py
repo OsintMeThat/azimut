@@ -228,6 +228,11 @@ _BBOX_PAD = 0.005
 # is "up to 100 granules" rather than "100 dates" — the caller sees how many
 # dates that collapsed to.
 _MAX_FEATURES = 100
+# How many pages of that one lookup reads before it says it was cut. Granules
+# come newest first (checked 2026-09 over Lyman), so a cut drops the oldest, and
+# five pages hold a year over a point or a season over an area several tiles
+# wide. Each page is one request on the meter.
+_MAX_PAGES = 5
 
 # How many points stand in for a drawn area when measuring how much of it a
 # day's granules really cover. Sampling keeps this to the geometry already
@@ -895,15 +900,18 @@ def _passes(
     *,
     collection: str = "sentinel2",
     get: Callable[..., Any] | None = None,
-) -> tuple[dict[str, dict[str, Any]], int]:
-    """One WFS query, collapsed to per-pass entries and the samples each covers.
+    on_request: Callable[[], object] | None = None,
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """One WFS lookup, collapsed to per-pass entries and the samples each covers,
+    and whether the catalogue still had more when it stopped.
 
     A Sentinel-2 entry is a day. A Sentinel-1 entry is one pass, so a morning
     and an evening look on the same day stay two, and each carries its time.
 
-    A WFS query is billed as one request (~0.01 PU, versus a tile's 1 PU), so
-    the caller counts it on the meter — cheap, but not free, and the meter never
-    lies by omission.
+    The lookup reads up to ``_MAX_PAGES`` pages of ``_MAX_FEATURES``. Each page
+    is billed as one request (~0.01 PU, versus a tile's 1 PU), so ``on_request``
+    is called once a page, sent or failed: cheap, but not free, and the meter
+    never lies by omission.
 
     Raises httpx.HTTPError / ValueError upward: a date list that failed must not
     read as "no imagery here".
@@ -930,16 +938,29 @@ def _passes(
         # the instance's filter would hide passes we never said we hid.
         "MAXCC": str(DEFAULT_MAXCC),
     }
-    response = fetch(
-        f"{BASE}/wfs/{instance}", params=params,
-        headers={"User-Agent": USER_AGENT}, timeout=15,
-    )
-    if response.status_code == 400 and radar and "not found" in response.text.lower():
-        raise ValueError(
-            "this Copernicus instance has no Sentinel-1 layer; add one in its configuration"
-        )
-    response.raise_for_status()
-    features = (response.json() or {}).get("features") or []
+    features: list[dict[str, Any]] = []
+    truncated = True
+    for page in range(_MAX_PAGES):
+        if page:
+            params["FEATURE_OFFSET"] = str(page * _MAX_FEATURES)
+        try:
+            response = fetch(
+                f"{BASE}/wfs/{instance}", params=params,
+                headers={"User-Agent": USER_AGENT}, timeout=15,
+            )
+        finally:
+            if on_request:
+                on_request()
+        if response.status_code == 400 and radar and "not found" in response.text.lower():
+            raise ValueError(
+                "this Copernicus instance has no Sentinel-1 layer; add one in its configuration"
+            )
+        response.raise_for_status()
+        chunk = (response.json() or {}).get("features") or []
+        features.extend(chunk)
+        if len(chunk) < _MAX_FEATURES:
+            truncated = False
+            break
 
     by_pass: dict[str, dict[str, Any]] = {}
     for feature in features:
@@ -965,7 +986,7 @@ def _passes(
         # the granule that actually covers the area may be the clearer of two
         if cloud is not None and (entry["cloud"] is None or cloud < entry["cloud"]):
             entry["cloud"] = cloud
-    return by_pass, len(features)
+    return by_pass, truncated
 
 
 def _listed(entry: dict[str, Any], lon: float, collection: str) -> dict[str, Any]:
@@ -984,6 +1005,7 @@ def dates(
     *,
     collection: str = "sentinel2",
     get: Callable[..., Any] | None = None,
+    on_request: Callable[[], object] | None = None,
 ) -> list[dict[str, Any]]:
     """Acquisition dates over a point, newest first.
 
@@ -998,7 +1020,8 @@ def dates(
     share attached.
     """
     box = (lon - _BBOX_PAD, lat - _BBOX_PAD, lon + _BBOX_PAD, lat + _BBOX_PAD)
-    found, _ = _passes(instance, box, [(lon, lat)], start, end, collection=collection, get=get)
+    found, _ = _passes(instance, box, [(lon, lat)], start, end, collection=collection, get=get,
+                       on_request=on_request)
     return sorted(
         (_listed(e, lon, collection) for e in found.values()),
         key=lambda entry: (entry["date"], entry.get("time", "")), reverse=True,
@@ -1056,6 +1079,7 @@ def acquisitions(
     *,
     collection: str = "sentinel2",
     get: Callable[..., Any] | None = None,
+    on_request: Callable[[], object] | None = None,
 ) -> dict[str, Any]:
     """Acquisitions over drawn areas, newest first.
 
@@ -1065,8 +1089,9 @@ def acquisitions(
     290 km-wide swaths, so an area wider than one of them has *no* single day
     that covers it, and pinned to one date half the sweep reads nodata.
 
-    ``truncated`` says the WFS hit its feature ceiling, so older passes in the
-    window are missing and the window wants narrowing.
+    ``truncated`` says the catalogue still had more after ``_MAX_PAGES`` pages,
+    so the oldest passes in the window are missing and the window wants
+    narrowing.
     """
     if not rings:
         raise ValueError("no area to look up")
@@ -1078,7 +1103,8 @@ def acquisitions(
         min(180.0, max(b[2] for b in boxes) + _BBOX_PAD),
         min(90.0, max(b[3] for b in boxes) + _BBOX_PAD),
     )
-    found, features = _passes(instance, box, samples, start, end, collection=collection, get=get)
+    found, truncated = _passes(instance, box, samples, start, end, collection=collection, get=get,
+                               on_request=on_request)
     middle = (box[0] + box[2]) / 2
     listed = sorted(
         ({**_listed(entry, middle, collection),
@@ -1086,7 +1112,7 @@ def acquisitions(
          for entry in found.values()),
         key=lambda entry: (entry["date"], entry.get("time", "")), reverse=True,
     )
-    return {"dates": listed, "truncated": features >= _MAX_FEATURES}
+    return {"dates": listed, "truncated": truncated}
 
 
 def coverage(

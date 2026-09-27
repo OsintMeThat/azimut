@@ -30,6 +30,7 @@ export const BLINK_SPEEDS = Object.freeze([
 /** Reference layers Compare can persist, grouped the way the sheet lists them. */
 export const COMPARE_LAYERS = Object.freeze([
   { id: 'boundaries', label: 'Borders', hint: 'Country, region and district borders', group: 'reference' },
+  { id: 'placenames', label: 'Place names', hint: 'Towns, villages and hamlets from OpenStreetMap', group: 'reference' },
   { id: 'roads', label: 'Roads', hint: 'Road network', group: 'reference' },
   { id: 'railway', label: 'Railways', hint: 'Tracks, sidings and stations', group: 'reference' },
   { id: 'power', label: 'Power lines', hint: 'Lines, towers and substations', group: 'reference' },

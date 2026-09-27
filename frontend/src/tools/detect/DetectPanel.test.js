@@ -41,6 +41,13 @@ const button = (text) => [...document.querySelectorAll('button')].find((b) => b.
 const starts = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 const labelled = (label) => target.querySelector(`button[aria-label="${label}"]`);
 const heading = () => target.querySelector('h3')?.textContent.trim();
+const ceilingSlider = () => target.querySelector('input[aria-label="Maximum cloud cover"]');
+function slide(value) {
+  const slider = ceilingSlider();
+  slider.value = String(value);
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
 
 const area = [{ id: 'area', name: 'Area', kind: 'rect', points: [[2, 48], [2.001, 48.001]] }];
 const WATCH = 'abcdef123456';
@@ -295,8 +302,9 @@ it('walks a single pass through its steps and runs it once', async () => {
   // a pair needs A, and says so in the words of the step
   expect(button('Next: Start').disabled).toBe(true);
   expect(target.textContent).toContain('Choose A, the picture before.');
-  // B is the newest pass until a day is asked for, and then it needs one
-  expect(button('Newest pass').getAttribute('aria-checked')).toBe('true');
+  // B is the newest pass under the ceiling until a day is asked for, and the
+  // button says which ceiling rather than promising the newest pass there is
+  expect(button('Newest pass under 30% cloud').getAttribute('aria-checked')).toBe('true');
   button('A day I choose').click(); await settle();
   const pass = target.querySelector('[aria-label="Day of B"]');
   pass.value = '06/09/2026'; pass.dispatchEvent(new Event('input', { bubbles: true })); await settle();
@@ -333,13 +341,13 @@ it('pages back through a pass list the catalogue cut short', async () => {
   post.mockResolvedValueOnce({ dates: [{ date: ago(100), cloud: 5, coverage: 1 }, { date: ago(120), cloud: 9, coverage: 1 }],
     truncated: false });
   button('Find passes').click(); await settle();
-  expect(target.textContent).toContain('stopped at 100 passes');
+  expect(target.textContent).toContain('stopped short');
   button('Older passes').click(); await settle();
   expect(post).toHaveBeenLastCalledWith('/api/satellite/sentinel/acquisitions',
     expect.objectContaining({ start: ago(365), end: ago(100) }));
   const listed = [...target.querySelectorAll('.passes li strong')].map((node) => node.textContent);
   expect(listed).toEqual([ago(10), ago(100), ago(120)]);
-  expect(target.textContent).not.toContain('stopped at 100 passes');
+  expect(target.textContent).not.toContain('stopped short');
   expect(target.textContent).not.toContain('40% of the areas');
 });
 
@@ -390,7 +398,10 @@ it('asks a routine what each pass compares against, not which day to read', asyn
   button('Next: What').click(); await settle();
   button('Next: When').click(); await settle();
   expect(heading()).toBe('Which images, each run');
-  expect(target.textContent).toContain('Each run takes the newest pass as B and compares it with');
+  expect(target.textContent).toContain('Each run takes the newest pass under 30% cloud as B and compares it with');
+  expect(ceilingSlider().value).toBe('30');
+  slide(40);
+  expect(target.textContent).toContain('Each run takes the newest pass under 40% cloud as B');
   expect(target.textContent).toContain('The pass before');
   expect(target.textContent).toContain('Only the first run');
   expect(target.textContent).toContain('Choose A, the picture the first run compares with.');
@@ -399,14 +410,57 @@ it('asks a routine what each pass compares against, not which day to read', asyn
   expect(button('B')).toBeUndefined();
   button('A').click(); await settle();
   button('Next: Start').click(); await settle();
-  expect(target.textContent).toContain('Each run: the newest pass against the one before, first against 2026-08-01');
+  expect(target.textContent).toContain('Each run: the newest pass under 40% cloud against the one before, first against 2026-08-01');
   button('Save and run the first pass').click(); await settle();
   expect(post).toHaveBeenCalledWith('/api/cases/case-a/analysis/followups', expect.objectContaining({
-    date_rule: 'latest_previous', zones: area, area_dates: [expect.objectContaining({ a: expect.objectContaining({ date: '2026-08-01' }) })],
+    date_rule: 'latest_previous', zones: area, area_dates: [expect.objectContaining({
+      a: expect.objectContaining({ date: '2026-08-01' }), b: expect.objectContaining({ maxcc: 40 }) })],
   }));
   expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/run`, {});
   // it lands on the routine's own page, where its runs gather
   expect(heading()).toBe('Harbour weekly');
+});
+
+it('says which day the newest pass is and why newer ones were skipped, and reads a cloudier one when asked', async () => {
+  // Lyman, 2026-09-26: the map showed that day's pass, while "newest" took the
+  // 19th without a word; the three newer passes were over the ceiling
+  answer({
+    '/api/compare/analyzers': catalogue({ builtins: [structuredClone(vessels), structuredClone(recipe)] }),
+    '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area },
+  });
+  post.mockImplementation(async (path) => (path.endsWith('/acquisitions')
+    ? { dates: [
+      { date: '2026-09-26', cloud: 51.1, granules: 2, coverage: 1 },
+      { date: '2026-09-24', cloud: 82.2, granules: 2, coverage: 1 },
+      { date: '2026-09-22', cloud: 89.2, granules: 2, coverage: 1 },
+      { date: '2026-09-19', cloud: 0.7, granules: 4, coverage: 1 },
+    ], truncated: false }
+    : { id: RUN, status: 'queued', input: {}, results: [], total: 1, progress: 0 }));
+  const onshow = vi.fn();
+  await open({ opening: 'zones-aaaaaaaaaaaa', onshow });
+  button('Next: What').click(); await settle();
+  button('Next: When').click(); await settle();
+  button('Find passes').click(); await settle();
+  expect(target.textContent).toContain(
+    'Now 2026-09-19. Newer: 2026-09-26 (51% cloud), 2026-09-24 (82% cloud), 2026-09-22 (89% cloud).');
+  // the ceiling sits beside "newest": raised, it takes the 26th and says what that costs
+  slide(60);
+  expect(button('Newest pass under 60% cloud')).toBeDefined();
+  expect(target.textContent).toContain('Now 2026-09-26, looked up again when the run starts.');
+  expect(target.textContent).toContain('Above 30%, the pass taken can be mostly cloud');
+  slide(30);
+  expect(target.textContent).not.toContain('Above 30%');
+  // the analyst has the last word: the cloudier pass is offered, and read
+  target.querySelector('[aria-label="Use 2026-09-26"] button').click(); await settle();
+  expect(target.textContent).toContain('2026-09-26 is 51% cloud over its tile. It is read anyway');
+  // the map is handed its cloud, and a chosen day needs no ceiling
+  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ date: '2026-09-26', cloud: 51.1 }));
+  expect(ceilingSlider()).toBe(null);
+  button('Next: Start').click(); await settle();
+  button('Run this pass').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/cases/case-a/analysis/runs', expect.objectContaining({
+    area_dates: [expect.objectContaining({ date_rule: 'manual', b: expect.objectContaining({ date: '2026-09-26' }) })],
+  }));
 });
 
 it('reads the newest pass for a one-image sweep unless a day is asked for', async () => {
@@ -422,7 +476,7 @@ it('reads the newest pass for a one-image sweep unless a day is asked for', asyn
   button('Next: When').click(); await settle();
   expect(heading()).toBe('Which image');
   // the newest pass is a whole answer, so the step can be passed as it opens
-  expect(target.textContent).toContain('Looked up when the run starts, under the cloud ceiling.');
+  expect(target.textContent).toContain('The newest pass under 30% cloud, looked up when the run starts.');
   expect(target.querySelector('[aria-label="Day of A"]')).toBe(null);
   expect(button('Next: Start').disabled).toBe(false);
   button('A day I choose').click(); await settle();
@@ -481,11 +535,16 @@ it('asks a routine of one image for nothing but its picture', async () => {
   button('Next: What').click(); await settle();
   button('Next: When').click(); await settle();
   expect(heading()).toBe('Which image, each run');
-  expect(target.textContent).toContain('Each run reads the newest pass over the area, under the cloud ceiling.');
+  expect(target.textContent).toContain('Each run reads the newest pass under 30% cloud over the area.');
   expect(button('Find passes')).toBeUndefined();
+  // its one question is the cloud ceiling, right there, with a word above 30%
+  expect(target.textContent).not.toContain('Above 30%');
+  slide(45);
+  expect(target.textContent).toContain('Each run reads the newest pass under 45% cloud over the area.');
+  expect(target.textContent).toContain('Above 30%, the pass taken can be mostly cloud, and ground under cloud is left out.');
   expect(button('Next: Start').disabled).toBe(false);
   button('Next: Start').click(); await settle();
-  expect(target.textContent).toContain('Each run: the newest pass');
+  expect(target.textContent).toContain('Each run: the newest pass under 45% cloud');
   expect(post).not.toHaveBeenCalled();
 });
 
@@ -507,7 +566,7 @@ it('holds a routine to one fixed picture when asked', async () => {
   const day = target.querySelector('[aria-label="Day of A"]');
   day.value = '01/08/2026'; day.dispatchEvent(new Event('input', { bubbles: true })); await settle();
   button('Next: Start').click(); await settle();
-  expect(target.textContent).toContain('Each run: the newest pass against 2026-08-01');
+  expect(target.textContent).toContain('Each run: the newest pass under 30% cloud against 2026-08-01');
   button('Save without running').click(); await settle();
   expect(post).toHaveBeenCalledWith('/api/cases/case-a/analysis/followups', expect.objectContaining({
     date_rule: 'latest_reference',

@@ -1281,19 +1281,23 @@ tabs left the window, or on the home view, with a key-less pair: an Esri Wayback
 today's World Imagery on B. That costs the release list and tiles, never a
 Copernicus request or a point's history, and A stays empty when no release list
 comes back rather than showing B twice. Panning that untouched pair leaves
-nothing to discard, and Save still takes it. **New** starts over from a menu of
-starting pairs, the same ones a removed pair offers above its empty slots. Each
+nothing unsaved, and Save still takes it. **New** starts over from a menu of
+starting pairs, the same ones a removed pair offers above its empty slots, and
+**Revert** shows only on an edited saved comparison, taking it back to the saved
+version. Each
 side keeps its provider, Wayback release, Sentinel-2 day and reference layers.
 The source cards and mode controls use the application's shared theme, buttons
-and spacing. On a card the date is a chip beside the provider, reading the same
-for Wayback and for Sentinel-2, so the card's layers icon means one thing. A
+and spacing. The date is a chip beside the provider, reading the same for
+Wayback and for Sentinel-2 on every map tab, so the card's layers icon means one thing. A
 Wayback chip names the release, so the day its pixels were taken sits beside it,
 as it does under the chip on Satellite. The
-cards are as wide as the maps under them, so the split between A and B is one
-line down the tool. Both Layers buttons open the same A/B sheet, including each
+cards float over the maps they describe, one per pane, so no bar takes the maps'
+height; the place search and the camera sit in B's corner. Both Layers buttons open the same A/B sheet, including each
 side's FIRMS period, VIIRS night and saved case work.
 
-The mode dock holds the four views: side by side, through a swipe, with B faded
+One row sits above the maps. With a pair on screen the mode dock takes the
+title's place there, beside the name, **All dates**, **Export** and **Save**, and
+below 1400 px its four views show as icons. The dock holds the four views: side by side, through a swipe, with B faded
 over A, or as alternating whole frames. Blink has three speeds and can pause on
 either side. **Difference** sits beside them as a switch, offered only when the
 two sides are a matched pair, and lays its highlights over whichever view is on.
@@ -1301,8 +1305,9 @@ Sweeping an area over time is the Detect tab's job, not Compare's. Keys 1–4
 switch views, 5 toggles Difference, and Space pauses blink. Dragging, zooming or rotating either
 map moves the other in the same frame. Both stop at the lower provider zoom
 ceiling. **Swap A and B** exchanges the complete source stacks and annotation
-sides. One compass in the bar reads the shared turn, resets it to north and takes
-an exact angle.
+sides. One compass over the stage reads the shared turn, resets it to north and takes
+an exact angle. **Full screen** ends the header row and gives the whole tool the
+screen, its bars and annotation rail included. Esc gives the window back.
 
 A radar side knows the other side's pass: its picker marks the passes on the same
 track, the only ones that compare like with like. **Two radar passes** joins
@@ -1312,7 +1317,7 @@ satellite and radar pairs stay in the New menu marked *set up*, and the two
 archives stay in the imagery picker marked *Needs a free key* or *Needs its
 layer*. Pressing one lays the same setup card as Detect's over the stage.
 
-**All dates** in the bar opens a strip under the maps whenever A and B show the
+**All dates** in the header opens a strip under the maps whenever A and B show the
 same dated archive: Sentinel-2, Sentinel-1 or Esri Wayback. It lists every picture
 that archive holds of the point under the crosshair, oldest on the left: the
 Copernicus days and passes of a window around A and B, one request, or the
@@ -1324,8 +1329,13 @@ read, and a view that moved says so rather than refreshing on its own.
 
 Difference opens no column: its strip joins the view's own controls in the footer
 under the stage, and its full settings open above that strip only from the gear.
-The strip keeps one width through a read, so the panel hanging from it stays put;
-what the read is doing shows in the panel's readout and the map legend. The panel
+The strip keeps one width through a read, so the panel hanging from it stays put
+and the gear never moves. **Read** says what the reading is doing on the button
+itself: amber **Read** when pressing it is the next move, **Reading…**,
+**Loading…** while map tiles are still coming in, and a disabled **Up to date**
+when nothing moved since the last read. The map legend says the same in words
+("out of date, press Read"). A reading waits for tiles to finish instead of
+failing on them. The panel
 lies over the highlights and closes on Escape or a press anywhere outside it.
 
 **Difference** checks that the sources can be compared before it runs.
@@ -1334,14 +1344,23 @@ Two Sentinel-1 passes of one track are a pair too: the rendered radar picture is
 read with no tone matching, and passes from two tracks are refused, because they
 see the ground from two angles.
 Sentinel-2 also offers six spectral indices — NDVI, NDWI, MNDWI, NBR, NDBI and
-BSI, the ones Detect measures — from the actual bands. Band frames are fetched by
-an explicit act only — **Read this view**, or switching the cloud filter on —
-one metered request per side; reopening a session or moving the camera never
-fetches. Each frame is kept with a margin of ground around the view, so the
-reading keeps its bands while the camera stays inside that margin, and past it
-the last reading stays up, marked in the strip as an earlier read, until **Read**. A changed view must be run again before
-export. A reading recomputes by itself after every move, on the
-frames it holds; what it never does on a pan is spend a request.
+BSI, the ones Detect measures — from the actual bands. A new pair's band frames
+are fetched by an explicit act — **Read**, turning Difference on, choosing a
+method or an index, or switching the cloud filter on — one metered request per
+side. Reopening a session or changing a date never fetches on its own. Each frame
+is kept with a margin of ground around the view, so the reading keeps its bands
+while the camera stays inside that margin. Frames are asked for at the
+resolution the reading draws at, never finer. The cloud map is read at
+Sentinel-2's own 20 m, which lets its margin reach up to a whole view past each
+edge for no more pixels. Once a pair has been read with its bands, the reading
+follows the camera with them. Past the margin it fetches them again once the
+camera has rested for a moment, and only then, however many drags it took. The
+pan has just drawn Sentinel-2 tiles, which are metered requests too. A reading
+that follows the camera waits for bands already on their way, and a Read the
+camera moved under reads the view it settles on, so a request is never spent and
+then thrown away. Until a new pair is read, the last reading stays up, drained
+to grey so it cannot pass for this view's. A changed view must be run again
+before export.
 These viewport captures depend on display resolution and zoom. Use the Detect
 tab for a fixed analysis grid across camera changes. An index reading carries
 **Save as a Detect analyzer** in the Detection tab: the same index, line, way it
@@ -1401,7 +1420,9 @@ drag inside one pans the imagery under it. The wheel still belongs to the map wh
 the pointer is: the marks are drawn over it rather than in it, and a zoom that
 stopped on whatever had been drawn read as a map that had frozen. Clicking the ground beside a mark lets it go;
 dragging the map is a pan and keeps it. The tool rail packs into two columns, like
-Proof Maker's, so it stays short enough to fit a laptop window. Its colour, width
+Proof Maker's, so it stays short enough to fit a laptop window. The tab on its
+edge, or `[`, folds it to a strip marked *Annotations* that keeps the tool in hand,
+and this browser remembers the fold. Its colour, width
 and fill panels close on Escape, on their own button, on a press anywhere else,
 and with the button behind them when the selection is dropped. **Pressing the tool
 already in hand puts it down** and gives the cursor back, on this rail and on Proof
@@ -1414,7 +1435,7 @@ name, anchored on the point and closed by the next click — or open it in
 Satellite or Detect. The rows Satellite offers for its own rails are left out
 rather than shown dead.
 
-**Save comparison** writes the editable version-2 session under `.compare/` and
+**Save** writes the editable version-2 session under `.compare/` and
 updates its rendered media preview in My work (PNG, or GIF for blink). The preview
 records the date of each picture, one Esri or Wayback only estimated marked `~` on
 its Time tab, where **Date a change** offers a claim that something changed between
@@ -1459,7 +1480,7 @@ Views destination only, never kept in the case. Tile captures wait
 for loaded frames and reject incomplete tiles. Google Maps JS uses the
 user-triggered Azimut Capture extension and retains its on-map credits.
 
-The search bar in the header proposes matches as you type, in the order they can
+The search bar floating at the top of the map proposes matches as you type, in the order they can
 answer: the coordinates the text parses to, saved work in this case, cities from
 a gazetteer shipped with the app (GeoNames, credited under the list), and last
 the geocoder's streets and hamlets. The first three cost no network and appear on
@@ -1586,8 +1607,9 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
 - **Its settings** open in the rail's one **panel slot**, beside it. One mode is
   armed, so one panel is open; a panel cannot cross another or the map's own
   controls.
-- **Layers** — what is drawn over the imagery: borders with their place names,
-  roads, OSM railways, power lines, sea marks, GPS traces, active fires, night lights, the
+- **Layers** — what is drawn over the imagery: borders with the larger place
+  names, town and village names, roads, railways, power lines, sea marks,
+  GPS traces, active fires, night lights, the
   case's saved work, and the points another tool handed over (a sheet's
   coordinate column, a Timeline window). None of them changes what the
   pointer does, so none takes a rail seat: they are a list in the panel beside
@@ -1633,26 +1655,45 @@ something off the map — Save place and Capture — on the right. What marks th
 point, and whether that point is the map's centre or a pin dropped somewhere,
 is one small menu beside them: both are set once and the two acts are pressed
 all day. The engine's scale bracket reads under the coordinates, where how far
-a pixel goes and where you are make one instrument. Fullscreen sits with the
-tool's title, because it is what the window does with the tool rather than what
-the tool does with the map.
+a pixel goes and where you are make one instrument. Link, new tab and fullscreen
+close the imagery card on its right, one frame as on Compare's source cards,
+because they are what the window does with the tool rather than what the tool
+does with the map. On a narrow map the card splits in two lines, the provider
+and those three on top, rather than slide under the search. Sentinel-2 is dated on its
+own chip there, as on Compare and Detect, and the pill under it reads the day
+again with how it was chosen, as the radar pass does.
 
 **Active fires** are NASA FIRMS, and answer two questions with the same marks:
 what is burning now (the last 24, 48 or 72 hours, or the week) and what was
 burning on a given day (any range back through the archive, up to 31 days).
-Which instrument and which stretch of time are chosen in the row itself. It
-needs a key, and says so with the reason rather than failing on the first tile;
-a key pasted into Settings is picked up on the way back to the map. Source
-tiles stop at z14. Farther in, the map enlarges their pixels into visible
-squares instead of hiding the detections or asking NASA for invented detail.
+Which instrument and which stretch of time are chosen in the row itself. A
+detection is a square the size of its footprint, never under 7 px, with a dark
+ring so it reads on any ground; close in, its inside shows the ground and each
+square keeps its own edge, even under another. A window
+longer than a day draws the last 24 hours in red over the rest in amber, and the
+row says so. The windows are FIRMS's own, counted in whole UTC days. The map
+draws every square itself, at every zoom: a square keeps its size through a
+zoom and stays where it is while the next level loads, then the new level
+refines it. From zoom 8 in, a live window comes from the points fetched for the
+ground around, so zooming in costs nothing more; farther out, and for a date,
+the squares are read off FIRMS's own picture of each tile. It needs a key, and says which of three things stops it rather than
+failing on the first tile: no key, a key switched off, a key FIRMS refused. A key
+pasted into Settings is picked up on the way back to the map. A spent allowance
+is none of those: the layer stays on, says it refills within ten minutes, and
+asks NASA nothing in the meantime. Tiles stop at z13. Farther in, the map
+draws those squares bigger instead of asking NASA for invented detail.
 
 **The reference layers** are key-less and each is simply on or off: Esri's
-borders (country, region, district, with names) and roads, Open Infrastructure
-Map's power lines, OpenSeaMap's buoys and harbours, and the raw GPS traces people
-uploaded to OSM, which show tracks nobody has mapped yet. Borders start on —
-reading imagery starts with which side of a line the ground is on — and none of
-the others fetches a tile before its switch is pressed. The roads follow the
-labels' rule: over a street map they are greyed, since it already draws them. Power lines are drawn
+borders (country, region, district, with names) and roads, OpenStreetMap's
+town, village and hamlet names from OpenFreeMap, Open Infrastructure Map's power
+lines, OpenSeaMap's buoys and harbours, and the raw GPS traces people uploaded to
+OSM, which show tracks nobody has mapped yet. Borders and place names start on —
+reading imagery starts with which side of a line the ground is on and what the
+place is called — and none of the others fetches a tile before its switch is
+pressed. The place names fill in
+where Esri names only the cities. They are written in Latin script, and where
+two would overlap the larger place is kept. The roads and the place names are
+greyed over a street map, since it already draws them. Power lines are drawn
 from vector tiles in the app's own small style, coloured by voltage on Open
 Infrastructure Map's scale, dashed where the line is buried, with towers from
 zoom 14, substations, plants, pipelines and telecom masts. No overlay reaches a
@@ -1691,7 +1732,7 @@ The row states five things:
   row that leaves the app, and it leaves on a click.
 - **How fresh what is drawn is.** A file says when it was opened and nothing
   more: it is exactly what was dropped in. A followed map says when it was last
-  read, and says *stale* when that was long enough ago to matter — before the
+  read, and says *out of date* when that was long enough ago to matter, so before the
   marks are read, not after.
 - **Both counts.** `3 200 features · 412 shown` whenever a group is switched
   off. The number drawn never passes for the number loaded.
@@ -1916,8 +1957,9 @@ A, newer on B — unsaved and unnamed, because nothing has been filed.
 **Open in…** lists the app's other map tabs first, then the maps outside it. A
 tab opens on the point at the zoom it was looked at: Satellite flies there, and
 Compare and Detect move their camera and keep their own pictures and work. In
-Detect a point asked for this way wins over the case's landing frame. A
-fullscreen map is left first.
+Detect a point asked for this way wins over the case's landing frame. Changing
+tab, from this menu or any other way, leaves full screen. Leaving it, however it
+is left, keeps the ground and zoom the map reached.
 
 **The map tabs share one camera.** Satellite, Compare and Detect look at the same
 ground: a map leaves the window's camera where it comes to rest, even when its glide
@@ -1925,9 +1967,9 @@ ends after you switched tab, and a map tab that shows takes it in one move, turn
 included. A hidden map never moves, so it loads no tiles and asks Copernicus nothing
 for ground nobody is looking at.
 A map whose imagery stops short of the shared zoom lands at its own ceiling and
-leaves the deeper zoom standing for the tab that has it. Two things keep their
-ground: a Detect run under review, and a saved comparison, whose camera is part of
-what was saved.
+leaves the deeper zoom standing for the tab that has it. A Detect run under
+review keeps its ground. A saved comparison follows like the rest, and moving it
+leaves it saved; Save keeps the new view.
 Switching case leaves the camera where it is, since a view is not case state.
 Settings → General → Map tabs turns it off, and each tab keeps its own camera again.
 
@@ -1974,7 +2016,7 @@ address in place: a back button holding four hundred camera positions would be
 worse than none. Everything else — the case, its saved points, a sweep in
 progress — is shared already, below.
 
-A detached tab carries its number in its title and its heading, because two
+A detached tab carries its number in its title and beside its search, because two
 identical maps on a second screen cannot otherwise be told apart, and `solo=1`
 in the same address, which is what keeps it the map alone across a reload. The
 first window is unnumbered. The browser can refuse a second tab, and says so.
@@ -2022,8 +2064,8 @@ the key, which brings its layers with it, and the Sentinel-1 layer added to it b
 hand for the radar analyzers, field by field — and one press opens the Copernicus
 card in Settings. The panel still opens on what the case already holds.
 
-Detect opens on Esri World Imagery, with Borders and saved results visible, framed
-on the areas this case watches — once, after which the camera is yours. That
+Detect opens on Esri World Imagery, with Borders, Place names and saved results
+visible, framed on the areas this case watches — once, after which the camera is yours. That
 framing waits for the tab to show. Arriving from another map tab while they share
 one view, Detect opens where that map was instead, since that is the ground in hand.
 A case with no area opens where the other map tabs left the window, or on the home
@@ -2053,7 +2095,8 @@ the ruler down.
 The right dock has Routines, Saved and Areas tabs, with New detection always at
 the top. The tabs name their own list, so nothing is titled twice, and a second
 row appears only inside a routine, a review, the wizard or the library, where it
-carries Back. **Analyzers** sits at the end of the tab row. Its toggle or the `]`
+carries Back. **Analyzers** sits at the end of the tab row, then **Full screen**,
+which gives Detect the whole screen with its dock. Its toggle or the `]`
 key collapses the dock to an icon rail; pressing a tab reopens it and resizes the
 map. Detect's basemap, overlays, saved-work visibility and collapsed state are
 viewer preferences carried by Settings → Backup. **Watched areas** is a row of the
@@ -2132,12 +2175,20 @@ pan, a zoom or a turn.
 
 **When** asks its questions in the order they are decided, in the step itself. A
 change names **A**, the picture before, and **B**, the one to look in; B is the
-**Newest pass**, looked up when the run starts under the cloud ceiling, until
-**A day I choose** asks for one. Vessels and hotspots read one image and ask only
-that. A routine names no B: it asks what each run compares the newest pass with,
+newest pass under the cloud ceiling, and its button names the ceiling (**Newest
+pass under 30% cloud**), since it is not always the newest pass there is. Once
+the passes are found, the line under it names the day it takes and the newer ones
+it steps over, each with its cloud. The ceiling's slider, 30% to start, sits
+wherever the newest pass is taken: under that button, and under a routine's
+question. Above 30% it warns that the pass taken can be mostly cloud. **A day I
+choose** asks for one, and a chosen day is read whatever its cloud: the ceiling
+only picks the newest pass, and ground under cloud is left out pixel by pixel.
+The map shows a chosen day whole, as the run reads it, and its chip adds the
+tile's cloud when that is over 30%. Vessels and hotspots read one image and
+ask only that. A routine names no B: it asks what each run compares the newest pass with,
 **The pass before** (what changed since the last run; A serves the first run only)
 or **A fixed picture** (everything changed since that day), and a one-image routine
-asks nothing but its picture and cloud ceiling. The slot still missing is tinted,
+asks nothing but its cloud ceiling, with its picture under **Picture**. The slot still missing is tinted,
 and the reason is written under the Next button. **Passes over the area** lists
 what exists right under the question, each row with its A and B buttons, and a
 typed day works too. One choice stands for every area; **Set them per area…**
@@ -2154,11 +2205,13 @@ hand is pinned to the pass on the other side's track at launch, and an automatic
 pass is looked for on the reference's track.
 
 **Find passes** explicitly asks Copernicus about the areas and counts one request
-against its quota. The picker shows cloud and coverage over all of them. It looks
-30 days, 90 days or a year back, or under **Dates…** between two days picked in a
-calendar that starts at the satellite's launch. The catalogue gives at most 100
-passes, newest first, so a list it cut short offers **Older passes**, one more
-request for the ones before the oldest listed. At launch, each area independently resolves its latest usable pass
+a catalogue page against its quota, which is one for most windows. The picker
+shows coverage over all of them and the cloud of each pass's 110 km tile, so a
+small area can be clearer or cloudier than its row says. It looks 30 days, 90
+days or a year back, or under **Dates…** between two days picked in a calendar
+that starts at the satellite's launch. The catalogue answers newest first and a
+lookup reads up to five pages, so a list it still cut short offers **Older
+passes**, one more lookup for the ones before the oldest listed. At launch, each area independently resolves its latest usable pass
 under the cloud ceiling. Different tracks can therefore use different days.
 An unresolved area fails by name without stopping the rest. Opening Detect reads
 local state only; pass lookups happen only on request or during an explicit run.

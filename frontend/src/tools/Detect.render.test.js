@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { fakeScreen } from '../lib/fullscreen.fixture.js';
 
 const ANALYZERS = {
   builtins: [{
@@ -291,6 +292,37 @@ describe('Detect', () => {
     expect(target.textContent).toContain('tile');
   });
 
+  it('shows a chosen pass whole, as the run reads it, and says on the chip when it is cloudy', async () => {
+    // Lyman, 2026-09-26: under the run's 30% ceiling Sentinel Hub dropped the
+    // 51% tile and the map stayed black while the day was picked
+    post.mockImplementation(async (path) => (path.endsWith('/acquisitions')
+      ? { dates: [{ date: '2026-09-26', cloud: 51.1, granules: 2, coverage: 1 },
+        { date: '2026-09-19', cloud: 0.7, granules: 4, coverage: 1 }], truncated: false }
+      : {}));
+    try {
+      await open();
+      button('New detection').click(); await settle();
+      starts('One pass').click(); await settle();
+      button('Use current view').click(); await settle();
+      button('Next: What').click(); await settle();
+      button('Next: When').click(); await settle();
+      button('Find passes').click(); await settle();
+      target.querySelector('[aria-label="Use 2026-09-26"] button:last-child').click(); await settle();
+      const [provider, variant] = showBasemap.mock.lastCall;
+      expect(provider.id).toBe('sentinel2');
+      expect(variant).toContain('2026-09-26');
+      expect(variant).not.toContain('CC');
+      const chip = labelled('Leave pass imagery');
+      expect(chip.textContent).toContain('2026-09-26');
+      expect(chip.textContent).toContain('51% cloud');
+      // a clear day says nothing more than its date
+      target.querySelector('[aria-label="Use 2026-09-19"] button:last-child').click(); await settle();
+      expect(labelled('Leave pass imagery').textContent).not.toContain('cloud');
+    } finally {
+      post.mockImplementation(async () => ({}));
+    }
+  });
+
   it('opens a saved item the rest of the app asked for', async () => {
     await open();
     uiState.openAnalyzer = `followups-${WATCH}`;
@@ -348,6 +380,46 @@ describe('Detect', () => {
     button('Satellite').click(); flushSync();
     expect(uiState.tool).toBe('satellite');
     expect(uiState.gotoCoords).toEqual({ lat: 14.81, lon: 42.95, zoom: 12 });
+  });
+
+  it('takes the whole screen with its panel, and reads the way out back from the browser', async () => {
+    const screen = fakeScreen();
+    try {
+      await open();
+      engines[0].resize.mockClear();
+      labelled('Full screen').click(); await settle();
+      expect(screen.request).toHaveBeenCalledOnce();
+      expect(document.fullscreenElement).toBe(target.querySelector('.detect-tool'));
+      expect(labelled('Exit full screen').getAttribute('aria-pressed')).toBe('true');
+      expect(engines[0].resize).toHaveBeenCalled();
+      // a map outside the app opens a browser tab, which would drop the screen
+      rightClick({ lat: 14.81, lon: 42.95, x: 200, y: 150 });
+      starts('Open in').click(); await settle();
+      const outside = [...target.querySelectorAll('[aria-label="Open this point in"] a')];
+      expect(outside.length).toBeGreaterThan(0);
+      expect(outside.every((link) => !link.hasAttribute('href') && link.getAttribute('aria-disabled') === 'true')).toBe(true);
+      // Esc belongs to the browser, which tells the page only afterwards
+      screen.leave(); await settle();
+      expect(labelled('Full screen').getAttribute('aria-pressed')).toBe('false');
+      labelled('Full screen').click(); await settle();
+      labelled('Exit full screen').click(); await settle();
+      expect(screen.exit).toHaveBeenCalledOnce();
+      expect(document.fullscreenElement).toBe(null);
+    } finally {
+      screen.restore();
+    }
+  });
+
+  it('says so when the browser refuses the screen', async () => {
+    const screen = fakeScreen({ refuse: true });
+    try {
+      await open();
+      labelled('Full screen').click(); await settle();
+      expect(toast).toHaveBeenCalledWith('Full screen is not available', 'danger');
+      expect(labelled('Full screen').getAttribute('aria-pressed')).toBe('false');
+    } finally {
+      screen.restore();
+    }
   });
 
   it('looks where another map tab asked, over the case\'s landing frame', async () => {

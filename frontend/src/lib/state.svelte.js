@@ -24,7 +24,7 @@ export const prefs = $state({
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
   mapSync: true, // Satellite, Compare and Detect share one camera
-  detectView: { collapsed: false, basemap: 'esri-world-imagery', overlays: ['boundaries'], saved: true },
+  detectView: { collapsed: false, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'], saved: true },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with

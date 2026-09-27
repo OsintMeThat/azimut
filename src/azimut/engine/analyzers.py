@@ -77,7 +77,10 @@ PAD = 32
 # Bumped when a product's layout changes, so a frame kept from an older run is
 # never decoded as a newer one.
 PRODUCT_VERSION = 2
-ENGINE_VERSION = 4
+# 5: a day is read whatever its tile's cloud cover. The ceiling picks the newest
+# pass and no longer filters the read, so a frame a v4 run kept under the same
+# source may be a blank one, and is not reused (``_key``).
+ENGINE_VERSION = 5
 LOCK = threading.RLock()
 KINDS = {"areas": "analysis-area", "zones": "analysis-zones", "followups": "analysis-follow-up", "runs": "analysis-run"}
 ACTIVE = {"queued", "running"}
@@ -541,24 +544,35 @@ def check_active(case: Case, ident: str) -> None:
         raise workqueue.JobCancelled() from exc
 
 
-def _key(source: Source, z: int, x: int, y: int, product: str | None) -> str:
+def _key(source: Source, z: int, x: int, y: int, product: str | None,
+         engine: int = ENGINE_VERSION) -> str:
+    """The name one frame is kept under, for the engine version of its run.
+
+    Up to v4 a Sentinel-2 day was read under its source's cloud ceiling, and
+    Sentinel Hub drops a whole tile above it: a day chosen over the ceiling came
+    back blank. From v5 a day is read whole, so a source with a ceiling names
+    its frames apart, and an older run still finds its own under the old name.
+    """
     parts: list[Any] = [source.model_dump(), z, x, y, product]
     if product:
         parts.append(PRODUCT_VERSION)
+    if engine >= 5 and source.maxcc < sentinel.DEFAULT_MAXCC:
+        parts.append("whole-day")
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:32]
 
 
 def picture_cache_id(source: Source) -> str:
     """The tile-cache folder a source's review picture lives in.
 
-    Sentinel-2's is the basemap's own variant, so a picture read for a sweep is
-    a tile the map can reuse. Sentinel-1's is rendered by us for one pass, and
-    its time rides in the name without the colons Windows refuses in a folder.
+    Sentinel-2's is the basemap's own variant for that day read whole, so a
+    picture read for a sweep is a tile the map can reuse. Sentinel-1's is
+    rendered by us for one pass, and its time rides in the name without the
+    colons Windows refuses in a folder.
     """
     if source.provider == "sentinel1":
         return (f"sentinel1~{source.layer}~{source.date}~{source.time.replace(':', '') or 'day'}"
                 f"~picture~v{PRODUCT_VERSION}")
-    return sentinel.variant_id("sentinel2", source.layer, source.date, source.date, source.maxcc)
+    return sentinel.variant_id("sentinel2", source.layer, source.date, source.date, sentinel.DEFAULT_MAXCC)
 
 
 def product_cache_id(source: Source, product: str) -> str:
@@ -566,7 +580,7 @@ def product_cache_id(source: Source, product: str) -> str:
     if source.provider == "sentinel1":
         return (f"sentinel1~{source.layer}~{source.date}~{source.time.replace(':', '') or 'day'}"
                 f"~{product}~v{PRODUCT_VERSION}")
-    variant = sentinel.variant_id("sentinel2", source.layer, source.date, source.date, source.maxcc)
+    variant = sentinel.variant_id("sentinel2", source.layer, source.date, source.date, sentinel.DEFAULT_MAXCC)
     return f"{variant}~{product}~v{PRODUCT_VERSION}"
 
 
@@ -637,7 +651,7 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
     """One tile's picture, or its band product with PAD pixels of context."""
     z, size = GRID
     edge = size + 2 * PAD if product else size
-    key = _key(source, z, x, y, product)
+    key = _key(source, z, x, y, product, run.get("engine_version", ENGINE_VERSION))
     frame_rel = layout.analysis_asset_rel(run["id"], key)
     name = frame_rel.rsplit("/", 1)[-1]
     destination = case.resolve_inside(frame_rel)
@@ -661,18 +675,21 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
             raise ValueError("Sentinel Hub usage limit reached; review Settings")
         instance = _instance()
         radar = source.provider == "sentinel1"
+        # A day is read whole, whatever its tile's cloud cover: the ceiling
+        # chose the day, and passed on as MAXCC it would blank a day the analyst
+        # picked over it. The sky byte masks the clouds pixel by pixel.
         if product or radar:
             # A radar picture is ours too: there is no true colour to borrow,
             # so the review composite is rendered like a product, unpadded.
             try:
                 raw = sentinel.band_frame(instance, _box(z, x, y, PAD if product else 0), edge, edge,
                                           source.date, product or "sar-picture",
-                                          100 if radar else source.maxcc, layer=source.layer,
+                                          sentinel.DEFAULT_MAXCC, layer=source.layer,
                                           time=source.time)
             finally:
                 config.record_usage("sentinelhub", 1)
         else:
-            url = sentinel.wmts_url(source.layer, source.date, source.date, source.maxcc)
+            url = sentinel.wmts_url(source.layer, source.date, source.date, sentinel.DEFAULT_MAXCC)
             url = url.replace("{key}", instance)
             with httpx.stream("GET", tiles.tile_url(url, z, x, y, 1), timeout=30) as response:
                 if response.status_code == 404:
@@ -1566,11 +1583,9 @@ def _lookup(body: RunInput, start: str, end: str) -> list[dict[str, Any]]:
     instance = (config.load_settings().get("api_keys") or {}).get("sentinelhub")
     if not instance or config.usage_blocked("sentinelhub"):
         raise ValueError("Copernicus is unavailable or its usage limit is reached")
-    try:
-        found = sentinel.acquisitions(instance, [list(zone.ring()) for zone in body.zones],
-                                      start, end, collection=recipe_sensor(body.recipe))
-    finally:
-        config.record_usage("sentinelhub", 1)
+    found = sentinel.acquisitions(instance, [list(zone.ring()) for zone in body.zones],
+                                  start, end, collection=recipe_sensor(body.recipe),
+                                  on_request=lambda: config.record_usage("sentinelhub", 1))
     return list(found["dates"])
 
 
@@ -1867,7 +1882,7 @@ def sweep_area(case: Case, run: dict[str, Any], body: RunInput) -> tuple[list[di
             asked += int(inside.sum())
             imaged += int((inside & (picture_a[:, :, 3] > 0) & (picture_b[:, :, 3] > 0)).sum())
         sources = [body.b] if single else [body.a, body.b]
-        keys = [_key(source, z, x, y, None) for source in sources]
+        keys = [_key(source, z, x, y, None, run["engine_version"]) for source in sources]
         results.extend(_candidates(reading, body.recipe.phenomenon, x, y, part, keys))
         if len(results) > MAX_RESULTS * 4:
             raise ValueError("too many fragments; lower the sensitivity or use smaller areas")

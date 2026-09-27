@@ -62,7 +62,7 @@ vi.mock('../../lib/map/engine.js', () => ({
 
 const setOverlay = vi.fn();
 vi.mock('../../lib/map/basemap.js', () => ({
-  OVERLAY_IDS: ['roads', 'boundaries', 'railway', 'power', 'seamarks', 'gpstraces'],
+  OVERLAY_IDS: ['roads', 'boundaries', 'placenames', 'railway', 'power', 'seamarks', 'gpstraces'],
   createBasemaps: vi.fn(() => ({
     show: vi.fn(),
     setOverlay,
@@ -155,11 +155,12 @@ describe('moving a proof point on the map', () => {
     expect(onpick).not.toHaveBeenCalled();
   });
 
-  it('offers the reference layers, the borders already on for their place names', async () => {
+  it('offers the reference layers, the borders and the place names already on', async () => {
     await open();
 
     expect(setOverlay).toHaveBeenCalledWith('boundaries', true, null);
     expect(setOverlay).toHaveBeenCalledWith('railway', false, undefined);
+    expect(setOverlay).toHaveBeenCalledWith('placenames', true, null);
 
     button('Layers').click();
     flushSync();
@@ -168,6 +169,7 @@ describe('moving a proof point on the map', () => {
     );
     expect(names).toEqual([
       'Borders',
+      'Place names',
       'Roads',
       'Railways',
       'Power lines',
@@ -181,6 +183,13 @@ describe('moving a proof point on the map', () => {
       .click();
     await settle();
     expect(setOverlay).toHaveBeenCalledWith('railway', true, null);
+
+    // the village names come off like any other layer
+    [...document.querySelectorAll('.layers button')]
+      .find((entry) => entry.getAttribute('aria-label') === 'Place names')
+      .click();
+    await settle();
+    expect(setOverlay).toHaveBeenCalledWith('placenames', false, undefined);
   });
 
   it('checks a point before a save, handing it back without closing', async () => {

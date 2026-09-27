@@ -132,7 +132,7 @@ export function freshness(layer, now = Date.now()) {
   const at = layer.checked_at || layer.fetched_at;
   const said = timeAgo(at, now);
   if (!said) return 'never read';
-  return layer.stale ? `stale — last read ${said}` : `read ${said}`;
+  return layer.stale ? `out of date, last read ${said}` : `read ${said}`;
 }
 
 /** Where a row came from, in the width a row has. */

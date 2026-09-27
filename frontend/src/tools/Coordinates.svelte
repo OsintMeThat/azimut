@@ -134,10 +134,6 @@
 </script>
 
 <div class="tool">
-  <div class="tool-header">
-    <h2>Coords &amp; Sky</h2>
-  </div>
-
   <div class="tool-body">
     <form
       class="go-form"

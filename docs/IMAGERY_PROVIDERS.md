@@ -195,7 +195,10 @@ scene above it is dropped before rendering, so the tile comes back empty rather
 than cloudy. Left implicit that reads as the app hiding cloudy days: a date the
 calendar offered renders black, and the dataMask probe calls it a coverage gap.
 Stating the ceiling on every request (tiles, the probe, the WFS date list) means
-what filters a date is our number, not the instance's.
+what filters a date is our number, not the instance's. Detect reads a day it has
+settled on at 100 whatever its ceiling, because the ceiling's job there is to pick
+the newest pass: sent as `MAXCC` it dropped the whole tile of a day chosen over it
+(26/09/2026 over Lyman, 51% cloud, came back without a pixel at 30).
 
 The provider id carries the layer, the window and the ceiling:
 `sentinel2~SWIR~2026-05-01~2026-05-31~CC20`
@@ -250,8 +253,10 @@ picked on its centre sweeps nodata over the rest. The automatic date rules
 (`resolve_dates`) take the newest pass that is both under the cloud ceiling and
 at full cover, and name the best partial share when there is none.
 
-Still one request for the whole set of areas, not one per area. `truncated` says
-the WFS hit its 100-feature ceiling, so older passes in the window are missing.
+Still one lookup for the whole set of areas, not one per area, read in pages of
+100 granules (`FEATURE_OFFSET`), newest first (checked 2026-09), up to five. Each
+page is one request on the meter. `truncated` says the fifth page was full, so
+the oldest passes in the window are missing.
 
 WFS dates are still candidates. Before changing the map, the picker sends an
 8×8 WMS `dataMask` check for the selected layer and day. A failed check leaves
@@ -471,22 +476,28 @@ meter, no free-allowance box and no eco threshold. Nothing about it is billed.
 | | |
 |---|---|
 | Credential | one `MAP_KEY`, from the FIRMS page; it serves the global and the US/Canada services alike |
-| Where it goes | **in the path** of every request, which is why the browser never builds one: `/api/firms/tiles/{z}/{x}/{y}` for the app, `/api/ingest/firms` for the extension |
-| Asking | WMS `GetMap` in EPSG:3857 — the projection the tile grid is already in, so a tile is its own square and nothing is reprojected |
-| Live | `fires_viirs_24 / _48 / _72 / _7`, and the same for `fires_viirs_snpp`, `fires_viirs_noaa20` and `fires_modis` |
+| Where it goes | **in the path** of every request, which is why the browser never builds one: `/api/firms/points/{z}/{x}/{y}` for the app, `/api/ingest/firms` for the extension |
+| Asking | the app gets vector tiles (`/api/firms/points/{z}/{x}/{y}`, z0 to z13) and draws every square itself. Far out, and for a dated range at every zoom, a tile is one WMS `GetMap` in EPSG:3857 — the projection the tile grid is already in, so nothing is reprojected — drawn with squares of 1 px, which the backend reads back into marks, one per 3 px (`firmspoints.picture_tile`). From z8 in, a rolling window comes from the **area API**'s points: one request per satellite, 4° cell and five days, held in memory, and every tile of every zoom over that cell is cut from them (`firmspoints.tile`) |
+| Drawing | squares sized to the footprint (375 m VIIRS, 1 km MODIS, never under 7 px) with a dark ring, and for a window longer than a day FIRMS's "24 h" in red over the rest in amber. The map draws them (`lib/map/firePoints.js`), so a square keeps its size through a zoom and stays where it is while the next level loads, where a picture's squares grew with its pixels until the next picture landed. From z11.5 to z12 a rolling window's squares give way to the footprints, scan by track, each with its own ring and edge and the ground showing inside, so a square under another keeps its outline. A square read off a picture has no footprint and stays a square. The extension's one picture is FIRMS's own far out, asked in the path after the key and dressed with the ring, and drawn from the points close in |
+| Windows | FIRMS counts whole UTC days, not hours: "24 h" is yesterday and today, "48 h" and "72 h" reach two and three days back, "7 days" seven (matched pixel for pixel against the WMS layers, 2026-09-27). The points are filtered the same way, or the day's main pass would drop out of "24 h" at the zoom where the points take over |
+| Live | `fires_viirs_24 / _48 / _72 / _7`, and the same for `fires_viirs_snpp`, `fires_viirs_noaa20` and `fires_modis`. The combined `fires_viirs` is S-NPP, NOAA-20 and NOAA-21 (checked pixel for pixel, 2026-09) |
 | History | the same layer names without the suffix, dated with `TIME=from/to`, up to **31 days** per request |
-| Zoom ceiling | source tiles stop at z14. Deeper views reuse the z14 tile with nearest-neighbour scaling, keeping each detection visible as a square without another NASA request |
-| Allowance | 5,000 requests per 10 minutes, and a long range counts as several. Nothing polls, and a layer that is off asks for nothing |
-| Caching | none on disk. The live layers are what is burning now (upstream refreshes every 15 minutes) and a cached fire is a lie with a timestamp; the browser holds one for 5 minutes |
+| Zoom ceiling | tiles are 512 px and stop at z13, where a VIIRS square is already 20 px or more. Deeper views draw the z13 tile's squares bigger, so a square stays the size of its footprint without another NASA request |
+| Allowance | 5,000 transactions per 10 minutes, counted per day covered and per satellite: a WMS tile of the last 24 hours on the combined VIIRS layer is 3, a tile of 31 days 93, and an area request 2 per day and satellite whatever its box, so a week of one cell is 48 and every zoom under it is then free (measured 2026-09). The count fell back to zero in one go after ten quiet minutes. Nothing polls, and a layer that is off asks for nothing |
+| Area API | `api/area/csv/{key}/{source}/{west,south,east,north}/{days}/{first day}`, `days` 1 to 5 counted forward. The near-real-time files (`VIIRS_SNPP_NRT`, `VIIRS_NOAA20_NRT`, `VIIRS_NOAA21_NRT`, `MODIS_NRT`) hold about the last three months, the archive files before. A wrong key answers `400 Invalid MAP_KEY.` |
+| Refusal | a spent allowance and a key FIRMS does not know answer the same 28 KB placard. The key-status endpoint costs nothing and tells them apart: it gives a key it knows its count, and a key it does not a 403. A spent allowance pauses the layer a minute at a time and leaves the key alone; only the 403 benches it. Any area answer that is not the table is read through the same endpoint |
+| Caching | none on disk. The live layers are what is burning now (upstream refreshes every 15 minutes) and a cached fire is a lie with a timestamp; the browser holds one for 5 minutes, and a range that ended before yesterday for 6 hours. The points are held in memory, today and yesterday for 5 minutes and older days for 6 hours, a million rows at most (about 24 MB), least recently drawn out first |
 
-NOAA-21 is left out on purpose: FIRMS gives it the rolling layers and no dated
-one, and a sensor that could answer "now" but not "that day" is a trap in a tool
-whose second question is always the date.
+NOAA-21 is not offered on its own: FIRMS gives it the rolling layers and no
+dated one, and a sensor that could answer "now" but not "that day" is a trap in
+a tool whose second question is always the date. It is inside the combined
+VIIRS layer, which is why that one counts three transactions a day.
 
 The extension asks differently for the same reason it draws differently: it has
 no tile grid to hang tiles on, so it asks for **one picture of the ground it can
 see** per settled view and lays it under its own drawing, rotated with the map.
-That is also one request where tiles would be a dozen.
+That is also one request where tiles would be a dozen. Close in, that picture is
+drawn from the same points as the map's vector tiles, so both show the same squares.
 
 ## Esri Wayback is one release at a time
 
@@ -530,20 +541,22 @@ id and its cache always name one.
 
 Drawn over any basemap, fetched by the browser straight from their own servers
 (all answer cross-origin), never through the proxy, never cached on disk and
-never in a capture. Borders are the one layer the map opens with; every other is
-asked for only once its switch is on (`frontend/src/lib/map/basemap.js`).
+never in a capture. Borders and Place names are the layers the map opens with;
+every other is asked for only once its switch is on
+(`frontend/src/lib/map/basemap.js`).
 Checked 2026-09-13.
 
 | Layer | Source | Licence / terms | Notes |
 |---|---|---|---|
-| Borders | Esri `Reference/World_Boundaries_and_Places` | Esri terms, as World Imagery | carries the place names |
+| Borders | Esri `Reference/World_Boundaries_and_Places` | Esri terms, as World Imagery | carries the larger place names |
+| Place names | OpenFreeMap `planet` vector tiles (OpenMapTiles schema), found through its TileJSON since the tile paths change with each weekly build | data ODbL © OSM contributors, © OpenMapTiles, OpenFreeMap credited; no key and no quota | `place` layer only, towns down to hamlets, in `name:latin`; imagery only; the browser draws the text, so no glyphs are fetched. Checked 2026-09-27 |
 | Roads | Esri `Reference/World_Transportation` | Esri terms, as World Imagery | imagery only |
-| OSM railways | OpenRailwayMap `standard` | © OSM contributors, style © OpenRailwayMap | |
+| Railways | OpenRailwayMap `standard` | © OSM contributors, style © OpenRailwayMap | |
 | Power lines | Open Infrastructure Map vector tiles (`/map/power`, `/telecoms`, `/petroleum`) | data ODbL, analysis CC-BY 4.0, credit and link required | no published tile usage policy, so the style is ours, requests only follow the view, and nothing is prefetched |
 | Sea marks | OpenSeaMap `seamark` | © OpenSeaMap contributors (CC-BY-SA) | |
 | GPS traces | `gps.tile.openstreetmap.org/lines` | OSMF tile policy | |
-| Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain | Level 8 (750 m); opaque, drawn lowest at 85% |
 | Active fires | NASA FIRMS, keyed, through the app | see above | |
+| Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain | Level 8 (750 m); opaque, drawn lowest at 85% |
 
 ## GeoConfirmed is a query, not a feed
 

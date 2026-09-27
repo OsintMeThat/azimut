@@ -1118,3 +1118,15 @@ def test_detect_prefs_drop_the_retired_labels_layer(client):
     )
     assert saved.status_code == 200, saved.text
     assert saved.json()["detect_view"]["overlays"] == ["boundaries", "roads"]
+
+
+def test_detect_opens_with_the_borders_and_the_place_names(client):
+    assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["boundaries", "placenames"]
+
+
+def test_detect_prefs_keep_the_place_names(client):
+    # Every layer Detect lists can be remembered, the place names included.
+    everything = ["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]
+    saved = client.put("/api/settings/prefs", json={"detect_view": {"overlays": everything}})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["detect_view"]["overlays"] == everything

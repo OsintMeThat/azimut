@@ -12,13 +12,6 @@
     monthGrid,
     cloudClass,
     cloudLabel,
-    /**
-     * Open from a dated chip rather than a layers icon, the way the Wayback
-     * picker beside it does. Compare's source card carries its own layers
-     * button, and two identical icons in one card said nothing about which of
-     * them held the date.
-     */
-    dateChip = false,
   } = $props();
 
   // What the tiles are dated: the pinned pass, or the one "most recent" resolved
@@ -33,27 +26,19 @@
 </script>
 
 <div class="s2-wrap" bind:this={menuEl}>
-  {#if dateChip}
-    <button
-      class="chip"
-      class:on={s2.menuOpen}
-      onclick={s2.toggleMenu}
-      title={s2.date ? `Sentinel-2 pass of ${s2.date}` : 'Sentinel-2 layer and date'}
-      aria-label="Sentinel-2 layer and date"
-      aria-expanded={s2.menuOpen}
-    >
-      <Icon name="clock" size={13} />
-      <span class="mono">{chipDate || 'Most recent'}</span>
-    </button>
-  {:else}
-    <button
-      class="btn btn-icon"
-      class:on={s2.menuOpen}
-      onclick={s2.toggleMenu}
-      title="Sentinel-2 layer and date"
-      aria-label="Sentinel-2 layer and date"
-    ><Icon name="layers" size={14} /></button>
-  {/if}
+  <!-- Opened from a dated chip, as the Wayback and Sentinel-1 pickers are: the
+       date is what you look for, and a layers icon hid it behind a click. -->
+  <button
+    class="chip"
+    class:on={s2.menuOpen}
+    onclick={s2.toggleMenu}
+    title={s2.date ? `Sentinel-2 pass of ${s2.date}` : 'Sentinel-2 layer and date'}
+    aria-label="Sentinel-2 layer and date"
+    aria-expanded={s2.menuOpen}
+  >
+    <Icon name="clock" size={13} />
+    <span class="mono">{chipDate || 'Most recent'}</span>
+  </button>
   {#if s2.menuOpen}
     <div class="s2-menu card">
       <div class="menu-row">

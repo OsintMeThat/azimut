@@ -9,7 +9,7 @@ from PIL import Image
 
 from azimut import config, layout
 from azimut.api import analyzers as analyzers_api
-from azimut.engine import analyzers, tilecache, workqueue
+from azimut.engine import analyzers, sentinel, tilecache, workqueue
 from azimut.engine.analysis_models import (
     BUILTINS,
     METHODS,
@@ -17,6 +17,7 @@ from azimut.engine.analysis_models import (
     Parameters,
     Recipe,
     RunInput,
+    Source,
     Zone,
 )
 from azimut.workspace import Case
@@ -76,6 +77,64 @@ def run(client, case, body):
 
 
 # -- runs, review and evidence ------------------------------------------------------
+
+
+def test_a_day_is_read_whole_whatever_its_tile_s_cloud(client, scenario, monkeypatch):
+    """Sentinel Hub drops a whole tile above MAXCC, so a day picked over the
+    ceiling used to come back blank and the sweep read nothing. The ceiling
+    only chooses the newest pass now; the sky byte keeps the clouds out."""
+    from analyzerfixture import _png
+
+    case, body = scenario
+    body["offline"] = False
+    assert body["b"]["maxcc"] < sentinel.DEFAULT_MAXCC
+    client.put("/api/settings/keys", json={"sentinelhub": "INSTANCE"})
+    monkeypatch.setattr(analyzers.tilecache, "get", lambda *args, **kwargs: None)
+    read, pictures = [], []
+
+    def band_frame(instance, box, width, height, day, product, maxcc, **kwargs):
+        read.append(maxcc)
+        return _png(surface())
+
+    class Stream:
+        status_code = 200
+
+        def __init__(self, url):
+            pictures.append(url)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield _png(np.full((512, 512, 3), 40, np.uint8))
+
+    monkeypatch.setattr(analyzers.sentinel, "band_frame", band_frame)
+    monkeypatch.setattr(analyzers.httpx, "stream", lambda method, url, **kwargs: Stream(url))
+    saved = run(client, case, body)
+    assert saved["status"] == "ready", saved
+    assert read and set(read) == {sentinel.DEFAULT_MAXCC}
+    assert pictures and all(f"MAXCC={sentinel.DEFAULT_MAXCC}" in url for url in pictures)
+
+
+def test_a_frame_an_older_run_kept_under_a_ceiling_is_not_taken_for_a_whole_day():
+    ceiling = Source(date="2026-05-04", maxcc=30)
+    # an older run finds its own frames under the name it kept them by…
+    assert analyzers._key(ceiling, 13, 1, 2, None, 4) == analyzers._key(ceiling, 13, 1, 2, None, 3)
+    # …and a new run never reuses one, which may be the blank a ceiling made
+    assert analyzers._key(ceiling, 13, 1, 2, None, 4) != analyzers._key(ceiling, 13, 1, 2, None)
+    assert analyzers._key(ceiling, 13, 1, 2, "surface", 4) != analyzers._key(ceiling, 13, 1, 2, "surface")
+    # a source that never had a ceiling read the whole day already
+    whole = Source(date="2026-05-04", maxcc=100)
+    assert analyzers._key(whole, 13, 1, 2, None, 4) == analyzers._key(whole, 13, 1, 2, None)
+    # and the cache a sweep shares with the map is the day read whole
+    assert analyzers.picture_cache_id(ceiling) == analyzers.picture_cache_id(whole)
+
 
 
 def test_local_run_keeps_frames_and_review_without_network(client, scenario):
@@ -1170,7 +1229,7 @@ def test_an_automatic_date_rule_takes_the_newest_pass_that_covers_the_whole_area
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     asked = {}
 
-    def acquisitions(instance, rings, start, end, collection="sentinel2"):
+    def acquisitions(instance, rings, start, end, collection="sentinel2", **kwargs):
         asked.update(instance=instance, rings=rings, start=start, end=end)
         return {"dates": [
             {"date": "2026-05-20", "cloud": 5.0, "granules": 1, "coverage": 0.61},

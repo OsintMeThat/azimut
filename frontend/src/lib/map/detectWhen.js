@@ -7,14 +7,75 @@
  * area" when the areas really do differ.
  *
  * A is the picture before, B the one to look in. An empty B date is the
- * newest pass, looked up when the run starts; a routine never holds one.
+ * newest pass under the cloud ceiling, looked up when the run starts; a routine
+ * never holds one.
  */
 import { sunPosition } from './changeDetect.js';
 import { zoneRing } from './analyzers.js';
+import { FULL_COVER } from './acquisitions.js';
+import { onTrack } from '../radar.js';
 
 /** How much a 10 m building's shadow may change length between two passes,
  *  in metres, before it reads as a change: half a Sentinel-2 pixel. */
 export const SHADOW_SHIFT_M = 5;
+
+/** The cloud ceiling a new detection starts with. Above it, a pass taken on its
+ *  own can be mostly cloud. */
+export const ADVISED_MAXCC = 30;
+
+/** What a ceiling above the advised one costs, or '' at or under it. */
+export function ceilingWarning(maxcc) {
+  if (!(maxcc > ADVISED_MAXCC)) return '';
+  return `Above ${ADVISED_MAXCC}%, the pass taken can be mostly cloud, and ground under cloud is left out.`;
+}
+
+/**
+ * What "the newest pass" means once the cloud ceiling is part of it, in words.
+ * It is the newest pass the ceiling allows, which is not always the newest
+ * there is. Radar sees through cloud, and a ceiling of 100 lets every pass
+ * through, so only a real ceiling is said.
+ */
+export function newestLabel({ maxcc = 100, radar = false } = {}) {
+  return radar || !(maxcc < 100) ? 'newest pass' : `newest pass under ${maxcc}% cloud`;
+}
+
+/**
+ * The pass "newest" would take from a looked-up list, newest first, and the
+ * newer ones it steps over, each with why: 'cloud' or 'cover'. The rule is the
+ * one the run applies at launch (`resolve_dates`): the tile's cloud known and
+ * at or under the ceiling, and the whole area covered. Radar keeps to `track`.
+ */
+export function newestPick(list, { maxcc = 100, radar = false, track = '' } = {}) {
+  const skipped = [];
+  for (const entry of radar ? onTrack(list, track) : (list ?? [])) {
+    const why = !radar && !(entry.cloud != null && entry.cloud <= maxcc) ? 'cloud'
+      : !((entry.coverage ?? 0) >= FULL_COVER) ? 'cover' : '';
+    if (!why) return { pass: entry, skipped };
+    skipped.push({ ...entry, why });
+  }
+  return { pass: null, skipped };
+}
+
+function skippedLabel(entry) {
+  if (entry.why === 'cover') return `${entry.date} (${Math.round((entry.coverage ?? 0) * 100)}% of the area)`;
+  return `${entry.date} (${entry.cloud == null ? 'cloud unknown' : `${Math.round(entry.cloud)}% cloud`})`;
+}
+
+/**
+ * The line under "newest" once the passes are known: which day it takes now,
+ * and the newer ones it steps over, so a clearer-looking map is not a mystery.
+ */
+export function newestLine(pick, { maxcc = 100, radar = false } = {}) {
+  if (!pick) return '';
+  const shown = pick.skipped.slice(0, 3).map(skippedLabel);
+  const more = pick.skipped.length > 3 ? ` and ${pick.skipped.length - 3} more` : '';
+  const newer = shown.length ? ` Newer: ${shown.join(', ')}${more}. Pick one below to read it anyway.` : '';
+  if (!pick.pass) {
+    const rule = radar || !(maxcc < 100) ? 'covers the whole area' : `is under ${maxcc}% cloud over the whole area`;
+    return `No pass in this window ${rule}. Pick one below.`;
+  }
+  return newer ? `Now ${pick.pass.date}.${newer}` : `Now ${pick.pass.date}, looked up again when the run starts.`;
+}
 
 /** A side as a line: its day, and a radar pass's time. */
 export function sideLine(source, radar = false) {
@@ -76,22 +137,24 @@ export function whenNeed({ single, routine, against, followupId, pairs, chooseB 
 
 /** One area's days, for the list shown when the areas differ. */
 export function areaLine(pair, { single, routine, radar = false }) {
+  const newest = newestLabel({ maxcc: pair?.b?.maxcc, radar });
   const a = sideLine(pair?.a, radar) || 'not chosen';
-  const b = sideLine(pair?.b, radar) || 'newest pass';
-  if (single) return routine ? 'newest pass' : b;
+  const b = sideLine(pair?.b, radar) || newest;
+  if (single) return routine ? newest : b;
   return routine ? `A ${a}` : `A ${a} → B ${b}`;
 }
 
 /** The step as one line, for the recap before the start. */
-export function whenSummary({ single, routine, against, pairs, radar = false }) {
+export function whenSummary({ single, routine, against, pairs, radar = false, maxcc = 100 }) {
   if (pairs.length > 1 && !uniform(pairs)) return 'Its own days for each area';
+  const newest = newestLabel({ maxcc, radar });
   const a = sideLine(sharedSide(pairs, 'a'), radar);
-  const b = sideLine(sharedSide(pairs, 'b'), radar) || 'newest pass';
+  const b = sideLine(sharedSide(pairs, 'b'), radar) || newest;
   if (routine) {
-    if (single) return 'Each run: the newest pass';
+    if (single) return `Each run: the ${newest}`;
     return against === 'previous'
-      ? `Each run: the newest pass against the one before${a ? `, first against ${a}` : ''}`
-      : `Each run: the newest pass against ${a || 'A'}`;
+      ? `Each run: the ${newest} against the one before${a ? `, first against ${a}` : ''}`
+      : `Each run: the ${newest} against ${a || 'A'}`;
   }
   if (single) return b.charAt(0).toUpperCase() + b.slice(1);
   return `${a || 'A not chosen'} → ${b}`;

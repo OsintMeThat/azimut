@@ -7,9 +7,13 @@ import math
 import os
 import re
 import tempfile
+import threading
+import time
+from collections import OrderedDict
+from concurrent.futures import Future, ThreadPoolExecutor
 # Aliased: this module already imports the ``time`` module for tile timing, and
 # the sky routes need the datetime classes of the same names.
-from datetime import date as calendar_date, datetime, time as wall_clock, timezone
+from datetime import date as calendar_date, datetime, time as wall_clock, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -24,6 +28,7 @@ from ..engine.analysis_models import Zone
 from ..engine import (
     cities,
     firms,
+    firmspoints,
     geo,
     google_tiles,
     localtime,
@@ -281,14 +286,18 @@ def sentinel_dates(
             "free tier is used; enable the override in Settings to keep going",
         )
     try:
-        found = sentinel.dates(instance, lat, lon, start, end, collection=collection)
+        found = sentinel.dates(instance, lat, lon, start, end, collection=collection,
+                               on_request=_count_sentinel_request)
     except ValueError as exc:
-        config.record_usage("sentinelhub", 1)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"date lookup failed: {tiles.upstream_failure(exc)}") from exc
-    config.record_usage("sentinelhub", 1)
     return {"dates": found, "start": start, "end": end}
+
+
+def _count_sentinel_request() -> None:
+    """One catalogue page asked of Sentinel Hub, on its meter."""
+    config.record_usage("sentinelhub", 1)
 
 
 class AcquisitionQuery(BaseModel):
@@ -311,7 +320,8 @@ def sentinel_acquisitions(body: AcquisitionQuery) -> dict[str, Any]:
     run, that is a number on a row; discovered after it, it is a sweep paid for
     in tiles that found nothing.
 
-    User-triggered only. Billed as one request on the sentinelhub meter.
+    User-triggered only. Billed as one request a catalogue page on the
+    sentinelhub meter, which is one for most windows.
     """
     instance = _sentinel_instance()
     if config.usage_blocked("sentinelhub"):
@@ -323,13 +333,12 @@ def sentinel_acquisitions(body: AcquisitionQuery) -> dict[str, Any]:
     try:
         found = sentinel.acquisitions(
             instance, [list(zone.ring()) for zone in body.zones], body.start, body.end,
-            collection=body.collection,
+            collection=body.collection, on_request=_count_sentinel_request,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"pass lookup failed: {tiles.upstream_failure(exc)}") from exc
-    config.record_usage("sentinelhub", 1)
     return {**found, "start": body.start, "end": body.end}
 
 
@@ -633,9 +642,84 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
 
 
-#: What FIRMS means by the placard it draws instead of detections. Its own
-#: wording, which covers both ways a key stops working.
-FIRMS_REFUSED = "FIRMS did not accept this key, or the account is over its limit"
+#: The three things a placard can turn out to mean, once the key-status
+#: endpoint has said which (``firms.allowance``).
+FIRMS_SPENT = "FIRMS allowance used up (5,000 per 10 minutes); it refills within ten minutes"
+FIRMS_REFUSED = "FIRMS does not know this key"
+FIRMS_UNSURE = "FIRMS turned this picture down without saying why; try again in a moment"
+#: How long one answer from the key-status endpoint stands for the tiles of a
+#: burst: a screen that hits the placard hits it a dozen times at once.
+FIRMS_VERDICT_SECONDS = 15
+
+_firms_lock = threading.Lock()
+#: One status question at a time, held apart from ``_firms_lock`` so a tile
+#: checking the pause never waits on NASA's answer to somebody else's placard.
+_firms_asking = threading.Lock()
+#: ``(monotonic, verdict)`` of the last status question.
+_firms_verdict: tuple[float, str] | None = None
+#: While a spent allowance pauses the layer: when it ends, on both clocks, and
+#: the count FIRMS gave. Memory only: a restart forgets it, and FIRMS's own
+#: ten minutes will have passed by then or be about to.
+_firms_pause: dict[str, Any] = {}
+
+
+def firms_paused() -> dict[str, Any] | None:
+    """The pause a spent allowance put on the layer, while it lasts."""
+    with _firms_lock:
+        if _firms_pause and _firms_pause["until"] > time.monotonic():
+            return {"until": _firms_pause["until_utc"], "used": _firms_pause["used"],
+                    "of": _firms_pause["of"]}
+        _firms_pause.clear()
+        return None
+
+
+def _firms_ask(key: str) -> str:
+    """'spent', 'refused' or 'unsure', from the key-status endpoint."""
+    try:
+        answer = _client().get(firms.STATUS_URL, params={"MAP_KEY": key}, timeout=10)
+    except Exception:
+        return "unsure"
+    if answer.status_code in (401, 403):
+        config.record_provider_status("firms", False, firms.status_error(answer.text))
+        return "refused"
+    count = firms.allowance(answer.text) if answer.status_code == 200 else None
+    if not count or not firms.spent(*count):
+        # a count far from the limit means the window turned over meanwhile,
+        # or the refusal was something else: nothing to pause for
+        return "unsure"
+    with _firms_lock:
+        _firms_pause.update(
+            until=time.monotonic() + firms.PAUSE_SECONDS,
+            until_utc=(datetime.now(timezone.utc) + timedelta(seconds=firms.PAUSE_SECONDS))
+            .isoformat(timespec="seconds"),
+            used=count[0], of=count[1],
+        )
+    return "spent"
+
+
+def _firms_refusal(key: str) -> HTTPException:
+    """What a refusal meant, asked of the one endpoint that can say.
+
+    The WMS's placard reads "invalid key *or* spent allowance" and is the same
+    bytes either way, and the area API's refusals are a sentence nobody
+    promised to keep. The key-status endpoint costs no transaction and answers a key
+    it knows with its count, so a spent allowance pauses the layer instead of
+    filing a good key as dead. Only a key it says it does not know is
+    benched; a failure to ask says nothing about the key and benches nothing.
+    """
+    global _firms_verdict
+    with _firms_asking:
+        memo = _firms_verdict
+        if memo and time.monotonic() - memo[0] < FIRMS_VERDICT_SECONDS:
+            verdict = memo[1]
+        else:
+            verdict = _firms_ask(key)
+            _firms_verdict = (time.monotonic(), verdict)
+    if verdict == "spent":
+        return HTTPException(status_code=429, detail=FIRMS_SPENT)
+    if verdict == "refused":
+        return HTTPException(status_code=502, detail=FIRMS_REFUSED)
+    return HTTPException(status_code=502, detail=FIRMS_UNSURE)
 
 
 def firms_key() -> str | None:
@@ -654,17 +738,38 @@ def firms_key() -> str | None:
     return (settings.get("api_keys") or {}).get("firms")
 
 
+def firms_state() -> str:
+    """Why the layer can or cannot be asked, as the Layers row says it.
+
+    ``keyed`` alone read "no key" for three different things: no key, a key
+    switched off in Settings, and a key FIRMS refused. Each wants a different
+    word and a different way out. FIRMS's own sentence stays with the verdict
+    in Settings, where the key is.
+    """
+    settings = config.load_settings()
+    if not (settings.get("api_keys") or {}).get("firms"):
+        return "missing"
+    if not settings.get("providers_enabled", {}).get("firms", True):
+        return "off"
+    if config.provider_key_bad("firms", settings):
+        return "refused"
+    return "ready"
+
+
 @router.get("/firms/sensors")
 def firms_sensors() -> dict[str, Any]:
     """What the fire layer can be asked, and whether it can be asked at all.
 
-    Read on mount by the Layers panel, so it touches no network: the sensors
-    and the windows are a catalogue, and ``keyed`` is a look at settings.json.
+    Read on mount by the Layers panel, and again when a tile fails, so it
+    touches no network: the sensors and the windows are a catalogue, the state
+    is a look at settings.json, and ``paused`` is what the last refusal said.
     A layer nobody can use says so with the reason rather than failing on the
     first tile.
     """
     return {
         "keyed": bool(firms_key()),
+        "state": firms_state(),
+        "paused": firms_paused(),
         "sensors": [{"id": s.id, "label": s.label} for s in firms.SENSORS],
         "windows": list(firms.WINDOWS),
         "max_zoom": firms.MAX_ZOOM,
@@ -672,8 +777,8 @@ def firms_sensors() -> dict[str, Any]:
     }
 
 
-@router.get("/firms/tiles/{z}/{x}/{y}")
-def firms_tile(
+@router.get("/firms/points/{z}/{x}/{y}")
+def firms_points(
     z: int,
     x: int,
     y: int,
@@ -682,66 +787,209 @@ def firms_tile(
     first: str = "",
     last: str = "",
 ) -> Response:
-    """One tile of active fire detections, proxied so the key stays here.
+    """One vector tile of active fire detections, which the map draws itself.
 
-    FIRMS puts the MAP_KEY in the *path*, so a tile URL the browser could build
-    would publish it in the page, in the network log and in a screenshot of
-    either. Everything else is this endpoint translating the map's z/x/y into
-    the bounding box a WMS wants (``engine/firms.py``).
+    The map draws every mark, at every zoom, so a square keeps its size through
+    a zoom and never waits blown up or hidden for the next level. From
+    ``firmspoints.MIN_ZOOM`` in, a rolling window is cut from the points
+    fetched for its cell once, footprints and all. Farther out, and for a dated
+    range, the marks are read off FIRMS's own picture of the tile, one request
+    a tile as before (``firmspoints.picture_tile``).
 
-    Never cached to disk: the live layers are what is burning now, refreshed
-    upstream every fifteen minutes, and a cached fire is a lie with a timestamp.
+    FIRMS puts the MAP_KEY in the *path*, so a URL the browser could build would
+    publish it in the page, in the network log and in a screenshot of either:
+    the key stays here. Never cached to disk: the live layers are what is
+    burning now, and a cached fire is a lie with a timestamp.
     """
-    if z < 0 or firms.too_deep(z):
-        raise HTTPException(
-            status_code=422,
-            detail=f"FIRMS source tiles use zooms 0 through {firms.MAX_ZOOM}",
-        )
+    if not 0 <= z <= firmspoints.MAX_ZOOM:
+        raise HTTPException(status_code=422, detail=f"FIRMS tiles come in zooms 0 through {firmspoints.MAX_ZOOM}")
     grid = 1 << z
     if not (0 <= x < grid) or not (0 <= y < grid):
         raise HTTPException(status_code=422, detail="tile coordinates out of range")
+    try:
+        firms.sensor(sensor)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     key = firms_key()
     if not key:
         raise HTTPException(status_code=404, detail="no FIRMS key saved")
+    exact = window in firmspoints.DAYS_BACK and z >= firmspoints.MIN_ZOOM
     try:
-        url = firms.tile_url(
-            key, sensor_id=sensor, window=window, z=z, x=x, y=y, first=first, last=last
-        )
-    except (KeyError, ValueError) as exc:
+        url = "" if exact else firms.tile_url(
+            key, sensor_id=sensor, window=window, z=z, x=x, y=y, first=first, last=last, mark=1)
+        max_age = firms.cache_seconds(window, first, last, today=datetime.now(timezone.utc).date())
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return firms_answer(url)
+    if firms_paused():
+        raise HTTPException(status_code=429, detail=FIRMS_SPENT)
+    if exact:
+        points = _firms_points_for(key, sensor, window, firms.tile_bounds(z, x, y))
+        body = firmspoints.tile(points, z, x, y, window=window, now=datetime.now(timezone.utc))
+    else:
+        try:
+            body = firmspoints.picture_tile(firms_picture(key, url), z, x, y, sensor_id=sensor)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail="FIRMS sent a picture that could not be read") from exc
+    # The browser may hold a live tile for a few minutes, long enough for a pan
+    # back and short of FIRMS's own fifteen, and a past range for hours.
+    return Response(
+        content=body,
+        media_type="application/vnd.mapbox-vector-tile",
+        headers={"Cache-Control": f"private, max-age={max_age}"},
+    )
 
 
-def firms_answer(url: str) -> Response:
-    """Fetch one FIRMS picture and hand it on, or say what FIRMS said.
+def firms_picture(key: str, url: str) -> bytes:
+    """One FIRMS picture, or what FIRMS said instead.
 
-    Shared with the extension's own route (``api/ingest.py``): the two ask for
-    different rectangles and want exactly the same handling of a refusal, and
-    FIRMS refuses by answering 200 with an XML report in the body.
+    Shared by the map's far tiles and the extension's picture (``api/ingest.py``):
+    they ask for different rectangles and want exactly the same handling of a
+    refusal, and FIRMS refuses by answering 200 with an XML report in the body.
+    While a spent allowance pauses the layer nothing is asked at all: each
+    refused picture would only add to the count that refused it.
     """
+    if firms_paused():
+        raise HTTPException(status_code=429, detail=FIRMS_SPENT)
     try:
-        response = httpx.get(url, headers={"User-Agent": tiles.USER_AGENT}, timeout=20)
+        response = _client().get(url)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FIRMS unreachable: {tiles.upstream_failure(exc)}") from exc
     if response.status_code >= 400 or "xml" in response.headers.get("content-type", ""):
         raise HTTPException(
             status_code=502, detail=firms.service_error(response.text) or "FIRMS refused the request"
         )
-    # A key FIRMS will not accept comes back as 200 and a picture saying so.
-    # Nothing in the answer is an error, so without this the map would tile that
-    # placard across the ground. It is an auth-shaped verdict and nothing else,
-    # which is what lets it bench the layer the way a dead basemap key is
-    # benched: the Layers row goes back to "add a key", with the reason.
+    # A key FIRMS will not accept, and an allowance spent, both come back as 200
+    # and the same picture saying so. Nothing in the answer is an error, so
+    # without this the map would draw that placard's pixels as fires.
     if firms.is_placard(response.content):
-        config.record_provider_status("firms", False, FIRMS_REFUSED)
-        raise HTTPException(status_code=502, detail=FIRMS_REFUSED)
+        raise _firms_refusal(key)
+    return response.content
+
+
+def firms_answer(key: str, url: str, *, mark: int, max_age: int) -> Response:
+    """The extension's picture far out: FIRMS's own, dressed to read over imagery."""
+    content = firms_picture(key, url)
+    try:
+        picture = firms.dress(content, mark)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="FIRMS sent a picture that could not be read") from exc
     return Response(
-        content=response.content,
+        content=picture,
         media_type="image/png",
-        # The browser may hold a picture for a few minutes — long enough for a
-        # pan back, short enough that a live layer is still live. FIRMS itself
-        # updates every fifteen.
-        headers={"Cache-Control": "private, max-age=300"},
+        headers={"Cache-Control": f"private, max-age={max_age}"},
+    )
+
+
+#: The points behind the drawn tiles (``engine/firmspoints.py``) by source, cell
+#: and day: when they stop being true, and the points. Least recently drawn
+#: first, and never more than ``FIRMS_POINTS_CAP`` rows in all, about 24 MB,
+#: where a week over a burning region is a few hundred thousand. Memory only:
+#: a restart asks again, which a live window would soon do anyway.
+FIRMS_POINTS_CAP = 1_000_000
+_firms_points: OrderedDict[tuple[str, tuple[int, int], calendar_date], tuple[float, firmspoints.Points]] = OrderedDict()
+_firms_rows = 0
+_firms_points_lock = threading.Lock()
+#: One fetch of the same days of the same cell at a time. The tiles of a screen
+#: want the same cells at once, and each would otherwise pay for them.
+_firms_flights: dict[tuple[str, tuple[int, int], calendar_date, int], Future[None]] = {}
+#: The satellites, cells and stretches of days of a screen fetched side by
+#: side, and no more at once than the connection pool keeps warm.
+_firms_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="firms")
+
+
+def _firms_missing(source: str, cell: tuple[int, int], days: list[calendar_date]) -> list[calendar_date]:
+    """The days of a cell not held, or held past their time."""
+    clock = time.monotonic()
+    with _firms_points_lock:
+        return [day for day in days
+                if (held := _firms_points.get((source, cell, day))) is None or held[0] <= clock]
+
+
+def _firms_store(source: str, cell: tuple[int, int], found: dict[calendar_date, firmspoints.Points]) -> None:
+    global _firms_rows
+    now = datetime.now(timezone.utc)
+    clock = time.monotonic()
+    with _firms_points_lock:
+        for day, points in found.items():
+            old = _firms_points.pop((source, cell, day), None)
+            if old:
+                _firms_rows -= len(old[1])
+            _firms_points[(source, cell, day)] = (clock + firmspoints.fresh_seconds(day, now), points)
+            _firms_rows += len(points)
+        while _firms_rows > FIRMS_POINTS_CAP and len(_firms_points) > 1:
+            _, (_, gone) = _firms_points.popitem(last=False)
+            _firms_rows -= len(gone)
+
+
+def _firms_fetch(key: str, source: str, cell: tuple[int, int], start: calendar_date, count: int) -> None:
+    """Ask the area API for ``count`` days of a cell from ``start``."""
+    try:
+        response = _client().get(firmspoints.area_url(key, source, cell, start, count), timeout=30)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FIRMS unreachable: {tiles.upstream_failure(exc)}") from exc
+    if response.status_code != 200 or not firmspoints.is_table(response.text):
+        raise _firms_refusal(key)
+    _firms_store(source, cell, firmspoints.parse(
+        response.text, [start + timedelta(days=n) for n in range(count)]))
+
+
+def _firms_flights_for(key: str, source: str, cell: tuple[int, int], days: list[calendar_date]) -> list[Future[None]]:
+    """The fetches that bring a cell these days: those under way, and new ones."""
+    flights = []
+    with _firms_points_lock:
+        for start, count in firmspoints.runs(days):
+            flight = _firms_flights.get((source, cell, start, count))
+            if flight is None or flight.done():
+                flight = _firms_pool.submit(_firms_fetch, key, source, cell, start, count)
+                _firms_flights[(source, cell, start, count)] = flight
+            flights.append(flight)
+        for done in [name for name, flight in _firms_flights.items() if flight.done()]:
+            del _firms_flights[done]
+    return flights
+
+
+def _firms_points_for(
+    key: str, sensor_id: str, window: str, bounds: tuple[float, float, float, float]
+) -> firmspoints.Points:
+    """Every point a picture may draw, fetched once for all the pictures after it.
+
+    Every source, cell and stretch of days missing is asked at once, and a
+    picture waits for them all: a picture short of one satellite would look
+    whole and not be.
+    """
+    days = firmspoints.days_for(window, datetime.now(timezone.utc))
+    wanted = [(source, cell) for source in firmspoints.SOURCES[sensor_id] for cell in firmspoints.cells_for(bounds)]
+    flights = [flight for source, cell in wanted if (missing := _firms_missing(source, cell, days))
+               for flight in _firms_flights_for(key, source, cell, missing)]
+    for flight in flights:
+        flight.result()
+    parts = []
+    with _firms_points_lock:
+        for source, cell in wanted:
+            for day in days:
+                held = _firms_points.get((source, cell, day))
+                if held:
+                    _firms_points.move_to_end((source, cell, day))
+                    parts.append(held[1])
+    return firmspoints.Points.join(parts)
+
+
+def firms_drawn(
+    key: str, *, sensor_id: str, window: str, bounds: tuple[float, float, float, float], width: int, height: int
+) -> Response:
+    """The extension's picture close in, drawn here from the same points the map's tiles are cut from.
+
+    The pause holds here as it does for the WMS: a spent allowance asks nothing.
+    """
+    if firms_paused():
+        raise HTTPException(status_code=429, detail=FIRMS_SPENT)
+    points = _firms_points_for(key, sensor_id, window, bounds)
+    picture = firmspoints.render(points, bounds, width, height, sensor_id=sensor_id, window=window,
+                                 now=datetime.now(timezone.utc))
+    return Response(
+        content=picture,
+        media_type="image/png",
+        headers={"Cache-Control": f"private, max-age={firms.LIVE_CACHE_SECONDS}"},
     )
 
 

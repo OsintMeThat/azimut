@@ -20,6 +20,8 @@
   import { caseState, dismissToast, prefs, prefsReady, toast, uiState } from '../lib/state.svelte.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
   import { blinkable } from '../lib/map/detectReview.js';
+  import { ADVISED_MAXCC } from '../lib/map/detectWhen.js';
+  import { DEFAULT_MAXCC } from '../lib/sentinel.js';
   import { insideBounds } from '../lib/map/analyzerRules.js';
   import { DEFAULT_BLINK_INTERVAL } from '../lib/map/compare.js';
   import { createImageryState } from './satellite/state/imagery.svelte.js';
@@ -29,6 +31,7 @@
   import { copernicusNeed } from '../lib/copernicusSetup.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { openMapAt } from '../lib/navigate.js';
+  import { followFullscreen, toggleFullscreen } from '../lib/fullscreen.js';
   import { shareView } from '../lib/map/sharedView.js';
   import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
@@ -65,7 +68,9 @@
   let providerId = $state('esri-world-imagery');
   let chosenBasemap = $state('esri-world-imagery');
   let collapsed = $state(false);
-  let overlays = $state(['boundaries']);
+  let toolEl = $state(null);
+  let fullscreen = $state(false);
+  let overlays = $state(['boundaries', 'placenames']);
   let savedVisible = $state(true);
   let readingPass = $state(false);
   let layersOpen = $state(false);
@@ -77,8 +82,8 @@
    *  its Copernicus layer and day, but none is remembered as the basemap: Detect
    *  opens on free imagery every time. */
   const PASSES = [SENTINEL, RADAR_ID];
-  const OVERLAY_ROWS = [['boundaries', 'Borders'], ['roads', 'Roads'], ['railway', 'Railways'],
-    ['power', 'Power lines'], ['seamarks', 'Seamarks'], ['gpstraces', 'GPS traces']];
+  const OVERLAY_ROWS = [['boundaries', 'Borders'], ['placenames', 'Place names'], ['roads', 'Roads'], ['railway', 'Railways'],
+    ['power', 'Power lines'], ['seamarks', 'Sea marks'], ['gpstraces', 'GPS traces']];
   const layerRows = $derived([
     ...OVERLAY_ROWS.map(([id, label]) => ({
       id, label, on: overlays.includes(id), toggle: () => {
@@ -182,6 +187,8 @@
   const marks = $derived(zoneMarks(zones));
   const mapDate = $derived(s2.date || '');
   const passChip = $derived(providerId === RADAR_ID ? passLabel(s1.pass) : mapDate);
+  let passCloud = $state(null);
+  const cloudyPass = $derived(providerId !== RADAR_ID && passCloud > ADVISED_MAXCC);
   /**
    * What Detect needs before a run can fetch anything: a Copernicus key, which
    * Sentinel-2 lists once it is in Settings. Said in the middle of the map,
@@ -202,7 +209,7 @@
       providerId = chosenBasemap;
       // Only the layers still offered: a retired one (Labels) would be sent back
       // with the next save and refused.
-      overlays = (saved?.overlays ?? ['boundaries']).filter((id) => OVERLAY_ROWS.some(([row]) => row === id));
+      overlays = (saved?.overlays ?? ['boundaries', 'placenames']).filter((id) => OVERLAY_ROWS.some(([row]) => row === id));
       savedVisible = saved?.saved ?? true;
       prefsLoaded = true;
       home = { ...prefs.homeView };
@@ -237,8 +244,18 @@
   });
   $effect(() => {
     collapsed;
+    fullscreen;
     void tick().then(() => engine?.resize());
   });
+
+  // The panel comes along to the whole screen, since the review is worked from
+  // it; `]` still folds it away for the map alone.
+  $effect(() => {
+    if (toolEl) return followFullscreen(toolEl, (on) => (fullscreen = on));
+  });
+  function switchFullscreen() {
+    toggleFullscreen(toolEl).catch(() => toast('Full screen is not available', 'danger'));
+  }
 
   // The same turn as Satellite and Compare: a middle-drag, or shift and the
   // left button, turns the map about the point that was grabbed.
@@ -503,9 +520,15 @@
     );
   }
 
-  /** Put a pass on the map, so the picture is the one the work is about. */
-  function showDate({ provider, date, time, layer, maxcc }) {
+  /**
+   * Put a pass on the map, so the picture is the one the work is about. A day is
+   * shown whole, as a run reads it: under the run's ceiling Sentinel Hub would
+   * drop a cloudier tile and leave the map black. Its cloud, when the lookup
+   * knows it, rides on the chip.
+   */
+  function showDate({ provider, date, time, layer, cloud = null }) {
     if (!date) { leavePass(); return; }
+    passCloud = provider === RADAR_ID || !Number.isFinite(cloud) ? null : cloud;
     if (provider === RADAR_ID) {
       // A radar pass is shown by the radar basemap, once Settings has its layer.
       if (!imagery.find(RADAR_ID)) return;
@@ -518,7 +541,7 @@
     readingPass = true;
     providerId = SENTINEL;
     if (layer) s2.layer = layer;
-    if (maxcc !== undefined && maxcc !== null) s2.setMaxcc(maxcc);
+    s2.setMaxcc(DEFAULT_MAXCC);
     s2.date = date ?? '';
   }
 
@@ -546,7 +569,7 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
-<div class="detect-tool">
+<div class="detect-tool" bind:this={toolEl}>
   <div class="stage">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="surface-shell" oncontextmenu={onOverlayMenu}>
@@ -593,18 +616,21 @@
           <button class="cmp-icon" title="Stop blinking" aria-label="Stop blinking" onclick={() => (blinking = false)}><Icon name="x" size={12} /></button>
         </div>
       {:else if readingPass}
-        <button class="pass-chip cmp-glass" title="Return to your basemap" aria-label="Leave pass imagery" onclick={leavePass}>{passChip} <Icon name="x" size={12} /></button>
+        <button class="pass-chip cmp-glass" title="Return to your basemap" aria-label="Leave pass imagery" onclick={leavePass}>{passChip}
+          {#if cloudyPass}<span class="cloudy" title="Ground under cloud is left out of a run">{Math.round(passCloud)}% cloud</span>{/if}
+          <Icon name="x" size={12} /></button>
       {/if}
       <!-- Which way is up: the same reading every other map in the app shows,
            which Detect lost when it turned the surface's own chrome off. -->
       <Compass {bearing} onbearing={(deg) => engine?.setBearing(deg)} />
-      <div class="ruler cmp-glass">
-        <button class="cmp-icon" class:on={measuring} aria-pressed={measuring} aria-label="Measure"
-          title="Measure a length (M)" onclick={toggleMeasure}><Icon name="ruler" size={15} /></button>
-        {#if measures.length}
-          <button class="cmp-icon" aria-label="Clear measures" title="Clear measures" onclick={clearMeasures}><Icon name="trash" size={14} /></button>
-        {/if}
-      </div>
+    </div>
+    <!-- Under the search and over the zoom buttons, which `controlsTop` pushes down to make room. -->
+    <div class="ruler cmp-glass">
+      <button class="cmp-icon" class:on={measuring} aria-pressed={measuring} aria-label="Measure"
+        title="Measure a length (M)" onclick={toggleMeasure}><Icon name="ruler" size={15} /></button>
+      {#if measures.length}
+        <button class="cmp-icon" aria-label="Clear measures" title="Clear measures" onclick={clearMeasures}><Icon name="trash" size={14} /></button>
+      {/if}
     </div>
       {#if home}
         <MapSurface
@@ -631,7 +657,7 @@
             else if (builder?.pinning && !measuring) panel?.pinAt({ lon, lat });
             else if (builder && !measuring) void panel?.probeAt({ lon, lat });
           }}
-          controlsTop={98}
+          controlsTop={108}
           {alternate}
           alternateOn={showingA}
           onusage={() => imagery.refreshUsage()}
@@ -690,6 +716,7 @@
             tools={pointTools}
             lookup={pointMenu.lookup}
             {compareSources}
+            {fullscreen}
             onpick={onPointMenu}
             onclose={closePointMenu}
           />
@@ -725,6 +752,8 @@
     <DetectPanel
       bind:this={panel}
       bind:collapsed
+      {fullscreen}
+      onfullscreen={switchFullscreen}
       bind:manual
       caseId={caseState.current?.id}
       bind:zones
@@ -767,11 +796,11 @@
   .search { position: absolute; top: 12px; left: 12px; z-index: 650; display: flex; width: min(280px, 42%); padding: 4px; }
   .search :global(.place-search) { flex: 1; }
   .map-choices { position: absolute; top: 12px; right: 12px; z-index: 650; display: grid; justify-items: end; gap: 8px; }
-  .layer-picker { padding: 4px 8px; min-width: 112px; max-width: 250px; max-height: 50vh; overflow: auto; }
-  .layer-picker :global(.sub-head) { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 22px; font-size: var(--fs-xs); color: var(--text-2); }
+  .layer-picker { padding: 3px 8px; min-width: 112px; max-width: 250px; max-height: 50vh; overflow: auto; }
+  .layer-picker :global(.sub-head) { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 22px; padding: 0 2px; font-size: var(--fs-xs); color: var(--text-2); }
   .layer-picker :global(.count) { margin-left: auto; color: var(--text-3); }
   .layer-picker :global(.layers) { min-width: 190px; margin-top: 8px; }
-  .ruler { display: flex; padding: 2px; }
+  .ruler { position: absolute; top: 66px; left: 12px; z-index: 650; display: flex; padding: 2px; }
   .blink-chip { padding: 2px 2px 2px 4px; }
   .bench-bar { gap: 4px; padding: 2px 2px 2px 4px; }
   .bench-bar .cmp-letter { cursor: pointer; }
@@ -781,6 +810,7 @@
   .bench-bar .cmp-icon { width: 22px; height: 22px; }
   .blink-chip .cmp-icon { width: 22px; height: 22px; }
   .pass-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: var(--fs-xs); }
+  .pass-chip .cloudy { color: var(--warn, #e2a03f); }
   /* Over the map and under its own controls, which stay usable around it. */
   .need-over {
     position: absolute;

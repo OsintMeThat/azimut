@@ -209,7 +209,7 @@ export function gotoPoint(lat, lon) {
  *
  * The right-click menu's Open in…: Satellite flies there, Compare and Detect
  * move their camera and keep their own pictures and work. A fullscreen map is
- * left first, or the tab it hands over to would open behind it.
+ * left on the way, as every change of tool leaves it (App.svelte).
  */
 export function openMapAt(tool, { lat, lon, zoom }) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
@@ -217,7 +217,6 @@ export function openMapAt(tool, { lat, lon, zoom }) {
   if (tool === 'satellite') uiState.gotoCoords = at;
   else if (tool === 'compare' || tool === 'detect') uiState.lookAt = { tool, ...at };
   else return;
-  if (globalThis.document?.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
   uiState.tool = tool;
 }
 

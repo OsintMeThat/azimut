@@ -56,8 +56,7 @@ def _png(pixels):
 def put_picture(source, tile=SENTINEL_TILE, shade=40):
     parsed = Source.model_validate(source)
     z, x, y = tile
-    tilecache.put(sentinel.variant_id("sentinel2", parsed.layer, parsed.date, parsed.date,
-                                      parsed.maxcc),
+    tilecache.put(analyzers.picture_cache_id(parsed),
                   z, x, y, _png(np.full((512, 512, 3), shade, np.uint8)), "image/png")
 
 

@@ -50,10 +50,12 @@ export const CHANGE_DISPLAYS = Object.freeze([
 ]);
 
 export const CHANGE_PALETTES = Object.freeze({
+  // Cyan and magenta are rare on the ground, so they stand out over soil,
+  // vegetation and roofs alike, where green and red sank into them.
   directional: Object.freeze({
-    gain: [34, 197, 94],
-    loss: [239, 68, 68],
-    changed: [250, 204, 21],
+    gain: [0, 229, 255],
+    loss: [255, 0, 170],
+    changed: [255, 221, 0],
   }),
   // Okabe-Ito hues: distinguishable under the common red/green deficiencies.
   colourblind: Object.freeze({
@@ -86,7 +88,7 @@ export const CHANGE_DEFAULTS = Object.freeze({
   method: 'colour',
   index: 'ndvi',
   threshold: 'auto',
-  sensitivity: 55,
+  sensitivity: 70,
   normalize: 'auto',
   smoothing: 1,
   alignment: 4,

@@ -439,7 +439,7 @@ def test_a_radar_run_without_its_layer_says_where_to_set_it(client, radar_case):
 def test_a_typed_day_is_pinned_to_the_pass_on_the_other_sides_track(client, radar_case, monkeypatch):
     asked = []
 
-    def acquisitions(instance, rings, start, end, collection="sentinel2"):
+    def acquisitions(instance, rings, start, end, collection="sentinel2", **kwargs):
         asked.append((start, end, collection))
         return {"dates": [
             {"date": DAY_B, "time": "17:33:02", "cloud": None, "coverage": 1.0},

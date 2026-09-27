@@ -133,6 +133,16 @@ export function coverageWarning(entry) {
   return `${entry.date} reaches ${Math.round(entry.coverage * 100)}% of the areas. The rest has no imagery that day and will be reported as not swept.`;
 }
 
+/**
+ * What to say about a chosen Sentinel-2 pass over the cloud ceiling, or ''.
+ * It is read all the same, since a chosen day is the analyst's call; the
+ * clouds are left out pixel by pixel, which is worth knowing before the run.
+ */
+export function cloudWarning(entry, maxcc = 100) {
+  if (!entry || entry.cloud == null || !(entry.cloud > maxcc)) return '';
+  return `${entry.date} is ${Math.round(entry.cloud)}% cloud over its tile. It is read anyway, and ground under cloud is left out.`;
+}
+
 /** The share of a finished run's areas that had imagery on both dates. */
 export function sweptNote(swept) {
   if (!Number.isFinite(swept) || swept >= FULL_COVER) return '';

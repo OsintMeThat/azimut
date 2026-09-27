@@ -25,6 +25,7 @@
   import { readSolo, splitHash } from './lib/hash.js';
   import { guideFor } from './lib/guide.js';
   import { openGuide } from './lib/navigate.js';
+  import { leaveFullscreen } from './lib/fullscreen.js';
   import { createToolLoader } from './lib/toolLoader.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
   import Icon from './components/Icon.svelte';
@@ -141,6 +142,14 @@
       uiState.sidebarOpen = sidebarOpenForWorkspace(nextWs.id, sidebarOpenByWorkspace);
     }
     previousTool = nextTool;
+  });
+  // A tool that holds the screen is left with it. Its host is hidden as soon as
+  // another tool is picked, and a hidden fullscreen element blacks the screen
+  // out with the new tool behind it. Every way across lands here: a toast's
+  // action, Open in…, a candidate sent to Compare.
+  $effect(() => {
+    uiState.tool;
+    leaveFullscreen();
   });
   function openWorkspace(ws) {
     uiState.tool = lastTool[ws.id] ?? ws.tools[0];

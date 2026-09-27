@@ -427,6 +427,18 @@ describe('capturing the drawn pixels', () => {
     }
   });
 
+  it('says whether a capture now would be partial', () => {
+    let moving = false;
+    let loaded = true;
+    const facade = mapFacade(stubMap({ isMoving: () => moving, areTilesLoaded: () => loaded }));
+    expect(facade.tilesLoading()).toBe(false);
+    loaded = false;
+    expect(facade.tilesLoading()).toBe(true);
+    loaded = true;
+    moving = true;
+    expect(facade.tilesLoading()).toBe(true);
+  });
+
   it('waits for the map to go idle, and says so when it gave up', async () => {
     vi.useFakeTimers();
     const { map, once } = capturable({ loaded: false });
