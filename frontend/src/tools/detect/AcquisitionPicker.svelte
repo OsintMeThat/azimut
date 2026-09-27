@@ -11,8 +11,8 @@
    * and how much of it was cloud.
    *
    * The calendar has its place one step up, for where to look: past the year the
-   * presets reach, two days picked in it bound the lookup. The catalogue gives at
-   * most 100 passes, newest first, so a list it cut short offers the older ones.
+   * presets reach, two days picked in it bound the lookup. The catalogue answers
+   * newest first, five pages at most, so a list it cut short offers the older ones.
    */
   import Icon from '../../components/Icon.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
@@ -117,12 +117,12 @@
   {:else if busy}
     <p class="hint">Reading the catalogue over your areas…</p>
   {:else if !searched}
-    <p class="hint">One lookup, billed as one Copernicus request.</p>
+    <p class="hint">One lookup, billed as one Copernicus request, or a few for a long window.</p>
   {:else if !list.length}
     <p class="warn">No pass reaches these areas in this window. Try a longer one.</p>
   {:else}
     {#if truncated}
-      <p class="warn">The catalogue stopped at 100 passes, so older ones are missing.
+      <p class="warn">The catalogue stopped short, so the oldest passes are missing.
         {#if older}<button type="button" class="link" disabled={busy} onclick={onolder}>Older passes</button>{/if}</p>
     {/if}
     <ul class="list">
@@ -170,7 +170,7 @@
     <p class="hint">
       <Icon name="info" size={11} />
       {radar ? 'A and B must share a track: the same time of day.'
-        : 'A pass covers what its swath reached that day, not the whole map.'}
+        : 'Cloud is over the whole 110 km tile, so your area can be clearer or cloudier.'}
     </p>
   {/if}
 </div>

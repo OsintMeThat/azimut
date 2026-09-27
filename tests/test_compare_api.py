@@ -785,7 +785,7 @@ def test_a_session_saved_with_the_retired_labels_layer_saves_without_it(client):
     cid = _case(client, "Retired labels")
     spec = _spec()
     spec["a"]["overlays"] = ["labels", "roads", "labels"]
-    everything = ["labels", "boundaries", "roads", "railway", "power", "seamarks",
+    everything = ["labels", "boundaries", "placenames", "roads", "railway", "power", "seamarks",
                   "gpstraces", "firms", "nightlights", "saved"]
     spec["b"]["overlays"] = everything
     res = _save(client, cid, "Before the key", spec=spec)

@@ -110,7 +110,7 @@ describe('a row', () => {
   it('says a stale snapshot is stale, and marks it for the eye', () => {
     show({ rows: [followed({ stale: true, checked_at: '2020-01-01T00:00:00Z' })] });
 
-    expect(text()).toContain('stale');
+    expect(text()).toContain('out of date');
     expect(document.querySelector('.stale')).toBeTruthy();
   });
 

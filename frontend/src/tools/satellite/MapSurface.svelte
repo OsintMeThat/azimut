@@ -97,9 +97,13 @@
     onwidgetload = () => {},
     onwidgetauthfailure = () => {},
     onwidgetfailed = () => {},
+    /** A tile of an overlay failed, by overlay id, for the tool that offers it. */
+    onoverlaytrouble = () => {},
     /** The settled camera and the turn, for a parent that shares them. */
     onviewsettled = () => {},
     onbearingchange = () => {},
+    /** Controls the tool puts beside the imagery chip, on its right. */
+    beside,
     children,
   } = $props();
 
@@ -193,6 +197,7 @@
       onWidgetLoad: (provider) => onwidgetload(provider.meter),
       onWidgetAuthFailure: onwidgetauthfailure,
       onWidgetFailed: onwidgetfailed,
+      onOverlayTrouble: (id) => onoverlaytrouble(id),
     });
     basemaps.setZoomCeiling(zoomCeiling);
     showBasemap();
@@ -326,16 +331,24 @@
        which is what lets two surfaces sit side by side each saying its own. -->
   {#if chrome}
   <div class="surface-ctl">
-    <ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />
+    {#if beside}
+      <div class="ctl-row">
+        <ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />
+        {@render beside()}
+      </div>
+    {:else}
+      <ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />
+    {/if}
 
   <!-- …and when the pixels under the crosshair were taken. Under the provider
        rather than in the opposite corner: it describes that same picture, and
        the corner it used to sit in is the instrument's, where the scale bracket
        reads. -->
   {#if s2 && shown.provider?.id === SENTINEL_ID}
-    <!-- Sentinel-2 says what it is showing: a pinned day is the window the tiles
-         were rendered from; otherwise the layer's default renders the most
-         recent pass, which the calendar lookup has already named. -->
+    <!-- The date is the picker's chip too, and it is said again here, as the
+         radar's pass is: one line reading the day, how it was chosen and what
+         is drawn from it. A pinned day is the window the tiles were rendered
+         from; otherwise the layer's default renders the most recent pass. -->
     <span
       class="date-pill mono"
       class:exact={!!pinnedDay}
@@ -474,11 +487,52 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 8px;
+    /* stops short of whatever the tool floats in the opposite corner (Satellite's
+       search), so a narrow map wraps the chips instead of hiding them under it */
+    max-width: calc(100% - 12px - var(--surface-ctl-reserve, 12px));
     /* the column is only as wide as its widest control, so the map stays
        grabbable everywhere the controls are not */
     pointer-events: none;
   }
   .surface-ctl > :global(*) {
     pointer-events: auto;
+  }
+  /* One card for the picture and what the window does with it, as Compare's
+     source card holds its side: the chips inside lose their own boxes. */
+  .ctl-row {
+    /* its blur is a stacking context that shuts its menus in, so the card
+       itself has to sit over the date pill and the compass below it */
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+    max-width: 100%;
+    padding: 3px;
+    border-radius: var(--radius-1);
+    background: rgba(24, 24, 24, 0.88);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  .ctl-row > :global(.chip-row) {
+    min-width: 0;
+    gap: 2px;
+  }
+  .ctl-row :global(.chip) {
+    height: 28px;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .ctl-row :global(.chip:hover),
+  .ctl-row :global(.chip.on) {
+    color: var(--text-1);
+    background: var(--bg-2);
+  }
+  .ctl-row :global(.pill) {
+    margin: 0 2px;
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: none;
+    backdrop-filter: none;
   }
 </style>

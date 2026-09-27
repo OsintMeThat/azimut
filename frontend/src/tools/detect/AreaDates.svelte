@@ -1,6 +1,9 @@
 <script>
   import { api } from '../../lib/api.js';
-  import { acquisitionQuery, coverageWarning, olderSpan, passKey, withOlder } from '../../lib/map/acquisitions.js';
+  import {
+    acquisitionQuery, cloudWarning, coverageWarning, olderSpan, passKey, withOlder,
+  } from '../../lib/map/acquisitions.js';
+  import { newestLabel, newestLine, newestPick } from '../../lib/map/detectWhen.js';
   import AcquisitionPicker from './AcquisitionPicker.svelte';
   import DateField from '../../components/DateField.svelte';
 
@@ -43,9 +46,17 @@
       ...pair, [letter]: { ...pair[letter], date, time: radar ? time : '' },
       date_rule: letter === 'b' && pair.date_rule !== 'latest_previous' ? (date ? 'manual' : 'latest_reference') : pair.date_rule,
     });
-    if (date) onshow({ ...pairFor(id)[letter], date, ...(radar ? { provider: 'sentinel1', time } : {}) });
+    if (!date) return;
+    const cloud = radar || looking !== id ? null : passes.find((pass) => pass.date === date)?.cloud ?? null;
+    onshow({ ...pairFor(id)[letter], date, cloud, ...(radar ? { provider: 'sentinel1', time } : {}) });
   }
   const at = (source) => (radar && source?.time ? `${source.time.slice(0, 5)} UTC` : '');
+  /** "Newest" as this area's ceiling makes it, capitalised for a cell. */
+  const newestFor = (pair) => {
+    const label = newestLabel({ maxcc: pair?.b?.maxcc, radar });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  };
+  const track = (pair) => (radar && !single ? pair?.a?.time ?? '' : '');
 </script>
 
 <div class="dates-table">
@@ -67,7 +78,7 @@
               <td><DateField day reading={false} label={`Pass for ${zone.name}`} value={pair.b.date}
                   onchange={(value) => pick(zone.id, 'b', value ?? '')} />
                 {#if at(pair.b)}<small class="mono">{at(pair.b)}</small>{/if}
-                {#if !pair.b.date}<small>Newest pass</small>{:else}<button class="link" onclick={() => pick(zone.id, 'b', '')}>Newest pass</button>{/if}</td>
+                {#if !pair.b.date}<small>{newestFor(pair)}</small>{:else}<button class="link" onclick={() => pick(zone.id, 'b', '')}>{newestFor(pair)}</button>{/if}</td>
             {/if}
             <td><button class="btn btn-sm" disabled={busy} onclick={() => lookup(zone)} aria-label={`Find passes for ${zone.name}`}>Find passes</button></td>
           </tr>
@@ -84,10 +95,15 @@
     onlookback={(value) => (lookback = value)} onlook={() => lookup(zones.find((zone) => zone.id === looking))}
     onolder={() => lookup(zones.find((zone) => zone.id === looking), true)}
     onpick={(letter, entry) => pick(looking, letter, entry.date, entry.time ?? '')} />
+  {#if searched && !baselineOnly && !pair?.b?.date}
+    {@const maxcc = radar ? 100 : pair?.b?.maxcc}
+    <p class="hint">{newestLine(newestPick(passes, { maxcc, radar, track: track(pair) }), { maxcc, radar })}</p>
+  {/if}
   {#each [single ? null : pair?.a, pair?.b].filter((source) => source?.date) as source}
-    {@const warning = coverageWarning(passes.find((pass) => passKey(pass) === passKey(source)
-      || (!source.time && pass.date === source.date)))}
-    {#if warning}<p class="warn">{warning}</p>{/if}
+    {@const entry = passes.find((pass) => passKey(pass) === passKey(source) || (!source.time && pass.date === source.date))}
+    {#each [coverageWarning(entry), radar ? '' : cloudWarning(entry, source.maxcc)].filter(Boolean) as warning (warning)}
+      <p class="warn">{warning}</p>
+    {/each}
   {/each}
 {/if}
 

@@ -36,6 +36,8 @@ setWorkerUrl(workerUrl);
  * Written here rather than fetched, which is the whole of this engine's network
  * behaviour: no style URL, no glyphs, no sprite, no token and no telemetry. The
  * only thing it ever asks for is a tile the analyst's own basemap choice named.
+ * A layer that writes text asks for nothing more: with no glyph URL, the engine
+ * draws each character in one of the browser's own fonts.
  */
 const EMPTY_STYLE = { version: 8, sources: {}, layers: [] };
 

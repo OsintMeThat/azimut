@@ -171,7 +171,7 @@ proof for publication.
 | ✅ **Map chrome** | Puts modes in one rail, map layers in their tool panel or popup, imagery in the map corner and position in a status line, each tool declared once. |
 | ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, opens it in the other map tabs, and links it out. |
 | ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
-| ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
+| ✅ **Map layers** | Stacks key-less overlays (borders, place names, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
 | ✅ **Added map layers** | Opens a KML, KMZ, GeoJSON or GPX file, or follows a public My Maps or map URL refreshed only while enabled, and draws it with its own colours, optionally its own icons composed once at import, a legend that filters and a search that goes to one feature — read, cited and never adopted into the case. |
 | ✅ **Dates on a layer** | Narrows a dated added layer (GeoConfirmed, KML timestamps, GPX waypoints) to a period dragged on a strip of its events over time or picked on a calendar, kept with the legend. |
 | ✅ **GeoConfirmed layer** | Adds one GeoConfirmed conflict over a window of days or dates or its whole history, optionally only the view, in GeoConfirmed's own icons, grouped by faction with each event's sources and geolocation one click away. |
@@ -204,13 +204,14 @@ proof for publication.
 | ✅ **Sizes in Detect** | Right-clicks Detect's map for its own point menu, measures a hull with a ruler, sizes each candidate along its footprint, walks the largest first, and hides the drawing or blinks A against B from the review. |
 | ✅ **Analyzers of your own** | Builds a Detect analyzer from up to six rules on any band, index, ground class or radar polarisation, read on A, B or the change, tried live on the map over any Copernicus layer, painted rule by rule or as the detections alone, with a point reading; optional checks (marked places reread as the rules change) and five calibrated examples that ship with theirs; also opened from a built-in or a Difference reading, with a shape filter for every analyzer. |
 | ✅ **Examine: Inspect and Collage** | Keeps one work per file, saved as it is made, with its frames on a strip; lays collages out of frames and images from any file; merges a case's 0.3.0 sessions on open. |
-| ✅ **One camera for the map tabs** | Satellite, Compare and Detect show the same ground, and the link carries it to other windows; a Detect review and a saved comparison keep theirs, and Settings turns it off. |
+| ✅ **One camera for the map tabs** | Satellite, Compare and Detect show the same ground, and the link carries it to other windows; a Detect review keeps its own, and Settings turns it off. |
 | ✅ **Comparisons in Saved work** | A saved comparison stands on the map with the captures, at its frame's centre with the frame outlined, dated A → B, and reopens in Compare; an export can also be kept in the case under it. |
 | ✅ **Dated pins and pictures** | A kept Detect candidate files a claim at its pin (a change between two passes, or a thing seen on one); comparisons and pinned evidence carry each picture's date, estimates marked; Detect layers filter a change by its span; exports are named by their pictures' dates. |
 | ✅ **An evolution of one point** | Exports Sentinel-2 passes or Wayback pictures ticked by hand on their previews, back to 2015, as one GIF or one sheet drawn from the tile proxy on the same ground, repeats and empty pictures left out and counted. |
 | ✅ **Signed exports, marks in their colours** | Compare exports close their credits line with the Azimut logo and name unless unticked, and a GIF keeps every mark's colour exact. |
 | ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame like a wheel about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back, Shift+← / → steps. |
 | ✅ **Checked proof points** | A proof point taken from a capture's centre reads greyed until checked; Save and To post show each one on the map first, and one saved for later stays off the case map. |
+| ✅ **Compare and Detect full screen** | Both take the whole screen with their bars and panel, as Satellite does, and any change of tab gives it back. |
 
 ---
 
@@ -334,7 +335,10 @@ stops making sense.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
 - **Map files out of the case:** export pins, claims and Detect findings as KML or GeoJSON, with TimeStamp and TimeSpan so another viewer's time slider reads them.
 - **Update ffmpeg from the app:** download a static build into the workspace and prefer it at runtime, like the scraper update, if the bundled copy ever lags in a way users hit.
+- **Place names in their own script:** the Arabic or Cyrillic name under the Latin one, for searching local sources. Needs the engine's right-to-left text plugin, bundled rather than fetched.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
+- **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
+- **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
 
 ## 8. Explicit non-goals
 

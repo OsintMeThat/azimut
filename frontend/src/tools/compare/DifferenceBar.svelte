@@ -8,9 +8,11 @@
    * hangs from its edge: a label that grew on every read moved the panel under
    * the pointer. What a read is doing is said in the panel and the map legend.
    *
-   * The reading follows the camera by itself. What it never does on a pan is
-   * spend a request: a method that reads Sentinel-2 bands runs on the frames it
-   * holds, and waits for Read once the camera leaves the ground they cover.
+   * The reading follows the camera by itself. A method that reads Sentinel-2
+   * bands runs on the frames it holds, and past the ground they cover fetches
+   * them again once the camera rests, for a pair it has already read.
+   * Read says which of those it is: lit when the next move is the analyst's,
+   * and naming what the reading does otherwise, never a press that does nothing.
    */
   import { CHANGE_BASES, CHANGE_METHODS, CHANGE_INDICES, CHANGE_DISPLAYS, CHANGE_CLASSES,
     changeNeedsFrames, changeSettings, indexThreshold } from '../../lib/map/changeAssist.js';
@@ -21,9 +23,9 @@
     settings = $bindable(),
     status,
     result = null,
-    busy = false,
+    /** due: Read has something to do · reading · tiles: waiting on the maps · current: nothing moved. */
+    reading = 'due',
     error = '',
-    stale = false,
     onrun = () => {},
     onzone = () => {},
     /** Keep this index reading as a Detect analyzer, to sweep areas with it. */
@@ -36,6 +38,23 @@
   // What this reading has to fetch, and therefore whether it can follow the map.
   const frames = $derived(changeNeedsFrames(settings, status));
   const index = $derived(CHANGE_INDICES.find((entry) => entry.id === settings.index));
+  const busy = $derived(reading === 'reading' || reading === 'tiles');
+  const stale = $derived(!!result && reading === 'due');
+  const due = $derived(runnable && reading === 'due');
+  const READ = {
+    due: ['Read', 'Read the pixels in this view'],
+    reading: ['Reading…', 'Reading the pixels in this view'],
+    tiles: ['Loading…', 'Waiting for the map tiles to load'],
+    current: ['Up to date', 'Nothing moved since the last read'],
+  };
+  const read = $derived(READ[reading] ?? READ.due);
+  // Choosing what to read is asking for it, as the cloud switch is: the reading
+  // runs then, bands included, rather than waiting on a second press of Read.
+  const chosen = () => queueMicrotask(() => onrun());
+  const readTitle = $derived(!status.ok ? status.reason
+    : !runnable ? 'This method needs another imagery source'
+      : reading === 'due' && frames ? 'Read this view, one Sentinel-2 request a side'
+        : read[1]);
 
   // A press anywhere off the strip and its panel closes the panel. The strip
   // counts as inside: Read or a base pressed with the settings open is tuning
@@ -78,9 +97,8 @@
   >
     <Icon name="blink" size={15} />
   </button>
-  <button class="text-btn read" class:busy disabled={busy || !runnable} onclick={() => onrun()}
-    title={runnable ? 'Read the pixels in this view again' : (status.ok ? 'This method needs another imagery source' : status.reason)}>
-    {busy ? 'Reading…' : 'Read'}
+  <button class="text-btn read" class:busy class:due disabled={!due} onclick={() => onrun()} title={readTitle}>
+    {runnable ? read[0] : 'Read'}
   </button>
   <button
     class="cmp-icon"
@@ -137,7 +155,7 @@
         {#if frames}
           <p class="hint">
             Reads Sentinel-2 bands, one request a side, kept with a margin around this view.
-            Panning inside it costs nothing; past it, press Read.
+            Panning inside it costs nothing; past it, the bands are fetched again once the map rests.
           </p>
         {/if}
 
@@ -149,13 +167,13 @@
 
         {#if tab === 'detection'}
           <label title="What to compare: colour, edges or a spectral index.">Method
-            <select aria-label="Method" bind:value={settings.method}>
+            <select aria-label="Method" bind:value={settings.method} onchange={chosen}>
               {#each CHANGE_METHODS as method}<option value={method.id} disabled={!status.methods.includes(method.id)}>{method.label}</option>{/each}
             </select>
           </label>
           {#if settings.method === 'index'}
             <label title="The spectral index compared between the two passes.">Index
-              <select bind:value={settings.index}>{#each CHANGE_INDICES as entry}<option value={entry.id}>{entry.label} · {entry.hint}</option>{/each}</select>
+              <select bind:value={settings.index} onchange={chosen}>{#each CHANGE_INDICES as entry}<option value={entry.id}>{entry.label} · {entry.hint}</option>{/each}</select>
             </label>
           {:else}
             <label title="Adapt the threshold to this view, or follow the sensitivity.">Threshold
@@ -257,9 +275,15 @@
     background: var(--glass-hover);
   }
   .text-btn:disabled { opacity: 0.4; }
-  /* Wide enough for "Reading…", so the strip keeps its width through a read. */
-  .text-btn.read { min-width: 70px; text-align: center; }
+  /* One width for every label, so the gear beside it never moves. */
+  .text-btn.read { width: 84px; text-align: center; white-space: nowrap; }
   .text-btn.read.busy:disabled { opacity: 0.75; }
+  /* Lit only when pressing it is the next move, in the primary-action amber. */
+  .text-btn.read.due {
+    color: var(--accent-text);
+    background: var(--accent);
+  }
+  .text-btn.read.due:hover { color: var(--accent-text); background: var(--accent-hover); }
   .name {
     font-size: var(--fs-xs);
     letter-spacing: 0.04em;

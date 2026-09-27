@@ -91,3 +91,48 @@ export function summary({ sensor, window, first, last } = {}, sensors = []) {
   const end = asDay(last);
   return [short, end && end !== start ? `${start} → ${end}` : start].filter(Boolean).join(' · ');
 }
+
+/**
+ * What the Layers row says about the key, from `/api/firms/sensors`.
+ *
+ * `keyed` alone said "needs a free key" for three different things. Each now
+ * has its own word and its own way out: no key, a key switched off in
+ * Settings, and a key FIRMS said it does not know. A spent allowance is none
+ * of these, and the layer stays on (`firmsNote`).
+ */
+const KEY_STATES = {
+  missing: { detail: 'needs a free key', title: 'Add a NASA FIRMS key in Settings → Imagery', action: 'Add a FIRMS key' },
+  off: { detail: 'off in Settings', title: 'Switched off in Settings → Imagery', action: 'Turn it on' },
+  refused: { detail: 'key refused', title: 'FIRMS does not know this key. Test it in Settings → Imagery', action: 'Check the key' },
+};
+
+export function keyState({ keyed, state } = {}) {
+  if (keyed) return { usable: true, detail: '', title: '', action: '' };
+  return { usable: false, ...(KEY_STATES[state] ?? KEY_STATES.missing) };
+}
+
+/** A dated range longer than this spends the allowance in a few screens. */
+export const LONG_RANGE_DAYS = 7;
+
+function rangeDays({ first, last } = {}) {
+  const start = asDay(first);
+  if (!start) return 0;
+  const end = asDay(last) || start;
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+/**
+ * The one sentence the row carries under its controls, or ''.
+ *
+ * In order: the layer paused on a spent allowance, a dated question with no
+ * date yet, a range long enough to spend the allowance, and what the two
+ * colours of a window longer than a day mean.
+ */
+export function firmsNote(choice = {}, paused = null) {
+  if (paused) return 'FIRMS allowance used up. It refills within ten minutes.';
+  if (!askable(choice)) return choice.window === DATED ? 'Pick a date to draw the detections.' : '';
+  if (choice.window === DATED) {
+    return rangeDays(choice) > LONG_RANGE_DAYS ? 'A long range spends the FIRMS allowance in a few screens.' : '';
+  }
+  return choice.window === '24h' ? '' : 'Red: the last 24 hours. Amber: before them.';
+}

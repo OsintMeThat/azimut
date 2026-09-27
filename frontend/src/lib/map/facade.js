@@ -293,6 +293,9 @@ export function mapFacade(map, container) {
     /** True while `follow` is moving this map. */
     following: () => following,
 
+    /** True while the view moves or has tiles in flight, so a capture now would be partial. */
+    tilesLoading: () => map.isMoving() || !map.areTilesLoaded(),
+
     /**
      * The drawn pixels, once every visible tile is in.
      *

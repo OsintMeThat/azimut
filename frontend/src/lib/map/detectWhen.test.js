@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  areaLine, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform, whenNeed, whenSummary, withRule,
+  ADVISED_MAXCC, areaLine, ceilingWarning, newestLabel, newestLine, newestPick, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform,
+  whenNeed, whenSummary, withRule,
 } from './detectWhen.js';
 
 const pair = (id, a = '', b = '', extra = {}) => ({
@@ -73,16 +74,19 @@ describe('the When step of a detection', () => {
 
   it('lists one area\'s days when the areas differ', () => {
     const once = { single: false, routine: false };
-    expect(areaLine(pair('x', '2026-08-01'), once)).toBe('A 2026-08-01 → B newest pass');
+    // "newest" is the newest the ceiling allows, and says so
+    expect(areaLine(pair('x', '2026-08-01'), once)).toBe('A 2026-08-01 → B newest pass under 30% cloud');
     expect(areaLine(pair('x', '', '2026-09-06'), once)).toBe('A not chosen → B 2026-09-06');
     expect(areaLine(pair('x', '', '2026-09-06'), { ...once, single: true })).toBe('2026-09-06');
     expect(areaLine(pair('x', '2026-08-01'), { ...once, routine: true })).toBe('A 2026-08-01');
-    expect(areaLine(pair('x'), { single: true, routine: true })).toBe('newest pass');
+    expect(areaLine(pair('x'), { single: true, routine: true })).toBe('newest pass under 30% cloud');
   });
 
   it('sums the step up in one line', () => {
     const once = { single: false, routine: false, against: 'previous' };
     expect(whenSummary({ ...once, pairs: [pair('x', '2026-08-01')] })).toBe('2026-08-01 → newest pass');
+    expect(whenSummary({ ...once, maxcc: 30, pairs: [pair('x', '2026-08-01')] }))
+      .toBe('2026-08-01 → newest pass under 30% cloud');
     expect(whenSummary({ ...once, pairs: [pair('x', '2026-08-01', '2026-09-06')] })).toBe('2026-08-01 → 2026-09-06');
     expect(whenSummary({ ...once, single: true, pairs: [pair('x')] })).toBe('Newest pass');
     expect(whenSummary({ ...once, pairs: [pair('x', '2026-08-01'), pair('y', '2026-07-20')] }))
@@ -94,8 +98,87 @@ describe('the When step of a detection', () => {
       .toBe('Each run: the newest pass against 2026-08-01');
     expect(whenSummary({ ...routine, single: true, against: 'previous', pairs: [pair('x')] }))
       .toBe('Each run: the newest pass');
+    expect(whenSummary({ ...routine, single: true, maxcc: 20, against: 'previous', pairs: [pair('x')] }))
+      .toBe('Each run: the newest pass under 20% cloud');
     const radar = [{ ...pair('x', '2026-08-01'), a: { date: '2026-08-01', time: '16:32:10' } }];
     expect(whenSummary({ ...once, radar: true, pairs: radar })).toBe('2026-08-01 16:32 UTC → newest pass');
+    // radar sees through cloud, whatever the ceiling says
+    expect(whenSummary({ ...once, radar: true, maxcc: 30, pairs: radar })).toBe('2026-08-01 16:32 UTC → newest pass');
+  });
+});
+
+describe('what "newest" takes, and what it steps over', () => {
+  // Lyman, 2026-09-26: three newer passes over the ceiling, then a clear one
+  const lyman = [
+    { date: '2026-09-26', cloud: 51.1, coverage: 1 },
+    { date: '2026-09-24', cloud: 82.2, coverage: 1 },
+    { date: '2026-09-22', cloud: 89.2, coverage: 1 },
+    { date: '2026-09-19', cloud: 0.7, coverage: 1 },
+    { date: '2026-09-17', cloud: 13.5, coverage: 1 },
+  ];
+
+  it('warns about a ceiling only above the advised one', () => {
+    expect(ADVISED_MAXCC).toBe(30);
+    expect(ceilingWarning(30)).toBe('');
+    expect(ceilingWarning(20)).toBe('');
+    expect(ceilingWarning(undefined)).toBe('');
+    expect(ceilingWarning(31)).toBe('Above 30%, the pass taken can be mostly cloud, and ground under cloud is left out.');
+  });
+
+  it('names the ceiling in the label, and only a real one', () => {
+    expect(newestLabel({ maxcc: 30 })).toBe('newest pass under 30% cloud');
+    expect(newestLabel({ maxcc: 100 })).toBe('newest pass');
+    expect(newestLabel({ maxcc: 30, radar: true })).toBe('newest pass');
+    expect(newestLabel()).toBe('newest pass');
+  });
+
+  it('takes the newest pass the ceiling allows and lists the newer ones it skips', () => {
+    const pick = newestPick(lyman, { maxcc: 30 });
+    expect(pick.pass.date).toBe('2026-09-19');
+    expect(pick.skipped.map((entry) => [entry.date, entry.why])).toEqual([
+      ['2026-09-26', 'cloud'], ['2026-09-24', 'cloud'], ['2026-09-22', 'cloud'],
+    ]);
+    expect(newestLine(pick, { maxcc: 30 })).toBe(
+      'Now 2026-09-19. Newer: 2026-09-26 (51% cloud), 2026-09-24 (82% cloud), 2026-09-22 (89% cloud). '
+      + 'Pick one below to read it anyway.'
+    );
+  });
+
+  it('takes the newest pass itself when the ceiling is off', () => {
+    const pick = newestPick(lyman, { maxcc: 100 });
+    expect(pick).toEqual({ pass: lyman[0], skipped: [] });
+    expect(newestLine(pick)).toBe('Now 2026-09-26, looked up again when the run starts.');
+  });
+
+  it('steps over a pass whose cloud is unknown or that misses part of the area, as the run does', () => {
+    const pick = newestPick([
+      { date: '2026-09-26', cloud: null, coverage: 1 },
+      { date: '2026-09-24', cloud: 5, coverage: 0.6 },
+      { date: '2026-09-22', cloud: 5, coverage: 1 },
+    ], { maxcc: 30 });
+    expect(pick.pass.date).toBe('2026-09-22');
+    expect(newestLine(pick, { maxcc: 30 })).toContain('2026-09-26 (cloud unknown), 2026-09-24 (60% of the area)');
+  });
+
+  it('says so when nothing in the window will do', () => {
+    const pick = newestPick(lyman.slice(0, 3), { maxcc: 30 });
+    expect(pick.pass).toBeNull();
+    expect(newestLine(pick, { maxcc: 30 })).toBe('No pass in this window is under 30% cloud over the whole area. Pick one below.');
+  });
+
+  it('keeps a radar pick on the track the pair reads', () => {
+    const passes = [
+      { date: '2026-09-25', time: '15:11:51', coverage: 1 },
+      { date: '2026-09-22', time: '03:38:55', coverage: 1 },
+    ];
+    expect(newestPick(passes, { radar: true, track: '03:38:27' }).pass.date).toBe('2026-09-22');
+    expect(newestPick(passes, { radar: true }).pass.date).toBe('2026-09-25');
+  });
+
+  it('shortens a long run of skipped passes', () => {
+    const cloudy = Array.from({ length: 5 }, (_, day) => ({ date: `2026-09-2${9 - day}`, cloud: 90, coverage: 1 }));
+    const line = newestLine(newestPick([...cloudy, { date: '2026-09-20', cloud: 2, coverage: 1 }], { maxcc: 30 }), { maxcc: 30 });
+    expect(line).toMatch(/^Now 2026-09-20\. Newer: .* and 2 more\./);
   });
 });
 

@@ -143,7 +143,7 @@
         'One key serves both the global and the US/Canada service.',
       ],
       overage:
-        'The limit is 5,000 requests per 10 minutes, which only a layer left on while panning could approach.',
+        'The limit is 5,000 transactions per 10 minutes, and every day a map tile covers counts, so a long range spends it fastest.',
     },
   ];
 

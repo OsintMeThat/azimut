@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   askable,
+  firmsNote,
+  keyState,
   DATED,
   lastDayOf,
   MAX_RANGE_DAYS,
@@ -11,7 +13,7 @@ import {
 } from './firms.js';
 
 const SENSORS = [
-  { id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' },
+  { id: 'viirs', label: 'VIIRS (S-NPP, NOAA-20, NOAA-21)' },
   { id: 'modis', label: 'MODIS (Terra + Aqua)' },
 ];
 
@@ -87,7 +89,7 @@ describe('what the service will answer', () => {
 
 describe('what the row says it is showing', () => {
   it('names the instrument without the satellites it is made of', () => {
-    // "VIIRS (S-NPP + NOAA-20) · 24 h" does not fit a layer row
+    // "VIIRS (S-NPP, NOAA-20, NOAA-21) · 24 h" does not fit a layer row
     expect(summary({ sensor: 'viirs', window: '24h' }, SENSORS)).toBe('VIIRS · 24 h');
   });
 
@@ -102,5 +104,44 @@ describe('what the row says it is showing', () => {
 
   it('asks for the date it is waiting on', () => {
     expect(summary({ sensor: 'viirs', window: DATED }, SENSORS)).toBe('VIIRS · pick a date');
+  });
+});
+
+describe('what the row says about the key', () => {
+  it('lets a usable key through without a word', () => {
+    expect(keyState({ keyed: true, state: 'ready' })).toEqual({ usable: true, detail: '', title: '', action: '' });
+  });
+
+  it('tells a missing key from one switched off and one FIRMS refused', () => {
+    expect(keyState({ keyed: false, state: 'missing' }).detail).toBe('needs a free key');
+    expect(keyState({ keyed: false, state: 'off' })).toMatchObject({ usable: false, detail: 'off in Settings', action: 'Turn it on' });
+    expect(keyState({ keyed: false, state: 'refused' })).toMatchObject({ detail: 'key refused', action: 'Check the key' });
+  });
+
+  it('reads an answer without a state as no key', () => {
+    expect(keyState({}).detail).toBe('needs a free key');
+    expect(keyState(undefined).usable).toBe(false);
+  });
+});
+
+describe('the note under the controls', () => {
+  it('puts a paused layer first, whatever else is true', () => {
+    expect(firmsNote({ window: DATED }, { until: '2026-09-26T12:00:00+00:00' })).toMatch(/allowance used up/);
+  });
+
+  it('asks for a date before anything else', () => {
+    expect(firmsNote({ window: DATED })).toBe('Pick a date to draw the detections.');
+  });
+
+  it('warns about a long range and says nothing about a short one', () => {
+    expect(firmsNote({ window: DATED, first: '2026-08-01', last: '2026-08-31' })).toMatch(/long range/);
+    expect(firmsNote({ window: DATED, first: '2026-08-01', last: '2026-08-07' })).toBe('');
+    expect(firmsNote({ window: DATED, first: '2026-08-01' })).toBe('');
+  });
+
+  it('explains the two colours of a window longer than a day', () => {
+    expect(firmsNote({ window: '7d' })).toBe('Red: the last 24 hours. Amber: before them.');
+    expect(firmsNote({ window: '48h' })).toMatch(/Red/);
+    expect(firmsNote({ window: '24h' })).toBe('');
   });
 });

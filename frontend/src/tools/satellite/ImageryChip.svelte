@@ -40,9 +40,6 @@
     s1 = null,
     /** What it is actually showing — a billed base steps aside when paused. */
     shown,
-    /** Open the Sentinel-2 picker from a dated chip, as Wayback's already is.
-     *  Compare asks for it: its card has a layers button of its own. */
-    dateChip = false,
   } = $props();
 
   let menuOpen = $state(false);
@@ -121,7 +118,6 @@
     <SentinelPicker
       bind:menuEl={s2MenuEl}
       {s2}
-      {dateChip}
       {maxccLabel}
       {monthLabel}
       {monthGrid}
@@ -183,7 +179,9 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    flex-wrap: wrap;
+    /* when it has to split, the provider keeps the top line and the usage and
+       date drop under it */
+    flex-wrap: wrap-reverse;
     gap: 6px;
   }
   .chip-wrap {

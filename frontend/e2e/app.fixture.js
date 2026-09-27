@@ -29,6 +29,52 @@ const CLEAR_TILE_PNG = Buffer.from(
   'base64'
 );
 
+/** Where the fixture's TileJSON says OpenFreeMap's tiles are, as the real one does. */
+const PLACE_TILES = 'https://tiles.openfreemap.org/planet/fixture-build/{z}/{x}/{y}.pbf';
+
+/**
+ * One vector tile holding one village, in OpenFreeMap's `place` layer: the
+ * least the Place names style writes a label from. Encoded here, by the Mapbox
+ * Vector Tile layout, so the fixture needs no encoder.
+ *
+ * The village stands at sixteen points of a grid rather than one. The map opens
+ * deeper than the tiles go, so one tile spans more than the map is wide, and a
+ * single point could fall outside the view.
+ */
+function placeTile(name) {
+  const varint = (n) => {
+    const out = [];
+    for (; n > 0x7f; n >>>= 7) out.push((n & 0x7f) | 0x80);
+    return [...out, n];
+  };
+  const key = (field, wire) => varint((field << 3) | wire);
+  const nested = (field, body) => [...key(field, 2), ...varint(body.length), ...body];
+  const text = (value) => [...Buffer.from(value, 'utf8')];
+  const zigzag = (n) => (n << 1) ^ (n >> 31);
+  // on a 4096 extent; each point is written as a step from the one before
+  const grid = [512, 1536, 2560, 3584].flatMap((y) => [512, 1536, 2560, 3584].map((x) => [x, y]));
+  const steps = grid.flatMap(([x, y], i) => {
+    const [px, py] = i ? grid[i - 1] : [0, 0];
+    return [...varint(zigzag(x - px)), ...varint(zigzag(y - py))];
+  });
+  const feature = [
+    ...nested(2, [0, 0, 1, 1]), // tags: class=village, name:latin=<name>
+    ...key(3, 0), 1, // points
+    ...nested(4, [...varint(1 | (grid.length << 3)), ...steps]), // one MoveTo, sixteen points
+  ];
+  const layer = [
+    ...key(15, 0), 2,
+    ...nested(1, text('place')),
+    ...nested(2, feature),
+    ...nested(3, text('class')),
+    ...nested(3, text('name:latin')),
+    ...nested(4, nested(1, text('village'))),
+    ...nested(4, nested(1, text(name))),
+    ...key(5, 0), ...varint(4096),
+  ];
+  return Buffer.from(nested(3, layer));
+}
+
 const media = [{
   path: PANEL_PATH,
   filename: 'panel.svg',
@@ -696,6 +742,7 @@ export async function installAppFixture(page, options = {}) {
   const unexpected = [];
   const railTiles = [];
   const referenceTiles = [];
+  const placeNameTiles = [];
   const captures = [];
   const placeWrites = [];
   const proofSaves = [];
@@ -962,11 +1009,24 @@ export async function installAppFixture(page, options = {}) {
     }
 
     // Esri's reference layers are drawn straight from their host too, and
-    // Borders is the one layer the map opens with — so every map spec asks for
-    // these. Answered here, so no run touches the network to draw a border.
+    // Borders is on whenever a map opens — so every map spec asks for these.
+    // Answered here, so no run touches the network to draw a border.
     if (url.hostname === 'services.arcgisonline.com') {
       referenceTiles.push(request.url());
       return route.fulfill({ contentType: 'image/png', body: CLEAR_TILE_PNG });
+    }
+
+    // The place names are OpenFreeMap's vector tiles, found through its TileJSON,
+    // and are on whenever a map opens, like Borders. A tile is empty unless the
+    // spec names a village (`placeNames`), so no label lands on what another
+    // spec is looking at; with one, every tile holds that village.
+    if (url.hostname === 'tiles.openfreemap.org') {
+      placeNameTiles.push(request.url());
+      if (path === '/planet') {
+        return json(route, { tilejson: '3.0.0', tiles: [PLACE_TILES], minzoom: 0, maxzoom: 14 });
+      }
+      const body = options.placeNames ? placeTile(options.placeNames) : Buffer.alloc(0);
+      return route.fulfill({ contentType: 'application/x-protobuf', body });
     }
 
     if (url.hostname !== '127.0.0.1') {
@@ -1981,6 +2041,7 @@ export async function installAppFixture(page, options = {}) {
     placeWrites,
     railTiles,
     referenceTiles,
+    placeNameTiles,
     widgetLoads,
     gridWrites,
     skyQueries,
@@ -2090,4 +2151,37 @@ export async function openProofWithPanel(page) {
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
+}
+
+/**
+ * Where a map is and how close, read as a user would: the point menu's DD row
+ * at the map's centre, then 200 px right of it. The first is the place, the gap
+ * between the two is the zoom. Read until two readings agree, so a glide or a
+ * zoom still easing in is not taken for where the map rests. Tab closes the
+ * menu, since Esc would also leave a fullscreen tool.
+ */
+export async function restingCamera(page, map) {
+  const read = async () => {
+    const box = await map.boundingBox();
+    const at = async (dx) => {
+      await page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2, { button: 'right' });
+      const menu = page.getByRole('menu', { name: 'This point' });
+      const text = await menu.locator('.item.copy')
+        .filter({ has: page.locator('.fmt', { hasText: /^DD$/ }) }).locator('.coords').textContent();
+      await page.keyboard.press('Tab');
+      await expect(menu).toBeHidden();
+      return text.split(',').map(Number);
+    };
+    const [lat, lon] = await at(0);
+    const [, east] = await at(200);
+    return { lat, lon, span: east - lon };
+  };
+  let last = null;
+  await expect.poll(async () => {
+    const now = await read();
+    const still = !!last && now.lat === last.lat && now.lon === last.lon && now.span === last.span;
+    last = now;
+    return still;
+  }).toBe(true);
+  return last;
 }

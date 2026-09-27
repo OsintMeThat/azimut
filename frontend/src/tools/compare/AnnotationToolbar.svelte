@@ -27,7 +27,10 @@
     count = 0,
     side = $bindable('both'),
     setSide = () => {},
+    collapsed = $bindable(false),
   } = $props();
+
+  const armed = $derived(ANNOTATION_TOOLS.find((entry) => entry.id === tool && entry.id !== 'select'));
 
   const contextual = $derived(tool !== 'select' || Boolean(selected));
   const fillable = $derived(canFill(selected?.kind ?? tool));
@@ -70,7 +73,7 @@
   // nothing selected, or deletes what was selected. Drop the panel with them
   // rather than leaving it floating over the maps with nothing behind it.
   $effect(() => {
-    if (!contextual || (open === 'fill' && !fillable) || (open === 'outline' && !outlined)) open = '';
+    if (collapsed || !contextual || (open === 'fill' && !fillable) || (open === 'outline' && !outlined)) open = '';
   });
 
   $effect(() => {
@@ -91,6 +94,18 @@
   });
 </script>
 
+<div class="annotation-rail" class:folded={collapsed}>
+{#if collapsed}
+  <!-- Folded, the rail gives its width to the maps and keeps a strip that says
+       what it holds, and the tool still in hand, which a press puts down. -->
+  {#if armed}
+    <button class="tool-button active" aria-pressed="true" title={`${armed.label} (${armed.shortcut})`}
+      onclick={() => (tool = 'select')}><Icon name={armed.icon} size={18} /></button>
+  {/if}
+  <button class="rail-strip" title="Show the annotation tools ([)" onclick={() => (collapsed = false)}>
+    <span class="strip-label">Annotations</span>
+  </button>
+{:else}
 <aside class="annotation-toolbar" aria-label="Comparison annotation tools">
   <button class="tool-button" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}><Icon name="undo" size={18} /></button>
   <button class="tool-button" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}><Icon name="redo" size={18} /></button>
@@ -160,6 +175,17 @@
     <button class="tool-button" title="Clear all annotations" onclick={clear}><Icon name="reset" size={18} /></button>
   {/if}
 </aside>
+{/if}
+  <!-- The tab on the map's edge, as a map's side panel has: the same place
+       folds the rail and brings it back. -->
+  <button
+    class="rail-tab"
+    aria-label={collapsed ? 'Show the annotation tools' : 'Hide the annotation tools'}
+    aria-expanded={!collapsed}
+    title={collapsed ? 'Show the annotation tools ([)' : 'Hide the annotation tools ([)'}
+    onclick={() => (collapsed = !collapsed)}
+  ><Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} size={15} /></button>
+</div>
 
 {#if open === 'glyph'}
   <div class="flyout glyphs" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
@@ -271,6 +297,60 @@
     font-size: 8px;
     line-height: 1;
   }
+  .annotation-rail {
+    position: relative;
+    z-index: 610;
+    display: flex;
+    flex: 0 0 auto;
+  }
+  .annotation-rail.folded {
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 26px;
+    padding-top: 6px;
+    border-right: 1px solid var(--border);
+    background: var(--bg-1);
+  }
+  .folded .tool-button { width: 24px; height: 28px; }
+  .rail-strip {
+    flex: 1;
+    align-self: stretch;
+    display: flex;
+    justify-content: center;
+    padding-top: 6px;
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .rail-strip:hover { color: var(--text-1); background: var(--bg-2); }
+  .strip-label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  /* Half on the rail's edge, half on the map, at mid-height where no map
+     control sits. */
+  .rail-tab {
+    position: absolute;
+    top: 50%;
+    left: 100%;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 48px;
+    transform: translateY(-50%);
+    border: 1px solid var(--border-strong);
+    border-left: 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-2);
+    background: var(--bg-1);
+    box-shadow: var(--shadow-1);
+    cursor: pointer;
+  }
+  .rail-tab:hover { color: var(--text-1); background: var(--bg-2); }
   .separator {
     grid-column: 1 / -1;
     justify-self: stretch;

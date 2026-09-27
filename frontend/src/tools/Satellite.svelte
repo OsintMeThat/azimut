@@ -51,6 +51,8 @@
   import {
     askable,
     DATED as FIRMS_DATED,
+    firmsNote,
+    keyState,
     lastDayOf,
     summary,
     tileParams,
@@ -212,13 +214,15 @@
   let railOverlay = $state(false);
   /**
    * The other key-less reference layers, each simply on or off: Esri's borders
-   * and roads, Open Infrastructure Map's power lines, OpenSeaMap's sea marks
-   * and OSM's raw GPS traces. Borders start on, because every read of imagery
-   * starts with which side of a line it is on; they are map tiles, the network
+   * and roads, OpenFreeMap's place names, Open Infrastructure Map's power
+   * lines, OpenSeaMap's sea marks and OSM's raw GPS traces. Borders and place
+   * names start on, because every read of imagery starts with which side of a
+   * line it is on and what the place is called; they are map tiles, the network
    * a map is opened to use. The rest fetch no tile until their switch is pressed.
    */
   const refLayers = $state({
     boundaries: true,
+    placenames: true,
     roads: false,
     power: false,
     seamarks: false,
@@ -240,6 +244,10 @@
   const fires = $state({
     on: false,
     keyed: false,
+    /** Why it is not usable when it is not: 'missing' | 'off' | 'refused'. */
+    state: 'missing',
+    /** A spent allowance's pause, `{ until, used, of }`, while it lasts. */
+    paused: null,
     sensors: [],
     sensor: 'viirs',
     window: '24h',
@@ -248,6 +256,7 @@
   });
   const firmsAskable = $derived(askable(fires));
   const firmsSummary = $derived(summary(fires, fires.sensors));
+  const firmsKey = $derived(keyState(fires));
 
   /** The archives a right-click can build a pair from. A keyed provider that is
    *  not configured is left out rather than offered and refused. */
@@ -273,9 +282,27 @@
       const answer = await api.get('/api/firms/sensors');
       fires.sensors = answer.sensors ?? [];
       fires.keyed = Boolean(answer.keyed);
+      fires.state = answer.state ?? 'missing';
+      fires.paused = answer.paused ?? null;
     } catch {
       fires.keyed = false;
+      fires.paused = null;
     }
+    // A pause ends on its own; the row hears it then rather than on the next
+    // failed tile. Our own backend, once, so nothing is polled.
+    clearTimeout(pauseTimer);
+    if (fires.paused) {
+      const left = Date.parse(fires.paused.until) - Date.now();
+      pauseTimer = setTimeout(loadFireSensors, Math.max(1000, left + 500));
+    }
+  }
+
+  let pauseTimer = null;
+  let troubleTimer = null;
+  /** A FIRMS tile failed: ask our backend why, once for the burst a screen makes. */
+  function fireTrouble() {
+    clearTimeout(troubleTimer);
+    troubleTimer = setTimeout(loadFireSensors, 800);
   }
 
   /** The two questions the fire layer asks, as rows under its switch. */
@@ -284,7 +311,7 @@
       label: 'Sensor',
       options: fires.sensors.map((entry) => ({
         id: entry.id,
-        // "VIIRS (S-NPP + NOAA-20)" does not fit a panel this wide, and the
+        // "VIIRS (S-NPP, NOAA-20, NOAA-21)" does not fit a panel this wide, and the
         // instrument is the part being chosen between
         label: entry.label.replace(/\s*\(.*\)\s*$/, ''),
         title:
@@ -357,6 +384,7 @@
   const overlays = $derived(
     [
       refLayers.boundaries && 'boundaries',
+      refLayers.placenames && baseIsImagery && 'placenames',
       refLayers.roads && baseIsImagery && 'roads',
       railOverlay && 'railway',
       refLayers.power && 'power',
@@ -563,6 +591,8 @@
       grid.destroy();
       footprint.destroy();
       markerSurface?.destroy();
+      clearTimeout(pauseTimer);
+      clearTimeout(troubleTimer);
     };
   }
 
@@ -627,10 +657,11 @@
     if (fullscreen && !document.fullscreenElement) toggleFullscreen();
   }
 
-  // force the roads off whenever the base isn't imagery: a street map already
-  // draws them
+  // force the roads and the place names off whenever the base isn't imagery: a
+  // street map already draws them
   $effect(() => {
     if (!baseIsImagery && refLayers.roads) refLayers.roads = false;
+    if (!baseIsImagery && refLayers.placenames) refLayers.placenames = false;
   });
 
   // While the picker is open, a settled pan refreshes its dates. The stale
@@ -1073,12 +1104,17 @@
    */
   const armedCursor = $derived(modes[armedMode]?.pointing?.() ? cursorOf(armedMode) : null);
   const RAIL = railSections(railEntries());
-  /** The rail's inset from the map's top-left corner, shared with the CSS. */
-  const RAIL_TOP = 12;
+  /** The search sits in the map's top-left corner and the rail under it, so
+   *  the rail's inset follows the search's own height. */
+  let searchHeight = $state(0);
+  const railTop = $derived(12 + searchHeight + 8);
+  /** …and the imagery corner stops short of its width, wrapping rather than
+   *  sliding under it on a narrow map. */
+  let searchWidth = $state(0);
   /** Its own height, so the engine's zoom buttons stack under it rather than
    *  behind it — and keep doing so when a tool is added to the rail. */
   let railHeight = $state(0);
-  const railBottom = $derived(RAIL_TOP + railHeight + 8);
+  const railBottom = $derived(railTop + railHeight + 8);
 
   /** Whether the case has anything the saved layer could draw, on any of its
    *  three positions — media reads its own index, so one length is not enough. */
@@ -1133,18 +1169,22 @@
    */
   const layerRows = $derived([
     {
-      id: 'railway',
-      label: 'OSM railways',
-      on: railOverlay,
-      title: 'Tracks, sidings and stations, from OpenRailwayMap',
-      toggle: () => (railOverlay = !railOverlay),
-    },
-    {
       id: 'boundaries',
       label: 'Borders',
       on: refLayers.boundaries,
       title: 'Country, region and district borders, from Esri',
       toggle: () => (refLayers.boundaries = !refLayers.boundaries),
+    },
+    {
+      id: 'placenames',
+      label: 'Place names',
+      on: refLayers.placenames,
+      disabled: !baseIsImagery,
+      detail: baseIsImagery ? '' : 'imagery only',
+      title: baseIsImagery
+        ? 'Towns, villages and hamlets, from OpenStreetMap via OpenFreeMap'
+        : 'Only useful over satellite imagery',
+      toggle: () => (refLayers.placenames = !refLayers.placenames),
     },
     {
       id: 'roads',
@@ -1154,6 +1194,13 @@
       detail: baseIsImagery ? '' : 'imagery only',
       title: baseIsImagery ? 'Road network over the imagery, from Esri' : 'Only useful over satellite imagery',
       toggle: () => (refLayers.roads = !refLayers.roads),
+    },
+    {
+      id: 'railway',
+      label: 'Railways',
+      on: railOverlay,
+      title: 'Tracks, sidings and stations, from OpenRailwayMap',
+      toggle: () => (railOverlay = !railOverlay),
     },
     {
       id: 'power',
@@ -1182,18 +1229,16 @@
       label: 'Active fires',
       on: fires.on,
       disabled: !fires.keyed,
-      detail: fires.keyed ? firmsSummary : 'needs a free key',
-      title: fires.keyed
-        ? 'Thermal detections from NASA FIRMS, live or from the archive'
-        : 'Add a NASA FIRMS key in Settings → Imagery',
+      detail: fires.keyed ? firmsSummary : firmsKey.detail,
+      title: fires.keyed ? 'Thermal detections from NASA FIRMS, live or from the archive' : firmsKey.title,
       toggle: () => (fires.on = !fires.on),
-      // A switch that cannot be pressed says why and where the key goes, on the
-      // row itself rather than only on a greyed-out eye nobody hovers.
-      actions: fires.keyed ? null : [{ label: 'Add a FIRMS key', quiet: true, run: openImagerySettings }],
+      // A switch that cannot be pressed says why and where to go, on the row
+      // itself rather than only on a greyed-out eye nobody hovers.
+      actions: fires.keyed ? null : [{ label: firmsKey.action, quiet: true, run: openImagerySettings }],
       // its two questions — which instrument, and over what — are asked in the
       // row rather than in a card of its own floating somewhere
       controls: fires.on && fires.keyed ? firmsControls : null,
-      note: fires.on && !firmsAskable ? 'Pick a date to draw the detections.' : '',
+      note: fires.on && fires.keyed ? firmsNote(fires, fires.paused) : '',
     },
     {
       id: 'nightlights',
@@ -2102,50 +2147,7 @@
 </script>
 
 <div class="tool" class:fullscreen bind:this={toolEl}>
-  <div class="tool-header">
-    <!-- Two identical windows on a second screen are otherwise impossible to
-         tell apart; the first one needs no number and says nothing. -->
-    <h2>Satellite{windowNumber ? ` · ${windowNumber}` : ''}</h2>
-    <div class="spacer"></div>
-    <PlaceSearch
-      bind:value={coordsText}
-      savedRows={savedWork.rows}
-      centre={{ lat: center.lat, lon: center.lon }}
-      units={prefs.units}
-      {searching}
-      onpick={goToSuggestion}
-      onsubmit={goTo}
-    />
-    <!-- What the window does with the tool, not what the tool does with the
-         map: these sit with the title rather than among the map's own controls. -->
-    <button
-      class="btn btn-icon"
-      class:on={linked}
-      onclick={toggleLink}
-      disabled={!peerMaps}
-      title={!peerMaps
-        ? 'Open a second map tab or the extension map tools to link the views'
-        : linked
-          ? 'Stop following the other maps'
-          : 'Pan and zoom with the other maps'}
-      aria-label="Link the view to the other maps"
-    ><Icon name="link" size={15} /></button>
-    <button
-      class="btn btn-icon"
-      onclick={detachWindow}
-      title="Open this map in a tab of its own, on this view"
-      aria-label="Open in a new tab"
-    ><Icon name="external" size={15} /></button>
-    <button
-      class="btn btn-icon"
-      class:on={fullscreen}
-      onclick={toggleFullscreen}
-      title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
-      aria-label="Toggle fullscreen"
-    ><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
-  </div>
-
-  <div class="body">
+  <div class="body" style:--surface-ctl-reserve={`${12 + searchWidth + 8}px`}>
     {#if homeReady}
       <MapSurface
         bind:this={surface}
@@ -2172,6 +2174,7 @@
         onwidgetload={(meter) => imagery.countLoad(meter)}
         onwidgetauthfailure={onWidgetAuthFailure}
         onwidgetfailed={onWidgetFailed}
+        onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
         onviewsettled={(camera) => share.settled(camera, engine?.maxZoom())}
       >
       <!-- saved work on the map: navigation only, off by default, session-only.
@@ -2222,10 +2225,58 @@
         />
       {/if}
 
+      <!-- What the window does with the tool, beside the imagery it shows. -->
+      {#snippet beside()}
+        <div class="window-ctl">
+          <button
+            class="btn btn-icon"
+            class:on={linked}
+            onclick={toggleLink}
+            disabled={!peerMaps}
+            title={!peerMaps
+              ? 'Open a second map tab or the extension map tools to link the views'
+              : linked
+                ? 'Stop following the other maps'
+                : 'Pan and zoom with the other maps'}
+            aria-label="Link the view to the other maps"
+          ><Icon name="link" size={15} /></button>
+          <button
+            class="btn btn-icon"
+            onclick={detachWindow}
+            title="Open this map in a tab of its own, on this view"
+            aria-label="Open in a new tab"
+          ><Icon name="external" size={15} /></button>
+          <button
+            class="btn btn-icon"
+            class:on={fullscreen}
+            onclick={toggleFullscreen}
+            title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
+            aria-label="Toggle fullscreen"
+          ><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
+        </div>
+      {/snippet}
+
+      <!-- The search floats over the map as Detect's does, above the rail: the
+           tab strip already says which tool this is. -->
+      <div class="map-bar" bind:clientHeight={searchHeight} bind:clientWidth={searchWidth}>
+        <!-- Two identical windows on a second screen are otherwise impossible to
+             tell apart; the first one needs no number and says nothing. -->
+        {#if windowNumber}<span class="window-no mono" title="This map's window">Map {windowNumber}</span>{/if}
+        <PlaceSearch
+          bind:value={coordsText}
+          savedRows={savedWork.rows}
+          centre={{ lat: center.lat, lon: center.lon }}
+          units={prefs.units}
+          {searching}
+          onpick={goToSuggestion}
+          onsubmit={goTo}
+        />
+      </div>
+
       <!-- The map's toolbox, and the one slot the armed tool's settings open
            in. Only verbs live here; what is *drawn* over the imagery is a layer
            and is listed in the panel on the right. -->
-      <div class="map-tools">
+      <div class="map-tools" style:top={`${railTop}px`}>
         <MapRail
           sections={RAIL}
           bind:height={railHeight}
@@ -2797,6 +2848,58 @@
   :global(.sat-marker) {
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
   }
+  .map-bar {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    /* over the rail (1100), which its suggestions list drops across */
+    z-index: 1150;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px;
+    border-radius: var(--radius-1);
+    background: rgba(24, 24, 24, 0.88);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  .map-bar :global(.place-search) {
+    width: min(360px, 30vw);
+  }
+  /* no frame of its own: it shares the imagery card (MapSurface's .ctl-row),
+     after a rule, as Compare's source card ends on its own two buttons */
+  .window-ctl {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-left: 5px;
+    margin-left: 1px;
+    border-left: 1px solid var(--border);
+  }
+  .window-ctl .btn-icon {
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    color: var(--text-2);
+    background: transparent;
+    border-color: transparent;
+  }
+  .window-ctl .btn-icon:hover:not(:disabled) {
+    color: var(--text-1);
+    background: var(--bg-2);
+    border-color: transparent;
+  }
+  .window-ctl .btn-icon.on {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .window-no {
+    padding: 0 6px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
   /* fullscreen: the whole tool covers the viewport, above the app chrome */
   .tool.fullscreen {
     position: fixed;
@@ -2810,7 +2913,6 @@
      buttons — which the rail now stacks on top of rather than beside. */
   .map-tools {
     position: absolute;
-    top: 12px;
     left: 12px;
     z-index: 1100;
     /* the rail sits in flow here, so this box is exactly rail-wide — which is

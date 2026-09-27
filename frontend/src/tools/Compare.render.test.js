@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { fakeScreen } from '../lib/fullscreen.fixture.js';
 
 const PROVIDERS = [
   {
@@ -76,7 +77,7 @@ const get = vi.fn(async (path) => {
     return {
       keyed: true,
       sensors: [
-        { id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' },
+        { id: 'viirs', label: 'VIIRS (S-NPP, NOAA-20, NOAA-21)' },
         { id: 'modis', label: 'MODIS (Terra + Aqua)' },
       ],
     };
@@ -201,6 +202,10 @@ const drawPictures = vi.fn(async ({ entries, variantFor, onpicture, onprogress }
 const composeEvolutionFrame = vi.fn(() => pictureCanvas());
 const composeEvolutionSheet = vi.fn(() => pictureCanvas());
 vi.mock('../lib/map/evolutionExport.js', () => ({ drawPictures, composeEvolutionFrame, composeEvolutionSheet }));
+// A reading's pixel work needs a real canvas, so a test hands back what one
+// would have found. Untouched, a reading never gets this far here.
+const detectCaptures = vi.fn(async () => { throw new Error('no pixels in this double'); });
+vi.mock('../lib/map/changeCapture.js', () => ({ detectCaptures }));
 
 const { default: Compare } = await import('./Compare.svelte');
 
@@ -236,6 +241,11 @@ function button(label, root = document) {
   return [...root.querySelectorAll('button')].find((entry) => entry.textContent.trim().includes(label));
 }
 
+/** The toolbar's Save, which "Saved" layers and the like would also match. */
+function saveButton() {
+  return [...target.querySelectorAll('.tool-header button')].find((entry) => entry.textContent.trim() === 'Save');
+}
+
 /** Start over from the New menu, on one of its presets. */
 async function startNew(label = 'Then and now') {
   button('New', target).click();
@@ -245,7 +255,8 @@ async function startNew(label = 'Then and now') {
   await settle();
 }
 
-async function add(slot, provider = 'Esri World Imagery') {
+/** Most tests here draw, so the rail opens once the pair is whole. */
+async function add(slot, provider = 'Esri World Imagery', { unfold = true } = {}) {
   const empty = [...target.querySelectorAll('.empty-slot')].find(
     (entry) => entry.querySelector('.slot-letter').textContent === slot
   );
@@ -256,6 +267,10 @@ async function add(slot, provider = 'Esri World Imagery') {
     .click();
   flushSync();
   await settle();
+  if (unfold) {
+    target.querySelector('.annotation-rail.folded .rail-strip')?.click();
+    flushSync();
+  }
 }
 
 beforeEach(() => {
@@ -294,12 +309,14 @@ describe('Compare', () => {
     } finally {
       vi.useRealTimers();
     }
-    expect(target.querySelector('h2').textContent).toBe('Compare');
+    // a pair on screen: the reading modes take the title's place in the one row
+    expect(target.querySelector('h2')).toBeNull();
+    expect(target.querySelector('.tool-header .mode-dock')).not.toBeNull();
     expect(target.querySelectorAll('.empty-slot')).toHaveLength(0);
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(2);
     expect(target.querySelectorAll('.presets')).toHaveLength(0);
     const saved = () => post.mock.calls.find(([path]) => path === '/api/cases/case-a/compare/sessions')?.[1];
-    button('Save comparison', target).click();
+    saveButton().click();
     flushSync();
     button('Save comparison', document.querySelector('[role="dialog"]')).click();
     await settle();
@@ -313,7 +330,7 @@ describe('Compare', () => {
     // no release list: a Wayback A would be World Imagery again
     await openFresh();
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(1);
-    expect(target.querySelector('.surface-label strong').textContent).toBe('B');
+    expect(target.querySelector('.source-card .cmp-letter').textContent).toBe('B');
     expect(target.querySelectorAll('.empty-slot')).toHaveLength(1);
   });
 
@@ -323,9 +340,8 @@ describe('Compare', () => {
     engines[0].handlers['view-settled']?.({ lat: 40, lon: 3, zoom: 12 });
     flushSync();
     expect(target.querySelector('.badge')).toBeNull();
-    expect(button('Discard', target).disabled).toBe(true);
     // …while Save still takes it, a pair at a place being worth keeping
-    expect(button('Save comparison', target).disabled).toBe(false);
+    expect(saveButton().disabled).toBe(false);
     await startNew();
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
@@ -350,17 +366,26 @@ describe('Compare', () => {
     expect(engines[1].camera()).toEqual(engines[0].camera());
     expect(target.querySelectorAll('.source-card')).toHaveLength(2);
     expect(target.querySelectorAll('.source-card button[aria-label="Imagery provider"]')).toHaveLength(2);
-    expect(
-      target.querySelector('.compare-bar').compareDocumentPosition(target.querySelector('.source-bar')) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    // The cards are as wide as the maps they describe, so the seam between A and
-    // B is one line: the annotation rail beside the stage narrows both together.
+    // One row above the maps: the modes, the name and the acts share it, and
+    // no bar is left between that row and the stage.
+    const header = target.querySelector('.tool-header');
+    expect(header.querySelector('.mode-dock')).not.toBeNull();
+    expect(button('All dates', header)).toBeTruthy();
+    expect(button('Export', header)).toBeTruthy();
+    expect(target.querySelector('.compare-bar')).toBeNull();
+    // The cards float over the maps they describe, one column per pane, so the
+    // seam between A and B is one line: the annotation rail beside the stage
+    // narrows both together.
     const column = target.querySelector('.stage-column');
-    expect(target.querySelector('.source-bar').parentElement).toBe(column);
-    expect(target.querySelector('.compare-stage').parentElement).toBe(column);
-    expect(target.querySelector('.annotation-toolbar').parentElement).toBe(column.parentElement);
-    // One camera, so one compass in the bar and none on either surface.
+    const stage = target.querySelector('.compare-stage');
+    expect(target.querySelector('.source-bar').parentElement).toBe(stage);
+    expect(stage.parentElement).toBe(column);
+    expect(target.querySelector('.annotation-rail').parentElement).toBe(column.parentElement);
+    // The place search and the camera ride over the maps, in B's corner.
+    const view = target.querySelector('.source-b .view-col');
+    expect(view.querySelector('.place-search')).not.toBeNull();
+    expect(view.querySelector('.camera-readout')).not.toBeNull();
+    // One camera, so one compass over the stage and none on either surface.
     expect(target.querySelectorAll('button[aria-label="Reset to north"]')).toHaveLength(1);
     expect(target.querySelector('.surface-shell button[aria-label="Reset to north"]')).toBeNull();
     // local-first: Wayback names its releases once it is on screen, but nothing
@@ -435,7 +460,11 @@ describe('Compare', () => {
     const footer = target.querySelector('.mode-footer');
     expect(footer.querySelector('input[aria-label="Swipe position"]')).not.toBeNull();
     expect(footer.querySelector('.difference-bar')).not.toBeNull();
-    expect(target.querySelector('.change-legend')).not.toBeNull();
+    const legend = target.querySelector('.change-legend');
+    expect(legend).not.toBeNull();
+    // The legend's swatches are the overlay's own colours, whatever the palette.
+    expect(legend.style.getPropertyValue('--gain')).toBe('rgb(0,229,255)');
+    expect(legend.style.getPropertyValue('--loss')).toBe('rgb(255,0,170)');
     // Over both images unless asked otherwise.
     const base = (label) => [...target.querySelectorAll('[aria-label="Image under the highlights"] button')]
       .find((entry) => entry.textContent.trim() === label);
@@ -452,6 +481,127 @@ describe('Compare', () => {
     expect(target.querySelector('.difference-bar')).toBeNull();
     expect(target.querySelector('.change-legend')).toBeNull();
     expect(button('Blink', target).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('waits out loading tiles, says when a reading is up to date, and drains one the view moved past', async () => {
+    releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-09-01' }];
+    await open();
+    await add('A');
+    await add('B', 'Esri Wayback');
+    const pair = engines.slice(-2);
+    let loaded;
+    const tilesIn = new Promise((resolve) => (loaded = resolve));
+    let loading = true;
+    for (const engine of pair) {
+      engine.tilesLoading = () => loading;
+      engine.snapshot.mockImplementation(async () => { await tilesIn; return { canvas: {}, complete: true }; });
+    }
+    // A's first capture gives up with tiles still out, as the engine's wait does.
+    pair[0].snapshot.mockImplementationOnce(async () => ({ canvas: {}, complete: false }));
+    detectCaptures.mockImplementationOnce(async (sources) => ({
+      counts: { gained: 1, lost: 1, changed: 0, quiet: 8 }, zones: [], zoneCount: 0,
+      share: 0.2, coverage: 1, area: 50, frame: sources.a.frame,
+      canvas: { toDataURL: () => 'data:image/png;base64,AA' },
+    }));
+    // Real time never passes on this bench, so the clock is stepped by hand.
+    vi.useFakeTimers();
+    const until = async (check) => {
+      for (let tries = 0; tries < 40 && !check(); tries += 1) { await vi.advanceTimersByTimeAsync(50); flushSync(); }
+      return check();
+    };
+    const read = () => target.querySelector('.difference-bar button.read');
+    const said = () => target.querySelector('.change-legend em')?.textContent.trim() ?? '';
+
+    button('Difference', target).click();
+    flushSync();
+    expect(await until(() => read().textContent.trim() === 'Loading…')).toBe(true);
+    expect(read().disabled).toBe(true);
+    expect(said()).toBe('Waiting for the tiles…');
+
+    // The tiles land: the reading carries on by itself, no "try again".
+    loading = false;
+    loaded();
+    expect(await until(() => read().textContent.trim() === 'Up to date')).toBe(true);
+    expect(read().disabled).toBe(true);
+    expect(said()).toBe('20% highlighted');
+    expect(target.querySelector('.change-map.stale')).toBeNull();
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining('tiles'), expect.anything(), expect.anything());
+
+    // Past the held ground, a pair already read follows the camera: once it
+    // rests, the bands are fetched again, with no press of Read.
+    const found = (sources) => ({
+      counts: { gained: 1, lost: 1, changed: 0, quiet: 8 }, zones: [], zoneCount: 0,
+      share: 0.2, coverage: 1, area: 50, frame: sources.a.frame,
+      canvas: { toDataURL: () => 'data:image/png;base64,AA' },
+    });
+    const calls = () => detectCaptures.mock.calls.length;
+    const before = calls();
+    detectCaptures.mockImplementationOnce(async () => ({ needsFetch: true }));
+    detectCaptures.mockImplementationOnce(async (sources) => found(sources));
+    pair[0].handlers['view-settled']({ lat: 40, lon: 3, zoom: 12 });
+    expect(await until(() => calls() === before + 1)).toBe(true);
+    expect(detectCaptures.mock.calls[before][4]).toBe(false);
+    // resting, not waiting on the analyst
+    expect(read().textContent.trim()).toBe('Reading…');
+    expect(await until(() => read().textContent.trim() === 'Up to date')).toBe(true);
+    expect(detectCaptures.mock.calls[before + 1][4]).toBe(true);
+
+    // Something new to read past the held ground waits for Read, and says so everywhere.
+    detectCaptures.mockImplementationOnce(async () => ({ needsFetch: true }));
+    target.querySelector('button[aria-label="Difference settings"]').click();
+    flushSync();
+    button('Preserve fine changes', target).click();
+    flushSync();
+    expect(await until(() => read().textContent.trim() === 'Read' && !read().disabled)).toBe(true);
+    expect(read().classList.contains('due')).toBe(true);
+    expect(said()).toBe('20% highlighted · out of date, press Read');
+    expect(target.querySelector('.change-map').classList.contains('stale')).toBe(true);
+    const waiting = calls();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls()).toBe(waiting);
+    vi.useRealTimers();
+  });
+
+  it('hands an asked-for read overtaken by a move to the reading that takes over, and only that one', async () => {
+    releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-09-01' }];
+    await open();
+    await add('A');
+    await add('B', 'Esri Wayback');
+    const pair = engines.slice(-2);
+    for (const engine of pair) {
+      engine.tilesLoading = () => false;
+      engine.snapshot.mockImplementation(async () => ({ canvas: {}, complete: true }));
+    }
+    const found = (sources) => ({
+      counts: { gained: 1, lost: 0, changed: 0, quiet: 9 }, zones: [], zoneCount: 0,
+      share: 0.1, coverage: 1, area: 20, frame: sources.a.frame,
+      canvas: { toDataURL: () => 'data:image/png;base64,AA' },
+    });
+    // The first read's bands are slow to come.
+    detectCaptures.mockImplementationOnce(() => new Promise(() => {}));
+    detectCaptures.mockImplementation(async (sources) => found(sources));
+    vi.useFakeTimers();
+    const until = async (check) => {
+      for (let tries = 0; tries < 40 && !check(); tries += 1) { await vi.advanceTimersByTimeAsync(50); flushSync(); }
+      return check();
+    };
+    const read = () => target.querySelector('.difference-bar button.read');
+
+    // Turned on by hand, so it may fetch; the camera moves before it lands.
+    button('Difference', target).click();
+    flushSync();
+    expect(await until(() => detectCaptures.mock.calls.length === 1)).toBe(true);
+    expect(detectCaptures.mock.calls[0][4]).toBe(true);
+    pair[0].handlers['view-settled']({ lat: 40, lon: 3, zoom: 12 });
+    expect(await until(() => read().textContent.trim() === 'Up to date')).toBe(true);
+    // The reading that took over carried the ask: it did not stop at "press Read".
+    expect(detectCaptures.mock.calls[1][4]).toBe(true);
+
+    // Once landed, the ask is spent: a pan after it follows on what is held.
+    pair[0].handlers['view-settled']({ lat: 40.01, lon: 3, zoom: 12 });
+    expect(await until(() => detectCaptures.mock.calls.length === 3)).toBe(true);
+    expect(detectCaptures.mock.calls[2][4]).toBe(false);
+    vi.useRealTimers();
   });
 
   it('shows the difference side by side with no footer of the view to share', async () => {
@@ -498,7 +648,7 @@ describe('Compare', () => {
     target.querySelector('button[aria-label="Remove imagery A"]').click();
     flushSync();
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(1);
-    expect(target.querySelector('.surface-label strong').textContent).toBe('B');
+    expect(target.querySelector('.source-card .cmp-letter').textContent).toBe('B');
     expect(target.querySelectorAll('.mode-btn')).toHaveLength(0);
   });
 
@@ -518,7 +668,7 @@ describe('Compare', () => {
     await settle();
     // back on the opening pair, which without a release list is B alone
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(1);
-    expect(target.querySelector('.surface-label strong').textContent).toBe('B');
+    expect(target.querySelector('.source-card .cmp-letter').textContent).toBe('B');
   });
 
   it('gives each source its own layers and keeps export choices in one modal', async () => {
@@ -531,7 +681,7 @@ describe('Compare', () => {
     const layers = document.querySelector('[role="dialog"]');
     expect(layers.getAttribute('aria-label')).toBe('Layers · A / B');
     expect(layers.querySelectorAll('.layer-pane')).toHaveLength(2);
-    expect(layers.querySelectorAll('.layer-row')).toHaveLength(18);
+    expect(layers.querySelectorAll('.layer-row')).toHaveLength(20);
     expect(layers.textContent).toContain('Active fires');
     expect(layers.textContent).toContain('Night lights');
     expect(layers.textContent).toContain('Saved work');
@@ -695,7 +845,7 @@ describe('Compare', () => {
     expect(target.querySelectorAll('.export-frame.readonly')).toHaveLength(1);
 
     output.querySelector('button[aria-label="Close"]').click();
-    button('Save comparison', target).click();
+    saveButton().click();
     flushSync();
     button('Save comparison', document.querySelector('[role="dialog"]')).click();
     await settle();
@@ -731,6 +881,57 @@ describe('Compare', () => {
     }
   );
 
+  it('starts with the drawing rail folded, and folds it back keeping the tool in hand', async () => {
+    await open();
+    await add('A');
+    await add('B', undefined, { unfold: false });
+    const toolbar = () => target.querySelector('.annotation-rail');
+    // folded until asked: the maps get the width
+    expect(toolbar().classList.contains('folded')).toBe(true);
+    expect(toolbar().querySelector('.rail-strip').textContent.trim()).toBe('Annotations');
+    target.querySelector('button[aria-label="Show the annotation tools"]').click();
+    flushSync();
+    expect(toolbar().classList.contains('folded')).toBe(false);
+    const tools = toolbar().querySelectorAll('button').length;
+    target.querySelector('button[title^="Arrow"]').click();
+    flushSync();
+    target.querySelector('button[aria-label="Hide the annotation tools"]').click();
+    flushSync();
+    expect(toolbar().classList.contains('folded')).toBe(true);
+    // folded, the strip names what it holds and opens it again
+    expect(toolbar().querySelector('.rail-strip').textContent.trim()).toBe('Annotations');
+    expect(target.querySelector('.annotation-toolbar')).toBeNull();
+    // folded, the rail still says what is in hand, and a press puts it down
+    const inHand = toolbar().querySelector('button[aria-pressed="true"]');
+    expect(inHand.title).toBe('Arrow (A)');
+    // the shortcuts still reach every tool while the rail is folded
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
+    flushSync();
+    expect(toolbar().querySelector('button[aria-pressed="true"]').title).toBe('Box (R)');
+    toolbar().querySelector('button[aria-pressed="true"]').click();
+    flushSync();
+    expect(toolbar().querySelector('button[aria-pressed="true"]')).toBeNull();
+    // `[` brings it back whole, as Detect's `]` does its panel
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
+    flushSync();
+    expect(toolbar().classList.contains('folded')).toBe(false);
+    expect(toolbar().querySelectorAll('button')).toHaveLength(tools);
+  });
+
+  it('opens with the drawing rail folded again after it was left open', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    expect(target.querySelector('.annotation-rail').classList.contains('folded')).toBe(false);
+    unmount(live);
+    live = null;
+    target.remove();
+    await open();
+    await add('A');
+    await add('B', undefined, { unfold: false });
+    expect(target.querySelector('.annotation-rail').classList.contains('folded')).toBe(true);
+  });
+
   it('adds a note over the comparison and keeps it in the editable state', async () => {
     await open();
     await add('A');
@@ -751,7 +952,7 @@ describe('Compare', () => {
     expect(target.querySelector('.mark text').textContent).toContain('Before');
     expect(target.querySelector('.annotation-toolbar')).not.toBeNull();
     expect(target.querySelector('.badge').textContent).toBe('unsaved');
-    button('Save comparison', target).click();
+    saveButton().click();
     flushSync();
     button('Save comparison', document.querySelector('[role="dialog"]')).click();
     await settle();
@@ -814,6 +1015,52 @@ describe('Compare', () => {
     expect(uiState.lookAt).toEqual({ tool: 'detect', lat: 43.3, lon: 5.4, zoom: 16 });
   });
 
+  it('takes the whole screen with both maps, and reads the way out back from the browser', async () => {
+    const screen = fakeScreen();
+    const full = () => target.querySelector('button[aria-label="Full screen"]');
+    try {
+      await open();
+      await add('A');
+      await add('B');
+      for (const engine of engines) engine.resize.mockClear();
+      full().click();
+      await settle();
+      expect(screen.request).toHaveBeenCalledOnce();
+      expect(document.fullscreenElement).toBe(target.querySelector('.compare-tool'));
+      expect(target.querySelector('button[aria-label="Exit full screen"]').getAttribute('aria-pressed')).toBe('true');
+      // both containers changed size, so both maps are told
+      expect(engines).toHaveLength(2);
+      for (const engine of engines) expect(engine.resize).toHaveBeenCalled();
+      // a map outside the app opens a browser tab, which would drop the screen
+      engines[0].handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 120, y: 90 });
+      flushSync();
+      button('Open in', target.querySelector('[role="menu"]')).click();
+      await settle();
+      const outside = [...target.querySelectorAll('[aria-label="Open this point in"] a')];
+      expect(outside.length).toBeGreaterThan(0);
+      expect(outside.every((link) => !link.hasAttribute('href') && link.getAttribute('aria-disabled') === 'true')).toBe(true);
+      // Esc belongs to the browser, which tells the page only afterwards
+      screen.leave();
+      await settle();
+      expect(full().getAttribute('aria-pressed')).toBe('false');
+    } finally {
+      screen.restore();
+    }
+  });
+
+  it('says so when the browser refuses the screen', async () => {
+    const screen = fakeScreen({ refuse: true });
+    try {
+      await openFresh();
+      target.querySelector('button[aria-label="Full screen"]').click();
+      await settle();
+      expect(toast).toHaveBeenCalledWith('Full screen is not available', 'danger');
+      expect(document.fullscreenElement).toBe(null);
+    } finally {
+      screen.restore();
+    }
+  });
+
   it('moves both maps to a point another tab asked about, and keeps its pictures', async () => {
     releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-06-01' }];
     uiState.lookAt = { tool: 'compare', lat: 12.76, lon: 43.65, zoom: 15 };
@@ -859,7 +1106,7 @@ describe('Compare', () => {
     await open();
     await add('A');
     await add('B');
-    button('Save comparison', target).click();
+    saveButton().click();
     flushSync();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     button('Save comparison', document.querySelector('[role="dialog"]')).click();
@@ -897,7 +1144,7 @@ describe('Compare', () => {
     button('Difference', target).click();
     flushSync();
     await settle();
-    button('Save comparison', target).click();
+    saveButton().click();
     flushSync();
     button('Save comparison', document.querySelector('[role="dialog"]')).click();
     await settle();
@@ -917,21 +1164,20 @@ describe('Compare', () => {
     expect(button('Difference', target).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('discards edits back to the saved version, where New would start over', async () => {
+  it('reverts edits back to the saved version, where New would start over', async () => {
     await open();
     button('Open', target).click();
     await settle();
     button('Harbour change', document.querySelector('[role="dialog"]')).click();
     await settle();
     expect(target.querySelector('.badge')).toBeNull();
-    expect(button('Discard', target).disabled).toBe(true);
+    expect(button('Revert', target)).toBeUndefined();
 
     button('Fade', target).click();
     flushSync();
     expect(target.querySelector('.badge').textContent).toBe('unsaved');
-    expect(button('Discard', target).disabled).toBe(false);
 
-    button('Discard', target).click();
+    button('Revert', target).click();
     flushSync();
     const dialog = document.querySelector('[role="alertdialog"]');
     expect(dialog.textContent).toContain('Harbour change');
@@ -941,6 +1187,18 @@ describe('Compare', () => {
     expect(target.querySelector('.compare-stage').classList.contains('swipe')).toBe(true);
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(2);
     expect(target.querySelector('.badge')).toBeNull();
+    expect(button('Revert', target)).toBeUndefined();
+  });
+
+  it('offers no Revert on a comparison that was never saved', async () => {
+    await open();
+    await add('A');
+    await add('B', 'Esri Wayback');
+    button('Fade', target).click();
+    flushSync();
+    expect(target.querySelector('.badge').textContent).toBe('unsaved');
+    expect(button('Revert', target)).toBeUndefined();
+    expect(button('Discard', target)).toBeUndefined();
   });
 });
 
@@ -993,7 +1251,7 @@ describe('one camera for the map tabs', () => {
     expect(took[0].setCamera).toHaveBeenCalledWith(expect.objectContaining({ ...SATELLITE }));
   });
 
-  it('keeps a saved comparison on the ground it was saved on', async () => {
+  it('brings a saved comparison along, the move leaving it saved', async () => {
     prefs.mapSync = true;
     await open();
     button('Open', target).click();
@@ -1005,7 +1263,21 @@ describe('one camera for the map tabs', () => {
     flushSync();
     uiState.tool = 'compare';
     flushSync();
-    for (const engine of engines) expect(engine.setCamera).not.toHaveBeenCalled();
+    const took = engines.filter((engine) => engine.setCamera.mock.calls.length);
+    expect(took).toHaveLength(1);
+    expect(took[0].setCamera).toHaveBeenCalledWith(expect.objectContaining({ ...SATELLITE }));
+    // the map lands there: looking elsewhere is not an edit to undo…
+    took[0].handlers['view-settled']({ ...SATELLITE });
+    flushSync();
     expect(target.querySelector('.badge')).toBeNull();
+    expect(button('Revert', target)).toBeUndefined();
+    // …and Compare does not send the other tabs back to where it was saved
+    expect(uiState.mapView.by).toBe('satellite');
+    // Save still keeps the new ground, and an edit after it still counts
+    expect(saveButton().disabled).toBe(false);
+    button('Fade', target).click();
+    flushSync();
+    expect(target.querySelector('.badge').textContent).toBe('unsaved');
+    expect(button('Revert', target)).toBeDefined();
   });
 });

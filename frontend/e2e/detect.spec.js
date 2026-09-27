@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture, restingCamera } from './app.fixture.js';
 
 const recipe = { id: 'change', name: 'Surface change', method: 'surface', phenomenon: 'Surface change',
   colour: '#f6a81a', style: 'both', parameters: { sensitivity: 60, min_area: 0, max_area: 0,
@@ -77,6 +77,17 @@ test('landing, dock rail and the When step fit the existing map workspace', asyn
   const { errors, calls, prefs } = await openDetect(page);
   await expect(page.getByRole('button', { name: 'Imagery provider', exact: true })).toContainText('Esri World Imagery');
   await expect(page.locator('.detect-tool > header')).toHaveCount(0);
+  // The ruler is stacked on the left between the search and the zoom buttons.
+  const [search, ruler, zoom] = await Promise.all([page.locator('.detect-tool .search'),
+    page.getByRole('button', { name: 'Measure', exact: true }), page.getByRole('button', { name: 'Zoom in' })]
+    .map((element) => element.boundingBox()));
+  expect(search.y + search.height).toBeLessThan(ruler.y);
+  expect(ruler.y + ruler.height).toBeLessThan(zoom.y);
+  expect(Math.abs(ruler.x - zoom.x)).toBeLessThan(8);
+  // The closed Layers chip is as tall as the imagery chip over it.
+  const [chip, picker] = await Promise.all(['.detect-tool .map-choices > :first-child', '.detect-tool .layer-picker']
+    .map((selector) => page.locator(selector).boundingBox()));
+  expect(Math.abs(picker.height - chip.height)).toBeLessThanOrEqual(1);
   const map = page.locator('.detect-tool .map');
   const before = await map.boundingBox();
   await page.getByRole('button', { name: 'Collapse Detect panel', exact: true }).click();
@@ -317,5 +328,49 @@ test('an analyzer of your own is built over the map: its rules painted, a point 
   await expect(layers).toHaveCount(0);
   await expect(page.locator('.mark')).toHaveCount(0);
   expect(previews.every((entry) => entry.recipe.method === 'rules')).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('takes the whole screen with its panel, folds it there, and gives it up to Compare', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  const held = () => page.evaluate(() => document.fullscreenElement?.classList.contains('detect-tool') ?? false);
+  const map = page.locator('.detect-tool .map');
+  const before = await map.boundingBox();
+  await page.getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect.poll(held).toBe(true);
+  await expect.poll(async () => (await map.boundingBox()).height).toBeGreaterThan(before.height);
+  await expect(page.getByRole('button', { name: 'New detection', exact: true })).toBeVisible();
+  // the panel still folds away, leaving the map the whole width
+  const panelled = await map.boundingBox();
+  await page.keyboard.press(']');
+  await expect(page.locator('.dock-tabs.rail')).toBeVisible();
+  await expect.poll(async () => (await map.boundingBox()).width).toBeGreaterThan(panelled.width + 200);
+  await expect(page.getByRole('button', { name: 'Exit full screen', exact: true })).toBeVisible();
+  await page.keyboard.press(']');
+
+  // the ground and the zoom reached in full screen are the ones the window gets back
+  const middle = await map.boundingBox();
+  await page.mouse.move(middle.x + middle.width / 2, middle.y + middle.height / 2);
+  await page.mouse.wheel(0, -120);
+  await page.mouse.down();
+  await page.mouse.move(middle.x + middle.width / 2 - 150, middle.y + middle.height / 2 - 60, { steps: 8 });
+  await page.mouse.up();
+  const there = await restingCamera(page, map);
+  await page.getByRole('button', { name: 'Exit full screen', exact: true }).click();
+  await expect.poll(held).toBe(false);
+  const back = await restingCamera(page, map);
+  expect(back.lat).toBeCloseTo(there.lat, 4);
+  expect(back.lon).toBeCloseTo(there.lon, 4);
+  expect(back.span / there.span).toBeCloseTo(1, 1);
+
+  // Open in… Compare leaves the screen on the way
+  await page.getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect.poll(held).toBe(true);
+  const box = await map.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+  await page.getByRole('menu', { name: 'This point' }).getByRole('menuitem', { name: /^Open in/ }).click();
+  await page.getByRole('menu', { name: 'Open this point in' }).getByRole('menuitem', { name: 'Compare', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+  await expect(page.locator('.tool-host:not(.hidden) h2')).toHaveText('Compare');
   expect(errors).toEqual([]);
 });

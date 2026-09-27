@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { changeSettings } from './changeAssist.js';
+import { mercatorPerPixel } from './groundFrame.js';
 
 const runChangeDetection = vi.fn(async ({ width, height }) => ({
   pixels: new Uint8ClampedArray(width * height * 4), width, height, counts: {},
@@ -103,6 +104,60 @@ describe('captured change frames', () => {
       family: 'sentinel2',
       ground: expect.objectContaining({ days: ['2026-08-01', '2026-09-01'] }),
     }));
+  });
+
+  it('asks for the resolution the reading draws at, along the projection the box is in', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ close: vi.fn() })));
+    fetch.mockResolvedValue({ ok: true, blob: async () => new Blob() });
+    const north = { ...frame, lat: 60, bearing: 0 };
+    await bandFrame(north, 80, 60, { sentinel: { date: '2026-09-01' } }, 'ndvi');
+    const asked = JSON.parse(fetch.mock.calls[0][1].body);
+    // Ground metres over a Mercator box asked for twice the pixels a side at 60°.
+    const drawn = mercatorPerPixel(north.zoom) * north.width / 80;
+    expect((asked.east - asked.west) / asked.width).toBeCloseTo(drawn, 0);
+    expect(asked.width).toBe(Math.round(80 * 1.4));
+  });
+
+  it('reads the sky at its own 20 m, over more ground for no more pixels', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ close: vi.fn() })));
+    fetch.mockResolvedValue({ ok: true, blob: async () => new Blob() });
+    const side = { sentinel: { date: '2026-09-01' } };
+    const flat = { ...frame, bearing: 0 };
+    await bandFrame(flat, 400, 300, side, 'ndvi');
+    await bandFrame(flat, 400, 300, side, 'sky');
+    const [index, sky] = fetch.mock.calls.map(([, request]) => JSON.parse(request.body));
+    const ground = (asked) => (asked.east - asked.west) / asked.width * Math.cos((flat.lat * Math.PI) / 180);
+    expect(ground(sky)).toBeCloseTo(20, 0);
+    expect(sky.width * sky.height).toBeLessThanOrEqual(index.width * index.height);
+    // a whole view past each edge, where the index keeps a fifth of one
+    expect((sky.east - sky.west) / (index.east - index.west)).toBeCloseTo(3 / 1.4, 1);
+  });
+
+  it('serves a view zoomed in from the sky it holds, since 20 m is all the sky there is', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ close: vi.fn() })));
+    fetch.mockResolvedValue({ ok: true, blob: async () => new Blob() });
+    const side = { sentinel: { date: '2026-09-01' } };
+    await bandFrame(frame, 400, 300, side, 'sky');
+    expect(await bandFrame({ ...frame, zoom: frame.zoom + 2 }, 400, 300, side, 'sky', false)).not.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a reading that may not fetch wait on bands already on their way', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ close: vi.fn() })));
+    let land;
+    fetch.mockReturnValue(new Promise((resolve) => (land = () => resolve({ ok: true, blob: async () => new Blob() }))));
+    const side = { sentinel: { date: '2026-09-01' } };
+    const asked = bandFrame(frame, 400, 300, side, 'sky');
+    await Promise.resolve();
+    // the camera nudged while the bands were coming: the reading that took over waits for them
+    const following = bandFrame({ ...frame, lng: frame.lng + 0.0005 }, 400, 300, side, 'sky', false);
+    land();
+    expect(await following).not.toBeNull();
+    expect(await asked).not.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // past what is on its way, it still says so rather than spending
+    const away = bandFrame({ ...frame, lng: frame.lng + 1 }, 400, 300, side, 'sky', false);
+    expect(await away).toBeNull();
   });
 
   it('reports a quota refusal without decoding or computing a mask', async () => {

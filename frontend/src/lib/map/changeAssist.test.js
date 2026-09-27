@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHANGE_DEFAULTS, changeCompatibility, changeNeedsFrames, changeSettings } from './changeAssist.js';
+import { CHANGE_DEFAULTS, CHANGE_PALETTES, changeCompatibility, changeNeedsFrames, changeSettings } from './changeAssist.js';
 
 const side = (patch = {}) => ({
   present: true,
@@ -104,6 +104,14 @@ describe('Difference settings', () => {
     expect(changeSettings({ normalize: true, noise: 3 })).toMatchObject({ normalize: 'auto' });
     // a session that chose histogram keeps it; only the default moved
     expect(changeSettings({ normalize: 'histogram' })).toMatchObject({ normalize: 'histogram' });
+  });
+
+  it('reaches a mid-strength change by default, drawn in hues the ground rarely has', () => {
+    expect(CHANGE_DEFAULTS.sensitivity).toBe(70);
+    expect(CHANGE_DEFAULTS.palette).toBe('directional');
+    // cyan and magenta: no longer green over vegetation or red over soil and roofs
+    expect(CHANGE_PALETTES.directional.gain).toEqual([0, 229, 255]);
+    expect(CHANGE_PALETTES.directional.loss).toEqual([255, 0, 170]);
   });
 
   it('keeps every value inside its range', () => {

@@ -56,7 +56,7 @@ from .satellite import locate_on_save, saved_changed
 router = APIRouter(prefix="/api", tags=["compare"])
 
 OVERLAYS = frozenset({
-    "boundaries", "roads", "railway", "power", "seamarks", "gpstraces",
+    "boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces",
     "firms", "nightlights", "saved",
 })
 MAX_FRAME_BYTES = 24_000_000

@@ -361,7 +361,7 @@ describe('an added layer on the map', () => {
     expect(marks.layout['symbol-sort-key']).toEqual(['get', 'index']);
   });
 
-  it('draws no text, because the engine loads no glyphs and will not start', async () => {
+  it('draws no text: a feature’s name is read in the hover and the card', async () => {
     const engine = stubEngine();
     await createAddedLayer(engine).set(COLLECTION, { categories: CATEGORIES });
 

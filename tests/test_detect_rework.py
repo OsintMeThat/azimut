@@ -94,8 +94,9 @@ def test_each_track_resolves_its_own_pass_and_only_the_missing_area_fails(client
     client.put("/api/settings/keys", json={"sentinelhub": "test-instance"})
     calls = []
     first_lon = body["zones"][0]["points"][0][0]
-    def lookup(instance, rings, start, end, collection="sentinel2"):
+    def lookup(instance, rings, start, end, collection="sentinel2", on_request=None):
         calls.append(rings)
+        on_request()  # one catalogue page, on the meter
         assert len(rings) == 1
         first = rings[0][0][0] == first_lon
         return {"dates": [] if partial and not first else [{"date": "2026-05-11" if first else "2026-05-13",

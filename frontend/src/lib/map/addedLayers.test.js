@@ -145,7 +145,7 @@ describe('how fresh what is drawn actually is', () => {
       stale: true,
     });
 
-    expect(freshness(stale, NOW)).toBe('stale — last read 10 Sep 2026');
+    expect(freshness(stale, NOW)).toBe('out of date, last read 10 Sep 2026');
   });
 
   it('says a subscription nothing has ever read has never been read', () => {

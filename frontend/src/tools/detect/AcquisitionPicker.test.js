@@ -86,7 +86,7 @@ describe('the acquisition picker', () => {
 
   it('says when the catalogue stopped short instead of implying a full list', () => {
     const { target, done } = render({ truncated: true });
-    expect(target.textContent).toContain('stopped at 100 passes');
+    expect(target.textContent).toContain('stopped short');
     done();
   });
 

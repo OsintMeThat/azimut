@@ -105,6 +105,34 @@ describe('Difference strip', () => {
     done();
   });
 
+  it('says what the reading is doing on Read itself, and lights it only when pressing it does something', () => {
+    const result = { share: 0.1, coverage: 1, area: 20, zones: [], zoneCount: 0 };
+    const read = (target) => target.querySelector('button.read');
+    const seen = Object.fromEntries(['due', 'reading', 'tiles', 'current'].map((reading) => {
+      const { target, done } = render({ reading, result });
+      const node = read(target);
+      const shown = [node.textContent.trim(), node.disabled, node.classList.contains('due'), node.title];
+      done();
+      return [reading, shown];
+    }));
+    expect(seen.due).toEqual(['Read', false, true, 'Read the pixels in this view']);
+    expect(seen.reading).toEqual(['Reading…', true, false, 'Reading the pixels in this view']);
+    expect(seen.tiles).toEqual(['Loading…', true, false, 'Waiting for the map tiles to load']);
+    // A press on an up-to-date reading used to do nothing and say nothing.
+    expect(seen.current).toEqual(['Up to date', true, false, 'Nothing moved since the last read']);
+    // What a press will cost is said before it is spent.
+    const bands = render({ reading: 'due', settings: changeSettings({ ignore_clouds: true }) });
+    expect(read(bands.target).title).toBe('Read this view, one Sentinel-2 request a side');
+    bands.done();
+  });
+
+  it('gives Read one width for every label, so the gear beside it never moves', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(join(here, 'DifferenceBar.svelte'), 'utf8');
+    expect(source).toMatch(/\.text-btn\.read \{ width: \d+px;/);
+    expect(source).not.toMatch(/\.text-btn\.read \{[^}]*min-width/);
+  });
+
   it('blinks the highlights on and off, which only touches the overlay', () => {
     const onrun = vi.fn();
     const { target, done } = render({ onrun });
@@ -119,7 +147,7 @@ describe('Difference strip', () => {
 
   it('says so in the panel when the highlights are from an earlier read', () => {
     const result = { share: 0.1, coverage: 1, area: 20, zones: [], zoneCount: 0 };
-    const { target, done } = render({ stale: true, result }, { open: true });
+    const { target, done } = render({ reading: 'due', result }, { open: true });
     expect(target.querySelector('.readout').textContent).toContain('From an earlier read');
     done();
   });
@@ -132,7 +160,7 @@ describe('Difference strip', () => {
     const idle = render({}, { open: true });
     const before = shape(idle.target);
     idle.done();
-    const reading = render({ busy: true, error: 'Could not compare these pixels', stale: true }, { open: true });
+    const reading = render({ reading: 'reading', error: 'Could not compare these pixels' }, { open: true });
     expect(shape(reading.target)).toEqual(before);
     expect(reading.target.querySelector('.readout [role="alert"]').textContent).toBe('Could not compare these pixels');
     reading.done();
@@ -184,6 +212,20 @@ describe('Difference strip', () => {
     free.done();
   });
 
+  it('reads the view as soon as a method or an index is chosen', async () => {
+    const onrun = vi.fn();
+    const { target, done } = render({ settings: changeSettings({ method: 'index', index: 'nbr' }),
+      status: { ...ready, methods: ['colour', 'index'] }, onrun }, { open: true });
+    const [method, index] = target.querySelectorAll('aside.settings select');
+    index.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve();
+    expect(onrun).toHaveBeenCalledTimes(1);
+    method.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve();
+    expect(onrun).toHaveBeenCalledTimes(2);
+    done();
+  });
+
   it('reads the view as soon as the cloud filter is switched on', async () => {
     // The switch says the sky is being read, so it cannot leave an unfiltered
     // reading up behind it.
@@ -198,7 +240,7 @@ describe('Difference strip', () => {
 
   it('states the index change it draws the line at', () => {
     const { target, done } = render({ settings: changeSettings({ method: 'index', index: 'nbr' }) }, { open: true });
-    expect(target.textContent).toContain('NBR moved by 0.25');
+    expect(target.textContent).toContain('NBR moved by 0.19');
     done();
   });
 });

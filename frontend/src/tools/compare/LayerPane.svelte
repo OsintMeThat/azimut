@@ -4,6 +4,8 @@
   import Icon from '../../components/Icon.svelte';
   import {
     DATED as FIRMS_DATED,
+    firmsNote,
+    keyState,
     lastDayOf,
     today as firmsToday,
     WINDOWS as FIRMS_WINDOWS,
@@ -24,6 +26,10 @@
     night,
     firmsSensors,
     firesKeyed,
+    /** Why the fire layer is not usable when it is not (`keyState`). */
+    firesState = 'missing',
+    /** A spent FIRMS allowance's pause, while it lasts. */
+    firesPaused = null,
     savedCount,
     ontoggle,
     onfirms,
@@ -35,9 +41,11 @@
   const disabled = (id) =>
     !present || (id === 'firms' && !firesKeyed) || (id === 'saved' && !savedCount);
   const on = (id) => overlays.includes(id);
+  const fireKey = $derived(keyState({ keyed: firesKeyed, state: firesState }));
+  const fireNote = $derived(firmsNote(firms, firesPaused));
   const disabledReason = (id) =>
     id === 'firms' && !firesKeyed
-      ? 'Add a FIRMS key in Settings'
+      ? fireKey.title
       : id === 'saved' && !savedCount
         ? 'No saved work in this case'
         : '';
@@ -143,6 +151,7 @@
                 </label>
               </div>
             {/if}
+            {#if fireNote}<p class="baseline">{fireNote}</p>{/if}
           </div>
         {/if}
 

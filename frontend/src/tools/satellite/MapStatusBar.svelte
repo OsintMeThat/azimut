@@ -34,7 +34,6 @@
 <div class="status">
   <div class="readouts card">
     <button class="hud-coords mono" onclick={copy} title="Copy coordinates">
-      <Icon name="crosshair" size={13} />
       {coords}
       <span class="z">z{zoom}</span>
       {#if pinned}<span class="pin-tag">pin</span>{/if}

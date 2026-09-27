@@ -356,8 +356,26 @@ describe('what is laid over the imagery', () => {
     expect(source).toContain("refLayers.roads && baseIsImagery && 'roads'");
     expect(source).toContain("railOverlay && 'railway'");
     const rows = source.slice(source.indexOf('const layerRows = $derived(['));
-    expect(rows.slice(0, 900)).toContain("label: 'OSM railways'");
-    expect(rows.slice(0, 900)).toContain('toggle: () => (railOverlay = !railOverlay)');
+    expect(rows).toContain('toggle: () => (railOverlay = !railOverlay)');
+  });
+
+  it('lists its layers in the order Compare, Detect and the proof map use', () => {
+    // the plain references first, then the specialist networks, the dated
+    // events, and the case last
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['), source.indexOf('...(sheetPoints'));
+    const labels = [...rows.matchAll(/^ {6}label: '([^']+)'/gm)].map((match) => match[1]);
+    expect(labels).toEqual([
+      'Borders',
+      'Place names',
+      'Roads',
+      'Railways',
+      'Power lines',
+      'Sea marks',
+      'GPS traces',
+      'Active fires',
+      'Night lights',
+      'Saved work',
+    ]);
   });
 
   it('gives the railways no rail seat', () => {
@@ -387,19 +405,31 @@ describe('what is laid over the imagery', () => {
     expect(back.slice(0, 700)).toContain('loadFireSensors()');
   });
 
-  it('offers the layer disabled, with the reason, when there is no key', () => {
+  it('offers the layer disabled, with the reason, when the key cannot be used', () => {
     const rows = source.slice(source.indexOf('const layerRows = $derived(['));
     expect(rows).toContain('disabled: !fires.keyed');
-    expect(rows).toContain('Add a NASA FIRMS key in Settings → Imagery');
-    // said on the row, where it can be read without hovering a greyed switch
-    expect(rows).toContain("detail: fires.keyed ? firmsSummary : 'needs a free key'");
-    expect(rows).toContain("actions: fires.keyed ? null : [{ label: 'Add a FIRMS key', quiet: true, run: openImagerySettings }]");
+    // said on the row, where it can be read without hovering a greyed switch;
+    // no key, a key switched off and a refused key each say their own thing
+    // (`keyState`, tested in lib/map/firms.test.js)
+    expect(rows).toContain('detail: fires.keyed ? firmsSummary : firmsKey.detail');
+    expect(rows).toContain('actions: fires.keyed ? null : [{ label: firmsKey.action, quiet: true, run: openImagerySettings }]');
+    expect(source).toContain('const firmsKey = $derived(keyState(fires));');
     expect(source).toContain("uiState.settingsTab = 'imagery';");
+  });
+
+  it('asks its own backend why when a fire tile fails, once for the burst', () => {
+    // the map shows nothing for a failed tile, so the row would never hear
+    // about a spent allowance or a refused key without this
+    expect(source).toContain("onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}");
+    const trouble = source.slice(source.indexOf('function fireTrouble()'));
+    expect(trouble.slice(0, 200)).toContain('clearTimeout(troubleTimer)');
+    expect(trouble.slice(0, 200)).toContain('setTimeout(loadFireSensors');
   });
 
   it('says a layer is for imagery only when the basemap is not imagery', () => {
     const rows = source.slice(source.indexOf('const layerRows = $derived(['));
-    expect(rows.match(/detail: baseIsImagery \? '' : 'imagery only'/g)).toHaveLength(1);
+    // the roads and the place names, which a street map already draws
+    expect(rows.match(/detail: baseIsImagery \? '' : 'imagery only'/g)).toHaveLength(2);
   });
 
   it('asks for no tile until the choice is one the service can answer', () => {
@@ -678,6 +708,37 @@ describe('a map in more than one window', () => {
     expect(source).toContain('if (!count) linked = false;');
   });
 
+  it('has no title row: the search floats above the rail, the window buttons beside the imagery', () => {
+    // the tab strip already names the tool, and every row above the map is map lost
+    expect(source).not.toContain('<div class="tool-header">');
+    const bar = source.slice(source.indexOf('<div class="map-bar"'), source.indexOf('<div class="map-tools"'));
+    expect(bar).toContain('<PlaceSearch');
+    // the rail starts under the search, however tall it renders
+    expect(source).toContain('const railTop = $derived(12 + searchHeight + 8);');
+    expect(source).toContain('<div class="map-tools" style:top={`${railTop}px`}>');
+    const beside = source.slice(source.indexOf('{#snippet beside()}'), source.indexOf('{/snippet}', source.indexOf('{#snippet beside()}')));
+    for (const label of ['Link the view to the other maps', 'Open in a new tab', 'Toggle fullscreen']) {
+      expect(beside).toContain(`aria-label="${label}"`);
+    }
+    // on the imagery chip's right, where the corner ends
+    const row = satelliteSources()['satellite/MapSurface.svelte'];
+    const ctl = row.slice(row.indexOf('<div class="ctl-row">'), row.indexOf('</div>', row.indexOf('<div class="ctl-row">')));
+    expect(ctl.indexOf('<ImageryChip')).toBeGreaterThan(-1);
+    expect(ctl.indexOf('{@render beside()}')).toBeGreaterThan(ctl.indexOf('<ImageryChip'));
+  });
+
+  it('dates Sentinel-2 on its chip and again under it, as the radar pass is', () => {
+    const surface = satelliteSources()['satellite/MapSurface.svelte'];
+    const s2Pill = surface.slice(
+      surface.indexOf('{#if s2 && shown.provider?.id === SENTINEL_ID}'),
+      surface.indexOf('{:else if s1 && shown.provider?.id === RADAR_ID}')
+    );
+    // the pill always reads the day, marks a pinned one, and says how it was chosen
+    expect(s2Pill).toContain('{pinnedDay ?? s2.latest ?? \'\'}');
+    expect(s2Pill).toContain('class:exact={!!pinnedDay}');
+    expect(s2Pill).toContain("{s2.latest ? 'latest' : 'most recent'}");
+  });
+
   it('opens that tab on the map alone', () => {
     // the rail, the case bar and the tab strip are how you get somewhere else,
     // and a second screen showing one map is already somewhere (lib/hash.js)
@@ -686,7 +747,7 @@ describe('a map in more than one window', () => {
 
   it('numbers a detached window, and leaves the first one unnumbered', () => {
     expect(source).toContain('const windowNumber = readWindowLabel(opening.params)');
-    expect(source).toContain('<h2>Satellite{windowNumber ? ` · ${windowNumber}` : \'\'}</h2>');
+    expect(source).toContain('{#if windowNumber}<span class="window-no mono" title="This map\'s window">Map {windowNumber}</span>{/if}');
     expect(source).toContain('if (windowNumber) document.title = `Azimut · Map ${windowNumber}`');
   });
 
@@ -740,25 +801,29 @@ describe('one camera for the map tabs', () => {
 });
 
 describe('the key-less reference layers', () => {
-  it('fetches no tile from any of them until its switch is pressed, borders apart', () => {
+  it('fetches no tile from any of them until its switch is pressed, borders and place names apart', () => {
     // local-first: a map not showing power lines asks nobody about power lines.
-    // Borders are the exception and are on from the start — they are map tiles,
-    // which is the network a map is opened to use.
+    // Borders and place names are the exception and are on from the start —
+    // they are map tiles, which is the network a map is opened to use.
     const state = source.slice(
       source.indexOf('const refLayers = $state({'),
       source.indexOf('const night = $state(')
     );
     expect(state).toContain('boundaries: true');
-    expect(state.replace('boundaries: true', '')).not.toContain('true');
+    expect(state).toContain('placenames: true');
+    expect(state.replace('boundaries: true', '').replace('placenames: true', '')).not.toContain('true');
     expect(source).toContain("const night = $state({ on: false, source: 'noaa20', day: lastNight() });");
   });
 
-  it('asks for each by id, and the roads only over imagery like the labels', () => {
+  it('asks for each by id, and the roads and the place names only over imagery', () => {
     for (const id of ['boundaries', 'power', 'seamarks', 'gpstraces']) {
       expect(source).toContain(`refLayers.${id} && '${id}'`);
     }
-    expect(source).toContain("refLayers.roads && baseIsImagery && 'roads'");
-    expect(source).toContain('if (!baseIsImagery && refLayers.roads) refLayers.roads = false;');
+    // a street map already names its villages and draws its roads
+    for (const id of ['roads', 'placenames']) {
+      expect(source).toContain(`refLayers.${id} && baseIsImagery && '${id}'`);
+      expect(source).toContain(`if (!baseIsImagery && refLayers.${id}) refLayers.${id} = false;`);
+    }
   });
 
   it('asks GIBS for no night until the choice is one it can answer', () => {

@@ -71,9 +71,9 @@ test('hands a second window the view the first one is showing', async ({ page, c
   // same ground…
   await expect(second.locator('.hud-coords')).toContainText('50.450');
   // …and it says which window it is, since two of them look identical
-  await expect(second.getByRole('heading', { name: 'Satellite · 2' })).toBeVisible();
+  await expect(second.locator('.map-bar .window-no')).toHaveText('Map 2');
   // the first one stays unnumbered and keeps its own view
-  await expect(page.getByRole('heading', { name: 'Satellite', exact: true })).toBeVisible();
+  await expect(page.locator('.map-bar .window-no')).toHaveCount(0);
 
   // two windows, two cameras: moving one leaves the other alone
   const box = await second.locator('.map').boundingBox();

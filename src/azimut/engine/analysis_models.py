@@ -107,15 +107,16 @@ def stored(model: type[M], data: Any) -> M:
 
 #: Map layers that no longer exist. A saved preference or a settings backup that
 #: still names one drops it rather than being refused: CARTO's labels went when
-#: their tiles began asking for a key, and the borders already name places.
+#: their tiles began asking for a key, and the place names now come from
+#: OpenFreeMap under an id of their own.
 RETIRED_OVERLAYS = frozenset({"labels"})
 
 
 class DetectPrefs(Model):
     collapsed: bool = False
     basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
-    overlays: list[Literal["boundaries", "roads", "railway", "power", "seamarks", "gpstraces"]] = Field(
-        default=["boundaries"], max_length=6)
+    overlays: list[Literal["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]] = (
+        Field(default=["boundaries", "placenames"], max_length=7))
     saved: bool = True
 
     @field_validator("overlays", mode="before")

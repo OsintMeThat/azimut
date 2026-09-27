@@ -22,6 +22,7 @@
   import { saveRelation } from '../lib/relations.svelte.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { openMapAt } from '../lib/navigate.js';
+  import { followFullscreen, toggleFullscreen } from '../lib/fullscreen.js';
   import { wrapLon } from '../lib/coords.js';
   import {
     COMPARE_LAYERS,
@@ -60,6 +61,7 @@
   } from '../lib/map/evolution.js';
   import { composeEvolutionFrame, composeEvolutionSheet, drawPictures } from '../lib/map/evolutionExport.js';
   import {
+    CHANGE_PALETTES,
     changeCompatibility,
     changeNeedsFrames,
     changeSettings,
@@ -137,6 +139,10 @@
   let home = $state(null);
   let catalogueError = $state('');
   let firesKeyed = $state(false);
+  /** Why the fire layer is not usable when it is not: 'missing' | 'off' | 'refused'. */
+  let firesState = $state('missing');
+  /** A spent FIRMS allowance's pause, while it lasts. */
+  let firesPaused = $state(null);
   let picking = $state(null); // 'a' | 'b' | null
   let mode = $state('side');
   let divider = $state(DEFAULT_DIVIDER);
@@ -149,6 +155,11 @@
   let searching = $state(false);
   let swiping = $state(false);
   let stageEl = $state(null);
+  let toolEl = $state(null);
+  let fullscreen = $state(false);
+  // The drawing rail opens folded on every visit, its width given to the
+  // maps, until `[` or its tab opens it.
+  let railFolded = $state(true);
   let rotating = $state(null); // { which, x, y } | null
   let outputBusy = $state(''); // 'capture' | 'png' | 'gif' | 'copy' | ''
   let rightPanel = $state(null); // 'export' | 'layers' | null
@@ -218,6 +229,10 @@
   const primeEngine = $derived(a.engine ?? b.engine);
 
   let changeBusy = $state(false);
+  /** A reading is on its way: the settle it follows has not fired yet. */
+  let changePending = $state(false);
+  /** A reading waits for tiles still loading, rather than failing on them. */
+  let changeTiles = $state(false);
   let changeError = $state('');
   let changeResult = $state(null);
   let changeUrl = $state('');
@@ -227,7 +242,9 @@
   const changeVisible = $derived(!changeOptions.blink || changeBlinkOn);
   const changeOver = (letter) => changeOptions.base === 'both' || changeOptions.base === letter;
   const changeOpacity = $derived(changeOptions.opacity);
-  const changePalette = $derived(changeOptions.palette);
+  // The legend's swatches come from the palette the overlay is drawn in.
+  const changeSwatches = $derived(Object.entries(CHANGE_PALETTES[changeOptions.palette] ?? CHANGE_PALETTES.directional)
+    .map(([name, [r, g, b]]) => `--${name}: rgb(${r},${g},${b})`).join('; '));
   const changeCounts = $derived(changeResult?.counts);
   let changeRequest = 0;
   let previousCaseId = null;
@@ -340,8 +357,8 @@
   const sessionDirty = $derived(
     (a.present || b.present) && sessionSignature() !== savedSignature
   );
-  // A preset as it opened, camera aside. Panning an untouched pair is looking,
-  // not work, so leaving it asks nothing; Save still takes it.
+  // A preset as it opened, or a comparison as it was saved, camera aside.
+  // Panning is looking, not work, so leaving asks nothing; Save still takes it.
   let pristineSignature = $state(null);
   const discardable = $derived(sessionDirty && pairSignature() !== pristineSignature);
   let firmsSensors = $state([]);
@@ -451,6 +468,8 @@
     })();
     return () => {
       gone = true;
+      clearTimeout(firesPauseTimer);
+      clearTimeout(firesTroubleTimer);
     };
   });
 
@@ -468,10 +487,27 @@
       const answer = await api.get('/api/firms/sensors');
       firmsSensors = answer.sensors ?? [];
       firesKeyed = Boolean(answer.keyed);
+      firesState = answer.state ?? 'missing';
+      firesPaused = answer.paused ?? null;
     } catch {
       firmsSensors = [];
       firesKeyed = false;
+      firesPaused = null;
     }
+    // A pause ends on its own; the panes hear it then. Our own backend, once.
+    clearTimeout(firesPauseTimer);
+    if (firesPaused) {
+      const left = Date.parse(firesPaused.until) - Date.now();
+      firesPauseTimer = setTimeout(loadFireCatalogue, Math.max(1000, left + 500));
+    }
+  }
+
+  let firesPauseTimer = null;
+  let firesTroubleTimer = null;
+  /** A FIRMS tile failed on either side: ask our backend why, once per burst. */
+  function fireTrouble() {
+    clearTimeout(firesTroubleTimer);
+    firesTroubleTimer = setTimeout(loadFireCatalogue, 800);
   }
 
   function side(which) {
@@ -680,6 +716,8 @@
     mode;
     a.present;
     b.present;
+    fullscreen;
+    railFolded;
     void tick().then(() => {
       a.engine?.resize();
       b.engine?.resize();
@@ -691,11 +729,22 @@
     });
   });
 
+  // The whole tool takes the screen, bars and panels with it, so Save and
+  // Export stay in reach.
+  $effect(() => {
+    if (toolEl) return followFullscreen(toolEl, (on) => (fullscreen = on));
+  });
+  function switchFullscreen() {
+    toggleFullscreen(toolEl).catch(() => toast('Full screen is not available', 'danger'));
+  }
+
   // Tools stay mounted while hidden so their work survives a tab switch.
   $effect(() => {
     if (uiState.tool !== 'compare') return;
     imagery.refreshUsage();
     loadProviders();
+    // a FIRMS key pasted into Settings, or tested back to life there
+    loadFireCatalogue();
     void tick().then(() => {
       a.engine?.resize();
       b.engine?.resize();
@@ -836,7 +885,10 @@
     difference = on;
     if (!on) return;
     if (!changeStatus.methods.includes(changeOptions.method)) changeOptions.method = changeStatus.methods[0];
-    void refreshChangeAssist({ fetch: false });
+    // Turning it on by hand asks for a reading, bands included. Queued behind
+    // the flush the switch starts, so the follow-up that flush schedules is the
+    // one this replaces, and not the other way round.
+    queueMicrotask(() => void refreshChangeAssist());
   }
 
   function setDividerAt(clientX) {
@@ -909,9 +961,9 @@
     return JSON.stringify([sessionName.trim(), sessionSpec()]);
   }
 
-  function pairSignature() {
-    const { camera, ...pair } = sessionSpec();
-    return JSON.stringify([sessionName.trim(), pair]);
+  function pairSignature(spec = sessionSpec(), title = sessionName.trim()) {
+    const { camera, ...pair } = spec;
+    return JSON.stringify([title, pair]);
   }
 
   function requestSaveSession() {
@@ -935,7 +987,7 @@
       if (caseState.current?.id !== owner.id) return;
       sessionName = result.title;
       openedSession = { name: result.name, title: result.title };
-      pristineSignature = null;
+      pristineSignature = pairSignature(savedSpec, result.title);
       savedSignature = JSON.stringify([result.title, savedSpec]);
       saveDialog = false;
       let previewError = null;
@@ -1031,6 +1083,8 @@
       mode = compareMode(spec.mode);
       // Difference used to be a mode of its own, laid over the pair side by side.
       difference = spec.difference === true || spec.mode === 'change';
+      // A reopened session reads nothing it has not been asked to, bands included.
+      changeReadScope = '';
       divider = percentage(spec.divider, DEFAULT_DIVIDER);
       opacity = percentage(spec.opacity, DEFAULT_OPACITY);
       changeOptions = changeSettings(spec.change_assist);
@@ -1053,6 +1107,7 @@
       a.engine?.resize();
       b.engine?.resize();
       savedSignature = sessionSignature();
+      pristineSignature = pairSignature();
       if (difference) void refreshChangeAssist({ fetch: false });
       toast(`Opened ${sessionName}`, 'ok');
     } catch (error) {
@@ -1097,8 +1152,8 @@
    * when this tab shows. One map takes it and the link brings the other along;
    * with neither built, the camera they will open on moves.
    *
-   * A saved comparison keeps the ground it was saved on: its camera is part of
-   * what was saved, and a pan made in another tab would leave it unsaved.
+   * A saved comparison follows too: its camera is not an edit (see
+   * `pristineSignature`), and holding it would send the other tabs back to it.
    */
   const share = shareView('compare', { state: uiState, enabled: () => prefs.mapSync });
 
@@ -1106,7 +1161,6 @@
     uiState.mapView;
     if (uiState.tool !== 'compare' || !home) return;
     untrack(() => {
-      if (openedSession) return;
       const engine = a.engine ?? b.engine;
       const next = share.pending(engine ? engine.camera() : { ...view, bearing });
       if (!next) return;
@@ -1215,16 +1269,13 @@
   }
 
   /**
-   * Throw the edits away and keep the work: a comparison that was saved goes
-   * back to the version on disk, one that never was goes back to the default
-   * pair. New always starts over, which is why it is not an answer to "undo
-   * what I just did".
+   * Throw the edits away and keep the work: a saved comparison goes back to the
+   * version on disk. One that never was has nothing to go back to, so New is
+   * its way to start over.
    */
-  function requestDiscardChanges() {
-    if (!discardable || sessionBusy) return;
-    discardTarget = openedSession
-      ? { kind: 'revert', name: openedSession.name }
-      : { kind: 'new' };
+  function requestRevert() {
+    if (!openedSession || !discardable || sessionBusy) return;
+    discardTarget = { kind: 'revert', name: openedSession.name };
   }
 
   function confirmDiscard() {
@@ -1272,28 +1323,41 @@
     new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   let changeTimer;
+  /** A reading asked for (Read, a choice) that has not landed yet: bands are allowed until it does. */
+  let changeAsked = false;
   let changeRenderedKey = $state('');
   const detectionKey = $derived(changeKey());
 
   const changeFrames = $derived(changeNeedsFrames(changeSettings(changeOptions), changeStatus));
+  // What Read can honestly say: its move ("due"), the reading's, or nothing left to do.
+  const changeState = $derived(
+    changeTiles ? 'tiles'
+      : changeBusy || changePending ? 'reading'
+        : changeResult && !changeError && changeRenderedKey === detectionKey ? 'current'
+          : 'due');
+
+  /** What a reading reads, the camera aside: the pair and the analysis settings. */
+  function changeScope() {
+    const { opacity, base, blink, zones, ...analysis } = changeSettings(changeOptions);
+    return JSON.stringify([changeSide(a, s2a, wba, shownA, s1a), changeSide(b, s2b, wbb, shownB, s1b), analysis]);
+  }
 
   function changeKey() {
-    const { opacity, base, blink, zones, ...analysis } = changeSettings(changeOptions);
-    return JSON.stringify([
-      changeSide(a, s2a, wba, shownA, s1a),
-      changeSide(b, s2b, wbb, shownB, s1b),
-      view,
-      bearing,
-      analysis,
-    ]);
+    return JSON.stringify([changeScope(), view, bearing]);
   }
+
+  /** The scope the last reading landed for: once read, a pair's bands follow the camera. */
+  let changeReadScope = '';
+  /** How long the camera rests past the held ground before its bands are fetched again. */
+  const CHANGE_REST_MS = 700;
 
   function invalidateChangeAssist() {
     changeRenderedKey = '';
     if (!difference) return;
-    // A reading that follows the camera never spends a request: it runs on the
-    // band frames already held, and waits for Run when they no longer reach.
+    // A reading that follows the camera runs on the band frames already held;
+    // past them it waits for the camera to rest (see `refreshChangeAssist`).
     clearTimeout(changeTimer);
+    changePending = true;
     changeTimer = setTimeout(() => void refreshChangeAssist({ fetch: false }), 180);
   }
 
@@ -1310,11 +1374,26 @@
     }
   }
 
+  const tilesLoading = () => [a, b].some((side) => side.engine?.tilesLoading?.());
+  // A map that can say it is loading can be waited on: its capture waits for
+  // the tiles itself, so trying again is never a spin.
+  const canWaitForTiles = () => [a, b].every((side) => typeof side.engine?.tilesLoading === 'function');
+
   async function refreshChangeAssist({ fetch = true } = {}) {
+    // This reading replaces the one waiting to follow the camera, which would
+    // otherwise start 180 ms in and throw away a Read still fetching its bands.
+    clearTimeout(changeTimer);
+    changePending = false;
+    // A read that was asked for and then overtaken by a move hands its ask to
+    // the reading that took over: Read reads the view the camera settles on,
+    // where it once spent the request and then threw the answer away.
+    const allowed = fetch || changeAsked;
+    changeAsked = false;
     if (!difference || !changeStatus.ok) return;
     if (!changeStatus.methods.includes(changeOptions.method)) { changeError = 'Choose a compatible method'; return; }
     const key = changeKey();
     if (key === changeRenderedKey && changeResult) return;
+    changeAsked = allowed;
     const settings = changeSettings(changeOptions);
     const sides = [changeSide(a, s2a, wba, shownA, s1a), changeSide(b, s2b, wbb, shownB, s1b)];
     const request = ++changeRequest;
@@ -1324,41 +1403,76 @@
       await tick();
       await twoPaints();
       if (request !== changeRequest || key !== changeKey()) return;
-      const sources = await sourceCanvases();
-      if (request !== changeRequest || key !== changeKey()) return;
-      const result = await detectCaptures(sources, settings, sides, changeStatus, fetch);
+      // Tiles in flight are waited out, however long they take: a reading that
+      // gave up on them left the analyst to guess that Read would now work.
+      let sources = null;
+      while (!sources) {
+        changeTiles = tilesLoading();
+        try {
+          sources = await sourceCanvases();
+        } catch (error) {
+          if (!(error instanceof TilesLoading) || !canWaitForTiles()) throw error;
+        }
+        if (request !== changeRequest || key !== changeKey()) return;
+      }
+      changeTiles = false;
+      const result = await detectCaptures(sources, settings, sides, changeStatus, allowed);
       if (request !== changeRequest || !difference || key !== changeKey()) return;
-      // Nothing held reaches this view: the last reading stays up, marked out
-      // of date, until the analyst asks for the frames.
-      if (result.needsFetch) return;
+      // Nothing held reaches this view. A pair already read with its bands
+      // follows the camera with them: once it rests, they are fetched again, as
+      // the tiles it just drew were. A new pair, another date or a reopened
+      // session waits for Read, the last reading up and marked out of date.
+      if (result.needsFetch) {
+        if (changeScope() === changeReadScope) {
+          changePending = true;
+          changeTimer = setTimeout(() => void refreshChangeAssist(), CHANGE_REST_MS);
+        }
+        return;
+      }
       changeResult = result;
       placeChangeMap();
       changeUrl = result.canvas.toDataURL('image/png');
       changeRenderedKey = key;
+      changeReadScope = changeScope();
     } catch (error) {
       if (request !== changeRequest) return;
       changeResult = null;
       changeUrl = '';
       changeError = error?.message ?? 'Could not compare these pixels';
     } finally {
-      if (request === changeRequest) changeBusy = false;
+      if (request === changeRequest) {
+        changeBusy = false;
+        changeTiles = false;
+        changeAsked = false;
+      }
     }
   }
 
   $effect(() => {
-    if (!difference || uiState.tool !== 'compare') { changeRequest++; return; }
+    if (!difference || uiState.tool !== 'compare') {
+      changeRequest++;
+      changePending = false;
+      changeAsked = false;
+      if (!difference) changeReadScope = '';
+      return;
+    }
     if (!changeStatus.ok) {
       changeRequest += 1;
+      changeAsked = false;
       changeResult = null;
       changeUrl = '';
       changeError = changeStatus.reason;
       changeBusy = false;
+      changeTiles = false;
+      changePending = false;
       return;
     }
     detectionKey;
     changeRequest++;
     changeBusy = false;
+    changeTiles = false;
     clearTimeout(changeTimer);
+    changePending = true;
     changeTimer = setTimeout(() => void refreshChangeAssist({ fetch: false }), 180);
     return () => clearTimeout(changeTimer);
   });
@@ -1485,6 +1599,7 @@
         if (reading) { setMode(reading.id); return; }
         if (key === DIFFERENCE_KEY && (difference || changeStatus.ok)) { setDifference(!difference); return; }
         if (key === ' ' && mode === 'blink') { event.preventDefault(); blinkPaused = !blinkPaused; return; }
+        if (key === '[') { railFolded = !railFolded; return; }
       }
       if ((event.ctrlKey || event.metaKey) && key === 'z') {
         event.preventDefault();
@@ -1717,6 +1832,13 @@
     return canvas;
   }
 
+  /** A capture taken with tiles still in flight: a reading waits, an export says so. */
+  class TilesLoading extends Error {
+    constructor() {
+      super('Some tiles are still loading. Try again');
+    }
+  }
+
   async function sourceCanvases() {
     if (!both || !a.ready || !b.ready) {
       throw new Error('both maps must be ready before they can be exported');
@@ -1724,7 +1846,7 @@
     if (!hasWidget) {
       const frames = [surfaceFrame(a), surfaceFrame(b)];
       const captures = await Promise.all([a.engine.snapshot(), b.engine.snapshot()]);
-      if (captures.some((capture) => !capture.complete)) throw new Error('Some tiles are still loading. Try again');
+      if (captures.some((capture) => !capture.complete)) throw new TilesLoading();
       if ([a, b].some((target, index) => JSON.stringify(surfaceFrame(target)) !== JSON.stringify(frames[index]))) {
         throw new Error('The map moved during capture. Settle it and try again');
       }
@@ -2143,46 +2265,47 @@
   }
 </script>
 
-<div class="tool compare-tool" inert={sessionBusy}>
+<div class="tool compare-tool" class:grabbing inert={sessionBusy} bind:this={toolEl}>
+  <!-- One row above the maps. With a pair on screen the reading modes take the
+       title's place, since the tab strip already says which tool this is. -->
   <div class="tool-header">
-    <h2>Compare</h2>
-    {#if a.present || b.present}
-      <input
-        class="input session-title"
-        bind:value={sessionName}
-        maxlength="200"
-        aria-label="Comparison name"
-        onkeydown={(event) => event.key === 'Enter' && requestSaveSession()}
-      />
-      {#if discardable}<span class="badge">unsaved</span>{/if}
+    {#if both}
+      <ModeDock {mode} {difference} differenceable={difference || changeStatus.ok}
+        onmode={setMode} ondifference={setDifference} onswap={swapSides} />
+      <button class="btn btn-sm" class:active={stripOpen} disabled={!archive} aria-pressed={stripOpen}
+        onclick={() => (stripOpen = !stripOpen)}
+        title={archive ? 'Every dated picture of this point'
+          : 'Show the same dated archive on A and B to list its pictures'}>
+        <Icon name="clock" size={13} /> All dates
+      </button>
     {:else}
+      <h2>Compare</h2>
+    {/if}
+    {#if !a.present && !b.present}
       <span class="sub">Two imagery views, one shared camera</span>
     {/if}
     <div class="spacer"></div>
+    <!-- The name sits with the acts that save and discard it. -->
     {#if a.present || b.present}
-      <PlaceSearch
-        bind:value={coordsText}
-        savedRows={[]}
-        centre={activeView}
-        units={prefs.units}
-        {searching}
-        listId="compare-suggestions"
-        onpick={goToSuggestion}
-        onsubmit={goTo}
+      {#if discardable}<span class="badge">unsaved</span>{/if}
+      <input
+        class="input title-input session-title"
+        bind:value={sessionName}
+        maxlength="200"
+        aria-label="Comparison name"
+        title="Rename this comparison"
+        onkeydown={(event) => event.key === 'Enter' && requestSaveSession()}
       />
     {/if}
     <button class="btn btn-sm" onclick={openSessionList} disabled={!caseState.current || sessionBusy} title="Open a saved comparison">
       <Icon name="folderOpen" size={13} /> Open
     </button>
-    {#if a.present || b.present}
-      <button
-        class="btn btn-sm"
-        onclick={requestDiscardChanges}
-        disabled={!discardable || sessionBusy}
-        title={openedSession ? 'Go back to the saved version' : 'Throw this comparison away'}
-      >
-        <Icon name="undo" size={13} /> Discard
+    {#if openedSession && discardable}
+      <button class="btn btn-sm" onclick={requestRevert} disabled={sessionBusy} title="Go back to the saved version">
+        <Icon name="undo" size={13} /> Revert
       </button>
+    {/if}
+    {#if a.present || b.present}
       <div class="new-wrap" bind:this={newMenuEl}>
         <button class="btn btn-sm" onclick={() => (newMenu = !newMenu)} title="Start a new comparison"
           aria-expanded={newMenu} aria-haspopup="menu">
@@ -2204,35 +2327,28 @@
         {/if}
       </div>
     {/if}
+    {#if both}
+      <button class="btn btn-sm" onclick={() => toggleRightPanel('export')} disabled={!a.ready || !b.ready || !!outputBusy}>
+        <Icon name="download" size={13} /> Export
+      </button>
+    {/if}
     <button
       class="btn btn-primary btn-sm"
       onclick={requestSaveSession}
       disabled={!both || sessionBusy || !sessionDirty}
       title="Keep this editable comparison in My work"
     >
-      <Icon name="save" size={13} /> {sessionBusy ? 'Saving…' : 'Save comparison'}
+      <Icon name="save" size={13} /> {sessionBusy ? 'Saving…' : 'Save'}
     </button>
+    <button
+      class="btn btn-sm btn-ghost"
+      aria-pressed={fullscreen}
+      onclick={switchFullscreen}
+      title={fullscreen ? 'Back to the window (Esc)' : 'Compare on the whole screen'}
+      aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+    ><Icon name={fullscreen ? 'minimize' : 'maximize'} size={13} /></button>
   </div>
 
-  {#if both}
-    <div class="compare-bar">
-      <ModeDock {mode} {difference} differenceable={difference || changeStatus.ok}
-        onmode={setMode} ondifference={setDifference} onswap={swapSides} />
-      <button class="btn btn-sm" class:active={stripOpen} disabled={!archive} aria-pressed={stripOpen}
-        onclick={() => (stripOpen = !stripOpen)}
-        title={archive ? 'Every dated picture of this point'
-          : 'Show the same dated archive on A and B to list its pictures'}>
-        <Icon name="clock" size={13} /> All dates
-      </button>
-      <div class="spacer"></div>
-      <span class="camera-readout mono">z{Number(view.zoom).toFixed(1)}</span>
-      <!-- One camera, so one compass: it turns both maps and resets them. -->
-      <Compass {bearing} onbearing={(deg) => primeEngine?.setBearing(deg)} />
-      <button class="btn btn-sm" onclick={() => toggleRightPanel('export')} disabled={!a.ready || !b.ready || !!outputBusy}>
-        <Icon name="download" size={13} /> Export
-      </button>
-    </div>
-  {/if}
   {#if !a.present && !b.present}
     <div class="presets">
       {#each availablePresets(imagery.providers) as preset}
@@ -2247,6 +2363,7 @@
   <div class="compare-workspace">
   {#if both}
     <AnnotationToolbar
+      bind:collapsed={railFolded}
       bind:tool={annotationTool}
       selected={editableAnnotation}
       canUndo={annotationUndo.length > 0}
@@ -2275,24 +2392,7 @@
     />
   {/if}
 
-  <!-- The cards ride over the stage, not over the tool: the annotation rail on
-       the left narrows the stage, and a full-width bar put the seam between
-       the cards tens of pixels away from the seam between the maps. -->
   <div class="stage-column">
-  {#if a.present || b.present}
-    <div class="source-bar" aria-label="Compared imagery">
-      {#if a.present}
-        <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba} s1={s1a}
-          shown={shownA} dated={a.dated} layerCount={a.overlays.length} layersOpen={rightPanel === 'layers'}
-          onlayers={() => toggleRightPanel('layers')} onremove={() => remove('a')} />
-      {:else}<button class="source-add" onclick={() => (picking = 'a')}>A · Add imagery</button>{/if}
-      {#if b.present}
-        <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb} s1={s1b}
-          shown={shownB} dated={b.dated} align="right" layerCount={b.overlays.length} layersOpen={rightPanel === 'layers'}
-          onlayers={() => toggleRightPanel('layers')} onremove={() => remove('b')} />
-      {:else}<button class="source-add" onclick={() => (picking = 'b')}>B · Add imagery</button>{/if}
-    </div>
-  {/if}
   <div
     class="compare-stage"
     class:overlay={both && mode !== 'side'}
@@ -2306,10 +2406,51 @@
     style:--change-opacity={changeOpacity / 100}
     bind:this={stageEl}
   >
+    <!-- The cards float over the maps they describe, one column per pane, so
+         the seam between A and B is one line and no bar takes the maps'
+         height. The view's own controls ride in B's corner. -->
+    {#if a.present || b.present}
+      <div class="source-bar" aria-label="Compared imagery">
+        {#if a.present}
+          <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba} s1={s1a}
+            shown={shownA} dated={a.dated} layerCount={a.overlays.length} layersOpen={rightPanel === 'layers'}
+            onlayers={() => toggleRightPanel('layers')} onremove={() => remove('a')} />
+        {:else}<button class="source-add cmp-glass" onclick={() => (picking = 'a')}>A · Add imagery</button>{/if}
+        <div class="source-b">
+          {#if b.present}
+            <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb} s1={s1b}
+              shown={shownB} dated={b.dated} align="right" layerCount={b.overlays.length} layersOpen={rightPanel === 'layers'}
+              onlayers={() => toggleRightPanel('layers')} onremove={() => remove('b')} />
+          {:else}<button class="source-add cmp-glass" onclick={() => (picking = 'b')}>B · Add imagery</button>{/if}
+          <!-- Stacked in the corner as Detect's column is: where to go, then how
+               the shared camera stands. -->
+          <div class="view-col">
+            <div class="search-chip cmp-glass">
+            <PlaceSearch
+              bind:value={coordsText}
+              savedRows={[]}
+              centre={activeView}
+              units={prefs.units}
+              {searching}
+              listId="compare-suggestions"
+              onpick={goToSuggestion}
+              onsubmit={goTo}
+            />
+            </div>
+            {#if both}
+              <div class="camera-chip cmp-glass">
+                <span class="camera-readout mono" title="Zoom level of both maps">z{Number(view.zoom).toFixed(1)}</span>
+                <!-- One camera, so one compass: it turns both maps and resets them. -->
+                <Compass {bearing} onbearing={(deg) => primeEngine?.setBearing(deg)} />
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
     {#if a.present && home}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="surface-shell primary" oncontextmenu={(event) => onOverlayMenu('a', event)}>
-        <div class="surface-label"><strong>A</strong></div>
         <MapSurface
           bind:this={a.surface}
           bind:engine={a.engine}
@@ -2336,6 +2477,7 @@
           onwidgetload={(meter) => imagery.countLoad(meter)}
           onwidgetauthfailure={onWidgetAuthFailure}
           onwidgetfailed={(provider, error) => onWidgetFailed('a', provider, error)}
+          onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
           onviewsettled={(next) => onSurfaceSettled('a', next)}
           onbearingchange={(next) => onSurfaceBearing('a', next)}
           oncontextmenu={(at) => onMapContextMenu('a', at)}
@@ -2349,6 +2491,7 @@
               actions={pointActions}
               tools={pointTools}
               lookup={pointMenu.lookup}
+              {fullscreen}
               onpick={onPointMenu}
               onclose={closePointMenu}
             />
@@ -2359,6 +2502,7 @@
               items={savedWork.rows}
               caseId={caseState.current?.id}
               coords={savedCoords}
+              {fullscreen}
               onopen={openSaved}
               onedit={editSaved}
               onrefresh={reloadCase}
@@ -2368,7 +2512,7 @@
         <!-- The mask is ground, not screen: it is laid on each map through that
              map's own frame, so "Both" shows one reading over two pictures. -->
         {#if both && difference && changeOver('a') && changeUrl && changeVisible}
-          <img class="change-map" src={changeUrl} alt="Pixel-change heatmap over imagery A"
+          <img class="change-map" class:stale={changeState === 'due'} src={changeUrl} alt="Pixel-change heatmap over imagery A"
             style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
             style:transform={changeTransform.a} />
         {/if}
@@ -2405,7 +2549,6 @@
         class:blink-hidden={mode === 'blink' && !blinkB}
         oncontextmenu={(event) => onOverlayMenu('b', event)}
       >
-        <div class="surface-label"><strong>B</strong></div>
         <MapSurface
           bind:this={b.surface}
           bind:engine={b.engine}
@@ -2432,6 +2575,7 @@
           onwidgetload={(meter) => imagery.countLoad(meter)}
           onwidgetauthfailure={onWidgetAuthFailure}
           onwidgetfailed={(provider, error) => onWidgetFailed('b', provider, error)}
+          onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
           onviewsettled={(next) => onSurfaceSettled('b', next)}
           onbearingchange={(next) => onSurfaceBearing('b', next)}
           oncontextmenu={(at) => onMapContextMenu('b', at)}
@@ -2445,6 +2589,7 @@
               actions={pointActions}
               tools={pointTools}
               lookup={pointMenu.lookup}
+              {fullscreen}
               onpick={onPointMenu}
               onclose={closePointMenu}
             />
@@ -2455,6 +2600,7 @@
               items={savedWork.rows}
               caseId={caseState.current?.id}
               coords={savedCoords}
+              {fullscreen}
               onopen={openSaved}
               onedit={editSaved}
               onrefresh={reloadCase}
@@ -2462,7 +2608,7 @@
           {/if}
         </MapSurface>
         {#if both && difference && changeOver('b') && changeUrl && changeVisible}
-          <img class="change-map" src={changeUrl} alt="Pixel-change heatmap over imagery B"
+          <img class="change-map" class:stale={changeState === 'due'} src={changeUrl} alt="Pixel-change heatmap over imagery B"
             style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
             style:transform={changeTransform.b} />
         {/if}
@@ -2528,11 +2674,15 @@
     {/if}
 
     {#if both && difference}
-      <div class="change-legend" class:colourblind={changePalette === 'colourblind'}>
+      <div class="change-legend" style={changeSwatches}>
         <span><i class="gain"></i> Appeared / stronger in B</span>
         <span><i class="loss"></i> Disappeared / weaker from A</span>
         <span><i class="changed"></i> Other evolution</span>
-        {#if changeBusy}<em>Reading…</em>{:else if changeError}<em class="warn">{changeError}</em>{:else if changeCounts}<em class:warn={changeRenderedKey !== detectionKey}>{changeShare(changeCounts)}% highlighted{changeRenderedKey !== detectionKey ? ' · from an earlier read' : ''}</em>{/if}
+        {#if changeState === 'tiles'}<em>Waiting for the tiles…</em>
+        {:else if changeState === 'reading'}<em>Reading…</em>
+        {:else if changeError}<em class="warn">{changeError}</em>
+        {:else if changeState === 'due'}<em class="warn">{changeCounts ? `${changeShare(changeCounts)}% highlighted · out of date, press Read` : 'Not read yet, press Read'}</em>
+        {:else if changeCounts}<em>{changeShare(changeCounts)}% highlighted</em>{/if}
       </div>
     {/if}
 
@@ -2552,8 +2702,7 @@
       <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
       {#if difference}
         <DifferenceBar bind:settings={changeOptions} status={changeStatus} result={changeResult}
-          busy={changeBusy} error={changeError}
-          stale={!!changeResult && changeRenderedKey !== detectionKey}
+          reading={changeState} error={changeError}
           onrun={() => refreshChangeAssist()} onzone={visitZone} onanalyzer={saveAsAnalyzer} />
       {/if}
     </div>
@@ -2698,6 +2847,8 @@
           night={a.night}
           {firmsSensors}
           {firesKeyed}
+          {firesState}
+          {firesPaused}
           savedCount={savedWork.rows.length}
           ontoggle={(layer) => toggleLayer(a, layer)}
           onfirms={(patch) => patchLayer(a, 'firms', patch)}
@@ -2714,6 +2865,8 @@
           night={b.night}
           {firmsSensors}
           {firesKeyed}
+          {firesState}
+          {firesPaused}
           savedCount={savedWork.rows.length}
           ontoggle={(layer) => toggleLayer(b, layer)}
           onfirms={(patch) => patchLayer(b, 'firms', patch)}
@@ -2853,14 +3006,20 @@
 
 <style>
   .tool { position: relative; }
+  /* The fullscreen backdrop is black, and the header draws no background of its own. */
+  .tool:fullscreen { background: var(--bg-0); }
   .spacer { flex: 1; }
-  .tool-header { min-height: 55px; }
-  .tool-header :global(.place-search) { width: min(440px, 40vw); }
-  .session-title {
-    width: min(250px, 22vw);
-    height: 30px;
-    padding: 4px 8px;
-    font-weight: 650;
+  .tool-header { min-height: 48px; padding-block: 6px; gap: 8px; }
+  .tool-header > :global(*) { flex-shrink: 0; }
+  /* The name gives way before any button does, so the row never wraps. */
+  /* The shared title field of Inspect and the composers, so it reads as a name
+     to type over. It gives way before any button does, so the row never wraps. */
+  .tool-header .session-title {
+    flex: 0 1 240px;
+    width: 240px;
+    min-width: 100px;
+    height: 28px;
+    padding: 3px 10px;
   }
   .badge {
     padding: 2px 6px;
@@ -2871,17 +3030,49 @@
     text-transform: uppercase;
     letter-spacing: .05em;
   }
+  /* Two columns set 8px inside the two panes (1px stage padding, 1px seam), so
+     each card sits in its own map's corner. Only the cards take the pointer;
+     the map stays grabbable between them. */
   .source-bar {
+    position: absolute;
+    top: 8px;
+    left: 9px;
+    right: 9px;
+    z-index: 650;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 1px;
-    padding: 1px;
-    border-bottom: 1px solid var(--border);
-    background: var(--border-strong);
+    column-gap: 17px;
+    align-items: start;
+    pointer-events: none;
   }
-  .source-add { color: var(--text-3); background: var(--bg-1); }
-  .compare-bar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: var(--bg-1); }
+  .source-bar > :global(*),
+  .source-b > :global(*) { pointer-events: auto; }
+  .source-bar > :global(.source-card) { justify-self: start; }
+  .source-b {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+    pointer-events: none;
+  }
+  .source-add { justify-self: start; height: 38px; padding: 0 12px; color: var(--text-2); font-size: var(--fs-sm); }
+  .source-add:hover { color: var(--text-1); border-color: var(--accent); }
+  /* Lifted off the imagery, which can be as dark as the chips themselves. */
+  .source-bar :global(.cmp-glass) { box-shadow: var(--shadow-1); }
+  .view-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: auto; pointer-events: none; }
+  .view-col > * { pointer-events: auto; }
+  .search-chip { display: flex; width: min(280px, 24vw); padding: 4px; }
+  .search-chip :global(.place-search) { flex: 1; }
+  .camera-chip { display: flex; align-items: center; gap: 4px; padding: 0 0 0 8px; }
+  /* one frame for the pair; a turned camera still rings the compass in amber */
+  .camera-chip :global(.rotate-ctl) { background: transparent; backdrop-filter: none; }
+  .camera-chip :global(.rotate-ctl:not(.turned)) { box-shadow: none; }
   .camera-readout { color: var(--text-3); font-size: var(--fs-xs); }
+  /* The dock is drawn for the map; in the header row its segments stand on
+     the row itself, not on a second frame. */
+  .tool-header :global(.mode-dock) { padding: 0; border: 0; background: transparent; box-shadow: none; }
   /* Above the stage, which keeps its map layers to itself (see .compare-stage),
      so the Difference panel opening upward lies over the highlights. */
   .mode-footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 6px; background: var(--bg-1); }
@@ -2946,22 +3137,6 @@
     min-height: 0;
   }
   .surface-shell { display: flex; overflow: hidden; background: var(--bg-0); }
-  .surface-label {
-    position: absolute;
-    top: 11px;
-    left: 11px;
-    z-index: 520;
-    display: flex;
-    align-items: center;
-    height: 29px;
-    border: 1px solid rgba(255,255,255,.18);
-    border-radius: var(--r-sm);
-    color: #f2f2f2;
-    background: rgba(24,24,24,.88);
-    backdrop-filter: blur(6px);
-    box-shadow: var(--shadow-1);
-  }
-  .surface-label strong { padding: 0 9px; font-size: var(--fs-xs); color: var(--accent); }
   .empty-slot {
     display: flex;
     flex-direction: column;
@@ -2992,7 +3167,6 @@
   .compare-stage.overlay .surface-shell { background: transparent; }
   .compare-stage.overlay .primary { z-index: 1; }
   .compare-stage.overlay .secondary { z-index: 2; }
-  .compare-stage.overlay .surface-label { display: none; }
   .compare-stage.swipe .secondary { clip-path: inset(0 0 0 var(--divider)); }
   /* Blend the pixels, not the provider/date controls that explain them. */
   .compare-stage.blended .secondary :global(.map),
@@ -3008,6 +3182,12 @@
     transform-origin: 0 0;
     opacity: var(--change-opacity);
     pointer-events: none;
+  }
+  /* A reading the view has moved past stays for reference, drained of colour
+     so it cannot pass for this view's. */
+  .change-map.stale {
+    opacity: calc(var(--change-opacity) * 0.45);
+    filter: grayscale(1);
   }
   .change-legend {
     position: absolute;
@@ -3028,15 +3208,14 @@
   }
   .change-legend span { display: flex; align-items: center; gap: 4px; }
   .change-legend i { width: 9px; height: 9px; border-radius: 2px; }
-  .change-legend .gain { background: rgb(34,197,94); }
-  .change-legend .loss { background: rgb(239,68,68); }
-  .change-legend .changed { background: rgb(250,204,21); }
-  .change-legend.colourblind .gain { background: rgb(0,114,178); }
-  .change-legend.colourblind .loss { background: rgb(230,159,0); }
-  .change-legend.colourblind .changed { background: rgb(204,121,167); }
+  .change-legend .gain { background: var(--gain); }
+  .change-legend .loss { background: var(--loss); }
+  .change-legend .changed { background: var(--changed); }
   .change-legend em.warn { color: var(--warn); }
   .change-legend em { max-width: 260px; overflow: hidden; color: #c4c9cf; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
-  .compare-stage.capturing .surface-label,
+  /* the rail's tab lies over map A's edge, inside the frame being grabbed */
+  .compare-tool.grabbing :global(.rail-tab) { visibility: hidden; }
+  .compare-stage.capturing .source-bar,
   .compare-stage.capturing .swipe-line { visibility: hidden; }
   .compare-stage.capture-a .secondary,
   .compare-stage.capture-b .primary { visibility: hidden; }
@@ -3201,11 +3380,13 @@
   .session-open small { color: var(--text-3); font-size: 10px; }
   @media (max-width: 900px) {
     .tool-header .sub { display: none; }
+    .tool-header { flex-wrap: wrap; }
     .compare-stage:not(.overlay) { flex-direction: column; }
     .provider-grid { grid-template-columns: 1fr; }
-    .source-bar { grid-template-columns: 1fr; }
-    .compare-bar { flex-wrap: wrap; }
-    .session-title { width: 150px; }
+    /* The panes stack, so the cards do too: each row is one pane's height. */
+    .source-bar { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+    .compare-stage:not(.overlay) .source-bar { bottom: 8px; grid-template-rows: 1fr 1fr; row-gap: 17px; }
+    .source-b { grid-column: 1; }
     .camera-readout { display: none; }
     .layer-columns { height: min(72vh, 720px); grid-template-columns: 1fr; overflow: auto; }
   }

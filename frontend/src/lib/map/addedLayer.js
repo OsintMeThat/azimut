@@ -32,10 +32,8 @@
  *   did draw the source's picture, the ones that did not draw our tinted shape.
  *   That split is also the fallback. An icon that 404s, decodes badly or never
  *   arrives costs its features nothing beyond the pictogram they would have had.
- * - **No map labels.** `text-field` needs real glyphs, which the engine does not
- *   load and which this feature will not make it load. A feature's name lives in
- *   the hover reading and in the card, both resolved through the engine's own
- *   hit testing.
+ * - **No map labels.** A feature's name lives in the hover reading and in the
+ *   card, both resolved through the engine's own hit testing.
  */
 import { Popup } from 'maplibre-gl';
 import { paths } from '../../components/Icon.svelte';

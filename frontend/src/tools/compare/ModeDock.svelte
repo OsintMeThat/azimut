@@ -20,6 +20,7 @@
         class="mode-btn"
         class:on={mode === entry.id}
         aria-pressed={mode === entry.id}
+        aria-label={entry.label}
         title={`${entry.label} (${entry.key})`}
         onclick={() => onmode(entry.id)}
       >
@@ -56,7 +57,9 @@
     gap: 8px;
     padding: 4px 6px;
   }
-  @media (max-width: 1100px) {
+  /* The dock shares its row with the comparison's name and acts, so the four
+     readings go to their icons first; the tooltips still name them. */
+  @media (max-width: 1400px) {
     .mode-btn:not(.difference) span {
       display: none;
     }

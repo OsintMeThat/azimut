@@ -55,6 +55,7 @@ from .. import __version__, config
 from ..engine import (
     extinstall,
     firms,
+    firmspoints,
     geo,
     mapsites,
     media as media_engine,
@@ -69,6 +70,7 @@ from .satellite import (
     GridSaveIn,
     apply_grid_marks,
     firms_answer,
+    firms_drawn,
     firms_key,
     firms_sensors,
     get_search_grid,
@@ -666,11 +668,12 @@ def firms_image(
 ) -> Response:
     """Active fire detections over one rectangle of ground, as a picture.
 
-    The app's own map draws FIRMS as tiles (``/api/firms/tiles``). The panel
-    over Google or Yandex has no tile grid of its own, so it asks for the whole
-    of what it can see at once and lays that over the map — which is also one
-    request per settled view rather than a dozen, and the FIRMS allowance is
-    counted in requests.
+    The app's own map draws FIRMS from vector tiles (``/api/firms/points``). The
+    panel over Google or Yandex has no tile grid of its own, so it asks for the
+    whole of what it can see at once and lays that over the map — which is also
+    one request per settled view rather than a dozen, and the FIRMS allowance is
+    counted in requests. Close in, the picture is drawn from the same points as
+    the map's tiles.
 
     Same key, same guard, same reason as the app's route: NASA puts the
     MAP_KEY in the path, so it never crosses into a page.
@@ -680,10 +683,18 @@ def firms_image(
         raise HTTPException(status_code=404, detail="no FIRMS key saved")
     if north <= south or east <= west:
         raise HTTPException(status_code=422, detail="the rectangle has no area")
+    bounds = firms.bounds_of(south, west, north, east)
+    try:
+        firms.sensor(sensor)
+        drawn = firmspoints.drawn_here(window, bounds, width)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if drawn:
+        return firms_drawn(key, sensor_id=sensor, window=window, bounds=bounds, width=width, height=height)
     try:
         url = firms.image_url(
             key,
-            bounds=firms.bounds_of(south, west, north, east),
+            bounds=bounds,
             width=width,
             height=height,
             sensor_id=sensor,
@@ -691,9 +702,11 @@ def firms_image(
             first=first,
             last=last,
         )
+        mark = firms.mark_px(sensor, bounds, width)
+        max_age = firms.cache_seconds(window, first, last, today=datetime.now(timezone.utc).date())
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return firms_answer(url)
+    return firms_answer(key, url, mark=mark, max_age=max_age)
 
 
 @router.get("/firms/sensors", dependencies=[Depends(require_token)])

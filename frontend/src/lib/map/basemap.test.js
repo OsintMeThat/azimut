@@ -127,16 +127,23 @@ describe('the source one provider is served from', () => {
   });
 });
 
+/** The FIRMS overlay's engine layers, lowest first (`firePoints.js`). */
+const FIRE_LAYERS = ['basemap-firms-foot-fill', 'basemap-firms-foot-ring', 'basemap-firms-foot-edge', 'basemap-firms-mark'];
+
 describe('the layers on a map', () => {
   /** A MapLibre map, as far as basemap.js reaches into it. */
   function stubMap() {
     const sources = new Map();
     const layers = [];
+    const images = new Map();
     const calls = { setMaxZoom: [], on: [], off: [] };
     return {
       calls,
       sources,
       layers,
+      images,
+      hasImage: (name) => images.has(name),
+      addImage: (name, image, options) => images.set(name, { image, options }),
       addSource: (id, spec) => sources.set(id, spec),
       removeSource: (id) => sources.delete(id),
       getSource: (id) => sources.get(id),
@@ -386,21 +393,44 @@ describe('the layers on a map', () => {
       expect(map.sources.get('basemap-railway').maxzoom).toBe(19);
       expect(map.getLayer('basemap-railway').maxzoom).toBe(19);
       expect(map.sources.get('basemap-railway').tiles).toHaveLength(3);
+      expect(map.sources.get('basemap-railway').tileSize).toBe(256);
     });
   });
 
-  it('keeps FIRMS detections as visible squares beyond the last source zoom', async () => {
+  it('draws FIRMS as marks the map paints itself, at every zoom and for any question', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
-      createBasemaps(stubEngine(map)).setOverlay('firms', true, {
-        sensor: 'viirs',
-        window: '24h',
-      });
-      expect(map.sources.get('basemap-firms').maxzoom).toBe(14);
-      expect(map.getLayer('basemap-firms')).toMatchObject({
-        maxzoom: 24,
-        paint: { 'raster-resampling': 'nearest' },
-      });
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '7d' });
+      const marks = map.sources.get('basemap-firms-marks');
+      // one vector source from z0: no picture to swell while the next level loads
+      expect(marks).toMatchObject({ type: 'vector', minzoom: 0, maxzoom: 13, tileSize: 512 });
+      expect(marks.tiles).toEqual(['/api/firms/points/{z}/{x}/{y}?sensor=viirs&window=7d&v=2']);
+      expect(map.layers.map((l) => l.id)).toEqual(FIRE_LAYERS);
+      for (const layer of map.layers) expect(layer.source).toBe('basemap-firms-marks');
+      // one tintable square for both colours
+      expect(map.images.get('firms-square').options).toEqual({ sdf: true });
+      // a dated range is the same marks, asked with its days
+      basemaps.setOverlay('firms', true, { sensor: 'viirs', window: 'dates', first: '2026-09-01', last: '2026-09-03' });
+      expect(map.sources.get('basemap-firms-marks').tiles[0]).toContain('window=dates&first=2026-09-01&last=2026-09-03');
+      expect(map.layers.map((l) => l.id)).toEqual(FIRE_LAYERS);
+      // and nothing else is laid for it: no picture layer under the marks
+      expect([...map.sources.keys()]).toEqual(['basemap-firms-marks']);
+    });
+  });
+
+  it('tells the tool when a tile of one of its overlays fails, and of nothing else', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const trouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onOverlayTrouble: trouble });
+      const [, onError] = map.calls.on.find(([name]) => name === 'error');
+      onError({ sourceId: 'basemap-firms-marks' });
+      onError({ sourceId: 'somebody-else' });
+      onError({ error: new Error('style') });
+      expect(trouble.mock.calls).toEqual([['firms']]);
+      basemaps.dispose();
+      expect(map.calls.off).toContainEqual(['error', onError]);
     });
   });
 
@@ -431,9 +461,9 @@ describe('the layers on a map', () => {
         sensor: 'modis',
         window: '48h',
       });
-      const [url] = map.sources.get('basemap-firms').tiles;
+      const [url] = map.sources.get('basemap-firms-marks').tiles;
       // through the app, because the key is NASA's and stays on the backend
-      expect(url).toContain('/api/firms/tiles/{z}/{x}/{y}?');
+      expect(url).toContain('/api/firms/points/{z}/{x}/{y}?');
       expect(url).toContain('sensor=modis');
       expect(url).toContain('window=48h');
     });
@@ -445,16 +475,16 @@ describe('the layers on a map', () => {
       const basemaps = createBasemaps(stubEngine(map));
       const params = { sensor: 'viirs', window: '24h' };
       basemaps.setOverlay('firms', true, params);
-      const first = map.sources.get('basemap-firms');
+      const first = map.sources.get('basemap-firms-marks');
       // the same question again is the same tiles: rebuilding would refetch
       // every one of them, which reads on screen as a reloading map
       basemaps.setOverlay('firms', true, { ...params });
-      expect(map.sources.get('basemap-firms')).toBe(first);
+      expect(map.sources.get('basemap-firms-marks')).toBe(first);
 
       basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '7d' });
-      expect(map.sources.get('basemap-firms')).not.toBe(first);
-      expect(map.sources.get('basemap-firms').tiles[0]).toContain('window=7d');
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-firms']);
+      expect(map.sources.get('basemap-firms-marks')).not.toBe(first);
+      expect(map.sources.get('basemap-firms-marks').tiles[0]).toContain('window=7d');
+      expect(map.layers.map((l) => l.id)).toEqual(FIRE_LAYERS);
     });
   });
 
@@ -465,11 +495,7 @@ describe('the layers on a map', () => {
       basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '24h' });
       basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
-      expect(map.layers.map((l) => l.id)).toEqual([
-        'basemap-railway',
-        'basemap-boundaries',
-        'basemap-firms',
-      ]);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-boundaries', ...FIRE_LAYERS]);
     });
   });
 
@@ -530,6 +556,33 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('reads the place names from the TileJSON that names OpenFreeMap’s current build', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setOverlay('boundaries', true);
+      expect(map.sources.has('basemap-placenames-openmaptiles')).toBe(false);
+
+      basemaps.setOverlay('placenames', true);
+      const source = map.sources.get('basemap-placenames-openmaptiles');
+      expect(source).toMatchObject({
+        type: 'vector',
+        url: 'https://tiles.openfreemap.org/planet',
+        maxzoom: 14,
+        attribution: expect.stringContaining('OpenStreetMap'),
+      });
+      // a dated template would break the week the build it names is removed
+      expect(source).not.toHaveProperty('tiles');
+      // over the borders, whose own names are the larger places
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries', 'basemap-placenames-label']);
+      expect(map.getLayer('basemap-placenames-label').source).toBe('basemap-placenames-openmaptiles');
+
+      basemaps.setOverlay('placenames', false);
+      expect(map.sources.has('basemap-placenames-openmaptiles')).toBe(false);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries']);
+    });
+  });
+
   it('slides a vector overlay into the stack as one block', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
@@ -550,7 +603,7 @@ describe('the layers on a map', () => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
       basemaps.show(ESRI, ESRI.id, 256);
-      for (const id of ['firms', 'boundaries', 'seamarks', 'railway', 'roads', 'gpstraces']) {
+      for (const id of ['firms', 'placenames', 'boundaries', 'seamarks', 'railway', 'roads', 'gpstraces']) {
         basemaps.setOverlay(id, true, id === 'firms' ? { sensor: 'viirs', window: '24h' } : undefined);
       }
       basemaps.setOverlay('nightlights', true, { source: 'noaa20', day: '2026-09-12' });
@@ -562,12 +615,13 @@ describe('the layers on a map', () => {
         'basemap-railway',
         'basemap-seamarks',
         'basemap-boundaries',
-        'basemap-firms',
+        'basemap-placenames-label',
+        ...FIRE_LAYERS,
       ]);
     });
   });
 
-  it('has no CARTO labels layer: its tiles now ask for a key, and the borders name places', () => {
+  it('has no CARTO labels layer: its tiles now ask for a key', () => {
     expect(OVERLAY_IDS).not.toContain('labels');
   });
 
@@ -601,8 +655,8 @@ describe('the layers on a map', () => {
       const basemaps = createBasemaps(stubEngine(map));
       for (const id of OVERLAY_IDS) basemaps.setOverlay(id, true, params[id]);
       for (const [id, source] of map.sources) {
-        const expected = id === 'basemap-firms' ? /^\/api\/firms\/tiles\// : /^https:\/\//;
-        for (const url of source.tiles) expect(url, id).toMatch(expected);
+        const expected = id === 'basemap-firms-marks' ? /^\/api\/firms\/points\// : /^https:\/\//;
+        for (const url of source.tiles ?? [source.url]) expect(url, id).toMatch(expected);
         expect(source.attribution, id).toBeTruthy();
       }
     });
@@ -614,7 +668,10 @@ describe('the layers on a map', () => {
       const basemaps = createBasemaps(stubEngine(map));
       await basemaps.show(WIDGET, WIDGET.id, 256);
       basemaps.dispose();
-      expect(map.calls.off).toEqual([['sourcedata', expect.any(Function)]]);
+      expect(map.calls.off).toEqual([
+        ['sourcedata', expect.any(Function)],
+        ['error', expect.any(Function)],
+      ]);
       expect(glasses[0].destroyed).toBe(1);
     });
   });

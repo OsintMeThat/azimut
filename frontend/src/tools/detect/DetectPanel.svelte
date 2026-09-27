@@ -31,6 +31,9 @@
   let {
     caseId,
     collapsed = $bindable(false),
+    /** Whether Detect holds the whole screen, and the way in and out of it. */
+    fullscreen = false,
+    onfullscreen = () => {},
     manual = $bindable(null),
     zones = $bindable([]),
     drawing = $bindable('select'),
@@ -562,6 +565,10 @@
     {/each}
     <button class="cmp-icon" aria-label="Analyzers" title="Make and tune what detections look for"
       onclick={openLibrary}><Icon name="sliders" size={15} /></button>
+    <button class="cmp-icon" class:on={fullscreen} aria-pressed={fullscreen}
+      aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+      title={fullscreen ? 'Back to the window (Esc)' : 'Detect on the whole screen'}
+      onclick={onfullscreen}><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
   </nav>
   <div class="dock-content" hidden={collapsed}>
   <div class="new-action" bind:this={newActionEl}>

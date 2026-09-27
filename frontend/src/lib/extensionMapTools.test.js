@@ -926,7 +926,7 @@ describe('the reference windows', () => {
 
 describe('the fire layer, on both sides of the boundary', () => {
   const SENSORS = [
-    { id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' },
+    { id: 'viirs', label: 'VIIRS (S-NPP, NOAA-20, NOAA-21)' },
     { id: 'modis', label: 'MODIS (Terra + Aqua)' },
   ];
 
@@ -1010,9 +1010,11 @@ describe('the fire layer, on both sides of the boundary', () => {
     // the app caps the tile source rather than refusing to draw: past this it
     // keeps showing that level, scaled. The panel holds its one picture the
     // same way, and neither asks again.
+    // The same ground detail, counted two ways: the app's source tiles are
+    // 512 px, and a host map counts its zoom in 256 px tiles, one level deeper.
     const basemap = readFileSync(join(here, './map/basemap.js'), 'utf8');
-    const firms = /id: 'firms',[\s\S]*?maxZoom: (\d+)/.exec(basemap);
-    expect(ext.FIRE_MAX_ZOOM).toBe(Number(firms[1]));
+    const firms = /id: 'firms',[\s\S]*?tileSize: (\d+),[\s\S]*?maxZoom: (\d+)/.exec(basemap);
+    expect(ext.FIRE_MAX_ZOOM).toBe(Number(firms[2]) + Math.log2(Number(firms[1]) / 256));
   });
 
   it('offers no seat at all until a key is behind it', () => {

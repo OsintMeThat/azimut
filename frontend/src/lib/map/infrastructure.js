@@ -10,9 +10,8 @@
  *
  * The style is ours and deliberately small: lines coloured by voltage on Open
  * Infrastructure Map's own scale, so a reader who knows that map reads this one,
- * then towers, substations, plants, pipelines and masts. No labels, because
- * the engine loads no glyphs (`engine.js` asks the network for tiles and
- * nothing else). Zooms here are the engine's own, one shallower than the app's.
+ * then towers, substations, plants, pipelines and masts, with no labels. Zooms
+ * here are the engine's own, one shallower than the app's.
  */
 
 const TILES = 'https://openinframap.org/map';

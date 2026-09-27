@@ -1112,10 +1112,16 @@ def _kml_rings(polygon: Element) -> Iterator[list[list[float]]]:
             yield points
 
 
+#: Space around a tuple's commas. The spec writes `lon,lat` with none, but NASA
+#: FIRMS writes `7.31866000,  52.46726000`, and splitting that on whitespace
+#: leaves two halves that are neither a point.
+_KML_COMMA = re.compile(r"\s*,\s*")
+
+
 def _kml_points(text: str) -> list[list[float]]:
     """`lon,lat[,alt]` tuples, whitespace-separated. Altitude is dropped."""
     points: list[list[float]] = []
-    for chunk in str(text or "").split():
+    for chunk in _KML_COMMA.sub(",", str(text or "")).split():
         parts = chunk.split(",")
         if len(parts) < 2:
             continue
@@ -1552,7 +1558,7 @@ SPEC_VERSION = 1
 #: the day it was dropped in, for as long as the case lives. Bumped whenever a
 #: change here would give the same bytes a different reading; the next request
 #: for that layer reparses the snapshot already on disk.
-PARSE_VERSION = 3
+PARSE_VERSION = 4
 
 #: Where that stamp is written. A GeoJSON object may carry members it does not
 #: define, and this one is written first so the check reads the head of the file

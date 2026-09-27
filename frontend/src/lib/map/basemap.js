@@ -17,9 +17,11 @@
  * throwaway intermediate zoom levels mid-gesture, which a billed provider paid
  * for. MapLibre overzooms what it already holds instead.
  */
+import { FIRE_MARKS } from './firePoints.js';
 import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
 import { INFRASTRUCTURE } from './infrastructure.js';
 import { tileTemplate as nightTemplate } from './nightlights.js';
+import { PLACE_NAMES } from './placeNames.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
@@ -49,7 +51,10 @@ const ALTERNATE = 'basemap-alternate';
  * for one night, and changing either is a different set of tiles.
  *
  * `vector` is a layer drawn from vector tiles by a style of our own: several
- * sources and several engine layers, switched on and off as one.
+ * sources and several engine layers, switched on and off as one. Its sources
+ * may be a function too, for the same reason as `url`. A source is a tile
+ * template, or `{ url }` naming a TileJSON for a provider whose tile paths
+ * change with each build.
  */
 const OVERLAYS = [
   {
@@ -118,17 +123,29 @@ const OVERLAYS = [
     maxZoom: 19,
   },
   {
+    // The towns, villages and hamlets the borders leave out (placeNames.js),
+    // over them because the smaller names are the ones being looked for.
+    id: 'placenames',
+    layer: 'basemap-placenames',
+    vector: PLACE_NAMES,
+    attribution: 'OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors',
+  },
+  {
     // Active fire detections, live or from the archive (engine/firms.py). The
     // key is NASA's and stays on the backend, so this one address is ours.
+    // The map draws every detection itself (firePoints.js): a picture's squares
+    // swelled with its pixels until the next zoom's picture landed, a mark
+    // keeps its size and stays where it is while the next tiles come.
     id: 'firms',
     layer: 'basemap-firms',
-    url: (params) => `/api/firms/tiles/{z}/{x}/{y}?${new URLSearchParams(params)}`,
+    vector: FIRE_MARKS,
     attribution: 'Active fire data: NASA FIRMS',
-    // The source stops at z14. Past it, MapLibre enlarges those pixels instead
-    // of requesting invented detail, so a detection remains a visible square.
-    maxZoom: 14,
-    viewMaxZoom: 24,
-    resampling: 'nearest',
+    // 512 px is a quarter of the requests for the same screen, and FIRMS counts
+    // requests against a ten-minute allowance (engine/firms.py).
+    tileSize: 512,
+    // The tiles stop at z13, where a square is already its 375 m footprint.
+    // Past it the map draws the z13 marks bigger, never blurred.
+    maxZoom: 13,
   },
 ];
 
@@ -144,13 +161,33 @@ export function overlayLayers(overlay) {
   return overlay.vector.layers.map((entry) => `${overlay.layer}-${entry.id}`);
 }
 
-/** …and the sources behind them, as `[id, spec]`. */
+/** A vector overlay's sources for one question, by name. */
+function vectorSources(overlay, params) {
+  const { sources } = overlay.vector;
+  return typeof sources === 'function' ? sources(params ?? {}) : sources;
+}
+
+/** Every source an overlay adds, whatever the question: what is taken off with
+ *  it, and what a failed tile is traced back through. */
+export function overlaySourceIds(overlay) {
+  if (!overlay.vector) return [overlay.layer];
+  return Object.keys(vectorSources(overlay, {})).map((name) => `${overlay.layer}-${name}`);
+}
+
+/** …and the sources behind them for one question, as `[id, spec]`. */
 export function overlaySources(overlay, params) {
   const { attribution } = overlay;
   if (overlay.vector) {
-    return Object.entries(overlay.vector.sources).map(([name, url]) => [
+    return Object.entries(vectorSources(overlay, params)).map(([name, where]) => [
       `${overlay.layer}-${name}`,
-      { type: 'vector', tiles: [url], minzoom: 0, maxzoom: overlay.vector.maxZoom, attribution },
+      {
+        type: 'vector',
+        ...(typeof where === 'string' ? { tiles: [where] } : where),
+        ...(overlay.tileSize ? { tileSize: overlay.tileSize } : {}),
+        minzoom: 0,
+        maxzoom: overlay.vector.maxZoom,
+        attribution,
+      },
     ]);
   }
   const template = typeof overlay.url === 'function' ? overlay.url(params ?? {}) : overlay.url;
@@ -160,7 +197,7 @@ export function overlaySources(overlay, params) {
       {
         type: 'raster',
         tiles: tileUrls(template, overlay.subdomains),
-        tileSize: 256,
+        tileSize: overlay.tileSize ?? 256,
         minzoom: 0,
         maxzoom: overlay.maxZoom,
         attribution,
@@ -256,6 +293,10 @@ export function createBasemaps(engine, hooks = {}) {
     onWidgetLoad = () => {},
     onWidgetAuthFailure = () => {},
     onWidgetFailed = () => {},
+    /** An overlay's tile failed, by overlay id. The engine shows nothing for
+     *  it, so the tool that owns the layer can ask why (FIRMS: a spent
+     *  allowance, a refused key). */
+    onOverlayTrouble = () => {},
   } = hooks;
 
   const map = engine.impl;
@@ -309,6 +350,13 @@ export function createBasemaps(engine, hooks = {}) {
     if (billed) onMeteredTiles(billed);
   }
   map.on('sourcedata', onSourceData);
+
+  function onError(event) {
+    const source = event?.sourceId;
+    const overlay = source && OVERLAYS.find((entry) => overlaySourceIds(entry).includes(source));
+    if (overlay) onOverlayTrouble(overlay.id);
+  }
+  map.on('error', onError);
 
   function dropTiles() {
     if (map.getLayer(IMAGERY)) map.removeLayer(IMAGERY);
@@ -374,6 +422,9 @@ export function createBasemaps(engine, hooks = {}) {
     for (const [id, spec] of overlaySources(overlay, params)) map.addSource(id, spec);
     const before = under(overlay);
     if (overlay.vector) {
+      for (const [name, image, options] of overlay.vector.images ?? []) {
+        if (!map.hasImage(name)) map.addImage(name, image(), options);
+      }
       for (const entry of overlay.vector.layers) {
         map.addLayer(
           { ...entry, id: `${overlay.layer}-${entry.id}`, source: `${overlay.layer}-${entry.source}` },
@@ -384,7 +435,6 @@ export function createBasemaps(engine, hooks = {}) {
     }
     const paint = {};
     if (overlay.opacity != null) paint['raster-opacity'] = overlay.opacity;
-    if (overlay.resampling) paint['raster-resampling'] = overlay.resampling;
     map.addLayer(
       {
         id: overlay.layer,
@@ -406,7 +456,7 @@ export function createBasemaps(engine, hooks = {}) {
 
   function dropOverlay(overlay) {
     for (const id of overlayLayers(overlay)) if (map.getLayer(id)) map.removeLayer(id);
-    for (const [id] of overlaySources(overlay, {})) if (map.getSource(id)) map.removeSource(id);
+    for (const id of overlaySourceIds(overlay)) if (map.getSource(id)) map.removeSource(id);
   }
 
   return {
@@ -511,6 +561,7 @@ export function createBasemaps(engine, hooks = {}) {
 
     dispose() {
       map.off('sourcedata', onSourceData);
+      map.off('error', onError);
       glass?.destroy();
       glass = null;
     },
