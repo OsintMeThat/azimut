@@ -686,89 +686,286 @@ export function nudgeTemporalRaw(item, mode, direction) {
   return ordered(parts) ? parts.join('/') : null;
 }
 
-function itemBounds(item, window) {
+/**
+ * How an entry is drawn on a track, in screen pixels.
+ *
+ * One rule decides the shape: **a point is an instant, a bracket is a reduced date, a
+ * bar is a period, and a box is never an instant.** A date stated to the day, the month
+ * or the year covers that whole period, so once the period is wide enough to see it is
+ * drawn across it; narrower than `bracket` pixels it is as good as an instant and drawn
+ * as one, in the middle of what it covers. A mark never moves because of its neighbours
+ * or of what is selected: only its row does, and only when two marks would overlap.
+ */
+export const MARKS = {
+  top: 14,
+  row: 18,
+  bottom: 10,
+  /** The room one point takes across the axis; two points closer than this stack. */
+  column: 10,
+  dot: 8,
+  /** Between a mark and the caption beside it. */
+  gap: 5,
+  caption: 180,
+  /** What one character of the 10px caption face costs. Fixed rather than measured:
+   *  the layout has to come out the same under a test and on a plate. */
+  charWidth: 5.6,
+  /** A reduced date narrower than this is drawn as a point. */
+  bracket: 6,
+  /** The narrowest a period is drawn, however short it is. */
+  bar: 2,
+  cardWidth: 220,
+  cardMin: 120,
+  cardHeight: 40,
+  cardGap: 8,
+  cardRows: 3,
+  /** A track with more marks than this in the window stays on captions. */
+  cardMax: 12,
+  /** Overflow closer than this joins one `+N`. */
+  cluster: 28,
+};
+
+function markOf(item, window, width) {
   const first = new Date(item.earliest).getTime();
-  const last = new Date(item.latest).getTime();
+  const last = new Date(item.latest ?? item.earliest).getTime();
   if (!Number.isFinite(first) || !Number.isFinite(last)) return null;
-  const left = clamp((first - window.start) / window.span);
-  const right = clamp((last - window.start) / window.span);
-  const midpoint = clamp(((first + last) / 2 - window.start) / window.span);
-  return { left, right: Math.max(left, right), midpoint };
+  const a = ((first - window.start) / window.span) * width;
+  const b = ((Math.max(first, last) - window.start) / window.span) * width;
+  // Half-open like the window it is read against: a period ending where the window
+  // starts is not in it, and neither is one starting where it ends.
+  if (b <= 0 && a < 0) return null;
+  if (a >= width) return null;
+  const clipped = { openStart: a < 0, openEnd: b > width };
+  if (item.shape === 'interval' || b - a >= MARKS.bracket) {
+    const left = clamp(a, 0, width);
+    const right = Math.max(clamp(b, 0, width), left + MARKS.bar);
+    return { mark: item.shape === 'interval' ? 'bar' : 'bracket', left, right, x: left, ...clipped };
+  }
+  const x = clamp((a + b) / 2, 0, width);
+  return { mark: 'point', left: x, right: x, x, openStart: false, openEnd: false };
 }
 
-function pointWidth(item) {
-  const date = formatTemporalValue(item.raw).label;
-  return clamp(Math.max(String(item.label ?? '').length * 5.45, date.length * 5.1) + 40, 82, 230);
+/** The pixels a mark keeps to itself on its row. */
+function extentOf(geo) {
+  return geo.mark === 'point'
+    ? [geo.x - MARKS.column / 2, geo.x + MARKS.column / 2]
+    : [geo.left - 1.5, geo.right + 1.5];
 }
 
-/** Pack the rendered geometry, not just the instant anchoring each item. */
-export function layoutTimelineItems(items, from, to, axisWidth = 1000, maxItemRows = 6) {
+const overlaps = (a, b) => a[0] < b[1] && b[0] < a[1];
+
+function freeRow(rows, extent, ignore = null) {
+  for (let row = 0; ; row += 1) {
+    const taken = rows[row];
+    if (!taken || !taken.some((one) => one.id !== ignore && overlaps(one.extent, extent))) return row;
+  }
+}
+
+function byTime(a, b) {
+  return String(a.earliest).localeCompare(String(b.earliest))
+    || String(a.id).localeCompare(String(b.id));
+}
+
+/** How wide a caption is, at the caption face's own metric. */
+export function captionWidth(text) {
+  return Math.min(MARKS.caption, Math.ceil([...String(text ?? '')].length * MARKS.charWidth) + 4);
+}
+
+function captionFor(entry, width) {
+  const { geo } = entry;
+  const room = captionWidth(entry.item.label);
+  if (!String(entry.item.label ?? '').trim()) return [];
+  const half = geo.mark === 'point' ? MARKS.dot / 2 : 0;
+  const tries = [];
+  // Inside a period its name may run the period's length: the room is its own.
+  const whole = Math.ceil([...String(entry.item.label)].length * MARKS.charWidth) + 4;
+  const inside = Math.min(whole, geo.right - geo.left - 16);
+  if (geo.mark !== 'point' && inside >= room) {
+    tries.push({ side: 'inside', from: geo.left + 6, room: inside });
+  }
+  tries.push({ side: 'right', from: geo.right + half + MARKS.gap, room });
+  tries.push({ side: 'left', from: geo.left - half - MARKS.gap - room, room });
+  return tries
+    .filter((one) => one.from >= 0 && one.from + one.room <= width)
+    .map((one) => ({ ...one, extent: [one.from, one.from + one.room], width: one.room }));
+}
+
+/**
+ * Cards hang under the marks when a track has the room: few enough marks, each card
+ * at most `cardWidth` wide, none of them overlapping, and no stem crossing another
+ * mark or card on its way down. Decided for the whole track at once, so a track reads
+ * one way.
+ */
+function placeCards(placed, rowsTaken, width) {
+  if (!placed.length || placed.length > MARKS.cardMax) return null;
+  const cardRows = [];
+  const cards = new Map();
+  const anchored = [...placed].sort((a, b) => a.geo.x - b.geo.x || byTime(a.item, b.item));
+  for (const entry of anchored) {
+    const { geo, item, row } = entry;
+    const anchor = geo.mark === 'point' ? geo.x : geo.left + Math.min(8, (geo.right - geo.left) / 2);
+    // The stem runs down from the mark, so every mark under this one in its rows must
+    // leave that line clear.
+    for (let below = row + 1; below < rowsTaken.length; below += 1) {
+      if ((rowsTaken[below] ?? []).some((one) => one.id !== item.id
+        && one.extent[0] <= anchor && anchor <= one.extent[1])) return null;
+    }
+    const thumb = item.category === 'media' && item.thumb;
+    // The card holds the name and, under it, the date as written in the 9px mono face.
+    const said = Math.ceil(formatTemporalValue(item.raw ?? '').label.length * 5.5);
+    const wide = clamp(
+      Math.max(captionWidth(item.label), said) + 20 + (thumb ? 38 : 0),
+      MARKS.cardMin,
+      MARKS.cardWidth
+    );
+    const left = clamp(anchor - 14, 0, Math.max(0, width - wide));
+    const extent = [left - MARKS.cardGap / 2, left + wide + MARKS.cardGap / 2];
+    let chosen = -1;
+    for (let cardRow = 0; cardRow < MARKS.cardRows; cardRow += 1) {
+      const taken = cardRows[cardRow] ?? [];
+      if (taken.some((one) => overlaps(one, extent))) continue;
+      // A stem down to a lower row passes the cards above it.
+      const crossed = cardRows.slice(0, cardRow).some((row) =>
+        row.some((one) => one[0] <= anchor && anchor <= one[1]));
+      if (crossed) continue;
+      chosen = cardRow;
+      break;
+    }
+    if (chosen === -1) return null;
+    (cardRows[chosen] ??= []).push(extent);
+    cards.set(item.id, { row: chosen, left, width: wide, anchor });
+  }
+  return { cards, rows: cardRows.length };
+}
+
+/**
+ * Lay a track's entries out against an axis `axisWidth` pixels wide.
+ *
+ * Marks first, in a stable order (pinned, then time), each on the first row where it
+ * overlaps no other mark: points stack down in their column, brackets and bars take
+ * the first row free across their whole span. Past `maxItemRows` an entry joins a
+ * `+N` instead, unless it is pinned. Captions come second, in the order selected,
+ * pinned, time: each tries the right of its mark, then the left (a period first tries
+ * inside itself), and is left out when every side would cover something already
+ * there. The mark stays either way.
+ */
+export function layoutTimelineItems(items, from, to, axisWidth = 1000, maxItemRows = 6, options = {}) {
   const window = windowMillis(from, to);
-  if (!window) return { items: [], clusters: [], rows: 1 };
+  const empty = {
+    items: [], clusters: [], rows: 1, cards: false, cardRows: 0, labelled: 0,
+    height: MARKS.top + MARKS.row + MARKS.bottom,
+  };
+  if (!window) return empty;
   const width = Math.max(320, axisWidth);
-  const gap = 7 / width;
-  const lanes = [];
+  const { selectedId = null } = options;
+  const entries = [];
+  for (const item of items) {
+    const geo = markOf(item, window, width);
+    if (geo) entries.push({ item, geo });
+  }
+  entries.sort((a, b) =>
+    Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned))
+    || Number(a.geo.mark !== 'point') - Number(b.geo.mark !== 'point')
+    || byTime(a.item, b.item));
+
+  const rowsTaken = [];
   const placed = [];
-  const hidden = new Map();
-  const sorted = [...items].sort((a, b) =>
-    Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
-    || String(a.earliest).localeCompare(String(b.earliest))
-    || String(a.id).localeCompare(String(b.id))
-  );
-  for (const item of sorted) {
-    const bounds = itemBounds(item, window);
-    if (!bounds) continue;
-    const interval = item.shape === 'interval';
-    const left = interval ? bounds.left : bounds.midpoint;
-    const displayWidth = interval
-      ? Math.max(28, (bounds.right - bounds.left) * width)
-      : pointWidth(item);
-    const endAligned = !interval && bounds.midpoint > 0.82;
-    const visualLeft = interval ? left : endAligned
-      ? left - (displayWidth - 8) / width
-      : left - 8 / width;
-    const visualRight = interval ? left + displayWidth / width : endAligned
-      ? left + 8 / width
-      : left + (displayWidth - 8) / width;
-    let lane = lanes.findIndex((end) => end + gap < visualLeft);
-    if (lane === -1 && (lanes.length < maxItemRows || item.pinned)) {
-      lane = lanes.length;
-      lanes.push(visualRight);
-    } else if (lane !== -1) {
-      lanes[lane] = visualRight;
-    } else {
-      const bucket = Math.floor(clamp(bounds.midpoint, 0, 0.9999) * width / 88);
-      const group = hidden.get(bucket) ?? { count: 0, items: [], midpoint: bounds.midpoint };
-      group.count += 1;
-      group.items.push(item);
-      group.midpoint = (group.midpoint * (group.count - 1) + bounds.midpoint) / group.count;
-      hidden.set(bucket, group);
+  const overflow = [];
+  for (const entry of entries) {
+    const extent = extentOf(entry.geo);
+    const row = freeRow(rowsTaken, extent);
+    if (row >= maxItemRows && !entry.item.pinned) {
+      overflow.push(entry);
       continue;
     }
-    placed.push({
-      ...item,
-      lane,
-      left: left * 100,
-      width: (displayWidth / width) * 100,
-      displayWidth,
-      endAligned,
-      haloLeft: bounds.left * 100,
-      haloWidth: Math.max(0, (bounds.right - bounds.left) * 100),
-    });
+    (rowsTaken[row] ??= []).push({ id: entry.item.id, extent });
+    placed.push({ ...entry, row });
   }
-  const clusters = [...hidden.entries()].map(([bucket, group]) => ({
-    id: `cluster:${bucket}`,
-    lane: Math.max(maxItemRows, lanes.length),
-    left: group.midpoint * 100,
-    count: group.count,
-    items: group.items,
-    earliest: group.items[0]?.earliest ?? '',
+
+  const groups = [];
+  for (const entry of [...overflow].sort((a, b) => a.geo.x - b.geo.x || byTime(a.item, b.item))) {
+    const at = entry.geo.mark === 'point' ? entry.geo.x : (entry.geo.left + entry.geo.right) / 2;
+    const group = groups.find((one) => Math.abs(one.at - at) < MARKS.cluster);
+    if (group) {
+      group.items.push(entry.item);
+      group.at = (group.at * (group.items.length - 1) + at) / group.items.length;
+    } else groups.push({ at, items: [entry.item] });
+  }
+  const markRows = Math.max(1, rowsTaken.length);
+  const clusters = groups.map((group, index) => ({
+    id: `cluster:${index}:${group.items[0].id}`,
+    row: markRows,
+    left: (group.at / width) * 100,
+    count: group.items.length,
+    items: [...group.items].sort(byTime),
+    earliest: [...group.items].sort(byTime)[0]?.earliest ?? '',
   }));
+  const rows = markRows + (clusters.length ? 1 : 0);
+
+  const carded = clusters.length ? null : placeCards(placed, rowsTaken, width);
+  const captions = new Map();
+  if (!carded) {
+    const taken = rowsTaken.map((row) => [...row]);
+    const order = [...placed].sort((a, b) =>
+      Number(b.item.id === selectedId) - Number(a.item.id === selectedId)
+      || Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned))
+      || byTime(a.item, b.item));
+    for (const entry of order) {
+      const row = taken[entry.row];
+      const fit = captionFor(entry, width).find((one) =>
+        !row.some((other) => other.id !== entry.item.id && overlaps(other.extent, one.extent)));
+      if (!fit) continue;
+      row.push({ id: `${entry.item.id}:caption`, extent: fit.extent });
+      captions.set(entry.item.id, fit);
+    }
+  }
+
+  const laid = [...placed].sort((a, b) => byTime(a.item, b.item)).map(({ item, geo, row }) => {
+    const box = geo.mark === 'point'
+      ? { from: geo.x - MARKS.column / 2, to: geo.x + MARKS.column / 2 }
+      : { from: geo.left, to: geo.right };
+    const caption = captions.get(item.id);
+    const card = carded?.cards.get(item.id);
+    return {
+      ...item,
+      mark: geo.mark,
+      row,
+      /** Where the instant, or the start of the span, falls: a percentage of the axis. */
+      left: (geo.x / width) * 100,
+      /** How much of the axis the mark covers: nothing for a point. */
+      width: geo.mark === 'point' ? 0 : ((geo.right - geo.left) / width) * 100,
+      openStart: geo.openStart,
+      openEnd: geo.openEnd,
+      caption: caption
+        ? { side: caption.side, offset: caption.from - box.from, width: caption.width, left: caption.from }
+        : null,
+      card: card
+        ? {
+          row: card.row,
+          offset: card.left - box.from,
+          width: card.width,
+          left: card.left,
+          stem: card.anchor - box.from,
+          anchor: card.anchor,
+        }
+        : null,
+    };
+  });
+  const cardRows = carded?.rows ?? 0;
+  const marksHeight = MARKS.top + rows * MARKS.row;
   return {
-    items: placed,
+    items: laid,
     clusters,
-    rows: Math.max(1, lanes.length + (clusters.length ? 1 : 0)),
+    rows,
+    cards: Boolean(carded),
+    cardRows,
+    labelled: laid.filter((item) => item.caption || item.card).length,
+    height: marksHeight + (cardRows ? 6 + cardRows * (MARKS.cardHeight + 6) : 0) + MARKS.bottom,
   };
+}
+
+/** The top of a card row under a track's marks, in pixels from the top of the track. */
+export function cardTop(layout, row) {
+  return MARKS.top + layout.rows * MARKS.row + 6 + row * (MARKS.cardHeight + 6);
 }
 
 const TICK_STEPS = [

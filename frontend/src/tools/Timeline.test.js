@@ -120,8 +120,11 @@ describe('Timeline workspace', () => {
     expect(source).toContain("viewMode === 'list'");
     expect(source).toContain('formatTemporalValue(item.raw).label');
     expect(source).toContain('class="timeline-tooltip"');
-    expect(source).toContain("item.zone === 'date-only'");
-    expect(source).toContain('class={`precision-span ${item.category}`}');
+    // one shape per kind of date, decided by the layout rather than by the zone
+    expect(source).toContain('class={`timeline-event ${item.category} ${item.mark}`}');
+    expect(source).not.toContain('precision-span');
+    expect(source).not.toContain('translateX(-8px)');
+    expect(source).not.toContain('end-aligned');
     expect(source).toContain('grid-template-columns: minmax(0, 1fr) 330px');
     // the tool's own clock, not a target: nothing is being aimed at in an empty panel
     expect(source).toContain('<Icon name="clock" size={16} /><span>Select an entry</span>');
@@ -305,10 +308,43 @@ describe('measuring between two entries', () => {
   });
 });
 
+describe('reading a mark', () => {
+  it('draws a line up to the ruler with the date as written, for one end or both', () => {
+    expect(source).toContain("const lines = item.mark === 'point' ? [middle] : [mark.left, mark.right];");
+    expect(source).toContain('class="time-guide" aria-hidden="true"');
+    expect(source).toContain("label: formatTemporalValue(item.raw ?? '').label");
+    expect(source).toContain('showGuide(event.currentTarget, item)');
+  });
+
+  it('captions and cards belong to the mark, so reading one is clicking it', () => {
+    const button = source.slice(source.indexOf('class="event-select"'), source.indexOf('class="move-grip"'));
+    expect(button).toContain('class={`event-caption ${item.caption.side}`}');
+    expect(button).toContain('class="event-card"');
+    expect(button).toContain('loading="lazy"');
+  });
+
+  it('walks entries with Alt and an arrow, and keeps every other key for the canvas', () => {
+    expect(source).toContain("if (!event.altKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;");
+    expect(source).toContain("if (event.key === 'Enter' || event.key === ' ') {");
+    expect(source).toContain('onkeydown={(event) => markKey(event, track, item)}');
+  });
+
+  it('explains the three shapes in the legend', () => {
+    for (const shape of ['Instant', 'Reduced date, across what it covers', 'Period']) {
+      expect(source).toContain(`></i>${shape}</span>`);
+    }
+  });
+
+  it('asks the export for no selection, so a plate does not depend on a click', () => {
+    expect(source).toContain('tracks: buildTracks(PLATE_PLOT)');
+    expect(source).not.toContain('buildTracks(PLATE_PLOT, selected');
+  });
+});
+
 describe('exporting the axis', () => {
   it('serialises the tracks the tool laid out, never a canvas', () => {
     expect(source).toContain('timelinePlate({');
-    expect(source).toContain('const tracks = $derived(buildTracks(plotWidth));');
+    expect(source).toContain('const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null));');
   });
 
   it('lays the page out at the plate’s width, not the browser’s', () => {

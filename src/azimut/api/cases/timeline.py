@@ -93,6 +93,18 @@ def timeline(
         )
     except (CaseError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # A file's row carries the preview the case already cached for it, so a card on a
+    # zoomed axis can show the picture. One indexed read per page, and nothing is made.
+    media_owners = [
+        str(item["owner_id"]) for item in page["items"]
+        if item.get("category") == timeline_engine.MEDIA
+    ]
+    if media_owners:
+        thumbs = get_case(case_id).media_thumbs(media_owners)
+        for item in page["items"]:
+            thumb = thumbs.get(str(item["owner_id"]))
+            if thumb and item.get("category") == timeline_engine.MEDIA:
+                item["thumb"] = thumb
     return {**page, "window": {"from": since, "to": until}}
 
 # Every way the case puts something on the map. A Claim says where it happened with

@@ -375,6 +375,34 @@ def test_media_metadata_and_case_activity_are_separate_categories(client):
     assert [item["kind"] for item in activity["items"]] == ["added"]
 
 
+def test_a_file_row_carries_the_preview_the_case_already_cached(client):
+    """A card on a zoomed axis shows the picture: the row brings the cached thumbnail,
+    and a row whose owner has none, or is not a file, brings nothing."""
+    case_id = _case(client)
+    case = Case.open(case_id)
+    shown = case.add_entity("media", "Frame", {"path": "media/frame.jpg", "kind": "image"}, by="user")
+    bare = case.add_entity("media", "Clip", {"path": "media/clip.mp4", "kind": "video"}, by="user")
+    for entity, path, thumb in ((shown, "media/frame.jpg", ".thumbs/frame.jpg"), (bare, "media/clip.mp4", None)):
+        case.upsert_media_item(
+            {
+                "path": path, "filename": path.rsplit("/", 1)[1], "kind": "image",
+                "taken_at": "2024-02-03T10:11:12Z", "added_at": "2026-08-11T10:00:00Z",
+                **({"thumbnail": thumb} if thumb else {}),
+            },
+            entity_id=entity["id"],
+        )
+    _entity(client, case_id, "claim", "Seen the same day", {"when": "2024-02-03"})
+
+    items = client.get(
+        f"/api/cases/{case_id}/timeline", params={"category": ["media", "statement"]}
+    ).json()["items"]
+    thumbs = {item["owner_id"]: item.get("thumb") for item in items}
+
+    assert thumbs[shown["id"]] == ".thumbs/frame.jpg"
+    assert thumbs[bare["id"]] is None
+    assert all("thumb" not in item for item in items if item["category"] == "statement")
+
+
 def test_schema_15_backfills_existing_claims_and_media(tmp_path):
     db = tmp_path / "case.db"
     from azimut.sqlite_backend import SqliteCase

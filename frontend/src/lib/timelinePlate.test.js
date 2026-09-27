@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { axisTicks, layoutTimelineItems } from './timeline.js';
+import { MARKS, axisTicks, layoutTimelineItems } from './timeline.js';
 import { TRACK_COLORS } from './timelineTracks.js';
 import { PLATE_COLOURS } from './plate.js';
 import {
@@ -113,13 +113,21 @@ describe('serialising the timeline', () => {
   });
 
   it('draws an instant, a period and the span a reduced date covers apart', () => {
+    const layout = track().layout;
     const { body } = timelineDrawing(scene());
 
+    expect(layout.items.map((item) => item.mark)).toEqual(['point', 'bar', 'bracket']);
     expect(body).toContain('Convoy seen at the roundabout'); // a point, with its name
     expect(body).toContain('Checkpoint standing');
-    // the approximate period is a dashed bar, the day-only media its own hairline
+    // the approximate period is a dashed bar, the day-only media a line with two stops
     expect(body).toMatch(/<rect[^>]*stroke-dasharray="4 3"/);
-    expect(body).toMatch(/<rect[^>]*fill-opacity="0.35"/);
+    expect(body).toMatch(/<rect[^>]*height="2"[^>]*fill-opacity="0.9"/);
+    const bracket = layout.items[2];
+    const stops = [...body.matchAll(/<line x1="([\d.]+)" y1="[\d.]+" x2="\1" y2="[\d.]+" stroke="#1f7669" stroke-width="2"/g)];
+    expect(stops.map((stop) => Number(stop[1]))).toEqual([
+      Math.round((TIMELINE_PLATE.names + bracket.left * PLATE_PLOT / 100) * 100) / 100,
+      Math.round((TIMELINE_PLATE.names + (bracket.left + bracket.width) * PLATE_PLOT / 100) * 100) / 100,
+    ]);
   });
 
   it('marks a proposal hollow, the way every surface draws one', () => {
@@ -164,30 +172,63 @@ describe('serialising the timeline', () => {
     expect(PLATE_PLOT).toBe(TIMELINE_PLATE.width - TIMELINE_PLATE.names - TIMELINE_PLATE.right);
   });
 
-  it('holds a label inside the room its lane reserved, not the room to the page edge', () => {
-    // The lane packing gives every entry a box, in pixels, and that box is why the next
-    // entry sits where it sits. A label written past it runs under its neighbour.
-    const long = [{ ...ITEMS[0], label: 'A convoy of eleven trucks leaving the depot at dawn' }];
+  // Two entries stacked on the first day: a card's stem would cross one, so these
+  // tracks are read by their captions.
+  const crowd = ['k1', 'k2'].map((id) => ({
+    ...ITEMS[0], id, label: id, earliest: '2026-03-01T06:00:00Z', latest: '2026-03-01T06:00:00Z',
+  }));
+
+  it('holds a label inside the room the layout gave its caption, not the room to the page edge', () => {
+    // The caption was placed where it covers nothing; written past its width it would
+    // run under whatever the layout kept it clear of.
+    const long = [{ ...ITEMS[0], label: 'A convoy of eleven trucks leaving the depot at dawn, then two more at noon' }, ...crowd];
     const laid = layoutTimelineItems(long, FROM, TO, PLATE_PLOT);
     const { body } = timelineDrawing(scene({ tracks: [track({ items: long, layout: laid })] }));
     const written = body.match(/>(A convoy[^<]*)</)[1];
+    const caption = laid.items.find((item) => item.id === 't1').caption;
 
     expect(written).not.toBe(long[0].label);
-    expect([...written].length * TIMELINE_PLATE.charWidth)
-      .toBeLessThanOrEqual(laid.items[0].displayWidth);
+    expect([...written].length * TIMELINE_PLATE.charWidth).toBeLessThanOrEqual(caption.width);
   });
 
   it('labels an entry at the far right leftwards, the way the screen does', () => {
     const late = [{
       ...ITEMS[0], id: 'late', label: 'Last convoy',
-      earliest: '2026-03-29T00:00:00Z', latest: '2026-03-29T00:00:00Z',
-      raw: '2026-03-29T00:00:00Z',
-    }];
+      earliest: '2026-03-30T12:00:00Z', latest: '2026-03-30T12:00:00Z',
+      raw: '2026-03-30T12:00:00Z',
+    }, ...crowd];
     const laid = layoutTimelineItems(late, FROM, TO, PLATE_PLOT);
     const { body } = timelineDrawing(scene({ tracks: [track({ items: late, layout: laid })] }));
 
-    expect(laid.items[0].endAligned).toBe(true);
+    expect(laid.items.find((item) => item.id === 'late').caption.side).toBe('left');
     expect(body).toMatch(/<text[^>]*text-anchor="end"[^>]*>Last convoy</);
+  });
+
+  it('hangs cards from their marks when the track has the room, as the screen does', () => {
+    const laid = track().layout;
+    const { body } = timelineDrawing(scene());
+
+    expect(laid.cards).toBe(true);
+    expect(body).toContain('>4 Mar 2026, 09:00:00 UTC<');
+    expect(body).toMatch(new RegExp(`<rect[^>]*height="${MARKS.cardHeight}"`));
+  });
+
+  it('lists every entry under the drawing when some went without a caption, and says so', () => {
+    const dense = Array.from({ length: 5 }, (_, index) => ({
+      ...ITEMS[0], id: `d${index}`, label: `Convoy sighting number ${index + 1}`,
+      earliest: `2026-03-1${index}T12:00:00Z`, latest: `2026-03-1${index}T12:00:00Z`,
+      raw: `2026-03-1${index}T12:00:00Z`,
+    }));
+    const items = [...dense, ...crowd];
+    const laid = layoutTimelineItems(items, FROM, TO, PLATE_PLOT);
+    expect(laid.labelled).toBeLessThan(items.length);
+    const page = timelinePlate({ meta: { view: 'Dense' }, ...scene({ tracks: [track({ items, layout: laid })] }) });
+
+    expect(page.svg).toContain(`labels shown for ${laid.labelled} of ${items.length}; the full list follows`);
+    expect(page.svg).toContain('Every entry in this window');
+    for (const entry of dense) expect(page.svg).toContain(`>${entry.label}<`);
+    // a page whose every entry is named needs no list
+    expect(timelinePlate({ meta: { view: 'March window' }, ...scene() }).svg).not.toContain('Every entry in this window');
   });
 
   it('keeps a bar that ends with the window inside the axis', () => {
@@ -200,7 +241,7 @@ describe('serialising the timeline', () => {
     }];
     const laid = layoutTimelineItems(tail, FROM, TO, PLATE_PLOT);
     const { body } = timelineDrawing(scene({ tracks: [track({ items: tail, layout: laid })] }));
-    const bar = body.match(/<rect[^>]*fill-opacity="0.22"[^>]*>/)[0];
+    const bar = body.match(/<rect[^>]*fill-opacity="0.3"[^>]*>/)[0];
     const at = Number(bar.match(/ x="([\d.]+)"/)[1]);
     const wide = Number(bar.match(/ width="([\d.]+)"/)[1]);
 

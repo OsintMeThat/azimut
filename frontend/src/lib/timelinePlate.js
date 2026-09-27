@@ -12,15 +12,15 @@
  * would reserve the wrong gaps — the plate has to be the same page whatever window it was
  * exported from.
  *
- * Two deliberate differences from the screen:
+ * It draws what the screen draws: a point for an instant, a bracket across the period
+ * a reduced date covers, a bar for a period, and a caption only where the layout found
+ * it room. Two deliberate differences from the screen:
  *
  * - **The window is the reading.** A Timeline plate is its saved window, never a
  *   viewport: the axis is what the analyst chose to look at.
- * - **An entry carries its name, not its date.** On screen the date is written beside
- *   the label because a pixel cannot be read precisely. A plate has a ruler above every
- *   lane and draws the precision it holds — a point, a bar, a dashed edge for an
- *   approximation, a hairline for the span a reduced date covers — so the words would be
- *   the one thing on the page repeating what the drawing already says.
+ * - **Nobody can hover a page.** Where the layout left captions out, the plate lists the
+ *   window's entries under the drawing, date as written beside each, and says so in its
+ *   header, so a reader holds every name the screen would have shown on demand.
  */
 
 import {
@@ -33,6 +33,7 @@ import {
   svgRect,
   svgText,
 } from './plate.js';
+import { MARKS, cardTop, formatTemporalValue } from './timeline.js';
 import { TRACK_COLORS } from './timelineTracks.js';
 
 /** The plate's own axis geometry, in SVG user units. */
@@ -42,9 +43,14 @@ export const TIMELINE_PLATE = {
   right: 16,
   ruler: 38,
   trackHead: 17,
-  lane: 24,
+  /** One row of marks, the same 18 units as the screen's pixels. */
+  lane: MARKS.row,
   trackGap: 12,
   marker: 4,
+  /** The chronology under the drawing, when captions were left out. */
+  listHead: 30,
+  listRow: 15,
+  listDate: 190,
   /** Roughly what one character of the 10px label face costs. Fixed rather than
    *  measured: a plate has to come out the same under a test. */
   charWidth: 5.4,
@@ -121,10 +127,15 @@ export function timelineDrawing({
   const atPercent = (percent) => plotLeft + (Number(percent) || 0) * plotWidth / 100;
 
   // Every track's height first, so the gridlines can run the whole way down.
-  const rows = tracks.map((track) => (track.collapsed ? 0 : Math.max(1, track.layout?.rows ?? 1)));
+  const heights = tracks.map((track) => {
+    if (track.collapsed) return 0;
+    const layout = track.layout ?? {};
+    const rows = Math.max(1, layout.rows ?? 1);
+    const cards = layout.cardRows ?? 0;
+    return rows * geometry.lane + (cards ? 6 + cards * (MARKS.cardHeight + 6) : 0);
+  });
   const height = tracks.reduce(
-    (total, _track, index) =>
-      total + geometry.trackHead + rows[index] * geometry.lane + geometry.trackGap,
+    (total, _track, index) => total + geometry.trackHead + heights[index] + geometry.trackGap,
     geometry.ruler,
   );
 
@@ -172,6 +183,8 @@ export function timelineDrawing({
   // -- the tracks -----------------------------------------------------------
   let top = geometry.ruler;
   let entries = 0;
+  let labelled = 0;
+  const listed = new Map();
   tracks.forEach((track, index) => {
     const colour = trackColour(track);
     const head = top + geometry.trackHead;
@@ -193,69 +206,70 @@ export function timelineDrawing({
     }
 
     if (!track.collapsed) {
+      for (const item of [...drawn, ...clusters.flatMap((cluster) => cluster.items ?? [])]) {
+        if (!listed.has(item.id)) listed.set(item.id, { item, track: track.label });
+      }
       for (const item of drawn) {
-        const laneTop = head + item.lane * geometry.lane;
-        const middle = laneTop + geometry.lane / 2;
+        const middle = head + item.row * geometry.lane + geometry.lane / 2;
         const x = atPercent(item.left);
-        const interval = item.shape === 'interval';
-        // Held inside the axis: a bar carries a minimum width of its own, so one that
-        // starts at the very end of the window would otherwise cross the ruler it is
-        // being read against.
-        const span = Math.max(1.5, Math.min((Number(item.width) || 0) * plotWidth / 100, plotRight - x));
-        // The span a reduced date covers, drawn as the hairline it is on screen: the
-        // entry is somewhere in here, and the plate must not claim a point instead.
-        if (!interval && item.haloWidth > 0) {
-          const haloLeft = atPercent(item.haloLeft);
+        const span = Math.max(MARKS.bar, Math.min((Number(item.width) || 0) * plotWidth / 100, plotRight - x));
+        const hollow = item.status === 'suggested';
+        if (item.mark === 'bar') {
           parts.push(svgRect({
-            x: haloLeft,
-            y: middle + 7,
-            width: Math.max(1, Math.min((Number(item.haloWidth) || 0) * plotWidth / 100, plotRight - haloLeft)),
-            height: 3,
-            fill: colour,
-            opacity: 0.35,
+            x, y: middle - 4, width: span, height: 8, radius: 2,
+            fill: colour, opacity: hollow ? 0.08 : 0.3, stroke: colour, strokeWidth: 1,
+            dash: item.approximate ? '4 3' : (hollow ? '1.5 2' : undefined),
           }));
-        }
-        if (interval) {
+        } else if (item.mark === 'bracket') {
+          // The whole period a reduced date covers, as the thin line it is on screen:
+          // the entry is somewhere in here, and the plate must not claim a point.
           parts.push(svgRect({
-            x, y: middle - 6, width: span, height: 12, radius: 3,
-            fill: colour, opacity: 0.22, stroke: colour, strokeWidth: 1,
-            dash: item.approximate ? '4 3' : undefined,
+            x, y: middle - 1, width: span, height: 2, fill: colour, opacity: hollow ? 0.5 : 0.9,
           }));
+          const stop = item.approximate ? '2 2' : undefined;
+          if (!item.openStart) parts.push(svgLine({ x1: x, y1: middle - 4, x2: x, y2: middle + 4, stroke: colour, width: 2, dash: stop }));
+          if (!item.openEnd) parts.push(svgLine({ x1: x + span, y1: middle - 4, x2: x + span, y2: middle + 4, stroke: colour, width: 2, dash: stop }));
         } else {
           parts.push(svgCircle({
             x, y: middle, r: geometry.marker,
-            fill: item.status === 'suggested' ? PLATE_COLOURS.paper : colour,
+            fill: hollow ? PLATE_COLOURS.paper : colour,
             stroke: colour,
             strokeWidth: 1.4,
             dash: item.approximate ? '2 2' : undefined,
           }));
         }
-        // The lane packing reserved this entry a box, in these same units, and that box
-        // is why the lane below it is empty. A label is cut to it rather than to the far
-        // edge of the page, since the room out there is where the next entry stands.
-        const reserved = interval || !Number.isFinite(item.displayWidth)
-          ? Infinity
-          : Math.max(0, item.displayWidth - geometry.marker - 6);
-        // An entry the packing pushed against the right edge is labelled leftwards, the
-        // way the screen labels it, so its name has somewhere to go.
-        const anchor = !interval && item.endAligned ? 'end' : undefined;
-        const edge = anchor
-          ? x - geometry.marker - 5
-          : (interval ? x + span + 6 : x + geometry.marker + 5);
-        const label = fitLabel(
-          item.label,
-          Math.min(anchor ? edge - plotLeft : plotRight - edge, reserved),
-        );
-        if (label) {
-          parts.push(svgText(label, {
-            x: edge, y: middle + 3.5, size: geometry.labelSize, anchor,
-            fill: item.confidence === 'refuted' ? PLATE_COLOURS.hint : PLATE_COLOURS.ink,
+        const ink = item.confidence === 'refuted' ? PLATE_COLOURS.hint : PLATE_COLOURS.ink;
+        if (item.caption) {
+          labelled += 1;
+          const from = plotLeft + item.caption.left;
+          const text = fitLabel(item.label, item.caption.width);
+          if (text) {
+            const right = item.caption.side === 'left';
+            parts.push(svgText(text, {
+              x: right ? from + item.caption.width : from,
+              y: middle + 3.5, size: geometry.labelSize, anchor: right ? 'end' : undefined, fill: ink,
+            }));
+          }
+        } else if (item.card) {
+          labelled += 1;
+          const cardY = head + cardTop(track.layout, item.card.row) - MARKS.top;
+          const anchor = plotLeft + item.card.anchor;
+          parts.push(svgLine({ x1: anchor, y1: middle + 4, x2: anchor, y2: cardY, stroke: colour }));
+          parts.push(svgRect({
+            x: plotLeft + item.card.left, y: cardY, width: item.card.width, height: MARKS.cardHeight,
+            radius: 5, fill: PLATE_COLOURS.paper, stroke: colour, strokeWidth: 1,
+          }));
+          parts.push(svgText(fitLabel(item.label, item.card.width - 16), {
+            x: plotLeft + item.card.left + 8, y: cardY + 16, size: geometry.labelSize, weight: '600', fill: ink,
+          }));
+          parts.push(svgText(fitLabel(formatTemporalValue(item.raw).label, item.card.width - 16), {
+            x: plotLeft + item.card.left + 8, y: cardY + 30, size: 9, fill: PLATE_COLOURS.hint,
           }));
         }
       }
       // What the lane could not hold, counted rather than dropped silently.
       for (const cluster of clusters) {
-        const laneTop = head + cluster.lane * geometry.lane;
+        const laneTop = head + cluster.row * geometry.lane;
         parts.push(svgText(`+${cluster.count}`, {
           x: atPercent(cluster.left), y: laneTop + geometry.lane / 2 + 3.5,
           size: 10, anchor: 'middle', fill: PLATE_COLOURS.hint,
@@ -268,17 +282,47 @@ export function timelineDrawing({
       }
     }
 
-    top += geometry.trackHead + rows[index] * geometry.lane + geometry.trackGap;
+    top += geometry.trackHead + heights[index] + geometry.trackGap;
   });
 
   parts.push(svgLine({ x1: plotLeft, y1: round(height), x2: width - geometry.right, y2: round(height), stroke: PLATE_COLOURS.hint }));
 
+  // -- the chronology, when the drawing could not name everything ------------
+  let bottom = height;
+  const named = labelled >= listed.size;
+  if (!named) {
+    const rows = [...listed.values()].sort((a, b) =>
+      String(a.item.earliest).localeCompare(String(b.item.earliest))
+      || String(a.item.id).localeCompare(String(b.item.id)));
+    bottom += geometry.listHead;
+    parts.push(svgText('Every entry in this window', {
+      x: 8, y: bottom - 10, size: 11, weight: '600', fill: PLATE_COLOURS.ink,
+    }));
+    const statement = width - geometry.right - (8 + geometry.listDate) - geometry.names;
+    for (const { item, track } of rows) {
+      bottom += geometry.listRow;
+      parts.push(svgText(fitLabel(formatTemporalValue(item.raw).label, geometry.listDate - 10), {
+        x: 8, y: bottom, size: 9, fill: PLATE_COLOURS.label,
+      }));
+      parts.push(svgText(fitLabel(item.label, statement), {
+        x: 8 + geometry.listDate, y: bottom, size: 10,
+        fill: item.confidence === 'refuted' ? PLATE_COLOURS.hint : PLATE_COLOURS.ink,
+      }));
+      parts.push(svgText(fitLabel(track, geometry.names - 10), {
+        x: width - geometry.right, y: bottom, size: 9, anchor: 'end', fill: PLATE_COLOURS.hint,
+      }));
+    }
+    bottom += 8;
+  }
+
   return {
     body: parts.filter(Boolean).join('\n'),
     width,
-    height: Math.round(height + 4),
+    height: Math.round(bottom + 4),
     tracks: tracks.length,
     entries,
+    labelled: Math.min(labelled, listed.size),
+    listed: named ? 0 : listed.size,
   };
 }
 
@@ -293,9 +337,9 @@ export function timelineLegend(tracks = []) {
   }));
   const strokes = [
     { label: 'an instant', shape: 'dot' },
+    { label: 'the span a reduced date covers', dash: [], width: 2 },
     { label: 'a period', dash: [], width: 8 },
     { label: 'approximate', dash: [4, 3], width: 1.4 },
-    { label: 'the span a reduced date covers', dash: [], width: 2 },
   ];
   return { families, strokes };
 }
@@ -306,7 +350,8 @@ export function timelinePlate({ meta = {}, ...scene } = {}) {
   const tally = [
     `${drawing.tracks} track${drawing.tracks === 1 ? '' : 's'}`,
     `${drawing.entries} entr${drawing.entries === 1 ? 'y' : 'ies'} in this window`,
-  ].join(' · ');
+    drawing.listed ? `labels shown for ${drawing.labelled} of ${drawing.listed}; the full list follows` : '',
+  ].filter(Boolean).join(' · ');
   return {
     ...plateDocument({ meta: { ...meta, tally }, families, strokes, drawing }),
     drawing,

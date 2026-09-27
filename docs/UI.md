@@ -272,6 +272,9 @@ row's Details.
   so two analysts export the same file. The header states what the drawing holds and what
   it leaves out: how many nodes and links are on it, entries with no date, nodes a fold or
   a focus is holding back, verbs dropped where the drawing is too dense to carry them.
+  Nobody can hover a page, so a Timeline plate that left some names off its marks lists
+  every entry of the window under the drawing, date as written beside each, and its
+  header says `labels shown for N of M; the full list follows`.
 - **The menu is where a list of readings is kept in order.** Every row states its mode,
   its surface where the family holds two, and when it was last written — a distance up
   to a week, then the date, with the exact UTC minute in the tooltip. Past one saved
@@ -1003,12 +1006,28 @@ strip, civil twilight and day are laid over it, and instants stay UTC underneath
 whatever clock labels them. It is read from `/api/geo/daylight`, which is pure local computation and
 answers a window wider than a month as cut rather than drawing stripes a few pixels
 wide.
-Category tracks stack vertically. An instant is a point and an explicit interval is a bar.
-A reduced date stays a point, with a thin bounded line showing the whole year, month
-or day its precision covers. Approximate dates use a dashed edge and uncertain dates
-use a pattern. Suggested status uses a corner mark; refuted confidence strikes the
-label. The legend separates date quality from assessment confidence because the two
-are independent.
+Category tracks stack vertically. A mark is drawn where its date is, to the pixel, and
+its shape says what kind of date it is: **a point is an instant, a bracket is a
+reduced date, a bar is a period**, and a box is never an instant. A reduced date is a
+thin line with a stop at each end, across the whole year, month or day it covers; once
+that period is narrower than a few pixels it is drawn as a point in its middle. A bar
+is as long as its period, down to two pixels, and a span running past the window has
+no stop on that side. Approximate dates have dashed ends, uncertain ones a broken or
+hatched fill, a suggestion is hollow and a refuted statement is faded with its name
+struck. The legend names the three shapes and keeps date quality apart from assessment
+confidence, because the two are independent.
+
+A mark never moves sideways for its neighbours or for what is selected. Marks that
+would overlap stack downwards, pinned ones first; a bracket or a bar takes the first
+row free across its whole span. A name is written beside its mark, right first, then
+left, and inside a period that can hold it, only where it covers nothing; otherwise the
+mark stands alone and its name is on hover, in the list and in the inspector. The
+selected entry is named first, and the same order on every render keeps names from
+jumping during a zoom. A track with at most twelve marks whose cards all fit hangs a
+card from each mark on a stem: the name, the date as written, and the cached preview
+of a file. Hovering or focusing a mark draws a line up to the ruler, one for an instant
+and one at each end of a span, with the date as written on the ruler. On a focused
+mark, `Alt` with an arrow moves to the entry before or after it on the same track.
 
 The toolbar states the window in words, on the axis's own clock, between two step
 arrows: pressing it opens the exact boundaries, the spans `Hour` to `Year`, and `All`
@@ -1040,9 +1059,9 @@ invalid legacy values visible without inventing a timezone. The date a fact ente
 Azimut never masquerades as the date of the fact.
 
 Overview stays above Plot or List, so expanding a dense track never pushes the global
-navigator below the chronology. Events are packed against their rendered labels.
-Overflow becomes a `+N` control that expands the track in place; **Collapse** in that
-track's left label restores the bounded view and its `+N`. Plot and List are
+navigator below the chronology. A track holds six rows of marks; past that, marks
+become a `+N` under their column that expands the track in place, and **Collapse** in
+that track's left label restores the bounded view and its `+N`. Plot and List are
 two readings of the same loaded page.
 
 The Timeline opens with **Events** and **Media** tracks. **Track** adds editable

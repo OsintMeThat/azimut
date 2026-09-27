@@ -12,6 +12,7 @@
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { entityLabel, entityTypes, loadEntityTypes } from '../lib/entityTypes.svelte.js';
   import {
+    MARKS,
     TIMELINE_CATEGORIES,
     UTC,
     WINDOW_SPANS,
@@ -21,6 +22,7 @@
     axisTicks,
     bucketWindow,
     canDragTemporal,
+    cardTop,
     dateAtRatio,
     describePair,
     draftWhen,
@@ -64,6 +66,7 @@
     trackPresets,
     trackTint,
   } from '../lib/timelineTracks.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { plateFilename } from '../lib/plate.js';
   import { PLATE_PLOT, timelinePlate } from '../lib/timelinePlate.js';
   import AnalysisViews from '../components/AnalysisViews.svelte';
@@ -141,6 +144,7 @@
   let rangeElement = $state(null);
   let rangeMenu = $state(false);
   let plotElement = $state(null);
+  let axisCardElement = $state(null);
   let plotWidth = $state(1000);
   let overviewWidth = $state(800);
   let tooltip = $state(null);
@@ -214,8 +218,12 @@
    * packs lanes by the room a label takes in pixels: it is the width that decides which
    * entries collide, how many lanes a track needs and what ends up in a `+n`. The screen
    * asks at the width it measured, the export at the plate's own.
+   *
+   * The selected entry is captioned first on screen, so the one being read is never the
+   * one left without its name. A plate is not being read by anyone yet, so it asks for
+   * no selection and comes out the same whatever was clicked.
    */
-  function buildTracks(axisWidth) {
+  function buildTracks(axisWidth, selectedId = null) {
     return groupedTimelineTracks(trackSpecs, baseTrackItems, groupBy, entityLabel).map((track) => {
       const baseId = track.parentId ?? track.id;
       const expanded = Boolean(expandedTracks[baseId]);
@@ -225,12 +233,12 @@
         total: groupBy === 'none' ? (trackPages[baseId]?.total ?? track.items.length) : track.items.length,
         layout: layoutTimelineItems(
           track.items.filter((item) => item.earliest), from, to, axisWidth,
-          expanded ? PAGE : 6
+          expanded ? PAGE : 6, { selectedId }
         ),
       };
     });
   }
-  const tracks = $derived(buildTracks(plotWidth));
+  const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null));
   const density = $derived(layoutDensityBuckets(overview, extent));
   const overviewUnit = $derived(
     { 13: 'Hour', 10: 'Day', 7: 'Month' }[overview[0]?.start?.length] ?? 'Year'
@@ -1335,6 +1343,61 @@
     showItemTooltip({ clientX: rect.right, clientY: rect.top }, item);
   }
 
+  /**
+   * A line from the entry up to the ruler, and on the ruler the date as it was written.
+   *
+   * A mark is exactly where its date is, and this is what lets that be read without
+   * counting ticks: an instant gets one line, a reduced date or a period one at each
+   * end of what it covers.
+   */
+  let guide = $state(null);
+  function showGuide(element, item) {
+    const card = axisCardElement?.getBoundingClientRect();
+    const ruler = plotElement?.getBoundingClientRect();
+    if (!card || !ruler || !element) return;
+    const mark = element.getBoundingClientRect();
+    const middle = mark.left + mark.width / 2;
+    const lines = item.mark === 'point' ? [middle] : [mark.left, mark.right];
+    guide = {
+      id: item.id,
+      lines: lines.map((x) => x - card.left),
+      top: ruler.bottom - card.top,
+      height: Math.max(0, mark.top + mark.height / 2 - ruler.bottom),
+      at: Math.min(Math.max(middle, ruler.left + 90), ruler.right - 90) - card.left,
+      label: formatTemporalValue(item.raw ?? '').label,
+    };
+  }
+
+  function leaveMark(item) {
+    tooltip = null;
+    if (guide?.id === item.id) guide = null;
+  }
+
+  /**
+   * The keys a mark answers to itself. Enter and Space are its own click, so they stop
+   * here rather than reaching the canvas, where they would start a new claim. Alt with
+   * an arrow walks to the entry before or after it on the same track; every other key
+   * goes on to the canvas, which pans and zooms as it always has.
+   */
+  function markKey(event, track, item) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.stopPropagation();
+      return;
+    }
+    if (!event.altKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const order = [...track.layout.items].sort((a, b) =>
+      String(a.earliest).localeCompare(String(b.earliest)) || String(a.id).localeCompare(String(b.id)));
+    const index = order.findIndex((entry) => entry.id === item.id);
+    const next = order[index + (event.key === 'ArrowLeft' ? -1 : 1)];
+    if (!next) return;
+    const canvas = event.currentTarget.closest('.track-canvas');
+    const target = [...(canvas?.querySelectorAll('[data-mark]') ?? [])]
+      .find((element) => element.dataset.mark === next.id);
+    target?.focus();
+  }
+
   function showBucketTooltip(event, bucket) {
     const parts = TIMELINE_CATEGORIES
       .map((category) => bucket.categories?.[category.id] ? `${category.short} ${bucket.categories[category.id]}` : '')
@@ -1439,6 +1502,10 @@
     <details class="legend" bind:this={legendElement} bind:open={legendOpen}>
       <summary>Legend</summary>
       <div class="legend-card">
+        <strong>Shape</strong>
+        <span><i class="sample shape-point"></i>Instant</span>
+        <span><i class="sample shape-bracket"></i>Reduced date, across what it covers</span>
+        <span><i class="sample shape-bar"></i>Period</span>
         <strong>Date quality</strong>
         <span><i class="sample approximate"></i>Approximate date</span>
         <span><i class="sample uncertain"></i>Uncertain date</span>
@@ -1570,7 +1637,7 @@
         </section>
 
         {#if viewMode === 'plot'}
-          <section class="axis-card" aria-label="Timeline axis">
+          <section class="axis-card" aria-label="Timeline axis" bind:this={axisCardElement}>
             <div class="axis-row">
               <div class="axis-label">
                 <span>{zoneWord}</span>
@@ -1638,7 +1705,7 @@
                 class:folded={track.collapsed}
                 role="listitem"
                 style:--track-tint={trackTint(track.color)}
-                style:min-height={track.collapsed ? '42px' : `${Math.max(78, track.layout.rows * 46 + 28)}px`}
+                style:min-height={track.collapsed ? '42px' : `${Math.max(46, track.layout.height)}px`}
                 ondragover={(event) => { if (groupBy === 'none' && !snapshotReading) event.preventDefault(); }}
                 ondrop={() => dropTrack(baseId)}
               >
@@ -1703,18 +1770,13 @@
                     <div class="draw-range" style:left={`${Math.min(drawing.start, drawing.end) * 100}%`} style:width={`${Math.max(.35, Math.abs(drawing.end - drawing.start) * 100)}%`}></div>
                   {/if}
                   {#each track.layout.items as item (item.id)}
-                    {#if item.shape !== 'interval' && item.zone === 'date-only' && item.haloWidth > 0}
-                      <span
-                        class={`precision-span ${item.category}`}
-                        class:chosen={selected?.id === item.id}
-                        style:left={`${item.haloLeft}%`}
-                        style:width={`${item.haloWidth}%`}
-                        style:top={`${item.lane * 46 + 31}px`}
-                        aria-hidden="true"
-                      ></span>
-                    {/if}
+                    {@const editable = canDragTemporal(item) && !snapshotReading}
+                    {@const markTop = MARKS.top + item.row * MARKS.row}
+                    <!-- A point is an instant, a bracket a reduced date across what it
+                         covers, a bar a period at its true length. The caption and the
+                         card are the mark's own button, so reading one is clicking it. -->
                     <div
-                      class={`timeline-event ${item.category}`}
+                      class={`timeline-event ${item.category} ${item.mark}`}
                       class:chosen={selected?.id === item.id}
                       class:against={against?.id === item.id}
                       class:period={item.shape === 'interval'}
@@ -1723,41 +1785,61 @@
                       class:suggested={item.status === 'suggested'}
                       class:refuted={item.confidence === 'refuted'}
                       class:pinned={item.pinned}
-                      class:axis-editable={canDragTemporal(item) && !snapshotReading}
-                      class:end-aligned={item.endAligned}
-                      style:left={`${item.left}%`}
-                      style:width={`${item.width}%`}
-                      style:top={`${item.lane * 46 + 18}px`}
+                      class:axis-editable={editable}
+                      class:open-start={item.openStart}
+                      class:open-end={item.openEnd}
+                      class:guided={guide?.id === item.id}
+                      style:left={item.mark === 'point' ? `calc(${item.left}% - ${MARKS.column / 2}px)` : `${item.left}%`}
+                      style:width={item.mark === 'point' ? `${MARKS.column}px` : `${item.width}%`}
+                      style:top={`${markTop}px`}
                     >
-                      {#if item.shape === 'interval' && canDragTemporal(item) && !snapshotReading}
+                      {#if item.shape === 'interval' && editable}
                         <button class="resize start" aria-label="Resize start" title="Resize start" onpointerdown={(event) => beginMove(event, item, 'start')} onkeydown={(event) => keyboardEdit(event, item, 'start')}></button>
                       {/if}
                       <button
                         class="event-select"
+                        data-mark={item.id}
                         aria-label={`${item.label}, ${formatTemporalValue(item.raw).label}`}
                         onpointerdown={(event) => {
                           // Ctrl is the measure gesture, so it must not also start a drag
                           if (event.ctrlKey || event.metaKey) return;
-                          if (selected?.id === item.id && canDragTemporal(item) && !snapshotReading) beginMove(event, item);
+                          if (selected?.id === item.id && editable) beginMove(event, item);
                         }}
                         onclick={(event) => { event.stopPropagation(); selectItem(item, baseId, event); }}
                         oncontextmenu={(event) => openItemMenu(event, item, baseId)}
-                        onpointerenter={(event) => showItemTooltip(event, item)}
+                        onpointerenter={(event) => { showItemTooltip(event, item); showGuide(event.currentTarget, item); }}
                         onpointermove={(event) => showItemTooltip(event, item)}
-                        onpointerleave={() => (tooltip = null)}
-                        onfocus={(event) => showFocusedTooltip(event, item)}
-                        onblur={() => (tooltip = null)}
+                        onpointerleave={() => leaveMark(item)}
+                        onfocus={(event) => { showFocusedTooltip(event, item); showGuide(event.currentTarget, item); }}
+                        onblur={() => leaveMark(item)}
+                        onkeydown={(event) => markKey(event, track, item)}
                       >
-                        {#if item.shape !== 'interval'}<span class="event-point"></span>{/if}
-                        <span class="event-text">
-                          <strong class="event-label">{item.label}</strong>
-                          <small class="event-date">{formatTemporalValue(item.raw).label}</small>
-                        </span>
+                        <span class="event-shape" aria-hidden="true"></span>
+                        {#if item.caption}
+                          <span
+                            class={`event-caption ${item.caption.side}`}
+                            style:left={`${item.caption.offset}px`}
+                            style:width={`${item.caption.width}px`}
+                          >{item.label}</span>
+                        {/if}
+                        {#if item.card}
+                          {@const drop = cardTop(track.layout, item.card.row) - markTop}
+                          <span class="card-stem" style:left={`${item.card.stem}px`} style:height={`${drop - MARKS.row / 2}px`} aria-hidden="true"></span>
+                          <span class="event-card" style:left={`${item.card.offset}px`} style:top={`${drop}px`} style:width={`${item.card.width}px`}>
+                            {#if item.category === 'media' && item.thumb && caseState.current?.id}
+                              <img src={fileUrl(caseState.current.id, item.thumb)} alt="" loading="lazy" decoding="async" />
+                            {/if}
+                            <span class="card-copy">
+                              <strong>{item.label}</strong>
+                              <small>{formatTemporalValue(item.raw).label}</small>
+                            </span>
+                          </span>
+                        {/if}
                       </button>
-                      {#if canDragTemporal(item) && !snapshotReading}
+                      {#if editable}
                         <button class="move-grip" aria-label="Move selected date" title="Move date" onpointerdown={(event) => beginMove(event, item)} onkeydown={(event) => keyboardEdit(event, item, 'move')}><Icon name="grip" size={10} /></button>
                       {/if}
-                      {#if item.shape === 'interval' && canDragTemporal(item) && !snapshotReading}
+                      {#if item.shape === 'interval' && editable}
                         <button class="resize end" aria-label="Resize end" title="Resize end" onpointerdown={(event) => beginMove(event, item, 'end')} onkeydown={(event) => keyboardEdit(event, item, 'end')}></button>
                       {/if}
                     </div>
@@ -1766,7 +1848,7 @@
                     <button
                       class="timeline-cluster"
                       style:left={`${cluster.left}%`}
-                      style:top={`${cluster.lane * 46 + 22}px`}
+                      style:top={`${MARKS.top + cluster.row * MARKS.row}px`}
                       aria-label={`${cluster.count} more events near ${formatTemporalValue(cluster.earliest).label}`}
                       onclick={() => expandTrack(baseId)}
                     >+{cluster.count}</button>
@@ -1777,6 +1859,14 @@
                 </div>
               </div>
             {/each}
+            {#if guide}
+              <div class="time-guide" aria-hidden="true">
+                {#each guide.lines as x, index (index)}
+                  <span class="guide-line" style:left={`${x}px`} style:top={`${guide.top}px`} style:height={`${guide.height}px`}></span>
+                {/each}
+                <span class="guide-reading" style:left={`${guide.at}px`} style:top={`${guide.top - 19}px`}>{guide.label}</span>
+              </div>
+            {/if}
           </section>
         {:else}
           <section class="timeline-list" aria-label="Timeline list">
@@ -2131,6 +2221,9 @@
   .sample.suggested::after { content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; border-radius: 50%; background: var(--track-statement); box-shadow: 0 0 0 1px var(--bg-1); }
   .sample.refuted { position: relative; opacity: .8; }
   .sample.refuted::after { content: ''; position: absolute; left: 2px; right: 2px; top: 4px; border-top: 1px solid var(--text-2); transform: rotate(-8deg); }
+  .sample.shape-point { width: 8px; height: 8px; margin-inline: 10px; border: 0; border-radius: 50%; background: var(--track-statement); }
+  .sample.shape-bracket { height: 8px; border: 0; border-inline: 2px solid var(--track-statement); border-radius: 0; background: linear-gradient(to bottom, transparent 3px, var(--track-statement) 3px, var(--track-statement) 5px, transparent 5px); }
+  .sample.shape-bar { height: 8px; border-radius: 2px; background: color-mix(in srgb, var(--track-statement) 32%, var(--bg-1)); }
   .utc-readout { margin-left: auto; color: var(--text-3); font: 10px var(--mono); letter-spacing: .03em; }
   /* Wraps rather than scrolls: the Add-a-track menu hangs out of this row, and an
      overflow container would clip it. */
@@ -2151,6 +2244,7 @@
   /* A panel is a border and a fill. The 35px drop shadow under each one read as a
      floating card, which is a look rather than a reading of the case. */
   .axis-card, .overview-card, .holding-card, .timeline-list { border: 1px solid var(--border); border-radius: var(--r); background: var(--bg-1); overflow: hidden; }
+  .axis-card { position: relative; }
   /* One width for the gutter, and wide enough for a name the analyst chose: at 132px
      "Events" arrived as "E." and a track nobody can read is a colour with a count. */
   .axis-card, .overview-card { --gutter: 178px; }
@@ -2208,41 +2302,72 @@
   .gridline { position: absolute; inset-block: 0; border-left: 1px solid color-mix(in srgb, var(--border) 65%, transparent); pointer-events: none; }
   .gridline.minor { border-left-color: color-mix(in srgb, var(--border) 35%, transparent); }
   .track-now { inset-block: 0; opacity: .7; }
-  .track-hint, .track-empty { position: absolute; right: 12px; top: 6px; color: color-mix(in srgb, var(--text-3) 65%, transparent); font-size: 9px; pointer-events: none; }
+  .track-hint, .track-empty { position: absolute; right: 12px; top: 2px; color: color-mix(in srgb, var(--text-3) 65%, transparent); font-size: 9px; pointer-events: none; }
   .track-empty { left: 14px; right: auto; top: 26px; font-size: var(--fs-xs); }
   .folded-note { position: absolute; top: 13px; left: 14px; color: var(--text-3); font-size: 9px; }
   .draw-range { position: absolute; inset-block: 12px; z-index: 6; border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
-  .timeline-event { --event-color: var(--track-tint, var(--track-statement)); position: absolute; z-index: 2; height: 36px; display: flex; align-items: stretch; border: 1px solid color-mix(in srgb, var(--event-color) 65%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--event-color) 11%, var(--bg-1)); color: var(--text-1); transform: translateX(-8px); box-shadow: 0 3px 10px color-mix(in srgb, var(--bg-0) 55%, transparent); }
+  /* One row of marks is 18px: a point is an 8px dot centred on its instant, a bracket a
+     2px line with a stop at each end of the period a reduced date covers, a bar an 8px
+     band as long as its period. Nothing is nudged sideways, so a mark sits exactly on
+     its date whichever way the axis is scrolled. */
+  .timeline-event { --event-color: var(--track-tint, var(--track-statement)); position: absolute; z-index: 2; height: 18px; color: var(--text-1); }
   .timeline-event.media { --event-color: var(--track-tint, var(--track-media)); }
   .timeline-event.case_activity { --event-color: var(--track-tint, var(--track-activity)); }
-  .timeline-event.period { min-width: 28px; transform: none; }
-  .timeline-event.end-aligned { transform: translateX(calc(-100% + 8px)); }
-  .timeline-event.chosen { z-index: 8; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 5px 16px color-mix(in srgb, var(--bg-0) 70%, transparent); }
+  .timeline-event.chosen, .timeline-event.against, .timeline-event.guided { z-index: 8; }
+  .event-select { position: absolute; inset: 0; display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+  /* 8px to the eye, 20px to the pointer. */
+  .point .event-select::before { content: ''; position: absolute; inset: 0 -5px; }
+  .event-shape { position: absolute; box-sizing: border-box; pointer-events: none; }
+  .point .event-shape { top: 5px; left: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--event-color); box-shadow: 0 0 0 1.5px var(--bg-1); }
+  .bracket .event-shape { inset: 5px 0; border-inline: 2px solid var(--event-color); background: linear-gradient(to bottom, transparent 3px, var(--event-color) 3px, var(--event-color) 5px, transparent 5px); }
+  .bar .event-shape { inset: 5px 0; border: 1px solid var(--event-color); border-radius: 2px; background: color-mix(in srgb, var(--event-color) 32%, var(--bg-1)); }
+  /* A span running past the window has no stop on that side: it goes on. */
+  .bracket.open-start .event-shape { border-left-width: 0; }
+  .bracket.open-end .event-shape { border-right-width: 0; }
+  .bar.open-start .event-shape { border-left-style: dotted; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+  .bar.open-end .event-shape { border-right-style: dotted; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .timeline-event.approximate.point .event-shape { box-shadow: none; outline: 1.5px dashed var(--event-color); outline-offset: 1px; }
+  .timeline-event.approximate.bracket .event-shape { border-inline-style: dashed; }
+  .timeline-event.approximate.bar .event-shape { border-style: dashed; }
+  .timeline-event.uncertain.point .event-shape { background: repeating-linear-gradient(135deg, var(--event-color) 0 2px, var(--bg-1) 2px 3px); }
+  .timeline-event.uncertain.bracket .event-shape { background: repeating-linear-gradient(90deg, var(--event-color) 0 3px, transparent 3px 5px) center / 100% 2px no-repeat; }
+  .timeline-event.uncertain.bar .event-shape { background-image: repeating-linear-gradient(135deg, transparent, transparent 3px, color-mix(in srgb, var(--text-2) 22%, transparent) 3px, color-mix(in srgb, var(--text-2) 22%, transparent) 5px); }
+  /* A proposal is hollow, the way every surface draws one. */
+  .timeline-event.suggested.point .event-shape { border: 2px solid var(--event-color); background: var(--bg-1); }
+  .timeline-event.suggested.bracket .event-shape { border-inline-style: dotted; opacity: .75; }
+  .timeline-event.suggested.bar .event-shape { border-style: dotted; background: color-mix(in srgb, var(--event-color) 10%, var(--bg-1)); }
+  .timeline-event.refuted { opacity: .55; }
+  .timeline-event.refuted .event-caption, .timeline-event.refuted .card-copy strong { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .timeline-event.pinned::before { content: ''; position: absolute; z-index: 3; top: 0; left: calc(50% - 4px); width: 8px; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+  .timeline-event.chosen.point .event-shape { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px var(--accent); }
+  .timeline-event.chosen:not(.point) .event-shape { box-shadow: 0 0 0 1px var(--bg-1), 0 0 0 3px var(--accent); }
   /* The entry held against the selected one. Marked apart rather than as a second
      selection: only one of the two is the one being read. */
-  .timeline-event.against { z-index: 8; border-color: var(--text-2); border-style: dashed; }
-  .timeline-event.pinned { box-shadow: inset 0 2px 0 var(--accent), 0 3px 10px color-mix(in srgb, var(--bg-0) 55%, transparent); }
-  .timeline-event.approximate { border-style: dashed; }
-  .timeline-event.uncertain { background-image: repeating-linear-gradient(135deg, transparent, transparent 4px, color-mix(in srgb, var(--text-2) 12%, transparent) 4px, color-mix(in srgb, var(--text-2) 12%, transparent) 7px); }
-  .timeline-event.suggested::after { content: ''; position: absolute; z-index: 5; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--event-color); box-shadow: 0 0 0 2px var(--bg-1); pointer-events: none; }
-  .timeline-event.refuted { opacity: .8; }
-  .timeline-event.refuted .event-label { text-decoration: line-through; text-decoration-thickness: 1px; }
-  .event-select { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 3px 7px; overflow: hidden; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
-  .event-point { width: 8px; height: 8px; flex: 0 0 auto; border: 2px solid var(--bg-1); border-radius: 50%; background: var(--event-color); box-shadow: 0 0 0 1px var(--event-color); }
-  .event-text { min-width: 0; display: grid; line-height: 1.12; }
-  .event-label, .event-date { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .event-label { font-size: 10px; font-weight: 650; }
-  .event-date { margin-top: 2px; color: var(--text-3); font: 8px var(--mono); }
-  .precision-span { --event-color: var(--track-tint, var(--track-statement)); position: absolute; z-index: 1; height: 10px; min-width: 1px; border-inline: 1px solid color-mix(in srgb, var(--event-color) 55%, transparent); background: linear-gradient(to bottom, transparent 4px, color-mix(in srgb, var(--event-color) 42%, transparent) 4px, color-mix(in srgb, var(--event-color) 42%, transparent) 6px, transparent 6px); pointer-events: none; }
-  .precision-span.media { --event-color: var(--track-tint, var(--track-media)); }
-  .precision-span.case_activity { --event-color: var(--track-tint, var(--track-activity)); }
-  .precision-span.chosen { border-inline-color: var(--event-color); background: linear-gradient(to bottom, transparent 4px, color-mix(in srgb, var(--event-color) 72%, transparent) 4px, color-mix(in srgb, var(--event-color) 72%, transparent) 6px, transparent 6px); }
-  .move-grip { display: none; width: 18px; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--border); background: color-mix(in srgb, var(--bg-1) 90%, transparent); color: var(--text-3); cursor: ew-resize; }
+  .timeline-event.against .event-shape { outline: 1px dashed var(--text-2); outline-offset: 3px; }
+  .event-caption { position: absolute; top: 3px; height: 12px; box-sizing: content-box; overflow: hidden; color: var(--text-1); font-size: 10px; font-weight: 600; line-height: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+  .event-caption.left { text-align: right; }
+  .bracket .event-caption.inside { padding: 0 3px; background: var(--bg-1); }
+  /* A name inside a span interrupts its line rather than sitting on it, so it reads on
+     any tint. */
+  .bar .event-caption.inside { padding: 0 4px; border-radius: 3px; background: var(--bg-1); }
+  .timeline-event.chosen .event-caption { color: var(--accent); }
+  .card-stem { position: absolute; top: 13px; width: 0; border-left: 1px solid color-mix(in srgb, var(--event-color) 65%, transparent); pointer-events: none; }
+  .event-card { position: absolute; height: 40px; box-sizing: border-box; display: flex; align-items: center; gap: 7px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--event-color) 55%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--event-color) 8%, var(--bg-1)); box-shadow: 0 3px 10px color-mix(in srgb, var(--bg-0) 45%, transparent); text-align: left; }
+  .timeline-event.chosen .event-card { border-color: var(--accent); }
+  .event-card img { width: 32px; height: 30px; flex: 0 0 auto; border-radius: 3px; object-fit: cover; }
+  .card-copy { min-width: 0; display: grid; line-height: 1.15; }
+  .card-copy strong, .card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-copy strong { font-size: 10px; font-weight: 650; }
+  .card-copy small { margin-top: 2px; color: var(--text-3); font: 9px var(--font-mono); }
+  .move-grip { display: none; position: absolute; z-index: 3; top: 100%; left: calc(50% - 9px); width: 18px; height: 14px; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); color: var(--text-3); cursor: ew-resize; }
   .timeline-event.chosen .move-grip { display: grid; }
-  .resize { display: none; position: absolute; z-index: 3; top: 4px; bottom: 4px; width: 7px; padding: 0; border: 0; border-radius: 3px; background: var(--accent); cursor: ew-resize; }
+  .resize { display: none; position: absolute; z-index: 3; top: 2px; bottom: 2px; width: 7px; padding: 0; border: 0; border-radius: 3px; background: var(--accent); cursor: ew-resize; }
   .timeline-event.chosen .resize { display: block; }
   .resize.start { left: -4px; } .resize.end { right: -4px; }
-  .timeline-cluster { position: absolute; z-index: 7; min-width: 32px; height: 24px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-3); color: var(--text-2); font: 700 10px var(--mono); transform: translateX(-50%); cursor: pointer; }
+  .timeline-cluster { position: absolute; z-index: 7; min-width: 26px; height: 16px; margin-top: 1px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-3); color: var(--text-2); font: 700 9px var(--font-mono); line-height: 14px; transform: translateX(-50%); cursor: pointer; }
+  .time-guide { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
+  .guide-line { position: absolute; width: 0; border-left: 1px solid color-mix(in srgb, var(--accent) 75%, transparent); }
+  .guide-reading { position: absolute; transform: translateX(-50%); padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); border-radius: 999px; background: var(--bg-1); color: var(--text-1); font: 600 10px var(--font-mono); white-space: nowrap; box-shadow: var(--shadow-1); }
   .timeline-list { display: grid; padding-bottom: 5px; }
   .timeline-list h2 { display: flex; justify-content: space-between; margin: 0; padding: 9px 12px; border-top: 1px solid var(--border); background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); }
   .timeline-list h2:first-child { border-top: 0; }

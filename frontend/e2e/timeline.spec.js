@@ -439,11 +439,58 @@ test('shows day precision across the full day without drawing a period', async (
   await setWindow(page, '2026-06-18T00:00', '2026-06-19T00:00');
   await expect(page.getByRole('button', { name: /Witness arrived/ })).toBeVisible();
 
+  // A bracket across the day it covers: two stops and a hairline, never a period's bar.
   const canvas = page.locator('.track-canvas').first();
-  const span = page.locator('.precision-span.statement').first();
-  const [canvasBox, spanBox] = await Promise.all([canvas.boundingBox(), span.boundingBox()]);
+  const mark = page.getByRole('button', { name: /Witness arrived/ }).locator('..');
+  await expect(mark).toHaveClass(/bracket/);
+  await expect(mark).not.toHaveClass(/\bbar\b|period/);
+  const [canvasBox, spanBox] = await Promise.all([canvas.boundingBox(), mark.boundingBox()]);
   expect(spanBox.width).toBeGreaterThan(canvasBox.width * .95);
-  expect(spanBox.height).toBeLessThan(12);
+  expect(spanBox.height).toBeLessThan(20);
+});
+
+test('puts an exact instant on its pixel, and never nudges it sideways', async ({ page }) => {
+  await openTimeline(page);
+  await setWindow(page, '2026-06-23T18:00', '2026-06-23T19:00');
+  const canvas = await page.locator('.track-canvas').nth(1).boundingBox();
+  const dot = await page.getByRole('button', { name: /Roadside camera frame/ })
+    .locator('..').locator('.event-shape').boundingBox();
+  // 18:42:11 on a one-hour axis, the middle of the second it was stamped to
+  const expected = canvas.x + canvas.width * ((42 * 60 + 11.5) / 3600);
+  expect(Math.abs(dot.x + dot.width / 2 - expected)).toBeLessThan(1);
+});
+
+test('reads a mark on the ruler, and walks the track with Alt and an arrow', async ({ page }) => {
+  await openTimeline(page);
+  const witness = page.getByRole('button', { name: /Witness arrived/ });
+  await witness.hover();
+  const reading = page.locator('.guide-reading');
+  await expect(reading).toHaveText('18 Jun 2026');
+  // a reduced date is read at both ends of what it covers
+  await expect(page.locator('.guide-line')).toHaveCount(2);
+  const [line, ruler] = await Promise.all([
+    page.locator('.guide-line').first().boundingBox(),
+    page.locator('.axis-ruler').boundingBox(),
+  ]);
+  expect(Math.abs(line.y - (ruler.y + ruler.height))).toBeLessThan(2);
+
+  await page.getByRole('button', { name: /Vehicle remained/ }).focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect(page.locator('.track-canvas').first().locator(':focus')).toHaveAttribute('data-mark', /claim-1|claim-4|dense/);
+  await expect(page.getByRole('dialog', { name: 'Add claim' })).toHaveCount(0);
+});
+
+test('hangs a card from each mark when the track has the room', async ({ page }) => {
+  await openTimeline(page);
+  const media = page.locator('.track-canvas').nth(1);
+  const card = media.locator('.event-card');
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText('Roadside camera frame');
+  await expect(card).toContainText('23 Jun 2026, 18:42:11 UTC');
+  await card.click();
+  await expect(page.locator('.inspector').getByRole('heading', { name: 'Roadside camera frame' })).toBeVisible();
+  // the crowded Events track stays on its marks and their captions
+  await expect(page.locator('.track-canvas').first().locator('.event-card')).toHaveCount(0);
 });
 
 test('creates and resizes an hourly period on a day view', async ({ page }) => {
