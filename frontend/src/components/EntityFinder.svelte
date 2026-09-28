@@ -35,6 +35,7 @@
   const PAGE = 30;
   let query = $state('');
   let kind = $state('');
+  let mediaKind = $state('');
   let rows = $state([]);
   let more = $state(false);
   let loading = $state(false);
@@ -69,7 +70,9 @@
     const mine = ++seq;
     loading = true;
     api
-      .get(buildCatalogQuery(caseId, { types: wanted, query: term || undefined, limit: PAGE, order, previews: true }))
+      .get(buildCatalogQuery(caseId, { types: wanted, query: term || undefined, limit: PAGE, order, previews: true,
+        ...(kind === 'media' && mediaKind ? { attr: 'kind', value: mediaKind } : {}),
+      }))
       .then((page) => {
         if (mine !== seq) return;
         rows = page.items ?? [];
@@ -124,6 +127,7 @@
       if (!shown.length) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
       active = (active + step + shown.length) % shown.length;
+      input?.closest('.finder')?.querySelectorAll('[role="option"]')[active]?.scrollIntoView?.({ block: 'nearest' });
     } else if (event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
@@ -153,11 +157,19 @@
 
   {#if kinds.length > 1}
     <div class="kinds" role="group" aria-label="Kinds">
-      <button class:on={!kind} aria-pressed={!kind} onclick={() => (kind = '')}>All</button>
+      <button class:on={!kind} aria-pressed={!kind} onclick={() => { kind = ''; mediaKind = ''; }}>All</button>
       {#each kinds as entry (entry.type)}
-        <button class:on={kind === entry.type} aria-pressed={kind === entry.type} onclick={() => (kind = kind === entry.type ? '' : entry.type)}>
+        <button class:on={kind === entry.type} aria-pressed={kind === entry.type} onclick={() => { kind = kind === entry.type ? '' : entry.type; mediaKind = ''; }}>
           {entry.label}<em>{entry.count}</em>
         </button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if types.includes('media') && (!kind || kind === 'media')}
+    <div class="kinds formats" role="group" aria-label="Media format">
+      {#each [['image', 'Images'], ['video', 'Videos'], ['audio', 'Audio'], ['file', 'Other files']] as [value, name]}
+        <button class:on={mediaKind === value} aria-pressed={mediaKind === value} onclick={() => { kind = 'media'; mediaKind = mediaKind === value ? '' : value; }}>{name}</button>
       {/each}
     </div>
   {/if}
@@ -198,34 +210,34 @@
 </div>
 
 <style>
-  .finder { display: grid; gap: 6px; min-width: 0; }
+  .finder { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; max-height: inherit; }
   .search {
-    display: flex; align-items: center; gap: 6px; padding: 5px 9px;
+    display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 8px 10px; min-height: 36px; box-sizing: border-box;
     border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-3);
   }
   .search:focus-within { border-color: var(--accent); }
   .search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text-1); font: inherit; font-size: var(--fs-sm); outline: none; }
-  .kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+  .kinds { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; }
   .kinds button {
-    display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+    display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; min-height: 28px;
     border: 1px solid var(--border); border-radius: 999px; background: none;
     color: var(--text-2); font-size: var(--fs-xs); cursor: pointer;
   }
   .kinds button.on { border-color: var(--accent); color: var(--text-1); background: var(--accent-soft); }
   .kinds em { color: var(--text-3); font-style: normal; font-size: 10px; }
-  .rows { max-height: 260px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+  .rows { max-height: 300px; min-height: 0; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 0; list-style: none; }
   .rows li {
-    display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 9px;
-    padding: 5px 6px; border-radius: var(--r-sm); cursor: pointer; color: var(--text-2);
+    display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 10px;
+    padding: 7px 6px; border-radius: var(--r-sm); cursor: pointer; color: var(--text-2);
   }
   .rows li.active { background: var(--bg-3); color: var(--text-1); }
   .rows li.none { display: block; padding: 10px; color: var(--text-3); font-size: var(--fs-xs); text-align: center; cursor: default; }
   .picture {
-    width: 34px; height: 26px; display: grid; place-items: center; overflow: hidden;
+    width: 48px; height: 36px; display: grid; place-items: center; overflow: hidden;
     border-radius: 3px; background: var(--bg-2); color: var(--text-3);
   }
   .picture img { width: 100%; height: 100%; object-fit: cover; }
   .text { display: grid; min-width: 0; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
-  .text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10px; }
+  .text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-xs); }
 </style>

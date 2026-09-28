@@ -80,6 +80,23 @@
   // the case-open payload. Mention autocomplete inherently spans every entity, so
   // it fetches the whole slice, but server-side and re-read on any change.
   let graphEntities = $state([]);
+  let referenceRedirects = $state({});
+  $effect(() => {
+    const cid = caseState.current?.id;
+    caseState.rev;
+    const ids = [...new Set([...text.matchAll(/\[\[entity:([A-Za-z0-9_-]+)\|/g)].map((match) => match[1]))];
+    referenceRedirects = {};
+    if (!cid || !ids.length) return;
+    let live = true;
+    const batches = [];
+    for (let offset = 0; offset < ids.length; offset += 2000) {
+      batches.push(api.post(`/api/cases/${cid}/entities/redirects`, { ids: ids.slice(offset, offset + 2000) }));
+    }
+    Promise.all(batches).then((results) => {
+      if (live) referenceRedirects = Object.assign({}, ...results.map((result) => result.redirects));
+    }).catch(() => {});
+    return () => { live = false; };
+  });
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
@@ -127,7 +144,7 @@
     : `/api/cases/${caseState.current?.id}/notes`);
   const key = $derived(caseState.current?.id ? `${caseState.current.id}:${noteId ?? 'case'}` : '');
   const preview = $derived(markdownHtml(text, {
-    entities: graphEntities, caseId: caseState.current?.id ?? '',
+    entities: graphEntities, caseId: caseState.current?.id ?? '', redirects: referenceRedirects,
   }));
   const remoteImages = $derived(remoteImageUrls(text));
   const saving = $derived(pendingSaves > 0);

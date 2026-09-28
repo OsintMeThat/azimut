@@ -116,7 +116,7 @@ class FullCase:
     entity_types: set[str] = field(default_factory=set)
 
 
-def build_full_case(client, name: str = "Full case") -> FullCase:
+def build_full_case(client, name: str = "Full case", *, subject_changes: bool = True) -> FullCase:
     """Fill one case through every tool that files an artifact.
 
     Returns once the background queue is idle, so a caller can move or delete the
@@ -575,6 +575,16 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     run_id = Path(full.analyzer_run).stem.split("-", 1)[1]
     result = client.get(f"/api/cases/{case_id}/analysis/runs/{run_id}").json()
     assert result["status"] == "ready", result
+
+    # Exercise the local merge journal, portable redirects, and retained fields in
+    # the same birth-state and bundle gates as every other case artifact.
+    if subject_changes:
+        first = entity("vehicle", "Unclassified subject")
+        changed = client.patch(f"/api/cases/{case_id}/entities/{first}", json={"type": "vessel"})
+        assert changed.status_code == 200, changed.text
+        duplicate = entity("vessel", "Duplicate subject")
+        merged = client.post(f"/api/cases/{case_id}/entities/{first}/merge", json={"other": duplicate})
+        assert merged.status_code == 200, merged.text
 
     entities = client.get(
         f"/api/cases/{case_id}/catalog/entities", params={"limit": 500}

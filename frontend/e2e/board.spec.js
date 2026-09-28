@@ -641,6 +641,12 @@ test('reads retained snapshot details in Board and leaves without a stale live d
     },
   };
   await openBoard(page, { analysisViews: [snapshot] });
+  await page.route(`**/api/cases/${CASE_ID}/entities/redirects`, (route) => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ redirects: { 'cap-person': { id: 'live-person' } } }),
+  }));
+  await page.route(`**/api/cases/${CASE_ID}/entities/cap-person/chain`, (route) => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ entity: { id: 'live-person', type: 'person', label: 'Current witness', attrs: { role: 'Changed later' } } }),
+  }));
 
   await page.getByRole('button', { name: /^Views/ }).click();
   await page.locator('.views .menu .open', { hasText: 'Witness handover' }).click();
@@ -651,6 +657,8 @@ test('reads retained snapshot details in Board and leaves without a stale live d
 
   await entityCell(page, 'Archived witness').click();
   const details = page.getByRole('dialog', { name: 'Snapshot details' });
+  await expect(details.getByRole('status')).toContainText('Merged into Current witness');
+  await expect(details).not.toContainText('Changed later');
   await expect(details).toContainText('observer');
   await expect(details.getByRole('img', { name: 'Witness portrait' })).toBeVisible();
   await expect(details).toContainText('Archived group');

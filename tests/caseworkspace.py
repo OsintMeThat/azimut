@@ -50,7 +50,8 @@ def _ok(response, what: str) -> dict[str, Any]:
 def build_workspace_case(client) -> WorkspaceCase:
     from azimut.engine import workqueue
 
-    full = build_full_case(client, name="Case workspace")
+    # This fixture represents 0.3.1, before retyping and merge journals existed.
+    full = build_full_case(client, name="Case workspace", subject_changes=False)
     ws = WorkspaceCase(full=full)
     case_id = full.case_id
     base = f"/api/cases/{case_id}"

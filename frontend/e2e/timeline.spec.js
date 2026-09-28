@@ -472,6 +472,34 @@ test('says what the line takes, and cites a source picked by its kind', async ({
   fixture.expectNoUnexpectedRequests();
 });
 
+test('keeps the source picker in the viewport and separates images from videos', async ({ page }) => {
+  const video = { ...mediaEntity, id: 'clip-2', label: 'Convoy clip', attrs: { kind: 'video', path: 'media/clip.mp4' } };
+  const fixture = await openTimeline(page, { catalog: [person, source, mediaEntity, video] });
+  await page.setViewportSize({ width: 1024, height: 600 });
+  const line = page.getByRole('region', { name: 'Note an entry' });
+  // Put the line near the bottom inside its existing clipped tool container.
+  await line.evaluate((node) => { node.style.position = 'fixed'; node.style.bottom = '20px'; node.style.left = '240px'; node.style.width = '740px'; node.style.zIndex = '100'; });
+  await line.getByRole('button', { name: 'Cite a source' }).click();
+  const picker = line.locator('.sources-panel');
+  await expect(picker.getByRole('button', { name: 'Videos', exact: true })).toBeVisible();
+  await picker.getByRole('button', { name: 'Videos', exact: true }).click();
+  await expect(picker.getByRole('option')).toHaveCount(1);
+  await expect(picker.getByRole('option')).toContainText('Convoy clip');
+  const box = await picker.boundingBox();
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(600);
+  expect(box.y + box.height).toBeLessThan((await line.locator('.row').boundingBox()).y);
+  await picker.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(picker.getByRole('option')).toHaveCount(1);
+  await expect(picker.getByRole('option')).toContainText('Roadside camera frame');
+  const heights = await line.locator('.row').evaluate((node) => [...node.querySelectorAll('input, button')].map((field) => field.getBoundingClientRect().height));
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: test.info().outputPath('source-picker.png') });
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('pans from the ruler and zooms with the wheel', async ({ page }) => {
   await openTimeline(page);
   const before = await axisWindowText(page);

@@ -53,7 +53,9 @@ date a Proof states: a statement, because the analyst concluded it, beside the m
 rows that report what a file claims about itself. Schema 19 rebuilds the entity and
 media search indexes folded (case, and the marks a reader skips: Latin, Greek and
 Cyrillic accents, Arabic harakat, Hebrew points), the fold every search term gets as
-it is typed. A Timeline view stores presentation
+it is typed. The same unreleased schema 19 adds `entity_redirects` and
+`entity_merges` for explicit subject merges and their local undo journal.
+A Timeline view stores presentation
 and track queries, never copies temporal rows into the graph and never creates a
 temporal relation.
 
@@ -293,9 +295,9 @@ answers it against the case.
 
 Three rules hold it together:
 
-- **It warns, it never refuses.** The case has no merge action, so a create that
-  failed would leave the analyst holding a value with nowhere to put it. Both the
-  create dialog and Details name the row already holding it and offer to open it.
+- **It warns, it never refuses.** The create dialog and Details name the row already
+  holding the value and offer to open it. Details also offers an explicit merge;
+  the warning never performs one automatically.
 - **It catches the same value typed twice, not every spelling that resolves to the
   same thing.** `+33612345678` is not compared against `0612345678` and
   `www.example.org` is not compared against `example.org`: supplying a country code or

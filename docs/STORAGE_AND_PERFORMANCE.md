@@ -276,7 +276,7 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 18: schema 8 adds nullable `links.confidence`,
+`case.db` is at SQLite schema 19: schema 8 adds nullable `links.confidence`,
 schema 9 rebuilds every row's `search_text`, schema 10 stores graph pins per lens,
 schema 11 adds `links.nature`, schema 12 adds entity photo galleries, schema 13
 adds saved analysis views with their bounded-list count, and schema 14 indexes the
@@ -284,7 +284,9 @@ two columns the catalog orders the whole case by. Schema 15 adds the rebuildable
 temporal projection, schema 16 extends saved analysis views to Timeline recipes
 and snapshots, schema 17 rewrites temporal bounds to fixed microsecond width, and
 schema 18 rebuilds the projection once more, now that a proof's stated date is
-projected beside the dates its files carry.
+projected beside the dates its files carry. Schema 19 folds the entity and media
+search indexes and adds subject merge redirects and undo records. These changes share
+one migration from released schema 18; the case manifest stays at 11.
 The schema counter is independent of the JSON `CASE_SCHEMA`: the
 manifest's `azimut.storage` field selects the backend, and each format counts its own
 shape upgrades.
@@ -303,6 +305,16 @@ checkpoint and runs only those last two. Media moves additionally
 use `.data/rename.json`, so a restart can finish references after the bytes moved.
 
 ### Tables
+
+`entity_redirects`
+: Absorbed id, surviving id, original label, optional coordinate key, merge id and
+  timestamp. Chains are compressed when another merge moves the survivor. These
+  rows travel in bundles when their target is still present; the merge id is cleared.
+
+`entity_merges`
+: Local undo journal containing the absorbed entity, original links and photos,
+  graph positions, changed live views, survivor fields and sheet edits. Completed
+  records remain until Undo or permanent deletion. Bundles omit this table's rows.
 
 `meta`
 : Schema version, case name and timestamps.
@@ -728,6 +740,20 @@ limit, and reports `remaining` so the client can loop. Progress is the stored
 geography itself, which makes the pass resumable and idempotent.
 
 ## Filesystem and database consistency
+
+A subject merge writes entities, links, galleries, graph positions, live views,
+redirects, temporal rows and its undo journal in one database transaction. Preview
+uses the same operation in a rolled-back savepoint. Incompatible links or cycles
+refuse the whole merge. Parallel relations with different confidence, nature or
+provenance remain separate. A snapshot is never rewritten.
+
+Sheet sidecar edits are recorded before the database commit, then applied with an
+atomic file replacement. Case open resumes pending edits, including interrupted Undo.
+The CSV and Notebook text are untouched. Subsequent sheet edits are preserved and
+reported when they prevent restoration. A pending sidecar write blocks another merge
+or bundle export until it can finish. Direct photos keep their existing paths; their
+database owner changes. Purging a survivor removes its redirects and merge history.
+Doctor reports redirects whose target is neither live nor in the Trash.
 
 SQLite cannot atomically commit a filesystem rename, so file-backed operations are
 recoverable. Creation produces a file under a unique temp name, validates it,

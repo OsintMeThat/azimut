@@ -158,6 +158,22 @@ describe('TemporalTargetPicker', () => {
     expect(root.querySelector('input[type="search"]').placeholder).toBe('Find a file, capture, proof, page or note…');
   });
 
+  it('filters media formats on the server rather than only the loaded page', async () => {
+    serve(() => Promise.resolve({ items: ROWS }));
+    const root = open({ relationType: 'cites', label: 'Evidence', selected: [], locked: [] });
+    click(root, 'Add');
+    await settle();
+    click(root, 'Videos');
+    await settle();
+    const query = new URL(pageCalls().at(-1), 'http://localhost').searchParams;
+    expect(query.get('type')).toBe('media');
+    expect(query.get('attr')).toBe('kind');
+    expect(query.get('value')).toBe('video');
+    click(root, 'Images');
+    await settle();
+    expect(new URL(pageCalls().at(-1), 'http://localhost').searchParams.get('value')).toBe('image');
+  });
+
   it('keeps the newest search result when an older request finishes last', async () => {
     let resolveFirst;
     let resolveSecond;

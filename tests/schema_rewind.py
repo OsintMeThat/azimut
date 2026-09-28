@@ -33,6 +33,12 @@ _AFTER_7 = (
     "DROP TABLE IF EXISTS graph_pins",
 )
 
+#: Objects created after schema 18, the release 0.3.1 shipped.
+_AFTER_18 = (
+    "DROP TABLE IF EXISTS entity_merges",
+    "DROP TABLE IF EXISTS entity_redirects",
+)
+
 #: The `links` table exactly as schema 7 shipped it: before `confidence` (8) and
 #: before `nature` (11).
 _LINKS_V7 = """
@@ -95,17 +101,19 @@ def _unfold_search_text(conn: sqlite3.Connection) -> None:
 def rewind(db: Path | str, version: int) -> None:
     """Put `case.db` back at `version`, shape included, ready to be migrated up.
 
-    18 is what 0.3.1 shipped. Nothing after it changes the shape yet, only what the
-    search indexes hold, so that is what a rewind to it undoes.
+    18 is what 0.3.1 shipped. After it, 19 folds what the search indexes hold and adds
+    the two merge tables, so that is what a rewind to it undoes.
     """
     if version not in (7, 8, 18):
         raise ValueError(f"no rewind to schema {version}")
     with closing(sqlite3.connect(db)) as conn, conn:
         if version == 18:
             _unfold_search_text(conn)
+            for statement in _AFTER_18:
+                conn.execute(statement)
         else:
             conn.executescript(_LINKS_V7 if version == 7 else _LINKS_V8)
-            for statement in _AFTER_7:
+            for statement in (*_AFTER_18, *_AFTER_7):
                 conn.execute(statement)
         conn.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(version),)

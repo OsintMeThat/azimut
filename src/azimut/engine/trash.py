@@ -292,6 +292,15 @@ def purge(case: Case, group_id: str) -> None:
             raise CaseError(f"trash group '{group_id}' not found")
         _drop_dir(case, group_id)
         case.remove_trash_group(group_id)
+        # Gone for good now: the redirects to these entities and the merges they took
+        # in go with them, as they would have with a case that never held them.
+        gone = [
+            str(entity["id"])
+            for entity in (group.get("payload") or {}).get("entities") or []
+            if entity.get("id")
+        ]
+        if gone:
+            case.forget_merges_of(gone)
         inspectwork.forget_legacy(case)
 
 

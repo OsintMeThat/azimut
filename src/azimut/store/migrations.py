@@ -304,14 +304,46 @@ def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
     _rebuild_temporal_projection_conn(conn)
 
 
+#: The two tables schema 19 adds for merges, as `sqlite_backend._SCHEMA` declares them.
+#: `IF NOT EXISTS`, so a database a test rewound by its version number alone replays it.
+_MERGE_TABLES = """
+CREATE TABLE IF NOT EXISTS entity_redirects (
+    old_id    TEXT PRIMARY KEY,
+    new_id    TEXT NOT NULL,
+    old_label TEXT NOT NULL,
+    old_key   TEXT,
+    merge_id  TEXT,
+    at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entity_redirects_new ON entity_redirects(new_id);
+CREATE INDEX IF NOT EXISTS idx_entity_redirects_key ON entity_redirects(old_key) WHERE old_key IS NOT NULL;
+CREATE TABLE IF NOT EXISTS entity_merges (
+    id           TEXT PRIMARY KEY,
+    survivor_id  TEXT NOT NULL,
+    merged_id    TEXT NOT NULL,
+    merged_label TEXT NOT NULL,
+    at           TEXT NOT NULL,
+    by           TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entity_merges_survivor ON entity_merges(survivor_id);
+"""
+
+
 def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
-    """Rebuild both search indexes, folded the way a search term now is.
+    """Rebuild both search indexes, folded the way a search term now is, and add the
+    two tables a merge writes.
 
     A term is folded as it is typed (``engine/textfold.py``), so an index written
     before could only be found by the exact accents it holds: ``Cafe`` would reach a
-    new ``Café`` and miss one filed last week. One pass over each table, no shape
-    change.
+    new ``Café`` and miss one filed last week. One pass over each table. The merge
+    tables start empty: nothing was merged before they existed.
     """
+    # One statement at a time: `executescript` commits first, and the upgrade runs
+    # the whole chain in one transaction it owns.
+    for statement in _MERGE_TABLES.split(";"):
+        if statement.strip():
+            conn.execute(statement)
     for row in conn.execute("SELECT id, type, label, attrs_json FROM entities").fetchall():
         conn.execute(
             "UPDATE entities SET search_text = ? WHERE id = ?",

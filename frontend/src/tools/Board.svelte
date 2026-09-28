@@ -1412,6 +1412,7 @@
 {#if snapshotOpen && snapshotReading}
   <Modal title="Snapshot details" onclose={() => (snapshotOpen = null)} width="640px">
     <SnapshotDetails
+      caseId={caseState.current?.id}
       entity={snapshotOpen}
       entities={catalogViews.activeView?.spec?.snapshot?.entities ?? []}
       links={catalogViews.activeView?.spec?.snapshot?.links ?? []}

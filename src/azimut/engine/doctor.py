@@ -19,6 +19,7 @@ DATABASE_UNREADABLE = "database-unreadable"
 MEDIA_MISSING = "media-missing"
 MEDIA_UNKNOWN = "media-unknown"
 TEMPORAL_INDEX_STALE = "temporal-index-stale"
+REDIRECT_DANGLING = "redirect-dangling"
 
 
 def _media_files(case: Case) -> Iterator[Path]:
@@ -143,6 +144,19 @@ def scan(case: Case) -> dict[str, Any]:
                 }
             )
 
+    for redirect in _dangling_redirects(case):
+        issues.append(
+            {
+                "id": f"{REDIRECT_DANGLING}:{redirect['old_id']}",
+                "kind": REDIRECT_DANGLING,
+                "severity": "info",
+                "title": f"{redirect['label']} was merged into something no longer in the case",
+                "detail": "Its id no longer leads anywhere, in the case or in the Trash.",
+                "entity_id": redirect["old_id"],
+                "actions": [{"id": "drop-redirect", "label": "Drop redirect", "tone": "danger"}],
+            }
+        )
+
     for rel_path in unknown_paths:
         issues.append(
             {
@@ -156,6 +170,27 @@ def scan(case: Case) -> dict[str, Any]:
             }
         )
     return _report(case, manifest, issues)
+
+
+def _dangling_redirects(case: Case) -> list[dict[str, str]]:
+    """Merge redirects to an entity that is neither in the case nor in the Trash.
+
+    A survivor in the Trash is not dangling: restoring it brings the redirect back to
+    life. One gone for good takes its redirects with it (`trash.purge`), so this only
+    finds what an older build or a hand edit left behind.
+    """
+    trashed: set[str] = set()
+    for group in case.list_trash():
+        held = case.get_trash_group(str(group["id"])) or {}
+        trashed.update(
+            str(entity.get("id")) for entity in (held.get("payload") or {}).get("entities") or []
+        )
+    return case.dangling_redirects(trashed)
+
+
+def require_dangling_redirect(case: Case, old_id: str) -> None:
+    if not any(redirect["old_id"] == old_id for redirect in _dangling_redirects(case)):
+        raise CaseError("this redirect still leads somewhere")
 
 
 def _report(case: Case, manifest: dict[str, Any], issues: list[dict[str, Any]]) -> dict[str, Any]:

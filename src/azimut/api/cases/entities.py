@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from ...engine import entities as entity_engine
 from ...engine import links as link_engine
+from ...engine import merge as merge_engine
+from ...engine import retype as retype_engine
 from ...engine import satellite as satellite_engine
 from ...engine import tally as tally_engine
 from ...repository import EntityStatus
@@ -108,27 +110,44 @@ def add_entity(case_id: str, body: EntityIn) -> dict[str, Any]:
 @router.patch("/{case_id}/entities/{entity_id}")
 def update_entity(case_id: str, entity_id: str, body: EntityPatch) -> dict[str, Any]:
     case = get_case(case_id)
-    current = case.get_entity(entity_id)
-    if current is None:
-        raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
-    patch = {k: v for k, v in body.model_dump().items() if v is not None}
-    if body.attrs is not None:
-        # Against the type it will have once patched, and the entity has to exist
-        # before its fields can be judged.
-        _check_attrs(
-            body.type or str(current["type"]),
-            body.attrs,
-            current=current.get("attrs") or {},
-        )
-    try:
-        entity = case.update_entity(entity_id, patch)
-        if body.status == "confirmed":
-            link_engine.confirm_incident_relations(case, entity_id)
-        if current.get("type") in MAPPED_TYPES or entity.get("type") in MAPPED_TYPES:
-            events.publish({"type": "saved", "case_id": case.id})
-        return entity
-    except CaseError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    with case.lock:
+        current = case.get_entity(entity_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
+        patch = {k: v for k, v in body.model_dump().items() if v is not None}
+        retyped = body.type is not None and body.type != current["type"]
+        if retyped:
+            # A change of type is checked before anything is written, and refused with
+            # everything that stands in its way (`engine/retype.py`). A route that wrote
+            # the column and nothing else let a subject keep relations its new type
+            # cannot hold.
+            reasons = retype_engine.problems(case, {**current, "attrs": {**current["attrs"], **(body.attrs or {})}}, str(body.type))
+            if reasons:
+                raise HTTPException(status_code=409, detail=reasons)
+        if body.attrs is not None:
+            # Against the type it will have once patched, and the entity has to exist
+            # before its fields can be judged.
+            _check_attrs(
+                body.type or str(current["type"]),
+                body.attrs,
+                current=current.get("attrs") or {},
+            )
+        if retyped:
+            patch["attrs"] = retype_engine.retained_fields(current, str(body.type), body.attrs or {})
+        try:
+            entity = case.update_entity(entity_id, patch)
+            if body.status == "confirmed":
+                link_engine.confirm_incident_relations(case, entity_id)
+            if current.get("type") in MAPPED_TYPES or entity.get("type") in MAPPED_TYPES:
+                events.publish({"type": "saved", "case_id": case.id})
+            if retyped:
+                # Into an identifier, the value the case already holds under that type is
+                # reported and never refused: two records of one value are a merge to make.
+                twin = retype_engine.twin(case, entity, str(entity["type"]))
+                return {**entity, "twin": twin}
+            return entity
+        except CaseError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.get("/{case_id}/entities/{entity_id}/dependents")
 def entity_dependents(case_id: str, entity_id: str) -> dict[str, Any]:
@@ -154,7 +173,12 @@ def entity_chain(case_id: str, entity_id: str) -> dict[str, Any]:
     case = get_case(case_id)
     chain = link_engine.chain_of(case, entity_id)
     if chain is None:
-        raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
+        # An id a merge absorbed answers with the entity that took it in, saying so.
+        target, merged_from = merge_engine.resolve(case, entity_id)
+        chain = link_engine.chain_of(case, target) if merged_from else None
+        if chain is None:
+            raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
+        return {**chain, "merged_from": merged_from}
     return chain
 
 @router.get("/{case_id}/entities/{entity_id}/placement")
@@ -217,7 +241,7 @@ def remove_entities(case_id: str, body: EntityDeleteIn) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.post("/{case_id}/entities/missing")
-def missing_entities(case_id: str, body: EntityIdsIn) -> dict[str, list[str]]:
+def missing_entities(case_id: str, body: EntityIdsIn) -> dict[str, Any]:
     """Which of these ids the case no longer holds.
 
     A sidecar keeps ids and only ids — a sheet cell's link, the files a row carries —
@@ -227,4 +251,12 @@ def missing_entities(case_id: str, body: EntityIdsIn) -> dict[str, list[str]]:
     """
     case = get_case(case_id)
     held = {str(entity["id"]) for entity in case.entities_by_ids(body.ids)}
-    return {"missing": [row for row in dict.fromkeys(body.ids) if row not in held]}
+    absent = [row for row in dict.fromkeys(body.ids) if row not in held]
+    # An absorbed id is not missing: it answers with the entity that took it in.
+    redirects = case.entity_redirects(absent) if absent else {}
+    live = {entity["id"] for entity in case.entities_by_ids([target["id"] for target in redirects.values()])}
+    redirects = {old: target for old, target in redirects.items() if target["id"] in live}
+    return {
+        "missing": [row for row in absent if row not in redirects],
+        "redirects": redirects,
+    }

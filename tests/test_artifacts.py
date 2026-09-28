@@ -103,6 +103,9 @@ def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     # The tool root, not the case folder: what the analyst keeps beside it is
     # theirs, and a gate on files Azimut never wrote would be meaningless.
     assert tree(emptied.tool_root) == tree(born.tool_root)
+    assert emptied.entity_redirects() == {}
+    with emptied._graph()._connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM entity_merges').fetchone()[0] == 0
 
 
 def test_deleting_a_proof_takes_its_pasted_images(client):

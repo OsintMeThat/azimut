@@ -99,7 +99,7 @@ function imageMarkup({ href, alt, title, width, align }) {
   return { attrs, className: `markdown-image align-${align}` };
 }
 
-function renderer({ entities, caseId }) {
+function renderer({ entities, caseId, redirects }) {
   const byId = new Map(entities.map((entity) => [entity.id, entity]));
   const mediaByPath = new Map(entities
     .filter((entity) => (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path)
@@ -120,8 +120,11 @@ function renderer({ entities, caseId }) {
     const body = this.parser.parseInline(token.tokens);
     const entityMatch = /^azimut:\/\/entity\/([A-Za-z0-9_-]+)$/.exec(token.href);
     if (entityMatch) {
-      return byId.has(entityMatch[1])
-        ? `<a href="#" data-entity-id="${entityMatch[1]}" class="entity-ref">${body}</a>`
+      const id = redirects[entityMatch[1]]?.id ?? entityMatch[1];
+      const entity = byId.get(id);
+      const title = id !== entityMatch[1] && entity ? ` title="Merged into ${escapeHtml(entity.label)}"` : '';
+      return entity
+        ? `<a href="#" data-entity-id="${escapeHtml(id)}" class="entity-ref"${title}>${body}</a>`
         : broken('Reference unavailable', body);
     }
     const mediaMatch = /^azimut:\/\/media\/([A-Za-z0-9_-]+)$/.exec(token.href);
@@ -175,11 +178,11 @@ function renderAlignmentBlocks(source, options) {
 }
 
 /** Render GitHub-flavored Markdown, then remove unsafe HTML before previewing it. */
-export function markdownHtml(text = '', { entities = [], caseId = '' } = {}) {
+export function markdownHtml(text = '', { entities = [], caseId = '', redirects = {} } = {}) {
   const options = {
     gfm: true,
     breaks: false,
-    renderer: renderer({ entities, caseId }),
+    renderer: renderer({ entities, caseId, redirects }),
   };
   const rendered = renderAlignmentBlocks(sourceWithCaseReferences(text), options);
   return sanitize(rendered);

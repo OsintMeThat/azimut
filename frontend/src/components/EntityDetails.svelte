@@ -44,6 +44,7 @@
   import { canStateSource, sourceProblem } from '../lib/statedSource.js';
   import { deletedToast, FILE_BACKED, RESTORABLE } from '../lib/trash.js';
   import Icon from './Icon.svelte';
+  import SubjectActions from './SubjectActions.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import FolderSelect from './FolderSelect.svelte';
   import AttrFields from './AttrFields.svelte';
@@ -665,7 +666,15 @@
       >Time</button>
     </div>
 
+    {#if chainData?.merged_from}
+      <p class="merged-notice" role="status"><bdi>{chainData.merged_from.label}</bdi> · Merged into <bdi>{entity.label}</bdi></p>
+    {/if}
     {#if tab === 'info'}
+    <SubjectActions caseId={caseState.current.id} {entity} {twin} disabled={dirty || infoSaving} onchanged={(saved) => {
+      seededId = null;
+      chainData = { ...chainData, entity: saved };
+      if (saved.id !== currentId) walkedId = saved.id;
+    }} />
     {#if infoData?.kind === 'image' && infoData.thumbnail}
       <div class="info-preview">
         <img src={fileUrl(caseState.current.id, infoData.path)} alt={entity.label} />

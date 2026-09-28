@@ -124,6 +124,11 @@ def place_at(
     """
     key = coord_key(lat, lon)
     found = case.find_entity(attr=COORD_KEY, value=key)
+    if found is None:
+        # A place merged into another is found where it went, or enrichment would
+        # file the same point again as a new place (`engine/merge.py`).
+        survivor = case.redirect_by_key(key)
+        found = case.get_entity(survivor) if survivor else None
     if found is not None or keyed_only:
         return found
     for place in _page_all(case, ["place"]):

@@ -4,17 +4,34 @@
   import { entityLabel } from '../lib/entityTypes.svelte.js';
   import { loadRelationTypes, relationVerb } from '../lib/relations.svelte.js';
   import Icon from './Icon.svelte';
+  import { api } from '../lib/api.js';
 
   loadRelationTypes();
 
-  let { entity, entities = [], links = [] } = $props();
+  let { entity, entities = [], links = [], caseId = '' } = $props();
+  let mergedInto = $state('');
+  $effect(() => {
+    const id = entity.id;
+    mergedInto = '';
+    if (!caseId) return;
+    let live = true;
+    // Resolve only the identity. Captured fields, relations and images stay frozen.
+    api.post(`/api/cases/${caseId}/entities/redirects`, { ids: [id] })
+      .then(async ({ redirects }) => {
+        if (!live || !redirects?.[id]) return;
+        const chain = await api.get(`/api/cases/${caseId}/entities/${id}/chain`);
+        if (live) mergedInto = chain.entity?.label ?? '';
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  });
 
   const byId = $derived(new Map(entities.map((item) => [item.id, item])));
   const relations = $derived(
     links.filter((link) => link.from === entity.id || link.to === entity.id)
   );
   const fields = $derived(
-    Object.entries(entity.attrs ?? {}).filter(([, value]) => value != null && value !== '')
+    Object.entries(entity.attrs ?? {}).filter(([key, value]) => !key.startsWith('_') && value != null && value !== '')
   );
   const label = (key) => key.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
   const value = (held) =>
@@ -23,6 +40,7 @@
 
 <div class="snapshot-detail">
   <p class="notice"><Icon name="clock" size={13} /> Captured data. Nothing here edits the case.</p>
+  {#if mergedInto}<p class="notice" role="status">Merged into <bdi>{mergedInto}</bdi></p>{/if}
 
   <header>
     <Icon name={entityIcon(entity)} size={22} />

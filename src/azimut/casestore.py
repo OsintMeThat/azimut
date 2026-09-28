@@ -487,6 +487,57 @@ class CaseStore:
     ) -> dict[str, int]:
         return self._graph().reinsert(entities, links)
 
+    # -- merges and redirects ----------------------------------------------
+
+    def merge_entities(
+        self,
+        survivor_id: str,
+        merged_id: str,
+        *,
+        survivor_attrs: dict[str, Any],
+        survivor_status: str,
+        old_key: str | None,
+        by: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        return self._graph().merge_entities(
+            survivor_id, merged_id, survivor_attrs=survivor_attrs,
+            survivor_status=survivor_status, old_key=old_key, by=by, dry_run=dry_run,
+        )
+
+    def unmerge(self, merge_id: str) -> dict[str, Any]:
+        return self._graph().unmerge(merge_id)
+
+    def pending_merge_work(self) -> list[dict[str, Any]]:
+        return self._graph().pending_merge_work()
+
+    def finish_merge_work(self, merge_id: str) -> None:
+        self._graph().finish_merge_work(merge_id)
+
+    def get_merge(self, merge_id: str) -> dict[str, Any] | None:
+        return self._graph().get_merge(merge_id)
+
+    def merges_into(self, survivor_id: str) -> list[dict[str, Any]]:
+        return self._graph().merges_into(survivor_id)
+
+    def set_merge_sheets(self, merge_id: str, sheets: list[dict[str, Any]]) -> None:
+        self._graph().set_merge_sheets(merge_id, sheets)
+
+    def entity_redirects(self, ids: list[str] | None = None) -> dict[str, dict[str, str]]:
+        return self._graph().entity_redirects(ids)
+
+    def redirect_by_key(self, key: str) -> str | None:
+        return self._graph().redirect_by_key(key)
+
+    def dangling_redirects(self, keep: set[str]) -> list[dict[str, str]]:
+        return self._graph().dangling_redirects(keep)
+
+    def drop_redirects(self, old_ids: list[str]) -> int:
+        return self._graph().drop_redirects(old_ids)
+
+    def forget_merges_of(self, entity_ids: list[str]) -> None:
+        self._graph().forget_merges_of(entity_ids)
+
     # -- durable jobs (thumbnail and background-job model) -------------------
 
     def enqueue_job(

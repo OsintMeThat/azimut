@@ -29,6 +29,7 @@ from .graph import router as _graph
 from .lifecycle import router as _lifecycle
 from .lifecycle import workspace_router
 from .links import router as _links
+from .merges import router as _merges
 from .registry import router as _registry
 from .timeline import router as _timeline
 from .timeline import timeline
@@ -44,6 +45,7 @@ for _sub in (
     _lifecycle,
     _catalog,
     _graph,
+    _merges,
     _entities,
     _entity_images,
     _links,

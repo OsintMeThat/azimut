@@ -1114,7 +1114,11 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
     if (path === '/api/cases/relation-types') return json(route, relationTypes);
     if (path === '/api/cases/confidence-levels') return json(route, confidenceLevels);
-    if (path === '/api/cases/entity-types') return json(route, entityTypes);
+    if (path === '/api/cases/entity-types') return json(route, entityTypes.map((entry) => ({
+      ...entry,
+      retypable: entry.manual && ['actor', 'asset', 'class', 'identifier'].includes(entry.family),
+      mergeable: ['actor', 'asset', 'class', 'identifier', 'place'].includes(entry.family),
+    })));
     if (path === '/api/cases/graph-lenses') return json(route, graphLenses);
     if (path === '/api/cases/bundles/inspect' && request.method() === 'POST') {
       bundleCalls.push({ kind: 'inspect' });
@@ -1769,6 +1773,8 @@ export async function installAppFixture(page, options = {}) {
       const row = options.tallies?.[tallyMatch[1]];
       return row ? json(route, row) : route.fulfill({ status: 404, body: '{}' });
     }
+    if (caseId && path === `/api/cases/${caseId}/entities/redirects`) return json(route, { redirects: {} });
+    if (caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/[^/]+/merges$`))) return json(route, { merges: [] });
     const chainMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/(.+)/chain$`));
     if (chainMatch) {
       const chain = fixtureChains[chainMatch[1]];

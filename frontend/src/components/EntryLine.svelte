@@ -67,6 +67,7 @@
   import { isUnzonedTime, withZone, zoneReading, zonesOf } from '../lib/localZone.js';
   import { formatTemporalValue } from '../lib/timeline.js';
   import DateBuilder from './DateBuilder.svelte';
+  import { anchoredPanel } from '../lib/anchoredPanel.js';
   import DateField from './DateField.svelte';
   import EntityFinder from './EntityFinder.svelte';
   import Icon from './Icon.svelte';
@@ -481,6 +482,12 @@
   }
 
   function onLineKey(event) {
+    if (event.key === 'Escape' && panel) {
+      event.preventDefault();
+      event.stopPropagation();
+      panel = '';
+      sentence?.focus();
+    }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       save();
@@ -569,7 +576,7 @@
       <DateField
         id="{uid}-when"
         label="When"
-        placeholder="When? optional"
+        placeholder="Date · optional"
         value={when}
         reading={false}
         onchange={(value) => { when = value; zoneChoice = ''; }}
@@ -594,7 +601,7 @@
         dir="auto"
         maxlength="300"
         autocomplete="off"
-        placeholder="What happened? Type @ to mention someone, a place or a file"
+        placeholder="What happened? Type @ to mention"
         aria-label="What happened"
         role="combobox"
         aria-expanded={Boolean(suggest)}
@@ -608,7 +615,7 @@
       />
       {#if counter}<small class="counter" class:full={text.length >= 300}>{counter}</small>{/if}
       {#if suggest}
-        <ul class="options" id="{uid}-options" role="listbox" aria-label="Mentions">
+        <ul class="options" popover="manual" use:anchoredPanel={{ anchor: () => sentence }} id="{uid}-options" role="listbox" aria-label="Mentions">
           {#each options as option, index (option.kind === 'new' ? 'new' : option.entity.id)}
             <li
               id="{uid}-option-{index}"
@@ -644,7 +651,7 @@
       title="Cite a source: a file, a capture, a proof, a page, a note. Or drop a file on the line"
       onclick={() => togglePanel('sources')}
     >
-      <Icon name="paperclip" size={14} />
+      <Icon name="paperclip" size={16} /><span class="attach-label">Source</span>
     </button>
     {#if oncancel}<button class="btn btn-ghost" onclick={oncancel}>Cancel</button>{/if}
     <button class="btn btn-primary" disabled={!ready} title={refusal || 'Enter · Ctrl+Enter from any field'} onclick={save}>
@@ -653,11 +660,11 @@
   </div>
 
   {#if panel === 'calendar'}
-    <div class="panel calendar-panel">
+    <div class="panel calendar-panel" popover="manual" use:anchoredPanel={{ anchor: () => lineElement?.querySelector('.when'), width: 320 }}>
       <DateBuilder value={formatTemporalValue(when).valid ? when : ''} label="When" onbuild={(value) => { when = value; zoneChoice = ''; }} />
     </div>
   {:else if panel === 'sources'}
-    <div class="panel sources-panel">
+    <div class="panel sources-panel" popover="manual" use:anchoredPanel={{ anchor: () => lineElement?.querySelector('.row') }}>
       <EntityFinder
         {caseId}
         types={sourceTypes}
@@ -817,12 +824,14 @@
 <style>
   .entry-line { position: relative; display: grid; gap: 6px; min-width: 0; }
   .entry-line.dragging { outline: 1px dashed var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
-  .row { display: flex; align-items: start; gap: 6px; min-width: 0; }
-  .when { position: relative; flex: 0 0 176px; min-width: 0; display: flex; align-items: start; }
+  .row { display: flex; align-items: start; gap: 8px; min-width: 0; }
+  .row > .btn, .sentence, .when :global(.date-field input) { min-height: 36px; height: 36px; box-sizing: border-box; font-size: var(--fs-sm); }
+  .row > .btn { flex: 0 0 auto; padding: 0 12px; }
+  .when { position: relative; flex: 0 0 224px; min-width: 0; display: flex; align-items: start; }
   .when :global(.date-field) { flex: 1; }
   .when :global(.date-field input) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   .calendar {
-    flex: 0 0 auto; height: 32px; width: 30px; display: grid; place-items: center;
+    flex: 0 0 auto; height: 36px; width: 36px; box-sizing: border-box; display: grid; place-items: center;
     border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--r-sm) var(--r-sm) 0;
     background: var(--bg-3); color: var(--text-3); cursor: pointer;
   }
@@ -832,7 +841,7 @@
   .counter { position: absolute; right: 8px; top: 8px; color: var(--text-3); font-size: 10px; pointer-events: none; }
   .counter.full { color: var(--warn); }
   .options {
-    position: absolute; z-index: 40; top: calc(100% + 3px); left: 0; right: 0;
+    position: fixed; z-index: 1000; inset: auto; box-sizing: border-box;
     max-height: 260px; overflow: auto; margin: 0; padding: 3px; list-style: none;
     border: 1px solid var(--border-strong); border-radius: var(--r-sm);
     background: var(--bg-1); box-shadow: var(--shadow-2);
@@ -849,12 +858,11 @@
   .options small { color: var(--text-3); font-size: 10px; white-space: nowrap; }
   .attach.on { color: var(--accent); background: var(--accent-soft); }
   .panel {
-    position: absolute; z-index: 40; top: 40px;
+    position: fixed; z-index: 1000; inset: auto; margin: 0; box-sizing: border-box; overflow: auto; color: var(--text-1);
     padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
     background: var(--bg-1); box-shadow: var(--shadow-2);
   }
-  .calendar-panel { left: 0; width: 300px; }
-  .sources-panel { right: 0; width: min(560px, 100%); }
+  .sources-panel { display: flex; flex-direction: column; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px; min-width: 0;
@@ -889,5 +897,7 @@
   @media (max-width: 620px) {
     .row { flex-wrap: wrap; }
     .when { flex-basis: 100%; }
+    .attach-label { display: none; }
+    .row > .btn { padding: 0 10px; }
   }
 </style>

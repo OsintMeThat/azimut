@@ -605,6 +605,57 @@ class CaseRepository(Protocol):
         whose two endpoints still exist."""
         ...
 
+    # -- merges and redirects ----------------------------------------------
+
+    def merge_entities(
+        self,
+        survivor_id: str,
+        merged_id: str,
+        *,
+        survivor_attrs: dict[str, Any],
+        survivor_status: str,
+        old_key: str | None,
+        by: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Fold one entity into another in one transaction (``store/merges.py``)."""
+        ...
+
+    def unmerge(self, merge_id: str) -> dict[str, Any]:
+        """Take one merge back out, reporting what could not come back."""
+        ...
+
+    def pending_merge_work(self) -> list[dict[str, Any]]:
+        ...
+
+    def finish_merge_work(self, merge_id: str) -> None:
+        ...
+
+    def get_merge(self, merge_id: str) -> dict[str, Any] | None:
+        ...
+
+    def merges_into(self, survivor_id: str) -> list[dict[str, Any]]:
+        ...
+
+    def set_merge_sheets(self, merge_id: str, sheets: list[dict[str, Any]]) -> None:
+        ...
+
+    def entity_redirects(self, ids: list[str] | None = None) -> dict[str, dict[str, str]]:
+        """Where absorbed ids now answer, ``{old: {id, label}}``."""
+        ...
+
+    def redirect_by_key(self, key: str) -> str | None:
+        ...
+
+    def dangling_redirects(self, keep: set[str]) -> list[dict[str, str]]:
+        ...
+
+    def drop_redirects(self, old_ids: list[str]) -> int:
+        ...
+
+    def forget_merges_of(self, entity_ids: list[str]) -> None:
+        ...
+
     # -- durable jobs ------------------------------------------------------
     #
     # Local background work (thumbnails today; EXIF, OCR, transcripts later) that

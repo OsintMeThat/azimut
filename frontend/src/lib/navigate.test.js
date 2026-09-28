@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn().mockResolvedValue({ path: '/cases/c1/azimut/media' });
-vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: vi.fn() } }));
+const get = vi.fn();
+vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: (...a) => get(...a) } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
 const { gotoCapture, gotoPoint, openComparison, openEntity, openGuide, openInReverseSearch, openMapAt, opensInFileManager } =
@@ -56,6 +57,14 @@ describe('openInReverseSearch', () => {
 });
 
 describe('openEntity', () => {
+  it('opens a merged place at the survivor coordinates instead of frozen coordinates', async () => {
+    get.mockResolvedValue({ entity: { id: 'kept', type: 'place', label: 'Kept place', attrs: { lat: 3, lon: 4 } }, merged_from: { id: 'old', label: 'Old place' } });
+    openEntity({ id: 'old', type: 'place', attrs: { lat: 1, lon: 2 } });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/entities/old/chain');
+    expect(uiState.gotoCoords.lat).toBe(3);
+    expect(uiState.gotoCoords.lon).toBe(4);
+  });
   it('opens bookmarks and external captures in a new browser tab', () => {
     openEntity({ type: 'bookmark', attrs: { url: 'https://example.test/bookmark' } });
     openEntity({ type: 'capture', attrs: { source_url: 'https://maps.example.test/view' } });

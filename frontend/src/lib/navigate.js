@@ -5,6 +5,7 @@
  * the Details editor send an analyst to the same place.
  */
 import { caseState, toast, uiState } from './state.svelte.js';
+import { api } from './api.js';
 import { mediaKindOf } from './entityIcon.js';
 import { GUIDE, guideFor } from './guide.js';
 import { revealMediaFolder } from './reveal.js';
@@ -79,7 +80,17 @@ export function showInFolder(entity) {
 }
 
 /** Reopen an artifact in its tool, loading whatever spec/draft it carries. */
-export function openEntity(entity) {
+export function openEntity(entity, resolved = false) {
+  // Places navigate by coordinates, so resolve an old snapshot's id before flying.
+  // Other mergeable subjects open Details, whose chain read resolves the id.
+  if (entity?.type === 'place' && entity.id && caseState.current?.id && !resolved) {
+    const cid = caseState.current.id;
+    return api.get(`/api/cases/${cid}/entities/${entity.id}/chain`).then((chain) => {
+      if (caseState.current?.id !== cid) return;
+      if (chain.merged_from) toast(`Merged into ${chain.entity.label}`, 'info');
+      openEntity(chain.entity, true);
+    }).catch((error) => toast(error.message, 'danger'));
+  }
   // A file the app cannot show is opened where it actually lives. This runs before
   // the type branches below, so every surface that follows an entity — a relation
   // row, a chain row, the sidebar — makes the same call.

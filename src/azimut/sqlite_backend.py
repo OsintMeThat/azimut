@@ -51,6 +51,7 @@ from .store.filters import (
     _linked_at_all,
     lacking,
 )
+from .store import merges as merge_store
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
     _PRODUCED_HERE_SQL,
@@ -127,7 +128,10 @@ if TYPE_CHECKING:
 # Timeline, without re-saving each one.
 # Schema 19 rebuilds both search indexes folded (`engine/textfold.py`): a search
 # finds a label whatever accents, stress marks or Arabic and Hebrew vowels it was
-# written with, and a term is folded the same way as it is typed.
+# written with, and a term is folded the same way as it is typed. It also adds the
+# two tables a merge writes (`engine/merge.py`): `entity_redirects`, so an id that was
+# absorbed still answers with the entity that took it in, and `entity_merges`, the
+# record that undoes one.
 SQLITE_SCHEMA = 19
 
 _SCHEMA = """
@@ -281,6 +285,33 @@ CREATE TABLE temporal_items (
     confidence  TEXT,
     parse_error TEXT
 );
+-- An id a merge absorbed, and the entity that took it in. Chains are compressed as
+-- they are written, so an old id always names a survivor in one step. No foreign
+-- key: the survivor may be in the Trash, and its restore must find the redirect.
+-- `old_key` is the coordinate key a merged place was found by, so enrichment does
+-- not file the same point again as a new place.
+CREATE TABLE entity_redirects (
+    old_id    TEXT PRIMARY KEY,
+    new_id    TEXT NOT NULL,
+    old_label TEXT NOT NULL,
+    old_key   TEXT,
+    merge_id  TEXT,
+    at        TEXT NOT NULL
+);
+CREATE INDEX idx_entity_redirects_new ON entity_redirects(new_id);
+CREATE INDEX idx_entity_redirects_key ON entity_redirects(old_key) WHERE old_key IS NOT NULL;
+-- One merge, and everything needed to undo it. Local state, like the Trash: a
+-- bundle leaves these behind, and after an import the merge is final.
+CREATE TABLE entity_merges (
+    id           TEXT PRIMARY KEY,
+    survivor_id  TEXT NOT NULL,
+    merged_id    TEXT NOT NULL,
+    merged_label TEXT NOT NULL,
+    at           TEXT NOT NULL,
+    by           TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX idx_entity_merges_survivor ON entity_merges(survivor_id);
 CREATE INDEX idx_entities_type   ON entities(type);
 CREATE INDEX idx_entities_status ON entities(prov_status);
 CREATE INDEX idx_entities_folder ON entities(folder);
@@ -411,6 +442,22 @@ class SqliteCase:
             )
         if version < SQLITE_SCHEMA:
             store._upgrade()
+        if version == 19:
+            # Development cases may already carry the unshipped search-only 19.
+            with store._connect() as conn:
+                missing = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'entity_merges'").fetchone() is None
+            if missing:
+                from .store.migrations import _MERGE_TABLES
+                with store._connect() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        for statement in _MERGE_TABLES.split(";"):
+                            if statement.strip():
+                                conn.execute(statement)
+                        conn.execute("COMMIT")
+                    except BaseException:
+                        conn.execute("ROLLBACK")
+                        raise
         if media_dir is not None:
             store._ensure_media_index(media_dir)
         return store
@@ -2603,7 +2650,13 @@ class SqliteCase:
                 if key in patch:
                     entity[key] = patch[key]
             if "attrs" in patch:
-                entity["attrs"].update(patch["attrs"])
+                # Remove retained fields explicitly. Ordinary nulls remain tombstones:
+                # file editors use their presence to override older sidecar values.
+                for key, value in patch["attrs"].items():
+                    if value is None and (key == "_retained_fields" or key in (entity["attrs"].get("_retained_fields") or {})):
+                        entity["attrs"].pop(key, None)
+                    else:
+                        entity["attrs"][key] = value
             if patch.get("status") in ("confirmed", "suggested"):
                 entity["provenance"]["status"] = patch["status"]
             conn.execute(
@@ -3132,6 +3185,213 @@ class SqliteCase:
             "size_bytes": int(row["size"]),
         }
 
+    # -- merges and redirects (store/merges.py) ------------------------------
+
+    def merge_entities(
+        self,
+        survivor_id: str,
+        merged_id: str,
+        *,
+        survivor_attrs: dict[str, Any],
+        survivor_status: str,
+        old_key: str | None,
+        by: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Fold one entity into another in one transaction, or report what it would do.
+
+        A dry run is the same transaction rolled back at its end, so a preview cannot
+        say anything the merge would not do.
+        """
+        merge_id = _new_id("m")
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            conn.execute("SAVEPOINT merge_attempt")
+            try:
+                report = merge_store.merge_rows(
+                    conn,
+                    survivor_id=survivor_id,
+                    merged_id=merged_id,
+                    survivor_attrs=survivor_attrs,
+                    survivor_status=survivor_status,
+                    old_key=old_key,
+                    merge_id=merge_id,
+                    by=by,
+                    at=_now(),
+                    entity_row=self._entity,
+                    link_row=self._link,
+                    sync_temporal=_sync_entity_temporal,
+                    search_text=_entity_search_text,
+                    folder_of=_folder_of,
+                )
+                if dry_run:
+                    raise merge_store.DryRun(report)
+                self._touch(conn)
+                conn.execute("RELEASE merge_attempt")
+                return report
+            except BaseException:
+                conn.execute("ROLLBACK TO merge_attempt")
+                conn.execute("RELEASE merge_attempt")
+                raise
+
+        try:
+            return self._write(op)
+        except merge_store.DryRun as preview:
+            if not dry_run:
+                raise CaseError("merge refused: " + "; ".join(link.get("reason", "invalid relation") for link in preview.report["refused"])) from preview
+            return preview.report
+
+    def unmerge(self, merge_id: str) -> dict[str, Any]:
+        """Take one merge back out, saying what could not come back."""
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            result = merge_store.unmerge_rows(
+                conn,
+                merge_id,
+                entity_row=self._entity,
+                sync_temporal=_sync_entity_temporal,
+                search_text=_entity_search_text,
+                folder_of=_folder_of,
+                ensure_primary=self._ensure_entity_image_primary,
+            )
+            self._touch(conn)
+            return result
+
+        return self._write(op)
+
+    def get_merge(self, merge_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM entity_merges WHERE id = ?", (merge_id,)).fetchone()
+        return self._merge(row, payload=True) if row is not None else None
+
+    def merges_into(self, survivor_id: str) -> list[dict[str, Any]]:
+        """The merges this entity took in, newest first, without their payloads."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM entity_merges WHERE survivor_id = ? OR survivor_id IN"
+                " (SELECT old_id FROM entity_redirects WHERE new_id = ?) ORDER BY rowid DESC",
+                (survivor_id, survivor_id),
+            ).fetchall()
+        return [self._merge(row, payload=False) for row in rows]
+
+    def set_merge_sheets(self, merge_id: str, sheets: list[dict[str, Any]]) -> None:
+        """Record the sheet cells a merge rewrote on disk, once they are written."""
+
+        def op(conn: sqlite3.Connection) -> None:
+            row = conn.execute(
+                "SELECT payload_json FROM entity_merges WHERE id = ?", (merge_id,)
+            ).fetchone()
+            if row is None:
+                return
+            payload = json.loads(row["payload_json"])
+            payload["sheets"] = sheets
+            payload["pending_sheets"] = True
+            conn.execute(
+                "UPDATE entity_merges SET payload_json = ? WHERE id = ?",
+                (json.dumps(payload, ensure_ascii=False), merge_id),
+            )
+
+        self._write(op)
+
+    def pending_merge_work(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM entity_merges ORDER BY rowid").fetchall()
+        return [self._merge(row, payload=True) for row in rows if json.loads(row["payload_json"]).get("pending_sheets")]
+
+    def finish_merge_work(self, merge_id: str) -> None:
+        def op(conn: sqlite3.Connection) -> None:
+            row = conn.execute("SELECT payload_json FROM entity_merges WHERE id = ?", (merge_id,)).fetchone()
+            if row is None:
+                return
+            payload = json.loads(row["payload_json"])
+            if payload.get("undo_result"):
+                conn.execute("DELETE FROM entity_merges WHERE id = ?", (merge_id,))
+            else:
+                payload.pop("pending_sheets", None)
+                conn.execute("UPDATE entity_merges SET payload_json = ? WHERE id = ?", (json.dumps(payload, ensure_ascii=False), merge_id))
+        self._write(op)
+
+    @staticmethod
+    def _merge(row: sqlite3.Row, *, payload: bool) -> dict[str, Any]:
+        merge: dict[str, Any] = {
+            "id": row["id"],
+            "survivor_id": row["survivor_id"],
+            "merged_id": row["merged_id"],
+            "merged_label": row["merged_label"],
+            "at": row["at"],
+            "by": row["by"],
+        }
+        if payload:
+            merge["payload"] = json.loads(row["payload_json"])
+        return merge
+
+    def entity_redirects(self, ids: list[str] | None = None) -> dict[str, dict[str, str]]:
+        """Where absorbed ids now answer: ``{old: {id, label}}``, for these ids or all."""
+        with self._connect() as conn:
+            if ids is None:
+                rows = conn.execute(
+                    "SELECT old_id, new_id, old_label FROM entity_redirects"
+                    " ORDER BY at DESC"
+                ).fetchall()
+            else:
+                rows = []
+                for chunk in _chunks(list(dict.fromkeys(ids))):
+                    rows.extend(conn.execute(
+                        "SELECT old_id, new_id, old_label FROM entity_redirects"
+                        f" WHERE old_id IN ({_marks(chunk)})",
+                        chunk,
+                    ).fetchall())
+        return {row["old_id"]: {"id": row["new_id"], "label": row["old_label"]} for row in rows}
+
+    def redirect_by_key(self, key: str) -> str | None:
+        """The survivor of a merged place that was found by this coordinate key."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT new_id FROM entity_redirects WHERE old_key = ? LIMIT 1", (key,)
+            ).fetchone()
+        return row["new_id"] if row is not None else None
+
+    def dangling_redirects(self, keep: set[str]) -> list[dict[str, str]]:
+        """Redirects to an entity neither in the case nor among ``keep`` (the Trash)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT r.old_id, r.new_id, r.old_label FROM entity_redirects r"
+                " LEFT JOIN entities e ON e.id = r.new_id WHERE e.id IS NULL"
+            ).fetchall()
+        return [
+            {"old_id": row["old_id"], "new_id": row["new_id"], "label": row["old_label"]}
+            for row in rows if row["new_id"] not in keep
+        ]
+
+    def drop_redirects(self, old_ids: list[str]) -> int:
+        def op(conn: sqlite3.Connection) -> int:
+            dropped = 0
+            for chunk in _chunks(list(dict.fromkeys(old_ids))):
+                dropped += conn.execute(
+                    f"DELETE FROM entity_redirects WHERE old_id IN ({_marks(chunk)})", chunk
+                ).rowcount
+            if dropped:
+                self._touch(conn)
+            return dropped
+
+        return self._write(op)
+
+    def forget_merges_of(self, entity_ids: list[str]) -> None:
+        """An entity gone for good takes the redirects to it and its merge records."""
+
+        def op(conn: sqlite3.Connection) -> None:
+            for chunk in _chunks(list(dict.fromkeys(entity_ids))):
+                conn.execute(
+                    f"DELETE FROM entity_merges WHERE survivor_id IN ({_marks(chunk)})"
+                    f" OR survivor_id IN (SELECT old_id FROM entity_redirects WHERE new_id IN ({_marks(chunk)}))",
+                    [*chunk, *chunk],
+                )
+                conn.execute(
+                    f"DELETE FROM entity_redirects WHERE new_id IN ({_marks(chunk)})", chunk
+                )
+
+        self._write(op)
+
     def reinsert(
         self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
     ) -> dict[str, int]:
@@ -3171,9 +3431,22 @@ class SqliteCase:
                 r["id"]
                 for r in conn.execute("SELECT id FROM entities")
             }
+            # An end merged into another entity since the delete is found where it
+            # went: restoring a Claim about an absorbed subject lands on its survivor.
+            redirected = {
+                r["old_id"]: r["new_id"]
+                for r in conn.execute("SELECT old_id, new_id FROM entity_redirects")
+            }
             kept = 0
             for link in links:
+                link = {
+                    **link,
+                    "from": redirected.get(link["from"], link["from"]),
+                    "to": redirected.get(link["to"], link["to"]),
+                }
                 if link["from"] not in present or link["to"] not in present:
+                    continue
+                if not merge_store.valid_restored_link(conn, link["from"], link["to"], link["type"]):
                     continue
                 prov = link.get("provenance") or {}
                 conn.execute(

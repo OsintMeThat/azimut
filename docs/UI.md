@@ -189,7 +189,8 @@ row's Details.
   It opens on the type being filtered for, or the first of the chosen family. The primary field names the value being entered — **IP address**,
   **Full name**, **Handle** — never a generic **Name**. An identifier the case
   already holds is flagged with the existing row one click away: a warning, not a
-  block, since merging is not shipped. What it creates opens into its own Details.
+  block. Details can merge the two records after creation. What it creates opens
+  into its own Details.
 - **Add file** takes a document, scan, plan or image into the case, by the button or
   by dropping it on the list. It runs the Media Library's import, so the file is
   hashed, deduplicated, given a sidecar and a thumbnail, and filed as a `media`. One
@@ -959,6 +960,24 @@ is a fact about the row rather than about anyone's filter. A place reached by `a
 source reached by `cites` is listed without being counted: neither says how many of
 anything.
 
+**Correcting a subject.** Details → Info offers **Change type…** for manually created
+people, groups, objects, models and identifiers. Places, Claims and file owners keep
+their type. A change lists incompatible relations or photos and stops before writing.
+Fields outside the new type remain under **Kept from …**, with an explicit Remove
+button; changing back makes them editable again.
+
+**Merge…** finds another subject of the same type, including places. The older record
+is selected to stay; either card can change that choice. The preview shows retained
+fields, additions, conflicts and affected references. Conflicting values go into
+attributed notes. A cycle or incompatible relation blocks the whole merge. Claims,
+files and documents cannot merge.
+
+**Undo** appears in the toast and in the survivor's **Merged from …** history. It
+preserves later edits and lists anything it could not restore. Later merges involving
+the same subject must be undone first. Frozen views and Notebook text stay unchanged;
+opening an absorbed subject reaches the survivor and says **Merged into …**. Bundle
+imports retain these redirects but cannot undo merges performed before export.
+
 **The entry line.** One line notes what happened: `[date · optional] │ sentence with
 @mentions │ 📎 │ Add`. It sits under the Timeline's axis, and the Claims group in
 Details, a Board row and a node's menu in the Graph open the same line with their
@@ -1007,7 +1026,10 @@ for the ontology up front.
   transaction (`create` on the claim route, ten at most).
 - **📎 cites a source** from what `cites` accepts: files, captures, proofs, web pages,
   notes and other claims. The finder shows the kinds the case holds as chips with
-  their counts, and every row says what it is: its picture when the case already has
+  their counts, plus Images, Videos, Audio and Other files. Format filters query the
+  whole catalog. The picker opens above the line when there is too little room below
+  and scrolls within the viewport. Fields and buttons share a 36 px height.
+  Every row says what it is: its picture when the case already has
   one (`previews=true` on the catalog page, nothing made), its type, the kind of file,
   its folder and the day it came in, newest first. The Claim editor's About, Place and
   Evidence pickers use the same finder. A file dropped on the line is imported the way
