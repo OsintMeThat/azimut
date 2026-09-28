@@ -103,6 +103,8 @@
     uiState.timelineFocus = {
       entityId: entity.id,
       entityLabel: entity.label,
+      entityType: entity.type,
+      entityAttrs: entity.attrs ?? {},
       itemId: item?.id ?? null,
       producedHere: item?.produced_here === true,
     };

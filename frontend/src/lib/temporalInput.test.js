@@ -35,6 +35,12 @@ describe('the temporal input adapter', () => {
     expect(writeTemporalInput(state)).toBe('circa late summer');
   });
 
+  it('writes a place clock as the offset it keeps at that time', () => {
+    const state = { ...readTemporalInput('2026-08-11T17:05:00'), zone: 'place', placeZone: 'Europe/Kyiv' };
+    expect(writeTemporalInput(state)).toBe('2026-08-11T17:05:00+03:00');
+    expect(writeTemporalInput({ ...state, datetime: '2026-01-11T17:05' })).toBe('2026-01-11T17:05:00+02:00');
+  });
+
   it('documents every supported family with a pattern and an example', () => {
     expect(TEMPORAL_SYNTAX.map(({ meaning }) => meaning)).toEqual([
       'Year', 'Month', 'Day', 'Local time', 'UTC time', 'UTC offset',

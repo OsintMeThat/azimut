@@ -7,10 +7,46 @@
     writeTemporalInput,
   } from '../lib/temporalInput.js';
   import { formatTemporalValue } from '../lib/timeline.js';
+  import { zoneReading, zonesOf } from '../lib/localZone.js';
 
-  let { id, value = '', onchange, onvaliditychange } = $props();
+  let {
+    id,
+    value = '',
+    /** Where the claim happened, for a time typed as the local time there (D33). */
+    places = [],
+    onchange,
+    onvaliditychange,
+  } = $props();
   let state = $state(readTemporalInput(''));
   let sent = $state('');
+  // Whether the analyst picked a zone, and whether they typed the time here. A place's
+  // clock is the default only for a time typed in this editor while the zone is still
+  // Unknown: a stored time is never rewritten because the editor was opened.
+  let chosen = $state(false);
+  let typed = $state(false);
+  let zones = $state({ zones: [], only: null });
+
+  $effect(() => {
+    const held = places.map((entry) => ({ type: entry.type, label: entry.label, attrs: entry.attrs }));
+    let live = true;
+    zonesOf(held).then((found) => { if (live) zones = found; });
+    return () => { live = false; };
+  });
+
+  $effect(() => {
+    const only = zones.only;
+    if (!only || chosen || !typed || state.mode !== 'timestamp' || !state.datetime) return;
+    if (state.zone === 'local' || (state.zone === 'place' && state.placeZone !== only.zone)) {
+      emit({ zone: 'place', placeZone: only.zone });
+    }
+  });
+  // A place taken off the claim takes its clock with it, unless it was chosen.
+  $effect(() => {
+    if (state.zone === 'place' && !chosen && !zones.zones.some((entry) => entry.zone === state.placeZone)) {
+      emit({ zone: 'local', placeZone: '' });
+    }
+  });
+  const placeName = $derived(zones.zones.find((entry) => entry.zone === state.placeZone)?.place ?? '');
   const rawValue = $derived(writeTemporalInput(state));
   const reading = $derived(formatTemporalValue(rawValue));
 
@@ -113,7 +149,7 @@
           type="datetime-local"
           step="any"
           value={state.datetime}
-          oninput={(event) => emit({ datetime: event.currentTarget.value })}
+          oninput={(event) => { typed = true; emit({ datetime: event.currentTarget.value }); }}
         />
       </label>
       <label class="field zone-field">
@@ -121,12 +157,20 @@
         <select
           class="select input-sm zone"
           aria-label="Timezone"
-          value={state.zone}
-          onchange={(event) => emit({ zone: event.currentTarget.value })}
+          value={state.zone === 'place' ? `place:${state.placeZone}` : state.zone}
+          onchange={(event) => {
+            const picked = event.currentTarget.value;
+            chosen = true;
+            if (picked.startsWith('place:')) emit({ zone: 'place', placeZone: picked.slice(6) });
+            else emit({ zone: picked, placeZone: '' });
+          }}
         >
           <option value="local">Unknown</option>
           <option value="utc">UTC</option>
           <option value="offset">UTC offset</option>
+          {#each zones.zones as entry (entry.zone)}
+            <option value={`place:${entry.zone}`}>Local at {entry.place}</option>
+          {/each}
         </select>
       </label>
       {#if state.zone === 'offset'}
@@ -274,6 +318,9 @@
       {#if reading.valid && reading.qualifiers.length}<small>{reading.qualifiers.join(' · ')}</small>{/if}
       {#if reading.valid && reading.label !== rawValue}<code>{rawValue}</code>{/if}
     </div>
+    {#if state.mode === 'timestamp' && state.zone === 'place' && placeName}
+      <p class="zone-rule">{zoneReading(state.datetime.length === 16 ? `${state.datetime}:00` : state.datetime, state.placeZone, placeName)}</p>
+    {/if}
   {/if}
 </div>
 
@@ -323,6 +370,7 @@
     color: var(--text-2); font-size: var(--fs-xs);
   }
   .temporal-preview small { color: var(--text-3); }
+  .zone-rule { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
   .temporal-preview code { margin-left: auto; color: var(--text-3); overflow-wrap: anywhere; }
   .temporal-preview.error { border-left-color: var(--danger); color: var(--danger); }
   @media (max-width: 620px) {

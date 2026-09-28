@@ -14,6 +14,13 @@
     initialRole = '',
     /** Evidence a new claim cites from the start, such as the picture it was read on. */
     initialCites = [],
+    initialConfidence = '',
+    initialAbout = [],
+    initialAt = [],
+    /** A count and a state carried over from the entry line, which asks them there. */
+    initialFacts = null,
+    /** Subjects the entry line named for the first time, created with the claim. */
+    initialCreate = [],
     onsaved,
     oncancel,
   } = $props();
@@ -40,8 +47,13 @@
     statement = item?.label ?? initialStatement;
     when = item?.raw ?? initialWhen;
     timeRole = item?.time_role ?? initialRole;
-    confidence = item?.confidence ?? '';
-    if (!item) cites = initialCites.map((entry) => ({ id: entry.id, label: entry.label, type: entry.type }));
+    confidence = item?.confidence ?? initialConfidence;
+    if (!item) {
+      const keep = (entry) => ({ id: entry.id, label: entry.label, type: entry.type, attrs: entry.attrs });
+      cites = initialCites.map(keep);
+      about = initialAbout.map(keep);
+      places = initialAt.map(keep);
+    }
   });
 
   $effect(() => {
@@ -61,7 +73,7 @@
         const choices = (type) =>
           (chain.relations ?? [])
             .filter((row) => row.direction === 'out' && row.link.type === type)
-            .map((row) => ({ id: row.entity.id, label: row.entity.label, type: row.entity.type }));
+            .map((row) => ({ id: row.entity.id, label: row.entity.label, type: row.entity.type, attrs: row.entity.attrs }));
         about = choices('about').filter((choice) => choice.id !== subject?.id);
         places = choices('at');
         cites = choices('cites');
@@ -86,6 +98,11 @@
       at: places.map((entry) => entry.id),
       cites: cites.map((entry) => entry.id),
     };
+    if (!item) {
+      if (initialFacts?.count != null) body.count = initialFacts.count;
+      if (initialFacts?.condition) body.condition = initialFacts.condition;
+      if (initialCreate.length) body.create = initialCreate;
+    }
     try {
       const saved = item
         ? await api.patch(`/api/cases/${caseId}/timeline/claims/${item.owner_id}`, body)
@@ -120,6 +137,7 @@
   <TemporalInput
     id="temporal-when"
     value={when}
+    places={[...places, ...cites]}
     onchange={(value) => (when = value)}
     onvaliditychange={(reading) => (whenValid = reading.valid)}
   />
@@ -145,6 +163,17 @@
       </select>
     </label>
   </div>
+
+  {#if !item && (initialFacts?.count != null || initialFacts?.condition || initialCreate.length)}
+    <p class="carried">
+      Filed with it:
+      {[
+        initialFacts?.count != null ? `${initialFacts.count} counted` : '',
+        initialFacts?.condition ? initialFacts.condition : '',
+        ...initialCreate.map((entry) => `${entry.label} (new)`),
+      ].filter(Boolean).join(' · ')}
+    </p>
+  {/if}
 
   <section class="connections">
     <TemporalTargetPicker
@@ -189,6 +218,7 @@
 
 <style>
   .claim-editor { display: grid; gap: 8px; min-width: 0; }
+  .carried { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
   .loading { padding: 7px 9px; border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-3); }
   .two-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .two-cols label { display: grid; gap: 4px; }

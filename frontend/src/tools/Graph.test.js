@@ -2142,7 +2142,7 @@ describe('filing a claim from a node', () => {
   });
 
   it('opens the same form as Details and the Board, never over a snapshot', () => {
-    expect(source).toContain("import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';");
+    expect(source).toContain("import EntryLine, { claimSeat } from '../components/EntryLine.svelte';");
     expect(source).toContain('{#if claimFor && !snapshotReading}');
   });
 });

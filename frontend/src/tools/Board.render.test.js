@@ -309,13 +309,13 @@ describe('filing a claim from a row', () => {
     flushSync();
     await settle();
 
-    const form = document.querySelector('.quick-claim');
+    const form = document.querySelector('.entry-line');
     expect(form).not.toBeNull();
-    expect(form.querySelector('textarea').value).toBe('Seen at Quai sud');
+    expect(form.querySelector('input[aria-label="What happened"]').value).toBe('Seen at Quai sud');
     // The row's Details stay shut: the press is the claim's, not the row's.
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
 
     await press('Cancel', form);
-    expect(document.querySelector('.quick-claim')).toBeNull();
+    expect(document.querySelector('.entry-line')).toBeNull();
   });
 });

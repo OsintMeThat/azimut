@@ -675,3 +675,26 @@ def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client
         )
         assert answer.status_code == 200, answer.text
         assert answer.json()["spec"]["timeline"]["zone_choice"] == "utc"
+
+
+def test_a_snapshot_freezes_the_claims_that_lack_a_source(client):
+    case_id = _case(client)
+    clip = _entity(client, case_id, "media", "clip.mp4", {"kind": "video"})
+    for statement, cites in (("Heard of it", []), ("Seen in the clip", [clip["id"]])):
+        filed = client.post(
+            f"/api/cases/{case_id}/timeline/claims",
+            json={"statement": statement, "cites": cites},
+        )
+        assert filed.status_code == 200, filed.text
+    body = _body("No source yet", mode="snapshot")
+    body["spec"]["query"] = {
+        "filter": {"lacks": ["source"]},
+        "terms": {"lacks": "source"},
+        "label": "No source",
+    }
+
+    saved = client.post(f"/api/cases/{case_id}/analysis-views", json=body)
+
+    assert saved.status_code == 200, saved.text
+    frozen = saved.json()["spec"]["snapshot"]["entities"]
+    assert [entity["label"] for entity in frozen] == ["Heard of it"]

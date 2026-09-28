@@ -153,7 +153,7 @@
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
-  import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';
+  import EntryLine, { claimSeat } from '../components/EntryLine.svelte';
   import { claimActionTitle } from '../lib/quickClaim.js';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
@@ -5929,8 +5929,8 @@
 {/if}
 
 {#if claimFor && !snapshotReading}
-  <Modal title="New claim" onclose={() => (claimFor = null)} width="560px">
-    <QuickClaim
+  <Modal title="Note an entry" onclose={() => (claimFor = null)} width="640px">
+    <EntryLine
       caseId={caseState.current.id}
       entity={claimFor}
       onsaved={() => (claimFor = null)}

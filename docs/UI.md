@@ -209,8 +209,11 @@ row's Details.
   and a control that vanished took its own way back with it. An axis that cannot be
   asked yet stays in the menu **with its reason next to it**, because a control you can
   see and cannot use teaches something and one that is not there teaches nothing.
-- **The menu opens on four Questions** — *To review · Nothing linked yet · Added this
-  week · Unfiled* — and picking one drops its terms in as ordinary chips. That is the
+- **The menu opens on six Questions** — *To review · Nothing linked yet · Added this
+  week · Unfiled · No source · Not assessed* — and picking one drops its terms in as
+  ordinary chips. The last two ask of Claims only: one that cites nothing, and one with
+  no confidence given (`lacks=source`, `lacks=assessment` on the catalog and graph
+  routes). The Overview keeps its four tiles. That is the
   whole of the onboarding: the answer arrives, and the sentence that produced it is
   sitting there to edit. They are code, not saved state, so nothing new has to reach
   the backup.
@@ -956,22 +959,57 @@ is a fact about the row rather than about anyone's filter. A place reached by `a
 source reached by `cites` is listed without being counted: neither says how many of
 anything.
 
-**Add claim files the common observation from where it is read.** The Claims group
-offers it on any entity a Claim can point at — before the first claim exists, since
-that is when it is wanted — and so do a Board row, beside its way into the graph, and
-a node's menu in the Graph. All three open one small form. The entity takes its own
-seat, read off the verb registry rather than a list of types: the first of `at`,
-`cites` and `about` that takes it, so a place is where the thing was seen, a file or a
-proof is the evidence, and a model, an object, a person or a handle is what the claim
-is about. A post or a saved session has no seat and no button. The family decides what
-else is asked: **How many** for a model, which is what a count is of, and
-**Condition** for a model or an object; nothing more for anyone else. The sentence
-writes itself from those fields and the connectors picked — `2 × T-72B3 destroyed at
-Crossroads`, `Seen at Crossroads` — until the analyst types their own, which then
-stays put whatever changes under it, with **Rewrite from the fields** to go back. A
-date is optional and is stated as *observed*, since the sentence says *seen*.
-Reworking a claim afterwards is the full editor's job, on the Time tab and the
-Timeline.
+**The entry line.** One line notes what happened: `[date · optional] │ sentence with
+@mentions │ 📎 │ Add`. It sits under the Timeline's axis, and the Claims group in
+Details, a Board row and a node's menu in the Graph open the same line with their
+entity already seated. Every entry is an ordinary Claim; the line only stops asking
+for the ontology up front.
+
+- **One thing to say is enough**: a sentence, a mention or a source. Left empty, the
+  sentence writes itself from what is on the line — `2 × T-72B3 destroyed at
+  Crossroads`, `Seen at Crossroads`, `Seen in clip.mp4` — and a sentence the analyst
+  typed is kept as typed, whatever changes under it (**Rewrite from the mentions**
+  goes back). **Add** is greyed only when there is nothing to say, and says so.
+- **The date is empty until given.** It is read like every other date field
+  (`dd/mm/yyyy`, month names, `~`, ranges), its reading is shown under the line, and a
+  date it cannot read holds the line back until it is corrected or cleared. It is
+  never taken from a file or from the previous entry; a click on the axis is the one
+  thing that offers one. Filed with a date, the entry is *observed*.
+- **A time at a placed entry is the place's clock.** When the line has a place with a
+  point (or cites a proof with its own), a typed hour with no zone is read as local
+  time there, with the offset that place keeps on that day, summer time included:
+  `Reads: 17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)`. The zone comes from the bundled
+  boundaries through `GET /api/geo/zone`, once per point, with nothing sent anywhere.
+  A zone typed with the time is never replaced, **No zone** keeps the hour unzoned,
+  and two places in different zones get no default: each is offered. The full
+  editor's Timezone menu offers the same **Local at …** entries.
+- **`@` mentions anything the case holds**, through the catalog's own search, so other
+  names are found too. The list puts an exact name or other name first, then what the
+  line already mentions, then the rest, and says which field matched when it was not
+  the name. `↑`/`↓` move, `Enter` or `Tab` pick, `Escape` keeps the `@` as text, and an
+  `@` inside a word (an address) never opens it. The name goes into the sentence in
+  plain text, and the subject becomes a chip in its seat, read off the verb registry:
+  a place is where, a file or a document is the source, a Claim is only ever cited, and
+  anything else is what the entry is about. A click on a chip takes it off; `Alt+↓`
+  moves it to its next seat when it has one.
+- **A name the case has never held** is offered last as `New · name`, with a guessed
+  type that says its rule: an address, an IP, a network, a domain, a phone number, a
+  handle or a profile address by its shape, otherwise the subject type the case uses
+  most, otherwise a person. A place is never guessed, and a line cannot make one: a
+  place is a point. The chip's menu changes the type. An identifier the case already
+  holds is offered in its place (**Use the one in the case**) without refusing the new
+  one. Nothing is created until **Add**: the subjects and the Claim go in one
+  transaction (`create` on the claim route, ten at most).
+- **📎 cites a source** from what `cites` accepts, and a file dropped on the line is
+  imported the way the Media Library imports it, then cited.
+- **More** holds **How many** (a model) and **Condition** (a model or an object),
+  opened at once when the seated entity asks for them, **Confidence**, and **Full
+  editor**, which opens the complete Claim editor on the line as it stands.
+- `Enter` in the sentence adds, `Ctrl+Enter` adds from any field. After **Add** the
+  line empties and keeps the focus for the next entry, and the toast offers **Undo**,
+  which puts the Claim and the subjects it created in the Trash as one group. A refusal
+  keeps everything on the line and says why there. An unsaved line is kept per case for
+  the session, never on disk.
 
 **A Claim's fields use three sections**: statement, time and reasoning. The Time
 section uses a guided editor for a year, month, day, date and time, bounded date
@@ -1121,9 +1159,13 @@ temporal rows with their exact track assignments and opens read-only. It does no
 the current case when reopened. Timeline views can be renamed, duplicated, deleted
 through Trash, restored and carried in a complete case bundle.
 
-A track that includes Claims can create them; Media-only and Case activity
-tracks cannot. Clicking empty space creates a point; dragging creates a bounded range.
-The date proposed is as precise as the window it was pointed at: a zoned timestamp on
+**The entry line sits under the axis**, outside a snapshot, and is where a new entry
+is written (see *The entry line* below). A track that includes Claims can date it;
+Media-only and Case activity tracks cannot. Clicking empty space puts a point on the
+line's date and moves to its sentence; dragging puts a bounded range. Nothing opens
+over the axis. When the entry lands somewhere the reading does not show, the toast says
+where: no Events track shown (**Show** adds one), outside the window (**Go there**), or
+in Undated. The date proposed is as precise as the window it was pointed at: a zoned timestamp on
 a window up to three days, a day up to 400 days, a month up to twelve years and a year
 beyond, so hours can be created, moved and resized directly on a short window and a
 click on a decade does not claim a day. Date-only Claims support the same confirmed move,

@@ -1,3 +1,5 @@
+import { offsetAt } from './localZone.js';
+
 const DATE = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?([~?%])?$/;
 const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)(Z|[+-]\d{2}:\d{2})?$/;
 
@@ -96,6 +98,10 @@ export function writeTemporalInput(state) {
   }
   if (state.mode === 'advanced') return state.raw ?? '';
   if (!state.datetime) return '';
+  const wall = timestampWithSeconds(state.datetime);
+  // A place's clock is written as the offset it keeps at that very time, so the
+  // stored value is an ordinary zoned timestamp.
+  if (state.zone === 'place') return `${wall}${offsetAt(wall, state.placeZone)}`;
   const zone = state.zone === 'utc' ? 'Z' : state.zone === 'offset' ? state.offset : '';
-  return `${timestampWithSeconds(state.datetime)}${zone}`;
+  return `${wall}${zone}`;
 }

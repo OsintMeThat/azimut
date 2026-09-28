@@ -11,7 +11,7 @@ export function settleCatalogSummary(current, next, isCurrent) {
  *
  * `unfiled` (no folder) wins over an exact `folder` path when both are given.
  * `attr` with `value` narrows on one stored field, `linked` on having a neighbour of
- * that type and `unlinked` on having none at all; `since`, `until` and `by` ask how
+ * that type and `unlinked` on having none at all, `lacks` on what a Claim is missing; `since`, `until` and `by` ask how
  * the row got here rather than what it says. A field with no value chosen is **not**
  * sent: it is the analyst having picked what they are about to ask about, and asked
  * as a term it would empty the table between two clicks of one act.
@@ -32,6 +32,7 @@ function narrowing(
     value,
     linked,
     unlinked,
+    lacks,
     since,
     until,
     by,
@@ -53,6 +54,7 @@ function narrowing(
   }
   if (linked) params.set('linked', linked);
   if (unlinked) params.set('unlinked', 'true');
+  if (lacks && lacks.length) params.set('lacks', lacks.join(','));
   if (since) params.set('since', since);
   if (until) params.set('until', until);
   if (by && by.length) params.set('by', by.join(','));

@@ -40,6 +40,8 @@ describe('what the case is waiting on', () => {
 
   it('leaves "added this week" out: it says what happened, not what is outstanding', () => {
     expect(WAITING.map((row) => row.id)).not.toContain('week');
+    // Four tiles, two by two: the questions about claims stay in the Board's menu.
+    expect(WAITING).toHaveLength(4);
   });
 
   it('reads each count off the payload that already holds it', () => {

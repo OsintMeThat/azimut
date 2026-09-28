@@ -30,6 +30,7 @@ describe('temporal Claim editor', () => {
 
   it('starts a new claim citing the evidence it was opened from, and an edit from its own', () => {
     expect(editor).toContain('initialCites = [],');
-    expect(editor).toContain('if (!item) cites = initialCites.map(');
+    expect(editor).toContain('cites = initialCites.map(keep);');
+    expect(editor).toContain('confidence = item?.confidence ?? initialConfidence;');
   });
 });

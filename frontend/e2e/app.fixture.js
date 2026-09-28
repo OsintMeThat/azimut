@@ -1320,9 +1320,21 @@ export async function installAppFixture(page, options = {}) {
       };
       if (index >= 0) timelineRows[index] = temporal;
       else timelineRows.push(temporal);
+      // New subjects named on the entry line are filed with the claim, as the route does.
+      const created = (body.create ?? []).map((entry, at) => ({
+        id: `${entry.type}-browser-${timelineRows.length}-${at + 1}`, ...entry,
+      }));
+      for (const entry of created) {
+        fixtureCatalog.push({
+          id: entry.id, type: entry.type, label: entry.label, attrs: {},
+          provenance: { by: 'user', at: '2026-08-12T10:00:00Z', status: 'confirmed' },
+        });
+        temporal[{ about: 'subjects', at: 'places', cites: 'sources' }[entry.slot]].push(entry.id);
+      }
       return json(route, {
         entity: { id: ownerId, type: 'claim', label: temporal.label, attrs: body, provenance: { by: 'user', at: '2026-08-12T10:00:00Z', status: 'confirmed' } },
         links: [],
+        created,
         temporal,
       });
     }
@@ -1626,6 +1638,27 @@ export async function installAppFixture(page, options = {}) {
         galleryWrites.push({ method: 'DELETE', entityId, imageId });
         return json(route, { images: held });
       }
+    }
+    // The identifier already in the case under this value, the way `identity_key`
+    // compares: case aside, and a handle with or without its sigil.
+    if (caseId && path === `/api/cases/${caseId}/entities/twin`) {
+      const type = url.searchParams.get('type');
+      const key = (value) => String(value ?? '').trim().toLowerCase().replace(/^@/, '');
+      const wanted = key(url.searchParams.get('label'));
+      const held = fixtureCatalog.find((entity) => entity.type === type && key(entity.label) === wanted);
+      return json(route, { entity: held ?? null });
+    }
+    // A grouped delete, one trash group: what the entry line's Undo sends.
+    if (caseId && path === `/api/cases/${caseId}/entities/delete` && request.method() === 'POST') {
+      const { ids } = request.postDataJSON();
+      entityWrites.push({ method: 'DELETE', ids });
+      for (const id of ids) {
+        const at = timelineRows.findIndex((item) => item.owner_id === id);
+        if (at >= 0) timelineRows.splice(at, 1);
+        const index = fixtureCatalog.findIndex((entity) => entity.id === id);
+        if (index >= 0) fixtureCatalog.splice(index, 1);
+      }
+      return json(route, { status: 'deleted', deleted: ids, tombstoned: [], trash: 'trash-1' });
     }
     const entityMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/([^/]+)$`));
     if (entityMatch && request.method() !== 'GET') {
@@ -1980,6 +2013,15 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { status: 'saved', ...sheetPayload(held) });
     }
 
+    // The civil zone at a point, from the bundled boundaries: two zones are enough to
+    // tell a place's clock from another's.
+    if (path === '/api/geo/zone') {
+      geoQueries.zone = [...(geoQueries.zone ?? []), url.search];
+      const lon = Number(url.searchParams.get('lon'));
+      return json(route, {
+        name: lon > 20 ? 'Europe/Kyiv' : lon > 0 ? 'Europe/Paris' : lon > -30 ? 'Europe/Lisbon' : 'America/New_York',
+      });
+    }
     // The search bar's two layers. The offline one answers coordinates and a
     // handful of cities; the geocoder answers streets, and only ever late.
     if (path === '/api/geo/suggest') {

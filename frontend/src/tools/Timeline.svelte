@@ -78,6 +78,7 @@
   import PlateExport from '../components/PlateExport.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import EntryLine from '../components/EntryLine.svelte';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import TemporalClaimEditor from '../components/TemporalClaimEditor.svelte';
@@ -140,6 +141,11 @@
   let editor = $state(null);
   let detailsId = $state(null);
   let entityFilter = $state(null);
+  /** The entity the reading was scoped from, whole, so the entry line can seat it.
+   *  A saved view only keeps the scope's id and label, and then nothing is seated. */
+  let scopedEntity = $state(null);
+  const lineEntity = $derived(scopedEntity && scopedEntity.id === entityFilter?.id ? scopedEntity : null);
+  let entryLine = $state(null);
   let viewMode = $state('plot');
   let expandedTracks = $state({});
   let toolElement = $state(null);
@@ -299,7 +305,7 @@
     ? dated.filter((item) => Date.parse(item.earliest) < axisWindow.end
       && Date.parse(item.latest ?? item.earliest) >= axisWindow.start)
     : dated);
-  const axisMax = $derived(Math.max(150, Math.round((chronologyHeight - overviewHeight - 70) * axisShare)));
+  const axisMax = $derived(Math.max(150, Math.round((chronologyHeight - overviewHeight - 130) * axisShare)));
   const listGroups = $derived.by(() => {
     const groups = new Map();
     for (const item of [...windowItems].sort((a, b) => String(a.earliest).localeCompare(String(b.earliest)))) {
@@ -989,6 +995,9 @@
     const focus = uiState.timelineFocus;
     if (!focus) return;
     entityFilter = { id: focus.entityId, label: focus.entityLabel || 'Selected entity' };
+    scopedEntity = focus.entityType
+      ? { id: focus.entityId, label: focus.entityLabel, type: focus.entityType, attrs: focus.entityAttrs ?? {} }
+      : null;
     selected = null;
     handOverSelection(focus.itemId, focus.producedHere === true);
     from = '';
@@ -1290,8 +1299,54 @@
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
+  /** A date offered from the axis goes to the entry line, which is where the rest
+   *  of the entry is written. */
+  function offerDate(when) {
+    if (snapshotReading) return;
+    entryLine?.offer(when);
+  }
+
   function createFromKeyboard() {
-    openEditor(null, draftWhen(from, to, .5, .5));
+    offerDate(draftWhen(from, to, .5, .5));
+  }
+
+  /**
+   * Where a line just added went, said when it is not where the analyst is looking:
+   * a reading with no Events track, a date outside the window, or no date at all.
+   */
+  function lineAdded(saved, { undo }) {
+    const row = saved.temporal;
+    pendingSelection = row ? { id: row.id, fallback: row } : null;
+    const statements = trackSpecs.some((track) => track.categories.includes('statement'));
+    if (!statements) {
+      toast('Added · not in the tracks shown', 'ok', 8000, {
+        label: 'Show',
+        onClick: () => {
+          const events = defaultTimelineTracks()[0];
+          trackSpecs = [...trackSpecs, { ...copyTimelineTrack(events, trackSpecs), label: events.label }];
+        },
+      });
+      return;
+    }
+    if (row && !row.earliest) {
+      toast('Added · in Undated', 'ok', 8000, { label: 'Show', onClick: () => { undatedOpen = true; undatedElement?.scrollIntoView?.({ block: 'nearest' }); } });
+      return;
+    }
+    const start = Date.parse(row?.earliest ?? '');
+    const end = Date.parse(row?.latest ?? row?.earliest ?? '');
+    if (axisWindow && Number.isFinite(start) && (start >= axisWindow.end || end < axisWindow.start)) {
+      toast('Added · outside this window', 'ok', 8000, {
+        label: 'Go there',
+        onClick: () => {
+          const half = axisWindow.span / 2;
+          const middle = (start + Math.max(start, end)) / 2;
+          from = isoInstant(middle - half);
+          to = isoInstant(middle + half);
+        },
+      });
+      return;
+    }
+    toast('Added', 'ok', 8000, { label: 'Undo', onClick: undo });
   }
 
   /** The instants the minimap spans — the bars', so a drag lands where it looks. */
@@ -1380,7 +1435,7 @@
     if (drawing?.pointer === event.pointerId) {
       const draft = drawing;
       drawing = null;
-      openEditor(null, draftWhen(from, to, draft.start, draft.end));
+      offerDate(draftWhen(from, to, draft.start, draft.end));
       return;
     }
     if (!moving || moving.pointer !== event.pointerId) return;
@@ -1742,7 +1797,7 @@
       />
       <PlateExport surface="timeline" plate={capturePlate} disabled={!caseState.current} />
       <button class="btn btn-ghost fullscreen-btn" aria-pressed={fullscreen} onclick={toggleFullscreen}>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>
-      <button class="btn btn-primary add-event" disabled={snapshotReading} onclick={() => openEditor()}><Icon name="plus" size={13} />Add claim</button>
+      <button class="btn btn-primary add-event" disabled={snapshotReading || !caseState.current} title="Write it on the line under the axis" onclick={() => entryLine?.focus()}><Icon name="plus" size={13} />Add</button>
     </div>
   </header>
 
@@ -1831,6 +1886,23 @@
 
   <div class="timeline-grid">
     <main class="chronology" class:blank={!caseState.current || (!extent?.from && !loading)} bind:clientHeight={chronologyHeight}>
+      <!-- The entry line, under the axis. None in a snapshot, which takes no writes. -->
+      {#snippet line()}
+        {#if caseState.current && !snapshotReading}
+          <section class="entry-host" aria-label="Note an entry">
+            {#key `${caseState.current.id}:${lineEntity?.id ?? ''}`}
+              <EntryLine
+                bind:this={entryLine}
+                caseId={caseState.current.id}
+                entity={lineEntity}
+                draftKey={`timeline:${lineEntity?.id ?? ''}`}
+                announce={false}
+                onsaved={lineAdded}
+              />
+            {/key}
+          </section>
+        {/if}
+      {/snippet}
       <!-- What still waits for a date, under the list or under an empty axis alike. -->
       {#snippet holdings()}
         {#if unplaced.length || unplacedTotal}
@@ -1875,10 +1947,10 @@
           {#if fileDates}
             <p>{fileDates} {fileDates === 1 ? 'date' : 'dates'} read from {workingFilesHeld ? 'working files' : 'files'} · <button class="text-button" onclick={showFileDates}>Show them</button></p>
           {:else}
-            <p>Add a dated claim here or from an entity's Time tab.</p>
+            <p>Note what happened on the line below, or from an entity's Time tab.</p>
           {/if}
-          <button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor()}>Add first claim</button>
         </div>
+        {@render line()}
         {@render holdings()}
       {:else}
         <section class="overview-card" aria-label="Timeline overview" bind:clientHeight={overviewHeight}>
@@ -2163,7 +2235,7 @@
                       onclick={() => expandTrack(baseId)}
                     >+{cluster.count}</button>
                   {/each}
-                  {#if canCreate}<span class="track-hint">Click or drag to add a claim</span>{/if}
+                  {#if canCreate}<span class="track-hint">Click or drag to date a new entry</span>{/if}
                   {#if !track.layout.items.length && !track.layout.clusters.length && !canCreate}<span class="track-empty">No entries in this window</span>{/if}
                   {:else}<span class="folded-note">Track folded</span>{/if}
                 </div>
@@ -2198,6 +2270,8 @@
             onpointercancel={splitEnd}
             onkeydown={splitKey}
           ></div>
+
+          {@render line()}
 
           <div class="reading-pane" bind:this={listPane}>
             <section class="timeline-list" aria-label="Timeline list">
@@ -2590,7 +2664,7 @@
   /* The overview, the axis, the bar between and the list: one reading in one column,
      where the axis and the list scroll each on their own, so picking an entry in one
      never scrolls the other out of view. */
-  .chronology { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto 12px minmax(0, 1fr); overflow: auto hidden; padding: 18px 24px 16px; }
+  .chronology { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto 12px auto minmax(0, 1fr); overflow: auto hidden; padding: 18px 24px 16px; }
   .chronology.blank { display: block; overflow: auto; padding-bottom: 28px; }
   /* A panel is a border and a fill. The 35px drop shadow under each one read as a
      floating card, which is a look rather than a reading of the case. */
@@ -2758,6 +2832,7 @@
   /* The mark and the row of the entry under the pointer light each other. */
   .timeline-event.lit .event-shape { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent); }
   .timeline-event.lit .event-caption { color: var(--accent); }
+  .entry-host { padding: 6px 0 8px; border-bottom: 1px solid var(--border); }
   .split { position: relative; height: 12px; cursor: row-resize; touch-action: none; }
   .split::before { content: ''; position: absolute; top: 4px; left: calc(50% - 22px); width: 44px; height: 4px; border-radius: 2px; background: var(--border-strong); }
   .split:hover::before, .split:focus-visible::before { background: var(--accent); }

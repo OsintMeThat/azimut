@@ -311,8 +311,8 @@ export const GUIDE = [
         text: 'Expanding, hiding, folding and dragging are your picture. Undo reaches all of them and reaches nothing the case holds.',
       },
       {
-        label: 'Add claim starts from what you are looking at',
-        text: 'On a Board row, a Graph node or the Claims group in Details, the entity is already in its place: a model asks how many, and a place becomes where it was seen.',
+        label: 'One line notes what happened',
+        text: 'Under the Timeline axis, and on a Board row, a Graph node or the Claims group in Details with the entity already in its place. Type @ to mention a subject, even a new one; only a date you give is used.',
       },
       {
         label: 'Timeline reads in a clock you choose',
@@ -340,7 +340,7 @@ export const GUIDE = [
         keys: [
           { combo: 'Ctrl+V', does: 'files a screenshot or a copied address, on Media, Files, Board and Graph' },
           { combo: 'Escape', does: 'closes whatever is open, shallowest first' },
-          { combo: 'Ctrl+Enter', does: 'files an Add claim form' },
+          { combo: 'Ctrl+Enter', does: 'adds the entry line, from any of its fields' },
         ],
       },
       {
@@ -376,6 +376,16 @@ export const GUIDE = [
           { combo: 'Alt+← / →', does: 'moves from a focused entry to the one before or after it on its track' },
           { combo: '↑ / ↓', does: 'walks the rows of the list under the axis' },
           { combo: 'Enter', does: 'opens the focused row in the inspector' },
+        ],
+      },
+      {
+        where: 'Timeline, Board, Graph',
+        keys: [
+          { combo: '@', does: 'mentions a subject on the entry line, one the case holds or a new one' },
+          { combo: '↑ / ↓, Enter or Tab', does: 'moves through the mentions offered and picks one' },
+          { combo: 'Escape', does: 'closes the mentions and keeps the @ as text' },
+          { combo: 'Enter', does: 'adds the entry, from its sentence' },
+          { combo: 'Alt+↓', does: 'moves a focused mention to its next seat' },
         ],
       },
       {

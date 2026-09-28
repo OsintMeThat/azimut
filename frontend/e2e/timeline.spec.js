@@ -395,18 +395,56 @@ test('creates a dated statement from a point on the axis', async ({ page }) => {
   const box = await canvas.boundingBox();
 
   await page.mouse.click(box.x + box.width * 0.72, box.y + box.height - 8);
-  const dialog = page.getByRole('dialog', { name: 'Add claim' });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel('When')).not.toHaveValue('');
-  await dialog.getByLabel('Claim', { exact: true }).fill('A second witness reached the checkpoint');
-  await dialog.getByRole('button', { name: 'Add claim' }).click();
+  // The click dates the line under the axis and hands it the sentence.
+  const line = page.getByRole('region', { name: 'Note an entry' });
+  await expect(line.getByLabel('When')).not.toHaveValue('');
+  await expect(line.getByLabel('What happened')).toBeFocused();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.keyboard.type('A second witness reached the checkpoint');
+  await page.keyboard.press('Enter');
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0]).toMatchObject({
     method: 'POST',
-    body: { statement: 'A second witness reached the checkpoint' },
+    body: { statement: 'A second witness reached the checkpoint', create: [] },
   });
+  expect(fixture.timelineWrites[0].body.when).toMatch(/^2026-06-/);
   await expect(page.getByRole('button', { name: /A second witness/ })).toBeVisible();
+  // Emptied for the next one, and the way back is offered.
+  await expect(line.getByLabel('What happened')).toHaveValue('');
+  await expect(line.getByLabel('When')).toHaveValue('');
+  await page.locator('.toast').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => fixture.entityWrites.at(-1)?.ids).toEqual([fixture.timelineWrites[0].ownerId]);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('notes an entry with a new subject and a place, on that place’s clock', async ({ page }) => {
+  const fixture = await openTimeline(page, { catalog: [person, source, mediaEntity, quay] });
+  const line = page.getByRole('region', { name: 'Note an entry' });
+  const say = line.getByLabel('What happened');
+
+  await say.pressSequentially('Crane seen at @South');
+  const mentions = page.getByRole('listbox', { name: 'Mentions' });
+  await expect(mentions.getByRole('option').first()).toContainText('South quay');
+  await say.press('Enter');
+  await say.pressSequentially('with @4th brigade');
+  await expect(mentions.getByRole('option').last()).toContainText('New · 4th brigade');
+  await say.press('ArrowUp');
+  await say.press('Enter');
+  await expect(line.locator('.chip.new')).toContainText('4th brigade');
+
+  await line.getByLabel('When').fill('23/06/2026 17:05');
+  await expect(line).toContainText('Reads: 17:05 at South quay (Europe/Paris, UTC+02:00)');
+  await say.press('Enter');
+
+  await expect.poll(() => fixture.timelineWrites.length).toBe(1);
+  const { body } = fixture.timelineWrites[0];
+  expect(body).toMatchObject({
+    statement: 'Crane seen at South quay with 4th brigade',
+    at: ['place-1'],
+    when: '2026-06-23T17:05:00+02:00',
+    create: [{ slot: 'about', type: 'person', label: '4th brigade' }],
+  });
   fixture.expectNoUnexpectedRequests();
 });
 
@@ -645,13 +683,10 @@ test('creates and resizes an hourly period on a day view', async ({ page }) => {
   await page.mouse.move(box.x + box.width * .5, y, { steps: 5 });
   await page.mouse.up();
 
-  const dialog = page.getByRole('dialog', { name: 'Add claim' });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel('Date format')).toHaveValue('time-range');
-  await expect(dialog.getByLabel('Start time')).toHaveValue(/2026-06-23T\d{2}:\d{2}(?::\d{2})?/);
-  await expect(dialog.getByLabel('End time')).toHaveValue(/2026-06-23T\d{2}:\d{2}(?::\d{2})?/);
-  await dialog.getByLabel('Claim', { exact: true }).fill('Traffic peaked around the checkpoint');
-  await dialog.getByRole('button', { name: 'Add claim' }).click();
+  const line = page.getByRole('region', { name: 'Note an entry' });
+  await expect(line.getByLabel('When')).toHaveValue(/^23\/06\/2026 \d{2}:\d{2}.* 23\/06\/2026 \d{2}:\d{2}/);
+  await page.keyboard.type('Traffic peaked around the checkpoint');
+  await page.keyboard.press('Enter');
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0].body.when).toMatch(
@@ -680,7 +715,7 @@ test('keeps creation on the Claims track and offers the list view', async ({ pag
   const mediaCanvas = page.locator('.track-canvas').nth(1);
   const box = await mediaCanvas.boundingBox();
   await page.mouse.click(box.x + box.width * .7, box.y + box.height - 8);
-  await expect(page.getByRole('dialog', { name: 'Add claim' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Note an entry' }).getByLabel('When')).toHaveValue('');
 
   await page.getByRole('button', { name: 'List' }).click();
   await expect(page.getByRole('region', { name: 'Timeline list' })).toBeVisible();
@@ -779,9 +814,12 @@ test('moves and shortens a selected claim on the axis', async ({ page }) => {
 
 test('validates advanced syntax before saving', async ({ page }) => {
   await openTimeline(page);
-  await page.getByRole('button', { name: 'Add claim' }).click();
+  const line = page.getByRole('region', { name: 'Note an entry' });
+  await line.getByLabel('What happened').fill('A dated observation');
+  await line.getByRole('button', { name: 'More' }).click();
+  await line.getByRole('button', { name: 'Full editor' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add claim' });
-  await dialog.getByLabel('Claim', { exact: true }).fill('A dated observation');
+  await expect(dialog.getByLabel('Claim', { exact: true })).toHaveValue('A dated observation');
   await dialog.getByLabel('Date format').selectOption('advanced');
   await dialog.getByLabel('When').fill('late summer');
   await expect(dialog.getByText('Use a supported date or timestamp.')).toBeVisible();

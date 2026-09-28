@@ -71,6 +71,103 @@ def test_a_bad_connector_rolls_back_the_whole_claim(client):
     assert [entity["type"] for entity in entities] == ["person"]
 
 
+def test_a_line_creates_the_subjects_it_names_with_its_claim(client):
+    case_id = _case(client)
+    place = _entity(client, case_id, "place", "Crossroads", {"lat": 49.9, "lon": 36.2})
+
+    created = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={
+            "statement": "4th brigade seen at Crossroads",
+            "at": [place["id"]],
+            "create": [
+                {"slot": "about", "type": "organization", "label": " 4th brigade "},
+                {"slot": "about", "type": "account", "label": "@spotter"},
+            ],
+        },
+    )
+
+    assert created.status_code == 200, created.text
+    body = created.json()
+    made = body["created"]
+    assert [(entry["type"], entry["label"], entry["slot"]) for entry in made] == [
+        ("organization", "4th brigade", "about"),
+        ("account", "@spotter", "about"),
+    ]
+    assert {(link["type"], link["to"]) for link in body["links"]} == {
+        ("at", place["id"]),
+        ("about", made[0]["id"]),
+        ("about", made[1]["id"]),
+    }
+    case = Case.open(case_id)
+    organization = case.get_entity(made[0]["id"])
+    assert organization["provenance"]["by"] == "user"
+    assert organization["provenance"]["status"] == "confirmed"
+
+    # Undo is the grouped delete: the Claim and what it created, as one trash group.
+    undone = client.post(
+        f"/api/cases/{case_id}/entities/delete",
+        json={"ids": [body["entity"]["id"], *(entry["id"] for entry in made)]},
+    )
+    assert undone.status_code == 200, undone.text
+    assert sorted(entity["type"] for entity in case.list_entities()) == ["place"]
+    restored = client.post(f"/api/cases/{case_id}/trash/{undone.json()['trash']}/restore")
+    assert restored.status_code == 200, restored.text
+    assert sorted(entity["type"] for entity in case.list_entities()) == [
+        "account", "claim", "organization", "place",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("entry", "reason"),
+    [
+        ({"slot": "about", "type": "place", "label": "Somewhere"}, "cannot be a 'place'"),
+        ({"slot": "about", "type": "media", "label": "clip.mp4"}, "cannot be a 'media'"),
+        ({"slot": "about", "type": "claim", "label": "Another"}, "cannot be a 'claim'"),
+        ({"slot": "about", "type": "unheard-of", "label": "X"}, "cannot be a 'unheard-of'"),
+        ({"slot": "about", "type": "person", "label": "   "}, "needs a name"),
+        # A person is not evidence: the vocabulary refuses the seat, after the
+        # subject was written, and the whole line goes back.
+        ({"slot": "cites", "type": "person", "label": "Witness"}, ""),
+    ],
+)
+def test_a_new_subject_the_line_cannot_create_leaves_nothing(client, entry, reason):
+    case_id = _case(client)
+
+    refused = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Something seen", "create": [entry]},
+    )
+
+    assert refused.status_code == 400, refused.text
+    assert reason in refused.json()["detail"]
+    assert Case.open(case_id).list_entities() == []
+
+
+def test_a_line_names_at_most_ten_new_subjects(client):
+    case_id = _case(client)
+    entries = [{"slot": "about", "type": "person", "label": f"P{n}"} for n in range(11)]
+
+    refused = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Crowd", "create": entries},
+    )
+
+    assert refused.status_code == 422
+    assert Case.open(case_id).list_entities() == []
+
+
+def test_a_claim_without_new_subjects_still_posts_the_old_body(client):
+    case_id = _case(client)
+
+    created = client.post(
+        f"/api/cases/{case_id}/timeline/claims", json={"statement": "Plain"}
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["created"] == []
+
+
 def test_subsecond_bounds_sort_filter_and_measure_the_extent_chronologically(client):
     case_id = _case(client, "Subsecond order")
     for statement, when in (
@@ -513,6 +610,17 @@ def test_timeline_track_filters_through_named_claim_connectors(client):
         params={"category": "statement", "track": json.dumps({"relation": "source"})},
     )
     assert [item["id"] for item in sourced.json()["items"]] == [first["id"]]
+
+    # The Board's question about what a claim lacks reaches a track the same way.
+    unsourced = client.get(
+        f"/api/cases/{case_id}/timeline",
+        params={
+            "category": "statement",
+            "track": json.dumps({"relation": "owner", "terms": {"lacks": "source"}}),
+        },
+    )
+    assert unsourced.status_code == 200, unsourced.text
+    assert [item["label"] for item in unsourced.json()["items"]] == ["Unrelated event"]
 
 
 def test_timeline_track_can_filter_role_and_hide_one_entry(client):

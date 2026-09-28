@@ -85,7 +85,7 @@
   import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
   import ViewSwitch from '../components/ViewSwitch.svelte';
-  import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';
+  import EntryLine, { claimSeat } from '../components/EntryLine.svelte';
   import { claimActionTitle } from '../lib/quickClaim.js';
   import { loadRelationTypes } from '../lib/relations.svelte.js';
 
@@ -1383,8 +1383,8 @@
 {/if}
 
 {#if claimFor}
-  <Modal title="New claim" onclose={() => (claimFor = null)} width="560px">
-    <QuickClaim
+  <Modal title="Note an entry" onclose={() => (claimFor = null)} width="640px">
+    <EntryLine
       caseId={caseState.current.id}
       entity={claimFor}
       onsaved={() => (claimFor = null)}

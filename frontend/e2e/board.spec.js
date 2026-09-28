@@ -222,12 +222,12 @@ test('files a counted observation from a model’s row in one form', async ({ pa
   await row.hover();
   await row.getByRole('button', { name: 'File a claim from T-72B3' }).click();
 
-  const form = page.getByRole('dialog').locator('.quick-claim');
-  await expect(form.getByLabel('Claim', { exact: true })).toHaveValue('T-72B3 seen');
+  const form = page.getByRole('dialog').locator('.entry-line');
+  await expect(form.getByLabel('What happened')).toHaveValue('T-72B3 seen');
   await form.getByLabel('How many').fill('2');
   await form.getByLabel('Condition').selectOption('destroyed');
-  await expect(form.getByLabel('Claim', { exact: true })).toHaveValue('2 × T-72B3 destroyed');
-  await form.getByRole('button', { name: 'Add claim' }).click();
+  await expect(form.getByLabel('What happened')).toHaveValue('2 × T-72B3 destroyed');
+  await form.getByRole('button', { name: 'Add', exact: true }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0].body).toMatchObject({
@@ -238,7 +238,7 @@ test('files a counted observation from a model’s row in one form', async ({ pa
     at: [],
     cites: [],
   });
-  await expect(page.locator('.quick-claim')).toHaveCount(0);
+  await expect(page.locator('.entry-line')).toHaveCount(0);
 });
 
 test('files a claim from a place as where it was seen', async ({ page }) => {
@@ -250,12 +250,13 @@ test('files a claim from a place as where it was seen', async ({ page }) => {
   await expect(press).toHaveAttribute('title', 'File a claim placed here');
   await press.click();
 
-  const form = page.getByRole('dialog').locator('.quick-claim');
-  await expect(form.getByLabel('Claim', { exact: true })).toHaveValue('Seen at checkpoint north');
+  const form = page.getByRole('dialog').locator('.entry-line');
+  await expect(form.getByLabel('What happened')).toHaveValue('Seen at checkpoint north');
   // a place is never counted and has no condition of its own to state
+  await form.getByRole('button', { name: 'More' }).click();
   await expect(form.getByLabel('How many')).toHaveCount(0);
-  await form.getByLabel('Claim', { exact: true }).fill('Convoy seen at checkpoint north');
-  await form.getByRole('button', { name: 'Add claim' }).click();
+  await form.getByLabel('What happened').fill('Convoy seen at checkpoint north');
+  await form.getByLabel('What happened').press('Enter');
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0].body).toMatchObject({

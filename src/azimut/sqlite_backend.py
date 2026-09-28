@@ -49,6 +49,7 @@ from .store.filters import (
     _holds_number,
     _link_scope,
     _linked_at_all,
+    lacking,
 )
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
@@ -794,6 +795,7 @@ class SqliteCase:
         attr_value: str | None = None,
         linked: str | None = None,
         unlinked_only: bool = False,
+        lacks: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
@@ -834,6 +836,7 @@ class SqliteCase:
             types=types, exclude_types=exclude_types, status=status, query=query,
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked_only,
+            lacks=lacks,
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,
@@ -1242,6 +1245,7 @@ class SqliteCase:
         attr_value: str | None = None,
         linked: str | None = None,
         unlinked: bool = False,
+        lacks: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
@@ -1279,6 +1283,7 @@ class SqliteCase:
             types=types, status=status, query=query,
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked,
+            lacks=lacks,
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,
@@ -2215,6 +2220,7 @@ class SqliteCase:
                 attr_value=term("value") or None,
                 linked=term("linked") or None,
                 unlinked=term("unlinked").lower() == "true",
+                lacks=lacking(term("lacks")),
                 since=term("since") or None,
                 until=term("until") or None,
                 filed_by=filed_by or None,

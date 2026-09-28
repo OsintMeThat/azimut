@@ -13,8 +13,11 @@ import {
   loadFilter,
   orderFor,
   saveFilter,
+  normalizeFilter,
   sinceFor,
+  toGraphQuery,
   toQuery,
+  toggleLack,
   toggleValue,
 } from './entityFilter.js';
 
@@ -85,6 +88,35 @@ describe('the questions every case is asked', () => {
     const loose = askQuestion(emptyFilter(), 'loose');
     expect(toQuery(loose).unlinked).toBe(true);
     expect(chipsOf(loose)[0].text).toBe('Nothing linked');
+  });
+});
+
+describe('what a claim is missing', () => {
+  it('asks for the claims with no source, or not assessed, or both', () => {
+    const unsourced = askQuestion(emptyFilter(), 'unsourced');
+    expect(toQuery(unsourced).lacks).toEqual(['source']);
+    expect(chipsOf(unsourced)[0]).toEqual({ axis: 'unsourced', text: 'No source' });
+
+    const both = askQuestion(unsourced, 'unassessed');
+    expect(both.lacks).toEqual(['source', 'assessment']);
+    expect(toGraphQuery(both).lacks).toBe('source,assessment');
+    expect(activeAxes(both)).toEqual(['unsourced', 'unassessed']);
+
+    const left = clearAxis(both, 'unsourced');
+    expect(left.lacks).toEqual(['assessment']);
+    expect(toggleLack(left, 'unassessed').lacks).toEqual([]);
+    expect(toQuery(emptyFilter()).lacks).toBeUndefined();
+  });
+
+  it('keeps only the terms it knows from a remembered question', () => {
+    expect(normalizeFilter({ lacks: ['source', 'photo', 3] }).lacks).toEqual(['source']);
+    expect(normalizeFilter({}).lacks).toEqual([]);
+  });
+
+  it('comes after the four questions the Overview prices', () => {
+    expect(QUESTIONS.map((question) => question.id)).toEqual([
+      'review', 'loose', 'week', 'unfiled', 'unsourced', 'unassessed',
+    ]);
   });
 });
 

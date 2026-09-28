@@ -62,7 +62,7 @@ def _query_terms(spec: dict[str, Any]) -> dict[str, str]:
         return {}
     allowed = {
         "type", "status", "q", "folder", "unfiled", "recursive", "attr",
-        "value", "linked", "unlinked", "since", "until", "by",
+        "value", "linked", "unlinked", "lacks", "since", "until", "by",
     }
     return {
         key: _short(value, 1000)
@@ -302,6 +302,7 @@ def _capture(case: Case, spec: dict[str, Any]) -> dict[str, Any]:
             attr_value=terms.get("value"),
             linked=terms.get("linked"),
             unlinked=terms.get("unlinked") == "true",
+            lacks=[part for part in terms.get("lacks", "").split(",") if part] or None,
             since=terms.get("since"),
             until=terms.get("until"),
             filed_by=filed_by or None,

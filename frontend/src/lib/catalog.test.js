@@ -55,6 +55,12 @@ describe('buildCatalogQuery', () => {
     );
   });
 
+  it('asks what a claim is missing', () => {
+    expect(buildCatalogQuery('c1', { lacks: ['source', 'assessment'] })).toBe(
+      '/api/cases/c1/catalog/entities?lacks=source%2Cassessment'
+    );
+  });
+
   it('asks how a row got here: when it was filed, and by what', () => {
     expect(
       buildCatalogQuery('c1', { since: '2026-08-03', until: '2026-08-10', by: ['user', 'satellite'] })

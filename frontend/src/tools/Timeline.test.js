@@ -45,8 +45,17 @@ describe('Timeline workspace', () => {
     expect(source).toContain("!track?.categories.includes('statement')");
     expect(source).toContain("event.target.closest('button')");
     expect(source).toContain('class:createable={canCreate}');
-    expect(source).toContain('Click or drag to add a claim');
-    expect(source).toContain('Add claim');
+    expect(source).toContain('Click or drag to date a new entry');
+    expect(source).toContain('offerDate(draftWhen(from, to, draft.start, draft.end));');
+  });
+
+  it('writes a new entry on the line under the axis, and none over a snapshot', () => {
+    expect(source).toContain("{#if caseState.current && !snapshotReading}");
+    expect(source).toContain('<EntryLine');
+    expect(source).toContain('announce={false}');
+    expect(source).toContain('onsaved={lineAdded}');
+    expect(source).toContain("'Added · not in the tracks shown'");
+    expect(source).toContain("'Added · outside this window'");
   });
 
   it('shows uncertainty through patterns and a visible legend', () => {

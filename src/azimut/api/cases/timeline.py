@@ -14,6 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, StrictInt
 
+from ...engine import entities as entity_engine
 from ...engine import links as link_engine
 from ...engine import timeline as timeline_engine
 from ...repository import EntityStatus
@@ -22,6 +23,13 @@ from .common import _check_attrs, _timeline_bound, delete_entity_deep, get_case
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
+
+class NewSubjectIn(BaseModel):
+    """A subject the entry line names for the first time, created with the Claim."""
+
+    slot: Literal["about", "at", "cites"]
+    type: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1, max_length=300)
 
 class TemporalClaimIn(BaseModel):
     statement: str = Field(min_length=1, max_length=300)
@@ -35,6 +43,9 @@ class TemporalClaimIn(BaseModel):
     about: list[str] = Field(default_factory=list, max_length=200)
     at: list[str] = Field(default_factory=list, max_length=50)
     cites: list[str] = Field(default_factory=list, max_length=200)
+    #: Subjects named for the first time on this line. They are created in the same
+    #: transaction as the Claim, so abandoning or failing the line leaves nothing.
+    create: list[NewSubjectIn] = Field(default_factory=list, max_length=10)
 
 class TemporalClaimPatch(BaseModel):
     statement: str | None = Field(default=None, min_length=1, max_length=300)
@@ -309,19 +320,47 @@ def create_temporal_claim(case_id: str, body: TemporalClaimIn) -> dict[str, Any]
         if getattr(body, key) is not None
     }
     _check_attrs("claim", attrs)
-    connectors = {key: getattr(body, key) for key in _TEMPORAL_CONNECTORS}
-    _check_claim_connectors(case, {"type": "claim"}, connectors)
+    connectors = {key: list(getattr(body, key)) for key in _TEMPORAL_CONNECTORS}
+    new_subjects = [_new_subject(entry) for entry in body.create]
+    created: list[dict[str, Any]] = []
     try:
-        saved = case.save_temporal_claim(
-            entity_id=None,
-            label=statement,
-            attrs=attrs,
-            connectors=connectors,
-            by="user",
-        )
+        # One transaction for the subjects and the Claim: a connector the vocabulary
+        # refuses rolls the new subjects back with it.
+        with case.batch():
+            for entry, label in new_subjects:
+                entity = case.add_entity(entry.type, label, {}, by="user")
+                connectors[entry.slot].append(entity["id"])
+                created.append({"id": entity["id"], "type": entry.type,
+                                "label": label, "slot": entry.slot})
+            _check_claim_connectors(case, {"type": "claim"}, connectors)
+            saved = case.save_temporal_claim(
+                entity_id=None,
+                label=statement,
+                attrs=attrs,
+                connectors=connectors,
+                by="user",
+            )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {**saved, "temporal": _temporal_item(case, saved["entity"]["id"])}
+    return {
+        **saved,
+        "created": created,
+        "temporal": _temporal_item(case, saved["entity"]["id"]),
+    }
+
+def _new_subject(entry: NewSubjectIn) -> tuple[NewSubjectIn, str]:
+    """A new subject checked before anything is written: a type an analyst makes by
+    hand, and a name that is more than spaces. A Claim is not a subject here, since a
+    line that names one files a second statement rather than a subject of this one."""
+    declared = entity_engine.entity_type(entry.type)
+    if declared is None or not declared.manual or entry.type == "claim":
+        raise HTTPException(
+            status_code=400, detail=f"a new subject cannot be a '{entry.type}'"
+        )
+    label = entry.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="a new subject needs a name")
+    return entry, label
 
 @router.patch("/{case_id}/timeline/claims/{claim_id}")
 def update_temporal_claim(

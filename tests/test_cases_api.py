@@ -528,6 +528,42 @@ def test_catalog_lists_what_the_case_connects_to_nothing(client):
     assert client.get(f"/api/cases/{cid}/catalog/summary").json()["unlinked"] == 1
 
 
+def test_catalog_lists_the_claims_with_no_source_or_no_assessment(client):
+    cid = client.post("/api/cases", json={"name": "Waiting"}).json()["id"]
+    clip = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "media", "label": "clip.mp4", "attrs": {"kind": "video"}},
+    ).json()["id"]
+
+    def claim(statement, **extra):
+        body = {"statement": statement, **extra}
+        response = client.post(f"/api/cases/{cid}/timeline/claims", json=body)
+        assert response.status_code == 200, response.text
+        return response.json()["entity"]["id"]
+
+    bare = claim("Heard of it")
+    graded = claim("Graded, no source", confidence="probable")
+    sourced = claim("Sourced, not graded", cites=[clip])
+    whole = claim("Sourced and graded", cites=[clip], confidence="certain")
+
+    def ids(**params):
+        page = client.get(f"/api/cases/{cid}/catalog/entities", params=params)
+        assert page.status_code == 200, page.text
+        return {row["id"] for row in page.json()["items"]}
+
+    # The media is neither: a file is its own source and nothing grades it.
+    assert ids(lacks="source") == {bare, graded}
+    assert ids(lacks="assessment") == {bare, sourced}
+    assert ids(lacks="source,assessment") == {bare}
+    assert whole not in ids(lacks="source") | ids(lacks="assessment")
+    # The graph route asks the same predicate.
+    drawn = client.get(f"/api/cases/{cid}/graph", params={"lacks": "source"}).json()
+    assert {node["id"] for node in drawn["nodes"]} >= {bare, graded}
+    assert sourced not in {node["id"] for node in drawn["nodes"]}
+    refused = client.get(f"/api/cases/{cid}/catalog/entities", params={"lacks": "photo"})
+    assert refused.status_code == 400
+
+
 def test_the_summary_prices_linked_to_by_what_it_would_answer_with(client):
     """Four media pointing at one place is **four** under "linked to a place" and one
     under "type: place". The filter asks the first, so the menu has to price the

@@ -24,13 +24,16 @@
   import {
     ADDED,
     AXES,
+    LACKS,
     QUESTIONS,
     STATUSES,
+    askQuestion,
     chipsOf,
     clearAxis,
     emptyFilter,
     hasTerm,
     isFiltering,
+    toggleLack,
     toggleValue,
   } from '../lib/entityFilter.js';
   import Icon from './Icon.svelte';
@@ -168,6 +171,9 @@
       const loose = summary?.unlinked ?? 0;
       return loose ? { off: false, note: String(loose) } : { off: true, note: 'all connected' };
     }
+    if (axis in LACKS) {
+      return summary?.by_type?.claim ? { off: false, note: '' } : { off: true, note: 'no claims yet' };
+    }
     if (axis === 'folder') {
       return folders.length || unfiledCount
         ? { off: false, note: folders.length ? `${folders.length} folders` : '' }
@@ -204,6 +210,11 @@
       open = '';
       return;
     }
+    if (axis in LACKS) {
+      filter = toggleLack(filter, axis);
+      open = '';
+      return;
+    }
     if (axis === 'field') onfields();
     open = axis;
   }
@@ -227,8 +238,7 @@
   }
 
   function ask(id) {
-    const question = QUESTIONS.find((entry) => entry.id === id);
-    filter = { ...filter, ...question.terms };
+    filter = askQuestion(filter, id);
     open = '';
   }
 

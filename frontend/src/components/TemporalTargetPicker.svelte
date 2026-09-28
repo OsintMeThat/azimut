@@ -59,7 +59,7 @@
 
   function add(entity) {
     if (!selectedIds.has(entity.id) && !lockedIds.has(entity.id)) {
-      selected = [...selected, { id: entity.id, label: entity.label, type: entity.type }];
+      selected = [...selected, { id: entity.id, label: entity.label, type: entity.type, attrs: entity.attrs }];
     }
     query = '';
   }

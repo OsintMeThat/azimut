@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from ...engine import artifacts as artifact_engine
 from ...engine import graph as graph_engine
+from ...store.filters import lacking
 from ...workspace import Case, CaseError
 from .common import _temporal_filter_args, get_case
 
@@ -68,6 +69,7 @@ def graph_view(
     value: str | None = None,
     linked: str | None = None,
     unlinked: bool = False,
+    lacks: str | None = None,
     since: str | None = None,
     until: str | None = None,
     by: str | None = None,
@@ -119,6 +121,7 @@ def graph_view(
             case, lens_id=lens, limit=limit, types=types, status=status,
             query=q, folder=folder, unfiled=unfiled, recursive=recursive, order=order,
             attr=attr, attr_value=value, linked=linked, unlinked=unlinked,
+            lacks=lacking(lacks),
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,

@@ -15,6 +15,7 @@ from ...engine import analysis_views as analysis_view_engine
 from ...engine import entities as entity_engine
 from ...engine import tally as tally_engine
 from ...repository import EntityStatus
+from ...store.filters import lacking
 from ...workspace import CaseError
 from .common import _temporal_filter_args, get_case
 
@@ -44,6 +45,7 @@ def catalog_entities(
     value: str | None = None,
     linked: str | None = None,
     unlinked: bool = False,
+    lacks: str | None = None,
     since: str | None = None,
     until: str | None = None,
     by: str | None = None,
@@ -104,6 +106,7 @@ def catalog_entities(
             limit=limit, cursor=cursor, types=types, status=valid_status,
             query=q, folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=value, linked=linked, unlinked=unlinked,
+            lacks=lacking(lacks),
             since=since, until=until, filed_by=filed_by, order=order,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,
@@ -153,6 +156,7 @@ def catalog_tally(
     value: str | None = None,
     linked: str | None = None,
     unlinked: bool = False,
+    lacks: str | None = None,
     since: str | None = None,
     until: str | None = None,
     by: str | None = None,
@@ -178,6 +182,7 @@ def catalog_tally(
             get_case(case_id), types=types, status=status, query=q,
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=value, linked=linked, unlinked=unlinked,
+            lacks=lacking(lacks),
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,

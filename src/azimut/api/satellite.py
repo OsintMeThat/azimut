@@ -1250,6 +1250,19 @@ def _instant(value: str, field: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+@router.get("/geo/zone")
+def zone_at(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+) -> dict[str, str]:
+    """The civil zone at a point, for a time typed as the local time there.
+
+    Only the name: the offset depends on the instant, daylight saving included, and
+    the browser that holds the instant computes it.
+    """
+    return {"name": localtime.zone_for(lat, lon)}
+
+
 @router.get("/geo/daylight")
 def daylight_for_window(
     lat: float = Query(ge=-90, le=90),

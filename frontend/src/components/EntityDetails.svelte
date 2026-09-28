@@ -53,7 +53,7 @@
   import RelationPicker from './RelationPicker.svelte';
   import EntityImages from './EntityImages.svelte';
   import EntityTime from './EntityTime.svelte';
-  import QuickClaim, { claimSeat } from './QuickClaim.svelte';
+  import EntryLine, { claimSeat } from './EntryLine.svelte';
   import { claimActionTitle } from '../lib/quickClaim.js';
 
   let {
@@ -1004,7 +1004,7 @@
                 </div>
                 {#if connectionComposer === 'claim'}
                   <div class="quick-claim-host">
-                    <QuickClaim
+                    <EntryLine
                       caseId={caseState.current.id}
                       {entity}
                       onsaved={() => (connectionComposer = null)}
