@@ -82,19 +82,24 @@
 </script>
 
 <div class="temporal-editor">
-  <label class="field format-field">
-    <span>Format</span>
-    <select
-      class="select input-sm format"
-      aria-label="Date format"
-      value={state.mode}
-      onchange={(event) => chooseMode(event.currentTarget.value)}
-    >
-      {#each TEMPORAL_FORMATS as format (format.value)}
-        <option value={format.value}>{format.label}</option>
-      {/each}
-    </select>
-  </label>
+  <div class="format-line">
+    <label class="field format-field">
+      <span>Format</span>
+      <select
+        class="select input-sm format"
+        aria-label="Date format"
+        value={state.mode}
+        onchange={(event) => chooseMode(event.currentTarget.value)}
+      >
+        {#each TEMPORAL_FORMATS as format (format.value)}
+          <option value={format.value}>{format.label}</option>
+        {/each}
+      </select>
+    </label>
+    <small class="format-hint">
+      {TEMPORAL_FORMATS.find((format) => format.value === state.mode)?.hint}{#if !rawValue}. Left empty, the claim waits in Undated{/if}
+    </small>
+  </div>
 
   {#if state.mode === 'date'}
     <div class="parts date-parts">
@@ -338,6 +343,8 @@
   .timestamp-parts { grid-template-columns: minmax(190px, 1fr) auto auto; }
   .range-parts { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .time-range-parts { grid-template-columns: repeat(2, minmax(180px, 1fr)) auto auto; }
+  .format-line { display: flex; align-items: end; gap: 10px; min-width: 0; }
+  .format-hint { padding-bottom: 5px; color: var(--text-3); font-size: var(--fs-xs); }
   .format-field { justify-self: start; }
   .format, .precision, .zone { width: max-content; max-width: 100%; }
   .date-value, .datetime-value, .certainty, .advanced { width: 100%; }

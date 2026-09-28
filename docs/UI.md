@@ -972,7 +972,12 @@ for the ontology up front.
   goes back). **Add** is greyed only when there is nothing to say, and says so.
 - **The date is empty until given.** It is read like every other date field
   (`dd/mm/yyyy`, month names, `~`, ranges), its reading is shown under the line, and a
-  date it cannot read holds the line back until it is corrected or cleared. It is
+  date it cannot read holds the line back until it is corrected or cleared. Focused
+  and empty, the line lists what it takes, one example each (a day, a time, a month,
+  a year, about, unsure, a span), and says an empty date waits in Undated; the
+  calendar beside it builds a day, a month or a year for someone who would rather
+  point. The sentence, focused and empty, says the same about `@`, the paperclip and
+  `Enter`. It is
   never taken from a file or from the previous entry; a click on the axis is the one
   thing that offers one. Filed with a date, the entry is *observed*.
 - **A time at a placed entry is the place's clock.** When the line has a place with a
@@ -1000,8 +1005,13 @@ for the ontology up front.
   holds is offered in its place (**Use the one in the case**) without refusing the new
   one. Nothing is created until **Add**: the subjects and the Claim go in one
   transaction (`create` on the claim route, ten at most).
-- **📎 cites a source** from what `cites` accepts, and a file dropped on the line is
-  imported the way the Media Library imports it, then cited.
+- **📎 cites a source** from what `cites` accepts: files, captures, proofs, web pages,
+  notes and other claims. The finder shows the kinds the case holds as chips with
+  their counts, and every row says what it is: its picture when the case already has
+  one (`previews=true` on the catalog page, nothing made), its type, the kind of file,
+  its folder and the day it came in, newest first. The Claim editor's About, Place and
+  Evidence pickers use the same finder. A file dropped on the line is imported the way
+  the Media Library imports it, then cited.
 - **More** holds **How many** (a model) and **Condition** (a model or an object),
   opened at once when the seated entity asks for them, **Confidence**, and **Full
   editor**, which opens the complete Claim editor on the line as it stands.
@@ -1011,7 +1021,10 @@ for the ontology up front.
   keeps everything on the line and says why there. An unsaved line is kept per case for
   the session, never on disk.
 
-**A Claim's fields use three sections**: statement, time and reasoning. The Time
+**A Claim's fields use three sections**: statement, time and reasoning. Each says what
+it is for in a line under it: the sentence, the chosen date format (and that an empty
+date waits in Undated), the time role and the confidence, in the words the confidence
+scale is served with. The Time
 section uses a guided editor for a year, month, day, date and time, bounded date
 range or zoned time range. Precision, certainty and timezone are chosen separately, so the analyst does
 not need to remember suffixes or timestamp punctuation. **Advanced** preserves and

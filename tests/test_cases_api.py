@@ -1115,3 +1115,27 @@ def test_details_title_edit_moves_every_named_tool_file(client):
     proof = next(entity for entity in case.list_entities() if entity["type"] == "proof")
     assert proof["attrs"]["path"] == layout.proof_export_rel("New proof")
     assert case.resolve_inside(proof["attrs"]["path"]).is_file()
+
+
+def test_a_picker_page_brings_the_preview_each_source_already_has(client):
+    cid = client.post("/api/cases", json={"name": "Previews"}).json()["id"]
+    case = Case.open(cid)
+    frame = case.add_entity("media", "frame.jpg", {"path": "media/frame.jpg", "kind": "image"}, by="user")
+    case.upsert_media_item(
+        {"path": "media/frame.jpg", "filename": "frame.jpg", "kind": "image",
+         "added_at": "2026-08-11T10:00:00Z", "thumbnail": ".thumbs/frame.jpg"},
+        entity_id=frame["id"],
+    )
+    capture = case.add_entity("capture", "S2 11 Mar", {"thumb": ".thumbs/s2.jpg"}, by="user")
+    note = case.add_entity("note", "Interview", {}, by="user")
+
+    def thumbs(**params):
+        page = client.get(f"/api/cases/{cid}/catalog/entities", params=params).json()
+        return {row["id"]: row.get("thumb") for row in page["items"]}
+
+    # The table draws its own pictures and does not ask.
+    assert thumbs()[frame["id"]] is None
+    picked = thumbs(previews="true")
+    assert picked[frame["id"]] == ".thumbs/frame.jpg"
+    assert picked[capture["id"]] == ".thumbs/s2.jpg"
+    assert picked[note["id"]] is None

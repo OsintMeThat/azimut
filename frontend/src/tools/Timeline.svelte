@@ -1949,8 +1949,8 @@
           {:else}
             <p>Note what happened on the line below, or from an entity's Time tab.</p>
           {/if}
+          <div class="blank-line">{@render line()}</div>
         </div>
-        {@render line()}
         {@render holdings()}
       {:else}
         <section class="overview-card" aria-label="Timeline overview" bind:clientHeight={overviewHeight}>
@@ -2832,7 +2832,9 @@
   /* The mark and the row of the entry under the pointer light each other. */
   .timeline-event.lit .event-shape { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent); }
   .timeline-event.lit .event-caption { color: var(--accent); }
-  .entry-host { padding: 6px 0 8px; border-bottom: 1px solid var(--border); }
+  .entry-host { margin: 4px 0 10px; padding: 9px 10px 7px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-1); }
+  .blank-line { width: min(860px, 62vw); margin-top: 14px; text-align: left; }
+  .blank-line .entry-host { margin: 0; }
   .split { position: relative; height: 12px; cursor: row-resize; touch-action: none; }
   .split::before { content: ''; position: absolute; top: 4px; left: calc(50% - 22px); width: 44px; height: 4px; border-radius: 2px; background: var(--border-strong); }
   .split:hover::before, .split:focus-visible::before { background: var(--accent); }

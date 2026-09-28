@@ -66,7 +66,9 @@
   } from '../lib/entryLine.js';
   import { isUnzonedTime, withZone, zoneReading, zonesOf } from '../lib/localZone.js';
   import { formatTemporalValue } from '../lib/timeline.js';
+  import DateBuilder from './DateBuilder.svelte';
   import DateField from './DateField.svelte';
+  import EntityFinder from './EntityFinder.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import TemporalClaimEditor from './TemporalClaimEditor.svelte';
@@ -283,8 +285,12 @@
   const seatableTypes = $derived(entityTypes().filter((entry) => seatsFor(entry).length).map((entry) => entry.type));
   const sourceTypes = $derived(entityTypes().filter((entry) => seatsFor(entry).includes('cites')).map((entry) => entry.type));
 
-  /** The list under the sentence: `@` typed, or the paperclip pressed. */
-  let suggest = $state(null); // { mode: 'mention' | 'source', mention?, term, rows, active, loading }
+  /** The list under the sentence while an `@` is typed. */
+  let suggest = $state(null); // { mention, term, rows, active, loading }
+  /** Which panel is open under the line: the sources, or the date builder. */
+  let panel = $state('');
+  /** Which field has the focus, for the help it gets under the line. */
+  let focused = $state('');
   let seq = 0;
   let summary = null;
 
@@ -293,10 +299,10 @@
     return summary;
   }
 
-  function search(mode, term, mention = null) {
-    const types = mode === 'source' ? sourceTypes : seatableTypes;
+  function search(term, mention) {
+    const types = seatableTypes;
     const mine = ++seq;
-    suggest = { ...(suggest?.mode === mode ? suggest : { active: 0, rows: [] }), mode, term, mention, loading: true };
+    suggest = { ...(suggest ?? { active: 0, rows: [] }), term, mention, loading: true };
     if (!types.length) return;
     api
       .get(buildCatalogQuery(caseId, { types, query: term.trim() || undefined, limit: 20 }))
@@ -317,7 +323,7 @@
   /** The subject type this case holds most of, once the summary has been read. */
   let favourite = $state('');
   $effect(() => {
-    const name = suggest?.mode === 'mention' ? suggest.term.trim() : '';
+    const name = suggest ? suggest.term.trim() : '';
     if (!name) {
       guess = null;
       return;
@@ -332,14 +338,14 @@
   });
   const options = $derived([
     ...(suggest?.rows ?? []).map((row) => ({ kind: 'entity', ...row })),
-    ...(guess && suggest?.mode === 'mention' ? [{ kind: 'new', ...guess }] : []),
+    ...(guess && suggest ? [{ kind: 'new', ...guess }] : []),
   ]);
 
   function readCaret() {
     if (!sentence) return;
     const mention = mentionAt(text, sentence.selectionStart ?? text.length);
-    if (mention) search('mention', mention.term, mention);
-    else if (suggest?.mode === 'mention') suggest = null;
+    if (mention) search(mention.term, mention);
+    else if (suggest) suggest = null;
   }
 
   function onSentenceInput(event) {
@@ -355,7 +361,7 @@
   function pick(option) {
     if (!option) return;
     const label = option.kind === 'new' ? option.label : option.entity.label;
-    if (suggest?.mode === 'mention' && suggest.mention) {
+    if (suggest?.mention) {
       const next = insertMention(text, suggest.mention, label);
       text = next.text;
       edited = true;
@@ -421,12 +427,27 @@
       : entry));
   }
 
-  function toggleSources() {
-    if (suggest?.mode === 'source') {
-      suggest = null;
-      return;
+  /** A source picked from the paperclip's finder, cited at once. */
+  function cite(found) {
+    if (!all.some((entry) => entry.id === found.id)) {
+      mentions = [...mentions, {
+        key: found.id, id: found.id, label: found.label, type: found.type, attrs: found.attrs, slot: 'cites',
+      }];
     }
-    search('source', '');
+    panel = '';
+    sentence?.focus();
+  }
+
+  function togglePanel(name) {
+    panel = panel === name ? '' : name;
+    suggest = null;
+  }
+
+  /** A press outside the open panel closes it, as a menu does. */
+  function onWindowPointerDown(event) {
+    if (!panel || !lineElement) return;
+    if (event.target.closest?.('.panel, .panel-toggle')) return;
+    panel = '';
   }
 
   function onSentenceKey(event) {
@@ -522,6 +543,7 @@
   async function fullSaved(saved) {
     full = null;
     clear();
+    if (announce) toast('Added', 'ok', 8000, { label: 'Undo', onClick: () => undo(saved) });
     await reloadCase();
     onsaved?.(saved, { undo: () => undo(saved) });
   }
@@ -529,6 +551,8 @@
   const SEAT_WORDS = { about: 'about', at: 'at', cites: 'source' };
   const counter = $derived(text.length >= 250 ? `${text.length}/300` : '');
 </script>
+
+<svelte:window onpointerdown={onWindowPointerDown} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
@@ -541,17 +565,27 @@
   ondrop={onDrop}
 >
   <div class="row">
-    <div class="when">
+    <div class="when" onfocusin={() => (focused = 'when')} onfocusout={() => (focused = '')}>
       <DateField
         id="{uid}-when"
         label="When"
-        placeholder="date · optional"
+        placeholder="When? optional"
         value={when}
         reading={false}
         onchange={(value) => { when = value; zoneChoice = ''; }}
       />
+      <button
+        class="panel-toggle calendar"
+        class:on={panel === 'calendar'}
+        aria-expanded={panel === 'calendar'}
+        aria-label="Build the date"
+        title="Build the date: a day, a month or a year, and how sure"
+        onclick={() => togglePanel('calendar')}
+      >
+        <Icon name="calendar" size={13} />
+      </button>
     </div>
-    <div class="say">
+    <div class="say" onfocusin={() => (focused = 'say')} onfocusout={() => (focused = '')}>
       <input
         bind:this={sentence}
         id="{uid}-say"
@@ -560,7 +594,7 @@
         dir="auto"
         maxlength="300"
         autocomplete="off"
-        placeholder="What happened? Type @ to mention"
+        placeholder="What happened? Type @ to mention someone, a place or a file"
         aria-label="What happened"
         role="combobox"
         aria-expanded={Boolean(suggest)}
@@ -574,24 +608,7 @@
       />
       {#if counter}<small class="counter" class:full={text.length >= 300}>{counter}</small>{/if}
       {#if suggest}
-        <ul class="options" id="{uid}-options" role="listbox" aria-label={suggest.mode === 'source' ? 'Sources' : 'Mentions'}>
-          {#if suggest.mode === 'source'}
-            <li class="finder">
-              <input
-                class="input input-sm"
-                type="search"
-                placeholder="Find a source…"
-                aria-label="Find a source"
-                value={suggest.term}
-                oninput={(event) => search('source', event.currentTarget.value)}
-                onkeydown={(event) => {
-                  // Enter here picks a source; with none offered it is not an Add.
-                  if (event.key === 'Enter' && !options.length) event.preventDefault();
-                  else onSentenceKey(event);
-                }}
-              />
-            </li>
-          {/if}
+        <ul class="options" id="{uid}-options" role="listbox" aria-label="Mentions">
           {#each options as option, index (option.kind === 'new' ? 'new' : option.entity.id)}
             <li
               id="{uid}-option-{index}"
@@ -613,17 +630,19 @@
               {/if}
             </li>
           {:else}
-            <li class="none">{suggest.loading ? 'Searching…' : 'Nothing in the case by that name'}</li>
+            <li class="none">{suggest.loading ? 'Searching…' : 'Type a name: the case has nothing to offer yet'}</li>
           {/each}
+          <li class="keys" aria-hidden="true">↑ ↓ to choose · Enter or Tab to pick · Esc keeps the @ as text</li>
         </ul>
       {/if}
     </div>
     <button
-      class="btn btn-ghost attach"
-      class:on={suggest?.mode === 'source'}
+      class="btn btn-ghost panel-toggle attach"
+      class:on={panel === 'sources'}
+      aria-expanded={panel === 'sources'}
       aria-label="Cite a source"
-      title="Cite a source, or drop a file on the line"
-      onclick={toggleSources}
+      title="Cite a source: a file, a capture, a proof, a page, a note. Or drop a file on the line"
+      onclick={() => togglePanel('sources')}
     >
       <Icon name="paperclip" size={14} />
     </button>
@@ -632,6 +651,25 @@
       {saving ? 'Adding…' : 'Add'}
     </button>
   </div>
+
+  {#if panel === 'calendar'}
+    <div class="panel calendar-panel">
+      <DateBuilder value={formatTemporalValue(when).valid ? when : ''} label="When" onbuild={(value) => { when = value; zoneChoice = ''; }} />
+    </div>
+  {:else if panel === 'sources'}
+    <div class="panel sources-panel">
+      <EntityFinder
+        {caseId}
+        types={sourceTypes}
+        exclude={all.map((item) => item.id).filter(Boolean)}
+        order="-created"
+        label="Find a source"
+        placeholder="Find a source by name, folder or notes…"
+        onpick={cite}
+        onclose={() => { panel = ''; sentence?.focus(); }}
+      />
+    </div>
+  {/if}
 
   {#if all.length}
     <div class="chips" aria-label="Mentioned">
@@ -693,6 +731,24 @@
           {#if zone}<button class="btn btn-ghost btn-sm" title="Keep the time with no zone, off the UTC axis" onclick={() => (zoneChoice = 'none')}>No zone</button>{/if}
         </span>
       {/if}
+    {:else if focused === 'when' && !when}
+      <p class="help">
+        <span>A day <code>12/03/2026</code></span>
+        <span>a time <code>12/03/2026 14:30</code></span>
+        <span>a month <code>March 2026</code></span>
+        <span>a year <code>2026</code></span>
+        <span>about <code>~2026</code></span>
+        <span>unsure <code>2026?</code></span>
+        <span>a span <code>12/03/2026 to 15/03/2026</code></span>
+        <span class="aside">Or leave it empty: the entry waits in Undated.</span>
+      </p>
+    {:else if focused === 'say' && !suggest && !text.trim()}
+      <p class="help">
+        <span>In your own words, as short as you like.</span>
+        <span><code>@</code> mentions a person, a place or a file, and a name the case lacks becomes a new subject.</span>
+        <span><Icon name="paperclip" size={11} /> cites a source.</span>
+        <span><code>Enter</code> adds.</span>
+      </p>
     {/if}
     {#if error}<span class="error" role="alert">{error}</span>{/if}
     <button class="btn btn-ghost btn-sm more" aria-expanded={more} onclick={() => (more = !more)}>
@@ -704,13 +760,13 @@
     <div class="details">
       {#if facts.count}
         <label>
-          <span class="modal-label">How many</span>
+          <span class="field-name">How many</span>
           <input class="input input-sm" type="number" min={countField?.minimum ?? 1} max={countField?.maximum} step="1" placeholder="Not counted" bind:value={count} />
         </label>
       {/if}
       {#if facts.condition}
         <label>
-          <span class="modal-label">Condition</span>
+          <span class="field-name">Condition</span>
           <select class="select input-sm" value={condition} onchange={(event) => (condition = event.currentTarget.value)}>
             <option value="">Not stated</option>
             {#each conditions as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
@@ -718,18 +774,21 @@
         </label>
       {/if}
       <label>
-        <span class="modal-label">Confidence</span>
+        <span class="field-name">Confidence</span>
         <select class="select input-sm" value={confidence} onchange={(event) => (confidence = event.currentTarget.value)}>
           <option value="">Not assessed</option>
           {#each confidences as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
         </select>
       </label>
+      <span class="gap"></span>
       {#if edited && text.trim() !== composed && composed}
         <button class="btn btn-ghost btn-sm" title="Write the sentence from the mentions again" onclick={() => (edited = false)}>
           Rewrite from the mentions
         </button>
       {/if}
-      <button class="btn btn-ghost btn-sm" title="Role, method and the source's own wording" onclick={openFull}>Full editor</button>
+      <button class="btn btn-ghost btn-sm" title="The role of the date, how it was worked out, and the source's own wording" onclick={openFull}>
+        <Icon name="edit" size={11} /> Full editor
+      </button>
     </div>
   {/if}
 </div>
@@ -748,6 +807,7 @@
       initialCites={full.cites}
       initialFacts={full.facts}
       initialCreate={full.create}
+      announce={false}
       onsaved={fullSaved}
       oncancel={() => (full = null)}
     />
@@ -755,17 +815,25 @@
 {/if}
 
 <style>
-  .entry-line { position: relative; display: grid; gap: 5px; min-width: 0; }
+  .entry-line { position: relative; display: grid; gap: 6px; min-width: 0; }
   .entry-line.dragging { outline: 1px dashed var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
   .row { display: flex; align-items: start; gap: 6px; min-width: 0; }
-  .when { flex: 0 0 150px; min-width: 0; }
+  .when { position: relative; flex: 0 0 176px; min-width: 0; display: flex; align-items: start; }
+  .when :global(.date-field) { flex: 1; }
+  .when :global(.date-field input) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .calendar {
+    flex: 0 0 auto; height: 32px; width: 30px; display: grid; place-items: center;
+    border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    background: var(--bg-3); color: var(--text-3); cursor: pointer;
+  }
+  .calendar:hover, .calendar.on { color: var(--accent); }
   .say { position: relative; flex: 1; min-width: 0; }
   .sentence { width: 100%; }
-  .counter { position: absolute; right: 8px; top: 6px; color: var(--text-3); font-size: 10px; pointer-events: none; }
+  .counter { position: absolute; right: 8px; top: 8px; color: var(--text-3); font-size: 10px; pointer-events: none; }
   .counter.full { color: var(--warn); }
   .options {
     position: absolute; z-index: 40; top: calc(100% + 3px); left: 0; right: 0;
-    max-height: 240px; overflow: auto; margin: 0; padding: 3px; list-style: none;
+    max-height: 260px; overflow: auto; margin: 0; padding: 3px; list-style: none;
     border: 1px solid var(--border-strong); border-radius: var(--r-sm);
     background: var(--bg-1); box-shadow: var(--shadow-2);
   }
@@ -774,12 +842,19 @@
     padding: 6px 8px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer;
   }
   .options li.active, .options li:hover { background: var(--bg-3); color: var(--text-1); }
-  .options li.none, .options li.finder { display: block; cursor: default; color: var(--text-3); font-size: var(--fs-xs); }
-  .options li.finder:hover { background: none; }
-  .options li.finder input { width: 100%; }
+  .options li.none, .options li.keys { display: block; cursor: default; color: var(--text-3); font-size: var(--fs-xs); }
+  .options li.keys { padding: 5px 8px 3px; border-top: 1px solid var(--border); font-size: 10px; }
+  .options li.none:hover, .options li.keys:hover { background: none; }
   .options .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .options small { color: var(--text-3); font-size: 10px; white-space: nowrap; }
-  .attach.on { color: var(--accent); }
+  .attach.on { color: var(--accent); background: var(--accent-soft); }
+  .panel {
+    position: absolute; z-index: 40; top: 40px;
+    padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+    background: var(--bg-1); box-shadow: var(--shadow-2);
+  }
+  .calendar-panel { left: 0; width: 300px; }
+  .sources-panel { right: 0; width: min(560px, 100%); }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px; min-width: 0;
@@ -797,13 +872,19 @@
   .chip-name small, .rule { color: var(--text-3); font-size: 10px; }
   .retype { padding: 1px 4px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-1); color: var(--text-2); font-size: 10px; }
   .twin { color: var(--warn); }
-  .under { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 18px; }
-  .said { color: var(--text-3); font-size: var(--fs-xs); }
-  .error { color: var(--warn); font-size: var(--fs-xs); }
+  .under { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 22px; }
+  .said { color: var(--text-2); font-size: var(--fs-xs); }
+  .help { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; flex: 1; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+  .help code { padding: 0 4px; border-radius: 3px; background: var(--bg-2); color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; }
+  .help .aside { color: var(--text-3); font-style: italic; }
+  .help :global(svg) { vertical-align: -1px; }
   .zones { display: inline-flex; flex-wrap: wrap; gap: 4px; }
   .more { margin-left: auto; }
-  .details { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; padding-top: 6px; border-top: 1px solid var(--border); }
-  .details label { display: grid; gap: 3px; min-width: 120px; }
+  .error { color: var(--warn); font-size: var(--fs-xs); }
+  .details { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .details label { display: grid; gap: 3px; min-width: 130px; }
+  .field-name { color: var(--text-3); font-size: var(--fs-xs); }
+  .gap { flex: 1; }
   .input-sm { padding: 4px 7px; font-size: var(--fs-xs); }
   @media (max-width: 620px) {
     .row { flex-wrap: wrap; }

@@ -54,6 +54,7 @@ def catalog_entities(
     temporal_category: str | None = None,
     order: str = "",
     view: str | None = None,
+    previews: bool = False,
 ) -> dict[str, Any]:
     """A bounded page of the entity catalog (Step 5, "Bounded loading").
 
@@ -76,6 +77,10 @@ def catalog_entities(
     ``attr`` without ``value`` is not a term — it is the analyst having chosen which
     field they are about to ask about, and answering it as "holds nothing" would empty
     the table between two clicks of one act.
+
+    ``previews`` also joins the picture a file, a capture or a proof already has, for
+    a picker that has to tell twenty sources apart at a glance. Only what is cached
+    or recorded: nothing is made, and the table, which draws its own, does not ask.
     """
     case = get_case(case_id)
     limit = max(1, min(limit, 500))
@@ -112,6 +117,13 @@ def catalog_entities(
             temporal_categories=temporal_categories,
         )
         thumbs = case.entity_image_thumbs([entity["id"] for entity in page["items"]])
+        if previews:
+            files = [entity["id"] for entity in page["items"] if entity["type"] == "media"]
+            thumbs = {**case.media_thumbs(files), **thumbs}
+            for entity in page["items"]:
+                recorded = (entity.get("attrs") or {}).get("thumb")
+                if entity["type"] in ("capture", "proof") and isinstance(recorded, str):
+                    thumbs.setdefault(entity["id"], recorded)
         for entity in page["items"]:
             if thumb := thumbs.get(entity["id"]):
                 entity["thumb"] = thumb

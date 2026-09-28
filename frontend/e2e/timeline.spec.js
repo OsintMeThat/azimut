@@ -448,6 +448,30 @@ test('notes an entry with a new subject and a place, on that place’s clock', a
   fixture.expectNoUnexpectedRequests();
 });
 
+test('says what the line takes, and cites a source picked by its kind', async ({ page }) => {
+  const fixture = await openTimeline(page);
+  const line = page.getByRole('region', { name: 'Note an entry' });
+
+  await line.getByLabel('When').focus();
+  await expect(line.locator('.help')).toContainText('a month March 2026');
+  await line.getByLabel('What happened').focus();
+  await expect(line.locator('.help')).toContainText('mentions a person, a place or a file');
+
+  await line.getByRole('button', { name: 'Cite a source' }).click();
+  const finder = line.locator('.sources-panel');
+  await expect(finder.getByRole('group', { name: 'Kinds' })).toBeVisible();
+  await finder.getByRole('button', { name: /^Media/ }).click();
+  await expect(finder.getByRole('option')).toHaveCount(1);
+  await finder.getByRole('option', { name: /Roadside camera frame/ }).click();
+  await expect(line.locator('.chip')).toContainText('Roadside camera frame');
+  await expect(line.getByLabel('What happened')).toHaveValue('Seen in Roadside camera frame');
+  await line.getByLabel('What happened').press('Enter');
+
+  await expect.poll(() => fixture.timelineWrites.length).toBe(1);
+  expect(fixture.timelineWrites[0].body).toMatchObject({ statement: 'Seen in Roadside camera frame', cites: ['media-1'] });
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('pans from the ruler and zooms with the wheel', async ({ page }) => {
   await openTimeline(page);
   const before = await axisWindowText(page);

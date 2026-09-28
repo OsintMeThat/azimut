@@ -63,7 +63,7 @@ const get = vi.fn(async (url) => {
   if (url.includes('/entity-types')) return TYPES;
   if (url.includes('/relation-types')) return RELATIONS;
   if (url.includes('/confidence-levels')) return [];
-  if (url.includes('/catalog/summary')) return { total: 3, by_type: { organization: 3, person: 1 } };
+  if (url.includes('/catalog/summary')) return { total: 6, by_type: { organization: 3, person: 1, media: 1, claim: 1 } };
   if (url.includes('/entities/twin')) return { entity: twin };
   if (url.includes('/api/geo/zone')) {
     const lon = Number(new URL(url, 'http://x').searchParams.get('lon'));
@@ -515,6 +515,72 @@ describe('the time at the place', () => {
     type(dateField(), '11/08/2026 17:05');
     await settle();
     expect(target.textContent).toContain('Reads: 17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)');
+  });
+});
+
+describe('help where it is needed', () => {
+  it('says what a date can be while its field is empty and focused', async () => {
+    await open();
+    dateField().dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    flushSync();
+    const help = target.querySelector('.help').textContent;
+    for (const example of ['12/03/2026', '12/03/2026 14:30', 'March 2026', '~2026', '2026?', '12/03/2026 to 15/03/2026']) {
+      expect(help).toContain(example);
+    }
+    expect(help).toContain('Or leave it empty: the entry waits in Undated.');
+
+    type(dateField(), 'mars 2026');
+    expect(target.querySelector('.help')).toBeNull();
+    expect(target.textContent).toContain('Reads: Mar 2026');
+  });
+
+  it('says how the sentence works while it is empty and focused', async () => {
+    await open();
+    sentence().dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    flushSync();
+    expect(target.querySelector('.help').textContent).toContain('mentions a person, a place or a file');
+    type(sentence(), 'Explosions heard');
+    expect(target.querySelector('.help')).toBeNull();
+  });
+
+  it('builds a date from the calendar for someone who would rather point at it', async () => {
+    await open();
+    target.querySelector('button[aria-label="Build the date"]').click();
+    flushSync();
+    expect(target.querySelector('.calendar-panel')).not.toBeNull();
+    button('Today').click();
+    flushSync();
+    expect(dateField().value).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    flushSync();
+    expect(target.querySelector('.calendar-panel')).toBeNull();
+  });
+
+  it('cites a source picked by its kind from the paperclip', async () => {
+    catalog = [
+      { id: 'm-1', type: 'media', label: 'clip.mp4', attrs: { kind: 'video' } },
+      { id: 'c-9', type: 'claim', label: 'Earlier finding' },
+    ];
+    await open();
+    target.querySelector('button[aria-label="Cite a source"]').click();
+    await settle();
+
+    const kinds = [...target.querySelectorAll('[aria-label="Kinds"] button')].map((chip) => chip.textContent.trim());
+    expect(kinds).toEqual(['All', 'Media1', 'Claim1']);
+    const finder = get.mock.calls.map(([url]) => url).filter((url) => url.includes('/catalog/entities')).at(-1);
+    expect(finder).toContain('order=-created');
+    expect(finder).toContain('previews=true');
+
+    target.querySelector('.sources-panel [role="option"]').dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));
+    flushSync();
+    expect(target.querySelector('.sources-panel')).toBeNull();
+    expect(chips()[0]).toContain('clip.mp4 source');
+    expect(sentence().value).toBe('Seen in clip.mp4');
+
+    addButton().click();
+    await settle();
+    expect(post.mock.calls[0][1]).toMatchObject({ statement: 'Seen in clip.mp4', cites: ['m-1'] });
   });
 });
 

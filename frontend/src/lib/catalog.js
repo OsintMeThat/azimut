@@ -71,15 +71,17 @@ function narrowing(
 /** Build the catalog request path: the narrowing, plus what a *page* needs on top.
  *
  *  `order` sorts the whole filtered set rather than the page — the difference between
- *  *the newest in this case* and *the newest of the rows already loaded*. */
+ *  *the newest in this case* and *the newest of the rows already loaded*. `previews`
+ *  joins the picture a file, a capture or a proof already has, for a picker. */
 export function buildCatalogQuery(caseId, options = {}) {
-  const { cursor, limit, order, view } = options;
+  const { cursor, limit, order, view, previews } = options;
   const params = new URLSearchParams();
   if (limit != null) params.set('limit', String(limit));
   if (cursor) params.set('cursor', cursor);
   narrowing(options, params);
   if (order) params.set('order', order);
   if (view) params.set('view', view);
+  if (previews) params.set('previews', 'true');
   const qs = params.toString();
   return `/api/cases/${caseId}/catalog/entities${qs ? `?${qs}` : ''}`;
 }

@@ -25,7 +25,8 @@ describe('temporal Claim editor', () => {
     expect(editor).toContain('relationType="at"');
     expect(editor).toContain('relationType="cites"');
     expect(picker).toContain("relationOptions('claim', entry.type, 'claim')");
-    expect(picker).toContain('buildCatalogQuery(caseId, { types, query: term, limit: 200 })');
+    expect(picker).toContain('types={acceptedTypes}');
+    expect(picker).toContain("order={relationType === 'cites' ? '-created' : ''}");
   });
 
   it('starts a new claim citing the evidence it was opened from, and an edit from its own', () => {

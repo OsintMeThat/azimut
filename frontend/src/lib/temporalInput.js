@@ -4,11 +4,11 @@ const DATE = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?([~?%])?$/;
 const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)(Z|[+-]\d{2}:\d{2})?$/;
 
 export const TEMPORAL_FORMATS = [
-  { value: 'date', label: 'Date' },
-  { value: 'timestamp', label: 'Date and time' },
-  { value: 'range', label: 'Date range' },
-  { value: 'time-range', label: 'Time range' },
-  { value: 'advanced', label: 'Advanced syntax' },
+  { value: 'date', label: 'Date', hint: 'a day, a month or a year, and how sure' },
+  { value: 'timestamp', label: 'Date and time', hint: 'a time of day; without a zone it stays off the UTC axis' },
+  { value: 'range', label: 'Date range', hint: 'from one day to another' },
+  { value: 'time-range', label: 'Time range', hint: 'between two times, in one zone' },
+  { value: 'advanced', label: 'Advanced syntax', hint: 'the stored form, for what the others cannot say' },
 ];
 
 export const TEMPORAL_SYNTAX = [

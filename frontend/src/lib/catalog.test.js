@@ -55,6 +55,12 @@ describe('buildCatalogQuery', () => {
     );
   });
 
+  it('asks for the pictures a picker shows, and only when it is one', () => {
+    expect(buildCatalogQuery('c1', { previews: true, order: '-created' })).toBe(
+      '/api/cases/c1/catalog/entities?order=-created&previews=true'
+    );
+  });
+
   it('asks what a claim is missing', () => {
     expect(buildCatalogQuery('c1', { lacks: ['source', 'assessment'] })).toBe(
       '/api/cases/c1/catalog/entities?lacks=source%2Cassessment'
