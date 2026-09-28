@@ -16,6 +16,7 @@ from functools import lru_cache
 from typing import Any
 
 from ..engine import timeline as timeline_engine
+from ..engine.textfold import fold_text
 from ..workspace import CaseError
 from .sql import _like_contains, _like_prefix, _marks
 
@@ -220,7 +221,7 @@ def _entity_filters(
         else:
             where.append("folder = ?")
             params.append(folder)
-    for term in (query or "").casefold().split():
+    for term in fold_text(query or "").split():
         where.append("search_text LIKE ? ESCAPE '\\'")
         params.append(_like_contains(term))
     # A field with no value chosen is not a term: it is the analyst having picked which

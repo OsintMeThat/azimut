@@ -2,13 +2,15 @@
  * Free-text search + sorting for the Media Library grid. Pure functions so a
  * case with hundreds of items stays navigable and the behavior stays testable.
  */
+import { foldTerms, foldText } from './textFold.js';
 
-/** Case-insensitive match against everything the analyst might remember:
- *  filename, title, notes, folder, and the download's title/uploader/URL. */
+/** A match against everything the analyst might remember: filename, title, notes,
+ *  folder, and the download's title/uploader/URL. Folded like the server's index
+ *  (`store/rows._media_search_text`), so `cafe` finds `Café` on either side. */
 export function matchesQuery(item, query) {
-  const q = (query ?? '').trim().toLowerCase();
-  if (!q) return true;
-  const haystack = [
+  const terms = foldTerms(query);
+  if (!terms.length) return true;
+  const haystack = foldText([
     item.filename,
     item.title,
     item.notes,
@@ -18,9 +20,8 @@ export function matchesQuery(item, query) {
     item.source?.webpage_url ?? item.source?.url,
   ]
     .filter(Boolean)
-    .join('\n')
-    .toLowerCase();
-  return q.split(/\s+/).every((term) => haystack.includes(term));
+    .join('\n'));
+  return terms.every((term) => haystack.includes(term));
 }
 
 /** True for native satellite captures and extension screenshots whose URL

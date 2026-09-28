@@ -15,6 +15,7 @@ from typing import Any
 from ..engine import entities as entity_engine
 from ..engine import links as link_engine
 from ..engine import mapsites
+from ..engine.textfold import fold_text
 
 
 def _folder_of(attrs: dict[str, Any] | None) -> str | None:
@@ -30,13 +31,33 @@ def _entity_search_text(type_: str, label: str, attrs: dict[str, Any] | None) ->
     The label, the type, the folder and the notes, plus the type's own declared text
     fields (``entities.search_values``): a vehicle is looked for by its plate and a
     claim by the words it quotes, and neither was findable while the index stopped
-    at the notes. Recomputed on every write, and rebuilt for existing rows by the
-    schema-10 migration.
+    at the notes. Folded the way every search term is (``engine/textfold.py``).
+    Recomputed on every write, and rebuilt for existing rows by a migration whenever
+    what goes in changes: the declared fields at schema 9, the fold at 19.
     """
     attrs = attrs or {}
     fixed = (label, type_, attrs.get("folder"), attrs.get("notes"))
     declared = entity_engine.search_values(type_, attrs)
-    return "\n".join(str(value) for value in (*fixed, *declared) if value).casefold()
+    return fold_text("\n".join(str(value) for value in (*fixed, *declared) if value))
+
+
+def _media_search_text(item: dict[str, Any]) -> str:
+    """What a Media Library search matches a file against, folded like a term."""
+    source: dict[str, Any] = item["source"] if isinstance(item.get("source"), dict) else {}
+    filename = str(item.get("filename") or Path(str(item.get("path") or "")).name)
+    return fold_text("\n".join(
+        str(value)
+        for value in (
+            filename,
+            item.get("title"),
+            item.get("notes"),
+            item.get("folder"),
+            source.get("title"),
+            source.get("uploader"),
+            source.get("webpage_url") or source.get("url"),
+        )
+        if value
+    ))
 
 
 def _replace_exact(value: Any, old: str, new: str) -> Any:
@@ -146,26 +167,13 @@ def _normalise_media_item(item: dict[str, Any]) -> tuple[dict[str, Any], tuple[A
     kind = str(clean.get("kind") or "file")
     folder = str(clean.get("folder") or "") or None
     title = str(clean.get("title") or "")
-    notes = str(clean.get("notes") or "")
     name_sort = (title or filename).casefold()
     try:
         size = max(0, int(clean.get("size") or 0))
     except (TypeError, ValueError):
         size = 0
     added_at = str(clean.get("added_at") or "")
-    search_text = "\n".join(
-        str(value)
-        for value in (
-            filename,
-            title,
-            notes,
-            folder,
-            source.get("title"),
-            source.get("uploader"),
-            source.get("webpage_url") or source.get("url"),
-        )
-        if value
-    ).casefold()
+    search_text = _media_search_text(clean)
     return clean, (
         path,
         json.dumps(clean, ensure_ascii=False),

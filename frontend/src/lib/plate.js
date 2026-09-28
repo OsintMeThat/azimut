@@ -13,6 +13,7 @@
  */
 
 import { exactStamp } from './analysisViews.js';
+import { bidiIsolate } from './bidi.js';
 
 /**
  * The plate's own geometry, in SVG user units (a unit is a pixel at 1:1).
@@ -116,7 +117,7 @@ const attrs = (pairs) =>
 export function svgText(text, {
   x, y, size = PLATE.metaSize, fill = PLATE_COLOURS.ink, weight, anchor, opacity, halo,
 } = {}) {
-  const clean = String(text ?? '');
+  const clean = bidiIsolate(text);
   if (!clean.trim()) return '';
   return `<text ${attrs({
     x: round(x),

@@ -1,0 +1,31 @@
+{
+  "about": "What search folds, read by tests/test_textfold.py and frontend/src/lib/textFold.test.js so the server index and the browser mirror fold alike.",
+  "cases": [
+    ["Café", "cafe", "a Latin accent"],
+    ["Hà Nội", "ha noi", "Vietnamese stacks two marks on one letter"],
+    ["Ålesund", "alesund", "a ring above"],
+    ["İstanbul", "istanbul", "a capital dotted I lowers with a dot, which goes"],
+    ["Straße", "strasse", "sharp s reads as ss"],
+    ["STRASSE", "strasse", "and the plain spelling meets it"],
+    ["Ørsted", "ørsted", "a letter of its own, not a letter with a mark"],
+    ["Łódź", "łodz", "the stroke is a letter, the acute is a mark"],
+    ["ΟΔΟΣ", "οδοσ", "a final sigma reads as a sigma"],
+    ["Ἀθῆναι", "αθηναι", "polytonic Greek loses its breathings and accents"],
+    ["Москва", "москва", "Cyrillic lowers"],
+    ["Ёлка", "елка", "ё meets е, as Russian readers expect"],
+    ["Йошкар-Ола", "иошкар-ола", "й meets и, an overmatch search accepts"],
+    ["Київ", "киів", "ї meets і"],
+    ["مُحَمَّد", "محمد", "Arabic harakat go"],
+    ["كـتـاب", "كتاب", "so does the tatweel that stretches a word"],
+    ["شَارِعٌ", "شارع", "and tanwin"],
+    ["שָׁלוֹם", "שלום", "Hebrew points go"],
+    ["בית־לחם", "בית־לחם", "the maqaf is punctuation and stays"],
+    ["हिंदी", "हिंदी", "a Devanagari sign changes the syllable and stays"],
+    ["が", "が", "a dakuten changes the sound and stays"],
+    ["ガイド", "ガイド", "on katakana too"],
+    ["user.Name+tag@Mail.com", "user.name+tag@mail.com", "an email keeps its punctuation"],
+    ["192.168.0.1/24", "192.168.0.1/24", "a network keeps its dots and slash"],
+    ["@Handle_01", "@handle_01", "a handle keeps its at sign and underscore"],
+    ["Café  Москва\nnote", "cafe  москва\nnote", "spacing and lines are left alone"]
+  ]
+}

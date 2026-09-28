@@ -31,6 +31,16 @@ vi.mock('./entityTypes.svelte.js', () => ({
 const { entitySearchMatches, entitySearchText, matchesEntity } = await import('./entitySearch.js');
 
 describe('entity search', () => {
+  it('finds a name whatever accents or vowels it was written with, as the index does', () => {
+    const cafe = { label: 'Café du Port', type: 'place', attrs: {} };
+    const name = { label: 'مُحَمَّد', type: 'person', attrs: { notes: 'Ки́їв' } };
+    expect(matchesEntity(cafe, 'cafe')).toBe(true);
+    expect(matchesEntity(name, 'محمد київ')).toBe(true);
+    expect(entitySearchText(cafe)).toBe('cafe du port\nplace');
+    // the field that explains the hit is shown as written
+    expect(entitySearchMatches(cafe, 'CAFE')).toEqual([{ field: 'label', label: 'Name', value: 'Café du Port' }]);
+  });
+
   it('matches the label, the type, the folder and the notes', () => {
     const entity = {
       label: 'Truck 12',

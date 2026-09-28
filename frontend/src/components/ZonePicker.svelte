@@ -25,6 +25,7 @@
     zoneMatches,
     zoneWords,
   } from '../lib/timeline.js';
+  import { foldText } from '../lib/textFold.js';
   import Icon from './Icon.svelte';
   import SearchInput from './SearchInput.svelte';
 
@@ -55,7 +56,7 @@
   const shown = $derived(matching.slice(0, ROWS));
   const matchingPlaces = $derived(
     places.filter((place) =>
-      place.label.toLowerCase().includes(query.trim().toLowerCase())
+      foldText(place.label).includes(foldText(query.trim()))
     )
   );
 

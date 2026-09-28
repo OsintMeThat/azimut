@@ -1130,7 +1130,7 @@
               >
                 <td>
                   <Icon name={entityIcon(row)} size={12} />
-                  <span class="name">{row.label}</span>
+                  <span class="name" dir="auto">{row.label}</span>
                   <span class="dim">{entityLabel(row.type)}</span>
                 </td>
                 <td>
@@ -1253,10 +1253,10 @@
                 {:else}
                   <Icon name={entityIcon(entity)} size={12} />
                 {/if}
-                <span class="name">{entity.label}</span>
+                <span class="name" dir="auto">{entity.label}</span>
                 {#if filter.q.trim() && matchReasons(entity)[0]}
                   {@const match = matchReasons(entity)[0]}
-                  <span class="match-reason" title={match.value}>
+                  <span class="match-reason" title={match.value} dir="auto">
                     {match.label}: {match.value}
                   </span>
                 {/if}
@@ -1290,7 +1290,7 @@
               <td title={entityHint(entity.type)}>{entityLabel(entity.type)}</td>
               <td class="dim">{folderName(entity)}</td>
               <td class="dim mono">{created(entity)}</td>
-              {#each columns as column (column.key)}<td class="dim">{cell(entity, column)}</td>{/each}
+              {#each columns as column (column.key)}<td class="dim" dir="auto">{cell(entity, column)}</td>{/each}
               <!-- The row's one way out of the table. A list is good at narrowing and
                    says nothing about how things join up, so the question a row most
                    often raises is the one only the drawing answers. Quiet until the

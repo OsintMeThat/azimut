@@ -88,7 +88,7 @@ describe('Timeline workspace', () => {
 
   it('makes a track readable in its gutter: the name, its hover, its colour', () => {
     expect(source).toContain('--gutter: 178px');
-    expect(source).toContain('<strong>{track.label}</strong>');
+    expect(source).toContain('<strong dir="auto">{track.label}</strong>');
     expect(source).toContain('title={trackTitle(track)}');
     expect(source).toContain('-webkit-line-clamp: 2');
     expect(source).not.toContain('track.short');

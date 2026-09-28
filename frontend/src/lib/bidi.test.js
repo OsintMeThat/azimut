@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bidiSafe, hasRtl, LRI, PDI } from './bidi.js';
+import { bidiIsolate, bidiSafe, FSI, hasRtl, LRI, PDI } from './bidi.js';
 
 const ARABIC = 'قصف على المدينة';
 
@@ -44,5 +44,18 @@ describe('bidiSafe — isolates LTR runs inside RTL text', () => {
   it('handles empty/nullish input', () => {
     expect(bidiSafe('')).toBe('');
     expect(bidiSafe(null)).toBe('');
+  });
+});
+
+describe('bidiIsolate — a drawn label reads in its own direction', () => {
+  it('isolates a label holding RTL, so its number and ellipsis stay on its side', () => {
+    expect(bidiIsolate('مسجد 12')).toBe(`${FSI}مسجد 12${PDI}`);
+    expect(bidiIsolate('שלום…')).toBe(`${FSI}שלום…${PDI}`);
+  });
+
+  it('leaves every other label exactly as it was', () => {
+    expect(bidiIsolate('Quay 4')).toBe('Quay 4');
+    expect(bidiIsolate('Москва')).toBe('Москва');
+    expect(bidiIsolate(null)).toBe('');
   });
 });

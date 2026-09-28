@@ -6,6 +6,7 @@
  * would have to badge each folder with a per-type count the catalog summary
  * cannot give, so the two modes are exclusive rather than combined.
  */
+import { foldText } from './textFold.js';
 
 /** True when the body should show results instead of the tree. */
 export const isFiltering = ({ query = '', type = null } = {}) => !!query.trim() || !!type;
@@ -26,15 +27,11 @@ export function typeChips(summary) {
  * label alone.
  */
 export function filterEntities(items, { query = '', type = null } = {}) {
-  const q = query.trim().toLowerCase();
+  const q = foldText(query.trim());
   return items.filter((e) => {
     if (type && e.type !== type) return false;
     if (!q) return true;
-    return [e.label, e.type, e.attrs?.folder]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(q);
+    return foldText([e.label, e.type, e.attrs?.folder].filter(Boolean).join(' ')).includes(q);
   });
 }
 

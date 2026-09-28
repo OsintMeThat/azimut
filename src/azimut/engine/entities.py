@@ -368,6 +368,8 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
         # is what lets an order of battle render and sort — brigade above battalion
         # above company — and the tree itself is `part-of` edges.
         attrs=(
+            Attr("aliases", "Other names",
+                 hint="former names, acronyms or the name in another script"),
             Attr("echelon", "Echelon",
                  hint="brigade, battalion, company: what lets an order of battle sort"),
             Attr("country", "Country"),
@@ -399,6 +401,8 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
         # fields of the vessel: an identifier entity is only worth minting the day
         # a value turns up without its object, which is the AIS tracker's problem.
         attrs=(
+            Attr("aliases", "Former names",
+                 hint="the names this hull sailed under, since a renamed ship keeps its IMO"),
             Attr("imo", "IMO number", hint="permanent, unlike the MMSI"),
             Attr("mmsi", "MMSI", hint="changes with the flag"),
             Attr("flag", "Flag state"),
@@ -430,6 +434,7 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
         # A building, and also a bridge, a mast, a dam. Its position is stated by
         # `sited-at` rather than held here, so only `place` carries geometry.
         attrs=(
+            Attr("aliases", "Other names", hint="local names or the name in another script"),
             Attr("kind", "Kind"),
             Attr("address", "Address"),
             _CONDITION,
@@ -609,6 +614,8 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
         "place", "Place", PLACE, "pin", SUBJECT,
         hint="a saved point, as exact or as vague as the evidence allows",
         attrs=(
+            Attr("aliases", "Other names",
+                 hint="local, older or transliterated names, so a search finds either"),
             # Darwin Core's rule, kept verbatim: this is the radius of the smallest
             # circle containing the whole location, not a standard deviation — so
             # two analysts write the same number. And **zero is not valid**: an

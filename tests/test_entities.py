@@ -102,9 +102,10 @@ def test_the_legacy_ip_network_field_is_read_only(client):
 
 
 def test_a_field_that_opens_a_subject_says_what_heads_it(client):
-    """A place's four fields are all about how tightly the point is pinned, which is
-    worth saying once above them. A vessel's registration numbers are just its own
-    fields, so they head nothing — and the panel renders them bare.
+    """A place's four precision fields are all about how tightly the point is pinned,
+    which is worth saying once above them; its other names come first, bare, because
+    they are not. A vessel's registration numbers are just its own fields, so they
+    head nothing — and the panel renders them bare.
 
     The heading is on the field rather than on the type because one type can hold two
     subjects: a Claim says *what* it states, *when* it applies and *why* that is
@@ -112,7 +113,10 @@ def test_a_field_that_opens_a_subject_says_what_heads_it(client):
     rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
 
     heads = {attr["key"]: attr["group"] for attr in rows["place"]["attrs"]}
-    assert heads == {"radius_m": "How precise", "footprint": "", "verbatim": "", "method": ""}
+    assert heads == {
+        "aliases": "", "radius_m": "How precise", "footprint": "", "verbatim": "", "method": "",
+    }
+    assert [attr["key"] for attr in rows["place"]["attrs"]][:2] == ["aliases", "radius_m"]
     assert {attr["group"] for attr in rows["vessel"]["attrs"]} == {""}
     assert [attr["group"] for attr in rows["claim"]["attrs"]] == [
         "What it states", "", "When", "", "Reasoning", "", "",
@@ -985,3 +989,23 @@ def test_the_case_says_which_row_already_holds_an_identifier(client):
         json={"type": "account", "label": "osint_handle", "attrs": {}},
     )
     assert again.status_code == 200
+
+
+@pytest.mark.parametrize("type_", ["person", "organization", "vessel", "structure", "place", "equipment-type"])
+def test_a_subject_can_be_found_by_its_other_names(client, type_):
+    """A ship renamed twice, a unit known by its acronym, a village with a name in
+    each language: the other names are a declared text field, so the search index
+    and `@` reach them without a migration."""
+    rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
+    alias = next(attr for attr in rows[type_]["attrs"] if attr["key"] == "aliases")
+    assert alias["kind"] == "text"
+
+    cid = client.post("/api/cases", json={"name": f"Aliases {type_}"}).json()["id"]
+    made = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": type_, "label": "Plain name", "attrs": {"aliases": "Кі́ров; Άλφα, Nord Star"}},
+    )
+    assert made.status_code == 200, made.text
+    for term in ("кіров", "αλφα", "nord star"):
+        found = client.get(f"/api/cases/{cid}/catalog/entities", params={"q": term}).json()["items"]
+        assert [entity["id"] for entity in found] == [made.json()["id"]], term

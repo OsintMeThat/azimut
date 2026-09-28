@@ -708,6 +708,7 @@
     <input
       id="ed-title"
       class="input"
+      dir="auto"
       bind:value={infoTitle}
       placeholder={coordText || identityPlaceholder}
     />
@@ -854,7 +855,7 @@
     {/if}
 
     <label class="modal-label" for="ed-notes">Notes</label>
-    <textarea id="ed-notes" class="textarea" rows="3" bind:value={infoNotes} placeholder="Add observations, links, context…"></textarea>
+    <textarea id="ed-notes" class="textarea" rows="3" dir="auto" bind:value={infoNotes} placeholder="Add observations, links, context…"></textarea>
 
     <span class="modal-label">Folder (My work)</span>
     <FolderSelect bind:value={infoFolder} folders={allFolders} emptyLabel="None" />

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
 from .engine import links as link_engine
 from .engine import timeline as timeline_engine
+from .engine.textfold import fold_text
 from . import layout
 from .repository import EntityStatus
 from .store.cursors import (
@@ -123,7 +124,10 @@ if TYPE_CHECKING:
 # Schema 18 rebuilds it again, now that a proof's stated date is projected as a
 # statement: proofs dated before the projection could read them still reach the
 # Timeline, without re-saving each one.
-SQLITE_SCHEMA = 18
+# Schema 19 rebuilds both search indexes folded (`engine/textfold.py`): a search
+# finds a label whatever accents, stress marks or Arabic and Hebrew vowels it was
+# written with, and a term is folded the same way as it is typed.
+SQLITE_SCHEMA = 19
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -2025,7 +2029,7 @@ class SqliteCase:
                 base_params.append(folder)
             else:
                 base_where.append("folder IS NULL")
-        for term in (q or "").casefold().split():
+        for term in fold_text(q or "").split():
             base_where.append("search_text LIKE ? ESCAPE '\\'")
             base_params.append(_like_contains(term))
 

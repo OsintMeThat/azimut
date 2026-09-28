@@ -14,7 +14,7 @@ same jump. Schema 11 gives each file one Inspect work, dates every kept Detect p
 and stands every saved comparison on the map; 10 was a development checkpoint.
 The entity/link shape is unchanged since v1. Breaking changes require
 a manifest schema bump and migration. The internal SQLite schema is at version
-18: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
+19: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
 search reaches the declared fields (§2) rather than stopping at the label and the
 notes, 11 adds `links.nature` — what kind of tie an edge states, in the analyst's
 own words, and only where the verb declares a qualifier (§3) — and 10 adds
@@ -50,7 +50,10 @@ authoritative. Schema 16 lets Analysis Views own Timeline recipes and immutable
 temporal snapshots. Schema 17 rebuilds temporal bounds at fixed microsecond width so
 SQLite text ordering stays chronological. Schema 18 rebuilds the projection for the
 date a Proof states: a statement, because the analyst concluded it, beside the media
-rows that report what a file claims about itself. A Timeline view stores presentation
+rows that report what a file claims about itself. Schema 19 rebuilds the entity and
+media search indexes folded (case, and the marks a reader skips: Latin, Greek and
+Cyrillic accents, Arabic harakat, Hebrew points), the fold every search term gets as
+it is typed. A Timeline view stores presentation
 and track queries, never copies temporal rows into the graph and never creates a
 temporal relation.
 
@@ -181,7 +184,7 @@ answer by omission (`tests/test_entities.py`).
 |---|---|---|---|---|---|---|
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
-| `place` | place | subject | ✅ | satellite, ingest, enrich | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
+| `place` | place | subject | ✅ | satellite, ingest, enrich | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
@@ -196,11 +199,11 @@ answer by omission (`tests/test_entities.py`).
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
-| `organization` | actor | subject | ✅ | analyst | `echelon`, `country` | no |
+| `organization` | actor | subject | ✅ | analyst | `aliases`, `echelon`, `country` | no |
 | `vehicle` | asset | subject | ✅ | analyst | `plate`, `make`, `model`, `colour`, `condition` | no |
-| `vessel` | asset | subject | ✅ | analyst | `imo`, `mmsi`, `flag`, `kind`, `condition` | no |
+| `vessel` | asset | subject | ✅ | analyst | `aliases`, `imo`, `mmsi`, `flag`, `kind`, `condition` | no |
 | `aircraft` | asset | subject | ✅ | analyst | `registration`, `icao24`, `model`, `condition` | no |
-| `structure` | asset | subject | ✅ | analyst | `kind`, `address`, `condition` | no |
+| `structure` | asset | subject | ✅ | analyst | `aliases`, `kind`, `address`, `condition` | no |
 | `equipment-type` | class | subject | ✅ | analyst | `category`, `aliases` | no |
 | `account` | identifier | subject | ✅ | analyst | handle in the label; `platform?`, `url`, `reliability?` | no |
 | `email` | identifier | subject | ✅ | analyst | address in the label | no |

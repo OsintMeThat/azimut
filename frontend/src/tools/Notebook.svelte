@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { fetchAllEntities } from '../lib/catalog.js';
+  import { foldText } from '../lib/textFold.js';
   import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
   import { entityReference, markdownHtml, remoteImageUrls } from '../lib/markdown.js';
   import { drawMermaidDiagrams } from '../lib/mermaid.js';
@@ -110,11 +111,11 @@
   ].filter((choice) => matchesTerms(`${choice.label} ${choice.folder}`, exportQuery)));
   const referenceEntities = $derived(graphEntities
     .filter((entity) => entity.provenance?.status !== 'suggested')
-    .filter((entity) => `${entity.label} ${entity.type}`.toLowerCase().includes(referenceQuery.trim().toLowerCase()))
+    .filter((entity) => foldText(`${entity.label} ${entity.type}`).includes(foldText(referenceQuery.trim())))
     .sort((a, b) => a.label.localeCompare(b.label)));
   const caseMedia = $derived(graphEntities
     .filter((entity) => (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path)
-    .filter((entity) => `${entity.label} ${entity.attrs?.kind ?? ''}`.toLowerCase().includes(mediaQuery.trim().toLowerCase()))
+    .filter((entity) => foldText(`${entity.label} ${entity.attrs?.kind ?? ''}`).includes(foldText(mediaQuery.trim())))
     .sort((a, b) => a.label.localeCompare(b.label)));
   const activeTab = $derived(tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null);
   const noteId = $derived(activeTab?.noteId ?? null);

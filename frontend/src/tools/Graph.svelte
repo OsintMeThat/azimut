@@ -139,6 +139,8 @@
     ringsAround,
     shortLabel,
   } from '../lib/graph.js';
+  import { bidiIsolate } from '../lib/bidi.js';
+  import { foldText } from '../lib/textFold.js';
   import { createHistory } from '../lib/history.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { windowWords } from '../lib/timeline.js';
@@ -908,11 +910,11 @@
    * canvas is the reading.
    */
   const found = $derived.by(() => {
-    const term = find.trim().toLowerCase();
+    const term = foldText(find.trim());
     const hit = new Set();
     if (!term) return hit;
     for (const node of nodes) {
-      if (String(node.label).toLowerCase().includes(term)) hit.add(node.id);
+      if (foldText(node.label).includes(term)) hit.add(node.id);
     }
     return hit;
   });
@@ -925,13 +927,13 @@
    * first, so the obvious answer is the first one.
    */
   const matches = $derived.by(() => {
-    const term = find.trim().toLowerCase();
+    const term = foldText(find.trim());
     if (!term) return [];
     // Over what the case **sent**, not over what is drawn, so a folded node is found
     // where it is rather than reported missing and fetched again. It says it is
     // folded, and picking it gives its fold back.
     return sentNodes
-      .filter((node) => String(node.label).toLowerCase().includes(term))
+      .filter((node) => foldText(node.label).includes(term))
       .sort((a, b) => b.degree - a.degree)
       .slice(0, 8);
   });
@@ -2945,7 +2947,7 @@
         y: node.y + nodeRadius(data.degree) + 5,
         width: 140,
         align: 'center',
-        text: shortLabel(data.label),
+        text: bidiIsolate(shortLabel(data.label)),
         fontSize: 11,
         fontFamily: fontStack,
         listening: false,

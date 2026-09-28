@@ -2040,7 +2040,7 @@
                   <span class={`category-dot ${track.categories[0]}`}></span>
                   <!-- The hover says what the lane below is a reading of: the whole
                        name, then the question that filled it. -->
-                  <span class="track-name" title={trackTitle(track)}><strong>{track.label}</strong>{#if track.groupLabel}<em>{track.groupLabel}</em>{/if}</span>
+                  <span class="track-name" title={trackTitle(track)}><strong dir="auto">{track.label}</strong>{#if track.groupLabel}<em>{track.groupLabel}</em>{/if}</span>
                   <small title={track.total !== track.items.length ? 'A sample across the window. Load more fills it in.' : undefined}>{track.layout.items.length + track.layout.clusters.reduce((sum, cluster) => sum + cluster.count, 0)}{#if track.total !== track.items.length} / {track.total}{/if}</small>
                   {#if groupBy === 'none' && !snapshotReading}
                     <div class="track-actions">
@@ -2129,6 +2129,7 @@
                             class={`event-caption ${item.caption.side}`}
                             style:left={`${item.caption.offset}px`}
                             style:width={`${item.caption.width}px`}
+                            dir="auto"
                           >{item.label}</span>
                         {/if}
                         {#if item.card}
@@ -2139,7 +2140,7 @@
                               <img src={fileUrl(caseState.current.id, item.thumb)} alt="" loading="lazy" decoding="async" />
                             {/if}
                             <span class="card-copy">
-                              <strong>{item.label}</strong>
+                              <strong dir="auto">{item.label}</strong>
                               <small>{formatTemporalValue(item.raw).label}</small>
                             </span>
                           </span>
@@ -2249,10 +2250,10 @@
                         onblur={() => leaveRow(item)}
                       >
                         <span role="gridcell" class="list-date" title={item.raw}>{formatTemporalValue(item.raw).label}</span>
-                        <span role="gridcell" class="list-copy"><span class={`category-dot ${item.category}`}></span><strong>{item.label}</strong></span>
-                        <span role="gridcell" class="list-links">{names(item.subject_entities)}</span>
-                        <span role="gridcell" class="list-links">{names(item.place_entities)}</span>
-                        <span role="gridcell" class="list-links">{names(item.source_entities)}</span>
+                        <span role="gridcell" class="list-copy"><span class={`category-dot ${item.category}`}></span><strong dir="auto">{item.label}</strong></span>
+                        <span role="gridcell" class="list-links" dir="auto">{names(item.subject_entities)}</span>
+                        <span role="gridcell" class="list-links" dir="auto">{names(item.place_entities)}</span>
+                        <span role="gridcell" class="list-links" dir="auto">{names(item.source_entities)}</span>
                         <span role="gridcell" class="list-flags">
                           {#each rowFlags(item) as flag (flag.id)}<em class={flag.id}>{flag.label}</em>{/each}
                         </span>
@@ -2282,7 +2283,7 @@
         <header><span class={`category-dot ${selected.category}`}></span><span>{categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
         <div class="inspector-body">
           <div class="item-kind">{temporalKindLabel(selected.kind)}{#if selected.time_role} · {selected.time_role}{/if}</div>
-          <h2>{selected.label}</h2>
+          <h2 dir="auto">{selected.label}</h2>
           {#if inspectorLoading}<div class="inspector-loading">Loading details…</div>{/if}
           <div class="date-reading">
             <Icon name="clock" size={15} />
@@ -2334,10 +2335,10 @@
           </dl>
 
           {#if inspectorChain?.entity?.attrs?.method}
-            <section class="inspector-note"><h3>Method</h3><p>{inspectorChain.entity.attrs.method}</p></section>
+            <section class="inspector-note"><h3>Method</h3><p dir="auto">{inspectorChain.entity.attrs.method}</p></section>
           {/if}
           {#if inspectorChain?.entity?.attrs?.verbatim}
-            <section class="inspector-note"><h3>Source wording</h3><blockquote>{inspectorChain.entity.attrs.verbatim}</blockquote></section>
+            <section class="inspector-note"><h3>Source wording</h3><blockquote dir="auto">{inspectorChain.entity.attrs.verbatim}</blockquote></section>
           {/if}
 
           {#if inspectorConnections.about.length || inspectorConnections.at.length || inspectorConnections.cites.length}

@@ -196,6 +196,10 @@ row's Details.
   file opens its Details; a batch reports what landed and what was already there.
 - **Search+** covers the label, type, folder, notes and declared text fields
   (ONTOLOGY §2), in memory on a case that fits one page and server-side past it.
+  Both sides fold the text the same way (`engine/textfold.py`, `lib/textFold.js`):
+  case, the accents on Latin, Greek and Cyrillic letters, Arabic harakat and Hebrew
+  points, so `cafe` finds `Café` and `محمد` finds `مُحَمَّد`. A Devanagari vowel sign or a
+  dakuten changes the letter and still has to match, and punctuation always does.
   The first matching field is named under the row, so a vehicle found by its plate
   never looks like an unexplained result. Board and Graph send the same terms to the
   same case predicate.
@@ -2600,7 +2604,10 @@ The **date** is when the material was taken, in the same profile a Claim's *When
 uses — a day, a month, a year, a timestamp or a range, with `~` for approximate and
 `?` for uncertain — typed into **one field** rather than assembled from a format, a
 precision and a certainty. It reads `24/10/2025`, `Oct 2025`, `2025`, `~2025`,
-`24/10/2025 14:30 UTC` and two of those joined by *to*, keeps anything already
+`24/10/2025 14:30 UTC` and two of those joined by *to*. Month names are read in
+English and French everywhere, and in the languages the browser is set to as well,
+from `Intl` and in both the forms a language writes them (`март`, `12 марта 2026`,
+`12 de marzo de 2026`); the day still comes first. It keeps anything already
 written in the stored syntax exactly as it is, and says underneath what it
 understood. What it cannot read is handed on as typed, so the save refuses it with
 a reason rather than filing a date nobody meant. The browser's own date field is
@@ -3616,6 +3623,13 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   exception.
 - **Copy**: no slogans or self-explanation in chrome. Empty states use one short
   sentence. Visible UI strings use `·`, `:` or a period instead of em dashes.
+- **The analyst's words keep their direction**: the interface stays English, and a
+  label, a note or a statement in Arabic, Hebrew or Persian reads right to left
+  where it is shown or typed. HTML holding them carries `dir="auto"` (the Timeline's
+  captions, cards, list and inspector, the Board's names and fields, Details' name
+  and notes, the Claim editor). A canvas node name and an SVG plate label, which no
+  attribute reaches, are wrapped in a first-strong isolate (`lib/bidi.js`
+  `bidiIsolate`). Date fields stay left to right.
 - **Brand**: north arrow (`Logo.svelte`) + drawn wordmark (`Wordmark.svelte`),
   both defined in the components themselves. The arrow repeats in
   `public/favicon.svg` and in the plated PNG/ICO icons that

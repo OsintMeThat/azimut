@@ -109,6 +109,7 @@
   <textarea
     id="temporal-statement"
     class="textarea"
+    dir="auto"
     rows="2"
     bind:value={statement}
     maxlength="300"
@@ -173,9 +174,9 @@
   <details class="reasoning">
     <summary>Reasoning and source wording</summary>
     <label class="modal-label" for="temporal-method">How this was worked out</label>
-    <textarea id="temporal-method" class="textarea" rows="3" bind:value={method}></textarea>
+    <textarea id="temporal-method" class="textarea" rows="3" dir="auto" bind:value={method}></textarea>
     <label class="modal-label" for="temporal-verbatim">As the source put it</label>
-    <textarea id="temporal-verbatim" class="textarea" rows="3" bind:value={verbatim}></textarea>
+    <textarea id="temporal-verbatim" class="textarea" rows="3" dir="auto" bind:value={verbatim}></textarea>
   </details>
 
   <div class="actions">

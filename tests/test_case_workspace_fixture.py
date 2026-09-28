@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+from contextlib import closing
 
+import schema_rewind
 from azimut.sqlite_backend import SQLITE_SCHEMA
 from azimut.workspace import Case
 from caseworkspace import GOLDEN, build_workspace_case, read_workspace
@@ -28,8 +31,15 @@ SHIPPED_SCHEMA = 18
 
 def test_a_case_workspace_from_0_3_1_reads_as_it_did(client):
     ws = build_workspace_case(client)
-    case = Case.open(ws.full.case_id)
     assert SQLITE_SCHEMA >= SHIPPED_SCHEMA
+    # Taken back to the shape 0.3.1 wrote, then opened, so what is read is what the
+    # migrations make of a real 0.3.1 case and not a case born at today's schema.
+    schema_rewind.rewind(Case.open(ws.full.case_id).db_path, SHIPPED_SCHEMA)
+    case = Case.open(ws.full.case_id)
+    with closing(sqlite3.connect(case.db_path)) as conn:
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0] == str(SQLITE_SCHEMA)
 
     reading = read_workspace(client, ws)
     if os.environ.get("AZIMUT_WRITE_GOLDEN") == "1":

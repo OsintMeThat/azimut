@@ -186,6 +186,11 @@ describe('serialising text', () => {
     expect(svgText('Quay 4', { x: 1, y: 2 })).not.toContain('paint-order');
   });
 
+  it('draws an Arabic or Hebrew label in its own direction', () => {
+    expect(svgText('مسجد 12', { x: 1, y: 2 })).toContain('>\u2068مسجد 12\u2069</text>');
+    expect(svgText('Quay 4', { x: 1, y: 2 })).toContain('>Quay 4</text>');
+  });
+
   it('writes nothing for a label with nothing in it', () => {
     expect(svgText('   ', { x: 1, y: 2 })).toBe('');
     expect(svgText(null, { x: 1, y: 2 })).toBe('');

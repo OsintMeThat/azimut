@@ -45,3 +45,13 @@ reopens its saved views through the parsers the three surfaces use. A change tha
 means to alter a reading rewrites it with `AZIMUT_WRITE_GOLDEN=1 uv run pytest
 tests/test_case_workspace_fixture.py`, and the diff is that change's account of what
 reads differently.
+
+## Search folding
+
+| File | What it is there to break |
+|---|---|
+| `fold_cases.json` | What a search folds and what it keeps, one line per case: Latin, Greek and Cyrillic accents, Arabic harakat and the tatweel, Hebrew points go; a Devanagari sign, a dakuten, the Hebrew maqaf and the punctuation of an email, a network or a handle stay. |
+
+Written by hand. Read by `tests/test_textfold.py` against `engine/textfold.py` and by
+`frontend/src/lib/textFold.test.js` against `lib/textFold.js`, so the server's index
+and the browser's in-memory search cannot fold one text two ways.

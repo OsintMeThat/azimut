@@ -13,7 +13,7 @@ import json
 import sqlite3
 from typing import Callable
 
-from .rows import _entity_search_text, _folder_of, _has_gps
+from .rows import _entity_search_text, _folder_of, _has_gps, _media_search_text
 from .temporal import _rebuild_temporal_projection_conn
 
 
@@ -304,6 +304,26 @@ def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
     _rebuild_temporal_projection_conn(conn)
 
 
+def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
+    """Rebuild both search indexes, folded the way a search term now is.
+
+    A term is folded as it is typed (``engine/textfold.py``), so an index written
+    before could only be found by the exact accents it holds: ``Cafe`` would reach a
+    new ``Café`` and miss one filed last week. One pass over each table, no shape
+    change.
+    """
+    for row in conn.execute("SELECT id, type, label, attrs_json FROM entities").fetchall():
+        conn.execute(
+            "UPDATE entities SET search_text = ? WHERE id = ?",
+            (_entity_search_text(row["type"], row["label"], json.loads(row["attrs_json"])), row["id"]),
+        )
+    for row in conn.execute("SELECT path, item_json FROM media_items").fetchall():
+        conn.execute(
+            "UPDATE media_items SET search_text = ? WHERE path = ?",
+            (_media_search_text(json.loads(row["item_json"])), row["path"]),
+        )
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # The whole chain runs inside one immediate transaction in `SqliteCase._upgrade`,
 # which stamps each new schema_version and records each migration as it goes; a
@@ -327,4 +347,5 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     15: _migrate_15_to_16,
     16: _migrate_16_to_17,
     17: _migrate_17_to_18,
+    18: _migrate_18_to_19,
 }

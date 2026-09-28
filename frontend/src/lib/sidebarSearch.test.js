@@ -36,6 +36,11 @@ describe('filterEntities', () => {
     expect(filterEntities(items, { query: 'CLIP' }).map((e) => e.id)).toEqual(['1']);
   });
 
+  it('finds a label whatever accents it was written with', () => {
+    const accented = [...items, { id: '4', label: 'Café du Port', type: 'place', attrs: {} }];
+    expect(filterEntities(accented, { query: 'cafe' }).map((e) => e.id)).toEqual(['4']);
+  });
+
   it('matches the folder too, so typing a folder name reveals its contents', () => {
     expect(filterEntities(items, { query: 'terrain' }).map((e) => e.id)).toEqual(['1', '2']);
   });
