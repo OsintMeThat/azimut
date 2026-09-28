@@ -88,6 +88,12 @@ _PRODUCED_HERE_SQL = (
     + ")"
 )
 
+#: The same question asked of a timeline row ``t``: whether its owner is such a file.
+_PRODUCED_HERE_ROW_SQL = (
+    "EXISTS (SELECT 1 FROM media_items produced"
+    f" WHERE produced.entity_id = t.owner_id AND {_PRODUCED_HERE_SQL})"
+)
+
 
 def _has_gps(item: dict[str, Any]) -> bool:
     """Whether an indexed media item carries a usable position.

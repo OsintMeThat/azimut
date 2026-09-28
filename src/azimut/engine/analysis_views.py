@@ -134,6 +134,9 @@ def _clean_track(value: Any, index: int) -> dict[str, Any]:
             "label": _short(query.get("label"), 300),
             "relation": relation,
             "roles": roles,
+            # Written only when set, so a track saved before the switch reads back
+            # exactly as it was stored.
+            **({"collected_only": True} if query.get("collected_only") is True else {}),
         },
         "collapsed": bool(value.get("collapsed")),
         "hidden": _string_list(value.get("hidden"), limit=500),
@@ -481,6 +484,7 @@ def _clean_snapshot(value: Any) -> dict[str, Any]:
             "confidence": _short(item.get("confidence"), 24) or None,
             "parse_error": _short(item.get("parse_error"), 500) or None,
             "owner_type": _short(item.get("owner_type"), 40),
+            "produced_here": bool(item.get("produced_here")),
             "subjects": _string_list(item.get("subjects"), item_limit=64),
             "places": _string_list(item.get("places"), item_limit=64),
             "sources": _string_list(item.get("sources"), item_limit=64),

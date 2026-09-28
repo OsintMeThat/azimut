@@ -75,7 +75,16 @@ const timelineItems = [
     earliest: '2026-06-23T18:42:11Z', latest: '2026-06-23T18:42:12Z', precision: 'second',
     shape: 'instant', time_role: null, uncertain: false, approximate: false,
     zone: 'utc', sortable: true, status: null, confidence: null, parse_error: null,
-    subjects: [], places: [], sources: [],
+    subjects: [], places: [], sources: [], produced_here: false,
+  },
+  {
+    // a frame the case extracted itself: a working file, held back by the Media track
+    id: 'temporal:media:frame-1:captured', owner_id: 'frame-1', category: 'media', kind: 'captured',
+    label: 'Extracted frame 00:12', raw: '2026-06-23T19:10:00Z',
+    earliest: '2026-06-23T19:10:00Z', latest: '2026-06-23T19:10:01Z', precision: 'second',
+    shape: 'instant', time_role: null, uncertain: false, approximate: false,
+    zone: 'utc', sortable: true, status: null, confidence: null, parse_error: null,
+    subjects: [], places: [], sources: [], produced_here: true,
   },
   {
     id: 'temporal:claim:claim-3', owner_id: 'claim-3', category: 'statement', kind: 'claim',
@@ -146,13 +155,6 @@ async function setWindow(page, from, to) {
  *  It is what stays on screen while the ruler and the overview are being dragged. */
 const axisWindowText = (page) => page.locator('.axis-label small').innerText();
 
-/** The files' own dates, one preset away since the Timeline opens on Events alone. */
-async function addMediaTrack(page) {
-  await page.getByRole('button', { name: 'Track', exact: true }).click();
-  await page.locator('.track-menu').getByRole('button').filter({ hasText: /^Media/ }).click();
-  await expect(page.locator('.track-label strong').filter({ hasText: 'Media' })).toHaveCount(1);
-}
-
 async function openTimeline(page, options = {}) {
   const fixture = await installAppFixture(page, {
     catalog: [person, source, mediaEntity],
@@ -183,16 +185,14 @@ test('draws a clear chronology with density, uncertainty and an inspector', asyn
   const fixture = await openTimeline(page);
 
   await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Board', 'Graph', 'Timeline', 'Sheet']);
-  // the dates the analyst stated, and not the files' own
-  await expect(page.locator('.track-label strong')).toHaveText(['Events']);
-  await expect(page.getByRole('button', { name: /Roadside camera frame/ })).toHaveCount(0);
+  // the dates the analyst stated, then the files the case collected, not its own frames
+  await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Media']);
+  await expect(page.getByRole('button', { name: /Roadside camera frame/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Extracted frame/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Witness arrived/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Vehicle remained/ }).locator('..')).toHaveClass(/period.*approximate.*uncertain/);
-  await expect(page.locator('.density-bucket')).toHaveCount(3);
+  await expect(page.locator('.density-bucket')).toHaveCount(4);
   await expect(page.getByText('Undated', { exact: true })).toBeVisible();
-  // a camera's clock with no offset is a file's date, so it waits with the Media track
-  await expect(page.getByText('Not on UTC axis', { exact: true })).toHaveCount(0);
-  await addMediaTrack(page);
   await expect(page.getByText('Not on UTC axis', { exact: true })).toBeVisible();
   await expect(page.getByText('2021-04-24T14:52:29', { exact: false })).toBeVisible();
 
@@ -237,11 +237,11 @@ test('builds, reorders and curates tracks without leaving the chronology', async
 
   await page.getByRole('button', { name: 'Track', exact: true }).click();
   await page.locator('.track-menu').getByRole('button').filter({ hasText: /^Person/ }).click();
-  await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Person']);
+  await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Media', 'Person']);
 
   const movePerson = page.getByRole('button', { name: 'Move Person track' });
   await movePerson.press('Alt+ArrowUp');
-  await expect(page.locator('.track-label strong')).toHaveText(['Person', 'Events']);
+  await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Person', 'Media']);
 
   await page.getByRole('button', { name: 'Fold Person' }).click();
   await expect(page.locator('.track-row').filter({ hasText: 'Person' })).toHaveClass(/folded/);
@@ -463,7 +463,6 @@ test('shows day precision across the full day without drawing a period', async (
 
 test('puts an exact instant on its pixel, and never nudges it sideways', async ({ page }) => {
   await openTimeline(page);
-  await addMediaTrack(page);
   await setWindow(page, '2026-06-23T18:00', '2026-06-23T19:00');
   const canvas = await page.locator('.track-canvas').nth(1).boundingBox();
   const dot = await page.getByRole('button', { name: /Roadside camera frame/ })
@@ -495,7 +494,6 @@ test('reads a mark on the ruler, and walks the track with Alt and an arrow', asy
 
 test('hangs a card from each mark when the track has the room', async ({ page }) => {
   await openTimeline(page);
-  await addMediaTrack(page);
   const media = page.locator('.track-canvas').nth(1);
   const card = media.locator('.event-card');
   await expect(card).toHaveCount(1);
@@ -507,19 +505,38 @@ test('hangs a card from each mark when the track has the room', async ({ page })
   await expect(page.locator('.track-canvas').first().locator('.event-card')).toHaveCount(0);
 });
 
-test('says how many dates the files carry when nothing stated is on the axis', async ({ page }) => {
+test('says how many dates the working files carry when nothing else is on the axis', async ({ page }) => {
   await installAppFixture(page, {
-    catalog: [mediaEntity],
-    timelineItems: timelineItems.filter((item) => item.category === 'media'),
+    timelineItems: timelineItems.filter((item) => item.produced_here === true),
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#timeline');
   await expect(page.getByRole('heading', { name: 'No dates stated yet' })).toBeVisible();
-  // one of the two is a local camera time, which is a date the axis cannot place
-  await expect(page.getByText('1 date read from files')).toBeVisible();
+  await expect(page.getByText('1 date read from working files')).toBeVisible();
   await page.getByRole('button', { name: 'Show them' }).click();
+  // let back onto the Media track that held them, not onto a second one
   await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Media']);
-  await expect(page.getByRole('button', { name: /Roadside camera frame/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Extracted frame/ })).toBeVisible();
+});
+
+test("lets a track's working files in from its editor, and out again", async ({ page }) => {
+  await openTimeline(page);
+  await setWindow(page, '2026-06-23T18:00', '2026-06-23T20:00');
+  const media = page.locator('.track-canvas').nth(1);
+  await expect(media.getByRole('button', { name: /Extracted frame/ })).toHaveCount(0);
+  await expect(page.locator('.track-name').nth(1)).toHaveAttribute('title', /working files held back/);
+
+  await page.getByRole('button', { name: 'Edit Media' }).click();
+  const editor = page.getByRole('region', { name: 'Edit timeline track' });
+  await editor.getByLabel('Include working files').check();
+  await editor.getByRole('button', { name: 'Update track' }).click();
+  await expect(media.getByRole('button', { name: /Extracted frame/ })).toBeVisible();
+  await expect(page.locator('.track-name').nth(1)).not.toHaveAttribute('title', /held back/);
+
+  await page.getByRole('button', { name: 'Edit Media' }).click();
+  await editor.getByLabel('Include working files').uncheck();
+  await editor.getByRole('button', { name: 'Update track' }).click();
+  await expect(media.getByRole('button', { name: /Extracted frame/ })).toHaveCount(0);
 });
 
 test('reads the axis and the list as one', async ({ page }) => {
@@ -660,7 +677,6 @@ test('creates and resizes an hourly period on a day view', async ({ page }) => {
 
 test('keeps creation on the Claims track and offers the list view', async ({ page }) => {
   await openTimeline(page);
-  await addMediaTrack(page);
   const mediaCanvas = page.locator('.track-canvas').nth(1);
   const box = await mediaCanvas.boundingBox();
   await page.mouse.click(box.x + box.width * .7, box.y + box.height - 8);
@@ -673,7 +689,6 @@ test('keeps creation on the Claims track and offers the list view', async ({ pag
 
 test('starts a media correction from the captured date', async ({ page }) => {
   const fixture = await openTimeline(page);
-  await addMediaTrack(page);
   await page.getByRole('button', { name: /Roadside camera frame/ }).click();
   const inspector = page.locator('.inspector');
   const correction = inspector.getByRole('button', { name: 'Add correction' });

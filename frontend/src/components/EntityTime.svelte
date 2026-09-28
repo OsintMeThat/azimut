@@ -100,7 +100,12 @@
   }
 
   function openTimeline(item = null) {
-    uiState.timelineFocus = { entityId: entity.id, entityLabel: entity.label, itemId: item?.id ?? null };
+    uiState.timelineFocus = {
+      entityId: entity.id,
+      entityLabel: entity.label,
+      itemId: item?.id ?? null,
+      producedHere: item?.produced_here === true,
+    };
     uiState.tool = 'timeline';
     onclose?.();
   }

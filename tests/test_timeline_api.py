@@ -403,6 +403,39 @@ def test_a_file_row_carries_the_preview_the_case_already_cached(client):
     assert all("thumb" not in item for item in items if item["category"] == "statement")
 
 
+def test_a_track_can_hold_back_the_files_the_case_made_itself(client):
+    """The Media Library's working-files switch, on a track: a frame and a capture stay
+    off it, a download stays on, and the file a reading is focused on always shows."""
+    case_id = _case(client, "Working files")
+    case = Case.open(case_id)
+    owners = {}
+    for name, source in (("clip", "download"), ("frame", "inspect"), ("capture", "satellite")):
+        entity = case.add_entity("media", name, {"path": f"media/{name}.jpg", "kind": "image"}, by="user")
+        case.upsert_media_item(
+            {
+                "path": f"media/{name}.jpg", "filename": f"{name}.jpg", "kind": "image",
+                "taken_at": "2024-02-03T10:11:12Z", "added_at": "2026-08-11T10:00:00Z",
+                "source": {"type": source},
+            },
+            entity_id=entity["id"],
+        )
+        owners[entity["id"]] = name
+
+    def read(track, **params):
+        page = client.get(f"/api/cases/{case_id}/timeline", params={
+            "category": "media", "track": json.dumps(track), **params,
+        })
+        assert page.status_code == 200, page.text
+        return {owners[item["owner_id"]]: item["produced_here"] for item in page.json()["items"]}
+
+    assert read({}) == {"clip": False, "frame": True, "capture": True}
+    assert read({"collected_only": True}) == {"clip": False}
+    for spread in ("false", "true"):
+        assert read({"collected_only": True}, spread=spread, limit=1) == {"clip": False}
+    frame = next(owner for owner, name in owners.items() if name == "frame")
+    assert read({"collected_only": True}, entity=frame) == {"frame": True}
+
+
 def test_schema_15_backfills_existing_claims_and_media(tmp_path):
     db = tmp_path / "case.db"
     from azimut.sqlite_backend import SqliteCase

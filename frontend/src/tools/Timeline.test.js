@@ -342,15 +342,22 @@ describe('one reading, the axis over the list', () => {
     expect(source).toContain('? { items: windowItems, truncated: false }');
   });
 
-  it('opens on Events alone and says how many dates the files carry when that is empty', () => {
+  it('opens on Events and Media and says how many file dates an empty axis leaves out', () => {
     expect(source).toContain('let trackSpecs = $state(defaultTimelineTracks());');
     expect(source).toContain('/timeline?category=media&include_undated=false&limit=1');
     expect(source).toContain('>Show them</button>');
+    // what was counted is what "Show them" puts on the axis
+    expect(source).toContain("read from {workingFilesHeld ? 'working files' : 'files'}");
+    expect(source).toContain('trackSpecs = workingFilesHeld');
+    expect(source).toContain("mediaTrack(trackSpecs, { collectedOnly: false })");
   });
 
   it('adds the track a handed-over file date or filing lives on before looking for it', () => {
     expect(source).toContain("startsWith('temporal:media:') ? 'media'");
-    expect(source).toContain('    ensureTrackFor(itemId);');
+    expect(source).toContain('    ensureTrackFor(itemId, producedHere);');
+    // a working file is let back onto the Media track that held it back
+    expect(source).toContain("producedHere && holding.length && holding.every(holdsBackWorkingFiles)");
+    expect(source).toContain("handOverSelection(focus.itemId, focus.producedHere === true);");
   });
 
   it('lands on the Undated queue when the Overview sent it there', () => {

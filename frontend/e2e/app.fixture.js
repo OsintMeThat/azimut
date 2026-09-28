@@ -952,6 +952,8 @@ export async function installAppFixture(page, options = {}) {
       && (!entity || item.owner_id === entity || (item.subjects ?? []).includes(entity)
         || (item.places ?? []).includes(entity) || (item.sources ?? []).includes(entity))
       && timelineMatchesTrack(item, track)
+      // the server's `collected_only`: working files stay off, but the one in focus
+      && !(track.collected_only === true && item.produced_here === true && item.owner_id !== entity)
       && (item.earliest
         ? (!from || item.latest > (from.includes('T') ? from : `${from}T00:00:00Z`))
           && (!to || item.earliest < (to.includes('T') ? to : `${to}T23:59:59Z`))

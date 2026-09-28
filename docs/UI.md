@@ -1079,12 +1079,14 @@ tab-separated block a spreadsheet reads back as columns (`date_as_written`,
 `earliest_utc`, `latest_utc`, `statement`, `subjects`, `places`, `sources`,
 `confidence`, `status`). A frozen view copies what it froze.
 
-The Timeline opens on **Events**, the dates the analyst stated: Claims, including a
-proof's date and a kept Detect pin. A file's own dates are facts about the file, and
-opened beside the analyst's they buried them, so **Media** is one preset away; a saved
-view that holds it keeps it, and a row handed over from a file's Time tab or its mark on
-the map adds it first. With nothing stated, the empty axis says how many dates the files
-carry, and **Show them** adds the track. **Track** adds editable
+The Timeline opens on two tracks. **Events** holds the dates the analyst stated: Claims,
+including a proof's date and a kept Detect pin. **Media** holds the dates of the files
+the case collected and, like the Media Library, holds back the working files the case
+made itself (frames, captures, collages, Compare renders), which would otherwise bury
+the rest. **Include working files** in a track's editor lets them in. A saved view keeps
+the tracks it was saved with. A row handed over from a file's Time tab adds the track
+that holds it first, and lets a working file onto it. When the axis is empty, it says
+how many file dates the tracks leave out, and **Show them** puts them on. **Track** adds editable
 presets for Events, Person, Place, Media, Sources and Case activity, using labels from
 the entity registry. **Custom** opens the shared Search+ builder, then states whether
 that question matches the entry itself, its subject, place, evidence, or any of those

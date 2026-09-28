@@ -6,6 +6,8 @@ import io
 
 from PIL import Image
 
+from azimut.workspace import Case
+
 
 def _case(client, name: str = "View case") -> str:
     return client.post("/api/cases", json={"name": name}).json()["id"]
@@ -436,6 +438,49 @@ def test_a_track_captures_the_case_activity_it_asks_for(client):
         "activity": [f"temporal:activity:{person['id']}:filed"],
     }
     assert created.json()["snapshot_count"] == 2
+
+
+def test_a_frozen_media_track_holds_back_working_files_as_it_did_live(client):
+    """`collected_only` travels with the saved track and the snapshot honours it; a
+    track saved without it reads back without the key, as it was stored."""
+    case_id = _case(client, "Collected track")
+    case = Case.open(case_id)
+    kept = {}
+    for name, source in (("clip", "upload"), ("frame", "inspect")):
+        entity = case.add_entity("media", name, {"path": f"media/{name}.jpg", "kind": "image"}, by="user")
+        case.upsert_media_item(
+            {
+                "path": f"media/{name}.jpg", "filename": f"{name}.jpg", "kind": "image",
+                "taken_at": "2024-02-03T10:11:12Z", "added_at": "2026-08-11T10:00:00Z",
+                "source": {"type": source},
+            },
+            entity_id=entity["id"],
+        )
+        kept[name] = entity["id"]
+
+    created = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Collected",
+            "mode": "snapshot",
+            "surface": "timeline",
+            "spec": {"timeline": {"tracks": [
+                {"id": "media", "label": "Media", "categories": ["media"],
+                 "query": {"collected_only": True}},
+                {"id": "all", "label": "All files", "categories": ["media"]},
+            ]}},
+        },
+    )
+    assert created.status_code == 200, created.text
+    spec = created.json()["spec"]
+    tracks = {track["id"]: track["query"] for track in spec["timeline"]["tracks"]}
+    assert tracks["media"]["collected_only"] is True
+    assert "collected_only" not in tracks["all"]
+    frozen = spec["snapshot"]["timeline_tracks"]
+    assert frozen["media"] == [f"temporal:media:{kept['clip']}:captured"]
+    assert sorted(frozen["all"]) == sorted(
+        f"temporal:media:{kept[name]}:captured" for name in ("clip", "frame")
+    )
 
 
 def test_empty_timeline_snapshot_duplicates_without_changing_its_tracks(client):

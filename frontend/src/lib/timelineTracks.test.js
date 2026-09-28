@@ -3,6 +3,7 @@ import {
   TRACK_COLORS,
   copyTimelineTrack,
   defaultTimelineTracks,
+  holdsBackWorkingFiles,
   mediaTrack,
   groupedTimelineTracks,
   moveTimelineTrack,
@@ -11,23 +12,41 @@ import {
   timelineViewState,
   trackPresets,
   trackTint,
+  withWorkingFiles,
 } from './timelineTracks.js';
 
 describe('Timeline tracks', () => {
-  it("opens on the dates the analyst stated, with the files' own one preset away", () => {
-    expect(defaultTimelineTracks().map((track) => [track.label, track.categories])).toEqual([
-      ['Events', ['statement']],
+  it('opens on the dates the analyst stated, then the files the case collected', () => {
+    const tracks = defaultTimelineTracks();
+    expect(tracks.map((track) => [track.id, track.categories, holdsBackWorkingFiles(track)])).toEqual([
+      ['events', ['statement'], false],
+      ['media', ['media'], true],
     ]);
-    expect(trackPresets().some((preset) => preset.categories.includes('media'))).toBe(true);
-    // a saved reading with Media keeps it; only an empty one falls back to the default
-    expect(normalizeTimelineTracks([{ id: 'media', label: 'Media', categories: ['media'] }])
-      .map((track) => track.id)).toEqual(['media']);
-    expect(normalizeTimelineTracks([]).map((track) => track.id)).toEqual(['events']);
+    expect(holdsBackWorkingFiles(trackPresets().find((preset) => preset.id === 'preset-media'))).toBe(true);
+    // a saved reading keeps its own tracks, and one saved before the switch lets every
+    // file in; only an empty one falls back to the default
+    const saved = normalizeTimelineTracks([{ id: 'media', label: 'Media', categories: ['media'] }]);
+    expect(saved.map((track) => track.id)).toEqual(['media']);
+    expect(holdsBackWorkingFiles(saved[0])).toBe(false);
+    expect('collected_only' in saved[0].query).toBe(false);
+    expect(normalizeTimelineTracks([]).map((track) => track.id)).toEqual(['events', 'media']);
   });
 
   it('adds the Media track under an id the reading does not use yet', () => {
-    expect(mediaTrack(defaultTimelineTracks())).toMatchObject({ id: 'media', categories: ['media'] });
+    expect(mediaTrack([{ id: 'events' }])).toMatchObject({ id: 'media', categories: ['media'] });
+    expect(mediaTrack(defaultTimelineTracks()).id).toBe('media-2');
     expect(mediaTrack([{ id: 'media' }, { id: 'media-2' }]).id).toBe('media-3');
+    expect(holdsBackWorkingFiles(mediaTrack([], { collectedOnly: false }))).toBe(false);
+  });
+
+  it('lets the working files back in without touching the rest of the question', () => {
+    const held = timelineTrack({ id: 'm', categories: ['media'], query: { relation: 'source', collected_only: true } });
+    const open = withWorkingFiles(held);
+    expect(holdsBackWorkingFiles(open)).toBe(false);
+    expect(open.query.relation).toBe('source');
+    expect(held.query.collected_only).toBe(true);
+    // the switch only means something on a track that holds files
+    expect(holdsBackWorkingFiles(timelineTrack({ categories: ['statement'], query: { collected_only: true } }))).toBe(false);
   });
 
   it('builds presets from registry labels rather than a second type vocabulary', () => {
@@ -72,7 +91,7 @@ describe('Timeline tracks', () => {
   });
 
   it('reorders and duplicates presentation without sharing arrays', () => {
-    const tracks = [...defaultTimelineTracks(), mediaTrack()];
+    const tracks = defaultTimelineTracks();
     expect(moveTimelineTrack(tracks, 0, 1).map((track) => track.label)).toEqual(['Media', 'Events']);
     const copy = copyTimelineTrack({ ...tracks[0], hidden: ['a'] }, tracks);
     expect(copy.label).toBe('Events copy');
@@ -88,7 +107,7 @@ describe('Timeline tracks', () => {
   });
 
   it('keeps entries without a grouping value visible', () => {
-    const tracks = [...defaultTimelineTracks(), mediaTrack()];
+    const tracks = defaultTimelineTracks();
     const event = { id: 'event', owner_type: 'claim' };
     const media = { id: 'media', owner_type: 'capture' };
     expect(groupedTimelineTracks(tracks, { events: [event], media: [media] }, 'subject')
@@ -100,7 +119,7 @@ describe('Timeline tracks', () => {
   });
 
   it('leaves a track on its category colours until one is chosen', () => {
-    expect(defaultTimelineTracks().map((track) => track.color)).toEqual(['']);
+    expect(defaultTimelineTracks().map((track) => track.color)).toEqual(['', '']);
     expect(timelineTrack({ label: 'Vessels', color: 'blue' }).color).toBe('blue');
     expect(timelineTrack({ label: 'Vessels', color: 'chartreuse' }).color).toBe('');
     expect(trackTint('blue')).toBe('var(--anno-2)');

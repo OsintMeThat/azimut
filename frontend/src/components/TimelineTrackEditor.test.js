@@ -27,4 +27,11 @@ describe('Timeline track editor', () => {
     expect(source).toContain('color = track?.color ?? \'\'');
     expect(source).toContain('      color,');
   });
+
+  it("offers the Media Library's working-files switch on a track that holds files", () => {
+    expect(source).toContain("{#if categories.has('media')}");
+    expect(source).toContain('Include working files');
+    expect(source).toContain("collected_only: categories.has('media') && collectedOnly,");
+    expect(source).toContain('collectedOnly = track?.query?.collected_only === true;');
+  });
 });

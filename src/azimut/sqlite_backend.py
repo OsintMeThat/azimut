@@ -52,6 +52,7 @@ from .store.filters import (
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
     _PRODUCED_HERE_SQL,
+    _PRODUCED_HERE_ROW_SQL,
     _MEDIA_CATEGORIES,
     _MEDIA_CATEGORY_SQL,
     _entity_search_text,
@@ -2244,6 +2245,15 @@ class SqliteCase:
                 " WHERE track_link.from_id = t.owner_id AND track_link.type = ?)"
             )
             params.append(connector)
+        if query.get("collected_only") is True:
+            # The Media Library's switch, on a track: the files the case produced
+            # itself stay off it. The one a reading is focused on shows whatever made
+            # it, or opening a frame's own dates would land on an empty axis.
+            held = f"NOT {_PRODUCED_HERE_ROW_SQL}"
+            if entity_id:
+                held = f"(t.owner_id = ? OR {held})"
+                params.append(entity_id)
+            where.append(held)
         hidden_raw: list[Any] = (
             query["hidden"] if isinstance(query.get("hidden"), list) else []
         )
@@ -2279,6 +2289,7 @@ class SqliteCase:
             "confidence": row["confidence"],
             "parse_error": row["parse_error"],
             "owner_type": row["owner_type"],
+            "produced_here": bool(row["produced_here"]),
             "subjects": [entry["id"] for entry in joined.get("about", [])],
             "places": [entry["id"] for entry in joined.get("at", [])],
             "sources": [entry["id"] for entry in joined.get("cites", [])],
@@ -2391,7 +2402,8 @@ class SqliteCase:
                     "WITH ranked AS (SELECT t.id AS ranked_id,"
                     f" ROW_NUMBER() OVER (ORDER BY {group_sql}, {stamp_sql}, t.id) - 1 AS rn"
                     f" FROM temporal_items t{clause})"
-                    " SELECT t.*, e.label, e.type AS owner_type FROM ranked"
+                    " SELECT t.*, e.label, e.type AS owner_type,"
+                    f" {_PRODUCED_HERE_ROW_SQL} AS produced_here FROM ranked"
                     " JOIN temporal_items t ON t.id = ranked.ranked_id"
                     " JOIN entities e ON e.id = t.owner_id"
                     " WHERE ranked.rn % ? = ? ORDER BY ranked.rn LIMIT ?",
@@ -2399,7 +2411,8 @@ class SqliteCase:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT t.*, e.label, e.type AS owner_type FROM temporal_items t"
+                    "SELECT t.*, e.label, e.type AS owner_type,"
+                    f" {_PRODUCED_HERE_ROW_SQL} AS produced_here FROM temporal_items t"
                     " JOIN entities e ON e.id = t.owner_id"
                     f"{clause} ORDER BY {group_sql}, {stamp_sql}, t.id LIMIT ?",
                     (*params, limit + 1),

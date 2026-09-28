@@ -20,6 +20,7 @@
   let categories = $state(new Set());
   let relation = $state('any');
   let roles = $state(new Set());
+  let collectedOnly = $state(false);
   let filter = $state(emptyFilter());
   let summary = $state(null);
   let facets = $state([]);
@@ -37,6 +38,7 @@
     categories = new Set(track?.categories ?? ['statement']);
     relation = track?.query?.relation ?? 'any';
     roles = new Set(track?.query?.roles ?? []);
+    collectedOnly = track?.query?.collected_only === true;
     filter = normalizeFilter(track?.query?.filter ?? emptyFilter());
   });
 
@@ -121,6 +123,7 @@
         label: queryLabel,
         relation,
         roles: [...roles],
+        collected_only: categories.has('media') && collectedOnly,
       },
     }));
   }
@@ -161,6 +164,11 @@
         <label><input type="checkbox" checked={categories.has(option[0])} onchange={() => toggleCategory(option[0])} />{option[1]}</label>
       {/each}
     </div>
+    {#if categories.has('media')}
+      <label class="held" title="Frames, captures, collages and renders the case made itself">
+        <input type="checkbox" checked={!collectedOnly} onchange={() => (collectedOnly = !collectedOnly)} />Include working files
+      </label>
+    {/if}
   </fieldset>
 
   <label class="match">Match the Search+ question through
@@ -222,7 +230,7 @@
   fieldset { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); }
   legend, .search-query > span { padding: 0 4px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 650; }
   .checks { display: flex; flex-wrap: wrap; gap: 8px 14px; }
-  .checks label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--fs-sm); }
+  .checks label, .held { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--fs-sm); }
   fieldset small { color: var(--text-3); }
   .search-query { overflow: visible; border: 1px solid var(--border); border-radius: var(--r-sm); }
   .search-query > span { display: block; width: max-content; margin: -7px 0 0 8px; background: var(--bg-1); }

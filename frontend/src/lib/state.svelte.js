@@ -271,7 +271,7 @@ export const uiState = $state({
    *  from the node. */
   openGraphEntity: null,
   /** Entity/item handed to Timeline from Details. Timeline consumes and clears it. */
-  timelineFocus: null, // { entityId, entityLabel, itemId }
+  timelineFocus: null, // { entityId, entityLabel, itemId, producedHere }
   /** A fact-time range handed back to Timeline. Consumed once, never persisted. */
   timelineRange: null, // { from, to }
   /** A holding queue the Timeline should open onto, from a count that named it. */

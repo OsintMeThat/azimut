@@ -46,6 +46,10 @@ export function timelineTrack(value, index = 0) {
       label: typeof query.label === 'string' ? query.label.slice(0, 300) : '',
       relation: RELATIONS.has(query.relation) ? query.relation : 'any',
       roles: unique(query.roles, ROLES, 4),
+      // The Media Library's working-files switch: frames, captures, collages and
+      // renders the case made itself stay off the track. Absent reads as off, which
+      // is what every track saved before it meant.
+      ...(query.collected_only === true ? { collected_only: true } : {}),
     },
     color: TRACK_COLORS.includes(raw.color) ? raw.color : '',
     collapsed: raw.collapsed === true,
@@ -55,24 +59,42 @@ export function timelineTrack(value, index = 0) {
 }
 
 /**
- * What a fresh reading opens on: the dates the analyst stated, and nothing else.
+ * What a fresh reading opens on: the dates the analyst stated, then the files the case
+ * collected.
  *
- * Events holds the Claims, which include a proof's date and a kept Detect pin. A file's
- * own dates — when it was published, when a camera says it took it — are facts about
- * the file rather than about what happened, and opened beside the analyst's they were a
- * wall of `VID_…` cards burying the chronology. They stay one preset away in **Track**,
- * and a saved view that holds them keeps them.
+ * Events holds the Claims, which include a proof's date and a kept Detect pin. Media
+ * holds a collected file's own dates, when it was published and when a camera says it
+ * took it, and holds back what the case made itself: sixty satellite captures and a
+ * hundred extracted frames were a wall of cards burying the chronology, which is why the
+ * Media Library opens without them too. A saved view keeps the tracks it was saved with.
  */
 export function defaultTimelineTracks() {
-  return [timelineTrack({ id: 'events', label: 'Events', categories: ['statement'] })];
+  return [
+    timelineTrack({ id: 'events', label: 'Events', categories: ['statement'] }),
+    mediaTrack([{ id: 'events' }]),
+  ];
 }
 
-/** The Media preset, added when the analyst asks for the files' own dates. */
-export function mediaTrack(tracks = []) {
+/** The Media preset. `collectedOnly` holds back the working files, as it opens. */
+export function mediaTrack(tracks = [], { collectedOnly = true } = {}) {
   const used = new Set(tracks.map((track) => track.id));
   let id = 'media';
   for (let n = 2; used.has(id); n += 1) id = `media-${n}`;
-  return timelineTrack({ id, label: 'Media', categories: ['media'] });
+  return timelineTrack({
+    id, label: 'Media', categories: ['media'],
+    query: collectedOnly ? { collected_only: true } : {},
+  });
+}
+
+/** Whether a track leaves the case's working files out. */
+export function holdsBackWorkingFiles(track) {
+  return track?.categories?.includes('media') && track.query?.collected_only === true;
+}
+
+/** The same track with its working files let in. */
+export function withWorkingFiles(track) {
+  const { collected_only: _held, ...query } = track.query ?? {};
+  return { ...track, query };
 }
 
 export function normalizeTimelineTracks(value) {
@@ -101,7 +123,9 @@ export function trackPresets(types = []) {
     timelineTrack({ id: 'preset-events', label: 'Events', categories: ['statement'] }),
     ofType('person'),
     ofType('place', 'place'),
-    timelineTrack({ id: 'preset-media', label: 'Media', categories: ['media'] }),
+    timelineTrack({
+      id: 'preset-media', label: 'Media', categories: ['media'], query: { collected_only: true },
+    }),
     timelineTrack({
       id: 'preset-sources', label: 'Sources', categories: ['statement'],
       query: { relation: 'source' },

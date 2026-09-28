@@ -63,7 +63,9 @@
     timelineTrack,
     timelineTrackQuery,
     timelineViewState,
+    holdsBackWorkingFiles,
     mediaTrack,
+    withWorkingFiles,
     trackPresets,
     trackTint,
   } from '../lib/timelineTracks.js';
@@ -166,7 +168,7 @@
   let copyMenu = $state(false);
   let copyMenuElement = $state(null);
   let copying = $state(false);
-  /** How many file dates the case holds, said when nothing stated is on the axis. */
+  /** How many file dates the tracks leave out, said when nothing is on the axis. */
   let fileDates = $state(0);
   let undatedOpen = $state(true);
   let undatedElement = $state(null);
@@ -393,14 +395,18 @@
     axisShare = SHARES[viewMode] ?? SHARES.plot;
   });
 
-  // Nothing stated on these tracks: say how many dates the files carry, from one
-  // bounded read, so the empty axis is not mistaken for an empty case.
+  // Nothing on these tracks: say how many dates the files carry that they leave out,
+  // from one bounded read, so the empty axis is not mistaken for an empty case. With
+  // a Media track that holds back working files and an empty axis, every file date
+  // left is one of those.
+  const mediaTracks = $derived(trackSpecs.filter((track) => track.categories.includes('media')));
+  const workingFilesHeld = $derived(mediaTracks.length > 0 && mediaTracks.every(holdsBackWorkingFiles));
   $effect(() => {
     const caseId = caseState.current?.id;
     const empty = !extent?.from && !loading;
-    const media = trackSpecs.some((track) => track.categories.includes('media'));
+    const open = mediaTracks.length > 0 && !workingFilesHeld;
     void caseState.rev;
-    if (!caseId || !empty || media || snapshotReading) {
+    if (!caseId || !empty || open || snapshotReading) {
       fileDates = 0;
       return;
     }
@@ -938,25 +944,32 @@
    */
   /**
    * A row handed over from elsewhere is a file's date or a filing more often than one
-   * would think — Details' Time tab, a mark on the map. The reading opens on the dates
-   * the analyst stated, so the track that holds such a row is added before it is looked
-   * for, or the hand-over would land on nothing.
+   * would think — Details' Time tab, a mark on the map. The track that holds such a row
+   * is added before it is looked for, or the hand-over would land on nothing, and a
+   * working file is let back onto the Media track that holds them back: a frame of the
+   * person the reading is about is not the person, so the focus does not bring it.
    */
-  function ensureTrackFor(itemId) {
+  function ensureTrackFor(itemId, producedHere = false) {
     const category = String(itemId ?? '').startsWith('temporal:media:') ? 'media'
       : String(itemId ?? '').startsWith('temporal:activity:') ? 'case_activity'
         : null;
-    if (!category || snapshotReading || trackSpecs.some((track) => track.categories.includes(category))) return;
+    if (!category || snapshotReading) return;
+    const holding = trackSpecs.filter((track) => track.categories.includes(category));
+    if (category === 'media' && producedHere && holding.length && holding.every(holdsBackWorkingFiles)) {
+      trackSpecs = trackSpecs.map((track) => (track.id === holding[0].id ? withWorkingFiles(track) : track));
+      return;
+    }
+    if (holding.length) return;
     trackSpecs = [
       ...trackSpecs,
       category === 'media'
-        ? mediaTrack(trackSpecs)
+        ? mediaTrack(trackSpecs, { collectedOnly: !producedHere })
         : timelineTrack({ id: 'activity', label: 'Case activity', categories: ['case_activity'] }, trackSpecs.length),
     ];
   }
 
-  function handOverSelection(itemId) {
-    ensureTrackFor(itemId);
+  function handOverSelection(itemId, producedHere = false) {
+    ensureTrackFor(itemId, producedHere);
     const held = itemId ? items.find((item) => item.id === itemId) : null;
     selected = held ?? selected;
     pendingSelection = itemId && !held ? { id: itemId } : null;
@@ -977,7 +990,7 @@
     if (!focus) return;
     entityFilter = { id: focus.entityId, label: focus.entityLabel || 'Selected entity' };
     selected = null;
-    handOverSelection(focus.itemId);
+    handOverSelection(focus.itemId, focus.producedHere === true);
     from = '';
     to = '';
     uiState.timelineFocus = null;
@@ -1076,7 +1089,8 @@
       .map((category) => TIMELINE_CATEGORIES.find((entry) => entry.id === category)?.short ?? category)
       .join(' · ');
     const asked = track.query?.label?.trim();
-    return [track.label, [words, asked || 'the whole case'].join(' · ')].join('\n');
+    const held = holdsBackWorkingFiles(track) ? 'working files held back' : '';
+    return [track.label, [words, asked || 'the whole case', held].filter(Boolean).join(' · ')].join('\n');
   }
 
   /** A span asked for by name. Absolute where a zoom step is relative: "Week" is the
@@ -1584,8 +1598,12 @@
     axisShare = SHARES[mode];
   }
 
+  /** What the empty axis counted, put on it: the working files let back onto the
+   *  Media track that held them, or a Media track that holds every file. */
   function showFileDates() {
-    trackSpecs = [...trackSpecs, mediaTrack(trackSpecs)];
+    trackSpecs = workingFilesHeld
+      ? trackSpecs.map((track) => (track.id === mediaTracks[0].id ? withWorkingFiles(track) : track))
+      : [...trackSpecs, mediaTrack(trackSpecs, { collectedOnly: false })];
   }
 
   /**
@@ -1855,7 +1873,7 @@
           <Icon name="clock" size={24} />
           <h2>No dates stated yet</h2>
           {#if fileDates}
-            <p>{fileDates} {fileDates === 1 ? 'date' : 'dates'} read from files · <button class="text-button" onclick={showFileDates}>Show them</button></p>
+            <p>{fileDates} {fileDates === 1 ? 'date' : 'dates'} read from {workingFilesHeld ? 'working files' : 'files'} · <button class="text-button" onclick={showFileDates}>Show them</button></p>
           {:else}
             <p>Add a dated claim here or from an entity's Time tab.</p>
           {/if}
