@@ -54,11 +54,25 @@ export function timelineTrack(value, index = 0) {
   };
 }
 
+/**
+ * What a fresh reading opens on: the dates the analyst stated, and nothing else.
+ *
+ * Events holds the Claims, which include a proof's date and a kept Detect pin. A file's
+ * own dates — when it was published, when a camera says it took it — are facts about
+ * the file rather than about what happened, and opened beside the analyst's they were a
+ * wall of `VID_…` cards burying the chronology. They stay one preset away in **Track**,
+ * and a saved view that holds them keeps them.
+ */
 export function defaultTimelineTracks() {
-  return [
-    timelineTrack({ id: 'events', label: 'Events', categories: ['statement'] }),
-    timelineTrack({ id: 'media', label: 'Media', categories: ['media'] }, 1),
-  ];
+  return [timelineTrack({ id: 'events', label: 'Events', categories: ['statement'] })];
+}
+
+/** The Media preset, added when the analyst asks for the files' own dates. */
+export function mediaTrack(tracks = []) {
+  const used = new Set(tracks.map((track) => track.id));
+  let id = 'media';
+  for (let n = 2; used.has(id); n += 1) id = `media-${n}`;
+  return timelineTrack({ id, label: 'Media', categories: ['media'] });
 }
 
 export function normalizeTimelineTracks(value) {

@@ -308,6 +308,57 @@ describe('measuring between two entries', () => {
   });
 });
 
+describe('one reading, the axis over the list', () => {
+  it('draws both whatever the mode, which only says which one gets the room', () => {
+    expect(source).not.toContain("{#if viewMode === 'plot'}");
+    expect(source).toContain('const SHARES = { plot: 0.62, list: 0.28 };');
+    expect(source).toContain('style:max-height={`${axisMax}px`}');
+    expect(source).toContain('role="separator"');
+    expect(source).toContain("onclick={() => setViewMode('list')}");
+  });
+
+  it('lists the window with what each entry is about, where, on what, and still waits for', () => {
+    expect(source).toContain('<div class="list-grid" role="grid" aria-label="Chronology"');
+    for (const heading of ['Date', 'Statement', 'Subjects', 'Places', 'Sources']) {
+      expect(source).toContain(`<span role="columnheader">${heading}</span>`);
+    }
+    expect(source).toContain("flags.push({ id: 'unsourced', label: 'no source' })");
+    expect(source).toContain("flags.push({ id: 'unassessed', label: 'not assessed' })");
+    // only a Claim is asked for a source and an assessment
+    expect(source).toContain("if (item.kind === 'claim') {");
+  });
+
+  it('lights the mark and the row of the entry under the pointer, both ways', () => {
+    expect(source).toContain('class:lit={hovered === item.id}');
+    expect(source).toContain('onpointerenter={() => hoverRow(item)}');
+    expect(source).toContain('selectItem(item, baseId, event); revealRow(item.id);');
+  });
+
+  it('copies the whole window, not the page, as Markdown or a spreadsheet block', () => {
+    expect(source).toContain("copyChronology('markdown')");
+    expect(source).toContain("copyChronology('block')");
+    expect(source).toContain('await readChronology((url) => api.get(url)');
+    // a frozen reading copies what it froze and asks nothing of the case
+    expect(source).toContain('? { items: windowItems, truncated: false }');
+  });
+
+  it('opens on Events alone and says how many dates the files carry when that is empty', () => {
+    expect(source).toContain('let trackSpecs = $state(defaultTimelineTracks());');
+    expect(source).toContain('/timeline?category=media&include_undated=false&limit=1');
+    expect(source).toContain('>Show them</button>');
+  });
+
+  it('adds the track a handed-over file date or filing lives on before looking for it', () => {
+    expect(source).toContain("startsWith('temporal:media:') ? 'media'");
+    expect(source).toContain('    ensureTrackFor(itemId);');
+  });
+
+  it('lands on the Undated queue when the Overview sent it there', () => {
+    expect(source).toContain("if (queue === 'undated') {");
+    expect(source).toContain('bind:open={undatedOpen} bind:this={undatedElement}');
+  });
+});
+
 describe('reading a mark', () => {
   it('draws a line up to the ruler with the date as written, for one end or both', () => {
     expect(source).toContain("const lines = item.mark === 'point' ? [middle] : [mark.left, mark.right];");

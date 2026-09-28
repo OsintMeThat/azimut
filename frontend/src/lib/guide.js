@@ -319,6 +319,10 @@ export const GUIDE = [
         text: 'UTC, this computer, any zone in the world, or local time at a place the case saved. Undated work is counted apart rather than hidden.',
       },
       {
+        label: 'Timeline opens on the dates you stated',
+        text: 'A point is an instant, a bracket a date known to the day, month or year, a bar a period. The files\' own dates are one track away, and the list under the axis copies out as a table.',
+      },
+      {
         label: 'Sheet works on real CSV files',
         text: 'The sheets the case holds, in a grid. A declared sheet can be promoted into entities, places and dated claims, read as a plan first.',
       },
@@ -369,6 +373,9 @@ export const GUIDE = [
           { combo: '+ / -', does: 'narrows and widens the window' },
           { combo: 'Home', does: 'shows the whole filtered extent' },
           { combo: 'Shift-wheel', does: 'pans, as does a horizontal trackpad gesture' },
+          { combo: 'Alt+← / →', does: 'moves from a focused entry to the one before or after it on its track' },
+          { combo: '↑ / ↓', does: 'walks the rows of the list under the axis' },
+          { combo: 'Enter', does: 'opens the focused row in the inspector' },
         ],
       },
       {

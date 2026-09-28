@@ -1,6 +1,6 @@
 <script>
   /** A windowed UTC axis over the case's derived temporal projection. */
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import {
     openAnalysisCase,
@@ -63,9 +63,12 @@
     timelineTrack,
     timelineTrackQuery,
     timelineViewState,
+    mediaTrack,
     trackPresets,
     trackTint,
   } from '../lib/timelineTracks.js';
+  import { chronologyBlock, chronologyMarkdown, chronologyRows, readChronology } from '../lib/timelineCopy.js';
+  import { provenance } from '../lib/sheetExport.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { plateFilename } from '../lib/plate.js';
   import { PLATE_PLOT, timelinePlate } from '../lib/timelinePlate.js';
@@ -145,6 +148,29 @@
   let rangeMenu = $state(false);
   let plotElement = $state(null);
   let axisCardElement = $state(null);
+  let listPane = $state(null);
+  /** The entry under the pointer, on the axis or in the list: the other one lights it. */
+  let hovered = $state(null);
+  /**
+   * How much of the room below the overview the axis takes; the list has the rest.
+   *
+   * The two are one reading, so both are always there. `view_mode` from a saved view
+   * says which of them it favours, and dragging the bar between them moves it for now
+   * without rewriting what the view says.
+   */
+  const SHARES = { plot: 0.62, list: 0.28 };
+  let axisShare = $state(SHARES.plot);
+  let chronologyHeight = $state(0);
+  let overviewHeight = $state(0);
+  let splitting = null;
+  let copyMenu = $state(false);
+  let copyMenuElement = $state(null);
+  let copying = $state(false);
+  /** How many file dates the case holds, said when nothing stated is on the axis. */
+  let fileDates = $state(0);
+  let undatedOpen = $state(true);
+  let undatedElement = $state(null);
+  let landOnUndated = $state(false);
   let plotWidth = $state(1000);
   let overviewWidth = $state(800);
   let tooltip = $state(null);
@@ -266,9 +292,15 @@
     }
     return grouped;
   });
+  /** What the list reads: the dated entries the window holds, the same page as the axis. */
+  const windowItems = $derived(axisWindow
+    ? dated.filter((item) => Date.parse(item.earliest) < axisWindow.end
+      && Date.parse(item.latest ?? item.earliest) >= axisWindow.start)
+    : dated);
+  const axisMax = $derived(Math.max(150, Math.round((chronologyHeight - overviewHeight - 70) * axisShare)));
   const listGroups = $derived.by(() => {
     const groups = new Map();
-    for (const item of [...dated].sort((a, b) => String(a.earliest).localeCompare(String(b.earliest)))) {
+    for (const item of [...windowItems].sort((a, b) => String(a.earliest).localeCompare(String(b.earliest)))) {
       const date = new Date(item.earliest);
       // Grouped by the month the reading falls in, so the list and the axis agree
       // about which month an entry near a midnight belongs to.
@@ -354,6 +386,63 @@
   });
 
   $effect(() => trackMenu ? closeOnOutsidePointer(trackMenuElement, () => (trackMenu = false)) : undefined);
+  $effect(() => copyMenu ? closeOnOutsidePointer(copyMenuElement, () => (copyMenu = false)) : undefined);
+
+  // A saved view's mode says which half it favours; applying one moves the bar there.
+  $effect(() => {
+    axisShare = SHARES[viewMode] ?? SHARES.plot;
+  });
+
+  // Nothing stated on these tracks: say how many dates the files carry, from one
+  // bounded read, so the empty axis is not mistaken for an empty case.
+  $effect(() => {
+    const caseId = caseState.current?.id;
+    const empty = !extent?.from && !loading;
+    const media = trackSpecs.some((track) => track.categories.includes('media'));
+    void caseState.rev;
+    if (!caseId || !empty || media || snapshotReading) {
+      fileDates = 0;
+      return;
+    }
+    let live = true;
+    api.get(`/api/cases/${caseId}/timeline?category=media&include_undated=false&limit=1`)
+      .then((page) => { if (live) fileDates = Number(page?.total ?? 0); })
+      .catch(() => { if (live) fileDates = 0; });
+    return () => { live = false; };
+  });
+
+  // The Overview's "No date yet" lands on the queue it counted, open.
+  $effect(() => {
+    const queue = uiState.timelineQueue;
+    if (!queue) return;
+    uiState.timelineQueue = null;
+    if (queue === 'undated') {
+      undatedOpen = true;
+      landOnUndated = true;
+    }
+  });
+
+  $effect(() => {
+    if (!landOnUndated || loading) return;
+    const queue = undatedElement;
+    if (!queue) {
+      // Given up only once the tracks have answered and hold nothing undated.
+      if (Object.keys(trackPages).length && !undatedTotal) landOnUndated = false;
+      return;
+    }
+    landOnUndated = false;
+    // After the axis and the list have taken their measured room, and after the second
+    // read the window's first setting starts: landing before it would scroll to where
+    // the queue was, not to where it ends up.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (loading) {
+        landOnUndated = true;
+        return;
+      }
+      queue.scrollIntoView({ block: 'start' });
+      queue.querySelector('.holding-list button')?.focus({ preventScroll: true });
+    }));
+  });
   $effect(() => rangeMenu ? closeOnOutsidePointer(rangeElement, () => (rangeMenu = false)) : undefined);
 
   $effect(() => {
@@ -847,7 +936,27 @@
    * given — no load follows, and a selection waiting for one would never arrive. What
    * is already drawn answers in that case.
    */
+  /**
+   * A row handed over from elsewhere is a file's date or a filing more often than one
+   * would think — Details' Time tab, a mark on the map. The reading opens on the dates
+   * the analyst stated, so the track that holds such a row is added before it is looked
+   * for, or the hand-over would land on nothing.
+   */
+  function ensureTrackFor(itemId) {
+    const category = String(itemId ?? '').startsWith('temporal:media:') ? 'media'
+      : String(itemId ?? '').startsWith('temporal:activity:') ? 'case_activity'
+        : null;
+    if (!category || snapshotReading || trackSpecs.some((track) => track.categories.includes(category))) return;
+    trackSpecs = [
+      ...trackSpecs,
+      category === 'media'
+        ? mediaTrack(trackSpecs)
+        : timelineTrack({ id: 'activity', label: 'Case activity', categories: ['case_activity'] }, trackSpecs.length),
+    ];
+  }
+
   function handOverSelection(itemId) {
+    ensureTrackFor(itemId);
     const held = itemId ? items.find((item) => item.id === itemId) : null;
     selected = held ?? selected;
     pendingSelection = itemId && !held ? { id: itemId } : null;
@@ -1358,12 +1467,15 @@
     const mark = element.getBoundingClientRect();
     const middle = mark.left + mark.width / 2;
     const lines = item.mark === 'point' ? [middle] : [mark.left, mark.right];
+    // The card scrolls under its sticky ruler, and the guide is drawn in what scrolls.
+    const down = axisCardElement.scrollTop;
+    const across = axisCardElement.scrollLeft;
     guide = {
       id: item.id,
-      lines: lines.map((x) => x - card.left),
-      top: ruler.bottom - card.top,
+      lines: lines.map((x) => x - card.left + across),
+      top: ruler.bottom - card.top + down,
       height: Math.max(0, mark.top + mark.height / 2 - ruler.bottom),
-      at: Math.min(Math.max(middle, ruler.left + 90), ruler.right - 90) - card.left,
+      at: Math.min(Math.max(middle, ruler.left + 90), ruler.right - 90) - card.left + across,
       label: formatTemporalValue(item.raw ?? '').label,
     };
   }
@@ -1371,6 +1483,144 @@
   function leaveMark(item) {
     tooltip = null;
     if (guide?.id === item.id) guide = null;
+    if (hovered === item.id) hovered = null;
+  }
+
+  function enterMark(event, item) {
+    hovered = item.id;
+    showGuide(event.currentTarget, item);
+  }
+
+  /** The row of an entry, found by its id rather than by a selector built from it. */
+  function rowOf(id) {
+    return [...(listPane?.querySelectorAll('[data-row]') ?? [])].find((row) => row.dataset.row === id);
+  }
+
+  function markOf(id) {
+    return [...(axisCardElement?.querySelectorAll('[data-mark]') ?? [])].find((mark) => mark.dataset.mark === id);
+  }
+
+  /** A mark picked on the axis brings its row into the list, without moving the axis. */
+  async function revealRow(id) {
+    await tick();
+    rowOf(id)?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function hoverRow(item) {
+    hovered = item.id;
+    const laid = tracks.flatMap((track) => track.layout.items).find((entry) => entry.id === item.id);
+    const mark = laid ? markOf(item.id) : null;
+    if (mark) showGuide(mark, laid);
+  }
+
+  function leaveRow(item) {
+    if (hovered === item.id) hovered = null;
+    if (guide?.id === item.id) guide = null;
+  }
+
+  function rowKey(event, item) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      selectItem(item, null, event);
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+    event.preventDefault();
+    const rows = [...(listPane?.querySelectorAll('[data-row]') ?? [])];
+    const index = rows.indexOf(event.currentTarget);
+    rows[index + (event.key === 'ArrowDown' ? 1 : -1)]?.focus();
+  }
+
+  const names = (entries) => (entries ?? []).map((entry) => entry.label || entry.id).join(', ');
+
+  /**
+   * What a row still waits for, said as words beside it rather than as a colour.
+   *
+   * Only a Claim is asked for a source and an assessment: a proof is its own source,
+   * and a file's date is not an assessment anybody made.
+   */
+  function rowFlags(item) {
+    const flags = [];
+    if (item.status === 'suggested') flags.push({ id: 'suggested', label: 'suggested' });
+    if (item.confidence) flags.push({ id: item.confidence === 'refuted' ? 'refuted' : 'assessed', label: item.confidence });
+    if (item.kind === 'claim') {
+      if (!item.source_entities?.length && !item.sources?.length) flags.push({ id: 'unsourced', label: 'no source' });
+      if (!item.confidence) flags.push({ id: 'unassessed', label: 'not assessed' });
+    }
+    return flags;
+  }
+
+  function splitStart(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitting = {
+      pointer: event.pointerId,
+      top: axisCardElement?.getBoundingClientRect().top ?? 0,
+      room: Math.max(1, chronologyHeight - overviewHeight - 70),
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function splitMove(event) {
+    if (splitting?.pointer !== event.pointerId) return;
+    axisShare = Math.min(.85, Math.max(.15, (event.clientY - splitting.top) / splitting.room));
+  }
+
+  function splitEnd(event) {
+    if (splitting?.pointer === event.pointerId) splitting = null;
+  }
+
+  function splitKey(event) {
+    const step = { ArrowUp: -.05, ArrowDown: .05 }[event.key];
+    if (step === undefined && !['Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === 'Home') axisShare = .15;
+    else if (event.key === 'End') axisShare = .85;
+    else axisShare = Math.min(.85, Math.max(.15, axisShare + step));
+  }
+
+  function setViewMode(mode) {
+    viewMode = mode;
+    axisShare = SHARES[mode];
+  }
+
+  function showFileDates() {
+    trackSpecs = [...trackSpecs, mediaTrack(trackSpecs)];
+  }
+
+  /**
+   * The window's chronology on the clipboard, as a table for a report or a block for a
+   * spreadsheet. A frozen reading copies what it froze and asks nothing of the case.
+   */
+  async function copyChronology(kind) {
+    copyMenu = false;
+    const caseId = caseState.current?.id;
+    if (!caseId || copying) return;
+    copying = true;
+    try {
+      const read = snapshotReading
+        ? { items: windowItems, truncated: false }
+        : await readChronology((url) => api.get(url), {
+          caseId, tracks: trackSpecs, from, to, entityId: entityFilter?.id,
+        });
+      const rows = chronologyRows(read.items);
+      const text = kind === 'markdown'
+        ? chronologyMarkdown(rows, provenance({
+          caseName: caseState.current?.name ?? '',
+          sheet: timelineViews.activeView?.name || 'Timeline',
+          filter: [trackSpecs.map((track) => track.label).join(', '), windowWords(from, to, zone), zoneWord]
+            .filter(Boolean).join(' · '),
+          at: new Date().toISOString(),
+        }))
+        : chronologyBlock(rows);
+      await navigator.clipboard.writeText(text);
+      const count = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`;
+      toast(read.truncated ? `The first ${count} copied.` : `${count} copied.`, 'ok', 1800);
+    } catch (error) {
+      toast(error?.message || 'Copying failed.', 'danger');
+    } finally {
+      copying = false;
+    }
   }
 
   /**
@@ -1485,8 +1735,8 @@
       </button>
     {/if}
     <div class="view-switch" aria-label="Timeline display">
-      <button class:active={viewMode === 'plot'} aria-pressed={viewMode === 'plot'} onclick={() => (viewMode = 'plot')}>Plot</button>
-      <button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => (viewMode = 'list')}>List</button>
+      <button class:active={viewMode === 'plot'} aria-pressed={viewMode === 'plot'} title="Give the axis more room" onclick={() => setViewMode('plot')}>Plot</button>
+      <button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} title="Give the list more room" onclick={() => setViewMode('list')}>List</button>
     </div>
     <!-- Which clock the axis is read on. Presentation only: the case stores UTC, the
          queries ask in UTC, and this moves the ticks and their words. A saved point
@@ -1562,18 +1812,58 @@
   </div>
 
   <div class="timeline-grid">
-    <main class="chronology">
+    <main class="chronology" class:blank={!caseState.current || (!extent?.from && !loading)} bind:clientHeight={chronologyHeight}>
+      <!-- What still waits for a date, under the list or under an empty axis alike. -->
+      {#snippet holdings()}
+        {#if unplaced.length || unplacedTotal}
+          <details class="holding-card" open>
+            <summary><span><Icon name="alert" size={14} />Not on UTC axis</span><strong>{unplacedTotal}</strong></summary>
+            <p class="holding-note">Add a timezone or correct the value to place these entries.</p>
+            <div class="holding-list">
+              {#each unplaced as item (item.id)}
+                <button onclick={() => selectItem(item)} oncontextmenu={(event) => openItemMenu(event, item)}>
+                  <span class={`category-dot ${item.category}`}></span>
+                  <span><strong>{item.label}</strong><small><span class="mono">{item.raw}</span> · {unplacedReason(item)}</small></span>
+                  {#if item.category === 'statement'}<Icon name="edit" size={12} />{/if}
+                </button>
+              {/each}
+              {#if unplacedTotal > unplaced.length}<p>Load more to see the remaining entries.</p>{/if}
+            </div>
+          </details>
+        {/if}
+
+        {#if undated.length || undatedTotal}
+          <details class="holding-card undated-card" bind:open={undatedOpen} bind:this={undatedElement}>
+            <summary><span><Icon name="clock" size={14} />Undated</span><strong>{undatedTotal}</strong></summary>
+            <div class="holding-list">
+              {#each undated as item (item.id)}
+                <button onclick={() => selectItem(item)} oncontextmenu={(event) => openItemMenu(event, item)}>
+                  <span class={`category-dot ${item.category}`}></span>
+                  <span><strong>{item.label}</strong><small>{item.parse_error || categoryName(item)}</small></span>
+                  {#if item.category === 'statement'}<Icon name="edit" size={12} />{/if}
+                </button>
+              {/each}
+              {#if undatedTotal > undated.length}<p>Load more to see the remaining undated entries.</p>{/if}
+            </div>
+          </details>
+        {/if}
+      {/snippet}
       {#if !caseState.current}
         <div class="blank-state"><Icon name="clock" size={24} /><h2>Open a case to build its timeline.</h2></div>
       {:else if !extent?.from && !loading}
         <div class="blank-state">
           <Icon name="clock" size={24} />
-          <h2>No dated entries yet</h2>
-          <p>Add a dated claim here or from an entity's Time tab.</p>
+          <h2>No dates stated yet</h2>
+          {#if fileDates}
+            <p>{fileDates} {fileDates === 1 ? 'date' : 'dates'} read from files · <button class="text-button" onclick={showFileDates}>Show them</button></p>
+          {:else}
+            <p>Add a dated claim here or from an entity's Time tab.</p>
+          {/if}
           <button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor()}>Add first claim</button>
         </div>
+        {@render holdings()}
       {:else}
-        <section class="overview-card" aria-label="Timeline overview">
+        <section class="overview-card" aria-label="Timeline overview" bind:clientHeight={overviewHeight}>
           <div class="overview-title">
             <span>Overview</span>
             <!-- The extent in words rather than the first and last bucket keys, which
@@ -1636,8 +1926,7 @@
           </div>
         </section>
 
-        {#if viewMode === 'plot'}
-          <section class="axis-card" aria-label="Timeline axis" bind:this={axisCardElement}>
+          <section class="axis-card" aria-label="Timeline axis" bind:this={axisCardElement} style:max-height={`${axisMax}px`}>
             <div class="axis-row">
               <div class="axis-label">
                 <span>{zoneWord}</span>
@@ -1697,6 +1986,7 @@
               </p>
             {/if}
 
+            <div class="axis-tracks" role="list">
             {#each tracks as track (track.id)}
               {@const baseId = track.parentId ?? track.id}
               {@const canCreate = track.categories.includes('statement') && !snapshotReading}
@@ -1789,6 +2079,7 @@
                       class:open-start={item.openStart}
                       class:open-end={item.openEnd}
                       class:guided={guide?.id === item.id}
+                      class:lit={hovered === item.id}
                       style:left={item.mark === 'point' ? `calc(${item.left}% - ${MARKS.column / 2}px)` : `${item.left}%`}
                       style:width={item.mark === 'point' ? `${MARKS.column}px` : `${item.width}%`}
                       style:top={`${markTop}px`}
@@ -1805,12 +2096,12 @@
                           if (event.ctrlKey || event.metaKey) return;
                           if (selected?.id === item.id && editable) beginMove(event, item);
                         }}
-                        onclick={(event) => { event.stopPropagation(); selectItem(item, baseId, event); }}
+                        onclick={(event) => { event.stopPropagation(); selectItem(item, baseId, event); revealRow(item.id); }}
                         oncontextmenu={(event) => openItemMenu(event, item, baseId)}
-                        onpointerenter={(event) => { showItemTooltip(event, item); showGuide(event.currentTarget, item); }}
+                        onpointerenter={(event) => { showItemTooltip(event, item); enterMark(event, item); }}
                         onpointermove={(event) => showItemTooltip(event, item)}
                         onpointerleave={() => leaveMark(item)}
-                        onfocus={(event) => { showFocusedTooltip(event, item); showGuide(event.currentTarget, item); }}
+                        onfocus={(event) => { showFocusedTooltip(event, item); enterMark(event, item); }}
                         onblur={() => leaveMark(item)}
                         onkeydown={(event) => markKey(event, track, item)}
                       >
@@ -1859,6 +2150,7 @@
                 </div>
               </div>
             {/each}
+            </div>
             {#if guide}
               <div class="time-guide" aria-hidden="true">
                 {#each guide.lines as x, index (index)}
@@ -1868,65 +2160,101 @@
               </div>
             {/if}
           </section>
-        {:else}
-          <section class="timeline-list" aria-label="Timeline list">
-            {#each listGroups as group (group.key)}
-              <h2>{group.label}<span>{group.items.length}</span></h2>
-              {#each group.items as item (item.id)}
-                <button
-                  class:chosen={selected?.id === item.id}
-                  class:against={against?.id === item.id}
-                  onclick={(event) => selectItem(item, null, event)}
-                  oncontextmenu={(event) => openItemMenu(event, item)}
-                >
-                  <span class={`category-dot ${item.category}`}></span>
-                  <span class="list-copy"><strong>{item.label}</strong><small>{categoryName(item)}{#if item.time_role} · {item.time_role}{/if}{#if item.confidence} · {item.confidence}{/if}</small></span>
-                  <span class="list-date"><strong>{formatTemporalValue(item.raw).label}</strong><code>{item.raw}</code></span>
-                  <Icon name="arrowRight" size={12} />
-                </button>
-              {/each}
-            {/each}
-          </section>
-        {/if}
 
-        {#if unplaced.length || unplacedTotal}
-          <details class="holding-card" open>
-            <summary><span><Icon name="alert" size={14} />Not on UTC axis</span><strong>{unplacedTotal}</strong></summary>
-            <p class="holding-note">Add a timezone or correct the value to place these entries.</p>
-            <div class="holding-list">
-              {#each unplaced as item (item.id)}
-                <button onclick={() => selectItem(item)} oncontextmenu={(event) => openItemMenu(event, item)}>
-                  <span class={`category-dot ${item.category}`}></span>
-                  <span><strong>{item.label}</strong><small><span class="mono">{item.raw}</span> · {unplacedReason(item)}</small></span>
-                  {#if item.category === 'statement'}<Icon name="edit" size={12} />{/if}
-                </button>
-              {/each}
-              {#if unplacedTotal > unplaced.length}<p>Load more to see the remaining entries.</p>{/if}
-            </div>
-          </details>
-        {/if}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
+            class="split"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Share the room between the axis and the list"
+            aria-valuemin="15"
+            aria-valuemax="85"
+            aria-valuenow={Math.round(axisShare * 100)}
+            tabindex="0"
+            title="Drag to give the axis or the list more room"
+            onpointerdown={splitStart}
+            onpointermove={splitMove}
+            onpointerup={splitEnd}
+            onpointercancel={splitEnd}
+            onkeydown={splitKey}
+          ></div>
 
-        {#if undated.length || undatedTotal}
-          <details class="holding-card undated-card" open>
-            <summary><span><Icon name="clock" size={14} />Undated</span><strong>{undatedTotal}</strong></summary>
-            <div class="holding-list">
-              {#each undated as item (item.id)}
-                <button onclick={() => selectItem(item)} oncontextmenu={(event) => openItemMenu(event, item)}>
-                  <span class={`category-dot ${item.category}`}></span>
-                  <span><strong>{item.label}</strong><small>{item.parse_error || categoryName(item)}</small></span>
-                  {#if item.category === 'statement'}<Icon name="edit" size={12} />{/if}
-                </button>
-              {/each}
-              {#if undatedTotal > undated.length}<p>Load more to see the remaining undated entries.</p>{/if}
-            </div>
-          </details>
-        {/if}
+          <div class="reading-pane" bind:this={listPane}>
+            <section class="timeline-list" aria-label="Timeline list">
+              <header class="list-head">
+                <strong>{windowItems.length} {windowItems.length === 1 ? 'entry' : 'entries'} in this window</strong>
+                {#if cursor}<small>More below the ones loaded</small>{/if}
+                <div class="copy-menu" bind:this={copyMenuElement}>
+                  <button class="btn btn-ghost btn-sm" aria-expanded={copyMenu} disabled={!windowItems.length || copying} onclick={() => (copyMenu = !copyMenu)}>
+                    <Icon name="copy" size={12} /> Copy
+                  </button>
+                  {#if copyMenu}
+                    <div class="copy-options" role="menu">
+                      <button role="menuitem" onclick={() => copyChronology('markdown')}>As a Markdown table</button>
+                      <button role="menuitem" onclick={() => copyChronology('block')}>For a spreadsheet</button>
+                    </div>
+                  {/if}
+                </div>
+              </header>
+              {#if windowItems.length}
+                <div class="list-grid" role="grid" aria-label="Chronology" aria-rowcount={windowItems.length + 1}>
+                  <div class="list-row headings" role="row">
+                    <span role="columnheader">Date</span>
+                    <span role="columnheader">Statement</span>
+                    <span role="columnheader">Subjects</span>
+                    <span role="columnheader">Places</span>
+                    <span role="columnheader">Sources</span>
+                    <span role="columnheader"><span class="sr-only">Waiting for</span></span>
+                  </div>
+                  {#each listGroups as group (group.key)}
+                    <div class="list-row month" role="row">
+                      <span role="gridcell" aria-colspan="6">{group.label}<small>{group.items.length}</small></span>
+                    </div>
+                    {#each group.items as item (item.id)}
+                      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                      <div
+                        class="list-row entry"
+                        class:chosen={selected?.id === item.id}
+                        class:against={against?.id === item.id}
+                        class:lit={hovered === item.id}
+                        role="row"
+                        tabindex="0"
+                        data-row={item.id}
+                        aria-selected={selected?.id === item.id}
+                        onclick={(event) => selectItem(item, null, event)}
+                        onkeydown={(event) => rowKey(event, item)}
+                        oncontextmenu={(event) => openItemMenu(event, item)}
+                        onpointerenter={() => hoverRow(item)}
+                        onpointerleave={() => leaveRow(item)}
+                        onfocus={() => hoverRow(item)}
+                        onblur={() => leaveRow(item)}
+                      >
+                        <span role="gridcell" class="list-date" title={item.raw}>{formatTemporalValue(item.raw).label}</span>
+                        <span role="gridcell" class="list-copy"><span class={`category-dot ${item.category}`}></span><strong>{item.label}</strong></span>
+                        <span role="gridcell" class="list-links">{names(item.subject_entities)}</span>
+                        <span role="gridcell" class="list-links">{names(item.place_entities)}</span>
+                        <span role="gridcell" class="list-links">{names(item.source_entities)}</span>
+                        <span role="gridcell" class="list-flags">
+                          {#each rowFlags(item) as flag (flag.id)}<em class={flag.id}>{flag.label}</em>{/each}
+                        </span>
+                      </div>
+                    {/each}
+                  {/each}
+                </div>
+              {:else}
+                <p class="list-empty">No dated entries in this window.</p>
+              {/if}
+            </section>
 
-        {#if cursor}
-          <button class="btn btn-ghost load-more" disabled={loading} onclick={() => loadMain({ more: true })}>
-            {loading ? 'Loading…' : `Load more · ${items.length} of ${total}`}
-          </button>
-        {/if}
+            {@render holdings()}
+
+            {#if cursor}
+              <button class="btn btn-ghost load-more" disabled={loading} onclick={() => loadMain({ more: true })}>
+                {loading ? 'Loading…' : `Load more · ${items.length} of ${total}`}
+              </button>
+            {/if}
+          </div>
       {/if}
       {#if loading}<div class="loading-line"></div>{/if}
     </main>
@@ -2239,12 +2567,18 @@
   .track-menu > button:hover { background: var(--bg-2); color: var(--text-1); }
   .track-menu > button small { color: var(--text-3); font-size: 9px; }
   .track-menu .custom { margin-top: 5px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); }
-  .timeline-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
-  .chronology { position: relative; min-width: 0; overflow: auto; padding: 18px 24px 28px; }
+  .timeline-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 330px; grid-template-rows: minmax(0, 1fr); }
+  /* The overview, the axis, the bar between and the list: one reading in one column,
+     where the axis and the list scroll each on their own, so picking an entry in one
+     never scrolls the other out of view. */
+  .chronology { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto 12px minmax(0, 1fr); overflow: auto hidden; padding: 18px 24px 16px; }
+  .chronology.blank { display: block; overflow: auto; padding-bottom: 28px; }
   /* A panel is a border and a fill. The 35px drop shadow under each one read as a
      floating card, which is a look rather than a reading of the case. */
   .axis-card, .overview-card, .holding-card, .timeline-list { border: 1px solid var(--border); border-radius: var(--r); background: var(--bg-1); overflow: hidden; }
-  .axis-card { position: relative; }
+  .axis-card { position: relative; min-height: 0; overflow: hidden auto; }
+  /* The ruler stays over the tracks it measures however far they scroll. */
+  .axis-row { position: sticky; top: 0; z-index: 6; background: var(--bg-1); }
   /* One width for the gutter, and wide enough for a name the analyst chose: at 132px
      "Events" arrived as "E." and a track nobody can read is a colour with a count. */
   .axis-card, .overview-card { --gutter: 178px; }
@@ -2368,21 +2702,47 @@
   .time-guide { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
   .guide-line { position: absolute; width: 0; border-left: 1px solid color-mix(in srgb, var(--accent) 75%, transparent); }
   .guide-reading { position: absolute; transform: translateX(-50%); padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); border-radius: 999px; background: var(--bg-1); color: var(--text-1); font: 600 10px var(--font-mono); white-space: nowrap; box-shadow: var(--shadow-1); }
-  .timeline-list { display: grid; padding-bottom: 5px; }
-  .timeline-list h2 { display: flex; justify-content: space-between; margin: 0; padding: 9px 12px; border-top: 1px solid var(--border); background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); }
-  .timeline-list h2:first-child { border-top: 0; }
-  .timeline-list h2 span { color: var(--text-3); font-weight: 400; }
-  .timeline-list > button { display: grid; grid-template-columns: auto minmax(180px, 1fr) minmax(190px, auto) auto; align-items: center; gap: 10px; margin: 5px 7px 0; padding: 8px; border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text-2); text-align: left; cursor: pointer; }
-  .timeline-list > button:hover { background: var(--bg-2); }
-  .timeline-list > button.chosen { border-color: var(--accent); background: var(--accent-soft); }
-  .timeline-list > button.against { border-color: var(--text-3); border-style: dashed; }
-  .list-copy, .list-date { min-width: 0; display: grid; }
-  .list-copy strong, .list-copy small, .list-date strong, .list-date code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .list-copy strong { color: var(--text-1); font-size: var(--fs-sm); }
-  .list-copy small { color: var(--text-3); font-size: 10px; text-transform: capitalize; }
-  .list-date { justify-items: end; }
-  .list-date strong { font-size: var(--fs-xs); font-weight: 500; }
-  .list-date code { color: var(--text-3); font-size: 9px; }
+  /* The list under the axis: one row per dated entry of the window, grouped by month
+     on the axis's clock, with what each is about, where, on what, and what it still
+     waits for. */
+  .reading-pane { min-height: 0; overflow: auto; }
+  .timeline-list { display: grid; }
+  .list-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
+  .list-head strong { font-size: var(--fs-xs); }
+  .list-head small { color: var(--text-3); font-size: 10px; }
+  .copy-menu { position: relative; margin-left: auto; }
+  .copy-options { position: absolute; z-index: 40; top: calc(100% + 4px); right: 0; display: grid; min-width: 170px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2); }
+  .copy-options button { padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+  .copy-options button:hover { background: var(--bg-3); color: var(--text-1); }
+  .list-grid { display: grid; padding-bottom: 5px; }
+  .list-row { display: grid; grid-template-columns: 150px minmax(200px, 3fr) minmax(70px, 1.1fr) minmax(60px, .9fr) minmax(70px, 1.1fr) minmax(90px, auto); align-items: center; gap: 10px; padding: 6px 12px; }
+  .list-row.headings { padding-block: 5px; color: var(--text-3); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+  .list-row.month { display: block; padding: 7px 12px; border-top: 1px solid var(--border); background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); font-weight: 650; }
+  .list-row.month small { margin-left: 8px; color: var(--text-3); font-weight: 400; }
+  .list-row.entry { margin: 2px 6px 0; border: 1px solid transparent; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
+  .list-row.entry:hover, .list-row.entry.lit { background: var(--bg-2); }
+  .list-row.entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .list-row.entry.chosen { border-color: var(--accent); background: var(--accent-soft); }
+  .list-row.entry.against { border-color: var(--text-3); border-style: dashed; }
+  .list-date, .list-links { min-width: 0; overflow: hidden; font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+  .list-date { color: var(--text-1); font-variant-numeric: tabular-nums; }
+  .list-links { color: var(--text-3); }
+  .list-copy { min-width: 0; display: flex; align-items: center; gap: 7px; }
+  .list-copy strong { min-width: 0; overflow: hidden; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .list-flags { display: flex; gap: 4px; justify-content: flex-end; }
+  .list-flags em { padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-3); font-size: 9px; font-style: normal; white-space: nowrap; }
+  .list-flags em.suggested { border-style: dashed; color: var(--text-2); }
+  .list-flags em.assessed { border-color: transparent; background: var(--bg-3); color: var(--text-2); }
+  .list-flags em.refuted { text-decoration: line-through; }
+  .list-empty { margin: 0; padding: 14px 12px; color: var(--text-3); font-size: var(--fs-xs); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* The mark and the row of the entry under the pointer light each other. */
+  .timeline-event.lit .event-shape { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .timeline-event.lit .event-caption { color: var(--accent); }
+  .split { position: relative; height: 12px; cursor: row-resize; touch-action: none; }
+  .split::before { content: ''; position: absolute; top: 4px; left: calc(50% - 22px); width: 44px; height: 4px; border-radius: 2px; background: var(--border-strong); }
+  .split:hover::before, .split:focus-visible::before { background: var(--accent); }
+  .split:focus-visible { outline: none; }
   .overview-card { display: grid; grid-template-columns: var(--gutter) minmax(500px, 1fr); min-height: 92px; margin-bottom: 12px; }
   .overview-title { display: grid; align-content: center; gap: 2px; padding: 10px 12px; border-right: 1px solid var(--border); }
   .overview-title > span { font-size: var(--fs-xs); font-weight: 700; }
@@ -2437,6 +2797,7 @@
   .blank-state { height: 100%; min-height: 340px; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--text-3); text-align: center; }
   .blank-state h2 { margin: 0; color: var(--text-1); font-size: var(--fs-md); font-weight: 600; }
   .blank-state p { max-width: 360px; margin: 0 0 6px; }
+  .text-button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   .inspector { min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: color-mix(in srgb, var(--bg-1) 97%, transparent); }
   .inspector > header { display: flex; align-items: center; gap: 7px; min-height: 45px; padding: 0 13px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
   .inspector > header button { display: grid; margin-left: auto; padding: 4px; border: 0; background: none; color: var(--text-3); cursor: pointer; }
@@ -2516,7 +2877,7 @@
     .timeline-grid { position: relative; grid-template-columns: minmax(0, 1fr); }
     .inspector { position: absolute; z-index: 30; right: 0; bottom: 0; top: 0; width: min(310px, 88vw); box-shadow: -12px 0 32px color-mix(in srgb, var(--bg-0) 70%, transparent); }
     .inspector.empty { display: none; }
-    .timeline-list > button { grid-template-columns: auto minmax(0, 1fr) auto; }
-    .list-date { grid-column: 2; justify-items: start; }
+    .list-row { grid-template-columns: 110px minmax(0, 1fr) auto; }
+    .list-row .list-links, .list-row.headings > :nth-child(n + 3):not(:last-child) { display: none; }
   }
 </style>

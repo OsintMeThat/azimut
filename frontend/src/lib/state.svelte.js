@@ -274,6 +274,8 @@ export const uiState = $state({
   timelineFocus: null, // { entityId, entityLabel, itemId }
   /** A fact-time range handed back to Timeline. Consumed once, never persisted. */
   timelineRange: null, // { from, to }
+  /** A holding queue the Timeline should open onto, from a count that named it. */
+  timelineQueue: null, // 'undated'
   /** A fact-time range handed to the Satellite map as a temporary event layer. */
   mapTimelineRange: null, // { from, to }
   /**
@@ -585,6 +587,7 @@ function clearCaseHandoffs() {
   uiState.openGraphEntity = null;
   uiState.timelineFocus = null;
   uiState.timelineRange = null;
+  uiState.timelineQueue = null;
   uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.lookAt = null;

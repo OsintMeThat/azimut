@@ -96,7 +96,9 @@
   async function load(id) {
     const [counts, dates, newest, lately, points] = await Promise.allSettled([
       api.get(`/api/cases/${id}/catalog/summary`),
-      api.get(`/api/cases/${id}/timeline?limit=1`),
+      // Claims only: the Timeline this lands on opens on them, and a file's dates are
+      // never "waiting for a date".
+      api.get(`/api/cases/${id}/timeline?limit=1&category=statement`),
       api.get(buildCatalogQuery(id, { limit: RECENT, order: '-created' })),
       api.get(buildCatalogQuery(id, { limit: 1, since: weekAgo() })),
       api.get(`/api/cases/${id}/satellite/media`),
@@ -142,9 +144,10 @@
     uiState.tool = 'board';
   }
 
-  /** Hand a waiting row to whichever surface answers it. */
+  /** Hand a waiting row to whichever surface answers it, landed on what it counted. */
   function ask(row) {
     if (row.surface === 'timeline') {
+      uiState.timelineQueue = row.id;
       uiState.tool = 'timeline';
       return;
     }

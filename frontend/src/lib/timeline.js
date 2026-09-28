@@ -393,18 +393,32 @@ export function dateAtRatio(from, to, ratio) {
   return instant ? instant.slice(0, 10) : '';
 }
 
+/** A calendar year on average, for choosing a precision; nothing is dated with it. */
+const YEAR = 365.2425 * DAY;
+
+/**
+ * The date a click or a drag on the axis proposes, as precise as the window can mean.
+ *
+ * A pointer lands on a pixel, and a pixel is worth a few minutes on a day's axis and a
+ * week on a decade's. So the proposal is cut to what the analyst could have been
+ * pointing at: a zoned time under three days, a day up to about a year, a month up to
+ * twelve years, a year beyond. A drag gives the range between two such values, and a
+ * drag too short to be one is a click.
+ */
 export function draftWhen(from, to, startRatio, endRatio) {
   const window = windowMillis(from, to);
   if (!window) return '';
   const low = Math.min(startRatio, endRatio);
   const high = Math.max(startRatio, endRatio);
+  const click = high - low < .004;
   if (window.span <= 3 * DAY) {
     const start = timeAtRatio(from, to, low);
     const end = timeAtRatio(from, to, high);
-    return high - low < .004 ? start : `${start}/${end}`;
+    return click ? start : `${start}/${end}`;
   }
-  const a = dateAtRatio(from, to, low);
-  const b = dateAtRatio(from, to, high);
+  const cut = window.span <= 400 * DAY ? 10 : window.span <= 12 * YEAR ? 7 : 4;
+  const a = timeAtRatio(from, to, low).slice(0, cut);
+  const b = timeAtRatio(from, to, click ? low : high).slice(0, cut);
   if (!a || !b) return '';
   return a === b ? a : `${a}/${b}`;
 }

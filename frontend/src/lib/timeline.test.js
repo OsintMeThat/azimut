@@ -105,6 +105,27 @@ describe('timeline window', () => {
       .toBe('2026-08-11T18:15:00Z/2026-08-11T18:45:00Z');
     expect(draftWhen('2026-08-01', '2026-08-10', .1, .8)).toBe('2026-08-02/2026-08-09');
   });
+
+  it('proposes a date as precise as the window it was pointed at', () => {
+    const at = (from, span) => new Date(Date.parse(from) + span).toISOString();
+    const start = '2026-01-01T00:00:00Z';
+    // three days is still read to the second, a second more is read to the day
+    expect(draftWhen(start, at(start, 3 * DAY), .5, .5)).toBe('2026-01-02T12:00:00Z');
+    expect(draftWhen(start, at(start, 3 * DAY + 1000), .5, .5)).toBe('2026-01-02');
+    // up to four hundred days a day, then a month
+    expect(draftWhen(start, at(start, 400 * DAY), .5, .5)).toBe('2026-07-20');
+    expect(draftWhen(start, at(start, 401 * DAY), .5, .5)).toBe('2026-07');
+    // up to twelve years a month, then a year
+    expect(draftWhen(start, at(start, 12 * 365.2425 * DAY), .5, .5)).toBe('2032-01');
+    expect(draftWhen(start, at(start, 13 * 365.2425 * DAY), .5, .5)).toBe('2032');
+    // a drag gives a range at the same precision, and one inside a single period is it
+    expect(draftWhen(start, at(start, 2 * 365 * DAY), .1, .6)).toBe('2026-03/2027-03');
+    expect(draftWhen(start, at(start, 40 * 365.2425 * DAY), .1, .6)).toBe('2029/2049');
+    expect(draftWhen(start, at(start, 2 * 365 * DAY), .5, .505)).toBe('2027-01');
+    for (const value of ['2032-01', '2032', '2026-03/2027-03', '2029/2049']) {
+      expect(validateTemporalValue(value).valid, value).toBe(true);
+    }
+  });
 });
 
 describe('temporal reading', () => {

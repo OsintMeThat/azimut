@@ -66,11 +66,12 @@ before; **Guide** is for somebody who has not.
 - **What is waiting is the Board's own standing questions, priced.** *To review*,
   *Nothing linked yet* and *Unfiled* are the same three terms the `+ Filter` menu
   offers, worded once in `lib/entityFilter.js`; the fourth is the Timeline's undated
-  count. They are drawn as four tiles, two by two, each one line — number, then what it
+  count of Claims. They are drawn as four tiles, two by two, each one line — number, then what it
   counts — with the sentence saying what that means on the pointer. Pressing one hands
   the **question** to the surface that answers it,
   through the slot Board and Graph already share, so the table lands on exactly the rows
-  the number counted and the two can never disagree.
+  the number counted and the two can never disagree. *No date yet* opens the Timeline
+  on its `Undated` queue, unfolded and scrolled to, with its first entry focused.
 - **A count of nothing stops being a control.** It is dimmed and says zero rather than
   offering a press that lands on an empty table to confirm what the page already said.
   With all four at zero the tiles give way to one line, and that line is about the four
@@ -1058,13 +1059,32 @@ contains missing dates; a separate `Not on UTC axis` list keeps local timestamps
 invalid legacy values visible without inventing a timezone. The date a fact entered
 Azimut never masquerades as the date of the fact.
 
-Overview stays above Plot or List, so expanding a dense track never pushes the global
-navigator below the chronology. A track holds six rows of marks; past that, marks
+Overview stays above the chronology, so expanding a dense track never pushes the global
+navigator out of view. A track holds six rows of marks; past that, marks
 become a `+N` under their column that expands the track in place, and **Collapse** in
-that track's left label restores the bounded view and its `+N`. Plot and List are
-two readings of the same loaded page.
+that track's left label restores the bounded view and its `+N`.
 
-The Timeline opens with **Events** and **Media** tracks. **Track** adds editable
+**The axis and the list are one reading**, stacked: the axis on top with its ruler
+pinned while its tracks scroll, a bar to drag between the two, and the list of the
+window's dated entries underneath, grouped by month on the axis's clock. A row gives the
+date as written, the statement, its subjects, places and sources, and in words what it
+still waits for: `suggested`, `refuted`, and for a Claim `no source` and `not assessed`.
+The entry under the pointer lights both its mark and its row, picking a mark brings its
+row into the list without moving the axis, and a row opens with Enter and walks with the
+arrow keys. **Plot** and **List** say which of the two gets the room, and that is what a
+saved view's mode now means; dragging the bar moves it for the moment without rewriting
+the view. **Copy** puts the whole window on the clipboard, every page of every track up
+to 5,000 entries, as a Markdown table with its provenance quoted above it or as the
+tab-separated block a spreadsheet reads back as columns (`date_as_written`,
+`earliest_utc`, `latest_utc`, `statement`, `subjects`, `places`, `sources`,
+`confidence`, `status`). A frozen view copies what it froze.
+
+The Timeline opens on **Events**, the dates the analyst stated: Claims, including a
+proof's date and a kept Detect pin. A file's own dates are facts about the file, and
+opened beside the analyst's they buried them, so **Media** is one preset away; a saved
+view that holds it keeps it, and a row handed over from a file's Time tab or its mark on
+the map adds it first. With nothing stated, the empty axis says how many dates the files
+carry, and **Show them** adds the track. **Track** adds editable
 presets for Events, Person, Place, Media, Sources and Case activity, using labels from
 the entity registry. **Custom** opens the shared Search+ builder, then states whether
 that question matches the entry itself, its subject, place, evidence, or any of those
@@ -1097,8 +1117,10 @@ through Trash, restored and carried in a complete case bundle.
 
 A track that includes Claims can create them; Media-only and Case activity
 tracks cannot. Clicking empty space creates a point; dragging creates a bounded range.
-At day scale and below these are zoned timestamps and time ranges, so hours can be
-created, moved and resized directly. Date-only Claims support the same confirmed move,
+The date proposed is as precise as the window it was pointed at: a zoned timestamp on
+a window up to three days, a day up to 400 days, a month up to twelve years and a year
+beyond, so hours can be created, moved and resized directly on a short window and a
+click on a decade does not claim a day. Date-only Claims support the same confirmed move,
 and intervals expose both resize edges. Every direct write shows the old and new
 values before saving.
 
