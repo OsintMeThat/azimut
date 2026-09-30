@@ -14,6 +14,10 @@
     value = '',
     /** Where the claim happened, for a time typed as the local time there (D33). */
     places = [],
+    /** The zone the value was stated in (`when_zone`), and where a change to it goes.
+     *  Without the callback the editor has no zone row, as a bare field. */
+    dayZone = null,
+    ondayzonechange = null,
     onchange,
     onvaliditychange,
   } = $props();
@@ -24,13 +28,30 @@
   // Unknown: a stored time is never rewritten because the editor was opened.
   let chosen = $state(false);
   let typed = $state(false);
+  let dayChosen = $state(false);
   let zones = $state({ zones: [], only: null });
+  // The places' zones, and the stated one when no place gives it: a Claim a proof
+  // dated carries its point's zone without being tied to a place entity.
+  const zoneChoices = $derived(
+    dayZone && !zones.zones.some((entry) => entry.zone === dayZone)
+      ? [...zones.zones, { zone: dayZone, place: '' }]
+      : zones.zones,
+  );
+  const DATE_SHAPED = /^\d{4}(-\d{2}(-\d{2})?)?[~?%]?(\/\d{4}(-\d{2}(-\d{2})?)?[~?%]?)?$/;
 
   $effect(() => {
     const held = places.map((entry) => ({ type: entry.type, label: entry.label, attrs: entry.attrs }));
     let live = true;
     zonesOf(held).then((found) => { if (live) zones = found; });
     return () => { live = false; };
+  });
+
+  // A day typed here for a Claim tied to one zone is that place's day, the same
+  // default a typed time gets below; a stored day is never re-read by opening it.
+  $effect(() => {
+    const only = zones.only;
+    if (!ondayzonechange || !only || dayChosen || !typed || !DATE_SHAPED.test(rawValue)) return;
+    if (dayZone !== only.zone) ondayzonechange(only.zone);
   });
 
   $effect(() => {
@@ -42,18 +63,25 @@
   });
   // A place taken off the claim takes its clock with it, unless it was chosen.
   $effect(() => {
-    if (state.zone === 'place' && !chosen && !zones.zones.some((entry) => entry.zone === state.placeZone)) {
+    if (state.zone === 'place' && !chosen && !zoneChoices.some((entry) => entry.zone === state.placeZone)) {
       emit({ zone: 'local', placeZone: '' });
     }
   });
-  const placeName = $derived(zones.zones.find((entry) => entry.zone === state.placeZone)?.place ?? '');
+  const placeName = $derived(zoneChoices.find((entry) => entry.zone === state.placeZone)?.place ?? '');
   const rawValue = $derived(writeTemporalInput(state));
-  const reading = $derived(formatTemporalValue(rawValue));
+  const reading = $derived(
+    formatTemporalValue(rawValue, DATE_SHAPED.test(rawValue) || state.zone === 'place' ? dayZone : null),
+  );
 
   $effect(() => {
     const incoming = value ?? '';
     if (incoming !== sent) {
       state = readTemporalInput(incoming);
+      // A local time stated in a zone opens on that zone's clock rather than as
+      // Unknown. Nothing is written until the analyst edits it.
+      if (state.mode === 'timestamp' && state.zone === 'local' && dayZone) {
+        state = { ...state, zone: 'place', placeZone: dayZone };
+      }
       sent = incoming;
       onvaliditychange?.(formatTemporalValue(incoming));
     }
@@ -126,7 +154,7 @@
           max={state.precision === 'year' ? 9998 : undefined}
           placeholder={state.precision === 'year' ? 'YYYY' : 'Unknown'}
           value={state.date}
-          oninput={(event) => emit({ date: event.currentTarget.value })}
+          oninput={(event) => { typed = true; emit({ date: event.currentTarget.value }); }}
         />
       </label>
       <label class="field certainty-field">
@@ -173,8 +201,8 @@
           <option value="local">Unknown</option>
           <option value="utc">UTC</option>
           <option value="offset">UTC offset</option>
-          {#each zones.zones as entry (entry.zone)}
-            <option value={`place:${entry.zone}`}>Local at {entry.place}</option>
+          {#each zoneChoices as entry (entry.zone)}
+            <option value={`place:${entry.zone}`}>{entry.place ? `Local at ${entry.place}` : `Local, ${entry.zone}`}</option>
           {/each}
         </select>
       </label>
@@ -204,7 +232,7 @@
           aria-label="Start date"
           type="date"
           value={state.start}
-          oninput={(event) => emit({ start: event.currentTarget.value })}
+          oninput={(event) => { typed = true; emit({ start: event.currentTarget.value }); }}
         />
       </label>
       <label class="field">
@@ -214,7 +242,7 @@
           aria-label="End date"
           type="date"
           value={state.end}
-          oninput={(event) => emit({ end: event.currentTarget.value })}
+          oninput={(event) => { typed = true; emit({ end: event.currentTarget.value }); }}
         />
       </label>
     </div>
@@ -317,6 +345,24 @@
     </div>
   {/if}
 
+  <!-- Which day a date is: a day has no hour to carry an offset, so the zone is
+       stated beside it. Unstated, it spans UTC's day, and the row says so. -->
+  {#if ondayzonechange && DATE_SHAPED.test(rawValue)}
+    <label class="field day-zone-field">
+      <span>Day in</span>
+      <select
+        class="select input-sm zone day-zone"
+        aria-label="Day in"
+        value={dayZone ?? ''}
+        onchange={(event) => { dayChosen = true; ondayzonechange(event.currentTarget.value || null); }}
+      >
+        <option value="">UTC (not stated)</option>
+        {#each zoneChoices as entry (entry.zone)}
+          <option value={entry.zone}>{entry.place ? `Local at ${entry.place} (${entry.zone})` : entry.zone}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
   {#if rawValue}
     <div class="temporal-preview" class:error={!reading.valid} aria-live="polite">
       <span>{reading.valid ? reading.label : reading.error}</span>
@@ -346,6 +392,7 @@
   .format-line { display: flex; align-items: end; gap: 10px; min-width: 0; }
   .format-hint { padding-bottom: 5px; color: var(--text-3); font-size: var(--fs-xs); }
   .format-field { justify-self: start; }
+  .day-zone-field { justify-self: start; }
   .format, .precision, .zone { width: max-content; max-width: 100%; }
   .date-value, .datetime-value, .certainty, .advanced { width: 100%; }
   .offset { width: 90px; }

@@ -219,3 +219,24 @@ describe('Post Composer — the sentence the proof carries', () => {
     expect(source).toContain("if (blank && spec.description?.trim()) description = spec.description.trim();");
   });
 });
+
+describe('the date a proof states', () => {
+  it('shows a Date field only when the template holds #date', () => {
+    const field = source.slice(source.indexOf("{#if templateUsesPostField(body, 'date')}"));
+    expect(field).toContain('id="pc-date"');
+    expect(field).toContain('This proof has no date. Leave it empty and the line drops.');
+  });
+
+  it('reads it from the proof with the clock it was stated on', () => {
+    expect(source).toContain('date = postDate(spec.when, spec.whenZoneStated ?? spec.whenZone);');
+    expect(source).toContain('date = postDate(p.when, p.whenZone);');
+  });
+
+  it('keeps it with the draft and clears it with a fresh one', () => {
+    const snap = source.slice(source.indexOf('function snapshot()'), source.indexOf('function snapshot()') + 400);
+    expect(snap).toContain('date,');
+    expect(source).toContain("date = typeof s.date === 'string' ? s.date : '';");
+    const reset = source.slice(source.indexOf('function resetDraft()'));
+    expect(reset.slice(0, reset.indexOf('}\n'))).toContain("date = '';");
+  });
+});

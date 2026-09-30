@@ -34,4 +34,8 @@ describe('Timeline track editor', () => {
     expect(source).toContain("collected_only: categories.has('media') && collectedOnly,");
     expect(source).toContain('collectedOnly = track?.query?.collected_only === true;');
   });
+
+  it('keeps a file lane drawing its files through an edit', () => {
+    expect(source).toContain('as_files: track?.query?.as_files,');
+  });
 });

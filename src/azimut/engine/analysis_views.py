@@ -137,6 +137,10 @@ def _clean_track(value: Any, index: int) -> dict[str, Any]:
             # Written only when set, so a track saved before the switch reads back
             # exactly as it was stored.
             **({"collected_only": True} if query.get("collected_only") is True else {}),
+            # A lane that draws each event as the file it dates: the sources' files
+            # (the Media track) or the imagery the app made (the Imagery track).
+            **({"as_files": query["as_files"]}
+               if query.get("as_files") in {"sources", "imagery"} else {}),
         },
         "collapsed": bool(value.get("collapsed")),
         "hidden": _string_list(value.get("hidden"), limit=500),
@@ -148,11 +152,12 @@ _ZONE_NAME = re.compile(r"[A-Za-z0-9+\-_/]{1,64}")
 
 
 def _valid_zone_choice(choice: str) -> bool:
-    """Which clock the axis was read on: UTC, this machine, a saved point, or a zone
-    named outright. The last one has to travel — a view made on `zone:Asia/Tokyo` must
-    not come back on UTC — so the name is kept whether or not the machine reopening it
-    can load the name; the axis asks that when it draws."""
-    if choice in {"utc", "machine"}:
+    """Which clock the axis was read on: the zone of the case's places, UTC, this
+    machine, a saved point, or a zone named outright. The last one has to travel — a
+    view made on `zone:Asia/Tokyo` must not come back on UTC — so the name is kept
+    whether or not the machine reopening it can load the name; the axis asks that when
+    it draws. `case` is found again from the places wherever the view is opened."""
+    if choice in {"utc", "case", "machine"}:
         return True
     if choice.startswith("place:"):
         rest = choice.removeprefix("place:")
@@ -480,6 +485,7 @@ def _clean_snapshot(value: Any) -> dict[str, Any]:
             "uncertain": bool(item.get("uncertain")),
             "approximate": bool(item.get("approximate")),
             "zone": _short(item.get("zone"), 24) or None,
+            "tz": _short(item.get("tz"), 64) or None,
             "sortable": bool(item.get("sortable")),
             "status": _short(item.get("status"), 24) or None,
             "confidence": _short(item.get("confidence"), 24) or None,

@@ -21,6 +21,7 @@ import {
   formatSpan,
   formatSpanRange,
   formatTemporalValue,
+  temporalZoneWords,
   initialWindow,
   UTC,
   inputWindowValue,
@@ -97,6 +98,8 @@ describe('timeline window', () => {
 
   it('creates exact timestamps when the visible window is close enough', () => {
     expect(dateAtRatio('2026-08-01', '2026-08-10', 0)).toBe('2026-08-01');
+    // 23:00 UTC on the 1st is already the 2nd in Kyiv.
+    expect(dateAtRatio('2026-08-01T23:00:00Z', '2026-08-02T01:00:00Z', 0, 'Europe/Kyiv')).toBe('2026-08-02');
     expect(timeAtRatio('2026-06-23T00:00:00Z', '2026-06-24T00:00:00Z', .39999997))
       .toBe('2026-06-23T09:36:00Z');
     expect(draftWhen('2026-08-11T18:00:00Z', '2026-08-11T19:00:00Z', .5, .5))
@@ -137,6 +140,28 @@ describe('temporal reading', () => {
       .toBe('11 Aug 2026, 18:40:00 UTC+02:00');
     expect(formatTemporalValue('2026-08-11/2026-08-14').label)
       .toBe('11 Aug 2026 to 14 Aug 2026');
+  });
+
+  it('reads a camera clock to the millisecond at most, and not at all when it is zeros', () => {
+    expect(formatTemporalValue('2023-06-22T17:07:16.000000Z').label).toBe('22 Jun 2023, 17:07:16 UTC');
+    expect(formatTemporalValue('2023-06-22T17:07:16.250000Z').label).toBe('22 Jun 2023, 17:07:16.250 UTC');
+    expect(formatTemporalValue('2023-06-22T17:07:16.1Z').label).toBe('22 Jun 2023, 17:07:16.1 UTC');
+  });
+
+  it('names the zone a value was stated in, and says when none was', () => {
+    expect(formatTemporalValue('2024-03-12', 'Europe/Kyiv').label).toBe('12 Mar 2024 (Europe/Kyiv)');
+    expect(formatTemporalValue('2024-03-12/2024-03-14', 'Asia/Tokyo').label)
+      .toBe('12 Mar 2024 to 14 Mar 2024 (Asia/Tokyo)');
+    expect(formatTemporalValue('2024-07-12T14:30:00', 'Europe/Kyiv').label)
+      .toBe('12 Jul 2024, 14:30:00 Europe/Kyiv');
+    expect(formatTemporalValue('2024-07-12T14:30:00').label).toBe('12 Jul 2024, 14:30:00 local time');
+    // A time that says where it stands keeps its own offset.
+    expect(formatTemporalValue('2024-07-12T14:30:00Z', 'Europe/Kyiv').label).toBe('12 Jul 2024, 14:30:00 UTC');
+
+    expect(temporalZoneWords({ zone: 'date-only', tz: 'Europe/Kyiv' })).toBe('Europe/Kyiv');
+    expect(temporalZoneWords({ zone: 'date-only' })).toBe('Not stated, read as UTC days');
+    expect(temporalZoneWords({ zone: 'local' })).toBe('Not stated');
+    expect(temporalZoneWords({})).toBe('Not set');
   });
 
   it('validates the same supported families before save', () => {

@@ -827,6 +827,27 @@ def test_display_prefs_default_and_round_trip(client):
     assert reloaded["post_target"] == "bluesky"
 
 
+def test_post_template_default_is_none_and_round_trips(client):
+    assert client.get("/api/settings").json()["post_template"] == ""
+
+    saved = client.put("/api/settings/prefs", json={"post_template": "tpl_1-A"})
+    assert saved.json()["post_template"] == "tpl_1-A"
+    assert client.get("/api/settings").json()["post_template"] == "tpl_1-A"
+    # a PUT about something else leaves it as it was
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["post_template"] == "tpl_1-A"
+    # the empty string is how the analyst goes back to the classic layout
+    assert client.put("/api/settings/prefs", json={"post_template": ""}).json()["post_template"] == ""
+
+
+def test_post_template_rejects_anything_that_is_not_an_id(client):
+    client.put("/api/settings/prefs", json={"post_template": "keep"})
+    for bad in ("../x", "has space", "a" * 65, "tpl/1", "é"):
+        res = client.put("/api/settings/prefs", json={"post_template": bad})
+        assert res.status_code == 422, bad
+    assert client.get("/api/settings").json()["post_template"] == "keep"
+
+
 def test_extension_hand_off_switches_default_on_and_round_trip(client):
     """Both are on out of the box, because with no extension installed neither
     changes anything: Publish opens the intent page and a Reverse Search button

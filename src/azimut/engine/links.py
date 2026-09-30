@@ -84,7 +84,13 @@ MADE_HERE: tuple[str, ...] = ("inspect",)
 #: grabbed on purpose, filed as a capture — so it is held back with them, and so is the
 #: image a saved Compare session renders of two such views. What stays out
 #: is material that came from outside: an upload, a paste, a download.
-PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, "satellite", "screenshot", "compare")
+#:
+#: Of those, the routes that picture the ground from above (the capture, the map
+#: screenshot, the Compare render and the picture Detect keeps under that name) are
+#: imagery rather than footage: the Timeline draws the files they made on a lane of
+#: their own, apart from the sources' pictures and videos and what Inspect cut from them.
+FROM_ABOVE: tuple[str, ...] = ("satellite", "screenshot", "compare")
+PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE)
 
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an

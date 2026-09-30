@@ -29,6 +29,7 @@ from .. import config
 from ..engine import artifacts as artifact_engine
 from ..engine import exportdir
 from ..engine import links as link_engine
+from ..engine import localtime
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
@@ -112,7 +113,35 @@ def _write_spec(path: Path, spec: dict[str, Any]) -> None:
 _STATED_TEXT_MAX = 2000
 
 
-def _stated_when(spec: dict[str, Any]) -> str:
+def _chosen_zone(spec: dict[str, Any]) -> str | None:
+    """The zone the analyst picked for the proof's date, or None for *at the point*."""
+    raw = spec.get("whenZone")
+    if raw in (None, ""):
+        return None
+    if not temporal.valid_zone(raw):
+        raise HTTPException(status_code=422, detail="unknown time zone")
+    return str(raw)
+
+
+def _point_zone(spec: dict[str, Any]) -> str | None:
+    """The zone of the proof's first point, the one every single-answer surface reads.
+
+    A date read off footage is read on the clock of the place it shows, so that is
+    where the day begins. No point, no zone: the date then spans UTC's day, as a
+    date stated before zones existed always has.
+    """
+    points = satellite_engine.spec_points(spec)
+    if not points:
+        return None
+    return localtime.zone_for(float(points[0]["lat"]), float(points[0]["lon"]))
+
+
+def _stated_zone(spec: dict[str, Any]) -> str | None:
+    """The zone the proof's date is read in: the analyst's pick, else its point's."""
+    return _chosen_zone(spec) or _point_zone(spec)
+
+
+def _stated_when(spec: dict[str, Any], zone: str | None = None) -> str:
     """The date the proof states, checked against the profile the case stores.
 
     Refused here rather than stored and puzzled over later: a value the temporal
@@ -128,7 +157,7 @@ def _stated_when(spec: dict[str, Any]) -> str:
     if not value:
         return ""
     try:
-        temporal.parse_temporal(value)
+        temporal.parse_temporal(value, tz=zone)
     except temporal.TemporalError as exc:
         raise HTTPException(status_code=422, detail=f"unsupported date: {exc}") from exc
     return value
@@ -311,6 +340,19 @@ def load_proof(case_id: str, name: str) -> dict[str, Any]:
             if attr in attrs:
                 stated = attrs[attr]
                 opened[key] = (stated.strip() or None) if isinstance(stated, str) else None
+        # The zone too, but only where it says something the spec does not: the
+        # composer leaves it at *the point's* by default, and a zone the case holds
+        # that the point would give anyway is that default, not a pick. One set in
+        # Details that differs from it is the analyst's, and opens as their choice.
+        held = attrs.get("when_zone")
+        implied = _chosen_zone(opened) or _point_zone(opened)
+        if isinstance(held, str) and held and held != implied and temporal.valid_zone(held):
+            opened["whenZone"] = held
+        # What the date is read in, whichever way it was chosen, for the reader that
+        # only shows it (a post naming the offset).
+        opened["whenZoneStated"] = (held if isinstance(held, str) and held else None) or (
+            implied if opened.get("when") else None
+        )
         return opened
     return spec
 
@@ -373,7 +415,10 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     incoming = _decode_assets(body.assets)
     # Read up front for the same reason: a date outside the profile is refused
     # before the rename below moves this proof's export and its pasted images.
-    when = _stated_when(body.spec)
+    zone = _stated_zone(body.spec)
+    when = _stated_when(body.spec, zone)
+    # A zone only means something beside the date it reads.
+    when_zone = zone if when else None
     description = _stated_description(body.spec)
     # The export too, and for a stronger reason — the rename below deletes the
     # old PNG and moves the assets folder, so a payload refused after that point
@@ -427,6 +472,9 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     spec["azimut_proof"] = 1
     spec["title"] = name
     spec["when"] = when or None
+    # The pick, not the answer: left empty, the zone follows the point each save.
+    spec["whenZone"] = _chosen_zone(body.spec)
+    spec.pop("whenZoneStated", None)
     spec["description"] = description or None
     previous = case.resolve_inside(layout.proof_spec_rel(name if recased else old or name))
     spec.setdefault("created_at", read_created_at(previous) or _now())
@@ -466,6 +514,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         # since clearing the field is the analyst taking the statement back.
         if existing["attrs"].get("when", "") != when:
             attrs["when"] = when
+        if existing["attrs"].get("when_zone") != when_zone:
+            attrs["when_zone"] = when_zone
         if existing["attrs"].get("notes", "") != description:
             attrs["notes"] = description
         if attrs:
@@ -481,6 +531,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
                 **({"path": png_rel} if png_rel else {}),
                 **({"thumb": thumb_rel} if thumb_rel else {}),
                 **({"when": when} if when else {}),
+                **({"when_zone": when_zone} if when_zone else {}),
                 **({"notes": description} if description else {}),
             },
             by="proof-composer",
@@ -517,6 +568,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         rel=rel,
         old_rel=old_rel,
         when=when,
+        when_zone=when_zone,
         spec=spec,
     )
 
@@ -528,6 +580,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         "thumb": thumb_rel,
         "spec_path": rel,
         "place": place,
+        # The zone the date was read in, so a post handed this proof names its clock.
+        "when_zone": when_zone,
         # The files this save stated the date for, so the composer can say so. A
         # save that writes into the graph announces it; it just does not ask.
         "dated": dated,
@@ -544,7 +598,7 @@ _STATED_BY = "proof"
 #: What the statement holds when nothing but this save has touched it. A Claim that
 #: has grown reasoning, a quote or a confidence is the analyst's own work by then,
 #: and clearing a date in the composer must not delete it.
-_OURS = {"when", "time_role", _STATED_BY}
+_OURS = {"when", "when_zone", "time_role", _STATED_BY}
 
 
 def _source_material(case: Case, spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -600,6 +654,7 @@ def _date_the_material(
     old_rel: str | None,
     when: str,
     spec: dict[str, Any],
+    when_zone: str | None = None,
 ) -> list[str]:
     """State the proof's date for the footage it rests on, and answer with what it hit.
 
@@ -640,6 +695,9 @@ def _date_the_material(
                 if key not in _OURS
             },
             "when": when,
+            # Read on the same clock the proof states it on, so the footage's day
+            # is the day of the place it shows.
+            **({"when_zone": when_zone} if when_zone else {}),
             # What the file shows, as read by whoever composed the proof. The same
             # role the Timeline's own "this media was captured" correction uses.
             "time_role": "observed",

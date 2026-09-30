@@ -110,6 +110,7 @@ const settings = {
   home_view: { lat: 48.8584, lon: 2.2945, zoom: 16 },
   post_mention: '@GeoConfirmed',
   post_target: 'x',
+  post_template: '',
   signature_handle: '',
   signature: false,
   export_dirs: { notes: '', media: '', proofs: '' },
@@ -919,8 +920,17 @@ export async function installAppFixture(page, options = {}) {
       thumb: entity?.thumb ?? entity?.attrs?.thumb ?? null,
     };
   };
+  /** The server's file lanes: a source's picture or video, or what the app pictured
+   *  from above (a capture, or a file whose `origin` is one of those routes). */
+  const fromAbove = (entry) => entry.type === 'capture'
+    || ['satellite', 'screenshot', 'compare'].includes(timelineEntity(entry.id)?.origin?.type);
+  const laneFile = (item, lane) => [...item.subject_entities, ...item.source_entities]
+    .find((entry) => ['media', 'capture'].includes(entry.type) && fromAbove(entry) === (lane === 'imagery'))
+    ?? null;
   const timelineMatchesTrack = (item, track = {}) => {
     if ((track.hidden ?? []).includes(item.id)) return false;
+    if (['sources', 'imagery'].includes(track.as_files)
+      && (item.category !== 'statement' || !laneFile(item, track.as_files))) return false;
     const roles = Array.isArray(track.roles) ? track.roles : [];
     if (roles.length && !roles.includes(item.time_role ?? 'unset')) return false;
     const terms = track.terms && typeof track.terms === 'object' ? track.terms : {};
@@ -1404,8 +1414,14 @@ export async function installAppFixture(page, options = {}) {
         held.categories[item.category] = (held.categories[item.category] ?? 0) + 1;
         bucketCounts.set(key, held);
       }
+      const lane = ['sources', 'imagery'].includes(track.as_files) ? track.as_files : null;
       return json(route, {
-        items: visible,
+        items: lane
+          ? visible.map((item) => {
+            const file = laneFile(item, lane);
+            return { ...item, file: { id: file.id, label: file.label, type: file.type } };
+          })
+          : visible,
         next_cursor: null,
         total: visible.length,
         undated: base.filter((item) => !item.earliest && !item.raw).length,

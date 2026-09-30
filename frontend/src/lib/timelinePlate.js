@@ -262,7 +262,7 @@ export function timelineDrawing({
           parts.push(svgText(fitLabel(item.label, item.card.width - 16), {
             x: plotLeft + item.card.left + 8, y: cardY + 16, size: geometry.labelSize, weight: '600', fill: ink,
           }));
-          parts.push(svgText(fitLabel(formatTemporalValue(item.raw).label, item.card.width - 16), {
+          parts.push(svgText(fitLabel(formatTemporalValue(item.raw, item.tz).label, item.card.width - 16), {
             x: plotLeft + item.card.left + 8, y: cardY + 30, size: 9, fill: PLATE_COLOURS.hint,
           }));
         }
@@ -301,7 +301,7 @@ export function timelineDrawing({
     const statement = width - geometry.right - (8 + geometry.listDate) - geometry.names;
     for (const { item, track } of rows) {
       bottom += geometry.listRow;
-      parts.push(svgText(fitLabel(formatTemporalValue(item.raw).label, geometry.listDate - 10), {
+      parts.push(svgText(fitLabel(formatTemporalValue(item.raw, item.tz).label, geometry.listDate - 10), {
         x: 8, y: bottom, size: 9, fill: PLATE_COLOURS.label,
       }));
       parts.push(svgText(fitLabel(item.label, statement), {

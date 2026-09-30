@@ -258,7 +258,8 @@ def test_export_snapshots_kept_candidates_with_pass_categories_and_replaces_a_pa
 
 
 def test_detect_preferences_round_trip_through_settings_backup(client):
-    choice = {"collapsed": True, "basemap": "osm", "overlays": ["roads"], "saved": False}
+    choice = {"collapsed": True, "basemap": "osm", "overlays": ["roads"], "saved": False,
+              "width": 480}
     assert client.put("/api/settings/prefs", json={"detect_view": choice}).status_code == 200
     backup = client.get("/api/settings/export").json()
     client.put("/api/settings/prefs", json={"detect_view": {}})

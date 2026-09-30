@@ -70,8 +70,17 @@ def test_the_fixture_holds_what_the_rework_has_to_keep(client):
     assert any("media" in t["categories"] for t in tracks)
     assert any(t["hidden"] for t in tracks) and any(t["pinned"] for t in tracks)
 
-    kinds = {row["kind"] for row in reading["events"]["rows"]}
-    assert {"claim", "taken"} <= kinds, "Claims and a proof date are on the Events track"
+    rows = reading["events"]["rows"]
+    assert any(row["kind"] == "claim" for row in rows), "Claims are on the Events track"
+    # A proof's date is on it once, as the Claim about the footage that cites the proof:
+    # the proof's own row said the same date a second time and is no longer drawn.
+    proof_dates = [row for row in rows if any(s.startswith("proof:") for s in row["sources"])]
+    assert proof_dates, "a proof date is on the Events track"
+    assert not any(
+        row["kind"] == "taken" and row["raw"] == stated["raw"]
+        for row in rows
+        for stated in proof_dates
+    ), "and it is there once"
     assert reading["events"]["undated"] >= 1 and reading["events"]["unplaced"] >= 1
     assert reading["detect_claim"].startswith("claim:")
     assert reading["claims"][reading["detect_claim"].removeprefix("claim:")]["attrs"].get(

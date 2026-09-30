@@ -84,12 +84,14 @@ export function composeClaimStatement({
  * the form did not ask for is never sent, whatever is left in its field.
  */
 export function quickClaimBody({
-  statement, when, confidence, count, condition, about, at, cites, seat, create = [],
+  statement, when, whenZone = null, confidence, count, condition, about, at, cites, seat, create = [],
 }) {
   const whole = Number(count);
   return {
     statement: String(statement ?? '').trim(),
     when: when || null,
+    // The zone a day was stated in rides only with a day: a time carries its offset.
+    ...(when && whenZone ? { when_zone: whenZone } : {}),
     time_role: when ? 'observed' : null,
     confidence: confidence || null,
     count: seat?.count && Number.isInteger(whole) && whole > 0 ? whole : null,

@@ -126,7 +126,7 @@ export const GUIDE = [
           { tool: 'media', text: 'Paste the post URL. The first attempt is made without cookies, and only an "unavailable" answer offers your saved browser session.' },
           { tool: 'inspect', text: 'Step the video frame by frame and capture the stills the argument rests on, then save them to the case as media made here.' },
           { tool: 'board', text: 'Confirm what the import proposed, then link the frames to the place, the account and the people.' },
-          { tool: 'timeline', text: 'Date the claim, and read it in UTC, in your own clock, or in local time at the place itself.' },
+          { tool: 'timeline', text: 'Date the claim; the axis reads it in the local time of the place, UTC one pick away.' },
         ],
       },
       {
@@ -320,15 +320,15 @@ export const GUIDE = [
       },
       {
         label: 'One line notes what happened',
-        text: 'Under the Timeline axis, behind Add event in Details, and from any tool with the pencil in the topbar, what it shows already cited. Type @ to mention a subject, even a new one; only a date you give is used.',
+        text: 'Under the Timeline axis, behind Add event in Details, and from any tool with Add event in the topbar, what it shows already cited. Type @ to mention a subject, even a new one; only a date you give is used.',
       },
       {
-        label: 'Timeline reads in a clock you choose',
-        text: 'UTC, this computer, any zone in the world, or local time at a place the case saved. Undated work is counted apart rather than hidden.',
+        label: 'Timeline reads in the place\'s own time',
+        text: 'It opens on the zone the case\'s places stand in, or UTC when it has none. UTC, this computer, any zone, or a saved place with its daylight is one pick away.',
       },
       {
-        label: 'Timeline opens on the dates you stated',
-        text: 'A point is an instant, a bracket a date known to the day, month or year, a bar a period. The files\' own dates are one track away, and the list under the axis copies out as a table.',
+        label: 'Timeline puts your files where you dated them',
+        text: 'Media draws a video or a picture at the date you gave it, on its proof or in an event about it; Events is every sentence you dated. Imagery and File dates wait under ⋯. A point is an instant, a bracket a date known to the day, month or year, a bar a period.',
       },
       {
         label: 'Sheet works on real CSV files',
@@ -385,6 +385,7 @@ export const GUIDE = [
           { combo: 'Alt+← / →', does: 'moves from a focused entry to the one before or after it on its track' },
           { combo: '↑ / ↓', does: 'walks the rows of the list under the axis' },
           { combo: 'Enter', does: 'opens the focused row in the inspector' },
+          { combo: 'Escape', does: 'closes the menu that is open' },
         ],
       },
       {

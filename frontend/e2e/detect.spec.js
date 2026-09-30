@@ -6,13 +6,14 @@ const recipe = { id: 'change', name: 'Surface change', method: 'surface', phenom
     cleanup: 0, smoothing: 0, merge_metres: 0, index: 'ndvi', direction: 'both' } };
 const area = { id: 'aaaaaaaaaaaa', name: 'North site', colour: '#38bdf8',
   geometry: { type: 'Polygon', coordinates: [[[2.29, 48.855], [2.3, 48.855], [2.3, 48.862], [2.29, 48.862], [2.29, 48.855]]] } };
+const secondArea = { ...area, id: 'eeeeeeeeeeee', name: 'Second site', colour: '#22d3ee' };
 const zone = { id: area.id, name: area.name, kind: 'polygon', points: area.geometry.coordinates[0].slice(0, -1) };
 const source = (date) => ({ provider: 'sentinel2', date, layer: 'TRUE_COLOR', maxcc: 30 });
 const size = (min_area, max_area, cleanup, smoothing, merge_metres) => ({ min_area, max_area, cleanup, smoothing, merge_metres });
 const SIZES = { small: size(300, 0, 0, 0, 0), medium: size(2000, 0, 1, 0, 30), large: size(20000, 0, 1, 1, 100),
   all: size(0, 0, 0, 0, 0) };
 
-async function openDetect(page, withRun = false) {
+async function openDetect(page, withRun = false, withRoutine = false, twoRuns = false, twoAreas = false) {
   await installAppFixture(page);
   const errors = [], calls = [], prefs = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -22,11 +23,18 @@ async function openDetect(page, withRun = false) {
     bbox: [2.29, 48.855, 2.3, 48.862], review: 'new', strength: 'clear', measure: {},
     sources: { a, b }, area: 300 };
   const run = { id: 'bbbbbbbbbbbb', title: 'North site pass', status: 'ready', progress: 1, total: 1,
+    colour: recipe.colour,
     count: 3, created_at: '2026-09-10T12:00:00Z', results: [candidate,
       { ...candidate, id: 'candidate-2', phenomenon: 'A longer candidate name wrapping across several lines in the review panel' },
       { ...candidate, id: 'candidate-3', phenomenon: 'Third candidate' }],
     input: { title: 'North site pass', recipe, zones: [zone], a, b },
     area_runs: [{ area_id: area.id, name: area.name, a, b, status: 'ready' }] };
+  const secondRun = { ...run, id: 'cccccccccccc', title: 'Second site pass', colour: '#22d3ee',
+    input: { ...run.input, title: 'Second site pass', recipe: { ...recipe, colour: '#22d3ee' } },
+    results: [{ ...candidate, id: 'second-candidate' }] };
+  const routine = { ...run.input, id: 'dddddddddddd', title: 'North site routine',
+    date_rule: 'latest_previous' };
+  if (withRoutine) { run.input.followup_id = routine.id; run.followup_id = routine.id; }
   await page.route('**/api/compare/analyzers', (route) => route.fulfill({ json: {
     builtins: [recipe, { ...recipe, id: 'boats', name: 'Vessels', method: 'vessels' }], custom: [],
     methods: [{ id: 'surface', single: false, sizes: SIZES }, { id: 'vessels', single: true, sizes: {} }],
@@ -47,6 +55,15 @@ async function openDetect(page, withRun = false) {
   await page.route('**/api/cases/*/analysis/**', async (route) => {
     const suffix = route.request().url().split('/analysis/')[1];
     const method = route.request().method();
+    if (withRoutine && suffix === `followups/${routine.id}/colour` && method === 'PATCH') {
+      routine.recipe = { ...routine.recipe, ...route.request().postDataJSON() };
+      return route.fulfill({ json: routine });
+    }
+    if (suffix === `runs/${run.id}/colour` && method === 'PATCH') {
+      run.display_colour = route.request().postDataJSON().colour;
+      run.colour = run.display_colour;
+      return route.fulfill({ json: run });
+    }
     if (suffix.endsWith('/preview')) return route.fulfill({ contentType: 'image/svg+xml',
       body: `<svg xmlns="http://www.w3.org/2000/svg" width="${suffix.includes('candidate-2') ? 80 : 600}" height="160"><rect width="100%" height="100%" fill="#30352b"/></svg>` });
     if (method === 'PATCH') {
@@ -62,8 +79,13 @@ async function openDetect(page, withRun = false) {
       return route.fulfill({ json: manual });
     }
     if (method === 'GET') {
-      const data = suffix === 'areas' ? [area] : suffix === 'runs' ? (withRun ? [run] : [])
-        : suffix === `runs/${run.id}` ? run : [];
+      const data = suffix === 'areas' ? (twoAreas ? [area, secondArea] : [area])
+        : suffix === 'runs' ? (withRun ? twoRuns ? [run, secondRun] : [run] : [])
+        : suffix === 'followups' ? (withRoutine ? [{ id: routine.id, title: routine.title,
+          colour: routine.recipe.colour, method: 'surface', areas: 1, zones: [zone],
+          date_rule: routine.date_rule }] : [])
+        : suffix === `followups/${routine.id}` ? routine
+        : suffix === `runs/${run.id}` ? run : suffix === `runs/${secondRun.id}` ? secondRun : [];
       return route.fulfill({ json: data });
     }
     return route.fulfill({ json: {} });
@@ -72,6 +94,118 @@ async function openDetect(page, withRun = false) {
   await awaitMapReady(page);
   return { errors, calls, prefs };
 }
+
+async function typeWhenDay(page, button, field, value) {
+  await page.getByRole('button', { name: button, exact: true }).click();
+  const details = page.locator('.manual-date');
+  if (!await details.evaluate((node) => node.open)) await details.locator('summary').click();
+  await page.getByLabel(field).fill(value);
+}
+
+test('the Saved colour square recolours the routine and its map overlay', async ({ page }) => {
+  const { errors } = await openDetect(page, true, true);
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  const colour = page.getByLabel('Colour of North site routine');
+  await expect(colour).toHaveValue('#f6a81a');
+  await colour.fill('#eab308');
+  await expect(colour).toHaveValue('#eab308');
+  await expect(page.locator('.analysis-overlay > path').first()).toHaveAttribute('stroke', '#eab308');
+  await expect(page.locator('.fold[aria-expanded="true"]')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('a one pass has a compact colour square that recolours its saved overlay', async ({ page }) => {
+  const { errors } = await openDetect(page, true);
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  const colour = page.getByLabel('Colour of North site pass');
+  const swatch = page.locator('.single .colour-control .swatch');
+  expect(Math.round((await swatch.boundingBox()).width)).toBe(8);
+  expect(Math.round((await swatch.boundingBox()).height)).toBe(8);
+  await page.screenshot({ path: test.info().outputPath('detect-saved-colour.png') });
+  await colour.fill('#eab308');
+  await expect(colour).toHaveValue('#eab308');
+  await expect(page.locator('.analysis-overlay > path').first()).toHaveAttribute('stroke', '#eab308');
+  expect(errors).toEqual([]);
+});
+
+test('review isolates one result layer and restores the saved eye states on Back', async ({ page }) => {
+  const { errors } = await openDetect(page, true, false, true);
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  const orange = page.locator('.analysis-overlay > path[stroke="#f6a81a"]');
+  const cyan = page.locator('.analysis-overlay > path[stroke="#22d3ee"]');
+  await expect(orange.first()).toBeVisible();
+  await expect(cyan.first()).toBeVisible();
+  await page.getByRole('button', { name: 'Hide Second site pass on the map' }).click();
+  await expect(cyan).toHaveCount(0);
+  await page.locator('.single .past').filter({ hasText: 'Second site pass' }).click();
+  await expect(cyan.first()).toBeVisible();
+  await expect(orange).toHaveCount(0);
+  await page.locator('.dock-content > header button[aria-label="Back"]').click();
+  await expect(orange.first()).toBeVisible();
+  await expect(cyan).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Show Second site pass on the map' })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('clicking a Detect date opens a calendar of passes and previews the chosen day', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  const now = new Date();
+  const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+  const day = `${month}-15`;
+  const requests = [];
+  await page.route('**/api/satellite/sentinel/acquisitions', (route) => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ json: {
+    dates: [{ date: day, cloud: 8, coverage: 1 }], truncated: false,
+    } });
+  });
+  await page.getByRole('button', { name: 'New detection', exact: true }).click();
+  await page.getByRole('button', { name: 'New one pass', exact: true }).click();
+  await page.getByRole('button', { name: 'North site', exact: true }).click();
+  await page.getByRole('button', { name: 'Next: What' }).click();
+  await page.getByRole('button', { name: 'Next: When' }).click();
+  await page.getByRole('button', { name: 'Date A', exact: true }).click();
+  const calendar = page.getByRole('group', { name: 'A pass calendar' });
+  await expect(calendar).toBeVisible();
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  expect(requests[0].end <= new Date().toISOString().slice(0, 10)).toBe(true);
+  await calendar.getByRole('button', { name: 'Previous month' }).click();
+  await expect(calendar.getByRole('button', { name: `${month}-14: no pass` })).toBeDisabled();
+  await calendar.getByRole('button', { name: `${day}: 8% cloud` }).click();
+  await expect(page.getByRole('button', { name: 'Date A', exact: true })).toContainText(day);
+  await expect(page.getByRole('button', { name: 'Leave pass imagery' })).toContainText('North site · A');
+  await page.getByRole('button', { name: 'Date B', exact: true }).click();
+  const bCalendar = page.getByRole('group', { name: 'B pass calendar' });
+  await bCalendar.getByRole('button', { name: 'Previous month' }).click();
+  await expect(bCalendar.getByRole('button', { name: `${day}: outside date order` })).toBeDisabled();
+  expect(errors).toEqual([]);
+});
+
+test('each area opens its own A and B calendars with its pass list below', async ({ page }) => {
+  const { errors } = await openDetect(page, false, false, false, true);
+  await page.getByRole('button', { name: 'New detection', exact: true }).click();
+  await page.getByRole('button', { name: 'New one pass', exact: true }).click();
+  await page.getByRole('button', { name: 'North site', exact: true }).click();
+  await page.getByRole('button', { name: 'Second site', exact: true }).click();
+  await page.getByRole('button', { name: 'Next: What' }).click();
+  await page.getByRole('button', { name: 'Next: When' }).click();
+  const first = page.getByRole('region', { name: 'Dates for North site' });
+  const second = page.getByRole('region', { name: 'Dates for Second site' });
+  await second.getByRole('button', { name: 'Date A for Second site' }).click();
+  const calendar = second.getByRole('group', { name: 'Reference for Second site pass calendar' });
+  await expect(calendar).toBeVisible();
+  const month = await calendar.boundingBox();
+  const footer = await page.locator('.cmp-dock-foot').boundingBox();
+  expect(month.y + month.height).toBeLessThanOrEqual(footer.y + 1);
+  await expect(first.locator('.pass-calendar')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('detect-area-calendar.png') });
+  await second.getByRole('button', { name: 'Find passes for Second site' }).click();
+  await expect(second.locator('.passes')).toBeVisible();
+  await expect(first.locator('.passes')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Dates…' })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('detect-area-calendars.png') });
+  expect(errors).toEqual([]);
+});
 
 test('landing, dock rail and the When step fit the existing map workspace', async ({ page }) => {
   const { errors, calls, prefs } = await openDetect(page);
@@ -108,14 +242,61 @@ test('landing, dock rail and the When step fit the existing map workspace', asyn
   await page.getByRole('button', { name: 'Next: When' }).click();
   // A and B are asked in the step itself, B the newest pass until a day is chosen
   await expect(page.getByRole('heading', { name: 'Which two images' })).toBeVisible();
-  await expect(page.getByLabel('Day of A')).toBeVisible();
-  await expect(page.getByRole('radio', { name: 'Newest pass' })).toHaveAttribute('aria-checked', 'true');
-  await page.getByRole('radio', { name: 'A day I choose' }).click();
-  await expect(page.getByLabel('Day of B')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Date A', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Date B', exact: true })).toContainText('Newest pass');
+  await page.getByRole('button', { name: 'Date B', exact: true }).click();
+  await expect(page.getByRole('group', { name: 'B pass calendar' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Find passes', exact: true })).toBeVisible();
   expect((await map.boundingBox()).height).toBe(before.height);
-  expect(calls).toEqual([]);
+  expect(calls.every((url) => url.includes('/api/satellite/sentinel/acquisitions'))).toBe(true);
   await page.screenshot({ path: test.info().outputPath('detect-dates.png') });
+  expect(errors).toEqual([]);
+});
+
+test('Detect menus fit the dock at its minimum and maximum widths', async ({ page }) => {
+  const { errors, prefs } = await openDetect(page, true);
+  const dock = page.locator('.detect-tool .cmp-dock');
+  const map = page.locator('.detect-tool .map');
+  const handle = page.getByRole('button', { name: 'Resize Detect panel' });
+  for (const [key, width] of [['Home', 300], ['End', 720]]) {
+    await handle.focus();
+    await page.keyboard.press(key);
+    await expect.poll(async () => Math.round((await dock.boundingBox()).width)).toBe(width);
+    expect((await map.boundingBox()).width).toBeGreaterThanOrEqual(320);
+    for (const tab of ['Routines', 'Saved', 'Areas']) {
+      await page.getByRole('button', { name: tab, exact: true }).click();
+      await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+    }
+    await page.getByRole('button', { name: 'Saved', exact: true }).click();
+    await page.getByRole('button', { name: /^North site pass/ }).click();
+    await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+    await dock.locator('.dock-content > header button[aria-label="Back"]').click();
+    await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
+    await expect(dock.locator('.dock-content > header strong')).toHaveText('Analyzers');
+    await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+    await dock.locator('.dock-content > header button[aria-label="Back"]').click();
+    await page.getByRole('button', { name: 'New detection', exact: true }).click();
+    const menu = dock.getByRole('group', { name: 'New detection' });
+    await expect(menu.getByRole('button', { name: 'New one pass' })).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'New routine' })).toBeVisible();
+    const [dockBox, menuBox] = await Promise.all([dock.boundingBox(), menu.boundingBox()]);
+    expect(menuBox.x).toBeGreaterThanOrEqual(dockBox.x);
+    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(dockBox.x + dockBox.width);
+    await page.screenshot({ path: test.info().outputPath(`detect-menu-${width}.png`) });
+    await page.getByRole('button', { name: 'New one pass', exact: true }).click();
+    await page.getByRole('button', { name: 'North site', exact: true }).click();
+    for (const next of ['Next: What', 'Next: When']) {
+      await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+      await page.getByRole('button', { name: next }).click();
+    }
+    await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+    await page.getByRole('button', { name: 'Date A', exact: true }).click();
+    await expect(page.getByRole('group', { name: 'A pass calendar' })).toBeVisible();
+    await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+    await page.getByRole('button', { name: 'Close calendar' }).click();
+    await dock.locator('.dock-content > header button[aria-label="Back"]').click();
+  }
+  await expect.poll(() => prefs.some((value) => value.detect_view?.width === 720)).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -131,17 +312,24 @@ test('the size is asked before the analyzers, and a pair months apart warns abou
   await expect(sizes.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
   const [above, list] = [await sizes.boundingBox(), await step.getByRole('radiogroup', { name: 'Analyzer' }).boundingBox()];
   expect(above.y + above.height).toBeLessThanOrEqual(list.y);
+  const cloud = step.getByLabel('Maximum cloud cover');
+  const cloudBox = await cloud.boundingBox();
+  expect(cloudBox.y).toBeGreaterThanOrEqual(above.y + above.height);
+  expect(cloudBox.y + cloudBox.height).toBeLessThanOrEqual(list.y);
   await page.screenshot({ path: test.info().outputPath('detect-what.png') });
   await page.getByRole('button', { name: 'Next: When' }).click();
-  await page.getByLabel('Day of A').fill('21/01/2026');
+  await typeWhenDay(page, 'Date A', 'Day of A', '21/01/2026');
   await expect(page.getByRole('note')).toHaveCount(0);
-  await page.getByRole('radio', { name: 'A day I choose' }).click();
-  await page.getByLabel('Day of B').fill('25/09/2026');
+  await typeWhenDay(page, 'Date B', 'Day of B', '25/09/2026');
   await expect(page.getByRole('note')).toContainText('most buildings will read as changed');
   await page.screenshot({ path: test.info().outputPath('detect-shadows.png') });
-  await page.getByLabel('Day of B').fill('02/02/2026');
+  await typeWhenDay(page, 'Date B', 'Day of B', '02/02/2026');
   await expect(page.getByRole('note')).toHaveCount(0);
-  expect(calls).toEqual([]);
+  await typeWhenDay(page, 'Date B', 'Day of B', '20/01/2026');
+  await expect(page.locator('.step .warn[role="alert"]')).toContainText('Date A must be before date B.');
+  await expect(page.getByRole('button', { name: 'Next: Start' })).toBeDisabled();
+  expect(calls.every((url) => url.includes('/api/satellite/sentinel/acquisitions'))).toBe(true);
+  expect(calls.length).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
 

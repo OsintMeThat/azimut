@@ -2,8 +2,10 @@
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
   import { fileUrl } from '../../lib/fileUrl.js';
-  import { buildFrameOps } from '../../lib/inspect.js';
+  import { buildFrameOps, clockTime } from '../../lib/inspect.js';
+  import { foldTerms, foldText } from '../../lib/textFold.js';
   import Icon from '../../components/Icon.svelte';
+  import SearchInput from '../../components/SearchInput.svelte';
 
   // Where a collage's pieces come from: the frames cut in Inspect, from any file,
   // or any image already in the case. A piece is a recipe frozen when it is added,
@@ -11,6 +13,17 @@
   let { caseId, filters, works, images, used, rev = 0, onadd } = $props();
 
   let tab = $state('frames');
+  let query = $state('');
+
+  // Both lists keep the order they arrive in, the files last worked on and the
+  // images last added first, and the search box only narrows them.
+  const matches = (text) => {
+    const terms = foldTerms(query);
+    const folded = foldText(text);
+    return terms.every((term) => folded.includes(term));
+  };
+  const shownWorks = $derived(works.filter((w) => w.frames && matches(w.title)));
+  const shownImages = $derived(images.filter((item) => matches(item.title || item.filename)));
   let open = $state({}); // work name -> expanded
   let frames = $state({}); // work name -> [{ frame, thumb }] once fetched
   const blobs = new Set();
@@ -38,8 +51,9 @@
     }
   }
 
+  // One file unfolded at a time, so the list stays a list of files.
   function toggle(name) {
-    open[name] = !open[name];
+    open = open[name] ? {} : { [name]: true };
     if (open[name] && !frames[name]) load(name).catch(() => (frames[name] = []));
   }
 
@@ -59,8 +73,6 @@
     for (const url of blobs) URL.revokeObjectURL(url);
   });
 
-  const stamp = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
-
   function addFrame(frame) {
     onadd({ frameId: frame.id, save: { path: frame.path, time: frame.time ?? null, ops: buildFrameOps(filters, frame) } });
   }
@@ -71,24 +83,29 @@
 </script>
 
 <div class="picker">
-  <div class="tabs" role="tablist">
-    <button role="tab" class:on={tab === 'frames'} aria-selected={tab === 'frames'} onclick={() => (tab = 'frames')}>
-      Frames
-    </button>
-    <button role="tab" class:on={tab === 'images'} aria-selected={tab === 'images'} onclick={() => (tab = 'images')}>
-      Images
-    </button>
+  <div class="bar">
+    <div class="tabs" role="tablist">
+      <button role="tab" class:on={tab === 'frames'} aria-selected={tab === 'frames'} onclick={() => (tab = 'frames')}>
+        Frames
+      </button>
+      <button role="tab" class:on={tab === 'images'} aria-selected={tab === 'images'} onclick={() => (tab = 'images')}>
+        Images
+      </button>
+    </div>
+    <div class="find"><SearchInput bind:value={query} placeholder="Search…" width="100%" /></div>
   </div>
 
+  <div class="list">
   {#if tab === 'frames'}
     {#if !works.some((w) => w.frames)}
-      <p class="hint">Frames captured or edited in Inspect show up here, grouped by file.</p>
+      <p class="hint">Frames cut in Inspect show up here.</p>
     {/if}
-    {#each works.filter((w) => w.frames) as w (w.name)}
+    {#each shownWorks as w (w.name)}
       <div class="group">
-        <button class="group-head" onclick={() => toggle(w.name)} aria-expanded={!!open[w.name]}>
-          <Icon name={open[w.name] ? 'chevronDown' : 'chevronRight'} size={13} />
-          <Icon name={w.kind === 'video' ? 'video' : 'image'} size={13} />
+        <button class="group-head" class:open={open[w.name]} onclick={() => toggle(w.name)} aria-expanded={!!open[w.name]} title={w.title}>
+          <span class="file">
+            {#if w.thumb}<img src={fileUrl(caseId, w.thumb)} alt="" loading="lazy" />{:else}<Icon name={w.kind === 'video' ? 'video' : 'image'} size={13} />{/if}
+          </span>
           <span class="name">{w.title}</span>
           <span class="count">{w.frames}</span>
         </button>
@@ -104,7 +121,7 @@
                 title={times ? `On this collage ${times}×` : 'Add to the collage'}
               >
                 {#if entry.thumb}<img src={entry.thumb} alt="" />{:else if entry.missing}<Icon name="alert" size={14} />{:else}<span class="spinner"></span>{/if}
-                {#if entry.frame.time != null}<span class="num">{stamp(entry.frame.time)}</span>{/if}
+                {#if entry.frame.time != null}<span class="num">{clockTime(entry.frame.time)}</span>{/if}
                 <span class="tag">{#if times}×{times}{:else}<Icon name="plus" size={10} />{/if}</span>
               </button>
             {:else}
@@ -118,12 +135,18 @@
         {/if}
       </div>
     {/each}
+    {#if query.trim() && works.some((w) => w.frames) && !shownWorks.length}
+      <p class="hint">No file named “{query.trim()}”.</p>
+    {/if}
   {:else}
     {#if !images.length}
       <p class="hint">No images in the case yet.</p>
     {/if}
+    {#if query.trim() && images.length && !shownImages.length}
+      <p class="hint">No image named “{query.trim()}”.</p>
+    {/if}
     <div class="thumbs">
-      {#each images as item (item.path)}
+      {#each shownImages as item (item.path)}
         <button class="thumb" onclick={() => addImage(item)} title={item.title || item.filename}>
           {#if item.thumbnail}<img src={fileUrl(caseId, item.thumbnail)} alt="" loading="lazy" />{:else}<Icon name="image" size={14} />{/if}
           <span class="tag"><Icon name="plus" size={10} /></span>
@@ -131,6 +154,7 @@
       {/each}
     </div>
   {/if}
+  </div>
 </div>
 
 <style>
@@ -138,6 +162,29 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  .bar {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .find {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .find :global(.search-box) {
+    flex: 1;
+  }
+  /* The files scroll on their own, so the controls below stay in reach. */
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 38vh;
+    overflow: auto;
+    padding-right: 2px;
   }
   .tabs {
     display: flex;
@@ -147,8 +194,7 @@
     overflow: hidden;
   }
   .tabs button {
-    flex: 1;
-    padding: 5px 4px;
+    padding: 5px 9px;
     font-size: var(--fs-xs);
     color: var(--text-2);
     background: transparent;
@@ -169,14 +215,36 @@
   .group-head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
-    padding: 4px 2px;
+    padding: 3px;
     background: none;
     border: 0;
+    border-radius: var(--r-sm);
     color: var(--text-1);
     font-size: var(--fs-sm);
     text-align: left;
+  }
+  .group-head:hover,
+  .group-head.open {
+    background: var(--bg-2);
+  }
+  .file {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 26px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--bg-0);
+    color: var(--text-3);
+  }
+  .file img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
   .name {
     flex: 1;

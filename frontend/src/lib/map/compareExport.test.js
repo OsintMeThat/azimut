@@ -271,6 +271,14 @@ describe('keeping colours in a GIF', () => {
     expect(gifColours([], { signed: true }).split(',')).toContain('#e3e3e3');
   });
 
+  it('keeps the active Difference palette when the comparison carries one', () => {
+    const kept = gifColours([], { changePalette: 'colourblind' }).split(',');
+    expect(kept.slice(0, 3)).toEqual(['#0072b2', '#e69f00', '#cc79a7']);
+    expect(gifColours([])).not.toContain('#0072b2');
+    expect(gifColours([], { changePalette: 'missing' }).split(',').slice(0, 3))
+      .toEqual(['#00e5ff', '#ff00aa', '#ffdd00']);
+  });
+
   it('stays inside what the server reads', () => {
     const marks = Array.from({ length: 60 }, (_, index) => ({
       id: `m${index}`, kind: 'line', colour: `#${index.toString(16).padStart(6, '0')}`, points: [[0, 0], [1, 1]],

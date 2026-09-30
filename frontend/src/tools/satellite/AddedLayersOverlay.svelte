@@ -63,6 +63,23 @@
     live.delete(name);
   }
 
+  /**
+   * Stack the drawn layers as the panel lists them, the first on top.
+   *
+   * The block stays where the first one sits, and each next one goes just under
+   * the one before, so what the case draws itself keeps its place around them.
+   * Run again whenever a layer finishes building, since a late one lands on top.
+   */
+  function restack() {
+    let above = null;
+    for (const row of layers) {
+      const layer = live.get(row.name)?.layer;
+      if (!layer?.floor()) continue;
+      if (above) layer.stackUnder(above);
+      above = layer;
+    }
+  }
+
   $effect(() => {
     if (!engine || !caseId) return;
     const wanted = new Set(layers.map((row) => row.name));
@@ -94,9 +111,11 @@
             period: row.period,
             attribution: attribution(row),
           });
+          restack();
         })
         .catch(() => drop(row.name));
     }
+    restack();
   });
 
   /**

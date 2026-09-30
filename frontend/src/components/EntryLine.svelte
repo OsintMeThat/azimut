@@ -64,7 +64,7 @@
     rankMentions,
     typeMenu,
   } from '../lib/entryLine.js';
-  import { isUnzonedTime, withZone, zoneReading, zonesOf } from '../lib/localZone.js';
+  import { dayReading, isDateOnly, isUnzonedTime, withZone, zoneReading, zonesOf } from '../lib/localZone.js';
   import { FILE_TYPES, fetchFileDates } from '../lib/fileDates.js';
   import { formatTemporalValue } from '../lib/timeline.js';
   import DateBuilder from './DateBuilder.svelte';
@@ -232,6 +232,10 @@
   });
   const zoned = $derived(isUnzonedTime(when) && zones.zones.length > 0);
   const stored = $derived(zoned && zone ? withZone(when, zone.zone) : when);
+  // A day is that place's day in the same way: its zone is stated beside it, since a
+  // day has no offset to write into the value.
+  const zonedDay = $derived(isDateOnly(when) && zones.zones.length > 0);
+  const dayZone = $derived(zonedDay && zone ? zone.zone : null);
   const whenValid = $derived(!when || formatTemporalValue(when).valid);
 
   // -- sending ---------------------------------------------------------------
@@ -248,6 +252,7 @@
     return quickClaimBody({
       statement,
       when: stored,
+      whenZone: dayZone,
       confidence,
       count,
       condition,
@@ -573,6 +578,7 @@
     full = {
       statement,
       when: stored,
+      whenZone: dayZone,
       confidence,
       about: pick('about').filter((item) => item.id !== entity?.id || seat?.slot !== 'about'),
       at: pick('at'),
@@ -774,17 +780,19 @@
       <!-- A date it cannot read is said under the field itself, by DateField. -->
       <span class="said" aria-live="polite">
         {#if zoned && zone}Reads: {zoneReading(when, zone.zone, zone.place)}
+        {:else if dayZone}Reads: {[dayReading(reading.label, zone.zone, zone.place), ...reading.qualifiers].join(' · ')}
         {:else}Reads: {[reading.label, ...reading.qualifiers].join(' · ')}{/if}
         {#if fromOffer} · from the {fromOffer.kind} date, yours to correct{/if}
       </span>
-      {#if zoned}
+      {#if zoned || zonedDay}
         <span class="zones">
           {#each zones.zones as entry (entry.zone)}
             {#if zone?.zone !== entry.zone}
               <button class="btn btn-ghost btn-sm" onclick={() => (zoneChoice = entry.zone)}>Local at {entry.place}</button>
             {/if}
           {/each}
-          {#if zone}<button class="btn btn-ghost btn-sm" title="Keep the time with no zone, off the UTC axis" onclick={() => (zoneChoice = 'none')}>No zone</button>{/if}
+          {#if zone && zoned}<button class="btn btn-ghost btn-sm" title="Keep the time with no zone, off the UTC axis" onclick={() => (zoneChoice = 'none')}>No zone</button>{/if}
+          {#if zone && zonedDay}<button class="btn btn-ghost btn-sm" title="Read the day as UTC's day" onclick={() => (zoneChoice = 'none')}>UTC day</button>{/if}
         </span>
       {/if}
     {:else if focused === 'when' && !when}
@@ -855,6 +863,7 @@
       {caseId}
       subject={full.subject}
       initialWhen={full.when}
+      initialWhenZone={full.whenZone}
       initialStatement={full.statement}
       initialRole={full.when ? 'observed' : ''}
       initialConfidence={full.confidence}

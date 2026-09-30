@@ -2601,12 +2601,16 @@
           <AddedLayers
             rows={addedLayers.rows}
             busy={addedLayers.busy}
+            refreshing={addedLayers.refreshing}
+            opened={addedLayers.justAdded}
             bind:open={addedLayers.open}
             search={addedLayers.search}
             ontoggle={(row) => addedLayers.toggle(caseState.current?.id, row)}
             oncategory={(row, name) =>
               addedLayers.toggleCategory(caseState.current?.id, row, name)}
             onrefresh={(row) => addedLayers.refresh(caseState.current?.id, row)}
+            onrefreshall={() => addedLayers.refreshAll(caseState.current?.id)}
+            onreorder={(names) => addedLayers.reorder(caseState.current?.id, names)}
             onremove={(row) => (removingLayer = row)}
             onpick={(row, hit) => addedLayers.pick(caseState.current?.id, row, hit)}
             dates={addedLayers.dates}

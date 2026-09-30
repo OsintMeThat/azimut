@@ -3,7 +3,7 @@
    * Add an event from wherever the analyst is: one line, anchored over the bottom of
    * the tool on screen.
    *
-   * Nothing is visible until it is asked for, by the pencil in the topbar or Alt+N;
+   * Nothing is visible until it is asked for, by Add event in the topbar or Alt+N;
    * no tool gains a button of its own (D19). What the tool is looking at is already
    * seated (`lib/noteHere.svelte.js`): the video playing cites itself, and its one
    * confirmed place is where it happened. The date stays empty (D3), with the file's

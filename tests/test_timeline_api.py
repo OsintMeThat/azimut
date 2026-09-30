@@ -287,6 +287,54 @@ def test_local_time_is_counted_as_unplaced_instead_of_undated(client):
     assert body["items"][0]["zone"] == "local"
 
 
+def test_a_day_stated_in_a_zone_is_that_zones_day_on_the_axis(client):
+    """The 12th in Tokyo ends at 15:00 UTC, so a window closing at 16:00 UTC on
+    the 12th holds all of it; read as UTC's day it would spill past the window."""
+    case_id = _case(client)
+    created = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Filmed", "when": "2024-03-12", "when_zone": "Asia/Tokyo"},
+    )
+    assert created.status_code == 200, created.text
+    row = created.json()["temporal"]
+    assert (row["earliest"], row["latest"], row["tz"]) == (
+        "2024-03-11T15:00:00.000000Z", "2024-03-12T15:00:00.000000Z", "Asia/Tokyo",
+    )
+
+    local = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Clock", "when": "2024-03-12T09:00:00", "when_zone": "Asia/Tokyo"},
+    )
+    assert local.json()["temporal"]["earliest"] == "2024-03-12T00:00:00.000000Z"
+    assert local.json()["temporal"]["zone"] == "named"
+
+
+def test_a_zone_leaves_with_the_date_it_read(client):
+    case_id = _case(client)
+    claim_id = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Filmed", "when": "2024-03-12", "when_zone": "Europe/Kyiv"},
+    ).json()["entity"]["id"]
+
+    # Editing the date alone keeps the zone it was stated in.
+    moved = client.patch(
+        f"/api/cases/{case_id}/timeline/claims/{claim_id}", json={"when": "2024-03-13"}
+    )
+    assert moved.json()["entity"]["attrs"]["when_zone"] == "Europe/Kyiv"
+    assert moved.json()["temporal"]["earliest"] == "2024-03-12T22:00:00.000000Z"
+
+    cleared = client.patch(
+        f"/api/cases/{case_id}/timeline/claims/{claim_id}", json={"when": None}
+    )
+    assert "when_zone" not in cleared.json()["entity"]["attrs"]
+
+    refused = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Nowhere", "when": "2024-03-12", "when_zone": "Mars/Olympus"},
+    )
+    assert refused.status_code == 400
+
+
 def test_timestamp_window_uses_the_given_second_as_its_upper_boundary(client):
     case_id = _case(client)
     for second in (0, 1):

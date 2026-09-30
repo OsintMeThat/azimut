@@ -499,6 +499,11 @@ def collage_rel(name: str) -> str:
     return f"{COLLAGE_DIR}/{name}.json"
 
 
+def collage_thumb_rel(name: str) -> str:
+    """The preview the collage list shows, drawn by the browser from the open layout."""
+    return f"{COLLAGE_DIR}/{name}.webp"
+
+
 def compare_session_rel(name: str) -> str:
     return f"{COMPARE_DIR}/{name}.json"
 

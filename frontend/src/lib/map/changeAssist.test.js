@@ -37,7 +37,7 @@ describe('which pairs Difference reads', () => {
   it('reads World Imagery against a Wayback release as indicative, with the reason', () => {
     const answer = changeCompatibility(side({ provider: 'esri-world-imagery' }), side());
     expect(answer).toMatchObject({ ok: true, grade: 'indicative' });
-    expect(answer.notes.join(' ')).toContain('live mosaic');
+    expect(answer.notes.join(' ')).toContain('varies by place');
   });
 
   it('reads dated Sentinel-2 passes, and offers indices even across layers', () => {

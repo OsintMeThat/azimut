@@ -124,6 +124,8 @@
         relation,
         roles: [...roles],
         collected_only: categories.has('media') && collectedOnly,
+        // a file lane keeps drawing its files through an edit
+        as_files: track?.query?.as_files,
       },
     }));
   }

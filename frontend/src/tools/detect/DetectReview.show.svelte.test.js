@@ -21,12 +21,14 @@ const run = { id: RUN, title: 'Vessels by radar', status: 'ready', progress: 1, 
   results: [row('0-1', pass), row('0-2', pass), row('0-3', other)],
   input: { title: 'Vessels by radar', zones: area, recipe, note: '', a: pass, b: pass, offline: false,
     date_rule: 'manual', followup_id: null } };
+/** The run the mocked API serves, so a test can hand it verdicts already given. */
+let served = run;
 const catalogue = { builtins: [recipe], custom: [], max_tiles: 4096, max_results: 2000, grid: [13, 512],
   methods: [{ id: 'sar-vessels', single: true, sensor: 'sentinel1', frames: 3, sizes: {}, measure: '{value} dB' }] };
 
 vi.mock('../../lib/api.js', () => ({ api: {
   get: async (path) => (path === '/api/compare/analyzers' ? structuredClone(catalogue)
-    : path.endsWith(`/runs/${RUN}`) ? structuredClone(run) : []),
+    : path.endsWith(`/runs/${RUN}`) ? structuredClone(served) : []),
   post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn(),
 } }));
 vi.mock('../../lib/state.svelte.js', () => ({ ensureCase: async () => ({ id: 'case-a' }),
@@ -35,7 +37,7 @@ const { default: Panel } = await import('./DetectPanel.svelte');
 
 let live, target;
 const settle = async () => { for (let i = 0; i < 120; i++) await Promise.resolve(); flushSync(); };
-afterEach(() => { if (live) unmount(live); live = null; target?.remove(); });
+afterEach(() => { if (live) unmount(live); live = null; target?.remove(); served = run; });
 
 it('shows a radar pass once, however the map writes it back', async () => {
   // what Detect does: the shown pass is read and replaced by a fresh object
@@ -59,4 +61,28 @@ it('shows a radar pass once, however the map writes it back', async () => {
   // opening the run and the review each name its pass; a loop names it hundreds of times
   expect(shown.length).toBeLessThanOrEqual(3);
   expect([...new Set(shown)]).toEqual(['2026-09-22 02:06:41', '2026-09-10 02:06:40']);
+});
+
+it('keeps every verdict tab while another is open, and lands on its first candidate', async () => {
+  served = { ...run, results: [row('0-1', pass), { ...row('0-2', pass), review: 'noted' },
+    { ...row('0-3', other), review: 'kept' }] };
+  target = document.createElement('div'); document.body.append(target);
+  live = mount(Panel, { target, props: { caseId: 'case-a', opening: `runs-${RUN}` } });
+  await settle();
+  const tabs = () => [...target.querySelectorAll('[aria-label="Which candidates to walk"] .chip:not(.order)')]
+    .map((button) => button.textContent.replace(/\s+/g, ' ').trim());
+  const press = async (name) => {
+    [...target.querySelectorAll('.chip')].find((button) => button.textContent.trim().startsWith(name)).click();
+    await settle();
+  };
+  expect(tabs()).toEqual(['All 3', 'To review 1', 'Kept 1', 'Pinned 1']);
+  await press('To review');
+  // counted over the filter, "Kept" read zero here and was gone
+  expect(tabs()).toEqual(['All 3', 'To review 1', 'Kept 1', 'Pinned 1']);
+  await press('Kept');
+  expect(target.textContent).toContain('1 of 1');
+  expect(target.textContent).not.toContain('outside this filter');
+  expect(target.textContent).toContain('Kept in this detection');
+  await press('Pinned');
+  expect(target.textContent).toContain('Kept as a pin in this case');
 });

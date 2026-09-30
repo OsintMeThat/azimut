@@ -5,6 +5,8 @@
  * the runs started without saving one stand on their own.
  */
 
+import { foldText } from '../textFold.js';
+
 export const ACTIVE = Object.freeze(['queued', 'running']);
 export const isActive = (row) => ACTIVE.includes(row?.status);
 
@@ -81,6 +83,15 @@ export function runState(run) {
 }
 
 /** How a detection picks its imagery, short enough for a list row. */
+/** Past five routines the list gets a search box; below, a glance finds one. */
+export const ROUTINE_SEARCH_FROM = 6;
+
+/** Whether a routine answers every word of a search, in its title, note or analyzer. */
+export function routineMatches(routine, query) {
+  const text = foldText([routine.title, routine.note, routine.analyzer].filter(Boolean).join(' '));
+  return foldText(query).split(/\s+/).filter(Boolean).every((word) => text.includes(word));
+}
+
 export function ruleLabel(rule, single) {
   if (rule === 'manual') return 'fixed dates';
   if (single) return 'newest pass';

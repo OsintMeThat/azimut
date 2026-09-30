@@ -205,7 +205,7 @@
                 </td>
                 <td class="span">{said ? spanWords(said.first, said.last) : ''}</td>
               {:else if eventsGroup}
-                {@const when = formatTemporalValue(entity.attrs?.when ?? '')}
+                {@const when = formatTemporalValue(entity.attrs?.when ?? '', entity.attrs?.when_zone)}
                 <td class="when" class:none={!entity.attrs?.when} title="When it happened, as written">
                   {when.label}
                 </td>

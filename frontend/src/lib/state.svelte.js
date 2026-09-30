@@ -24,10 +24,11 @@ export const prefs = $state({
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
   mapSync: true, // Satellite, Compare and Detect share one camera
-  detectView: { collapsed: false, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'], saved: true },
+  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'], saved: true },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
+  postTemplate: '', // id of the post template a fresh draft starts with; '' = classic
   postPrefill: true, // let the capture extension fill that composer on Publish
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
   signatureHandle: '', // account handle stamped onto proofs that opt into it
@@ -99,6 +100,7 @@ export function applyPrefs(s) {
   if (s.capture_scale_north !== undefined) prefs.captureScaleNorth = s.capture_scale_north;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
+  if (s.post_template !== undefined) prefs.postTemplate = s.post_template; // '' = none
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
   if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
@@ -196,6 +198,13 @@ export const caseState = $state({
  * current without re-fetching. Each entry: { id, name, updated_at, data }.
  */
 export const templatesState = $state({ proof: [], post: [] });
+
+/**
+ * The Post composer's live draft, mirrored for the template editor's preview so
+ * a layout can be judged on the post that is open. Content only: the values the
+ * tokens stand for, or `null` while the composer holds nothing.
+ */
+export const postDraftState = $state({ fields: null });
 
 export async function loadTemplates() {
   try {

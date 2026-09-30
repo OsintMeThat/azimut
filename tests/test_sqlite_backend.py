@@ -398,6 +398,38 @@ def test_schema_19_folds_the_indexes_written_before_it(tmp_path):
     assert [i["path"] for i in reopened.page_media_items(q="arrivee")["items"]] == ["media/quai.jpg"]
 
 
+def _zones(db) -> list[tuple[str, str | None, str | None]]:
+    with closing(sqlite3.connect(db)) as conn:
+        return conn.execute("SELECT raw, earliest, tz FROM temporal_items WHERE raw IS NOT NULL"
+                            " AND category = 'statement'").fetchall()
+
+
+def test_schema_19_reads_a_stated_day_in_its_zone(tmp_path):
+    """0.3.1 had no zone column. The migration adds it and re-reads what the case
+    holds, so a Claim stated in a zone lands on that zone's day on first open."""
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Zones")
+    store.add_entity("claim", "Filmed", {"when": "2024-03-12", "when_zone": "Europe/Kyiv"}, by="user")
+    schema_rewind.rewind(db, 18)
+
+    SqliteCase.open(db)
+    assert _zones(db) == [("2024-03-12", "2024-03-11T22:00:00.000000Z", "Europe/Kyiv")]
+
+
+def test_a_development_19_without_the_zone_column_gains_it_on_open(tmp_path):
+    """A case opened by an earlier cut of the unshipped 19 is stamped 19 already, so
+    no migration runs; the open itself adds the column and rebuilds the rows."""
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Dev 19")
+    store.add_entity("claim", "Filmed", {"when": "2024-03-12", "when_zone": "Asia/Tokyo"}, by="user")
+    with closing(sqlite3.connect(db)) as conn, conn:
+        schema_rewind.drop_temporal_zones(conn)
+
+    reopened = SqliteCase.open(db)
+    assert _zones(db) == [("2024-03-12", "2024-03-11T15:00:00.000000Z", "Asia/Tokyo")]
+    assert reopened.temporal_projection_status()["consistent"] is True
+
+
 # A schema-4 media index: the browse table as it shipped, before the position
 # flag. `media_index_ready` is set because a real v4 case has already backfilled;
 # without it, open would rescan the (absent) media folder and clear these rows.

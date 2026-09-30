@@ -176,3 +176,74 @@ def test_unsupported_or_ambiguous_forms_are_refused(raw):
 def test_a_temporal_value_is_always_text(raw):
     with pytest.raises(TemporalError):
         parse_temporal(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "tz", "earliest", "latest"),
+    [
+        # The 12th in Kyiv opens two hours before UTC's.
+        ("2024-03-12", "Europe/Kyiv", "2024-03-11T22:00:00.000000Z", "2024-03-12T22:00:00.000000Z"),
+        # A day the clocks go forward is 23 hours long, and the next midnight ends it.
+        ("2024-03-31", "Europe/Paris", "2024-03-30T23:00:00.000000Z", "2024-03-31T22:00:00.000000Z"),
+        ("2024-03", "Australia/Sydney", "2024-02-29T13:00:00.000000Z", "2024-03-31T13:00:00.000000Z"),
+        ("2024", "America/New_York", "2024-01-01T05:00:00.000000Z", "2025-01-01T05:00:00.000000Z"),
+        ("2024-03-12", "UTC", "2024-03-12T00:00:00.000000Z", "2024-03-13T00:00:00.000000Z"),
+    ],
+)
+def test_a_date_stated_in_a_zone_spans_that_zones_days(raw, tz, earliest, latest):
+    value = parse_temporal(raw, tz=tz)
+
+    assert value.raw == raw
+    assert value.earliest == earliest
+    assert value.latest == latest
+    assert value.zone == "date-only"
+    assert value.tz == tz
+    assert value.sortable is True
+
+
+def test_a_date_interval_stated_in_a_zone_uses_its_midnights_at_both_ends():
+    value = parse_temporal("2024-03-12/2024-03-14~", tz="Asia/Tokyo")
+
+    assert value.earliest == "2024-03-11T15:00:00.000000Z"
+    assert value.latest == "2024-03-14T15:00:00.000000Z"
+    assert value.approximate is True
+
+
+def test_a_local_time_stated_in_a_zone_joins_the_utc_axis():
+    value = parse_temporal("2024-07-12T14:30:00", tz="Europe/Kyiv")
+
+    # Summer: Kyiv is three hours ahead of UTC.
+    assert value.earliest == "2024-07-12T11:30:00.000000Z"
+    assert value.latest == "2024-07-12T11:30:01.000000Z"
+    assert value.zone == "named"
+    assert value.tz == "Europe/Kyiv"
+    assert value.sortable is True
+
+
+def test_a_local_timestamp_interval_is_placed_once_its_zone_is_known():
+    value = parse_temporal("2024-03-12T14:30:00/2024-03-12T15:00:00", tz="Asia/Tokyo")
+
+    assert value.shape == "interval"
+    assert value.earliest == "2024-03-12T05:30:00.000000Z"
+    assert value.latest == "2024-03-12T06:00:00.000000Z"
+    assert value.zone == "named"
+
+
+@pytest.mark.parametrize("raw", ["2024-03-12T14:30:00Z", "2024-03-12T16:30:00+02:00"])
+def test_a_timestamp_that_says_where_it_stands_keeps_its_own_offset(raw):
+    value = parse_temporal(raw, tz="Asia/Tokyo")
+
+    assert value.earliest == "2024-03-12T14:30:00.000000Z"
+    assert value.tz is None
+    assert value.zone in {"utc", "offset"}
+
+
+def test_without_a_zone_a_date_still_spans_a_utc_day():
+    assert parse_temporal("2024-03-12").tz is None
+    assert parse_temporal("2024-03-12").earliest == "2024-03-12T00:00:00.000000Z"
+
+
+@pytest.mark.parametrize("tz", ["", "Mars/Olympus", " Europe/Kyiv", "../etc/passwd", "x" * 80])
+def test_an_unknown_zone_is_refused(tz):
+    with pytest.raises(TemporalError):
+        parse_temporal("2024-03-12", tz=tz)

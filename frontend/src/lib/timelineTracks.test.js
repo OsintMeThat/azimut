@@ -3,11 +3,13 @@ import {
   TRACK_COLORS,
   copyTimelineTrack,
   defaultTimelineTracks,
+  drawsFiles,
   holdsBackWorkingFiles,
   mediaTrack,
   groupedTimelineTracks,
   moveTimelineTrack,
   normalizeTimelineTracks,
+  situatedFile,
   timelineTrack,
   timelineViewState,
   trackPresets,
@@ -16,25 +18,38 @@ import {
 } from './timelineTracks.js';
 
 describe('Timeline tracks', () => {
-  it('opens on the dates the analyst stated, then the files the case collected', () => {
+  it('opens on the files where the analyst dated them, over the events', () => {
     const tracks = defaultTimelineTracks();
-    expect(tracks.map((track) => [track.id, track.categories, holdsBackWorkingFiles(track)])).toEqual([
-      ['events', ['statement'], false],
-      ['media', ['media'], true],
+    expect(tracks.map((track) => [track.id, track.label, track.categories, drawsFiles(track)])).toEqual([
+      ['files', 'Media', ['statement'], true],
+      ['events', 'Events', ['statement'], false],
     ]);
-    expect(holdsBackWorkingFiles(trackPresets().find((preset) => preset.id === 'preset-media'))).toBe(true);
+    // the Media lane is the events tied to a source's picture or video
+    expect(tracks[0].query).toMatchObject({ relation: 'any', as_files: 'sources' });
+    // what the app pictured from above, Compare and Detect among it, is a lane added on purpose
+    const imagery = trackPresets().find((preset) => preset.id === 'preset-imagery');
+    expect([imagery.label, imagery.query.as_files, drawsFiles(imagery)]).toEqual(['Imagery', 'imagery', true]);
+    // and a file's own dates are a track added on purpose
+    const fileDates = trackPresets().find((preset) => preset.id === 'preset-media');
+    expect(fileDates.label).toBe('File dates');
+    expect(holdsBackWorkingFiles(fileDates)).toBe(true);
     // a saved reading keeps its own tracks, and one saved before the switch lets every
     // file in; only an empty one falls back to the default
     const saved = normalizeTimelineTracks([{ id: 'media', label: 'Media', categories: ['media'] }]);
     expect(saved.map((track) => track.id)).toEqual(['media']);
     expect(holdsBackWorkingFiles(saved[0])).toBe(false);
     expect('collected_only' in saved[0].query).toBe(false);
-    expect(normalizeTimelineTracks([]).map((track) => track.id)).toEqual(['events', 'media']);
+    expect(normalizeTimelineTracks([]).map((track) => track.id)).toEqual(['files', 'events']);
+    // the switch survives a view being saved and read back, and is off unless set
+    expect(normalizeTimelineTracks([{ id: 'x', categories: ['statement'], query: { as_files: 'imagery' } }])[0].query.as_files)
+      .toBe('imagery');
+    expect('as_files' in timelineTrack({ id: 'y' }).query).toBe(false);
+    expect('as_files' in timelineTrack({ id: 'z', query: { as_files: true } }).query).toBe(false);
   });
 
-  it('adds the Media track under an id the reading does not use yet', () => {
-    expect(mediaTrack([{ id: 'events' }])).toMatchObject({ id: 'media', categories: ['media'] });
-    expect(mediaTrack(defaultTimelineTracks()).id).toBe('media-2');
+  it('adds the File dates track under an id the reading does not use yet', () => {
+    expect(mediaTrack([{ id: 'events' }])).toMatchObject({ id: 'media', label: 'File dates', categories: ['media'] });
+    expect(mediaTrack([...defaultTimelineTracks(), mediaTrack()]).id).toBe('media-2');
     expect(mediaTrack([{ id: 'media' }, { id: 'media-2' }]).id).toBe('media-3');
     expect(holdsBackWorkingFiles(mediaTrack([], { collectedOnly: false }))).toBe(false);
   });
@@ -52,9 +67,9 @@ describe('Timeline tracks', () => {
   it('builds presets from registry labels rather than a second type vocabulary', () => {
     const presets = trackPresets([{ type: 'person', label: 'Human' }, { type: 'place', label: 'Location' }]);
     expect(presets.map((preset) => preset.label)).toEqual([
-      'Events', 'Human', 'Location', 'Media', 'Sources', 'Case activity',
+      'Events', 'Media', 'Imagery', 'Human', 'Location', 'File dates', 'Sources', 'Case activity',
     ]);
-    expect(presets[1].query.terms).toEqual({ type: 'person' });
+    expect(presets[3].query.terms).toEqual({ type: 'person' });
   });
 
   it('normalizes imported state and keeps track ids unique', () => {
@@ -92,14 +107,14 @@ describe('Timeline tracks', () => {
 
   it('reorders and duplicates presentation without sharing arrays', () => {
     const tracks = defaultTimelineTracks();
-    expect(moveTimelineTrack(tracks, 0, 1).map((track) => track.label)).toEqual(['Media', 'Events']);
-    const copy = copyTimelineTrack({ ...tracks[0], hidden: ['a'] }, tracks);
+    expect(moveTimelineTrack(tracks, 0, 1).map((track) => track.label)).toEqual(['Events', 'Media']);
+    const copy = copyTimelineTrack({ ...tracks[1], hidden: ['a'] }, tracks);
     expect(copy.label).toBe('Events copy');
     expect(copy.id).not.toBe(tracks[0].id);
   });
 
   it('groups one event into each matching subject without copying the event', () => {
-    const tracks = defaultTimelineTracks().slice(0, 1);
+    const tracks = defaultTimelineTracks().slice(1);
     const item = { id: 'event', subject_entities: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] };
     const grouped = groupedTimelineTracks(tracks, { events: [item] }, 'subject');
     expect(grouped.map((track) => track.label)).toEqual(['A', 'B']);
@@ -107,15 +122,15 @@ describe('Timeline tracks', () => {
   });
 
   it('keeps entries without a grouping value visible', () => {
-    const tracks = defaultTimelineTracks();
+    const tracks = [mediaTrack(), ...defaultTimelineTracks().slice(1)];
     const event = { id: 'event', owner_type: 'claim' };
     const media = { id: 'media', owner_type: 'capture' };
     expect(groupedTimelineTracks(tracks, { events: [event], media: [media] }, 'subject')
       .map((track) => track.label)).toEqual(['No subject', 'No subject']);
     expect(groupedTimelineTracks(tracks, { events: [event], media: [media] }, 'type')
-      .map((track) => track.label)).toEqual(['claim', 'capture']);
+      .map((track) => track.label)).toEqual(['capture', 'claim']);
     expect(groupedTimelineTracks(tracks, { events: [event], media: [media] }, 'type',
-      (type) => type.toUpperCase()).map((track) => track.label)).toEqual(['CLAIM', 'CAPTURE']);
+      (type) => type.toUpperCase()).map((track) => track.label)).toEqual(['CAPTURE', 'CLAIM']);
   });
 
   it('leaves a track on its category colours until one is chosen', () => {
@@ -145,6 +160,8 @@ describe('Timeline tracks', () => {
     expect(timelineViewState({
       timezone: 'Europe/Kyiv', zone_choice: 'zone:Europe/Kyiv',
     })).toMatchObject({ zoneChoice: 'zone:Europe/Kyiv' });
+    // the zone of the case's places is found again wherever the view is opened
+    expect(timelineViewState({ zone_choice: 'case' }).zoneChoice).toBe('case');
     expect(timelineViewState({ zone_choice: 'zone:../../etc/passwd' }).zoneChoice).toBe('utc');
     expect(timelineViewState({ zone_choice: 'zone:' }).zoneChoice).toBe('utc');
   });
@@ -158,5 +175,19 @@ describe('Timeline tracks', () => {
       ],
     });
     expect(restored.categories).toEqual(['statement', 'media']);
+  });
+
+  it('names the file an event puts at its date, the one it is about first', () => {
+    const about = { id: 'm1', label: 'clip.mp4', type: 'media' };
+    const cited = { id: 'c1', label: 'Sentinel-2 scene', type: 'capture' };
+    const proof = { id: 'p1', label: 'Bridge proof', type: 'proof' };
+    expect(situatedFile({ subject_entities: [about], source_entities: [cited] })).toEqual(about);
+    // a proof's date is about the footage and cites the proof: the footage is the file
+    expect(situatedFile({ subject_entities: [about], source_entities: [proof] })).toEqual(about);
+    expect(situatedFile({ subject_entities: [{ id: 'x', type: 'person' }], source_entities: [cited] })).toEqual(cited);
+    expect(situatedFile({ subject_entities: [], source_entities: [proof] })).toBeNull();
+    // what the server named wins, with its preview
+    expect(situatedFile({ file: { id: 'm2', label: 'IMG', thumb: 't.jpg' }, subject_entities: [about] }))
+      .toEqual({ id: 'm2', label: 'IMG', thumb: 't.jpg' });
   });
 });

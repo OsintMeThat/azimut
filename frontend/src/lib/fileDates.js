@@ -8,6 +8,11 @@
  * a click on the axis, and what it fills is theirs to correct: a post's date is when
  * it went online, rarely when it happened. The dates come from the Timeline's own
  * projection of the file (`/timeline?entity=…`), so nothing is read twice.
+ *
+ * What an analyst already concluded comes first: the date typed on a proof is stated
+ * for the footage the proof rests on (`api/proofs.py`, `_date_the_material`), and a
+ * correction of a file's date is the same kind of statement. Both are events about the
+ * file with the `observed` role, in the same projection.
  */
 import { api } from './api.js';
 import { formatTemporalValue, temporalKindLabel } from './timeline.js';
@@ -35,26 +40,48 @@ function shortClock(raw) {
   return String(raw).replace(/(T\d\d:\d\d:\d\d)\.\d+/, '$1');
 }
 
+/** The dates already stated for the file: a proof's first, then a correction. */
+function statedOffers(items, fileId) {
+  return (items ?? [])
+    .filter((item) => item.kind === 'claim' && item.raw && item.time_role === 'observed'
+      && (item.subject_entities ?? []).some((entity) => entity.id === fileId))
+    .map((item) => {
+      const value = shortClock(item.raw);
+      const proof = (item.source_entities ?? []).some((entity) => entity.type === 'proof');
+      const kind = proof ? 'proof' : 'stated';
+      return {
+        kind,
+        value,
+        words: `${kind} ${formatTemporalValue(value, item.tz).label}`,
+        hint: proof ? 'Use the date its proof gives' : 'Use the date already stated for this file',
+      };
+    })
+    .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'proof' ? -1 : 1));
+}
+
 /**
- * The dates a file offers, from its Timeline rows: `{ kind, value, words, hint }`,
- * the camera first and the post last. `value` is what a press puts in the field.
+ * The dates a file offers, from its Timeline rows: `{ kind, value, words, hint }`.
+ * What was already stated for it comes first, then the camera, and the post last.
+ * `value` is what a press puts in the field.
  */
 export function fileDateOffers(items, ownerId) {
   const seen = new Set();
-  return (items ?? [])
+  const own = (items ?? [])
     .filter((item) => item.owner_id === ownerId && item.raw && FILE_DATE_KINDS.includes(item.kind))
     .sort((a, b) => FILE_DATE_KINDS.indexOf(a.kind) - FILE_DATE_KINDS.indexOf(b.kind))
     .map((item) => {
       const value = shortClock(item.raw);
       const kind = temporalKindLabel(item.kind).toLowerCase();
       return { kind, value, words: `${kind} ${formatTemporalValue(value).label}`, hint: HINTS[item.kind] ?? '' };
-    })
+    });
+  return [...statedOffers(items, ownerId), ...own]
     .filter((offer) => (seen.has(offer.value) ? false : seen.add(offer.value)));
 }
 
 export async function fetchFileDates(caseId, entityId, { get = api.get } = {}) {
   const params = new URLSearchParams({ entity: entityId, include_undated: 'false', limit: '50' });
   params.append('category', 'media');
+  params.append('category', 'statement');
   const page = await get(`/api/cases/${caseId}/timeline?${params}`);
   return fileDateOffers(page?.items, entityId);
 }

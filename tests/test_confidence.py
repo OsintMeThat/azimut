@@ -53,7 +53,8 @@ def test_claim_confidence_is_a_closed_entity_field(client):
     fields = {field["key"]: field for field in rows["claim"]["attrs"]}
 
     assert set(fields) == {
-        "count", "condition", "when", "time_role", "confidence", "method", "verbatim",
+        "count", "condition", "when", "when_zone", "time_role", "confidence", "method",
+        "verbatim",
     }
     assert fields["confidence"]["kind"] == "choice"
     assert [option["value"] for option in fields["confidence"]["options"]] == [

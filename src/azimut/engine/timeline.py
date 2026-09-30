@@ -43,6 +43,8 @@ class ProjectionRow:
     status: str | None
     confidence: str | None
     parse_error: str | None
+    #: The IANA zone the value was stated in, when one was and it applied.
+    tz: str | None = None
 
     def record(self) -> dict[str, Any]:
         return asdict(self)
@@ -59,15 +61,17 @@ def _project_value(
     time_role: str | None = None,
     status: str | None = None,
     confidence: str | None = None,
+    tz: object = None,
 ) -> ProjectionRow:
     text = raw if isinstance(raw, str) and raw else None
+    stated_in = tz if isinstance(tz, str) and tz else None
     if text is None:
         return ProjectionRow(
             id, owner_id, authority, category, kind, None, None, None, None,
             None, time_role, False, False, None, False, status, confidence, None,
         )
     try:
-        value = parse_temporal(text)
+        value = parse_temporal(text, tz=stated_in)
     except TemporalError as exc:
         # Old cases may contain a field that predates the declared Claim contract.
         # Keep it visible as unplaced and explain why it cannot be placed; a derived
@@ -95,6 +99,7 @@ def _project_value(
         status=status,
         confidence=confidence,
         parse_error=None,
+        tz=value.tz,
     )
 
 
@@ -121,6 +126,7 @@ def project_entity(entity: dict[str, Any]) -> list[ProjectionRow]:
                 kind="claim",
                 raw=attrs.get("when"),
                 time_role=role if isinstance(role, str) else None,
+                tz=attrs.get("when_zone"),
                 status=(
                     provenance.get("status")
                     if isinstance(provenance.get("status"), str)
@@ -158,6 +164,7 @@ def project_entity(entity: dict[str, Any]) -> list[ProjectionRow]:
                 kind="taken",
                 raw=attrs.get("when"),
                 time_role="occurred",
+                tz=attrs.get("when_zone"),
             )
         )
     return rows

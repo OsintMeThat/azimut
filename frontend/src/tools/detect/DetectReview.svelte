@@ -67,18 +67,28 @@
   const matches = (row, name) => (name === 'new' ? row.review === 'new'
     : name === 'kept' ? row.review === 'noted' : row.review === 'kept');
   const position = $derived(candidates.findIndex((r) => r.id === candidateId));
+  /** Counted over the whole run, not the filter: counted over "To review",
+   *  "Kept" read zero and its tab went missing until "All" was pressed. */
   const counts = $derived.by(() => {
     const tally = { kept: 0, noted: 0, dismissed: 0, new: 0 };
-    for (const row of candidates) tally[row.review] = (tally[row.review] ?? 0) + 1;
+    for (const row of all) tally[row.review] = (tally[row.review] ?? 0) + 1;
     return tally;
   });
+  /** A tab lands on its own first candidate, not on "outside this filter". */
+  function pickFilter(id) {
+    filter = id;
+    if (!candidates.some((row) => row.id === candidateId) && candidates[0]) {
+      candidateId = candidates[0].id;
+      focus(candidates[0].coordinates);
+    }
+  }
   const verdicts = $derived([
     counts.kept ? `${counts.kept} pinned` : '',
     counts.noted ? `${counts.noted} kept here` : '',
     counts.dismissed ? `${counts.dismissed} dismissed` : '',
   ].filter(Boolean).join(', ') || 'no verdict yet');
   const tally = $derived(
-    counts.new === 0 ? `All ${candidates.length} reviewed · ${verdicts}`
+    counts.new === 0 ? `All ${all.length} reviewed · ${verdicts}`
     : `${counts.new} still to review · ${verdicts}`
   );
   const previewAlt = $derived(recipeCapability(run.input.recipe, methods).single
@@ -250,7 +260,7 @@
   {#if run.message}<p class="hint" role="status">{run.message}</p>{/if}
   <!-- "Nothing found" and "never looked" are not the same answer. -->
   {#if sweptNote(run.swept)}<p class="warn">{sweptNote(run.swept)}</p>{/if}
-  {#if run.status === 'ready' && !candidates.length}<p class="hint">Nothing passed these thresholds.</p>{/if}
+  {#if run.status === 'ready' && !all.length}<p class="hint">Nothing passed these thresholds.</p>{/if}
   {#if run.status === 'ready'}
     <div class="row"><button class="btn btn-sm" onclick={() => {
       adding = !adding;
@@ -284,9 +294,9 @@
   <section class="candidate">
     <div class="row filters" role="group" aria-label="Which candidates to walk">
       {#each [['all', 'All', all.length], ['new', 'To review', counts.new], ['kept', 'Kept', counts.noted], ['pinned', 'Pinned', counts.kept]] as [id, label, n]}
-        {#if id === 'all' || n}
+        {#if id === 'all' || n || filter === id}
           <button class="chip" class:on={filter === id} aria-pressed={filter === id}
-            onclick={() => (filter = id)}>{label} <span class="n">{n}</span></button>
+            onclick={() => pickFilter(id)}>{label} <span class="n">{n}</span></button>
         {/if}
       {/each}
       <!-- A new order starts from its own top: the largest is what was asked for. -->
@@ -342,7 +352,7 @@
       {:else if candidate?.review === 'dismissed'}
         <button class="link" disabled={busy} onclick={() => act(() => review('new'))}>Put it back among the candidates</button>
       {:else}
-        <p class="hint">Keep stays in this run. Pin creates a place and evidence in Files.</p>
+        <p class="hint">Keep in this run, or pin the place and evidence to Files.</p>
         <p class="keys">K keep · D dismiss · P pin · ← → walk the queue</p>
       {/if}
     </div>
@@ -383,25 +393,26 @@
   .pin-form .check { display: flex; align-items: center; gap: 8px; }
   .pin-form fieldset { display: flex; gap: 20px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); }
   .manual { border-bottom: 1px dashed var(--accent); }
-  section { display: grid; gap: 7px; }
-  section.candidate, section:not(.run) { border-top: 1px solid var(--border); padding-top: 10px; }
-  section > strong, .run-head strong { font-size: var(--fs-xs); }
+  section { display: grid; gap: 9px; }
+  section.candidate, section:not(.run) { border-top: 1px solid var(--border); padding-top: 16px; }
+  section > strong, .run-head strong { font-size: var(--fs-md); font-weight: 650; }
   .link { color: var(--accent); font-size: var(--fs-xs); text-align: left; }
   .link:disabled { opacity: 0.5; }
   .link.inline { display: inline; font-family: var(--font-mono); font-size: 11px; }
   .centre { text-align: center; }
-  .nav { justify-content: space-between; }
-  .position { color: var(--text-2); font-size: var(--fs-xs); }
-  .filters { flex-wrap: wrap; gap: 4px; }
-  .chip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2); font-size: 10.5px; }
+  .nav { justify-content: space-between; min-height: 32px; }
+  .position { color: var(--text-1); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+  .filters { flex-wrap: wrap; gap: 2px 12px; border-bottom: 1px solid var(--border); }
+  .chip { min-height: 30px; padding: 4px 1px 6px; border-bottom: 2px solid transparent;
+    color: var(--text-2); font-size: var(--fs-xs); text-align: left; }
   .chip:hover { color: var(--text-1); }
-  .chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .chip.on { color: var(--text-1); border-bottom-color: var(--accent); }
   .chip .n { color: var(--text-3); }
   .chip.on .n { color: inherit; }
   .order { margin-left: auto; }
   .map-acts { display: flex; gap: 2px; margin-left: auto; }
   .compare { justify-self: start; }
-  .facts { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.5; }
+  .facts { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.55; }
   .strength { margin: 0; font-size: var(--fs-xs); font-weight: 600; color: var(--text-1); }
   .strength.strong { color: var(--ok); }
   .strength.weak { color: var(--text-3); }
@@ -413,9 +424,9 @@
   .review-status { display: grid; align-content: center; overflow: auto; }
   .verdict-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .tally { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .preview-open { display: block; width: 100%; padding: 0; border-radius: var(--r-sm); cursor: zoom-in; }
-  .preview-open:hover { outline: 1px solid var(--accent); }
-  .preview { display: block; width: 100%; height: 210px; object-fit: contain; border-radius: var(--r-sm); background: var(--bg-0); }
+  .preview-open { display: block; width: 100%; padding: 0; border: 1px solid var(--border); cursor: zoom-in; }
+  .preview-open:hover { border-color: var(--accent); }
+  .preview { display: block; width: 100%; height: 210px; object-fit: contain; background: var(--bg-0); }
   .big { width: 100%; max-height: 78vh; object-fit: contain; background: var(--bg-0); }
   progress { width: 100%; accent-color: var(--accent); }
 </style>

@@ -54,7 +54,8 @@ rows that report what a file claims about itself. Schema 19 rebuilds the entity 
 media search indexes folded (case, and the marks a reader skips: Latin, Greek and
 Cyrillic accents, Arabic harakat, Hebrew points), the fold every search term gets as
 it is typed. The same unreleased schema 19 adds `entity_redirects` and
-`entity_merges` for explicit subject merges and their local undo journal.
+`entity_merges` for explicit subject merges and their local undo journal, and the
+projection's `tz` column: the zone a value was stated in.
 A Timeline view stores presentation
 and track queries, never copies temporal rows into the graph and never creates a
 temporal relation.
@@ -194,7 +195,7 @@ answer by omission (`tests/test_entities.py`).
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
-| `analysis-zones` | document | annex | ✅ | detect | `spec` (json): a saved set of areas | yes (`.analysis/zones-<id>.json`) |
+| `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
 | `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
 | `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
@@ -213,7 +214,7 @@ answer by omission (`tests/test_entities.py`).
 | `domain` | identifier | subject | ✅ | analyst | hostname in the label; `registrar?` | no |
 | `ip` | identifier | subject | ✅ | analyst | address in the label; legacy read-only `network?`; `asn?`, `provider?` | no |
 | `network` | identifier | subject | ✅ | analyst | network/CIDR in the label; `asn?`, `provider?`, `country?` | no |
-| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `when`, `time_role`, `confidence`, `method`, `verbatim` | no |
+| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `when`, `when_zone`, `time_role`, `confidence`, `method`, `verbatim` | no |
 
 Every row is created by something: the tool-born ones by the save that produces them,
 the analyst's own from the board's **New entity**, which builds its form out of the
@@ -384,8 +385,17 @@ as unplaced rather than undated, but is not globally sortable. Two zoned timesta
 may form an exact interval. Local-time intervals, mixed date/time intervals, open
 intervals and the rest of EDTF Level 2 remain outside the announced profile.
 
-Time reads a derived SQLite projection, never a second authority. Claim `when` and
-`time_role` remain on the Claim; a Proof's `when` remains on the Proof;
+**A day is some place's day.** `when_zone` (an IANA name) says which clock `when`
+was stated on. A date then spans that zone's midnights, the 12th in Kyiv starting at
+22:00 UTC on the 11th, and a time with no offset of its own is placed on that zone's
+clock. A timestamp carrying `Z` or an offset keeps it. Without `when_zone` a date
+spans UTC's day, as every date stated before it did. A proof states its date on its
+first point's zone unless the analyst picks another, and the Claim it files for the
+footage carries the same zone.
+
+Time reads a derived SQLite projection, never a second authority. Claim `when`,
+`when_zone` and `time_role` remain on the Claim; a Proof's `when` and `when_zone`
+remain on the Proof;
 capture/publication/imagery dates remain in the media sidecar; filing and collection
 dates remain provenance. The projection labels them `statement`, `media` or
 `case_activity`, and can be deleted and rebuilt from those records. A manually assessed

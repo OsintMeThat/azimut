@@ -158,3 +158,38 @@ test('a signature resize whose release the window never sees still lands, and st
   await page.mouse.up();
   fixture.expectNoUnexpectedRequests();
 });
+
+test('a new post template starts from a layout, counts each platform and mends a misspelled token', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await page.goto('/#settings');
+  await page.getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('button', { name: 'Templates' }).click();
+  await page.getByRole('button', { name: 'New post template' }).click();
+
+  const editor = page.locator('.tpl-modal');
+  const body = editor.locator('textarea.body');
+  const preview = editor.locator('.pe-preview pre');
+
+  await editor.getByRole('group', { name: 'Start from' }).getByRole('button', { name: 'With date' }).click();
+  await expect(body).toHaveValue(/Filmed: #date/);
+  await expect(preview).toContainText('Filmed: 2025-10-24 14:30 UTC+3');
+  await expect(editor.locator('.counters')).toContainText(/X \d+\/280 · Bluesky \d+\/300/);
+
+  // no post is open in the composer, so only the sample can be previewed
+  const open = editor.getByRole('button', { name: 'Open post' });
+  await expect(open).toBeDisabled();
+  await expect(open).toHaveAttribute('title', 'No post is open in the composer');
+
+  await body.fill('#place\n#coordinate\n#coordinate');
+  await expect(editor.locator('.misspelled'))
+    .toContainText('#coordinate is not a token. Did you mean #coordinates?');
+  await editor.locator('.misspelled').getByRole('button', { name: 'Fix' }).click();
+  await expect(body).toHaveValue('#place\n#coordinates\n#coordinates');
+  await expect(editor.locator('.misspelled')).toHaveCount(0);
+
+  await body.fill('a'.repeat(290));
+  await expect(editor.locator('.counter').first()).toHaveClass(/over/);
+  await expect(editor.locator('.counter').nth(1)).not.toHaveClass(/over/);
+
+  fixture.expectNoUnexpectedRequests();
+});

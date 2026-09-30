@@ -34,6 +34,8 @@ class NewSubjectIn(BaseModel):
 class TemporalClaimIn(BaseModel):
     statement: str = Field(min_length=1, max_length=300)
     when: str | None = None
+    #: The IANA zone `when` was stated in: a day then spans that zone's day.
+    when_zone: str | None = Field(default=None, max_length=64)
     time_role: Literal["occurred", "observed", "valid"] | None = None
     confidence: Literal["certain", "probable", "possible", "refuted"] | None = None
     method: str | None = None
@@ -50,6 +52,7 @@ class TemporalClaimIn(BaseModel):
 class TemporalClaimPatch(BaseModel):
     statement: str | None = Field(default=None, min_length=1, max_length=300)
     when: str | None = None
+    when_zone: str | None = Field(default=None, max_length=64)
     time_role: Literal["occurred", "observed", "valid"] | None = None
     confidence: Literal["certain", "probable", "possible", "refuted"] | None = None
     method: str | None = None
@@ -116,7 +119,74 @@ def timeline(
             thumb = thumbs.get(str(item["owner_id"]))
             if thumb and item.get("category") == timeline_engine.MEDIA:
                 item["thumb"] = thumb
+    lane = (track_query or {}).get("as_files")
+    if lane in ("sources", "imagery"):
+        _situate_files(get_case(case_id), page["items"], from_above=lane == "imagery")
     return {**page, "window": {"from": since, "to": until}}
+
+
+#: What an event can put at its date: a picture or a video, or a picture from orbit.
+_SITUATED = ("media", "capture")
+
+
+def _situate_files(case: Case, items: list[dict[str, Any]], *, from_above: bool) -> None:
+    """Name, on each event of a file lane, the file it puts at its date, with its preview.
+
+    A file's own dates are what it says about itself; the date an analyst gives it is
+    an event about it or citing it: a proof's date stated for its footage, a
+    correction, "seen in" a video. That event is what places the file in time, so the
+    lane draws the file itself there. The sources' lane draws a picture or a video the
+    case collected, the imagery lane one the app pictured from above (`FROM_ABOVE`),
+    so an event about a video that cites a Compare render is the video on one and the
+    render on the other. The file the event is *about* comes first, since a proof's
+    date is about the footage and cites the proof. Two indexed reads per page.
+    """
+    named = {
+        str(entry["id"]): entry
+        for item in items if item.get("category") == timeline_engine.STATEMENT
+        for key in ("subject_entities", "source_entities")
+        for entry in item.get(key) or [] if entry.get("type") in _SITUATED
+    }
+    if not named:
+        return
+    ids = sorted(named)
+    origins = case.media_origins(ids)
+
+    def above(entry: dict[str, Any]) -> bool:
+        route = (origins.get(str(entry["id"])) or {}).get("type")
+        return entry.get("type") == "capture" or route in link_engine.FROM_ABOVE
+
+    chosen: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if item.get("category") != timeline_engine.STATEMENT:
+            continue
+        for key in ("subject_entities", "source_entities"):
+            entry = next(
+                (e for e in item.get(key) or []
+                 if e.get("type") in _SITUATED and above(e) == from_above),
+                None,
+            )
+            if entry is not None:
+                chosen[str(item["id"])] = entry
+                break
+    if not chosen:
+        return
+    ids = sorted({str(entry["id"]) for entry in chosen.values()})
+    thumbs = dict(case.media_thumbs(ids))
+    for entity in case.entities_by_ids(ids):
+        # A capture records its own preview rather than owning an indexed media row.
+        recorded = (entity.get("attrs") or {}).get("thumb")
+        if recorded and entity["id"] not in thumbs:
+            thumbs[entity["id"]] = recorded
+    for item in items:
+        entry = chosen.get(str(item.get("id")))
+        if entry is not None:
+            item["file"] = {
+                "id": entry["id"],
+                "label": entry.get("label", ""),
+                "type": entry.get("type"),
+                **({"thumb": thumbs[entry["id"]]} if thumbs.get(entry["id"]) else {}),
+            }
 
 # Every way the case puts something on the map. A Claim says where it happened with
 # `at`, and that was the only one this layer knew — so a window full of photographs
@@ -255,8 +325,16 @@ def timeline_map(
     }
 
 _TEMPORAL_CLAIM_ATTRS = (
-    "when", "time_role", "confidence", "method", "verbatim", "count", "condition"
+    "when", "when_zone", "time_role", "confidence", "method", "verbatim", "count",
+    "condition",
 )
+
+
+def _without_orphan_zone(attrs: dict[str, Any]) -> dict[str, Any]:
+    """A zone says how a date reads, so it leaves with the date it read."""
+    if not attrs.get("when"):
+        attrs.pop("when_zone", None)
+    return attrs
 _TEMPORAL_CONNECTORS = ("about", "at", "cites")
 
 def _temporal_item(case: Case, claim_id: str) -> dict[str, Any]:
@@ -329,6 +407,7 @@ def create_temporal_claim(case_id: str, body: TemporalClaimIn) -> dict[str, Any]
         for key in _TEMPORAL_CLAIM_ATTRS
         if getattr(body, key) is not None
     }
+    _without_orphan_zone(attrs)
     _check_attrs("claim", attrs)
     connectors = {key: list(getattr(body, key)) for key in _TEMPORAL_CONNECTORS}
     new_subjects = [_new_subject(entry) for entry in body.create]
@@ -395,6 +474,7 @@ def update_temporal_claim(
     for key in _TEMPORAL_CLAIM_ATTRS:
         if key in body.model_fields_set:
             attrs[key] = getattr(body, key)
+    _without_orphan_zone(attrs)
     _check_attrs("claim", attrs, current=current.get("attrs") or {})
     connector_keys = set(_TEMPORAL_CONNECTORS) & body.model_fields_set
     connectors = (

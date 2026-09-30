@@ -9,7 +9,6 @@ import {
   coverageWarning,
   lookupSpan,
   olderSpan,
-  spanProblem,
   sweptNote,
   withOlder,
 } from './acquisitions.js';
@@ -33,17 +32,10 @@ describe('acquisitions over drawn areas', () => {
     expect(Object.keys(query.zones[0]).sort()).toEqual(['id', 'kind', 'name', 'points']);
   });
 
-  it('asks about two days picked in the calendar as they are', () => {
-    const query = acquisitionQuery([zone('a')], { start: '2019-03-01', end: '2019-06-30' }, undefined, 'sentinel1');
-    expect([query.start, query.end, query.collection]).toEqual(['2019-03-01', '2019-06-30', 'sentinel1']);
+  it('asks about a calendar month by its start and end days', () => {
+    const query = acquisitionQuery([zone('a')], { start: '2019-03-01', end: '2019-03-31' }, undefined, 'sentinel1');
+    expect([query.start, query.end, query.collection]).toEqual(['2019-03-01', '2019-03-31', 'sentinel1']);
     expect(lookupSpan(90, new Date('2026-05-31T09:00:00Z'))).toEqual({ start: '2026-03-02', end: '2026-05-31' });
-  });
-
-  it('needs both days, in order, and nothing of a preset', () => {
-    expect(spanProblem(30)).toBe('');
-    expect(spanProblem({ start: '2019-03-01', end: '' })).toBe('Pick the first and the last day.');
-    expect(spanProblem({ start: '2019-06-30', end: '2019-03-01' })).toBe('The first day comes after the last.');
-    expect(spanProblem({ start: '2019-03-01', end: '2019-03-01' })).toBe('');
   });
 
   it('looks for what a cut list lacks before its oldest pass, that day included', () => {

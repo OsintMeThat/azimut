@@ -2109,16 +2109,42 @@ def _update_locked(
     return row(name, spec)
 
 
+def reorder(case: "Case", names: list[str]) -> list[dict[str, Any]]:
+    """Keep the order the analyst dragged the rows into, the first drawn on top.
+
+    Each named layer stores its place in its own spec, so the order travels with
+    the layer through a bundle and the Trash. A name the case does not hold is
+    skipped, and a layer left unnamed goes back to the top with the new ones.
+    """
+    with case.lock:
+        place = 0
+        for name in names:
+            try:
+                spec = _read_spec(case, name)
+            except LayerError:
+                continue
+            spec["position"] = place
+            place += 1
+            _write_spec(case, name, spec)
+        return listing(case)
+
+
 def listing(case: "Case") -> list[dict[str, Any]]:
-    """Every layer this case holds, newest first."""
+    """Every layer this case holds, top of the map first.
+
+    A layer never reordered sits above the reordered ones, newest first, which
+    is where a layer just added lands.
+    """
     rows = []
     for path in sorted(case.subdir(layout.LAYERS_DIR).glob("*.json")):
         try:
-            rows.append(row(path.stem, _read_spec(case, path.stem)))
+            spec = _read_spec(case, path.stem)
         except LayerError:
             continue
-    rows.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)
-    return rows
+        rows.append((spec.get("position"), row(path.stem, spec)))
+    rows.sort(key=lambda entry: entry[1].get("created_at") or "", reverse=True)
+    rows.sort(key=lambda entry: entry[0] if isinstance(entry[0], int) else -1)
+    return [entry for _, entry in rows]
 
 
 def read(case: "Case", name: str) -> dict[str, Any]:

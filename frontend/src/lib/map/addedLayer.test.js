@@ -39,6 +39,15 @@ function stubMap() {
     addLayer: (layer) => layers.set(layer.id, { ...layer }),
     getLayer: (id) => layers.get(id),
     removeLayer: (id) => layers.delete(id),
+    // MapLibre's: the layer goes just under `before`, keeping everything else
+    moveLayer: (id, before) => {
+      const moved = layers.get(id);
+      const rest = [...layers].filter(([key]) => key !== id);
+      const at = rest.findIndex(([key]) => key === before);
+      rest.splice(at < 0 ? rest.length : at, 0, [id, moved]);
+      layers.clear();
+      for (const [key, value] of rest) layers.set(key, value);
+    },
     setFilter: (id, filter) => layers.set(id, { ...layers.get(id), filter }),
     setPaintProperty: (id, key, value) =>
       layers.set(id, { ...layers.get(id), paint: { ...layers.get(id).paint, [key]: value } }),
@@ -457,6 +466,36 @@ describe('an added layer on the map', () => {
       expect(drawn.layout.visibility).toBe('none');
     }
     expect(engine.map.sources.size).toBe(1);
+  });
+
+  it('restacks under another added layer as one block, in its own order', async () => {
+    const engine = stubEngine();
+    const lower = createAddedLayer(engine);
+    const upper = createAddedLayer(engine);
+    await lower.set(COLLECTION, { categories: CATEGORIES });
+    await upper.set(COLLECTION, { categories: CATEGORIES });
+
+    // built last, so on top: now asked under the one built first
+    upper.stackUnder(lower);
+
+    const ids = [...engine.map.layers.keys()];
+    const own = (layer) => ids.filter((id) => id.startsWith(layer.floor().replace(/-fill$/, '-')));
+    expect(ids).toEqual([...own(upper), ...own(lower)]);
+    expect(own(upper).map((id) => id.split('-').pop())).toEqual(['fill', 'line', 'dot', 'mark', 'own']);
+  });
+
+  it('moves nothing while either layer is still unbuilt', async () => {
+    const engine = stubEngine();
+    const built = createAddedLayer(engine);
+    const waiting = createAddedLayer(engine);
+    await built.set(COLLECTION, { categories: CATEGORIES });
+    const before = [...engine.map.layers.keys()];
+
+    expect(waiting.floor()).toBeNull();
+    built.stackUnder(waiting);
+    waiting.stackUnder(built);
+
+    expect([...engine.map.layers.keys()]).toEqual(before);
   });
 
   it('drops its source and its layers when it is removed', async () => {

@@ -126,6 +126,15 @@ def test_deleting_a_proof_takes_its_pasted_images(client):
     assert not case.resolve_inside(full.proof).exists()
 
 
+def test_a_collage_owns_its_preview_but_not_its_exported_picture(client):
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    entity = case.find_entity(attr="spec", value=full.collage_doc)
+
+    assert set(artifacts.owned(case, entity)) == {full.collage_doc, full.collage_thumb}
+    assert artifacts.caches(case, entity) == []
+
+
 def test_every_type_in_a_full_case_declares_what_it_owns(client):
     """A type in neither table is not a decision, it is an oversight — the next
     tool declares its files in ``KINDS`` or declares it has none in ``NO_FILES``,

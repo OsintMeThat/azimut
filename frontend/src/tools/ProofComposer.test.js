@@ -1272,6 +1272,23 @@ describe('Proof Composer — what the proof says about itself', () => {
   it('hands the description to the post it opens', () => {
     expect(source).toContain('description: proof.description,');
   });
+
+  it('names the clock a date is read on, the first point\'s unless another is picked', () => {
+    const clock = side.slice(side.indexOf('<DateField'));
+    expect(clock).toContain('{#if proof.when.trim()}');
+    expect(clock).toContain("`At the point · ${pointZone}`");
+    expect(clock).toContain('{zoneOffset(proof.whenZone || pointZone)} on that day.');
+    expect(clock).toContain('zone={proof.whenZone || pointZone || null}');
+    expect(clock).toContain('<option value="UTC">UTC</option>');
+    expect(clock).toContain('No point yet, so the day is read in UTC.');
+    expect(source).toContain("await zoneAt({ lat: Number(where.lat), lon: Number(where.lon) })");
+    expect(bodyOfFn('resetDoc')).toContain('proof.whenZone = null;');
+  });
+
+  it('hands the date and its clock to the post it opens', () => {
+    expect(source).toContain('when: proof.when,');
+    expect(source).toContain('whenZone: result.when_zone ?? null,');
+  });
 });
 
 describe('Proof Composer — dating the material', () => {

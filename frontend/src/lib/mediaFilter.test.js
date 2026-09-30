@@ -121,6 +121,7 @@ describe('the shared facet list', () => {
     const links = read('../../../src/azimut/engine/links.py');
     const types = [
       ...quoted(links.match(/^MADE_HERE: .* = \(([^)]*)\)/m)[1]),
+      ...quoted(links.match(/^FROM_ABOVE: .* = \(([^)]*)\)/m)[1]),
       ...quoted(links.match(/^PRODUCED_HERE: .* = \(([^)]*)\)/m)[1]),
     ];
     expect(types).toContain('compare');

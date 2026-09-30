@@ -36,11 +36,42 @@ describe('the dates a file offers', () => {
     expect(fileDateOffers([row('captured', '2026-03-12'), row('taken', '2026-03-12')], 'm1')).toHaveLength(1);
   });
 
+  it('offers what was already stated for the file first, a proof’s date before a correction', () => {
+    const stated = (raw, sources, extra = {}) => ({
+      owner_id: `claim-${raw}`, kind: 'claim', raw, category: 'statement', time_role: 'observed',
+      subject_entities: [{ id: 'm1', label: 'clip', type: 'media' }], source_entities: sources, ...extra,
+    });
+    const offers = fileDateOffers([
+      row('published', '2026-03-14'),
+      row('captured', '2026-03-12T14:02:00Z'),
+      stated('2026-03-10', []),
+      stated('2026-03-11~', [{ id: 'p1', label: 'Dated proof', type: 'proof' }]),
+      // an event that only names the file happened then, it does not date the footage
+      stated('2026-03-09', [], { time_role: 'occurred' }),
+      // and one about another file says nothing about this one
+      stated('2026-03-08', [], { subject_entities: [{ id: 'm2', label: 'other', type: 'media' }] }),
+    ], 'm1');
+    expect(offers.map((offer) => offer.kind)).toEqual(['proof', 'stated', 'captured', 'published']);
+    expect(offers[0]).toMatchObject({ value: '2026-03-11~', hint: 'Use the date its proof gives' });
+    expect(offers[0].words).toBe('proof 11 Mar 2026');
+  });
+
+  it('keeps one press per date, the stated one when the camera agrees', () => {
+    const offers = fileDateOffers([
+      row('captured', '2026-03-12'),
+      { owner_id: 'c1', kind: 'claim', raw: '2026-03-12', time_role: 'observed',
+        subject_entities: [{ id: 'm1' }], source_entities: [{ id: 'p1', type: 'proof' }] },
+    ], 'm1');
+    expect(offers.map((offer) => offer.kind)).toEqual(['proof']);
+  });
+
   it('reads the file’s own rows off the Timeline projection', async () => {
     const get = vi.fn(async () => ({ items: [row('imagery', '2026-03-11')] }));
     const offers = await fetchFileDates('case-a', 'm1', { get });
     expect(offers.map((offer) => offer.words)).toEqual(['imagery 11 Mar 2026']);
     expect(get.mock.calls[0][0]).toContain('/api/cases/case-a/timeline?entity=m1');
     expect(get.mock.calls[0][0]).toContain('category=media');
+    // and the statements about it, which is where a proof's date lives
+    expect(get.mock.calls[0][0]).toContain('category=statement');
   });
 });

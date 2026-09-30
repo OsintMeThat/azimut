@@ -655,6 +655,13 @@ def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client
                         "label": "Media",
                         "categories": ["media"],
                         "color": "chartreuse",
+                        "query": {"as_files": "imagery"},
+                    },
+                    {
+                        "id": "files",
+                        "label": "Files",
+                        "categories": ["statement"],
+                        "query": {"as_files": True},
                     },
                 ],
             },
@@ -666,7 +673,17 @@ def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client
 
     # a zone named outright travels: the view was read on it and must reopen on it
     assert timeline["zone_choice"] == "zone:Asia/Tokyo"
-    assert [track["color"] for track in timeline["tracks"]] == ["blue", ""]
+    assert [track["color"] for track in timeline["tracks"]] == ["blue", "", ""]
+    # a lane drawn as the files its events date keeps the files it draws, and only it
+    assert [track["query"].get("as_files") for track in timeline["tracks"]] == [
+        None, "imagery", None,
+    ]
+
+    # the zone of the case's places is a reading too, and the one a Timeline opens on
+    body["spec"]["timeline"]["zone_choice"] = "case"
+    kept = client.put(f"/api/cases/{case_id}/analysis-views/{created.json()['id']}", json=body)
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["spec"]["timeline"]["zone_choice"] == "case"
 
     for refused in ("zone:../../etc/passwd", "zone:", "somewhere else"):
         body["spec"]["timeline"]["zone_choice"] = refused

@@ -25,6 +25,8 @@
  */
 import {
   drawable,
+  followed,
+  refreshedLabel,
   renewsOnShow,
   searchFeatures,
   toggleCategory,
@@ -35,6 +37,8 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   let rows = $state([]);
   let open = $state(true);
   let busy = $state(''); // the layer name an act is running on
+  let refreshing = $state(false); // the head's Refresh is going through every layer
+  let justAdded = $state(''); // the layer the + just filed, which opens unfolded
   let adding = $state(false); // the + dialog is up
   let saving = $state(false); // …and it is reading a file or an address
   let geoconfirmed = $state(false); // the GeoConfirmed dialog the + led to
@@ -186,6 +190,21 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     return data;
   }
 
+  /**
+   * Fetch one followed layer again: `'moved'` when the bytes changed, `'same'`
+   * when they did not. A failure throws, with the reason the backend gave.
+   */
+  function reread(caseId, layer) {
+    return act(layer.name, async () => {
+      const row = await api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/refresh`);
+      if (loadedFor !== caseId) return 'same';
+      const moved = row.sha256 !== layer.sha256;
+      if (moved) forget(row.name);
+      replace(row);
+      return moved ? 'moved' : 'same';
+    });
+  }
+
   async function act(name, run) {
     busy = name;
     try {
@@ -211,6 +230,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
       replace(row);
       // on, since it was added to be looked at, and just read
       show(row.name, true);
+      justAdded = row.name;
       renewed.add(row.name);
       adding = false;
       geoconfirmed = false;
@@ -282,6 +302,12 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     },
     get busy() {
       return busy;
+    },
+    get refreshing() {
+      return refreshing;
+    },
+    get justAdded() {
+      return justAdded;
     },
     get adding() {
       return adding;
@@ -399,20 +425,62 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     },
 
     /** The explicit press. The second of this feature's three network calls. */
-    refresh(caseId, layer) {
-      return act(layer.name, async () => {
-        try {
-          const row = await api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/refresh`);
-          if (row.sha256 !== layer.sha256) forget(row.name);
-          replace(row);
-          notify(
-            row.sha256 === layer.sha256 ? 'Unchanged since last read' : `${row.title} updated`,
-            'ok'
-          );
-        } catch (error) {
-          notify(error?.message || 'That source could not be reached', 'error');
+    async refresh(caseId, layer) {
+      try {
+        const result = await reread(caseId, layer);
+        notify(result === 'same' ? 'Unchanged since last read' : `${layer.title} updated`, 'ok');
+      } catch (error) {
+        notify(error?.message || 'That source could not be reached', 'error');
+      }
+    },
+
+    /**
+     * The same press on every followed layer, one after the other so each row
+     * says when its own turn comes, and one toast at the end rather than one
+     * per layer. A file has nothing to read and is left alone.
+     */
+    async refreshAll(caseId) {
+      const due = rows.filter(followed);
+      if (!due.length || refreshing) return;
+      refreshing = true;
+      let moved = 0;
+      let failed = 0;
+      try {
+        for (const layer of due) {
+          try {
+            if ((await reread(caseId, layer)) === 'moved') moved += 1;
+          } catch {
+            failed += 1;
+          }
         }
-      });
+      } finally {
+        refreshing = false;
+      }
+      const kind = failed === due.length ? 'error' : failed ? 'warn' : 'ok';
+      notify(refreshedLabel({ moved, failed, total: due.length }), kind);
+    },
+
+    /**
+     * The rows as they were dragged, top of the map first. The list moves at
+     * once, and a failed save puts it back.
+     */
+    async reorder(caseId, names) {
+      const before = rows;
+      const at = new Map(rows.map((row) => [row.name, row]));
+      const kept = names.filter((name) => at.has(name));
+      rows = [
+        ...kept.map((name) => at.get(name)),
+        ...rows.filter((row) => !kept.includes(row.name)),
+      ];
+      try {
+        const list = await api.put(`/api/cases/${caseId}/map-layers/order`, {
+          names: rows.map((row) => row.name),
+        });
+        if (loadedFor === caseId && Array.isArray(list)) rows = list;
+      } catch (error) {
+        if (loadedFor === caseId) rows = before;
+        notify(error?.message || 'That order could not be kept', 'error');
+      }
     },
 
     async remove(caseId, layer) {

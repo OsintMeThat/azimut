@@ -61,6 +61,25 @@ CREATE INDEX idx_links_to   ON links(to_id);
 CREATE INDEX idx_links_type ON links(type);
 """
 
+#: The Time projection as 0.3.1 shipped it, before schema 19 added the zone a value
+#: was stated in. Rebuilt rather than altered, for the SQLite floor noted above.
+_TEMPORAL_V18 = """
+CREATE TABLE temporal_rewound AS SELECT id, owner_id, authority, category, kind, raw,
+    earliest, latest, precision, shape, time_role, uncertain, approximate, zone,
+    sortable, status, confidence, parse_error FROM temporal_items;
+DROP TABLE temporal_items;
+ALTER TABLE temporal_rewound RENAME TO temporal_items;
+CREATE INDEX idx_temporal_window ON temporal_items(category, earliest, latest);
+CREATE INDEX idx_temporal_owner  ON temporal_items(owner_id, category);
+CREATE INDEX idx_temporal_kind   ON temporal_items(kind);
+"""
+
+
+def drop_temporal_zones(conn: sqlite3.Connection) -> None:
+    """Take the zone column off the Time projection, as a case before 19 had it."""
+    conn.executescript(_TEMPORAL_V18)
+
+
 #: The `links` table as schema 8 shipped it: `confidence` is in, `nature` is not.
 _LINKS_V8 = """
 CREATE TABLE links_rewound AS SELECT id, from_id, to_id, type, prov_by,
@@ -101,8 +120,8 @@ def _unfold_search_text(conn: sqlite3.Connection) -> None:
 def rewind(db: Path | str, version: int) -> None:
     """Put `case.db` back at `version`, shape included, ready to be migrated up.
 
-    18 is what 0.3.1 shipped. After it, 19 folds what the search indexes hold and adds
-    the two merge tables, so that is what a rewind to it undoes.
+    18 is what 0.3.1 shipped. After it, 19 folds what the search indexes hold, adds
+    the two merge tables and the zone column, so that is what a rewind to it undoes.
     """
     if version not in (7, 8, 18):
         raise ValueError(f"no rewind to schema {version}")
@@ -111,6 +130,7 @@ def rewind(db: Path | str, version: int) -> None:
             _unfold_search_text(conn)
             for statement in _AFTER_18:
                 conn.execute(statement)
+            drop_temporal_zones(conn)
         else:
             conn.executescript(_LINKS_V7 if version == 7 else _LINKS_V8)
             for statement in (*_AFTER_18, *_AFTER_7):

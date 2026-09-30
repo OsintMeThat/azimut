@@ -10,6 +10,8 @@
  */
 import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { api } from '../lib/api.js';
+import { prefs, templatesState } from '../lib/state.svelte.js';
 
 // The template editors reach Konva through the composer; nothing here draws.
 vi.mock('konva', () => ({ default: {} }));
@@ -55,6 +57,7 @@ function settingsBlob() {
     home_view: { lat: 48.85, lon: 2.29, zoom: 12 },
     post_mention: '',
     post_target: 'x',
+    post_template: '',
     update_check_on_start: true,
     proof_place_auto: true,
   };
@@ -174,5 +177,131 @@ describe('each section', () => {
     expect(text).toContain('0.2.8');
     expect(text).toContain('bundled');
     expect(text).toContain('Report an issue');
+  });
+});
+
+describe('post templates', () => {
+  const CLASSIC = {
+    id: 'po_1', name: 'Classic', data: { mention: '@House', body: '#place\n#mention', mediaEnabled: true, extraTweets: [] },
+  };
+  const SHORT = {
+    id: 'po_2', name: 'Short', data: { mention: '', body: '#coordinates', mediaEnabled: false, extraTweets: [{ text: 'Thread' }] },
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const click = (el) => {
+    el.click();
+    flushSync();
+  };
+  const row = (name) =>
+    [...pane().querySelectorAll('.tpl-row')].find((r) => r.querySelector('.tpl-name').textContent === name);
+  const inRow = (name, text) =>
+    [...row(name).querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+  const editor = () => document.querySelector('.tpl-modal');
+  const startFrom = () => editor().querySelector('.starters');
+
+  beforeEach(async () => {
+    // the shell asked for the templates and the settings as it mounted
+    await settle();
+    templatesState.post = [CLASSIC, SHORT];
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));
+    api.put.mockClear();
+    api.post.mockClear();
+    api.del.mockClear();
+    rail()[TABS.indexOf('templates')].click();
+    flushSync();
+  });
+
+  afterEach(() => {
+    if (editor()) click(editor().querySelector('.btn-ghost:not(.btn-sm)')); // Cancel
+    api.put.mockImplementation(async () => settingsBlob());
+    templatesState.proof = [];
+    templatesState.post = [];
+    prefs.postTemplate = '';
+  });
+
+  it('offers starting layouts for a new template, and not for one that exists', () => {
+    click(pane().querySelectorAll('.group')[1].querySelector(':scope > button'));
+    expect(startFrom()).not.toBeNull();
+    click(editor().querySelector('.btn-ghost:not(.btn-sm)')); // Cancel
+
+    click(inRow('Classic', 'Edit'));
+    expect(editor()).not.toBeNull();
+    expect(startFrom()).toBeNull();
+  });
+
+  it('opens a copy of a template under its own name, to be saved as a new one', async () => {
+    click(inRow('Short', 'Duplicate'));
+
+    expect(editor().querySelector('.tpl-title').value).toBe('Short copy');
+    expect(editor().querySelector('textarea.body').value).toBe('#coordinates');
+    expect(startFrom()).toBeNull(); // a copy is not a blank start
+    expect(api.post).not.toHaveBeenCalled(); // nothing is stored until Save
+
+    click([...editor().querySelectorAll('button')].find((b) => b.textContent.includes('Save template')));
+    await settle();
+    expect(api.post).toHaveBeenCalledWith('/api/templates/post', {
+      id: null,
+      name: 'Short copy',
+      data: SHORT.data,
+    });
+  });
+
+  it('leaves the original alone when the copy is edited and dropped', async () => {
+    click(inRow('Classic', 'Duplicate'));
+    const body = editor().querySelector('textarea.body');
+    body.value = 'changed';
+    body.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(); // the textarea binding reads its value back one tick later
+    click(editor().querySelector('.btn-ghost:not(.btn-sm)'));
+
+    expect(editor()).toBeNull();
+    expect(CLASSIC.data.body).toBe('#place\n#mention');
+  });
+
+  it('keeps a copied name inside the length a template may have', () => {
+    templatesState.post = [{ ...CLASSIC, name: 'n'.repeat(120) }];
+    flushSync();
+    click(inRow('n'.repeat(120), 'Duplicate'));
+    expect(editor().querySelector('.tpl-title').value).toBe('n'.repeat(120));
+  });
+
+  it('saves the template new posts start with, and shows it', async () => {
+    row('Short').querySelector('button[aria-pressed]').click();
+    await settle();
+    flushSync();
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { post_template: 'po_2' });
+    expect(prefs.postTemplate).toBe('po_2');
+    expect(row('Short').querySelector('.tpl-tag').textContent).toBe('Default');
+    expect(row('Classic').querySelector('.tpl-tag')).toBeNull();
+
+    row('Short').querySelector('button[aria-pressed]').click();
+    await settle();
+    flushSync();
+    expect(api.put).toHaveBeenLastCalledWith('/api/settings/prefs', { post_template: '' });
+    expect(prefs.postTemplate).toBe('');
+  });
+
+  it('forgets the default when that template is deleted', async () => {
+    prefs.postTemplate = 'po_2';
+    flushSync();
+    click(row('Short').querySelector('button[title="Delete"]'));
+    click([...document.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent.trim() === 'Delete'));
+    await settle();
+
+    expect(api.del).toHaveBeenCalledWith('/api/templates/post/po_2');
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { post_template: '' });
+    expect(prefs.postTemplate).toBe('');
+  });
+
+  it('keeps the default when another template is deleted', async () => {
+    prefs.postTemplate = 'po_2';
+    flushSync();
+    click(row('Classic').querySelector('button[title="Delete"]'));
+    click([...document.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent.trim() === 'Delete'));
+    await settle();
+
+    expect(api.del).toHaveBeenCalledWith('/api/templates/post/po_1');
+    expect(api.put).not.toHaveBeenCalled();
+    expect(prefs.postTemplate).toBe('po_2');
   });
 });

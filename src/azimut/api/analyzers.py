@@ -22,8 +22,8 @@ from ..engine import (
 )
 from ..engine.analysis_models import (
     BUILTINS, GROUPS, MAX_AROUND, MAX_BANDS, MAX_CHECKS, MAX_MARKS, MAX_RULES, METHODS, RELIABILITY, Area, AreaDates,
-    AreaGeometry, Bounds, Check, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId, Source, Zone,
-    ZoneSet, is_single, stored, unreadable,
+    AreaGeometry, AreaGroup, Bounds, Check, Colour, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId,
+    Source, Zone, is_single, stored, unreadable,
 )
 from ..workspace import Case
 from .cases import delete_by_path, delete_entities_deep, get_case
@@ -186,20 +186,32 @@ def save_area(case_id: str, body: Area) -> dict[str, Any]:
 @router.put("/cases/{case_id}/analysis/areas/{ident}")
 def update_area(case_id: str, ident: str, body: Area) -> dict[str, Any]:
     case = get_case(case_id)
-    read(case, "areas", ident)
-    return engine.save(case, "areas", body.model_dump(), ident)
+    old = read(case, "areas", ident)
+    position = old.get("position") if body.position is None else body.position
+    return engine.save(case, "areas", body.model_copy(update={"position": position}).model_dump(), ident)
 
 
 @router.post("/cases/{case_id}/analysis/zones")
-def save_zones(case_id: str, body: ZoneSet) -> dict[str, Any]:
-    return engine.save(get_case(case_id), "zones", body.model_dump())
+def save_zones(case_id: str, body: AreaGroup) -> dict[str, Any]:
+    case = get_case(case_id)
+    for area_id in body.area_ids:
+        read(case, "areas", area_id)
+    position = body.position
+    if position is None:
+        positions = [row["position"] for row in engine.listing(case, "zones") if row["position"] is not None]
+        position = max(positions, default=-1) + 1
+    return engine.save(case, "zones", body.model_copy(update={"position": position}).model_dump())
 
 
 @router.put("/cases/{case_id}/analysis/zones/{ident}")
-def update_zones(case_id: str, ident: str, body: ZoneSet) -> dict[str, Any]:
+def update_zones(case_id: str, ident: str, body: AreaGroup) -> dict[str, Any]:
     case = get_case(case_id)
-    read(case, "zones", ident)
-    return engine.save(case, "zones", body.model_dump(), ident)
+    old = read(case, "zones", ident)
+    for area_id in body.area_ids:
+        if area_id not in old["area_ids"]:
+            read(case, "areas", area_id)
+    position = old.get("position") if body.position is None else body.position
+    return engine.save(case, "zones", body.model_copy(update={"position": position}).model_dump(), ident)
 
 
 @router.post("/cases/{case_id}/analysis/followups")
@@ -214,6 +226,49 @@ def update_followup(case_id: str, ident: str, body: RunInput) -> dict[str, Any]:
     case = get_case(case_id)
     read(case, "followups", ident)
     return engine.save(case, "followups", body.model_dump(), ident)
+
+
+class RoutineColour(Model):
+    colour: Colour
+
+
+@router.patch("/cases/{case_id}/analysis/followups/{ident}/colour")
+def update_followup_colour(case_id: str, ident: str, body: RoutineColour) -> dict[str, Any]:
+    case = get_case(case_id)
+    with engine.LOCK, case._lock:
+        saved = read(case, "followups", ident)
+        saved["recipe"] = {**saved["recipe"], "colour": body.colour}
+        return engine.save(case, "followups", saved, ident)
+
+
+@router.patch("/cases/{case_id}/analysis/runs/{ident}/colour")
+def update_run_colour(case_id: str, ident: str, body: RoutineColour) -> dict[str, Any]:
+    case = get_case(case_id)
+    with engine.LOCK, case._lock:
+        saved = read(case, "runs", ident)
+        if saved["status"] in engine.ACTIVE:
+            raise HTTPException(409, "wait for this run to finish before changing its colour")
+        saved["display_colour"] = body.colour
+        return engine.save(case, "runs", saved, ident)
+
+
+@router.get("/cases/{case_id}/analysis/followups/{ident}/last-passes")
+def followup_last_passes(case_id: str, ident: str) -> dict[str, dict[str, Any]]:
+    """The last successfully swept pass for each area, without a network lookup."""
+    case = get_case(case_id)
+    saved = read(case, "followups", ident)
+    fields = {key: saved[key] for key in RunInput.model_fields if key in saved}
+    try:
+        body = engine.hydrate(case, stored(RunInput, {**fields, "followup_id": ident}))
+    except (FileNotFoundError, ValidationError, ValueError) as exc:
+        raise HTTPException(422, "this detection needs editing before it can run") from exc
+    found: dict[str, dict[str, Any]] = {}
+    for zone in body.zones:
+        local = engine._sensed_by(engine.for_area(body, zone))
+        last = engine.last_successful_pass(case, local)
+        if last:
+            found[zone.id] = last.model_dump()
+    return found
 
 
 def start(case: Any, body: RunInput) -> dict[str, Any]:
@@ -231,14 +286,24 @@ def start(case: Any, body: RunInput) -> dict[str, Any]:
             if any(row.get("status") in engine.ACTIVE and row.get("followup_id") == body.followup_id
                    for row in engine.listing(case, "runs")):
                 raise HTTPException(409, "this detection is already queued or running")
+        prepared, area_runs = engine.prepare_areas(case, body)
+        bad_order = next((row for row in area_runs if row["status"] == "failed"
+                          and "date A must be before date B" in row["message"]), None)
+        if bad_order:
+            raise HTTPException(422, bad_order["message"])
+        if body.followup_id and not any(row["status"] == "pending" for row in area_runs):
+            failed = any(row["status"] == "failed" for row in area_runs)
+            return {"status": "failed" if failed else "no_new_imagery", "area_runs": area_runs,
+                    "message": " · ".join(row["message"] for row in area_runs if row.get("message"))}
         try:
-            plans = [engine.plan(engine.for_area(body, zone)) for zone in body.zones]
+            active_zones = [zone for zone, outcome in zip(prepared.zones, area_runs)
+                            if outcome["status"] == "pending"]
+            plans = [engine.plan(engine.for_area(prepared, zone)) for zone in active_zones]
             if sum(map(len, plans)) > engine.MAX_TILES:
                 raise ValueError("areas exceed the tile limit; split them into smaller runs")
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        prepared, area_runs = engine.prepare_areas(case, body)
-        duplicates = engine.duplicates(case, prepared, area_runs)
+        duplicates = [] if body.followup_id else engine.duplicates(case, prepared, area_runs)
         if duplicates and not body.run_anyway:
             return {"duplicates": duplicates, "input": prepared.model_dump()}
         # Store the resolved pairs, not the launch request or its confirmation flag.

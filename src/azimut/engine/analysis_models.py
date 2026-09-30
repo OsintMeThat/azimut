@@ -35,6 +35,7 @@ Band = Literal["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B
 #: Ground as Sentinel-2's scene classification names it.
 SceneClass = Literal["vegetation", "bare", "water", "snow", "cloud", "shadow", "dark"]
 ShortId = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,48}$")]
+AreaId = Annotated[str, Field(pattern=r"^[0-9a-f]{12}$")]
 Colour = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 # Methods that read one image instead of a pair. A vessel or a fire is a thing
@@ -114,6 +115,7 @@ RETIRED_OVERLAYS = frozenset({"labels"})
 
 class DetectPrefs(Model):
     collapsed: bool = False
+    width: int = Field(default=380, ge=300, le=720)
     basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
     overlays: list[Literal["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]] = (
         Field(default=["boundaries", "placenames"], max_length=7))
@@ -354,6 +356,15 @@ class Source(Model):
         return data
 
 
+def ordered_pair(a: Source, b: Source) -> bool:
+    """Whether a dated comparison reads A strictly before B."""
+    if not a.date or not b.date:
+        return True
+    if a.date != b.date:
+        return a.date < b.date
+    return bool(a.provider == b.provider == "sentinel1" and a.time and b.time and a.time < b.time)
+
+
 #: How many checks one analyzer keeps, and how many marks one check holds.
 MAX_CHECKS = 12
 MAX_MARKS = 20
@@ -465,8 +476,31 @@ class Recipe(Model):
 
 
 class ZoneSet(Model):
+    """Shape snapshots written by Detect before area groups existed."""
     title: str = Field(min_length=1, max_length=120)
     zones: list[Zone] = Field(min_length=1, max_length=32)
+
+
+class AreaGroupReview(Model):
+    saved_area_id: AreaId
+    current_area_id: AreaId
+    name: str = Field(min_length=1, max_length=120)
+
+
+class AreaGroup(Model):
+    title: str = Field(min_length=1, max_length=120)
+    area_ids: list[AreaId] = Field(default_factory=list, max_length=1000)
+    position: int | None = Field(default=None, ge=0, le=100_000)
+    pending_review: list[AreaGroupReview] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def unique_areas(self) -> AreaGroup:
+        if len(self.area_ids) != len(set(self.area_ids)):
+            raise ValueError("an area can appear only once in a group")
+        reviewed = [item.saved_area_id for item in self.pending_review]
+        if len(reviewed) != len(set(reviewed)) or any(area_id not in self.area_ids for area_id in reviewed):
+            raise ValueError("reviewed shapes must belong to this group")
+        return self
 
 
 class AreaGeometry(Model):
@@ -486,6 +520,7 @@ class Area(Model):
     name: str = Field(min_length=1, max_length=120)
     colour: Colour = "#38bdf8"
     geometry: AreaGeometry
+    position: int | None = Field(default=None, ge=0, le=100_000)
 
 
 class AreaDates(Model):
@@ -527,6 +562,8 @@ class RunInput(Model):
                     pair.date_rule == "latest_previous" and self.followup_id
                 ):
                     raise ValueError("choose a reference date for each area")
+                if not is_single(self.recipe) and not ordered_pair(pair.a, pair.b):
+                    raise ValueError("date A must be before date B for each comparison")
             return self
         if not self.zones:
             raise ValueError("choose at least one area")
@@ -539,6 +576,8 @@ class RunInput(Model):
             required.append(self.a)
         if any(not source.date for source in required):
             raise ValueError("choose a dated Copernicus acquisition")
+        if not is_single(self.recipe) and self.date_rule == "manual" and not ordered_pair(self.a, self.b):
+            raise ValueError("date A must be before date B for each comparison")
         return self
 
 

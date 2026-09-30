@@ -41,14 +41,26 @@ export const EXPORT_STYLE = Object.freeze({ INK, MUTED, BAND, ACCENT, FONT, MONO
 /** The plate a mark's label sits on, and the ink written on it (`compareAnnotations.js`). */
 const LABEL_INKS = ['#f5f6f7'];
 
+const rgbHex = ([red, green, blue]) => `#${[red, green, blue]
+  .map((value) => Number(value).toString(16).padStart(2, '0')).join('')}`;
+
 /**
- * The colours a GIF must keep exactly, as the `keep` form field: every mark's
- * colour and the ink of its numeral, then the export's own inks and the
- * signature's. The server builds each frame's palette around them; the imagery
- * gets the rest.
+ * The colours a GIF must keep exactly, as the `keep` form field: the colours
+ * visible in Difference first, then every mark's colour and the ink of its
+ * numeral, followed by the export's own inks and the signature's. The server
+ * builds each frame's palette around them; the imagery gets the rest.
+ *
+ * `changePalette` is supplied only when the exported comparison carries a
+ * Difference reading. The final PNG frames already contain the reading; this
+ * list keeps its palette from being changed while the GIF encoder quantizes
+ * the satellite imagery around it.
  */
-export function gifColours(annotations = [], { signed = false } = {}) {
+export function gifColours(annotations = [], { signed = false, changePalette = null } = {}) {
   const colours = [];
+  if (changePalette) {
+    const palette = CHANGE_PALETTES[changePalette] ?? CHANGE_PALETTES.directional;
+    colours.push(...Object.values(palette).map(rgbHex));
+  }
   for (const mark of comparisonAnnotations(annotations)) {
     colours.push(mark.colour);
     if (mark.kind === 'number') colours.push(stampInk(mark));

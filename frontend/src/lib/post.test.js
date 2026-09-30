@@ -7,7 +7,8 @@ import {
   proofSourceMediaPaths, renumberMediaTweetText, retargetMediaTweetText,
   sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
-  pointLines, postCoordinates, splitPointLine,
+  pointLines, postCoordinates, splitPointLine, postDate,
+  POST_TEMPLATE_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
 } from './post.js';
 
 const full = {
@@ -83,7 +84,7 @@ describe('buildTweet1 — token ordering + line control', () => {
 
   it('exposes the insertable token palette', () => {
     expect(TWEET_TOKENS.map((t) => t.tag)).toEqual([
-      '#place', '#pluscode', '#coordinates', '#description', '#mention', '#source',
+      '#place', '#pluscode', '#coordinates', '#description', '#mention', '#source', '#date',
     ]);
     for (const t of TWEET_TOKENS) expect(t.sample).toBeTruthy();
   });
@@ -325,6 +326,87 @@ describe('templateUsesPostField — compose fields controlled by a template', ()
   it('keeps coordinates available when they can resolve a place or plus code', () => {
     expect(templateUsesPostField('#place', 'coordinates')).toBe(true);
     expect(templateUsesPostField('#pluscode', 'coordinates')).toBe(true);
+  });
+});
+
+describe('bodyTokens and misspelledTokens — what a layout will and will not fill', () => {
+  it('lists the tokens a body holds, in order, and leaves a longer word alone', () => {
+    expect(bodyTokens('#Place - #pluscode\n#placement #dates')).toEqual(['#place', '#pluscode']);
+  });
+
+  it('names a word that is one edit from a token, with the token it meant', () => {
+    expect(misspelledTokens('#coordinate\n#Sources and #plus_code')).toEqual([
+      { written: '#coordinate', meant: '#coordinates' },
+      { written: '#Sources', meant: '#source' },
+      { written: '#plus_code', meant: '#pluscode' },
+    ]);
+  });
+
+  it('says nothing about real tokens, real hashtags, or a word named twice', () => {
+    expect(misspelledTokens('#place #mention #osint #geolocation')).toEqual([]);
+    expect(misspelledTokens('#coordinate and #coordinate')).toHaveLength(1);
+  });
+});
+
+describe('fixMisspelledToken — the one-click correction', () => {
+  it('swaps every whole-word occurrence and leaves the longer token next to it alone', () => {
+    const body = '#coordinate\n#coordinates\nagain #coordinate, and #coordinate-x';
+    expect(fixMisspelledToken(body, '#coordinate', '#coordinates')).toBe(
+      '#coordinates\n#coordinates\nagain #coordinates, and #coordinate-x',
+    );
+  });
+
+  it('matches the case it was written in, and takes a separator as part of the word', () => {
+    expect(fixMisspelledToken('#Sources #sources', '#Sources', '#source')).toBe('#source #sources');
+    expect(fixMisspelledToken('#plus_code and #plus_codes', '#plus_code', '#pluscode')).toBe(
+      '#pluscode and #plus_codes',
+    );
+  });
+
+  it('leaves a body with no such word exactly as it was, and a fixed one clean', () => {
+    expect(fixMisspelledToken('#place', '#coordinate', '#coordinates')).toBe('#place');
+    const fixed = fixMisspelledToken('#coordinate\n#Sources', '#coordinate', '#coordinates');
+    expect(misspelledTokens(fixed)).toEqual([{ written: '#Sources', meant: '#source' }]);
+  });
+});
+
+describe('POST_TEMPLATE_STARTERS — where a new template starts', () => {
+  it('starts with the classic thread, unchanged', () => {
+    expect(POST_TEMPLATE_STARTERS[0]).toMatchObject({ id: 'classic', body: DEFAULT_TWEET_BODY });
+  });
+
+  it('gives every starter its own id and a name to show', () => {
+    const ids = POST_TEMPLATE_STARTERS.map((starter) => starter.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const starter of POST_TEMPLATE_STARTERS) expect(starter.label.trim()).not.toBe('');
+  });
+
+  it('writes only real tokens, so no starter goes out with text that looks like one', () => {
+    for (const starter of POST_TEMPLATE_STARTERS) {
+      expect(misspelledTokens(starter.body), starter.id).toEqual([]);
+      expect(bodyTokens(starter.body).length, starter.id).toBeGreaterThan(0);
+    }
+  });
+
+  it('is read-only, so one editor cannot change what the next one offers', () => {
+    expect(Object.isFrozen(POST_TEMPLATE_STARTERS)).toBe(true);
+    for (const starter of POST_TEMPLATE_STARTERS) expect(Object.isFrozen(starter)).toBe(true);
+  });
+
+  it('offers a dated layout that shows the date, and one that leaves it out', () => {
+    const byId = Object.fromEntries(POST_TEMPLATE_STARTERS.map((s) => [s.id, s]));
+    const fields = { ...full, date: '2025-10-24 14:30 UTC+3' };
+    expect(buildTweet1(byId.dated.body, fields)).toContain('Filmed: 2025-10-24 14:30 UTC+3');
+    expect(buildTweet1(byId.classic.body, fields)).not.toContain('2025-10-24');
+    expect(buildTweet1(byId.dated.body, full)).not.toContain('Filmed');
+  });
+
+  it('builds the short and coordinates-only layouts the way their names promise', () => {
+    const byId = Object.fromEntries(POST_TEMPLATE_STARTERS.map((s) => [s.id, s]));
+    expect(buildTweet1(byId.coordinates.body, full)).toBe('48.850000, 2.350000\n\n@GeoConfirmed');
+    expect(buildTweet1(byId.short.body, full)).toBe(
+      'Bakhmut, Donetsk, Ukraine\n48.850000, 2.350000\n\nSource: https://x.com/a/1',
+    );
   });
 });
 
@@ -574,3 +656,55 @@ describe('the points a post carries', () => {
     expect(report).not.toContain('## Points');
   });
 });
+
+describe('#date — the date a proof states, only where a template asks for it', () => {
+  it('fills its own line and drops it when there is no date', () => {
+    const body = '#place\n\nFilmed: #date\n\n#coordinates';
+    expect(buildTweet1(body, { ...full, date: '2024-03-12' }))
+      .toBe('Bakhmut, Donetsk, Ukraine\n\nFilmed: 2024-03-12\n\n48.850000, 2.350000');
+    expect(buildTweet1(body, { ...full, date: '' }))
+      .toBe('Bakhmut, Donetsk, Ukraine\n\n48.850000, 2.350000');
+  });
+
+  it('never enters the classic thread on its own', () => {
+    expect(DEFAULT_TWEET_BODY).not.toContain('#date');
+    expect(templateUsesPostField(DEFAULT_TWEET_BODY, 'date')).toBe(false);
+    expect(templateUsesPostField('Filmed: #Date', 'date')).toBe(true);
+  });
+
+  it('leaves a longer hashtag a template already carried alone', () => {
+    expect(templateUsesPostField('#dates #placement', 'date')).toBe(false);
+    expect(templateUsesPostField('#dates #placement', 'place')).toBe(false);
+    expect(buildTweet1('#placement #dates', { ...full, date: '2024-03-12' })).toBe('#placement #dates');
+  });
+});
+
+describe('postDate — the stored value, in no language, with its clock', () => {
+  it('keeps a date or a range of dates exactly as the case holds it', () => {
+    expect(postDate('2024-03-12', 'Europe/Kyiv')).toBe('2024-03-12');
+    expect(postDate('2024-03~')).toBe('2024-03~');
+    expect(postDate('2024-03-12/2024-03-15?')).toBe('2024-03-12/2024-03-15?');
+    expect(postDate('')).toBe('');
+  });
+
+  it('says which clock a time is on, as an offset from UTC on that day', () => {
+    expect(postDate('2024-07-12T14:30:00', 'Europe/Kyiv')).toBe('2024-07-12 14:30 UTC+3');
+    expect(postDate('2024-01-12T14:30:00', 'Europe/Kyiv')).toBe('2024-01-12 14:30 UTC+2');
+    expect(postDate('2024-01-12T14:30:00Z')).toBe('2024-01-12 14:30 UTC');
+    expect(postDate('2024-01-12T14:30:15+05:30')).toBe('2024-01-12 14:30:15 UTC+5:30');
+    // Across a clock change the offset is the one in force at that hour.
+    expect(postDate('2024-03-31T01:30:00', 'Europe/Paris')).toBe('2024-03-31 01:30 UTC+1');
+    expect(postDate('2024-03-31T03:30:00', 'Europe/Paris')).toBe('2024-03-31 03:30 UTC+2');
+  });
+
+  it('names no clock it does not know', () => {
+    expect(postDate('2024-01-12T14:30:00')).toBe('2024-01-12 14:30');
+    expect(postDate('2024-01-12T14:30:00', 'Not/AZone')).toBe('2024-01-12 14:30');
+  });
+
+  it('writes a span of times once, with its clock at the end', () => {
+    expect(postDate('2024-01-12T14:30:00/2024-01-12T15:00:00', 'Asia/Tokyo')).toBe('2024-01-12 14:30/15:00 UTC+9');
+    expect(postDate('2024-01-12T23:30:00Z/2024-01-13T01:00:00Z')).toBe('2024-01-12 23:30/2024-01-13 01:00 UTC');
+  });
+});
+

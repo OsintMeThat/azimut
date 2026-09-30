@@ -7,7 +7,8 @@ const get = vi.fn(async (url) => {
 vi.mock('./api.js', () => ({ api: { get } }));
 
 const {
-  forgetZones, isUnzonedTime, offsetAt, pointOf, withZone, zoneAt, zoneReading, zonesOf,
+  dayReading, forgetZones, isDateOnly, isUnzonedTime, offsetAt, pointOf, withZone, zoneAt,
+  zoneReading, zonesOf,
 } = await import('./localZone.js');
 
 beforeEach(() => {
@@ -34,6 +35,23 @@ describe('offsetAt', () => {
   it('says the rule it applied', () => {
     expect(zoneReading('2026-08-11T17:05:00', 'Europe/Kyiv', 'Kharkiv'))
       .toBe('17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)');
+  });
+});
+
+describe('a day and its zone', () => {
+  it('knows a date from a time', () => {
+    for (const raw of ['2024', '2024-03', '2024-03-12', '2024-03~', '2024-03-12/2024-03-14?']) {
+      expect(isDateOnly(raw), raw).toBe(true);
+    }
+    for (const raw of ['', '2024-03-12T14:30:00', '2024-03-12T14:30:00Z', 'March']) {
+      expect(isDateOnly(raw), raw).toBe(false);
+    }
+  });
+
+  it('says whose day it is', () => {
+    expect(dayReading('12 Mar 2024', 'Europe/Kyiv', 'Kharkiv')).toBe('12 Mar 2024, the day at Kharkiv (Europe/Kyiv)');
+    expect(dayReading('12 Mar 2024', 'Europe/Kyiv', '')).toBe('12 Mar 2024 (Europe/Kyiv)');
+    expect(dayReading('12 Mar 2024', null, 'Kharkiv')).toBe('12 Mar 2024');
   });
 });
 

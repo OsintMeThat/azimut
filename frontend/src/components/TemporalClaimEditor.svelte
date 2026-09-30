@@ -10,6 +10,8 @@
     item = null,
     subject = null,
     initialWhen = '',
+    /** The zone `initialWhen` was stated in, from the entry line. */
+    initialWhenZone = null,
     initialStatement = '',
     initialRole = '',
     /** Evidence a new claim cites from the start, such as the picture it was read on. */
@@ -29,6 +31,8 @@
 
   let statement = $state('');
   let when = $state('');
+  // The zone the date was stated in (`when_zone`): which day a date is.
+  let whenZone = $state(null);
   let timeRole = $state('');
   let confidence = $state('');
   let method = $state('');
@@ -65,6 +69,7 @@
     seeded = true;
     statement = item?.label ?? initialStatement;
     when = item?.raw ?? initialWhen;
+    whenZone = item ? (item.tz ?? null) : initialWhenZone;
     timeRole = item?.time_role ?? initialRole;
     confidence = item?.confidence ?? initialConfidence;
     if (!item) {
@@ -85,6 +90,7 @@
         if (!live) return;
         statement = chain.entity.label ?? item.label;
         when = chain.entity.attrs?.when ?? item.raw ?? '';
+        whenZone = chain.entity.attrs?.when_zone ?? item.tz ?? null;
         timeRole = chain.entity.attrs?.time_role ?? item.time_role ?? '';
         confidence = chain.entity.attrs?.confidence ?? item.confidence ?? '';
         method = chain.entity.attrs?.method ?? '';
@@ -109,6 +115,7 @@
     const body = {
       statement: text,
       when: when || null,
+      when_zone: (when && whenZone) || null,
       time_role: timeRole || null,
       confidence: confidence || null,
       method: method.trim() || null,
@@ -158,6 +165,8 @@
     id="temporal-when"
     value={when}
     places={[...places, ...cites]}
+    dayZone={whenZone}
+    ondayzonechange={(zone) => (whenZone = zone)}
     onchange={(value) => (when = value)}
     onvaliditychange={(reading) => (whenValid = reading.valid)}
   />

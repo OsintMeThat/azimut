@@ -1,15 +1,15 @@
 <script>
   import {
-    scaleQuad, rotateQuad, quadCentroid, rotateQuads, scaleQuads, pinholeOps, clampCollageDim,
-    stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
+    scaleQuad, rotateQuad, quadCentroid, rotateQuads, scaleQuads, pinholeOps, stitchCanvas, clockTime,
   } from '../../lib/inspect.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
 
-  // The panel beside the canvas: its size, the selected piece or block, and the
-  // auto panorama. Adding pieces and exporting live in the Collage tool around it.
-  let { collage: active, selectedIds = $bindable([]), requestCrop, renderPiece } = $props();
+  // The panel beside the canvas: the selected piece or block, and the auto
+  // panorama. Adding pieces and exporting live in the Collage tool around it.
+  // `fileTitles` names a piece's file as the case names it now.
+  let { collage: active, selectedIds = $bindable([]), requestCrop, renderPiece, fileTitles = new Map() } = $props();
 
   // These controls act on one piece; a multi-piece block is transformed as a
   // whole on the canvas, so the section simply steps aside for it.
@@ -17,14 +17,14 @@
     selectedIds.length === 1 ? (active?.nodes.find((n) => n.id === selectedIds[0]) ?? null) : null
   );
 
-  // The canvas is the resolution everything on it is worked and exported at, so
-  // it is the analyst's to set. Held inside the bounds compose accepts, and the
-  // field is put back to what was taken so a refused number never sits there.
-  function setDim(event, axis) {
-    const next = clampCollageDim(event.currentTarget.value, active[axis]);
-    active[axis] = next;
-    event.currentTarget.value = next;
-  }
+  // Which file the selected piece was cut from, and where in it.
+  const source = $derived.by(() => {
+    if (!selected) return null;
+    const path = selected.save?.path ?? '';
+    const name = fileTitles.get(path) ?? path.split('/').pop();
+    const time = selected.save?.time;
+    return time == null ? name : `${name} · ${clockTime(time)}`;
+  });
 
   function removeNode(id) {
     active.nodes = active.nodes.filter((n) => n.id !== id);
@@ -97,9 +97,9 @@
   // into each piece's recipe — bounded and undistorted however far you panned, at
   // the cost of the corner handles.
   const MODES = [
-    { id: 'planar', label: 'Planar', hint: 'One flat surface such as a facade, the ground or a map. Pieces stay warpable.' },
-    { id: 'cylindrical', label: 'Cylindrical', hint: 'A camera panning sideways. Bounded and even end to end.' },
-    { id: 'spherical', label: 'Spherical', hint: 'A camera that pans *and* tilts. Same, over both axes.' },
+    { id: 'planar', label: 'Planar', hint: 'One flat surface, such as a facade or the ground. Pieces stay warpable.' },
+    { id: 'cylindrical', label: 'Cylindrical', hint: 'A camera panning sideways.' },
+    { id: 'spherical', label: 'Spherical', hint: 'A camera that pans and tilts.' },
   ];
   let mode = $state('cylindrical');
   let stitching = $state(false);
@@ -185,50 +185,21 @@
 </script>
 
 <div class="module">
-  <p class="hint">Drag pieces to arrange them, pull corners to warp; shift-click selects several.</p>
-
-  <div class="section">
-    <div class="scale-row">
-      <span class="lbl">Canvas</span>
-      <input
-        class="input dim"
-        type="number"
-        min={COLLAGE_MIN_DIM}
-        max={COLLAGE_MAX_DIM}
-        value={active.width}
-        onchange={(e) => setDim(e, 'width')}
-        aria-label="Canvas width in pixels"
-      />
-      <span class="sub">×</span>
-      <input
-        class="input dim"
-        type="number"
-        min={COLLAGE_MIN_DIM}
-        max={COLLAGE_MAX_DIM}
-        value={active.height}
-        onchange={(e) => setDim(e, 'height')}
-        aria-label="Canvas height in pixels"
-      />
-      <span class="sub">px</span>
-    </div>
-    <p class="hint">Pieces are placed and exported at this scale, so raise it to keep a
-      high-resolution frame sharp.</p>
-  </div>
-
   {#if selected}
     <div class="section">
-      <div class="section-head"><span>Selected piece</span></div>
-      <div class="scale-row">
-        <span class="lbl">Scale</span>
-        <button class="btn btn-sm sq" onclick={() => scaleBy(selected, 1 / 1.1)} aria-label="Shrink piece">−</button>
-        <button class="btn btn-sm sq" onclick={() => scaleBy(selected, 1.1)} aria-label="Enlarge piece">+</button>
-        <span class="sub">or drag a square side handle</span>
+      <div class="identity" title={source}>
+        <span class="mini">
+          {#if selected.url}<img src={selected.url} alt="" />{:else}<Icon name={selected.missing ? 'alert' : 'image'} size={14} />{/if}
+        </span>
+        <span class="source">{source}</span>
       </div>
       <div class="scale-row">
-        <span class="lbl">Rotate</span>
-        <button class="btn btn-sm sq" onclick={() => rotateByDeg(selected, -15)} aria-label="Rotate left">↺</button>
-        <button class="btn btn-sm sq" onclick={() => rotateByDeg(selected, 15)} aria-label="Rotate right">↻</button>
-        <span class="sub">or drag the ↻ handle above the piece</span>
+        <span class="lbl">Scale</span>
+        <button class="btn btn-sm sq" onclick={() => scaleBy(selected, 1 / 1.1)} aria-label="Shrink piece" title="Shrink, or drag a side handle">−</button>
+        <button class="btn btn-sm sq" onclick={() => scaleBy(selected, 1.1)} aria-label="Enlarge piece" title="Enlarge, or drag a side handle">+</button>
+        <span class="lbl gap">Rotate</span>
+        <button class="btn btn-sm sq" onclick={() => rotateByDeg(selected, -15)} aria-label="Rotate left" title="Turn 15° left, or drag the ↻ handle">↺</button>
+        <button class="btn btn-sm sq" onclick={() => rotateByDeg(selected, 15)} aria-label="Rotate right" title="Turn 15° right, or drag the ↻ handle">↻</button>
       </div>
       <div class="actions">
         <button class="btn btn-sm" onclick={() => requestCrop?.(selected)}><Icon name="crop" size={13} /> Crop</button>
@@ -245,19 +216,16 @@
 
   {#if selectedGroup.length > 1}
     <div class="section">
-      <div class="section-head"><span>Selected block <span class="count">{selectedGroup.length}</span></span></div>
-      <p class="hint">Moves as one block; shift-click a piece to add or drop it.</p>
-      <div class="scale-row">
-        <span class="lbl">Scale</span>
-        <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1 / 1.1)} aria-label="Shrink block">−</button>
-        <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1.1)} aria-label="Enlarge block">+</button>
-        <span class="sub">or drag a block corner</span>
+      <div class="section-head" title="Moves as one block; shift-click a piece to add or drop it">
+        <span>{selectedGroup.length} pieces selected</span>
       </div>
       <div class="scale-row">
-        <span class="lbl">Rotate</span>
-        <button class="btn btn-sm sq" onclick={() => rotateGroupByDeg(-15)} aria-label="Rotate block left">↺</button>
-        <button class="btn btn-sm sq" onclick={() => rotateGroupByDeg(15)} aria-label="Rotate block right">↻</button>
-        <span class="sub">or drag the ↻ knob</span>
+        <span class="lbl">Scale</span>
+        <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1 / 1.1)} aria-label="Shrink block" title="Shrink, or drag a block corner">−</button>
+        <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1.1)} aria-label="Enlarge block" title="Enlarge, or drag a block corner">+</button>
+        <span class="lbl gap">Rotate</span>
+        <button class="btn btn-sm sq" onclick={() => rotateGroupByDeg(-15)} aria-label="Rotate block left" title="Turn 15° left, or drag the ↻ knob">↺</button>
+        <button class="btn btn-sm sq" onclick={() => rotateGroupByDeg(15)} aria-label="Rotate block right" title="Turn 15° right, or drag the ↻ knob">↻</button>
       </div>
       <div class="actions">
         <button class="btn btn-sm danger" onclick={removeGroup} title="or press Delete">
@@ -268,12 +236,9 @@
   {/if}
 
   <div class="section">
-    <div class="section-head"><span>Auto panorama</span></div>
-    <p class="hint">
-      Solves the layout from the overlapping imagery itself, then drops the pieces back on the
-      canvas, which grows to hold them at full resolution. You can still drag pieces to correct
-      the result.
-    </p>
+    <div class="section-head" title="Places the pieces from the imagery they share. You can still drag them after.">
+      <span>Auto panorama</span>
+    </div>
     <div class="modes">
       {#each MODES as m (m.id)}
         <button class="mode" class:on={mode === m.id} onclick={() => (mode = m.id)} title={m.hint}>
@@ -281,7 +246,6 @@
         </button>
       {/each}
     </div>
-    <p class="hint sub-hint">{MODES.find((m) => m.id === mode).hint}</p>
     <button
       class="btn btn-sm w-full"
       disabled={stitching || !active || active.nodes.length < 2}
@@ -307,19 +271,46 @@
     flex-direction: column;
     gap: 12px;
   }
-  .hint {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    margin: 0;
-  }
   .section {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
-  .hint + .section {
+  .section + .section {
     border-top: 1px solid var(--border);
     padding-top: 12px;
+  }
+  .identity {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mini {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 30px;
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    background: var(--bg-0);
+    color: var(--text-3);
+  }
+  .mini img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .source {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-1);
   }
   .section-head {
     font-weight: 600;
@@ -349,9 +340,6 @@
     background: var(--bg-3);
     color: var(--accent);
   }
-  .sub-hint {
-    margin-top: -2px;
-  }
   .scale-row {
     display: flex;
     align-items: center;
@@ -361,14 +349,8 @@
     font-size: var(--fs-sm);
     color: var(--text-2);
   }
-  .scale-row .sub {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .dim {
-    width: 5.5em;
-    padding: 4px 6px;
-    font-size: var(--fs-xs);
+  .scale-row .gap {
+    margin-left: 10px;
   }
   .btn.sq {
     min-width: 30px;

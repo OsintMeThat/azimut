@@ -12,11 +12,16 @@
    * nothing is flagged for being absent.
    */
   import { entityFields, withHeadings } from '../lib/entityTypes.svelte.js';
+  import { worldZones } from '../lib/timeline.js';
   import TemporalInput from './TemporalInput.svelte';
 
   let { type, values = $bindable({}), exclude = [] } = $props();
 
   const fields = $derived(entityFields(type));
+  // Named zones to pick from, typed to narrow: this browser's own list, UTC first.
+  const zoneNames = $derived(
+    fields.some((field) => field.kind === 'timezone') ? ['UTC', ...worldZones().filter((zone) => zone !== 'UTC')] : [],
+  );
 
   /**
    * A shape is traced on the map, never typed here. So an empty footprint shows
@@ -126,6 +131,17 @@
               onchange={(value) => set(field.key, value)}
             />
           </div>
+        {:else if field.kind === 'timezone'}
+          <input
+            id={`attr-${field.key}`}
+            class="input input-sm mono"
+            list="attr-zone-names"
+            value={values?.[field.key] ?? ''}
+            placeholder="Not stated, UTC days"
+            autocomplete="off"
+            spellcheck="false"
+            onchange={(e) => set(field.key, e.currentTarget.value.trim())}
+          />
         {:else if field.kind === 'longtext'}
           <!-- A quoted source and the reasoning behind a claim run to paragraphs.
                Held in a one-line box they scroll sideways past eighty characters,
@@ -158,6 +174,11 @@
       </div>
     {/each}
   </div>
+  {#if zoneNames.length}
+    <datalist id="attr-zone-names">
+      {#each zoneNames as zone (zone)}<option value={zone}></option>{/each}
+    </datalist>
+  {/if}
 {/if}
 
 <style>

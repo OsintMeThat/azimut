@@ -105,7 +105,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..workspace import CaseError
-from .temporal import TemporalError, parse_temporal
+from .temporal import TemporalError, parse_temporal, valid_zone
 
 #: The families, in the order a menu should show them.
 ACTOR = "actor"
@@ -156,8 +156,10 @@ FAMILY_READS: dict[str, str] = {
 #: says is that the field expects sentences. A quoted source and the reasoning behind
 #: a claim run to paragraphs, and a one-line box that scrolls sideways at eighty
 #: characters is a field nobody fills — the reason those two exist at all.
+#:
+#: `timezone` is an IANA zone name, the one a date beside it was stated in.
 ATTR_KINDS: tuple[str, ...] = (
-    "text", "longtext", "number", "url", "geojson", "choice", "temporal",
+    "text", "longtext", "number", "url", "geojson", "choice", "temporal", "timezone",
 )
 
 #: Longest a declared text field may be. Generous: `verbatim` quotes a source and
@@ -546,6 +548,11 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                attrs=(
                    Attr("when", "Taken", kind="temporal",
                         hint="when the material this proof rests on was taken"),
+                   # The clock that date was read on. The composer states it from
+                   # the proof's first point unless the analyst picks another, and
+                   # it is what makes a stated day that place's day on the Timeline.
+                   Attr("when_zone", "Time zone", kind="timezone",
+                        hint="the zone the date was stated in"),
                )),
     EntityType("post", "Post", DOCUMENT, "post", DELIVERABLE,
                hint="a prepared thread or report, saved rather than published"),
@@ -569,8 +576,8 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="frames and images laid out together, exported as one picture"),
     EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
                hint="two map sources, their layers and the shared camera"),
-    EntityType("analysis-zones", "Analysis areas", DOCUMENT, "polygon", ANNEX,
-               hint="saved geographic areas reusable by any Detect analyzer"),
+    EntityType("analysis-zones", "Area group", DOCUMENT, "polygon", ANNEX,
+               hint="an ordered group of case areas used in Detect"),
     EntityType("analysis-area", "Area", DOCUMENT, "mapArea", ANNEX,
                hint="a named area shared by detections in this case"),
     # Named "routine" everywhere a user reads it: the type id is storage, and
@@ -668,6 +675,10 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                 "when", "When", kind="temporal",
                 hint="when this claim applies",
                 group="When",
+            ),
+            Attr(
+                "when_zone", "Time zone", kind="timezone",
+                hint="the zone the date was stated in",
             ),
             Attr(
                 "time_role", "Time role", kind="choice",
@@ -1083,6 +1094,11 @@ def _check_temporal(attr: Attr, value: Any) -> None:
         raise CaseError(f"'{attr.key}' {exc}") from exc
 
 
+def _check_timezone(attr: Attr, value: Any) -> None:
+    if not valid_zone(value):
+        raise CaseError(f"'{attr.key}' must be a time zone name such as Europe/Kyiv, or nothing")
+
+
 _CHECKS: dict[str, Callable[[Attr, Any], None]] = {
     "text": _check_text,
     "longtext": _check_text,
@@ -1091,4 +1107,5 @@ _CHECKS: dict[str, Callable[[Attr, Any], None]] = {
     "geojson": _check_geojson,
     "choice": _check_choice,
     "temporal": _check_temporal,
+    "timezone": _check_timezone,
 }

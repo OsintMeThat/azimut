@@ -249,7 +249,10 @@ def _migrate_14_to_15(conn: sqlite3.Connection) -> None:
         " uncertain INTEGER NOT NULL DEFAULT 0 CHECK (uncertain IN (0, 1)),"
         " approximate INTEGER NOT NULL DEFAULT 0 CHECK (approximate IN (0, 1)),"
         " zone TEXT, sortable INTEGER NOT NULL DEFAULT 0 CHECK (sortable IN (0, 1)),"
-        " status TEXT, confidence TEXT, parse_error TEXT"
+        " status TEXT, confidence TEXT, parse_error TEXT,"
+        # The rebuilds of later steps write every column the projection has today,
+        # so the table is born with the zone schema 19 added rather than without it.
+        " tz TEXT"
         ")"
     )
     conn.execute(
@@ -330,9 +333,23 @@ CREATE INDEX IF NOT EXISTS idx_entity_merges_survivor ON entity_merges(survivor_
 """
 
 
+def _add_temporal_zones(conn: sqlite3.Connection) -> None:
+    """Give the Time projection the zone each value was stated in, and re-read it.
+
+    A civil date stated in a zone spans that zone's days, so a dated proof's bounds
+    move with the zone its point is in. Nothing stored before carried one, and those
+    rows rebuild exactly as they were; the rebuild is for the column itself. A table
+    born at 15 already has the column, so it is added only where it is missing.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(temporal_items)")}
+    if "tz" not in columns:
+        conn.execute("ALTER TABLE temporal_items ADD COLUMN tz TEXT")
+    _rebuild_temporal_projection_conn(conn)
+
+
 def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
-    """Rebuild both search indexes, folded the way a search term now is, and add the
-    two tables a merge writes.
+    """Rebuild both search indexes, folded the way a search term now is, add the
+    two tables a merge writes, and the zone a temporal value was stated in.
 
     A term is folded as it is typed (``engine/textfold.py``), so an index written
     before could only be found by the exact accents it holds: ``Cafe`` would reach a
@@ -354,6 +371,7 @@ def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
             "UPDATE media_items SET search_text = ? WHERE path = ?",
             (_media_search_text(json.loads(row["item_json"])), row["path"]),
         )
+    _add_temporal_zones(conn)
 
 
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.

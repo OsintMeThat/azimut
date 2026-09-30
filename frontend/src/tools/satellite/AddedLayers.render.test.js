@@ -33,6 +33,13 @@ const text = () => document.body.textContent ?? '';
 const rows = (selector) => [...document.body.querySelectorAll(selector)];
 const byText = (selector, label) =>
   rows(selector).find((node) => node.textContent.trim().startsWith(label));
+const byLabel = (label) => document.body.querySelector(`[aria-label="${label}"]`);
+
+/** Every row opens folded: this is the press that shows the rest of one. */
+function unfold(title) {
+  byText('.fold', title).click();
+  flushSync();
+}
 
 const LAYER = {
   name: 'Sightings',
@@ -74,8 +81,34 @@ describe('before anything is added', () => {
 });
 
 describe('a row', () => {
+  it('opens folded to one line: the eye, the name, and its acts', () => {
+    show({ rows: [LAYER] });
+
+    expect(text()).toContain('Sightings');
+    expect(text()).not.toContain('sightings.kml');
+    expect(document.querySelector('.fold').getAttribute('aria-expanded')).toBe('false');
+    expect(byLabel('Remove Sightings')).toBeTruthy();
+  });
+
+  it('unfolds the layer just added, since it was added to be read', () => {
+    show({ rows: [LAYER, followed()], opened: 'Roadblocks' });
+
+    const [first, second] = rows('.fold');
+    expect(first.getAttribute('aria-expanded')).toBe('false');
+    expect(second.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('folds the layer just added when asked, and keeps it folded', () => {
+    show({ rows: [followed()], opened: 'Roadblocks' });
+
+    unfold('Roadblocks');
+
+    expect(document.querySelector('.fold').getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('renders from state, with where it came from and how fresh it is', () => {
     show({ rows: [LAYER] });
+    unfold('Sightings');
 
     expect(text()).toContain('Sightings');
     expect(text()).toContain('sightings.kml');
@@ -84,6 +117,7 @@ describe('a row', () => {
 
   it('states what is loaded and what is drawn, separately', () => {
     show({ rows: [{ ...LAYER, hidden: ['Damage'] }] });
+    unfold('Sightings');
 
     // never the drawn count passing for the loaded one
     expect(text()).toMatch(/3.200 features · 2.788 shown/);
@@ -91,6 +125,7 @@ describe('a row', () => {
 
   it('links a followed map back to the page it was published on', () => {
     show({ rows: [followed()] });
+    unfold('Roadblocks');
 
     const link = document.querySelector('.from');
     expect(link.getAttribute('href')).toBe('https://example.test/r.kml');
@@ -102,34 +137,39 @@ describe('a row', () => {
 
   it('leaves a file as plain text, having nowhere to send anybody', () => {
     show({ rows: [LAYER] });
+    unfold('Sightings');
 
     expect(document.querySelector('.from')).toBeNull();
     expect(text()).toContain('sightings.kml');
   });
 
-  it('says a stale snapshot is stale, and marks it for the eye', () => {
+  it('says a stale snapshot is stale, folded or not', () => {
     show({ rows: [followed({ stale: true, checked_at: '2020-01-01T00:00:00Z' })] });
 
+    // folded, the name and a mark say it before anything is read
+    expect(document.querySelector('.name.stale')).toBeTruthy();
+    expect(document.querySelector('.stale-mark').title).toContain('out of date');
+
+    unfold('Roadblocks');
     expect(text()).toContain('out of date');
-    expect(document.querySelector('.stale')).toBeTruthy();
   });
 
   it('offers Refresh only to a layer that has somewhere to refresh from', () => {
     show({ rows: [LAYER] });
-    expect(byText('button', 'Refresh')).toBeFalsy();
+    expect(byLabel('Refresh Sightings')).toBeNull();
 
     unmount(held);
     held = null;
     document.body.innerHTML = '';
 
     show({ rows: [followed()] });
-    expect(byText('button', 'Refresh')).toBeTruthy();
+    expect(byLabel('Refresh Roadblocks')).toBeTruthy();
   });
 
   it('owns its layer the way a curated row does not: it can be removed', () => {
     show({ rows: [LAYER] });
 
-    expect(byText('button', 'Remove')).toBeTruthy();
+    expect(byLabel('Remove Sightings')).toBeTruthy();
     // no way to reach the saved copy on disk: it is stored under an extension
     // no other program opens, in a folder the analyst never sees
     expect(byText('button', 'Reveal file')).toBeFalsy();
@@ -145,6 +185,7 @@ describe('a row', () => {
 describe('the legend is the filter', () => {
   it('opens to one row per category, with its colour and its count', () => {
     show({ rows: [LAYER] });
+    unfold('Sightings');
 
     byText('.legend-head', '2 groups').click();
     flushSync();
@@ -159,6 +200,7 @@ describe('the legend is the filter', () => {
 
   it('reports a hidden category as off rather than dropping it from the legend', () => {
     show({ rows: [{ ...LAYER, hidden: ['Damage'] }] });
+    unfold('Sightings');
     byText('.legend-head', '2 groups').click();
     flushSync();
 
@@ -171,6 +213,7 @@ describe('the legend is the filter', () => {
   it('asks for exactly the category that was clicked', () => {
     const oncategory = vi.fn();
     show({ rows: [LAYER], oncategory });
+    unfold('Sightings');
     byText('.legend-head', '2 groups').click();
     flushSync();
 
@@ -203,6 +246,7 @@ describe('finding a pin', () => {
 
   function opened(props = {}) {
     show({ rows: [LAYER], ...props });
+    unfold('Sightings');
     byText('.legend-head', '2 groups').click();
     flushSync();
   }
@@ -216,6 +260,7 @@ describe('finding a pin', () => {
   it('offers nothing to search on a layer that is switched off', () => {
     // a match is somewhere to go, and a layer nobody is drawing has nowhere
     show({ rows: [{ ...LAYER, enabled: false }], search: finder(null) });
+    unfold('Sightings');
     byText('.legend-head', '2 groups').click();
     flushSync();
 
@@ -302,8 +347,8 @@ describe('the acts', () => {
     show({ rows: [followed()], ...handlers });
 
     document.querySelector('.eye').click();
-    byText('button', 'Refresh').click();
-    byText('button', 'Remove').click();
+    byLabel('Refresh Roadblocks').click();
+    byLabel('Remove Roadblocks').click();
     byText('button', 'Add a layer').click();
 
     for (const handler of Object.values(handlers)) expect(handler).toHaveBeenCalled();
@@ -312,7 +357,144 @@ describe('the acts', () => {
   it('says a refresh is running on the row it is running on', () => {
     show({ rows: [followed()], busy: 'Roadblocks' });
 
-    expect(byText('button', 'Reading…')).toBeTruthy();
-    expect(byText('button', 'Reading…').disabled).toBe(true);
+    const button = byLabel('Refresh Roadblocks');
+    expect(button.title).toBe('Reading…');
+    expect(button.disabled).toBe(true);
+  });
+
+  it('refreshes every followed layer from the head, and only offers it when there is one', () => {
+    show({ rows: [LAYER] });
+    expect(byLabel('Refresh every followed layer')).toBeNull();
+
+    unmount(held);
+    held = null;
+    document.body.innerHTML = '';
+
+    const onrefreshall = vi.fn();
+    show({ rows: [LAYER, followed()], onrefreshall });
+    byLabel('Refresh every followed layer').click();
+    expect(onrefreshall).toHaveBeenCalled();
+  });
+
+  it('holds the head button while it is going through them', () => {
+    show({ rows: [followed()], refreshing: true });
+
+    expect(byLabel('Refresh every followed layer').disabled).toBe(true);
+  });
+});
+
+/** The list is the stack, top first, and the grip is how it changes. */
+describe('restacking', () => {
+  const three = () => [
+    LAYER,
+    followed(),
+    { ...LAYER, name: 'Damage', title: 'Damage' },
+  ];
+
+  /** happy-dom has no DataTransfer, so the drag carries a stand-in. */
+  function dragEvent(type, { x = 100, y = 0 } = {}) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    event.dataTransfer = {
+      setData() {},
+      setDragImage() {},
+      effectAllowed: '',
+      dropEffect: '',
+    };
+    event.clientX = x;
+    event.clientY = y;
+    return event;
+  }
+
+  /** …and no layout: each row 26px tall, the list 300px wide from x 0. */
+  const ROW = 26;
+  function laidOut() {
+    const list = document.querySelector('ul.layers');
+    const items = [...list.children];
+    const rect = (top, height) => ({ top, bottom: top + height, height, left: 0, right: 300, width: 300 });
+    list.getBoundingClientRect = () => rect(0, items.length * ROW);
+    items.forEach((item, index) => (item.getBoundingClientRect = () => rect(index * ROW, ROW)));
+    return items;
+  }
+
+  it('has nothing to drag in a list of one', () => {
+    show({ rows: [LAYER] });
+
+    expect(document.querySelector('.grip')).toBeNull();
+  });
+
+  it('drops a row below the one it was let go over the lower half of', () => {
+    const onreorder = vi.fn();
+    show({ rows: three(), onreorder });
+    const items = laidOut();
+    rows('.grip')[0].dispatchEvent(dragEvent('dragstart'));
+    // the lower half of the second row
+    items[1].dispatchEvent(dragEvent('dragover', { y: ROW + 20 }));
+    flushSync();
+    expect(items[2].classList.contains('gap-above')).toBe(true);
+    items[1].dispatchEvent(dragEvent('drop', { y: ROW + 20 }));
+
+    expect(onreorder).toHaveBeenCalledWith(['Roadblocks', 'Sightings', 'Damage']);
+  });
+
+  it('still takes the drop when the pointer drifted off the row beside the list', () => {
+    // the grip sits on the row's left edge, and a hand moving down drifts off it
+    const onreorder = vi.fn();
+    show({ rows: three(), onreorder });
+    laidOut();
+    rows('.grip')[2].dispatchEvent(dragEvent('dragstart'));
+    const over = dragEvent('dragover', { x: -12, y: 4 });
+    document.body.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    document.body.dispatchEvent(dragEvent('drop', { x: -12, y: 4 }));
+
+    expect(onreorder).toHaveBeenCalledWith(['Damage', 'Sightings', 'Roadblocks']);
+  });
+
+  it('refuses a drop far from the list, so the row goes back where it was', () => {
+    const onreorder = vi.fn();
+    show({ rows: three(), onreorder });
+    laidOut();
+    rows('.grip')[0].dispatchEvent(dragEvent('dragstart'));
+    const over = dragEvent('dragover', { x: 600, y: 40 });
+    document.body.dispatchEvent(over);
+    flushSync();
+
+    expect(over.defaultPrevented).toBe(false);
+    expect(document.querySelector('.gap-above, .gap-below')).toBeNull();
+    document.body.dispatchEvent(dragEvent('drop', { x: 600, y: 40 }));
+    expect(onreorder).not.toHaveBeenCalled();
+  });
+
+  it('asks for nothing when a row is let go where it was', () => {
+    const onreorder = vi.fn();
+    show({ rows: three(), onreorder });
+    const items = laidOut();
+    const own = items[1];
+    // a drop that never passed over the list…
+    rows('.grip')[1].dispatchEvent(dragEvent('dragstart'));
+    own.dispatchEvent(dragEvent('drop', { y: ROW + 20 }));
+    // …and one let go over itself
+    rows('.grip')[1].dispatchEvent(dragEvent('dragstart'));
+    own.dispatchEvent(dragEvent('dragover', { y: ROW + 20 }));
+    own.dispatchEvent(dragEvent('drop', { y: ROW + 20 }));
+
+    expect(onreorder).not.toHaveBeenCalled();
+  });
+
+  it('moves one place at a time with the arrow keys, and not past either end', () => {
+    const onreorder = vi.fn();
+    show({ rows: three(), onreorder });
+    const press = (grip, key) =>
+      grip.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+
+    press(rows('.grip')[0], 'ArrowDown');
+    expect(onreorder).toHaveBeenLastCalledWith(['Roadblocks', 'Sightings', 'Damage']);
+    press(rows('.grip')[2], 'ArrowUp');
+    expect(onreorder).toHaveBeenLastCalledWith(['Sightings', 'Damage', 'Roadblocks']);
+
+    onreorder.mockClear();
+    press(rows('.grip')[0], 'ArrowUp');
+    press(rows('.grip')[2], 'ArrowDown');
+    expect(onreorder).not.toHaveBeenCalled();
   });
 });

@@ -15,8 +15,7 @@
 import { daysBefore, isoDay } from '../sentinel.js';
 
 /**
- * How far back to look. A month is several passes, a year the most one preset
- * reaches; anything older is two days picked in the calendar, `{ start, end }`.
+ * How far back the pass list looks. A calendar asks for one chosen month instead.
  */
 export const LOOKBACK_WINDOWS = Object.freeze([
   { id: 30, label: '30 days' },
@@ -32,13 +31,6 @@ export function lookupSpan(lookback, now = new Date()) {
   return typeof lookback === 'number'
     ? { start: daysBefore(lookback, now), end: isoDay(now) }
     : { start: lookback?.start ?? '', end: lookback?.end ?? '' };
-}
-
-/** What stops two picked days from being looked up, or '' when nothing does. */
-export function spanProblem(lookback) {
-  if (typeof lookback === 'number') return '';
-  if (!lookback?.start || !lookback?.end) return 'Pick the first and the last day.';
-  return lookback.start > lookback.end ? 'The first day comes after the last.' : '';
 }
 
 /**

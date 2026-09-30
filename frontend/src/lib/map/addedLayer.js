@@ -652,6 +652,23 @@ export function createAddedLayer(
       return true;
     },
 
+    /** The lowest of this layer's GL layers, or null while nothing is built. */
+    floor() {
+      return built && map.getLayer(FILL) ? FILL : null;
+    },
+
+    /**
+     * Move every GL layer of this one, in its own order, to just under `other`,
+     * another added layer. Nothing moves until both are built.
+     */
+    stackUnder(other) {
+      const below = other?.floor();
+      if (!built || !below) return;
+      for (const layer of PAINTED) {
+        if (map.getLayer(layer)) map.moveLayer(layer, below);
+      }
+    },
+
     /** Keep the features, take them off the map (or put them back). */
     visible(on) {
       shown = on;

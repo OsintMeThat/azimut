@@ -813,7 +813,7 @@
       <AttrFields
         type={entity.type}
         bind:values={infoAttrs}
-        exclude={entity.type === 'claim' ? ['when', 'time_role', 'confidence', 'method', 'verbatim'] : []}
+        exclude={entity.type === 'claim' ? ['when', 'when_zone', 'time_role', 'confidence', 'method', 'verbatim'] : []}
       />
     {/if}
 

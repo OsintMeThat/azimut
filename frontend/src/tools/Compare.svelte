@@ -111,6 +111,7 @@
   import ModeControl from './compare/ModeControl.svelte';
   import SourceCard from './compare/SourceCard.svelte';
   import DifferenceBar from './compare/DifferenceBar.svelte';
+  import DifferencePanel from './compare/DifferencePanel.svelte';
   import { fromDifference } from '../lib/map/analyzerRules.js';
   import PassStrip from './compare/PassStrip.svelte';
   import EvolutionPicker from './compare/EvolutionPicker.svelte';
@@ -227,6 +228,9 @@
   let copernicus = $state(null);
   // Highlights laid over whichever view mode is on, never a layout of their own.
   let difference = $state(false);
+  // Its settings, docked on the stage's right edge; closed whenever Difference comes on.
+  let differenceOpen = $state(false);
+  const differenceDocked = $derived(both && difference && differenceOpen);
   /** The surface the shared controls act on. */
   const primeEngine = $derived(a.engine ?? b.engine);
 
@@ -885,6 +889,7 @@
       return;
     }
     difference = on;
+    differenceOpen = false;
     if (!on) return;
     if (!changeStatus.methods.includes(changeOptions.method)) changeOptions.method = changeStatus.methods[0];
     // Turning it on by hand asks for a reading, bands included. Queued behind
@@ -1085,6 +1090,7 @@
       mode = compareMode(spec.mode);
       // Difference used to be a mode of its own, laid over the pair side by side.
       difference = spec.difference === true || spec.mode === 'change';
+      differenceOpen = false;
       // A reopened session reads nothing it has not been asked to, bands included.
       changeReadScope = '';
       divider = percentage(spec.divider, DEFAULT_DIVIDER);
@@ -1999,7 +2005,7 @@
       form.append('image_b', frameB, 'comparison-b.png');
       form.append('format', 'blink');
       form.append('interval', String(blinkInterval));
-      form.append('keep', gifColours(annotations));
+      form.append('keep', gifKeepColours());
     } else {
       form.append('image_a', await comparisonBlob(), 'comparison.png');
       form.append('format', 'png');
@@ -2035,7 +2041,7 @@
     if (imageB) form.append('image_b', imageB, 'comparison-b.png');
     form.append('format', format);
     form.append('interval', String(blinkInterval));
-    if (format !== 'png') form.append('keep', gifColours(annotations, { signed: signExport }));
+    if (format !== 'png') form.append('keep', gifKeepColours({ signed: signExport }));
     form.append('filename', exportName());
     form.append('spec', JSON.stringify(sessionSpec()));
     for (const [field, value] of pictureDateFields(pictureDates())) form.append(field, value);
@@ -2093,7 +2099,7 @@
       form.append('image_b', frameB, 'comparison-b.png');
       form.append('animation', animation);
       form.append('interval', String(blinkInterval));
-      form.append('keep', gifColours(annotations, { signed: signExport }));
+      form.append('keep', gifKeepColours({ signed: signExport }));
       form.append('filename', exportName());
       const result = await api.post(`/api/cases/${owner.id}/compare/gif`, form);
       const kept = await keepExport(owner.id, animation, frameA, frameB);
@@ -2426,6 +2432,7 @@
     class:capturing={grabbing}
     class:capture-a={captureSide === 'a'}
     class:capture-b={captureSide === 'b'}
+    class:docked={differenceDocked}
     style:--divider={`${divider}%`}
     style:--opacity={opacity / 100}
     style:--change-opacity={changeOpacity / 100}
@@ -2710,6 +2717,11 @@
         {:else if changeCounts}<em>{changeShare(changeCounts)}% highlighted</em>{/if}
       </div>
     {/if}
+    {#if differenceDocked}
+      <DifferencePanel bind:settings={changeOptions} status={changeStatus} result={changeResult}
+        reading={changeState} error={changeError} onrun={() => refreshChangeAssist()} onzone={visitZone}
+        onanalyzer={saveAsAnalyzer} onclose={() => (differenceOpen = false)} />
+    {/if}
 
  </div>
   {#if both && stripOpen && archive}
@@ -2726,9 +2738,8 @@
     <div class="mode-footer">
       <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
       {#if difference}
-        <DifferenceBar bind:settings={changeOptions} status={changeStatus} result={changeResult}
-          reading={changeState} error={changeError}
-          onrun={() => refreshChangeAssist()} onzone={visitZone} onanalyzer={saveAsAnalyzer} />
+        <DifferenceBar bind:settings={changeOptions} bind:open={differenceOpen} status={changeStatus}
+          reading={changeState} onrun={() => refreshChangeAssist()} />
       {/if}
     </div>
   {/if}
@@ -3086,9 +3097,9 @@
   .source-add:hover { color: var(--text-1); border-color: var(--accent); }
   /* Lifted off the imagery, which can be as dark as the chips themselves. */
   .source-bar :global(.cmp-glass) { box-shadow: var(--shadow-1); }
-  .view-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: auto; pointer-events: none; }
+  .view-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 100%; margin-left: auto; pointer-events: none; }
   .view-col > * { pointer-events: auto; }
-  .search-chip { display: flex; width: min(280px, 24vw); padding: 4px; }
+  .search-chip { display: flex; width: min(280px, 24vw); max-width: 100%; padding: 4px; }
   .search-chip :global(.place-search) { flex: 1; }
   .camera-chip { display: flex; align-items: center; gap: 4px; padding: 0 0 0 8px; }
   /* one frame for the pair; a turned camera still rings the compass in amber */
@@ -3098,8 +3109,7 @@
   /* The dock is drawn for the map; in the header row its segments stand on
      the row itself, not on a second frame. */
   .tool-header :global(.mode-dock) { padding: 0; border: 0; background: transparent; box-shadow: none; }
-  /* Above the stage, which keeps its map layers to itself (see .compare-stage),
-     so the Difference panel opening upward lies over the highlights. */
+  /* Above the stage, which keeps its map layers to itself (see .compare-stage). */
   .mode-footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 6px; background: var(--bg-1); }
   .presets { display: flex; justify-content: center; gap: 8px; padding: 8px; }
   .locked small { color: var(--accent); }
@@ -3143,6 +3153,7 @@
      A and B is one line down the whole tool. */
   .stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
   .compare-stage {
+    --difference-dock: clamp(290px, 24vw, 340px);
     position: relative;
     flex: 1;
     min-height: 0;
@@ -3231,6 +3242,14 @@
     font-size: 10px;
     backdrop-filter: blur(6px);
   }
+  /* Difference's settings dock on the right edge under the cards' row, so
+     what rides that corner steps aside rather than hiding under them, leaving
+     B's zoom buttons their column. */
+  .compare-stage.docked .view-col {
+    max-width: calc(100% - var(--difference-dock) - 48px);
+    margin-right: calc(var(--difference-dock) + 8px);
+  }
+  .compare-stage.docked .change-legend { right: calc(var(--difference-dock) + 20px); }
   .change-legend span { display: flex; align-items: center; gap: 4px; }
   .change-legend i { width: 9px; height: 9px; border-radius: 2px; }
   .change-legend .gain { background: var(--gain); }

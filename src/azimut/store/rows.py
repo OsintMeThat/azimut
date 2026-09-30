@@ -115,6 +115,15 @@ _PRODUCED_HERE_ROW_SQL = (
     f" WHERE produced.entity_id = t.owner_id AND {_PRODUCED_HERE_SQL})"
 )
 
+#: Whether the entity ``file`` pictures the ground from above (`FROM_ABOVE`): a
+#: capture, or a file one of those routes made. The Timeline's two file lanes split on it.
+_FROM_ABOVE_FILE_SQL = (
+    "(file.type = 'capture' OR EXISTS (SELECT 1 FROM media_items above"
+    " WHERE above.entity_id = file.id AND COALESCE(above.source_type, '') IN ("
+    + ", ".join(f"'{route}'" for route in link_engine.FROM_ABOVE)
+    + ")))"
+)
+
 
 def _has_gps(item: dict[str, Any]) -> bool:
     """Whether an indexed media item carries a usable position.

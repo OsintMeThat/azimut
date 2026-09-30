@@ -3,7 +3,7 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
-    uid, initialQuad, quadFromCropRect, collageBounds, COLLAGE_DEFAULT_SIZE,
+    uid, initialQuad, quadFromCropRect, exportFrame, COLLAGE_DEFAULT_SIZE,
   } from '../lib/inspect.js';
   import {
     workState, collageSpec, collageSignature, missingPieces, isFiled,
@@ -12,11 +12,15 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
+  import { renderCollageThumb } from '../lib/collageThumb.js';
+  import { foldTerms, foldText } from '../lib/textFold.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
   import CollageCanvas from './inspect/CollageCanvas.svelte';
   import CollageMenu from './inspect/CollageMenu.svelte';
+  import CollagePreview from './inspect/CollagePreview.svelte';
   import PiecePicker from './inspect/PiecePicker.svelte';
   import PieceCropModal from './inspect/PieceCropModal.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
@@ -37,13 +41,27 @@
   let selectedIds = $state([]);
   let cropPieceNode = $state(null);
   let opening = $state(false);
+  let query = $state('');
+
+  // The list, narrowed by the search box: every word has to be in the name.
+  const shownCollages = $derived.by(() => {
+    const terms = foldTerms(query);
+    if (!terms.length) return collages;
+    return collages.filter((row) => {
+      const title = foldText(row.title);
+      return terms.every((term) => title.includes(term));
+    });
+  });
 
   const mediaPaths = $derived(new Set(mediaList.map((m) => m.path)));
   const images = $derived(mediaList.filter((m) => m.kind === 'image'));
   // A work is listed under its file's name as the file has it now, whatever the
   // work itself is called.
   const fileTitles = $derived(new Map(mediaList.map((m) => [m.path, m.title || m.filename])));
-  const pickerWorks = $derived(works.map((w) => ({ ...w, title: fileTitles.get(w.source) ?? w.title })));
+  const fileThumbs = $derived(new Map(mediaList.map((m) => [m.path, m.thumbnail])));
+  const pickerWorks = $derived(
+    works.map((w) => ({ ...w, title: fileTitles.get(w.source) ?? w.title, thumb: fileThumbs.get(w.source) ?? null }))
+  );
 
   // The open collage. `name` is the file it is saved under, absent until the
   // first piece makes it worth filing.
@@ -70,6 +88,11 @@
   const lost = $derived(missingPieces(doc).length);
   const exportedPath = $derived(
     isFiled(doc.exported, collageSignature(doc), mediaPaths) ? doc.exported.path : null
+  );
+  // What the export will be, said beside the button that makes it.
+  const output = $derived(doc.nodes.length ? exportFrame(doc.nodes) : null);
+  const outputHint = $derived(
+    output ? `Exports at ${output.width} × ${output.height} px${output.capped ? ', the size limit' : ''}.` : ''
   );
 
   // -- saving as it is made -----------------------------------------------------
@@ -118,6 +141,56 @@
     if (autosave.state.status === 'error') return 'error';
     if (autosave.state.status === 'pending' || autosave.state.status === 'saving') return 'saving';
     return 'saved';
+  });
+
+  // -- the list's preview -------------------------------------------------------------
+  // Drawn here from the pieces already on screen, once every piece is in and the
+  // layout has settled, and filed beside the collage (engine/inspectwork.py). What
+  // it was last drawn from is kept, so reopening an unchanged collage sends nothing.
+  let thumbDrawnFrom = null;
+  let thumbTimer = null;
+  const thumbKey = () => JSON.stringify(doc.nodes.map((n) => [n.save, n.quad, !!n.missing]));
+  const piecesIn = () => doc.nodes.length > 0 && doc.nodes.every((n) => n.url || n.missing);
+
+  /** Draw and file the preview now. Takes its own copy, so the collage can close meanwhile. */
+  function sendThumb() {
+    clearTimeout(thumbTimer);
+    thumbTimer = null;
+    if (!doc.open || !doc.name || !piecesIn()) return null;
+    const key = thumbKey();
+    if (key === thumbDrawnFrom) return null;
+    const { caseId, name } = doc;
+    const nodes = doc.nodes.map((n) => ({
+      id: n.id, quad: n.quad.map(([x, y]) => [x, y]), url: n.url, w: n.w, h: n.h, missing: !!n.missing,
+    }));
+    thumbDrawnFrom = key;
+    return renderCollageThumb(nodes)
+      .then((blob) => {
+        if (!blob) return;
+        const form = new FormData();
+        form.append('file', blob, 'preview.png');
+        return api.put(`/api/cases/${caseId}/collages/${encodeURIComponent(name)}/thumb`, form);
+      })
+      .then(() => {
+        const shown = listOpen || !doc.open;
+        if (shown && caseState.current?.id === caseId) refreshList(caseId);
+      })
+      .catch(() => {
+        // A preview is a convenience: the list falls back to the outline, and the
+        // next change draws it again.
+        if (thumbDrawnFrom === key) thumbDrawnFrom = null;
+      });
+  }
+
+  $effect(() => {
+    const key = thumbKey();
+    const ready = doc.open && !!doc.name && !opening && piecesIn();
+    if (!ready || key === thumbDrawnFrom) return;
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(sendThumb, 1500);
+  });
+  $effect(() => () => {
+    if (thumbTimer) sendThumb();
   });
 
   // -- undo / redo ------------------------------------------------------------------
@@ -275,9 +348,14 @@
 
   // -- opening ----------------------------------------------------------------------
   function closeDoc() {
-    docRun += 1;
-    for (const url of blobs) URL.revokeObjectURL(url);
+    // A preview still waiting is drawn from the pieces as they are, so their
+    // pixels are let go only once it has them.
+    const drawing = thumbTimer ? sendThumb() : null;
+    const urls = [...blobs];
     blobs.clear();
+    Promise.resolve(drawing).finally(() => urls.forEach((url) => URL.revokeObjectURL(url)));
+    thumbDrawnFrom = null;
+    docRun += 1;
     Object.assign(doc, {
       open: false, caseId: null, name: null, title: '', ...COLLAGE_DEFAULT_SIZE,
       background: '#12141c', transparent: true, nodes: [], exported: null,
@@ -323,9 +401,13 @@
         background: spec.background ?? '#12141c',
         transparent: spec.transparent ?? true,
         exported: spec.exported ?? null,
-        nodes: (spec.nodes ?? []).map((n) => ({ ...n, url: null, baseUrl: null })),
+        // Marked lost up front, so the preview key reads as it did when last drawn.
+        nodes: (spec.nodes ?? []).map((n) => ({
+          ...n, url: null, baseUrl: null, missing: !mediaPaths.has(n.save?.path),
+        })),
       });
       savedSignature = signature();
+      if (collages.find((c) => c.name === saved.name)?.thumb) thumbDrawnFrom = thumbKey();
       anchorHistory();
       renderPieces(run);
     } catch (e) {
@@ -459,7 +541,14 @@
     titleField = doc.title;
   });
 
-  async function commitTitle() {
+  // A rename typed and left by clicking Close is still on its way when Close runs.
+  let renaming = null;
+  function commitTitle() {
+    renaming = renameTo().finally(() => (renaming = null));
+    return renaming;
+  }
+
+  async function renameTo() {
     const next = titleField.trim();
     if (!next || next === doc.title) {
       titleField = doc.title;
@@ -493,18 +582,35 @@
     }
   }
 
+  // -- back to the list ---------------------------------------------------------------
+  // Everything is saved as it is made, so closing only waits for the last write. A
+  // write that failed keeps the collage open, where the header says so.
+  async function closeCollage() {
+    await renaming;
+    await autosave.flush();
+    if (autosave.state.status === 'error') {
+      toast('The collage could not be saved, so it stays open', 'warn');
+      return;
+    }
+    closeDoc();
+    query = '';
+    await refreshList();
+  }
+
   // -- export and delete ------------------------------------------------------------
   async function exportCollage({ name, folder, note }) {
     exporting = true;
     exportFolder = folder ?? '';
     const signatureNow = collageSignature(doc);
     try {
-      // Always a transparent PNG of just the pieces, trimmed to their bounds: the
-      // size follows the layout, not a number typed somewhere.
-      const b = collageBounds(doc.nodes);
-      const nodes = doc.nodes.map((n) => ({ src: n.save, quad: n.quad.map(([x, y]) => [x - b.minX, y - b.minY]) }));
+      // Always a transparent PNG of just the pieces, trimmed to their bounds and at
+      // the sharpest piece's own resolution, however small it sits on the canvas.
+      const f = exportFrame(doc.nodes);
+      const nodes = doc.nodes.map((n) => ({
+        src: n.save, quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale]),
+      }));
       const res = await api.post(`/api/cases/${doc.caseId}/inspect/compose`, {
-        width: b.width, height: b.height, background: null, nodes, folder, label: name, notes: note,
+        width: f.width, height: f.height, background: null, nodes, folder, label: name, notes: note,
       });
       if (res?.item?.path) doc.exported = { path: res.item.path, signature: signatureNow };
       await reloadCase();
@@ -544,24 +650,55 @@
 
 <svelte:window onkeydown={onWindowKeydown} {onpagehide} />
 
-{#snippet list()}
+{#snippet filedMark(row)}
+  {#if row.filed}
+    <span class="filed" title="Its picture is in the case"><Icon name="check" size={10} /></span>
+  {/if}
+{/snippet}
+
+{#snippet list(grid = false)}
   {#if collages.length}
-    <div class="rows">
-      {#each collages as row (row.name)}
-        <div class="row" class:current={row.name === doc.name}>
-          <button class="row-open" onclick={() => openCollage(row.name)}>
-            <Icon name="grid" size={15} />
-            <span class="row-title">{row.title}</span>
-            <span class="row-meta">
-              {row.pieces} piece{row.pieces === 1 ? '' : 's'}{when(row.updated_at) ? ` · ${when(row.updated_at)}` : ''}
-            </span>
-          </button>
-          <button class="btn btn-ghost btn-xs" onclick={() => (deleting = row)} aria-label="Delete collage" title="Delete collage">
-            <Icon name="trash" size={14} />
-          </button>
-        </div>
+    <div class={grid ? 'cards' : 'rows'}>
+      {#each shownCollages as row (row.name)}
+        {@const meta = `${row.pieces} piece${row.pieces === 1 ? '' : 's'}${when(row.updated_at) ? ` · ${when(row.updated_at)}` : ''}`}
+        {#if grid}
+          <div class="card" class:current={row.name === doc.name}>
+            <button class="card-open" onclick={() => openCollage(row.name)}>
+              <span class="card-preview"><CollagePreview {row} caseId={caseState.current?.id} iconSize={28} /></span>
+              <span class="card-foot">
+                <span class="row-title">{row.title}</span>
+                {@render filedMark(row)}
+              </span>
+              <span class="row-meta">{meta}</span>
+            </button>
+            <button class="btn btn-ghost btn-xs card-delete" onclick={() => (deleting = row)} aria-label="Delete collage" title="Delete collage">
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        {:else}
+          <div class="row" class:current={row.name === doc.name}>
+            <button class="row-open" onclick={() => openCollage(row.name)}>
+              <span class="row-preview"><CollagePreview {row} caseId={caseState.current?.id} iconSize={15} /></span>
+              <span class="row-title">{row.title}</span>
+              {@render filedMark(row)}
+              <span class="row-meta">{meta}</span>
+            </button>
+            <button class="btn btn-ghost btn-xs" onclick={() => (deleting = row)} aria-label="Delete collage" title="Delete collage">
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        {/if}
       {/each}
     </div>
+    {#if !shownCollages.length}
+      <p class="hint">No collage has “{query.trim()}” in its name.</p>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet search()}
+  {#if collages.length > 1}
+    <SearchInput bind:value={query} placeholder="Search collages…" width="100%" />
   {/if}
 {/snippet}
 
@@ -591,11 +728,14 @@
       <button class="btn btn-ghost btn-sm" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled={!canRedo} onclick={redo}>
         <Icon name="redo" size={15} />
       </button>
-      <button class="btn btn-sm" onclick={() => { refreshList(); listOpen = true; }} title="Open another collage">
+      <button class="btn btn-sm" onclick={() => { query = ''; refreshList(); listOpen = true; }} title="Open another collage">
         <Icon name="folderOpen" size={14} /> Collages
       </button>
       <button class="btn btn-sm" onclick={newCollage} title="Start an empty canvas">
         <Icon name="plus" size={14} /> New
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick={closeCollage} title="Save and go back to the list">
+        <Icon name="x" size={14} /> Close
       </button>
     </div>
   {/if}
@@ -618,7 +758,8 @@
         {#if opening}
           <span class="spinner" aria-label="Opening"></span>
         {:else}
-          {@render list()}
+          {@render search()}
+          {@render list(true)}
         {/if}
       </div>
     </div>
@@ -641,7 +782,7 @@
           />
         </div>
         <div class="section">
-          <CollageMenu collage={doc} bind:selectedIds {requestCrop} {renderPiece} />
+          <CollageMenu collage={doc} bind:selectedIds {requestCrop} {renderPiece} {fileTitles} />
         </div>
         <div class="section">
           <SaveToCase
@@ -653,7 +794,7 @@
               : lost
                 ? `${lost} piece${lost === 1 ? '' : 's'} lost ${lost === 1 ? 'its' : 'their'} file. Remove ${lost === 1 ? 'it' : 'them'} to save.`
                 : ''}
-            hint="Saves only the pieces, on a transparent background, trimmed to their bounds."
+            hint={outputHint}
             bind:folder={exportFolder}
             onsave={exportCollage}
           />
@@ -673,7 +814,10 @@
   {#if listOpen}
     <Modal title="Collages" width="480px" onclose={() => (listOpen = false)}>
       {#if collages.length}
-        {@render list()}
+        <div class="modal-list">
+          {@render search()}
+          {@render list()}
+        </div>
       {:else}
         <p class="hint">No collage saved in this case yet.</p>
       {/if}
@@ -781,7 +925,7 @@
     align-items: center;
     gap: 10px;
     min-width: 0;
-    padding: 9px 11px;
+    padding: 6px 11px 6px 6px;
     text-align: left;
     border: 1px solid var(--border);
     border-radius: var(--r-md);
@@ -806,6 +950,85 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
     white-space: nowrap;
+  }
+  .modal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .row-preview {
+    flex-shrink: 0;
+    width: 56px;
+    height: 38px;
+    border-radius: var(--r-sm);
+    overflow: hidden;
+  }
+  /* The start page has the room to show what each collage holds. */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    position: relative;
+  }
+  .card-open {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    padding: 0 0 9px;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-2);
+    color: var(--text-2);
+    overflow: hidden;
+  }
+  .card-open:hover,
+  .card.current .card-open {
+    border-color: var(--accent);
+  }
+  .card-preview {
+    display: block;
+    aspect-ratio: 16 / 10;
+    min-height: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .card-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 0 10px;
+  }
+  .card-open .row-meta {
+    padding: 0 10px;
+  }
+  .card-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: var(--bg-1);
+    opacity: 0;
+  }
+  .card:hover .card-delete,
+  .card-delete:focus-visible {
+    opacity: 1;
+  }
+  /* Its picture is in the case: a small mark, since the list is about the layouts. */
+  .filed {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--ok-soft);
+    color: var(--ok);
   }
   .spinner {
     align-self: center;

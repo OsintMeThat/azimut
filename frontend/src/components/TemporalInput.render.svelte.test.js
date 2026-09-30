@@ -19,6 +19,7 @@ const LISBON = { id: 'p', type: 'place', label: 'Lisbon', attrs: { lat: 38.72, l
 let live = null;
 let target = null;
 let changes = [];
+let zoneChanges = [];
 
 async function settle() {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
@@ -29,8 +30,9 @@ async function open(props) {
   target = document.createElement('div');
   document.body.append(target);
   changes = [];
+  zoneChanges = [];
   // The editor hands every change back as the value, as TemporalClaimEditor does.
-  const held = $state({ value: props.value ?? '' });
+  const held = $state({ value: props.value ?? '', dayZone: props.dayZone ?? null });
   live = mount(TemporalInput, {
     target,
     props: {
@@ -43,6 +45,15 @@ async function open(props) {
         changes.push(value);
         held.value = value;
       },
+      get dayZone() {
+        return held.dayZone;
+      },
+      ondayzonechange: props.zoned
+        ? (zone) => {
+          zoneChanges.push(zone);
+          held.dayZone = zone;
+        }
+        : null,
     },
   });
   await settle();
@@ -115,3 +126,43 @@ describe('a time at a placed claim', () => {
     expect(changes.at(-1)).toBe('2026-08-11T17:05:00+01:00');
   });
 });
+
+const dayIn = () => target.querySelector('select[aria-label="Day in"]');
+const dateInput = () => target.querySelector('input.date-value');
+
+describe('the day a date is', () => {
+  it('reads a day typed for a place as that place\'s day, and says so', async () => {
+    await open({ places: [KHARKIV], zoned: true });
+    set(dateInput(), '2024-03-12');
+    await settle();
+
+    expect(changes.at(-1)).toBe('2024-03-12');
+    expect(zoneChanges.at(-1)).toBe('Europe/Kyiv');
+    expect(dayIn().value).toBe('Europe/Kyiv');
+    expect(target.textContent).toContain('12 Mar 2024 (Europe/Kyiv)');
+
+    set(dayIn(), '', 'change');
+    expect(zoneChanges.at(-1)).toBe(null);
+  });
+
+  it('opens a stored day on its stated zone without re-reading it', async () => {
+    await open({ places: [], value: '2024-03-12', dayZone: 'Asia/Tokyo', zoned: true });
+    expect(changes).toEqual([]);
+    expect(zoneChanges).toEqual([]);
+    expect([...dayIn().options].map((option) => option.textContent.trim()))
+      .toEqual(['UTC (not stated)', 'Asia/Tokyo']);
+  });
+
+  it('opens a local time stated in a zone on that clock, and leaves it as written', async () => {
+    await open({ places: [], value: '2024-07-12T14:30:00', dayZone: 'Europe/Kyiv', zoned: true });
+    expect(changes).toEqual([]);
+    expect(zone().value).toBe('place:Europe/Kyiv');
+    expect(dayIn()).toBeNull();
+  });
+
+  it('has no zone row as a bare field', async () => {
+    await open({ places: [KHARKIV], value: '2024-03-12' });
+    expect(dayIn()).toBeNull();
+  });
+});
+

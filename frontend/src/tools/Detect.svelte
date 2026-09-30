@@ -68,6 +68,8 @@
   let providerId = $state('esri-world-imagery');
   let chosenBasemap = $state('esri-world-imagery');
   let collapsed = $state(false);
+  let dockWidth = $state(380);
+  let savedDockWidth = $state(380);
   let toolEl = $state(null);
   let fullscreen = $state(false);
   let overlays = $state(['boundaries', 'placenames']);
@@ -110,6 +112,12 @@
   let drawing = $state('select');
   let selectedZone = $state(null);
   let layers = $state([]);
+  let focusedRunId = $state(null);
+  // Reviewing a run temporarily isolates it. The saved eye states stay intact
+  // and return as soon as the review closes.
+  const visibleRunLayers = $derived(focusedRunId
+    ? layers.filter((layer) => layer.id === focusedRunId).map((layer) => ({ ...layer, visible: true }))
+    : layers);
   let showZones = $state(true);
   let selectedResult = $state(null);
   let areaGroups = $state([]);
@@ -188,6 +196,7 @@
   const mapDate = $derived(s2.date || '');
   const passChip = $derived(providerId === RADAR_ID ? passLabel(s1.pass) : mapDate);
   let passCloud = $state(null);
+  let passContext = $state(null);
   const cloudyPass = $derived(providerId !== RADAR_ID && passCloud > ADVISED_MAXCC);
   /**
    * What Detect needs before a run can fetch anything: a Copernicus key, which
@@ -199,12 +208,16 @@
 
   onMount(() => {
     let gone = false;
+    const fitDock = () => (dockWidth = clampDock(savedDockWidth));
+    window.addEventListener('resize', fitDock);
     void (async () => {
       imagery.refreshUsage();
       await prefsReady;
       if (gone) return;
       const saved = prefs.detectView;
       collapsed = saved?.collapsed ?? false;
+      savedDockWidth = Math.max(300, Math.min(720, saved?.width ?? 380));
+      fitDock();
       chosenBasemap = saved?.basemap && !PASSES.includes(saved.basemap) ? saved.basemap : 'esri-world-imagery';
       providerId = chosenBasemap;
       // Only the layers still offered: a retired one (Labels) would be sent back
@@ -225,8 +238,15 @@
       if (gone) return;
       if (!imagery.find(providerId)) providerId = 'esri-world-imagery';
     })();
-    return () => { gone = true; };
+    return () => { gone = true; window.removeEventListener('resize', fitDock); };
   });
+
+  function dockMaximum() {
+    const available = toolEl?.clientWidth || window.innerWidth;
+    return Math.max(300, Math.min(720, available - 320));
+  }
+  function clampDock(width) { return Math.max(300, Math.min(dockMaximum(), Math.round(width))); }
+  function commitDockWidth() { savedDockWidth = dockWidth; }
 
   $effect(() => {
     if (!PASSES.includes(providerId)) chosenBasemap = providerId;
@@ -234,7 +254,8 @@
   let lastPrefs = '';
   $effect(() => {
     if (!prefsLoaded) return;
-    const value = { collapsed, basemap: chosenBasemap, overlays: [...overlays], saved: savedVisible };
+    const value = { collapsed, width: savedDockWidth, basemap: chosenBasemap,
+      overlays: [...overlays], saved: savedVisible };
     const key = JSON.stringify(value);
     if (!lastPrefs) { lastPrefs = key; return; }
     if (key === lastPrefs) return;
@@ -245,6 +266,7 @@
   $effect(() => {
     collapsed;
     fullscreen;
+    dockWidth;
     void tick().then(() => engine?.resize());
   });
 
@@ -418,6 +440,7 @@
   function leavePass() {
     blinking = false;
     readingPass = false;
+    passContext = null;
     providerId = chosenBasemap;
   }
 
@@ -526,8 +549,10 @@
    * drop a cloudier tile and leave the map black. Its cloud, when the lookup
    * knows it, rides on the chip.
    */
-  function showDate({ provider, date, time, layer, cloud = null }) {
+  function showDate({ provider, date, time, layer, cloud = null, area = null, side = '' }) {
     if (!date) { leavePass(); return; }
+    passContext = area && side ? { name: area.name, side } : null;
+    if (area) frame([area]);
     passCloud = provider === RADAR_ID || !Number.isFinite(cloud) ? null : cloud;
     if (provider === RADAR_ID) {
       // A radar pass is shown by the radar basemap, once Settings has its layer.
@@ -616,7 +641,8 @@
           <button class="cmp-icon" title="Stop blinking" aria-label="Stop blinking" onclick={() => (blinking = false)}><Icon name="x" size={12} /></button>
         </div>
       {:else if readingPass}
-        <button class="pass-chip cmp-glass" title="Return to your basemap" aria-label="Leave pass imagery" onclick={leavePass}>{passChip}
+        <button class="pass-chip cmp-glass" title="Return to your basemap" aria-label="Leave pass imagery" onclick={leavePass}>
+          {#if passContext}<strong>{passContext.name} · {passContext.side?.toUpperCase()}</strong>{/if}{passChip}
           {#if cloudyPass}<span class="cloudy" title="Ground under cloud is left out of a run">{Math.round(passCloud)}% cloud</span>{/if}
           <Icon name="x" size={12} /></button>
       {/if}
@@ -681,8 +707,8 @@
               width={element?.clientWidth ?? 0} height={element?.clientHeight ?? 0} onclose={() => panel?.closeProbe()}
               onmark={(expect) => panel?.markProbe(expect)} markTarget={builder.checking} canMark={builder.canMark} />
           {/if}
-        {:else if savedVisible && !bare && layers.some((layer) => layer.visible)}
-          <AnalysisOverlay {engine} {layers} selected={selectedResult} active={!manual}
+        {:else if !bare && (focusedRunId || savedVisible) && visibleRunLayers.some((layer) => layer.visible)}
+          <AnalysisOverlay {engine} layers={visibleRunLayers} selected={selectedResult} active={!manual}
             onpick={(run, result) => panel?.pick(run, result)} />
         {/if}
         {#if areaGroups.length && !manual && !bare && !builder}
@@ -752,6 +778,10 @@
     <DetectPanel
       bind:this={panel}
       bind:collapsed
+      {dockWidth}
+      maxDockWidth={dockMaximum}
+      onwidth={(value) => (dockWidth = clampDock(value))}
+      onwidthend={commitDockWidth}
       {fullscreen}
       onfullscreen={switchFullscreen}
       bind:manual
@@ -760,6 +790,7 @@
       bind:drawing
       bind:selectedZone
       bind:layers
+      bind:focusedRunId
       bind:showZones
       bind:selectedResult
       bind:areaGroups

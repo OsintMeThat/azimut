@@ -74,6 +74,7 @@ class FullCase:
     piece: str = ""
     collage: str = ""  # the exported picture, which is media
     collage_doc: str = ""  # the layout it was exported from
+    collage_thumb: str = ""  # the layout's preview, which travels with it
     capture: str = ""
     session: str = ""  # the photo's Inspect work
     compare_session: str = ""
@@ -205,6 +206,12 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     )
     assert layout_doc.status_code == 200, layout_doc.text
     full.collage_doc = f".collages/{layout_doc.json()['name']}.json"
+    preview = client.put(
+        f"/api/cases/{case_id}/collages/{layout_doc.json()['name']}/thumb",
+        files={"file": ("preview.png", io.BytesIO(_png((160, 80))), "image/png")},
+    )
+    assert preview.status_code == 200, preview.text
+    full.collage_thumb = preview.json()["thumb"]
 
     comparison = client.post(
         f"/api/cases/{case_id}/compare/sessions",
@@ -558,10 +565,14 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     seed_images(analysis)
     from azimut.engine.analysis_models import Zone
     ring = Zone.model_validate(analysis["zones"][0]).ring()
+    area = client.post(f"/api/cases/{case_id}/analysis/areas", json={
+        "name": "Port", "colour": "#38bdf8", "geometry": {
+            "type": "Polygon", "coordinates": [ring + [ring[0]]]},
+    })
+    assert area.status_code == 200, area.text
+    full.analyzer_area = f"{layout.ANALYSIS_DIR}/areas-{area.json()['id']}.json"
     for kind, body, attr in (
-        ("areas", {"name": "Port", "colour": "#38bdf8", "geometry": {
-            "type": "Polygon", "coordinates": [ring + [ring[0]]]}}, "analyzer_area"),
-        ("zones", {"title": "Port areas", "zones": analysis["zones"]}, "analyzer_zones"),
+        ("zones", {"title": "Port areas", "area_ids": [area.json()["id"]]}, "analyzer_zones"),
         ("followups", analysis, "analyzer_followup"),
         ("runs", analysis, "analyzer_run"),
     ):

@@ -15,6 +15,7 @@
   import { ensureCase, reloadCase, toast } from '../../lib/state.svelte.js';
   import { detectRuns, refreshRuns } from '../../lib/detectRuns.svelte.js';
   import { clone, zoneRing } from '../../lib/map/analyzers.js';
+  import { passBefore } from '../../lib/map/detectWhen.js';
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { containsPoint } from '../../lib/measure.js';
   import { detectionsWithRuns, isActive, plural } from '../../lib/map/detections.js';
@@ -31,6 +32,10 @@
   let {
     caseId,
     collapsed = $bindable(false),
+    dockWidth = 380,
+    maxDockWidth = () => 720,
+    onwidth = () => {},
+    onwidthend = () => {},
     /** Whether Detect holds the whole screen, and the way in and out of it. */
     fullscreen = false,
     onfullscreen = () => {},
@@ -47,6 +52,8 @@
     blinking = $bindable(false),
     /** Whether a run's results are open, which holds the map on them. */
     reviewing = $bindable(false),
+    /** The run being reviewed; the map isolates its overlay without changing saved visibility. */
+    focusedRunId = $bindable(null),
     /** Every watched area of the case, for the map to draw while the list is up. */
     areaGroups = $bindable([]),
     /** The areas the pointer is on, drawn heavier on the map. */
@@ -78,6 +85,37 @@
   } = $props();
 
   const TITLES = { new: 'New detection', review: 'Results', library: 'Analyzers' };
+  let resizing = $state(false);
+  let stopResize = () => {};
+  function startResize(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    stopResize();
+    resizing = true;
+    const startX = event.clientX;
+    const startWidth = dockWidth;
+    const move = (next) => onwidth(startWidth + startX - next.clientX);
+    const end = () => { stopResize(); onwidthend(); };
+    stopResize = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      resizing = false;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  }
+  function resizeKey(event) {
+    const next = event.key === 'ArrowLeft' ? dockWidth + 20
+      : event.key === 'ArrowRight' ? dockWidth - 20
+      : event.key === 'Home' ? 300 : event.key === 'End' ? maxDockWidth() : null;
+    if (next === null) return;
+    event.preventDefault();
+    onwidth(next);
+    onwidthend();
+  }
+  $effect(() => () => stopResize());
 
   let catalogue = $state(null);
   let lists = $state({ zones: [], followups: [], areas: [] });
@@ -125,12 +163,16 @@
   const detection = $derived(routines.find((row) => row.id === detectionId) ?? null);
   /** What a recipe's method can do; an analyzer of your own answers from its rules. */
   const capabilityOf = (recipe) => recipeCapability(recipe, catalogue?.methods ?? []);
+  const launchOrderInvalid = (item) => !capabilityOf(item.recipe).single && item.area_dates.some((pair) =>
+    !passBefore(item.date_rule === 'latest_previous' && item.lastPasses[pair.area_id] || pair.a,
+      pair.b, capabilityOf(item.recipe).sensor === 'sentinel1'));
   const pending = $derived(isActive(current));
   let library = $state(null);
   const kindTitle = $derived(draft?.kind === 'routine' ? (draft.followupId ? 'Edit routine' : 'New routine') : 'New pass');
 
   $effect(() => { selectedResult = view === 'review' ? candidateId : null; });
   $effect(() => { reviewing = view === 'review'; });
+  $effect(() => { focusedRunId = view === 'review' ? current?.id ?? null : null; });
   $effect(() => {
     if (view === 'review') return;
     bare = false;
@@ -172,11 +214,13 @@
   async function refresh(id = caseId) {
     if (!id) return;
     const epoch = generation;
-    const [zoneSets, followups, areas] = await Promise.all([
-      api.get(`${base(id)}/zones`), api.get(`${base(id)}/followups`), api.get(`${base(id)}/areas`),
+    // Reading groups can promote drawings from older area sets into shared areas.
+    const groups = await api.get(`${base(id)}/zones`);
+    const [followups, areas] = await Promise.all([
+      api.get(`${base(id)}/followups`), api.get(`${base(id)}/areas`),
     ]);
     if (epoch !== generation) return;
-    lists = { zones: zoneSets, followups, areas };
+    lists = { zones: groups, followups, areas };
     // Opening Detect on a case that already watches ground should show that
     // ground, not the home view it has nothing to do with. Once per case: after
     // that the camera is the analyst's.
@@ -234,6 +278,17 @@
     });
   });
 
+  // A routine's chosen colour paints all of its saved overlays, including
+  // earlier runs. Their recorded imagery and results remain as they were.
+  $effect(() => {
+    const colours = new Map(lists.followups.map((item) => [item.id, item.colour]));
+    const updated = layers.map((layer) => {
+      const colour = colours.get(layer.input?.followup_id) || layer.display_colour || null;
+      return layer.displayColour === colour ? layer : { ...layer, displayColour: colour };
+    });
+    if (updated.some((layer, index) => layer !== layers[index])) layers = updated;
+  });
+
   // A run under review that is still working is read again until it settles.
   $effect(() => {
     if (!pending || !caseId) return;
@@ -282,6 +337,7 @@
     onleavepass();
     view = 'home';
     draft = null;
+    launch = null;
     detectionId = null; detail = null; findings = [];
     zones = []; selectedZone = null; drawing = 'select';
   }
@@ -290,6 +346,7 @@
     manual = null;
     onleavepass();
     offer = null;
+    launch = null;
     draft = seed;
     selectedZone = null; drawing = 'select';
     view = 'new';
@@ -331,10 +388,12 @@
 
   async function editDetection(id) {
     const epoch = generation;
-    const body = await api.get(`${base()}/followups/${id}`);
+    const [body, lastPasses] = await Promise.all([
+      api.get(`${base()}/followups/${id}`), api.get(`${base()}/followups/${id}/last-passes`),
+    ]);
     if (epoch !== generation) return;
     zones = clone(body.zones);
-    startWizard({ body, followupId: id, kind: 'routine' });
+    startWizard({ body, followupId: id, kind: 'routine', lastPasses });
   }
 
   async function openItem(kind, id) {
@@ -342,9 +401,17 @@
     if (kind === 'areas') { openTab('areas'); return; }
     if (kind === 'runs') return openRun(id);
     if (kind === 'followups') return openDetection(id);
-    const set = await api.get(`${base()}/zones/${id}`);
-    zones = clone(set.zones);
-    startWizard({ kind: 'once', zonesId: id, zonesTitle: set.title });
+    const group = await api.get(`${base()}/zones/${id}`);
+    if (group.pending_review?.length) { openTab('areas'); return; }
+    if (group.area_ids) {
+      if (group.area_ids.length > 32) { openTab('areas'); return; }
+      const shared = await api.get(`${base()}/areas`);
+      zones = group.area_ids.map((areaId) => shared.find((area) => area.id === areaId))
+        .filter(Boolean).map(areaZone);
+    } else {
+      zones = clone(group.zones ?? []);
+    }
+    startWizard({ kind: 'once' });
   }
 
   function newDetection(kind) {
@@ -376,6 +443,7 @@
   }
 
   function back() {
+    if (launch) { launch = null; onleavepass(); return; }
     if (view === 'library') {
       view = libraryFrom === 'new' && draft ? 'new' : libraryFrom === 'detection' && detection ? 'detection' : 'home';
       return;
@@ -398,13 +466,21 @@
    */
   async function submit({ input, followupId, kind, run }) {
     const owner = await ensureCase();
+    let runStatus = run ? 'queued' : '';
     if (kind === 'routine') {
       const saved = followupId
         ? await api.put(`${base(owner.id)}/followups/${followupId}`, input)
         : await api.post(`${base(owner.id)}/followups`, input);
       if (run) {
         const started = await api.post(`${base(owner.id)}/followups/${saved.id}/run`, {});
+        runStatus = started.status ?? 'queued';
+        if (runStatus === 'failed' || runStatus === 'no_new_imagery')
+          toast(started.message || 'No new eligible pass for these areas', runStatus === 'failed' ? 'danger' : 'info');
         if (started.duplicates) repeatRequest = started;
+        if (runStatus === 'queued') {
+          const skipped = started.area_runs?.map((row) => row.message).filter((message) => message?.includes('Skipped '));
+          if (skipped?.length) toast(skipped.join(' '), 'info', 7000);
+        }
       }
       draft = null;
       await Promise.all([refresh(owner.id), refreshRuns(owner.id)]);
@@ -412,25 +488,38 @@
       await openDetection(saved.id);
     } else {
       const started = await api.post(`${base(owner.id)}/runs`, input);
+      if (!started.id) { error = started.message || 'No area could be checked'; return; }
       if (started.duplicates) { repeatRequest = started; return; }
       draft = null;
       await Promise.all([refresh(owner.id), refreshRuns(owner.id)]);
       await reloadCase();
       await openRun(started.id);
     }
-    toast(run ? 'Detection started. Carry on elsewhere; the top bar follows it.' : 'Routine saved', 'ok', 5000);
+    if (!run || runStatus === 'queued') toast(run ? 'Detection started. Carry on elsewhere; the top bar follows it.' : 'Routine saved', 'ok', 5000);
   }
 
   async function runDetection(item, pass = {}) {
     const started = await api.post(`${base()}/followups/${item.id}/run`, pass);
-    if (started.duplicates) repeatRequest = started;
-    else { launch = null; onleavepass(); }
+    if (started.status === 'failed') { error = started.message || 'No area could be checked'; return; }
+    if (started.status === 'no_new_imagery') {
+      toast(started.message || 'No new eligible pass for these areas', 'info');
+      launch = null; onleavepass();
+    } else if (started.duplicates) repeatRequest = started;
+    else {
+      const count = started.area_runs?.filter((row) => row.status === 'pending').length ?? item.zones.length;
+      toast(`${plural(count, 'area')} queued`, 'ok');
+      launch = null; onleavepass();
+    }
+    const skippedCloud = started.area_runs?.map((row) => row.message).filter((message) => message?.includes('Skipped '));
+    if (started.status !== 'no_new_imagery' && skippedCloud?.length) toast(skippedCloud.join(' '), 'info', 7000);
     await refreshRuns(caseId);
   }
 
   async function prepareLaunch(item) {
-    const body = await api.get(`${base()}/followups/${item.id}`);
-    launch = { ...body, area_dates: (body.area_dates ?? body.zones.map((zone) => ({
+    const [body, lastPasses] = await Promise.all([
+      api.get(`${base()}/followups/${item.id}`), api.get(`${base()}/followups/${item.id}/last-passes`),
+    ]);
+    launch = { ...body, lastPasses: lastPasses ?? {}, area_dates: (body.area_dates ?? body.zones.map((zone) => ({
       area_id: zone.id, a: body.a, b: body.b, date_rule: body.date_rule,
     }))).map((pair) => ({ ...pair, b: { ...pair.b, date: '' } })) };
   }
@@ -448,6 +537,20 @@
     toast('Snapshot saved in SAT layers', 'ok');
   }
 
+  async function changeRoutineColour(group, colour) {
+    await api.patch(`${base()}/followups/${group.id}/colour`, { colour });
+    await refresh();
+    await reloadCase();
+  }
+
+  async function changeRunColour(run, colour) {
+    await api.patch(`${base()}/runs/${run.id}/colour`, { colour });
+    layers = layers.map((layer) => layer.id === run.id
+      ? { ...layer, display_colour: colour, displayColour: colour } : layer);
+    if (current?.id === run.id) current = { ...current, display_colour: colour };
+    await refreshRuns(caseId);
+  }
+
   function nextRepeat() {
     repeatRequest = repeatQueue[0] ?? null;
     repeatQueue = repeatQueue.slice(1);
@@ -457,10 +560,13 @@
   async function runAll() {
     const problems = [];
     let started = 0;
+    let current = 0;
     for (const item of routines.filter((entry) => !entry.active)) {
       try {
         const response = await api.post(`${base()}/followups/${item.id}/run`, {});
-        if (response.duplicates) repeatQueue = [...repeatQueue, response];
+        if (response.status === 'no_new_imagery') current++;
+        else if (response.status === 'failed') problems.push(`${item.title}: ${response.message}`);
+        else if (response.duplicates) repeatQueue = [...repeatQueue, response];
         else started++;
       } catch (e) {
         problems.push(`${item.title}: ${e.message}`);
@@ -468,6 +574,7 @@
     }
     await refreshRuns(caseId);
     if (started) toast(`${plural(started, 'routine')} queued`, 'ok');
+    if (current) toast(`${plural(current, 'routine')} already up to date`, 'info');
     if (!repeatRequest && repeatQueue.length) nextRepeat();
     if (problems.length) error = problems.join(' · ');
   }
@@ -553,50 +660,89 @@
   }
 </script>
 
-<aside class="cmp-dock" class:collapsed aria-label="Detect">
-  <nav class="dock-tabs" class:rail={collapsed} aria-label="Detect sections">
-    <button class="cmp-icon" aria-label={collapsed ? 'Expand Detect panel' : 'Collapse Detect panel'}
-      title="Toggle Detect panel (])" onclick={() => (collapsed = !collapsed)}>
-      <Icon name={collapsed ? 'chevronLeft' : 'chevronRight'} size={16} />
-    </button>
-    {#each [['routines', 'Routines', 'clock'], ['saved', 'Saved', 'bookmark'], ['areas', 'Areas', 'polygon']] as [id, label, icon]}
-      <button class="section-tab" class:on={tab === id && view === 'home'} aria-label={label} aria-pressed={tab === id && view === 'home'}
-        title={label} onclick={() => openTab(id)}><Icon name={icon} size={15} />{#if !collapsed}{label}{/if}</button>
-    {/each}
-    <button class="cmp-icon" aria-label="Analyzers" title="Make and tune what detections look for"
-      onclick={openLibrary}><Icon name="sliders" size={15} /></button>
-    <button class="cmp-icon" class:on={fullscreen} aria-pressed={fullscreen}
-      aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
-      title={fullscreen ? 'Back to the window (Esc)' : 'Detect on the whole screen'}
-      onclick={onfullscreen}><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
-  </nav>
+<aside class="cmp-dock" class:collapsed class:resizing class:compact={dockWidth <= 340} aria-label="Detect"
+  style:flex-basis={collapsed ? undefined : `${dockWidth}px`}>
+  {#if !collapsed}
+    <button type="button" class="dock-resizer" aria-label="Resize Detect panel"
+      title="Drag to resize; double-click to reset"
+      onpointerdown={startResize} onkeydown={resizeKey}
+      ondblclick={() => { onwidth(380); onwidthend(); }}></button>
+  {/if}
+  <div class="dock-chrome" class:rail={collapsed}>
+    <header class="dock-heading">
+      {#if !collapsed}<strong>Detect</strong>{/if}
+      <button class="cmp-icon" aria-label={collapsed ? 'Expand Detect panel' : 'Collapse Detect panel'}
+        title="Toggle Detect panel (])" onclick={() => (collapsed = !collapsed)}>
+        <Icon name={collapsed ? 'chevronLeft' : 'chevronRight'} size={16} />
+      </button>
+      {#if !collapsed}
+        <button class="cmp-icon" aria-label="Analyzers" title="Edit analyzers"
+          onclick={openLibrary}><Icon name="sliders" size={15} /></button>
+        <button class="cmp-icon" class:on={fullscreen} aria-pressed={fullscreen}
+          aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+          title={fullscreen ? 'Exit full screen' : 'Full screen'}
+          onclick={onfullscreen}><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
+      {/if}
+    </header>
+    <nav class="dock-tabs" class:rail={collapsed} aria-label="Detect sections">
+      {#each [['routines', 'Routines', 'clock'], ['saved', 'Saved', 'bookmark'], ['areas', 'Areas', 'polygon']] as [id, label, icon]}
+        <button class="section-tab" class:on={tab === id && view === 'home'} aria-label={label} aria-pressed={tab === id && view === 'home'}
+          title={label} onclick={() => openTab(id)}><Icon name={icon} size={15} />{#if !collapsed}{label}{/if}</button>
+      {/each}
+    </nav>
+    {#if collapsed}
+      <div class="rail-tools">
+        <button class="cmp-icon" aria-label="Analyzers" title="Edit analyzers"
+          onclick={openLibrary}><Icon name="sliders" size={15} /></button>
+        <button class="cmp-icon" class:on={fullscreen} aria-pressed={fullscreen}
+          aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+          title={fullscreen ? 'Exit full screen' : 'Full screen'}
+          onclick={onfullscreen}><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
+      </div>
+    {/if}
+  </div>
   <div class="dock-content" hidden={collapsed}>
-  <div class="new-action" bind:this={newActionEl}>
-    <button class="btn btn-primary" aria-expanded={picking} onclick={() => (picking = !picking)}><Icon name="plus" size={14} /> New detection</button>
+  <div class="new-action" class:quiet={view !== 'home' || !!launch} bind:this={newActionEl}>
+    <button class="btn btn-primary create-trigger" aria-expanded={picking}
+      onclick={() => (picking = !picking)}>
+      <Icon name="plus" size={15} /> <span>New detection</span>
+      <Icon name={picking ? 'chevronUp' : 'chevronDown'} size={14} />
+    </button>
     {#if picking}
       <!-- The kind is the first question because it changes every one after
            it, so each says in a line what it commits you to. -->
       <div class="new-menu cmp-glass" role="group" aria-label="New detection">
         <button class="kind" aria-label="New one pass" onclick={() => newDetection('once')}>
-          <strong>One pass</strong><small>Sweep two dates you name, review it, done.</small>
+          <span class="kind-copy"><strong>One pass</strong><small>Choose dates for one sweep.</small></span>
         </button>
         <button class="kind" aria-label="New routine" onclick={() => newDetection('routine')}>
-          <strong>Routine</strong><small>Ground you come back to. Each run picks its own pass.</small>
+          <span class="kind-copy"><strong>Routine</strong><small>Watch the same areas over time.</small></span>
         </button>
       </div>
     {/if}
   </div>
-  {#if view !== 'home'}
+  {#if launch || view !== 'home'}
     <header>
       <button class="cmp-icon" aria-label="Back" title="Back" onclick={back}>
         <Icon name="chevronLeft" size={15} />
       </button>
-      <strong>{view === 'new' ? kindTitle : view === 'detection' ? 'Routine' : TITLES[view]}</strong>
+      <strong>{launch ? `Run ${launch.title}` : view === 'new' ? kindTitle : view === 'detection' ? 'Routine' : TITLES[view]}</strong>
     </header>
   {/if}
 
 
-  {#if !catalogue}
+  {#if launch}
+    <div class="cmp-dock-body launch-body">
+      <AreaDates zones={launch.zones} bind:pairs={launch.area_dates} single={!!capabilityOf(launch.recipe).single}
+        routine previous={launch.date_rule === 'latest_previous'} lastPasses={launch.lastPasses}
+        sensor={capabilityOf(launch.recipe).sensor} {onshow} />
+      {#if error}<p class="warn" role="alert">{error}</p>{/if}
+      <button class="btn btn-primary" disabled={busy || launchOrderInvalid(launch)}
+        onclick={() => act(() => runDetection(launch, { area_dates: clone(launch.area_dates) }))}>
+        Check for new passes
+      </button>
+    </div>
+  {:else if !catalogue}
     <div class="cmp-dock-body">
       {#if error}<p class="warn" role="alert">{error}</p>{/if}
       <p class="hint">Reading the local analyzer library…</p>
@@ -607,7 +753,8 @@
            survives a detour to make the analyzer it needs. -->
       <div class="pane" hidden={view !== 'new'}>
         {#key draft}
-          <DetectWizard {caseId} {catalogue} areaSets={lists.zones} areas={lists.areas} seed={draft} {offer} {busy} failure={error}
+          <DetectWizard {caseId} {catalogue} areaGroups={lists.zones} areas={lists.areas} seed={draft} {offer} {busy} failure={error}
+            onopenareas={() => openTab('areas')}
             bind:zones bind:drawing bind:selectedZone bind:showZones
             {onfocus} {onusecurrentview} {onshow} onlibrary={openLibrary}
             onareas={(id) => refresh(id)} onsubmit={(request) => act(() => submit(request))} />
@@ -619,7 +766,7 @@
       <div class="cmp-dock-body">
         {#if error}<p class="warn" role="alert">{error}</p>{/if}
         {#if tab === 'areas'}
-          <AreasPanel {caseId} areas={lists.areas} {selectedArea} routines={lists.followups} bind:hidden={hiddenAreas} bind:zones bind:drawing bind:selectedZone
+          <AreasPanel {caseId} areas={lists.areas} groups={lists.zones} {selectedArea} routines={lists.followups} bind:hidden={hiddenAreas} bind:zones bind:drawing bind:selectedZone
             onrefresh={() => refresh()} {onusecurrentview} {onframe} />
         {:else}
         <DetectHome {tab} {routines} passes={runs} methods={catalogue.methods} {busy} bind:layers
@@ -628,6 +775,8 @@
           oncancel={(run) => act(() => cancelRun(run))}
           onopen={(item) => act(() => openDetection(item.id))}
           onopenrun={(run) => act(() => openRun(run.id))}
+          oncolour={(group, colour) => act(() => changeRoutineColour(group, colour))}
+          onruncolour={(run, colour) => act(() => changeRunColour(run, colour))}
           ondelete={(kind, row) => act(() => removeItem(kind, row))}
           {onframe} onexport={(kind, id) => act(() => exportLayer(kind, id))}
           onhover={(id) => {
@@ -682,16 +831,6 @@
   </div>
 </aside>
 
-{#if launch}
-  <Modal title={`Run ${launch.title}`} width="760px" onclose={() => { launch = null; onleavepass(); }}>
-    <AreaDates zones={launch.zones} bind:pairs={launch.area_dates} single={!!capabilityOf(launch.recipe).single}
-      sensor={capabilityOf(launch.recipe).sensor} {onshow} />
-    {#if error}<p class="warn" role="alert">{error}</p>{/if}
-    <button class="btn btn-primary" disabled={busy} onclick={() => act(() => runDetection(launch, { area_dates: clone(launch.area_dates) }))}>
-      {launch.zones.length > 1 ? `Run ${plural(launch.zones.length, 'area')}` : 'Run this area'}
-    </button>
-  </Modal>
-{/if}
 {#if repeatRequest}
   <Modal title="Already run between these dates" width="560px" onclose={nextRepeat}>
     {#each repeatRequest.duplicates as match (`${match.run_id}-${match.area_id}`)}
@@ -703,24 +842,49 @@
 {/if}
 
 <style>
+  .cmp-dock { position: relative; min-width: 300px; max-width: 720px; }
   .cmp-dock.collapsed { flex: 0 0 42px; width: 42px; min-width: 42px; }
+  .dock-resizer { position: absolute; z-index: 10; top: 0; bottom: 0; left: -4px; width: 8px;
+    padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
+  .dock-resizer:hover, .dock-resizer:focus-visible, .resizing .dock-resizer {
+    background: var(--accent-soft); outline: 1px solid var(--accent); }
   .dock-content { display: flex; flex: 1; flex-direction: column; min-height: 0; }
   .dock-content[hidden] { display: none; }
-  .dock-content > header { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
-  .dock-content > header strong { flex: 1; font-size: var(--fs-xs); }
-  .dock-tabs { display: flex; align-items: center; gap: 2px; padding: 5px; border-bottom: 1px solid var(--border); }
-  .dock-tabs.rail { flex-direction: column; }
-  .section-tab { display: flex; flex: 1; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 5px; border-radius: var(--r-sm); font-size: var(--fs-xs); color: var(--text-2); }
-  .section-tab:hover { background: var(--bg-2); color: var(--text-1); }
-  .section-tab.on { color: var(--accent); background: var(--accent-soft); }
-  .rail .section-tab { flex: 0 0 32px; width: 32px; }
-  .new-action { position: relative; padding: 8px 10px; }
+  .dock-content > header { display: flex; align-items: center; gap: 7px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .dock-content > header strong { flex: 1; font-size: var(--fs-sm); }
+  .dock-chrome { flex: 0 0 auto; border-bottom: 1px solid var(--border); }
+  .dock-heading { display: flex; align-items: center; gap: 3px; min-height: 42px; padding: 5px 8px 3px 13px; }
+  .dock-heading strong { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: 650; }
+  .dock-tabs { display: flex; align-items: center; gap: 0; padding: 0 8px; }
+  .section-tab { display: flex; flex: 1; align-items: center; justify-content: center; gap: 6px;
+    min-width: 0; min-height: 38px; padding: 6px 4px 8px; border-bottom: 2px solid transparent;
+    font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); }
+  .compact .section-tab { gap: 0; font-size: 0; }
+  .section-tab:hover { color: var(--text-1); background: var(--bg-2); }
+  .section-tab.on { color: var(--text-1); border-bottom-color: var(--accent); }
+  .dock-chrome.rail { display: flex; flex: 1; flex-direction: column; width: 42px; }
+  .rail .dock-heading { justify-content: center; min-height: 40px; padding: 5px; }
+  .rail .dock-tabs { flex-direction: column; gap: 2px; padding: 0 5px; }
+  .rail .section-tab { flex: 0 0 32px; width: 32px; min-height: 32px; padding: 5px;
+    border-bottom: 0; border-left: 2px solid transparent; }
+  .rail .section-tab.on { border-left-color: var(--accent); }
+  .rail-tools { display: grid; gap: 2px; margin-top: auto; padding: 7px 5px; border-top: 1px solid var(--border); }
+  .new-action { position: relative; padding: 11px 12px; border-bottom: 1px solid var(--border); }
   .new-action > button { width: 100%; }
-  .new-menu { position: absolute; top: 100%; left: 10px; right: 10px; z-index: 700; display: grid; gap: 2px; padding: 6px; }
-  .kind { display: grid; gap: 2px; padding: 7px 9px; border-radius: var(--r-sm); text-align: left; }
-  .kind:hover { background: var(--bg-3); }
-  .kind strong { font-size: var(--fs-xs); }
-  .kind small { color: var(--text-3); font-size: 10.5px; line-height: 1.35; }
+  .create-trigger { display: flex; align-items: center; justify-content: flex-start; gap: 7px; min-height: 36px; padding: 7px 11px; font-weight: 650; }
+  .create-trigger span { flex: 1; text-align: left; }
+  .quiet .create-trigger { border: 1px solid var(--border); color: var(--text-1); background: var(--bg-2); }
+  .quiet .create-trigger:hover { background: var(--bg-3); }
+  .new-menu { position: absolute; top: calc(100% + 2px); left: 12px; right: 12px; z-index: 700;
+    display: grid; padding: 5px 9px; border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm); background: var(--bg-1); box-shadow: var(--shadow-2); }
+  .kind { min-width: 0; padding: 10px 7px; text-align: left; }
+  .kind + .kind { border-top: 1px solid var(--border); }
+  .kind:hover, .kind:focus-visible { background: var(--bg-2); }
+  .kind:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .kind-copy { display: grid; gap: 2px; min-width: 0; }
+  .kind strong { color: var(--text-1); font-size: var(--fs-sm); }
+  .kind small { color: var(--text-2); font-size: var(--fs-xs); line-height: 1.4; }
   .pane { display: contents; }
   .pane[hidden] { display: none; }
   .cmp-dock-body-host { display: contents; }

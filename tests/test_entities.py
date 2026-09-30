@@ -119,7 +119,7 @@ def test_a_field_that_opens_a_subject_says_what_heads_it(client):
     assert [attr["key"] for attr in rows["place"]["attrs"]][:2] == ["aliases", "radius_m"]
     assert {attr["group"] for attr in rows["vessel"]["attrs"]} == {""}
     assert [attr["group"] for attr in rows["claim"]["attrs"]] == [
-        "What it states", "", "When", "", "Reasoning", "", "",
+        "What it states", "", "When", "", "", "Reasoning", "", "",
     ]
 
 
@@ -230,7 +230,7 @@ def test_a_type_is_shown_by_the_name_its_tool_gives_it(client):
 
     assert rows["inspect-session"]["label"] == "Inspect work"
     assert rows["analysis-follow-up"]["label"] == "Detect routine"
-    assert "Detect analyzer" in rows["analysis-zones"]["hint"]
+    assert "Detect" in rows["analysis-zones"]["hint"]
     for row in rows.values():
         assert "session" not in row["label"].lower() or row["type"] == "compare-session"
         assert "watch" not in row["label"].lower(), row["type"]
@@ -612,6 +612,35 @@ def test_a_claim_may_keep_a_local_time_or_no_time_at_all(client):
     assert local.status_code == 200, local.text
     assert undated.status_code == 200, undated.text
     assert cleared.status_code == 200, cleared.text
+
+
+def test_a_claim_states_the_zone_its_date_was_read_in(client):
+    """A day stated in Kyiv is Kyiv's day: the Timeline bounds it from that zone's
+    midnights, and a zone this install cannot load is refused rather than stored."""
+    cid = _new_case(client, "Zoned statement")
+
+    created = client.post(
+        f"/api/cases/{cid}/entities",
+        json={
+            "type": "claim",
+            "label": "The strike was filmed",
+            "attrs": {"when": "2024-03-12", "when_zone": "Europe/Kyiv"},
+        },
+    )
+    bad_zone = client.patch(
+        f"/api/cases/{cid}/entities/{created.json()['id']}",
+        json={"attrs": {"when_zone": "Mars/Olympus"}},
+    )
+    rows = client.get(
+        f"/api/cases/{cid}/timeline",
+        params={"entity": created.json()["id"], "category": "statement", "include_undated": "true"},
+    ).json()["items"]
+
+    assert created.status_code == 200, created.text
+    assert bad_zone.status_code == 400
+    assert [(row["earliest"], row["latest"], row["tz"]) for row in rows] == [
+        ("2024-03-11T22:00:00.000000Z", "2024-03-12T22:00:00.000000Z", "Europe/Kyiv"),
+    ]
 
 
 # -- the class family ----------------------------------------------------------

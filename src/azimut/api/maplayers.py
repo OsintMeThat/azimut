@@ -24,7 +24,7 @@ Google for the one it pointed at.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -249,6 +249,18 @@ def layer_icon(case_id: str, name: str, key: str) -> Response:
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+class OrderIn(BaseModel):
+    #: Every layer's name, top of the map first.
+    names: list[Annotated[str, Field(max_length=200)]] = Field(max_length=2000)
+
+
+@router.put("/{case_id}/map-layers/order")
+def order_layers(case_id: str, body: OrderIn) -> list[dict[str, Any]]:
+    """The rows as they were dragged, which is also how the map stacks them.
+    Answers with the whole list in its new order. Touches no network."""
+    return layer_engine.reorder(get_case(case_id), [_stem(name) for name in body.names])
 
 
 @router.patch("/{case_id}/map-layers/{name}")

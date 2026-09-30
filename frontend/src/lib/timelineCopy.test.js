@@ -45,10 +45,20 @@ describe('copying the chronology', () => {
     expect(table[0]).toEqual(CHRONOLOGY_COLUMNS);
     expect(table[1]).toEqual([
       // as written, with its own offset; the bounds stay in UTC whatever the axis reads
-      '2026-08-11T17:05:00+03:00', '2026-08-11T14:05:00Z', '2026-08-11T14:05:01Z',
+      '2026-08-11T17:05:00+03:00', '', '2026-08-11T14:05:00Z', '2026-08-11T14:05:01Z',
       'Convoy crossed the "east" bridge', 'MV Aurora; Northwind', 'East bridge', 'VID_0312',
       'probable', 'confirmed',
     ]);
+  });
+
+  it('names the zone a day was stated in, beside the day and in its reading', () => {
+    const [row] = chronologyRows([entry('a', '2024-03-11T22:00:00Z', {
+      raw: '2024-03-12', tz: 'Europe/Kyiv', latest: '2024-03-12T22:00:00Z',
+    })]);
+    expect(parseBlock(chronologyBlock([row]))[1].slice(0, 4)).toEqual([
+      '2024-03-12', 'Europe/Kyiv', '2024-03-11T22:00:00Z', '2024-03-12T22:00:00Z',
+    ]);
+    expect(row.reading).toBe('12 Mar 2024 (Europe/Kyiv)');
   });
 
   it('writes a Markdown table that reads the date and says where it came from', () => {

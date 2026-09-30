@@ -11,6 +11,8 @@
   // Reading a typed pair back into a point: the one parser the app has, and the
   // one a coordinate row is written in (decimal, hemispheres, or DMS).
   import { parseLatLon } from '../lib/sheetRoles.js';
+  import { knownZone, offsetLabel, worldZones } from '../lib/timeline.js';
+  import { zoneAt } from '../lib/localZone.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
@@ -126,6 +128,8 @@
     // post is written from. '' → the panels answer for the date, nothing for the
     // sentence.
     when: '',
+    // The zone the date is read in: null is the first point's, resolved on save.
+    whenZone: null,
     description: '',
     // Case files the proof rests on without composing them, brought in from a stated
     // source address. They join the chain on save, and the point with it.
@@ -163,6 +167,66 @@
   // Saved proof slug, or null before the first save.
   let savedName = $state(null);
   let dirty = $state(false);
+
+  // ---- the clock the date is read on ---------------------------------------
+  // The first point is the conclusion, and footage is read on the clock of the
+  // place it shows, so that point's zone is the default. It is looked up only
+  // while a date is set, from the bundled boundaries (no network).
+  let pointZone = $state('');
+  let otherZone = $state(false);
+  const zonePointKey = $derived.by(() => {
+    if (!proof.when.trim()) return '';
+    const typed = String(specPoints(proof)[0]?.coords ?? '').trim();
+    if (typed) return typed;
+    const auto = autoCoords(proof.panels ?? []);
+    return auto ? `${auto.lat}, ${auto.lon}` : '';
+  });
+  $effect(() => {
+    const key = zonePointKey;
+    if (!key) {
+      pointZone = '';
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(async () => {
+      try {
+        const where = parseLatLon(key) ?? (await api.post('/api/geo/parse', { text: key }));
+        const zone = await zoneAt({ lat: Number(where.lat), lon: Number(where.lon) });
+        if (live) pointZone = zone;
+      } catch {
+        if (live) pointZone = '';
+      }
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  });
+  const zoneMode = $derived(
+    otherZone || (proof.whenZone && proof.whenZone !== 'UTC') ? 'other' : proof.whenZone === 'UTC' ? 'UTC' : '',
+  );
+  /** The zone's offset on the stated date, not today's: a summer day in Kyiv is +03:00. */
+  function zoneOffset(zone) {
+    const [, year, month = '01', day = '01'] = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(proof.when.trim()) ?? [];
+    const at = year ? Date.UTC(Number(year), Number(month) - 1, Number(day), 12) : Date.now();
+    return offsetLabel(zone, at);
+  }
+  function pickZoneMode(mode) {
+    otherZone = mode === 'other';
+    if (mode === 'other') return;
+    proof.whenZone = mode === 'UTC' ? 'UTC' : null;
+    dirty = true;
+  }
+  function typeZone(text) {
+    const zone = text.trim();
+    if (!zone) return;
+    if (!knownZone(zone)) {
+      toast(`${zone} is not a time zone name`, 'warn');
+      return;
+    }
+    proof.whenZone = zone;
+    dirty = true;
+  }
   // The document as it stands on disk, so an undo that walks all the way back
   // to it can say the proof is saved again. null until a save or an open has
   // put something there to match.
@@ -383,6 +447,8 @@
     proof.footerText = spec.footerText !== false;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     proof.when = typeof spec.when === 'string' ? spec.when : '';
+    proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
+    otherZone = false;
     proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
@@ -696,6 +762,8 @@
     proof.points = [blankPoint()];
     proof.sources = null;
     proof.when = '';
+    proof.whenZone = null;
+    otherZone = false;
     proof.description = '';
     proof.material = [];
     proof.captionSize = CAPTION_SIZE;
@@ -3843,6 +3911,9 @@
           title: result.title,
           // What the post is written from, when the proof carries one.
           description: proof.description,
+          // The date and the clock the save read it on, for a post template with #date.
+          when: proof.when,
+          whenZone: result.when_zone ?? null,
           // every point, one per line: the post cites the first and carries the rest
           coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,
@@ -3953,6 +4024,8 @@
     // sentence edited from Details opens here as the case's answer rather than as
     // the copy this file was written with.
     proof.when = typeof spec.when === 'string' ? spec.when : '';
+    proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
+    otherZone = false;
     proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
@@ -4757,9 +4830,48 @@
             label="Date the material was taken"
             placeholder="dd/mm/yyyy · Oct 2025 · ~2025"
             calendar
+            zone={proof.whenZone || pointZone || null}
             value={proof.when}
             onchange={(value) => { proof.when = value; dirty = true; }}
           />
+          <!-- Which clock the date is read on. A day is that place's day, so the
+               default follows the first point and is named here rather than
+               assumed: without it the Timeline would put Kyiv's 12th on UTC's. -->
+          {#if proof.when.trim()}
+            <div class="when-zone">
+              <label for="proof-when-zone">Clock</label>
+              <select
+                id="proof-when-zone"
+                class="select meta-input"
+                value={zoneMode}
+                onchange={(event) => pickZoneMode(event.currentTarget.value)}
+              >
+                <option value="">{pointZone ? `At the point · ${pointZone}` : 'At the point · no point yet'}</option>
+                <option value="UTC">UTC</option>
+                <option value="other">Other zone…</option>
+              </select>
+              {#if zoneMode === 'other'}
+                <input
+                  class="input meta-input mono"
+                  list="proof-zone-names"
+                  aria-label="Time zone"
+                  placeholder="Europe/Kyiv"
+                  autocomplete="off"
+                  spellcheck="false"
+                  value={proof.whenZone && proof.whenZone !== 'UTC' ? proof.whenZone : ''}
+                  onchange={(event) => typeZone(event.currentTarget.value)}
+                />
+                <datalist id="proof-zone-names">
+                  {#each worldZones() as zone (zone)}<option value={zone}></option>{/each}
+                </datalist>
+              {/if}
+              {#if !zoneMode && !pointZone}
+                <p class="when-zone-note">No point yet, so the day is read in UTC.</p>
+              {:else if proof.whenZone !== 'UTC' && (proof.whenZone || pointZone)}
+                <p class="when-zone-note">{zoneOffset(proof.whenZone || pointZone)} on that day.</p>
+              {/if}
+            </div>
+          {/if}
         </div>
 
         <ProofLayersPanel
@@ -5387,6 +5499,10 @@
     padding: 12px;
   }
   .meta-field { margin-bottom: 10px; }
+  .when-zone { margin-top: 6px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; }
+  .when-zone label { font-size: var(--fs-xs); color: var(--text-3); }
+  .when-zone input { grid-column: 2; }
+  .when-zone-note { grid-column: 2; margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
   .meta-head {
     display: flex;
     align-items: center;

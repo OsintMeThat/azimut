@@ -505,6 +505,27 @@ describe('the time at the place', () => {
     expect(post.mock.calls[0][1].when).toBe('2026-08-11T17:05:00+01:00');
   });
 
+  it('reads a day as the day at the place, and can be read as a UTC day instead', async () => {
+    await open(KHARKIV);
+    type(sentence(), 'Strike reported');
+    type(dateField(), '12/03/2024');
+    await settle();
+    expect(target.textContent).toContain('Reads: 12 Mar 2024, the day at Kharkiv (Europe/Kyiv)');
+    addButton().click();
+    await settle();
+    expect(post.mock.calls[0][1]).toMatchObject({ when: '2024-03-12', when_zone: 'Europe/Kyiv' });
+
+    type(sentence(), 'Strike reported');
+    type(dateField(), '12/03/2024');
+    await settle();
+    button('UTC day').click();
+    flushSync();
+    addButton().click();
+    await settle();
+    expect(post.mock.calls[1][1].when).toBe('2024-03-12');
+    expect(post.mock.calls[1][1]).not.toHaveProperty('when_zone');
+  });
+
   it('counts two places in one zone as one choice', async () => {
     catalog = [LVIV];
     await open(KHARKIV);

@@ -28,7 +28,8 @@
   import { plural } from '../../lib/map/detections.js';
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { openCopernicusSettings } from '../../lib/navigate.js';
-  import { ADVISED_MAXCC, uniform, whenNeed, whenSummary } from '../../lib/map/detectWhen.js';
+  import { ADVISED_MAXCC, ceilingWarning, uniform, whenNeed, whenSummary } from '../../lib/map/detectWhen.js';
+  import CloudFilter from '../compare/CloudFilter.svelte';
   import AnalyzerSettings from './AnalyzerSettings.svelte';
   import AnalyzerSize from './AnalyzerSize.svelte';
   import WhenStep from './WhenStep.svelte';
@@ -37,10 +38,10 @@
   let {
     caseId,
     catalogue,
-    /** Saved area sets of this case. */
-    areaSets = [],
+    /** Ordered area groups shared with the Areas tab. */
+    areaGroups = [],
     areas = [],
-    /** Where it starts: `{ kind, body, followupId, fromRun, zonesId, zonesTitle }`. */
+    /** Where it starts: `{ kind, body, followupId, fromRun }`. */
     seed = {},
     /** An analyzer just made in the library, to pick. */
     offer = null,
@@ -58,6 +59,7 @@
     onsubmit = () => {},
     onlibrary = () => {},
     onareas = async () => {},
+    onopenareas = () => {},
   } = $props();
 
   const EMPTY_SOURCE = { provider: 'sentinel2', date: '', layer: 'TRUE_COLOR', maxcc: ADVISED_MAXCC };
@@ -78,8 +80,11 @@
   let against = $state('previous');
   let offline = $state(false);
   let followupId = $state(null);
-  let zonesId = $state(null);
-  let zonesTitle = $state('Analysis areas');
+  let lastPasses = $state({});
+  let groupTitle = $state('');
+  let areaSearch = $state('');
+  /** Groups opened by hand; every group starts folded, the first one too. */
+  let openGroups = $state({});
   let pairs = $state([]);
   /** A one pass reads B on a chosen day rather than the newest pass. */
   let chooseB = $state(false);
@@ -117,7 +122,7 @@
   // Said here rather than discovered when the run comes back failed. A routine
   // that compares each pass with the one before it still needs a first one.
   const imageryNeeds = $derived(
-    whenNeed({ single: isSingle, routine, against, followupId, pairs, chooseB })
+    whenNeed({ single: isSingle, routine, against, pairs, chooseB, lastPasses, radar })
   );
   // A locked analyzer can still be picked and read about; a run of it cannot
   // start, and saying why here beats a run that comes back failed.
@@ -162,8 +167,6 @@
     kind = seed.kind ?? (seed.followupId ? 'routine' : 'once');
     if (!seed.body) {
       choose(builtins[0]?.id);
-      zonesId = seed.zonesId ?? null;
-      zonesTitle = seed.zonesTitle ?? zonesTitle;
       return;
     }
     const body = seed.body;
@@ -178,6 +181,7 @@
     against = body.date_rule === 'latest_reference' ? 'reference' : 'previous';
     chooseB = kind !== 'routine' && (!!body.b?.date || pairs.some((pair) => pair.b?.date));
     followupId = seed.followupId ?? null;
+    lastPasses = seed.lastPasses ?? {};
     step = seed.followupId ? 4 : 1;
   });
 
@@ -217,37 +221,57 @@
     b = { ...b, ...patch };
     pairs = pairs.map((pair) => ({ ...pair, a: { ...pair.a, ...patch }, b: { ...pair.b, ...patch } }));
   }
+  function setWeather(on) {
+    recipe.parameters = { ...recipe.parameters, ignore_clouds: on, ignore_shadows: on };
+  }
 
   function removeZone(id) {
     zones = zones.filter((z) => z.id !== id);
     if (selectedZone === id) selectedZone = null;
   }
 
-  async function saveAreas(asNew = false) {
+  const areaZone = (area) => ({ id: area.id, name: area.name, kind: 'polygon',
+    points: clone(area.geometry.coordinates[0].slice(0, -1)) });
+  const groupZones = (group) => group.area_ids
+    ? group.area_ids.map((id) => areas.find((area) => area.id === id)).filter(Boolean).map(areaZone)
+    : clone(group.zones ?? []);
+  const groupedIds = $derived(new Set(areaGroups.flatMap((group) => group.area_ids ?? [])));
+  const ungrouped = $derived(areas.filter((area) => !groupedIds.has(area.id)));
+  const matching = (name) => name.toLowerCase().includes(areaSearch.trim().toLowerCase());
+
+  function useGroup(group) {
+    const additions = groupZones(group).filter((zone) => !zones.some((selected) => selected.id === zone.id));
+    if (zones.length + additions.length > 32) return;
+    zones = [...zones, ...additions];
+  }
+
+  async function saveGroup() {
+    if (!groupTitle.trim()) return;
     const owner = await ensureCase();
-    const base = `/api/cases/${owner.id}/analysis/zones`;
-    const data = { title: zonesTitle, zones: clone(zones) };
-    const saved = zonesId && !asNew ? await api.put(`${base}/${zonesId}`, data) : await api.post(base, data);
-    zonesId = saved.id;
-    await onareas(owner.id);
-    await reloadCase();
-    toast('Areas saved in this case', 'ok');
-  }
-
-  async function openAreas(id) {
-    const body = await api.get(`/api/cases/${caseId}/analysis/zones/${id}`);
-    zones = clone(body.zones);
-    zonesTitle = body.title;
-    zonesId = id;
-    showZones = true;
-  }
-
-  async function removeAreas(id) {
-    await api.del(`/api/cases/${caseId}/analysis/zones/${id}`);
-    if (zonesId === id) zonesId = null;
-    await onareas(caseId);
-    await reloadCase();
-    toast('Moved to Trash', 'ok');
+    const replacements = new Map();
+    try {
+      for (const zone of zones) {
+        if (areas.some((area) => area.id === zone.id)) continue;
+        const ring = zoneRing(zone);
+        const saved = await api.post(`/api/cases/${owner.id}/analysis/areas`, {
+          name: zone.name, colour: recipe.colour,
+          geometry: { type: 'Polygon', coordinates: [[...ring, ring[0]]] },
+        });
+        replacements.set(zone.id, saved.id);
+      }
+      await api.post(`/api/cases/${owner.id}/analysis/zones`, {
+        title: groupTitle.trim(), area_ids: zones.map((zone) => replacements.get(zone.id) ?? zone.id),
+      });
+      groupTitle = '';
+      toast('Group saved', 'ok');
+    } finally {
+      if (replacements.size) {
+        zones = zones.map((zone) => ({ ...zone, id: replacements.get(zone.id) ?? zone.id }));
+        pairs = pairs.map((pair) => ({ ...pair, area_id: replacements.get(pair.area_id) ?? pair.area_id }));
+      }
+      await onareas(owner.id);
+      await reloadCase();
+    }
   }
 
   async function saveArea(zone) {
@@ -304,18 +328,58 @@
   {#if step === 1}
     <section class="step" aria-label="Where to look">
       <h3>Where to look</h3>
-      <!-- The case's own ground comes first: picking an area it already
-           watches is one press, and drawing is for ground it does not. -->
-      {#if areas.length}
-        <div class="shared">
-          {#each areas as area (area.id)}
-            {@const on = zones.some((zone) => zone.id === area.id)}
-            <button class="area-chip" class:on aria-pressed={on} disabled={!on && zones.length >= 32}
-              onclick={() => (on ? removeZone(area.id) : useArea(area))}>
-              <span class="swatch" style={`--tint: ${area.colour}`}></span>{area.name}
-            </button>
-          {/each}
-        </div>
+      {#if areas.length || areaGroups.length}
+        <input class="area-search" aria-label="Search areas or groups" placeholder="Search areas or groups…"
+          bind:value={areaSearch} />
+        {#each areaGroups as group (group.id)}
+          {@const members = groupZones(group)}
+          {@const shown = members.filter((zone) => !areaSearch || matching(group.title) || matching(zone.name))}
+          {#if !areaSearch || matching(group.title) || shown.length}
+            <div class="area-group">
+              <div class="area-group-head">
+                <button class="group-fold grow" aria-expanded={!!areaSearch || !!openGroups[group.id]}
+                  onclick={() => (openGroups = { ...openGroups, [group.id]: !openGroups[group.id] })}>
+                  <Icon name={(areaSearch || openGroups[group.id]) ? 'chevronDown' : 'chevronRight'} size={12} />
+                  {group.title} <small>{plural(members.length, 'area')}</small>
+                </button>
+                <button class="btn btn-sm" aria-label={`Use ${group.title}`}
+                  disabled={!!group.pending_review?.length || !members.length || zones.length + members.filter((zone) => !zones.some((selected) => selected.id === zone.id)).length > 32}
+                  onclick={() => useGroup(group)}>Use</button>
+              </div>
+              {#if group.pending_review?.length}
+                <button class="link" onclick={onopenareas}>Review saved shapes in Areas</button>
+              {/if}
+              {#if areaSearch || openGroups[group.id]}
+                <div class="shared">
+                  {#each shown as zone (zone.id)}
+                    {@const area = areas.find((item) => item.id === zone.id)}
+                    {@const on = zones.some((selected) => selected.id === zone.id)}
+                    <button class="area-chip" class:on aria-pressed={on}
+                      disabled={!!group.pending_review?.length || (!on && zones.length >= 32)}
+                      onclick={() => (on ? removeZone(zone.id) : area ? useArea(area) : (zones = [...zones, zone]))}>
+                      <span class="swatch" style={`--tint: ${area?.colour ?? '#38bdf8'}`}></span>{zone.name}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        {/each}
+        {@const loose = ungrouped.filter((area) => !areaSearch || matching(area.name))}
+        {#if loose.length}
+          <div class="area-group">
+            <div class="area-group-head"><strong>Ungrouped</strong><small>{plural(loose.length, 'area')}</small></div>
+            <div class="shared">
+              {#each loose as area (area.id)}
+                {@const on = zones.some((zone) => zone.id === area.id)}
+                <button class="area-chip" class:on aria-pressed={on} disabled={!on && zones.length >= 32}
+                  onclick={() => (on ? removeZone(area.id) : useArea(area))}>
+                  <span class="swatch" style={`--tint: ${area.colour}`}></span>{area.name}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
       {/if}
       <div class="row wrap">
         {#each [['rect', 'Rectangle'], ['polygon', 'Polygon'], ['ellipse', 'Circle']] as [shape, label]}
@@ -352,27 +416,12 @@
           tooMany ? '' : `${plural(frames, 'request')} a run, about ${duration}`,
         ].filter(Boolean).join(' · ')}</p>
       {/if}
-      {#if areaSets.length}
-        <details>
-          <summary>Saved area sets · {areaSets.length}</summary>
-          {#each areaSets as set (set.id)}
-            <div class="row">
-              <button class="link grow" disabled={working} onclick={() => act(() => openAreas(set.id))}>
-                {set.title}<small>{plural(set.areas ?? 0, 'area')}</small>
-              </button>
-              <button class="cmp-icon" disabled={working} aria-label={`Delete ${set.title}`} title={`Delete ${set.title}`}
-                onclick={() => act(() => removeAreas(set.id))}><Icon name="trash" size={13} /></button>
-            </div>
-          {/each}
-        </details>
-      {/if}
       {#if zones.length}
         <details>
-          <summary>Save these areas as a set</summary>
+          <summary>Save selection as group</summary>
           <div class="row">
-            <input class="grow" aria-label="Area set name" bind:value={zonesTitle} maxlength="120" />
-            <button class="btn btn-sm" disabled={working} onclick={() => act(() => saveAreas())}>Save</button>
-            {#if zonesId}<button class="btn btn-sm" disabled={working} onclick={() => act(() => saveAreas(true))}>As new</button>{/if}
+            <input class="grow" aria-label="Group name" bind:value={groupTitle} maxlength="120" />
+            <button class="btn btn-sm" disabled={working || !groupTitle.trim()} onclick={() => act(saveGroup)}>Save group</button>
           </div>
         </details>
       {/if}
@@ -385,6 +434,17 @@
           <p class="group">Target size</p>
           <AnalyzerSize bind:recipe {capability} onpick={(name) => (pickedSize = name)} />
         </div>
+        {#if capability.clouds}
+          <CloudFilter clouds={recipe.parameters.ignore_clouds} shadows={recipe.parameters.ignore_shadows}
+            ontoggle={setWeather} />
+        {/if}
+        {#if !radar}
+          <label class="cloud-ceiling">Maximum cloud cover · {b.maxcc}%
+            <input type="range" min="0" max="100" value={b.maxcc} aria-label="Maximum cloud cover"
+              oninput={(event) => setPicture({ maxcc: Number(event.currentTarget.value) })} />
+          </label>
+          {#if ceilingWarning(b.maxcc)}<p class="hint warn">{ceilingWarning(b.maxcc)}</p>{/if}
+        {/if}
       {/if}
       <div class="choices" role="radiogroup" aria-label="Analyzer">
         {#each groups as group (group.label)}
@@ -409,12 +469,12 @@
         {/if}
       </div>
       {#if recipe.description}<p class="hint">{recipe.description}</p>{/if}
-      <AnalyzerSettings bind:recipe {capability} showSize={false} />
+      <AnalyzerSettings bind:recipe {capability} showSize={false} showCloud={false} />
       <button class="link" onclick={onlibrary}>Make an analyzer of your own…</button>
     </section>
   {:else if step === 3}
-    <WhenStep {zones} bind:pairs {routine} single={isSingle} sensor={capability.sensor} {followupId}
-      maxcc={radar ? 100 : b.maxcc} onmaxcc={radar ? null : (value) => setPicture({ maxcc: value })}
+    <WhenStep {zones} bind:pairs {routine} single={isSingle} sensor={capability.sensor} {lastPasses}
+      maxcc={radar ? 100 : b.maxcc}
       bind:against bind:chooseB bind:lookup {onshow} />
     {#if radar}
       {#if !routine}
@@ -495,6 +555,15 @@
 </div>
 
 <style>
+  .area-search { width: 100%; }
+  .area-group { display: grid; gap: 6px; }
+  .area-group-head { display: flex; align-items: center; gap: 7px; min-height: 30px;
+    padding: 3px 0; font-size: var(--fs-xs); }
+  .area-group-head strong { flex: 1; }
+  .area-group-head small { color: var(--text-3); }
+  .group-fold { display: flex; align-items: center; gap: 5px; min-width: 0; text-align: left;
+    font-size: var(--fs-xs); }
+  .group-fold small { margin-left: auto; }
   .shared { display: flex; flex-wrap: wrap; gap: 5px; }
   .area-chip {
     display: flex;
@@ -512,38 +581,33 @@
   .stepper {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 2px;
-    padding: 8px 10px;
+    gap: 8px;
+    padding: 7px 12px 0;
     border-bottom: 1px solid var(--border);
   }
   .stepper button {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    padding: 4px 2px;
-    border-radius: var(--r-sm);
-    color: var(--text-3);
+    gap: 6px;
+    min-height: 37px;
+    padding: 5px 2px 8px;
+    border-bottom: 2px solid transparent;
+    color: var(--text-2);
     font-size: var(--fs-xs);
     font-weight: 600;
   }
-  .stepper button:hover:not(:disabled) { background: var(--bg-2); color: var(--text-1); }
+  .stepper button:hover:not(:disabled) { color: var(--text-1); }
   .stepper button:disabled { opacity: 0.45; cursor: not-allowed; }
   .stepper .n {
-    display: grid;
-    place-items: center;
-    width: 17px;
-    height: 17px;
-    border-radius: 50%;
-    background: var(--bg-3);
-    font: 700 10px/1 var(--font-sans);
+    color: var(--text-3);
+    font: 700 10px/1 var(--font-mono);
   }
-  .stepper .done { color: var(--text-2); }
-  .stepper .done .n { color: var(--bg-0); background: var(--accent); }
-  .stepper .current { color: var(--accent); background: var(--accent-soft); }
-  .stepper .current .n { color: var(--bg-0); background: var(--accent); }
-  .step { display: grid; gap: 9px; }
-  h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; }
+  .stepper .done { color: var(--text-1); }
+  .stepper .current { color: var(--text-1); border-bottom-color: var(--accent); }
+  .stepper .current .n { color: var(--accent); }
+  .step { display: grid; gap: 12px; }
+  h3 { margin: 0 0 3px; font-size: var(--fs-lg); font-weight: 650; }
   .row.wrap { flex-wrap: wrap; }
   .active { outline: 1px solid var(--accent); }
   .area-row input { font-size: var(--fs-xs); }
@@ -552,10 +616,9 @@
   summary { color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
   .link { color: var(--accent); font-size: var(--fs-xs); text-align: left; justify-self: start; }
   .link:disabled { opacity: 0.5; }
-  .link small { display: block; color: var(--text-3); font-size: 10px; }
   .centre { justify-self: center; text-align: center; }
   .size { display: grid; gap: 5px; }
-  .choices { display: grid; gap: 2px; }
+  .choices { display: grid; gap: 0; }
   .group {
     margin: 6px 0 2px;
     color: var(--text-3);
@@ -569,15 +632,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 8px;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
+    min-height: 35px;
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
     color: var(--text-1);
-    font-size: var(--fs-xs);
+    font-size: var(--fs-sm);
     text-align: left;
   }
   .choice:hover { background: var(--bg-2); }
-  .choice.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .choice.on { color: var(--text-1); background: var(--accent-soft); font-weight: 600; }
   .choice small { margin-left: auto; color: var(--text-3); font-weight: 400; }
   .choice.locked { color: var(--text-2); }
   .choice .lock { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); }

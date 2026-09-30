@@ -27,6 +27,7 @@
     describePair,
     draftWhen,
     formatTemporalValue,
+    temporalZoneWords,
     initialWindow,
     inputWindowValue,
     isoInstant,
@@ -50,8 +51,8 @@
     windowMillis,
     windowWords,
     zoneAbbreviation,
+    zoneWords,
     zonedFields,
-    zonedStamp,
     zoomWindow,
   } from '../lib/timeline.js';
   import {
@@ -64,6 +65,8 @@
     timelineTrackQuery,
     timelineViewState,
     holdsBackWorkingFiles,
+    drawsFiles,
+    situatedFile,
     mediaTrack,
     withWorkingFiles,
     trackPresets,
@@ -72,6 +75,8 @@
   import { chronologyBlock, chronologyMarkdown, chronologyRows, readChronology } from '../lib/timelineCopy.js';
   import { provenance } from '../lib/sheetExport.js';
   import { fileUrl } from '../lib/fileUrl.js';
+  import { caseZone, clockReading, rememberClock, rememberedClock } from '../lib/caseClock.js';
+  import { fitBands, fitSlots, fitTicks, overviewNeeded } from '../lib/timelineFit.js';
   import { plateFilename } from '../lib/plate.js';
   import { PLATE_PLOT, timelinePlate } from '../lib/timelinePlate.js';
   import AnalysisViews from '../components/AnalysisViews.svelte';
@@ -93,8 +98,10 @@
   let trackPages = $state({});
   let groupBy = $state('none');
   let trackEditor = $state(null);
-  let trackMenu = $state(false);
-  let trackMenuElement = $state(null);
+  /** The bar's `⋯`: tracks, grouping, the period handed to another tool, the legend and
+   *  full screen. Asked for rarely, so kept out of the way of the axis. */
+  let moreMenu = $state(false);
+  let moreElement = $state(null);
   let draggedTrack = null;
   let selectedTrackId = $state(null);
   let from = $state('');
@@ -119,23 +126,26 @@
    */
   let against = $state(null);
   /**
-   * Which clock the axis is *read* on: `utc`, `machine`, or `place:<id>` for the
-   * local time at a point the case has saved.
+   * Which clock the axis is *read* on: `case`, `utc`, `machine`, `zone:<IANA>`, or
+   * `place:<id>` for the local time at a point the case has saved.
    *
    * The case is stored in UTC and stays there (`lib/timeline.js`): this moves the
-   * ticks and their words, nothing else. UTC is the default because it is the one
-   * reading that means the same thing on every machine — and it is the wrong reading
-   * for the work, because an investigator argues in the local time of the *event*,
-   * and checking a 19:40 timestamp against a clock in the analyst's own country is
-   * how an hour goes missing.
+   * ticks and their words, nothing else. It opens on `case`, the zone most of the
+   * case's places stand in (`lib/caseClock.js`), because an investigator argues in the
+   * local time of the *event*: checking a 19:40 timestamp against UTC, or against a
+   * clock in the analyst's own country, is how an hour goes missing. A case with no
+   * placed point reads UTC, the one reading that means the same thing everywhere. The
+   * clock picked is kept per case.
    *
-   * A saved point is that reading, and it is the only one that can carry the daylight
-   * ribbon with it: a band of day and night needs coordinates, so it arrives with the
-   * zone rather than being a second control.
+   * A saved point is the same reading narrowed to one place, and the only one that can
+   * carry the daylight ribbon with it: a band of day and night needs coordinates, so it
+   * arrives with the zone rather than being a second control.
    */
-  let zoneChoice = $state('utc');
+  let zoneChoice = $state('case');
   /** The case's saved points, for that menu. Bounded like every other list here. */
   let places = $state([]);
+  /** The zone most of those points stand in, `{ zone, count, of }`, or null. */
+  let caseClock = $state(null);
   /** `{ zone, day, civil, truncated }` for the chosen point over the visible window. */
   let daylight = $state(null);
   let daylightLoading = $state(false);
@@ -182,8 +192,6 @@
   let expandedTracks = $state({});
   let toolElement = $state(null);
   let fullscreen = $state(false);
-  let legendElement = $state(null);
-  let legendOpen = $state(false);
   let rangeElement = $state(null);
   let rangeMenu = $state(false);
   let plotElement = $state(null);
@@ -239,18 +247,29 @@
   const minorTicks = $derived(axisMinorTicks(from, to, plotWidth, zone));
   const bands = $derived(axisBands(from, to, plotWidth, zone));
   const nowLeft = $derived(nowPosition(from, to));
+  /**
+   * An event on the Media lane, drawn as the file it dates: the file's name and its
+   * picture, where the analyst put it. The row stays the event's, so picking it opens
+   * the event and moving it moves the event's date (`drawsFiles`).
+   */
+  function asFile(item) {
+    const file = situatedFile(item);
+    return file ? { ...item, label: file.label || item.label, thumb: file.thumb ?? '', statement: item.label, asFile: true } : item;
+  }
   const baseTrackItems = $derived(Object.fromEntries(
     trackSpecs.map((track) => [
       track.id,
       (trackPages[track.id]?.items ?? [])
         .filter((item) => !track.hidden.includes(item.id))
-        .map((item) => ({ ...item, pinned: track.pinned.includes(item.id) })),
+        .map((item) => ({ ...(drawsFiles(track) ? asFile(item) : item), pinned: track.pinned.includes(item.id) })),
     ])
   ));
   const visibleItems = $derived.by(() => {
     const unique = new Map();
     for (const rows of Object.values(baseTrackItems)) {
-      for (const item of rows) unique.set(item.id, item);
+      // The list reads an event as its sentence: a row drawn as its file on the Media
+      // lane gives way to the same row on any other lane.
+      for (const item of rows) if (!unique.has(item.id) || unique.get(item.id).asFile) unique.set(item.id, item);
     }
     return [...unique.values()];
   });
@@ -306,9 +325,6 @@
   }
   const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null));
   const density = $derived(layoutDensityBuckets(overview, extent));
-  const overviewUnit = $derived(
-    { 13: 'Hour', 10: 'Day', 7: 'Month' }[overview[0]?.start?.length] ?? 'Year'
-  );
   /**
    * The date scale under the minimap: one slot per period, named under its own bar.
    *
@@ -317,7 +333,13 @@
    * wide one half empty.
    */
   const overviewTicks = $derived(densityTicks(overview, extent, overviewWidth));
-  const selectedReading = $derived(formatTemporalValue(selected?.raw ?? ''));
+  const selectedReading = $derived(formatTemporalValue(selected?.raw ?? '', selected?.tz));
+  /** Whether an entry names an instant, which can be read on the axis's clock. A day
+   *  has no hour, and printing 00:00 in another zone would invent one. */
+  function instantOnClock(item) {
+    return zone !== UTC && Boolean(item?.earliest) && ['second', 'subsecond'].includes(item?.precision);
+  }
+  const onClock = $derived(instantOnClock(selected));
   const selectedTrack = $derived(trackSpecs.find((track) => track.id === selectedTrackId) ?? null);
   const inspectorConnections = $derived.by(() => {
     const grouped = { about: [], at: [], cites: [] };
@@ -334,18 +356,21 @@
   });
   /**
    * The file an entry is about, shown at the top of the inspector: the file itself
-   * for a file's date, or the first file an event cites. Seeing it is what a click on
-   * a dated file is most often for, and it used to cost Details, then the file.
+   * for a file's date, then the file an event is about, then the first one it cites.
+   * Seeing it is what a click on a dated file is most often for, and it used to cost
+   * Details, then the file. `about` comes first because a proof's date is stated
+   * *about* the footage and *cites* the proof: the video is what was dated.
    */
   const PREVIEWS = new Set(['media', 'capture']);
   const previewEntity = $derived.by(() => {
     if (!selected) return null;
     const own = inspectorChain?.entity;
     if (own?.id === selected.owner_id && PREVIEWS.has(own.type)) return own;
-    const cited = (inspectorChain?.relations ?? []).find(
-      (row) => row.direction === 'out' && row.link?.type === 'cites' && PREVIEWS.has(row.entity?.type)
+    const out = (inspectorChain?.relations ?? []).filter(
+      (row) => row.direction === 'out' && PREVIEWS.has(row.entity?.type)
     );
-    return cited?.entity ?? null;
+    const file = out.find((row) => row.link?.type === 'about') ?? out.find((row) => row.link?.type === 'cites');
+    return file?.entity ?? null;
   });
   /** The picture the row already carried, drawn before the file is known. */
   const previewThumb = $derived(selected?.category === 'media' ? selected.thumb ?? '' : '');
@@ -355,7 +380,33 @@
     ? dated.filter((item) => Date.parse(item.earliest) < axisWindow.end
       && Date.parse(item.latest ?? item.earliest) >= axisWindow.start)
     : dated);
-  const axisMax = $derived(Math.max(150, Math.round((chronologyHeight - overviewHeight - 130) * axisShare)));
+  /** The whole-case strip, only once the window leaves part of the case out
+   *  (`lib/timelineFit.js`). Under the axis, so the axis does not move when it comes. */
+  const overviewShown = $derived(overviewNeeded(extent, axisWindow));
+  const overviewRoom = $derived(overviewShown ? overviewHeight : 0);
+  // The strip's height comes out of the list, not the axis: the lanes being read keep
+  // their room when the window is zoomed and the strip arrives.
+  const axisMax = $derived(Math.max(150, Math.round((chronologyHeight - 130) * axisShare)));
+  /** Names on the ruler and the strip, each kept only where it fits. */
+  const tickNames = $derived(fitTicks(ticks, plotWidth));
+  const bandNames = $derived(fitBands(bands, plotWidth));
+  const overviewNames = $derived(fitSlots(overviewTicks, overviewWidth));
+  /**
+   * The list's link columns, only those some entry of the window fills: three empty
+   * columns under `Subjects · Places · Sources` were most of a file date's row.
+   */
+  const listColumns = $derived({
+    subjects: windowItems.some((item) => item.subject_entities?.length),
+    places: windowItems.some((item) => item.place_entities?.length),
+    sources: windowItems.some((item) => item.source_entities?.length),
+  });
+  const listTemplate = $derived([
+    '150px', 'minmax(200px, 3fr)',
+    ...(listColumns.subjects ? ['minmax(70px, 1.1fr)'] : []),
+    ...(listColumns.places ? ['minmax(60px, .9fr)'] : []),
+    ...(listColumns.sources ? ['minmax(70px, 1.1fr)'] : []),
+    'minmax(90px, auto)',
+  ].join(' '));
   const listGroups = $derived.by(() => {
     const groups = new Map();
     for (const item of [...windowItems].sort((a, b) => String(a.earliest).localeCompare(String(b.earliest)))) {
@@ -393,6 +444,7 @@
   );
   const zone = $derived.by(() => {
     if (frozenZone && knownZone(frozenZone)) return frozenZone;
+    if (zoneChoice === 'case') return caseClock && knownZone(caseClock.zone) ? caseClock.zone : UTC;
     if (zoneChoice === 'machine') return knownZone(localZone) ? localZone : UTC;
     // A zone named outright: the investigation is at the other end of the world and
     // the case has no saved point there yet. It carries no coordinates, so it labels
@@ -422,10 +474,6 @@
   const twilightBands = $derived(
     sunPlace && !daylight?.truncated ? ribbonBands(daylight?.civil ?? [], from, to) : []
   );
-  const scaleLabel = $derived.by(() => {
-    const unit = axisScale(from, to, plotWidth);
-    return unit ? `${unit} · ${zoneWord}` : zoneWord;
-  });
   /** The machine's own zone is offered rather than assumed: it is a legitimate
    *  reading of a working day and a poor default. */
   const localZone = machineZone();
@@ -443,7 +491,7 @@
     return () => observer.disconnect();
   });
 
-  $effect(() => trackMenu ? closeOnOutsidePointer(trackMenuElement, () => (trackMenu = false)) : undefined);
+  $effect(() => moreMenu ? closeOnOutsidePointer(moreElement, () => (moreMenu = false)) : undefined);
   $effect(() => copyMenu ? closeOnOutsidePointer(copyMenuElement, () => (copyMenu = false)) : undefined);
 
   // A saved view's mode says which half it favours; applying one moves the bar there.
@@ -517,7 +565,6 @@
     return () => document.removeEventListener('fullscreenchange', changed);
   });
 
-  $effect(() => legendOpen ? closeOnOutsidePointer(legendElement, () => (legendOpen = false)) : undefined);
   $effect(() => itemMenu ? closeOnOutsidePointer(itemMenuElement, () => (itemMenu = null)) : undefined);
 
   function overviewQuery(track, { densityBucket = 'year' } = {}) {
@@ -834,7 +881,7 @@
     items = [];
     trackSpecs = defaultTimelineTracks();
     groupBy = 'none';
-    zoneChoice = 'utc';
+    zoneChoice = rememberedClock(caseState.current?.id);
     from = '';
     to = '';
     entityFilter = null;
@@ -899,7 +946,8 @@
       trackSpecs = defaultTimelineTracks();
       trackPages = {};
       groupBy = 'none';
-      zoneChoice = 'utc';
+      zoneChoice = rememberedClock(caseId);
+      caseClock = null;
       selected = null;
       pendingSelection = null;
       cursor = null;
@@ -954,7 +1002,22 @@
 
   /** A point no longer in the case cannot go on labelling the axis. */
   $effect(() => {
-    if (zoneChoice.startsWith('place:') && places.length && !sunPlace) zoneChoice = 'utc';
+    if (zoneChoice.startsWith('place:') && places.length && !sunPlace) zoneChoice = 'case';
+  });
+
+  /** Where the case is: the zone its points stand in, read once they are listed. */
+  $effect(() => {
+    const caseId = caseState.current?.id;
+    const points = places;
+    if (!caseId || !points.length) {
+      caseClock = null;
+      return;
+    }
+    let live = true;
+    caseZone(points)
+      .then((found) => { if (live && caseState.current?.id === caseId) caseClock = found; })
+      .catch(() => { if (live) caseClock = null; });
+    return () => { live = false; };
   });
 
   /**
@@ -1165,11 +1228,14 @@
     expandedTracks = { ...expandedTracks, [id]: expanded };
   }
 
+  /** What a file lane holds, said where it is added. */
+  const FILE_LANE_NOTES = { sources: 'your files, where dated', imagery: 'satellite · Compare · Detect' };
+
   function addPreset(preset) {
     const duplicate = copyTimelineTrack(preset, trackSpecs);
     const used = trackSpecs.some((track) => track.label.toLocaleLowerCase() === preset.label.toLocaleLowerCase());
     trackSpecs = [...trackSpecs, { ...duplicate, label: used ? duplicate.label : preset.label }];
-    trackMenu = false;
+    moreMenu = false;
   }
 
   function saveTrack(track) {
@@ -1259,7 +1325,9 @@
    * *while* reading one entry — a "compare" button would be a state to enter, leave
    * and forget you were in. Ctrl-clicking the held entry again lets it go.
    */
-  function selectItem(item, trackId = null, event = null) {
+  function selectItem(picked, trackId = null, event = null) {
+    // A file on the Media lane is its event: the panel reads the event, the file on top.
+    const item = picked?.asFile ? pageItems.find((row) => row.id === picked.id) ?? picked : picked;
     if ((event?.ctrlKey || event?.metaKey) && selected && selected.id !== item.id) {
       against = against?.id === item.id ? null : item;
       return;
@@ -1343,7 +1411,7 @@
   function drawStart(event, trackId) {
     const track = trackSpecs.find((entry) => entry.id === trackId);
     if (
-      snapshotReading || !track?.categories.includes('statement') ||
+      snapshotReading || !track?.categories.includes('statement') || drawsFiles(track) ||
       event.button !== 0 || event.target.closest('button')
     ) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1502,7 +1570,7 @@
     } else {
       const value = edit.item.raw.includes('T')
         ? timeAtRatio(from, to, ratio)
-        : dateAtRatio(from, to, ratio);
+        : dateAtRatio(from, to, ratio, edit.item.tz);
       raw = resizeTemporalRaw(edit.item, edit.mode, value);
     }
     if (raw && raw !== edit.item.raw) pendingEdit = { item: edit.item, raw };
@@ -1572,6 +1640,9 @@
     }
   }
 
+  /** What the picked entry is, in the words the tracks use. */
+  const HEADINGS = { statement: 'Event', media: 'File date', case_activity: 'Case activity' };
+
   function categoryName(item) {
     return TIMELINE_CATEGORIES.find((entry) => entry.id === item.category)?.label ?? item.category;
   }
@@ -1583,13 +1654,15 @@
   }
 
   function showItemTooltip(event, item) {
-    const reading = formatTemporalValue(item.raw ?? '');
+    const reading = formatTemporalValue(item.raw ?? '', item.tz);
     tooltip = {
       x: Math.min(window.innerWidth - 286, event.clientX + 12),
       y: Math.min(window.innerHeight - 132, event.clientY + 12),
       title: item.label,
       date: reading.label,
-      detail: [categoryName(item), item.time_role, item.confidence].filter(Boolean).join(' · '),
+      // a file on the Media lane says which event dated it
+      detail: item.asFile ? item.statement : [categoryName(item), item.time_role, item.confidence].filter(Boolean).join(' · '),
+      sentence: item.asFile === true,
     };
   }
 
@@ -1622,7 +1695,7 @@
       top: ruler.bottom - card.top + down,
       height: Math.max(0, mark.top + mark.height / 2 - ruler.bottom),
       at: Math.min(Math.max(middle, ruler.left + 90), ruler.right - 90) - card.left + across,
-      label: formatTemporalValue(item.raw ?? '').label,
+      label: formatTemporalValue(item.raw ?? '', item.tz).label,
     };
   }
 
@@ -1702,7 +1775,7 @@
     splitting = {
       pointer: event.pointerId,
       top: axisCardElement?.getBoundingClientRect().top ?? 0,
-      room: Math.max(1, chronologyHeight - overviewHeight - 70),
+      room: Math.max(1, chronologyHeight - overviewRoom - 70),
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }
@@ -1817,29 +1890,39 @@
 <svelte:window
   onpointermove={pointerMove}
   onpointerup={pointerUp}
-  onkeydown={(event) => { if (event.key === 'Escape' && itemMenu) itemMenu = null; }}
+  onkeydown={(event) => {
+    if (event.key !== 'Escape') return;
+    if (itemMenu) itemMenu = null;
+    else if (moreMenu) moreMenu = false;
+    else if (rangeMenu) rangeMenu = false;
+  }}
 />
 
 <div class="timeline-tool" class:fullscreen bind:this={toolElement}>
-  <header class="timeline-head">
-    <!-- Titled the way every other tool is (`app.css .tool-header`): the name, then
-         one clause saying what is on screen. It used to carry a second title over the
-         first in accent capitals, which said the same word twice. -->
-    <div class="title-block">
-      <h2>Timeline</h2>
-      <span class="sub">{total} {total === 1 ? 'entry' : 'entries'} across tracks</span>
-    </div>
+  <!-- One bar: the period, the clock it is read on, and which half gets the room. The
+       rest (tracks, grouping, the period handed to another tool, the legend, full
+       screen) is asked for rarely and waits under `⋯`. There used to be three rows of
+       controls, a title repeating the tab, and a line of mouse hints, and the first
+       entry started halfway down the screen. Adding is the line under the axis, which
+       the topbar's Add event also goes to, so the bar has no Add of its own. -->
+  <header class="timeline-bar">
+    {#if entityFilter}
+      <button class="scope-chip" disabled={snapshotReading} title="Clear entity filter" onclick={() => { entityFilter = null; from = ''; to = ''; }}>
+        <Icon name="crosshair" size={11} /><span>{entityFilter.label}</span><Icon name="x" size={10} />
+      </button>
+    {/if}
 
-    <!-- The window, read rather than spelled out in controls. Two date boxes, four
-         icons and an All button were seven things on the toolbar for one fact; the
-         boundaries are typed rarely and checked constantly, so the reading is what
-         stays out and the rest opens under it. Panning keeps its arrows because
-         stepping through a chronology is the frequent move. -->
+    <!-- The window, read rather than spelled out in controls. The boundaries are typed
+         rarely and checked constantly, so the reading is what stays out and the rest
+         opens under it. Panning keeps its arrows: stepping through a chronology is the
+         frequent move. -->
     <div class="range" bind:this={rangeElement}>
       <button class="range-step" title="Earlier" aria-label="Earlier" onclick={() => pan(-.7)} disabled={!axisWindow}>
         <Icon name="chevronLeft" size={15} />
       </button>
-      <button class="range-face" aria-expanded={rangeMenu} onclick={() => (rangeMenu = !rangeMenu)}>
+      <!-- The exact boundaries on hover: the corner of the ruler spelled them in ISO
+           beside the words already here. -->
+      <button class="range-face" aria-expanded={rangeMenu} title={`${windowInputValue(from, zone).replace('T', ' ')} to ${windowInputValue(to, zone).replace('T', ' ')} · Scroll to zoom, Shift-scroll to pan`} onclick={() => (rangeMenu = !rangeMenu)}>
         {windowWords(from, to, zone)}
       </button>
       <button class="range-step" title="Later" aria-label="Later" onclick={() => pan(.7)} disabled={!axisWindow}>
@@ -1865,7 +1948,27 @@
       {/if}
     </div>
 
-    <div class="head-actions">
+    <!-- Which clock the axis is read on. Presentation only: the case stores UTC, the
+         queries ask in UTC, and this moves the ticks and their words. It opens on the
+         zone of the case's places. A saved point also brings its daylight with it,
+         since a band of day and night needs coordinates. -->
+    <ZonePicker
+      bind:choice={zoneChoice}
+      {places}
+      home={caseClock}
+      at={axisWindow?.start ?? 0}
+      resolved={zone}
+      disabled={snapshotReading}
+      onpick={(value) => rememberClock(caseState.current?.id, value)}
+    />
+
+    <div class="view-switch" aria-label="Timeline display">
+      <button class:active={viewMode === 'plot'} aria-pressed={viewMode === 'plot'} title="Give the axis more room" onclick={() => setViewMode('plot')}>Plot</button>
+      <button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} title="Give the list more room" onclick={() => setViewMode('list')}>List</button>
+    </div>
+    {#if snapshotReading}<em class="frozen">Frozen view</em>{/if}
+
+    <div class="bar-end">
       <AnalysisViews
         surface="timeline"
         capture={captureAnalysisView}
@@ -1873,95 +1976,65 @@
         onleave={leaveAnalysisReading}
       />
       <PlateExport surface="timeline" plate={capturePlate} disabled={!caseState.current} />
-      <button class="btn btn-ghost fullscreen-btn" aria-pressed={fullscreen} onclick={toggleFullscreen}>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>
-      <button class="btn btn-primary add-event" disabled={snapshotReading || !caseState.current} title="Write it on the line under the axis" onclick={focusLine}><Icon name="plus" size={13} />Add</button>
+      {#if fullscreen}<button class="btn btn-sm" onclick={toggleFullscreen}>Exit full screen</button>{/if}
+      <div class="more" bind:this={moreElement}>
+        <button class="btn btn-sm more-btn" aria-expanded={moreMenu} aria-label="More" title="Tracks, grouping, legend, full screen" onclick={() => (moreMenu = !moreMenu)}>
+          <Icon name="more" size={15} stroke={2.6} />
+        </button>
+        {#if moreMenu}
+          <div class="more-menu">
+            <section aria-label="Add a track">
+              <strong>Add a track</strong>
+              {#each trackPresets(entityTypes()) as preset (preset.id)}
+                <button disabled={snapshotReading || trackSpecs.length >= 20} onclick={() => addPreset(preset)}><span>{preset.label}</span><small>{FILE_LANE_NOTES[preset.query.as_files] ?? preset.categories.map((category) => category === 'case_activity' ? 'activity' : category).join(' · ')}</small></button>
+              {/each}
+              <button class="custom" disabled={snapshotReading || trackSpecs.length >= 20} onclick={() => { trackEditor = { mode: 'new' }; moreMenu = false; }}>
+                <span>Custom</span><small>Build with Search+</small>
+              </button>
+            </section>
+            <label class="more-row">Group by
+              <select class="input input-sm" bind:value={groupBy} disabled={snapshotReading}>
+                <option value="none">None</option>
+                <option value="subject">Subject</option>
+                <option value="type">Type</option>
+                <option value="place">Place</option>
+                <option value="source">Evidence</option>
+                <option value="role">Time role</option>
+              </select>
+            </label>
+            <!-- The same period asked of another tool. -->
+            <div class="more-row range-handoffs" role="group" aria-label="Open range">
+              <span>Open this period in</span>
+              <div>
+                <button onclick={() => { moreMenu = false; openRangeIn('board'); }} disabled={!axisWindow}>Board</button>
+                <button onclick={() => { moreMenu = false; openRangeIn('graph'); }} disabled={!axisWindow}>Graph</button>
+                <button onclick={() => { moreMenu = false; openRangeIn('satellite'); }} disabled={!axisWindow}>Map</button>
+              </div>
+            </div>
+            <details class="legend">
+              <summary>Legend</summary>
+              <div class="legend-card">
+                <strong>Shape</strong>
+                <span><i class="sample shape-point"></i>Instant</span>
+                <span><i class="sample shape-bracket"></i>Reduced date, across what it covers</span>
+                <span><i class="sample shape-bar"></i>Period</span>
+                <strong>Date quality</strong>
+                <span><i class="sample approximate"></i>Approximate date</span>
+                <span><i class="sample uncertain"></i>Uncertain date</span>
+                <strong>Status</strong>
+                <span><i class="sample suggested"></i>Suggested status</span>
+                <span><i class="sample refuted"></i>Refuted confidence</span>
+                <p>Confidence and date quality are independent.</p>
+              </div>
+            </details>
+            {#if !fullscreen}<button class="more-act" onclick={() => { moreMenu = false; void toggleFullscreen(); }}>Full screen</button>{/if}
+          </div>
+        {/if}
+      </div>
     </div>
   </header>
 
-  <div class="filter-row">
-    {#if entityFilter}
-      <button class="scope-chip" disabled={snapshotReading} title="Clear entity filter" onclick={() => { entityFilter = null; from = ''; to = ''; }}>
-        <Icon name="crosshair" size={11} /><span>{entityFilter.label}</span><Icon name="x" size={10} />
-      </button>
-    {/if}
-    <div class="view-switch" aria-label="Timeline display">
-      <button class:active={viewMode === 'plot'} aria-pressed={viewMode === 'plot'} title="Give the axis more room" onclick={() => setViewMode('plot')}>Plot</button>
-      <button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} title="Give the list more room" onclick={() => setViewMode('list')}>List</button>
-    </div>
-    <!-- Which clock the axis is read on. Presentation only: the case stores UTC, the
-         queries ask in UTC, and this moves the ticks and their words. A saved point
-         also brings its daylight with it, since a band of day and night needs
-         coordinates and there is no sense in asking for them twice. -->
-    <ZonePicker
-      bind:choice={zoneChoice}
-      {places}
-      at={axisWindow?.start ?? 0}
-      resolved={zone}
-      disabled={snapshotReading}
-    />
-    <details class="legend" bind:this={legendElement} bind:open={legendOpen}>
-      <summary>Legend</summary>
-      <div class="legend-card">
-        <strong>Shape</strong>
-        <span><i class="sample shape-point"></i>Instant</span>
-        <span><i class="sample shape-bracket"></i>Reduced date, across what it covers</span>
-        <span><i class="sample shape-bar"></i>Period</span>
-        <strong>Date quality</strong>
-        <span><i class="sample approximate"></i>Approximate date</span>
-        <span><i class="sample uncertain"></i>Uncertain date</span>
-        <strong>Status</strong>
-        <span><i class="sample suggested"></i>Suggested status</span>
-        <span><i class="sample refuted"></i>Refuted confidence</span>
-        <p>Confidence and date quality are independent.</p>
-      </div>
-    </details>
-    <span class="utc-readout">{scaleLabel} · Wheel zoom · Shift-wheel pan</span>
-  </div>
-
-  <div class="track-toolbar">
-    <div class="track-add" bind:this={trackMenuElement}>
-      <button class="btn btn-sm" aria-expanded={trackMenu} disabled={snapshotReading || trackSpecs.length >= 20} onclick={() => (trackMenu = !trackMenu)}>
-        <Icon name="plus" size={12} /> Track
-      </button>
-      {#if trackMenu}
-        <div class="track-menu">
-          <strong>Add a track</strong>
-          {#each trackPresets(entityTypes()) as preset (preset.id)}
-            <button onclick={() => addPreset(preset)}><span>{preset.label}</span><small>{preset.categories.map((category) => category === 'case_activity' ? 'activity' : category).join(' · ')}</small></button>
-          {/each}
-          <button class="custom" onclick={() => { trackEditor = { mode: 'new' }; trackMenu = false; }}>
-            <span>Custom</span><small>Build with Search+</small>
-          </button>
-        </div>
-      {/if}
-    </div>
-    <label>Group by
-      <select class="input input-sm" bind:value={groupBy} disabled={snapshotReading}>
-        <option value="none">None</option>
-        <option value="subject">Subject</option>
-        <option value="type">Type</option>
-        <option value="place">Place</option>
-        <option value="source">Evidence</option>
-        <option value="role">Time role</option>
-      </select>
-    </label>
-    <span>{trackSpecs.length} {trackSpecs.length === 1 ? 'track' : 'tracks'}</span>
-    {#if snapshotReading}<em>Frozen view</em>{/if}
-
-    <!-- Asking the same period of the other three surfaces is the point of having a
-         period, so the handoff stays in the open rather than under the window's
-         boundaries: the window is set rarely and handed over often. It ends the track
-         row instead of trailing the window, which left six controls fighting for the
-         middle of the header for one fact. -->
-    <div class="range-handoffs" role="group" aria-label="Open range">
-      <span>Open in</span>
-      <button onclick={() => openRangeIn('board')} disabled={!axisWindow}>Board</button>
-      <button onclick={() => openRangeIn('graph')} disabled={!axisWindow}>Graph</button>
-      <button onclick={() => openRangeIn('satellite')} disabled={!axisWindow}>Map</button>
-    </div>
-  </div>
-
-  <div class="timeline-grid">
+  <div class="timeline-grid" class:inspecting={Boolean(selected)}>
     <main class="chronology" class:blank={!caseState.current || (!extent?.from && !loading)} bind:clientHeight={chronologyHeight}>
       <!-- The entry line, under the axis. None in a snapshot, which takes no writes. -->
       {#snippet line()}
@@ -2020,84 +2093,22 @@
       {:else if !extent?.from && !loading}
         <div class="blank-state">
           <Icon name="clock" size={24} />
-          <h2>No dates stated yet</h2>
+          <h2>Nothing dated yet</h2>
+          <p>Date what happened on the line below, or give a proof its date.</p>
           {#if fileDates}
-            <p>{fileDates} {fileDates === 1 ? 'date' : 'dates'} read from {workingFilesHeld ? 'working files' : 'files'} · <button class="text-button" onclick={showFileDates}>Show them</button></p>
-          {:else}
-            <p>Note what happened on the line below, or from an entity's Time tab.</p>
+            <p class="blank-files">{fileDates} {fileDates === 1 ? 'date' : 'dates'} read from {workingFilesHeld ? 'working files' : 'files'} · <button class="text-button" onclick={showFileDates}>Show them</button></p>
           {/if}
           <div class="blank-line">{@render line()}</div>
         </div>
         {@render holdings()}
       {:else}
-        <section class="overview-card" aria-label="Timeline overview" bind:clientHeight={overviewHeight}>
-          <div class="overview-title">
-            <span>Overview</span>
-            <!-- The extent in words rather than the first and last bucket keys, which
-                 read as `2026-08-02T03` the moment the case is cut by the hour. -->
-            <small>{extent?.from ? windowWords(extent.from, extent.to, 'UTC') : 'No dated entries'}</small>
-            {#if overview.length}<small>{overviewUnit} buckets · exact counts on hover</small>{/if}
-            <div class="overview-counts">
-              {#if unplacedTotal}<span>{unplacedTotal} local</span>{/if}
-              {#if undatedTotal}<span>{undatedTotal} undated</span>{/if}
-            </div>
-            {#if overviewTruncated}<small class="capped">Partial overview</small>{/if}
-          </div>
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-          <div class="density-bars" role="application" tabindex="0" aria-label="Timeline minimap" bind:clientWidth={overviewWidth} onclick={overviewRecenter} onkeydown={navigateKey}>
-            {#each overviewTicks as slot (slot.key)}
-              {#if slot.label && slot.left > 0}
-                <span class="overview-rule" style:left={`${slot.left}%`}></span>
-              {/if}
-            {/each}
-            {#each density as bucket (bucket.start)}
-              <button
-                class="density-bucket"
-                aria-label={`${bucket.start}, ${bucket.count} entries`}
-                style:left={`${bucket.left}%`}
-                style:width={`${bucket.width}%`}
-                onclick={(event) => { event.stopPropagation(); openBucket(bucket); }}
-                onpointerenter={(event) => showBucketTooltip(event, bucket)}
-                onpointermove={(event) => showBucketTooltip(event, bucket)}
-                onpointerleave={() => (tooltip = null)}
-              >
-                <span class="density-stack" style:height={`${bucket.height}%`}>
-                  {#each TIMELINE_CATEGORIES as category (category.id)}
-                    {#if bucket.categories?.[category.id]}
-                      <i class={category.id} style:flex-grow={bucket.categories[category.id]}></i>
-                    {/if}
-                  {/each}
-                </span>
-              </button>
-            {/each}
-            <span class="density-baseline"></span>
-            {#each overviewTicks as slot (slot.key)}
-              {#if slot.label}
-                <span
-                  class="overview-tick {slot.anchor}"
-                  style:left={`${slot.left}%`}
-                  style:width={`${slot.width}%`}
-                >{slot.label}</span>
-              {/if}
-            {/each}
-            <!-- What the axis is not showing, dimmed: the brush says where the window
-                 is, and these say what it left out. -->
-            <span class="overview-shade" style:left="0" style:width={`${overviewWindow.left}%`}></span>
-            <span class="overview-shade" style:left={`${overviewWindow.left + overviewWindow.width}%`} style:right="0"></span>
-            <div class="overview-window" style:left={`${overviewWindow.left}%`} style:width={`${overviewWindow.width}%`}>
-              <button class="overview-drag" aria-label="Move visible range" title="Move visible range" onpointerdown={(event) => beginOverview(event, 'move')} onkeydown={(event) => overviewKey(event, 'move')}></button>
-              <button class="overview-handle start" aria-label="Change range start" title="Change range start" onpointerdown={(event) => beginOverview(event, 'start')} onkeydown={(event) => overviewKey(event, 'start')}></button>
-              <button class="overview-handle end" aria-label="Change range end" title="Change range end" onpointerdown={(event) => beginOverview(event, 'end')} onkeydown={(event) => overviewKey(event, 'end')}></button>
-            </div>
-          </div>
-        </section>
-
           <section class="axis-card" aria-label="Timeline axis" bind:this={axisCardElement} style:max-height={`${axisMax}px`}>
             <div class="axis-row">
+              <!-- Which clock the ruler is in, in words. The window's two boundaries in
+                   ISO sat here too, a second spelling of what the bar already says. -->
               <div class="axis-label">
                 <span>{zoneWord}</span>
-                <small>{windowInputValue(from, zone).replace('T', ' ')} to {windowInputValue(to, zone).replace('T', ' ')}</small>
+                {#if zone !== UTC}<small>{zoneWords(zone).place} time</small>{/if}
               </div>
               <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -2113,13 +2124,13 @@
                 onkeydown={navigateKey}
               >
                 <div class="axis-bands">
-                  {#each bands as band (band.label + band.left)}
+                  {#each bandNames as band (band.left)}
                     <span style:left={`${band.left}%`} style:width={`${band.width}%`}>{band.label}</span>
                   {/each}
                 </div>
                 {#each minorTicks as tick (tick.at)}<span class="axis-minor" style:left={`${tick.left}%`}></span>{/each}
-                {#each ticks as tick (tick.at)}
-                  <div class="axis-tick" class:end={tick.left > 94} style:left={`${tick.left}%`}><span>{tick.label}</span></div>
+                {#each tickNames as tick (tick.at)}
+                  <div class="axis-tick" class:end={tick.left > 94} style:left={`${tick.left}%`}>{#if tick.label}<span>{tick.label}</span>{/if}</div>
                 {/each}
                 {#if nowLeft !== null}<span class="now-line" style:left={`${nowLeft}%`}><small>Now</small></span>{/if}
                 <!-- Day and night at the chosen point, on the same scale as the
@@ -2156,7 +2167,10 @@
             <div class="axis-tracks" role="list">
             {#each tracks as track (track.id)}
               {@const baseId = track.parentId ?? track.id}
-              {@const canCreate = track.categories.includes('statement') && !snapshotReading}
+              <!-- A file lane holds events tied to a file, so a click on it has no file
+                   to tie a new one to: a file is dated from its proof or an event about it. -->
+              {@const canCreate = track.categories.includes('statement') && !drawsFiles(track) && !snapshotReading}
+              {@const shown = track.layout.items.length + track.layout.clusters.reduce((sum, cluster) => sum + cluster.count, 0)}
               <div
                 class="track-row"
                 class:folded={track.collapsed}
@@ -2186,11 +2200,13 @@
                   <button class="fold-track" aria-label={`${track.collapsed ? 'Expand' : 'Fold'} ${track.label}`} title={`${track.collapsed ? 'Expand' : 'Fold'} ${track.label}`} disabled={snapshotReading} onclick={() => setTrackCollapsed(baseId, !track.collapsed)}>
                     <Icon name={track.collapsed ? 'chevronRight' : 'chevronDown'} size={11} />
                   </button>
-                  <span class={`category-dot ${track.categories[0]}`}></span>
+                  <span class={`category-dot ${drawsFiles(track) ? 'media' : track.categories[0]}`}></span>
                   <!-- The hover says what the lane below is a reading of: the whole
                        name, then the question that filled it. -->
                   <span class="track-name" title={trackTitle(track)}><strong dir="auto">{track.label}</strong>{#if track.groupLabel}<em>{track.groupLabel}</em>{/if}</span>
-                  <small title={track.total !== track.items.length ? 'A sample across the window. Load more fills it in.' : undefined}>{track.layout.items.length + track.layout.clusters.reduce((sum, cluster) => sum + cluster.count, 0)}{#if track.total !== track.items.length} / {track.total}{/if}</small>
+                  <!-- A count only when there is one: a `0` badge on an empty lane said
+                       what the empty lane already shows. -->
+                  {#if shown || track.total}<small title={track.total !== track.items.length ? 'A sample across the window. Load more fills it in.' : undefined}>{shown}{#if track.total !== track.items.length} / {track.total}{/if}</small>{/if}
                   {#if groupBy === 'none' && !snapshotReading}
                     <div class="track-actions">
                       <button aria-label={`Edit ${track.label}`} title="Edit track" onclick={() => (trackEditor = { mode: 'edit', track })}><Icon name="edit" size={11} /></button>
@@ -2234,6 +2250,7 @@
                          card are the mark's own button, so reading one is clicking it. -->
                     <div
                       class={`timeline-event ${item.category} ${item.mark}`}
+                      class:as-file={item.asFile}
                       class:chosen={selected?.id === item.id}
                       class:against={against?.id === item.id}
                       class:period={item.shape === 'interval'}
@@ -2257,7 +2274,7 @@
                       <button
                         class="event-select"
                         data-mark={item.id}
-                        aria-label={`${item.label}, ${formatTemporalValue(item.raw).label}`}
+                        aria-label={`${item.label}, ${formatTemporalValue(item.raw, item.tz).label}`}
                         onpointerdown={(event) => {
                           // Ctrl is the measure gesture, so it must not also start a drag
                           if (event.ctrlKey || event.metaKey) return;
@@ -2285,12 +2302,12 @@
                           {@const drop = cardTop(track.layout, item.card.row) - markTop}
                           <span class="card-stem" style:left={`${item.card.stem}px`} style:height={`${drop - MARKS.row / 2}px`} aria-hidden="true"></span>
                           <span class="event-card" style:left={`${item.card.offset}px`} style:top={`${drop}px`} style:width={`${item.card.width}px`}>
-                            {#if item.category === 'media' && item.thumb && caseState.current?.id}
+                            {#if (item.category === 'media' || item.asFile) && item.thumb && caseState.current?.id}
                               <img src={fileUrl(caseState.current.id, item.thumb)} alt="" loading="lazy" decoding="async" />
                             {/if}
                             <span class="card-copy">
                               <strong dir="auto">{item.label}</strong>
-                              <small>{formatTemporalValue(item.raw).label}</small>
+                              <small>{formatTemporalValue(item.raw, item.tz).label}</small>
                             </span>
                           </span>
                         {/if}
@@ -2313,7 +2330,7 @@
                     >+{cluster.count}</button>
                   {/each}
                   {#if canCreate}<span class="track-hint">Click or drag to date a new entry</span>{/if}
-                  {#if !track.layout.items.length && !track.layout.clusters.length && !canCreate}<span class="track-empty">No entries in this window</span>{/if}
+                  {#if !track.layout.items.length && !track.layout.clusters.length && !canCreate}<span class="track-empty">{drawsFiles(track) ? 'No file dated in this window. A proof’s date or an event about a file puts it here.' : 'No entries in this window'}</span>{/if}
                   {:else}<span class="folded-note">Track folded</span>{/if}
                 </div>
               </div>
@@ -2328,6 +2345,70 @@
               </div>
             {/if}
           </section>
+
+          {#if overviewShown}
+          <section class="overview-card" aria-label="Timeline overview" bind:clientHeight={overviewHeight}>
+            <div class="overview-title">
+              <span>Whole case</span>
+              <!-- The extent in words rather than the first and last bucket keys, which
+                   read as `2026-08-02T03` the moment the case is cut by the hour. -->
+              <small>{extent?.from ? windowWords(extent.from, extent.to, 'UTC') : 'No dated entries'}</small>
+              <div class="overview-counts">
+                {#if unplacedTotal}<span>{unplacedTotal} local</span>{/if}
+                {#if undatedTotal}<span>{undatedTotal} undated</span>{/if}
+              </div>
+              {#if overviewTruncated}<small class="capped">Partial overview</small>{/if}
+            </div>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div class="density-bars" role="application" tabindex="0" aria-label="Timeline minimap" bind:clientWidth={overviewWidth} onclick={overviewRecenter} onkeydown={navigateKey}>
+              {#each overviewTicks as slot (slot.key)}
+                {#if slot.label && slot.left > 0}
+                  <span class="overview-rule" style:left={`${slot.left}%`}></span>
+                {/if}
+              {/each}
+              {#each density as bucket (bucket.start)}
+                <button
+                  class="density-bucket"
+                  aria-label={`${bucket.start}, ${bucket.count} entries`}
+                  style:left={`${bucket.left}%`}
+                  style:width={`${bucket.width}%`}
+                  onclick={(event) => { event.stopPropagation(); openBucket(bucket); }}
+                  onpointerenter={(event) => showBucketTooltip(event, bucket)}
+                  onpointermove={(event) => showBucketTooltip(event, bucket)}
+                  onpointerleave={() => (tooltip = null)}
+                >
+                  <span class="density-stack" style:height={`${bucket.height}%`}>
+                    {#each TIMELINE_CATEGORIES as category (category.id)}
+                      {#if bucket.categories?.[category.id]}
+                        <i class={category.id} style:flex-grow={bucket.categories[category.id]}></i>
+                      {/if}
+                    {/each}
+                  </span>
+                </button>
+              {/each}
+              <span class="density-baseline"></span>
+              {#each overviewNames as slot (slot.key)}
+                {#if slot.label}
+                  <span
+                    class="overview-tick {slot.anchor}"
+                    style:left={`${slot.left}%`}
+                    style:width={`${slot.width}%`}
+                  >{slot.label}</span>
+                {/if}
+              {/each}
+              <!-- What the axis is not showing, dimmed: the brush says where the window
+                   is, and these say what it left out. -->
+              <span class="overview-shade" style:left="0" style:width={`${overviewWindow.left}%`}></span>
+              <span class="overview-shade" style:left={`${overviewWindow.left + overviewWindow.width}%`} style:right="0"></span>
+              <div class="overview-window" style:left={`${overviewWindow.left}%`} style:width={`${overviewWindow.width}%`}>
+                <button class="overview-drag" aria-label="Move visible range" title="Move visible range" onpointerdown={(event) => beginOverview(event, 'move')} onkeydown={(event) => overviewKey(event, 'move')}></button>
+                <button class="overview-handle start" aria-label="Change range start" title="Change range start" onpointerdown={(event) => beginOverview(event, 'start')} onkeydown={(event) => overviewKey(event, 'start')}></button>
+                <button class="overview-handle end" aria-label="Change range end" title="Change range end" onpointerdown={(event) => beginOverview(event, 'end')} onkeydown={(event) => overviewKey(event, 'end')}></button>
+              </div>
+            </div>
+          </section>
+          {/if}
 
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -2368,18 +2449,18 @@
                 </div>
               </header>
               {#if windowItems.length}
-                <div class="list-grid" role="grid" aria-label="Chronology" aria-rowcount={windowItems.length + 1}>
+                <div class="list-grid" role="grid" aria-label="Chronology" aria-rowcount={windowItems.length + 1} style:--list-columns={listTemplate}>
                   <div class="list-row headings" role="row">
-                    <span role="columnheader">Date</span>
+                    <span role="columnheader">{zone === UTC ? 'Date' : `Date · ${zoneWords(zone).place} time`}</span>
                     <span role="columnheader">Statement</span>
-                    <span role="columnheader">Subjects</span>
-                    <span role="columnheader">Places</span>
-                    <span role="columnheader">Sources</span>
+                    {#if listColumns.subjects}<span role="columnheader">Subjects</span>{/if}
+                    {#if listColumns.places}<span role="columnheader">Places</span>{/if}
+                    {#if listColumns.sources}<span role="columnheader">Sources</span>{/if}
                     <span role="columnheader"><span class="sr-only">Waiting for</span></span>
                   </div>
                   {#each listGroups as group (group.key)}
                     <div class="list-row month" role="row">
-                      <span role="gridcell" aria-colspan="6">{group.label}<small>{group.items.length}</small></span>
+                      <span role="gridcell" aria-colspan={3 + Object.values(listColumns).filter(Boolean).length}>{group.label}<small>{group.items.length}</small></span>
                     </div>
                     {#each group.items as item (item.id)}
                       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -2400,11 +2481,13 @@
                         onfocus={() => hoverRow(item)}
                         onblur={() => leaveRow(item)}
                       >
-                        <span role="gridcell" class="list-date" title={item.raw}>{formatTemporalValue(item.raw).label}</span>
+                        <!-- An instant on the axis's clock, so the list and the ruler agree
+                             about the hour; a day as it was stated, in its own zone. -->
+                        <span role="gridcell" class="list-date" title={`${formatTemporalValue(item.raw, item.tz).label} · ${item.raw}`}>{instantOnClock(item) ? clockReading(item.earliest, zone, { named: false }) : formatTemporalValue(item.raw, item.tz).label}</span>
                         <span role="gridcell" class="list-copy"><span class={`category-dot ${item.category}`}></span><strong dir="auto">{item.label}</strong></span>
-                        <span role="gridcell" class="list-links" dir="auto">{names(item.subject_entities)}</span>
-                        <span role="gridcell" class="list-links" dir="auto">{names(item.place_entities)}</span>
-                        <span role="gridcell" class="list-links" dir="auto">{names(item.source_entities)}</span>
+                        {#if listColumns.subjects}<span role="gridcell" class="list-links" dir="auto">{names(item.subject_entities)}</span>{/if}
+                        {#if listColumns.places}<span role="gridcell" class="list-links" dir="auto">{names(item.place_entities)}</span>{/if}
+                        {#if listColumns.sources}<span role="gridcell" class="list-links" dir="auto">{names(item.source_entities)}</span>{/if}
                         <span role="gridcell" class="list-flags">
                           {#each rowFlags(item) as flag (flag.id)}<em class={flag.id}>{flag.label}</em>{/each}
                         </span>
@@ -2429,9 +2512,11 @@
       {#if loading}<div class="loading-line"></div>{/if}
     </main>
 
-    <aside class="inspector" class:empty={!selected}>
-      {#if selected}
-        <header><span class={`category-dot ${selected.category}`}></span><span>{categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
+    <!-- Only while an entry is picked: with nothing to say, it held a third of the width
+         for one line asking for a pick. -->
+    {#if selected}
+    <aside class="inspector">
+        <header><span class={`category-dot ${selected.category}`}></span><span>{HEADINGS[selected.category] ?? categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
         <div class="inspector-body">
           {#if previewEntity || previewThumb}
             <MediaPreview
@@ -2446,24 +2531,31 @@
               </button>
             {/if}
           {/if}
-          <div class="item-kind">{temporalKindLabel(selected.kind)}{#if selected.time_role} · {selected.time_role}{/if}</div>
+          <!-- What kind of date, when the heading has not said it: `Claim` under `Event`
+               said the same thing twice. -->
+          {#if selected.kind !== 'claim' || selected.time_role}
+            <div class="item-kind">{[selected.kind !== 'claim' ? temporalKindLabel(selected.kind) : '', selected.time_role].filter(Boolean).join(' · ')}</div>
+          {/if}
           <h2 dir="auto">{selected.label}</h2>
           {#if inspectorLoading}<div class="inspector-loading">Loading details…</div>{/if}
+          <!-- The date on the clock the axis is read on, first: a camera's 17:07 UTC in
+               Sanaa is read as 20:07 there. The value as it was stated follows it. Only
+               for a value that names an instant: a date has no time of day, and printing
+               00:00 in another zone would invent an hour the source never gave. -->
           <div class="date-reading">
             <Icon name="clock" size={15} />
             <div>
-              <strong>{selectedReading.label}</strong>{#if selected.raw}<code>{selected.raw}</code>{/if}<small>{selected.precision || 'No global position'}{#if selected.zone} · {selected.zone}{/if}</small>
-              <!-- The same instant on the clock the axis is being read on. Only for a
-                   value that names one: a date has no time of day, and printing 00:00
-                   in another zone would invent an hour the source never gave. -->
-              {#if zone !== UTC && selected.earliest && ['second', 'subsecond'].includes(selected.precision)}
-                <small class="in-zone">{zonedStamp(selected.earliest, zone)} {zoneWord}</small>
+              {#if onClock}
+                <strong>{clockReading(selected.earliest, zone)}</strong>
+                <small class="as-stated">{selectedReading.label}</small>
+              {:else}
+                <strong>{selectedReading.label}</strong>
               {/if}
             </div>
           </div>
           <!-- The date is changed where it is read. Dragging the mark and the full editor
                still do it; a picked entry just no longer hides how. A file's own date is
-               never rewritten: it is corrected by a sourced event, as Add correction does. -->
+               never rewritten: it is corrected by a sourced event beside it. -->
           {#if selected.kind === 'claim' && !snapshotReading}
             {#if dateEditing?.id === selected.id}
               <form class="date-edit" onsubmit={(event) => { event.preventDefault(); saveDateEdit(); }}>
@@ -2511,8 +2603,6 @@
               <small>{pairReading.detail}</small>
               {#each pairReading.notes as note (note)}<small class="caveat">{note}</small>{/each}
             </section>
-          {:else}
-            <p class="measure-hint">Ctrl-click a second entry to measure between them.</p>
           {/if}
           <div class="badges">
             {#if selected.approximate}<span>Date: approximate</span>{/if}
@@ -2522,15 +2612,6 @@
           </div>
           {#if selected.parse_error}<p class="warning">{selected.parse_error}</p>{/if}
           {#if selected.raw && !selected.earliest && selected.zone === 'local'}<p class="warning">Add a timezone to place this time on the UTC axis.</p>{/if}
-          {#if canDragTemporal(selected) && !snapshotReading}<p class="axis-edit-help">{selected.shape === 'interval' ? 'Drag to move. Use either edge to resize.' : 'Drag the event to move it.'}</p>{/if}
-          <dl class="temporal-facts">
-            <div><dt>Precision</dt><dd>{selected.precision || 'Not set'}</dd></div>
-            <div><dt>Timezone</dt><dd>{selected.zone || 'Not set'}</dd></div>
-            <div><dt>Authority</dt><dd>{selected.authority || selected.category}</dd></div>
-            {#if selected.time_role}<div><dt>Time role</dt><dd>{selected.time_role}</dd></div>{/if}
-            {#if selected.status}<div><dt>Status</dt><dd>{selected.status}</dd></div>{/if}
-            {#if selected.confidence}<div><dt>Confidence</dt><dd>{selected.confidence}</dd></div>{/if}
-          </dl>
 
           {#if inspectorChain?.entity?.attrs?.method}
             <section class="inspector-note"><h3>Method</h3><p dir="auto">{inspectorChain.entity.attrs.method}</p></section>
@@ -2555,6 +2636,29 @@
               {/if}
             </section>
           {/if}
+
+          <!-- How the date is held, for whoever needs to check it: the stored value, its
+               precision and zone, who states it. Folded, since reading a chronology
+               rarely needs it and it was most of the panel. -->
+          <details class="date-more">
+            <summary>About this date</summary>
+            <div class="date-reading plain">
+              <div>
+                {#if selected.raw}<code>{selected.raw}</code>{/if}<small>{selected.precision || 'No global position'}{#if selected.tz || selected.zone} · {selected.tz || selected.zone}{/if}</small>
+              </div>
+            </div>
+            <dl class="temporal-facts">
+              <div><dt>Precision</dt><dd>{selected.precision || 'Not set'}</dd></div>
+              <div><dt>Timezone</dt><dd>{temporalZoneWords(selected)}</dd></div>
+              <div><dt>Authority</dt><dd>{selected.authority || selected.category}</dd></div>
+              {#if selected.time_role}<div><dt>Time role</dt><dd>{selected.time_role}</dd></div>{/if}
+              {#if selected.status}<div><dt>Status</dt><dd>{selected.status}</dd></div>{/if}
+              {#if selected.confidence}<div><dt>Confidence</dt><dd>{selected.confidence}</dd></div>{/if}
+            </dl>
+            {#if canDragTemporal(selected) && !snapshotReading}<p class="axis-edit-help">{selected.shape === 'interval' ? 'Drag it on the axis to move it, or either edge to resize.' : 'Drag it on the axis to move it.'}</p>{/if}
+            {#if !pairReading}<p class="measure-hint">Ctrl-click a second entry to measure between them.</p>{/if}
+          </details>
+
           <!-- Both acts are about a lane: pinning keeps an entry out of that lane's
                density overflow, hiding takes it out of that lane. An entry with no
                place on the axis is in neither, so it is offered neither — a control
@@ -2567,17 +2671,14 @@
             </section>
           {/if}
         </div>
+        <!-- A file's date is corrected with the button under it; the footer only opens
+             what the entry belongs to, or edits the event whole. -->
         <footer>
           <button class="btn btn-ghost" disabled={snapshotReading} onclick={() => (detailsId = selected.owner_id)}>Details</button>
           {#if selected.category === 'statement'}<button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor(selected)}>Edit claim</button>{/if}
-          {#if selected.category === 'media'}<button class="btn btn-primary" disabled={snapshotReading || !inspectorChain?.entity} onclick={addMediaCorrection}>Add correction</button>{/if}
         </footer>
-      {:else}
-        <!-- The tool's own clock rather than a target: nothing is being aimed at here,
-             and the panel is empty until an entry is chosen. -->
-        <div class="inspector-empty"><Icon name="clock" size={16} /><span>Select an entry</span></div>
-      {/if}
     </aside>
+    {/if}
   </div>
 
   <!-- Inside the tool, not beside it: this screen goes to full screen, and nothing
@@ -2621,7 +2722,7 @@
 
 {#if tooltip}
   <div class="timeline-tooltip" style:left={`${tooltip.x}px`} style:top={`${tooltip.y}px`} role="tooltip">
-    <strong>{tooltip.title}</strong><span>{tooltip.date}</span>{#if tooltip.detail}<small>{tooltip.detail}</small>{/if}
+    <strong>{tooltip.title}</strong><span>{tooltip.date}</span>{#if tooltip.detail}<small class:sentence={tooltip.sentence}>{tooltip.detail}</small>{/if}
   </div>
 {/if}
 
@@ -2680,18 +2781,15 @@
     background: var(--bg-0);
     color: var(--text-1);
   }
-  .timeline-head { display: grid; grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr); align-items: center; gap: 18px; padding: 12px 24px 10px; }
-  /* The house header: name, then one clause. `app.css .tool-header` spells the same
-     two rules, and this screen keeps its own only because the head is a three-column
-     grid with the range controls in the middle. */
-  .title-block { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
-  .title-block h2 { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
-  .title-block .sub { overflow: hidden; color: var(--text-3); font-size: var(--fs-sm); text-overflow: ellipsis; white-space: nowrap; }
-  /* The middle column carries the window and nothing else. One segmented group: step
-     back, the window itself, step on. */
-  .range { position: relative; display: flex; align-items: center; justify-self: center; }
+  /* The one bar: the period, its clock and the split, then Views, Export and `⋯` at the
+     end. One row of controls where there were three. */
+  .timeline-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--border); }
+  .bar-end { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+  .frozen { color: var(--accent); font-size: 10px; font-style: normal; }
+  /* One segmented group: step back, the window itself, step on. */
+  .range { position: relative; display: flex; align-items: center; }
   .range-step, .range-face {
-    height: 30px; border: 1px solid var(--border); background: var(--bg-2);
+    height: 28px; border: 1px solid var(--border); background: var(--bg-2);
     color: var(--text-2); cursor: pointer;
   }
   .range-step { width: 28px; display: grid; place-items: center; padding: 0; }
@@ -2701,10 +2799,9 @@
   .range-step:hover, .range-face:hover, .range-face[aria-expanded='true'] { border-color: var(--border-strong); color: var(--text-1); }
   .range-step:disabled { opacity: .4; cursor: default; }
   .range-menu {
-    position: absolute; z-index: 80; top: calc(100% + 6px); left: 50%; width: 244px;
+    position: absolute; z-index: 80; top: calc(100% + 6px); left: 0; width: 244px;
     display: grid; gap: 9px; padding: 11px; border: 1px solid var(--border-strong);
     border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2);
-    transform: translateX(-50%);
   }
   .range-menu label { display: grid; gap: 4px; color: var(--text-3); font-size: var(--fs-xs); }
   .range-spans { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 9px; border-top: 1px solid var(--border); }
@@ -2712,10 +2809,8 @@
     flex: 1 1 30%; padding: 5px 0; border: 1px solid var(--border); border-radius: var(--r-sm);
     background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); cursor: pointer;
   }
-  /* Ends the track row: the label in the row's own small grey, the three surfaces
-     welded into one segmented control so they read as one choice. */
-  .range-handoffs { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; }
-  .range-handoffs > span { margin-right: 8px; color: var(--text-3); font-size: 10px; }
+  /* The three tools welded into one segmented control, so they read as one choice. */
+  .range-handoffs > div { display: flex; }
   .range-handoffs button {
     height: 24px;
     padding: 0 10px;
@@ -2732,15 +2827,26 @@
   .range-handoffs button:disabled { opacity: .4; cursor: default; }
   .range-spans button:hover { border-color: var(--border-strong); color: var(--text-1); }
   .range-spans button:disabled { opacity: .4; cursor: default; }
-  .head-actions { justify-self: end; display: flex; align-items: center; gap: 5px; }
-  /* One height across the row. Views and Export come from shared components and are
-     `btn-sm`, the tool's own two are not, and four buttons of two heights read as a
-     mistake. Stated from the same tokens a plain `.btn` is built from — its text plus
-     its padding and rule — rather than as a number that would drift from them. */
-  .head-actions :global(.btn) { min-height: calc(var(--fs-sm) * 1.5 + 12px); }
-  .add-event { justify-self: end; }
   .timeline-tool:fullscreen { width: 100vw; height: 100vh; }
-  .filter-row { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 0 24px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent); }
+  /* What `⋯` holds, grouped the way it is asked for: a track to add, how lanes split,
+     the period handed on, what the marks mean, the whole screen. */
+  .more { position: relative; }
+  .more-btn { display: grid; place-items: center; width: 30px; padding: 0; }
+  .more-menu {
+    position: absolute; z-index: 70; top: calc(100% + 5px); right: 0; width: 264px;
+    max-height: min(70vh, 560px); overflow: auto; display: grid; gap: 4px; padding: 7px;
+    border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1);
+    box-shadow: var(--shadow-2);
+  }
+  .more-menu > section { display: grid; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+  .more-menu > section > strong { padding: 5px 7px 5px; color: var(--text-3); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
+  .more-menu > section > button, .more-act { display: flex; justify-content: space-between; gap: 8px; padding: 7px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+  .more-menu > section > button:hover:not(:disabled), .more-act:hover { background: var(--bg-2); color: var(--text-1); }
+  .more-menu > section > button:disabled { opacity: .45; cursor: default; }
+  .more-menu > section > button small { color: var(--text-3); font-size: 9px; }
+  .more-menu .custom { margin-top: 3px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); }
+  .more-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; color: var(--text-3); font-size: 10px; }
+  .more-row select { width: 118px; }
   .category-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--text-3); }
   /* `--track-tint` is the colour the analyst gave this track, set on its row. Unset
      everywhere else, so the category keeps its own colour and the legend stays true. */
@@ -2752,10 +2858,9 @@
   .view-switch { display: flex; padding: 2px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-1); }
   .view-switch button { padding: 3px 7px; border: 0; border-radius: 2px; background: none; color: var(--text-3); font-size: 10px; cursor: pointer; }
   .view-switch button.active { background: var(--bg-3); color: var(--text-1); }
-  .legend { position: relative; }
-  .legend > summary { padding: 4px 6px; color: var(--text-3); font-size: 10px; cursor: pointer; list-style: none; }
-  .legend > summary::-webkit-details-marker { display: none; }
-  .legend-card { position: absolute; z-index: 45; top: calc(100% + 5px); left: 0; width: 210px; display: grid; gap: 7px; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2); }
+  .legend { border-block: 1px solid var(--border); }
+  .legend > summary { padding: 7px; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
+  .legend-card { display: grid; gap: 7px; padding: 4px 7px 10px; }
   .legend-card > strong { margin-top: 2px; color: var(--text-3); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
   .legend-card > span { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: var(--fs-xs); }
   .legend-card p { margin: 2px 0 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.35; }
@@ -2769,26 +2874,16 @@
   .sample.shape-point { width: 8px; height: 8px; margin-inline: 10px; border: 0; border-radius: 50%; background: var(--track-statement); }
   .sample.shape-bracket { height: 8px; border: 0; border-inline: 2px solid var(--track-statement); border-radius: 0; background: linear-gradient(to bottom, transparent 3px, var(--track-statement) 3px, var(--track-statement) 5px, transparent 5px); }
   .sample.shape-bar { height: 8px; border-radius: 2px; background: color-mix(in srgb, var(--track-statement) 32%, var(--bg-1)); }
-  .utc-readout { margin-left: auto; color: var(--text-3); font: 10px var(--mono); letter-spacing: .03em; }
-  /* Wraps rather than scrolls: the Add-a-track menu hangs out of this row, and an
-     overflow container would clip it. */
-  .track-toolbar { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 24px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg-1) 82%, transparent); }
-  .track-toolbar > label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10px; }
-  .track-toolbar > label select { width: 118px; }
-  .track-toolbar > span { color: var(--text-3); font-size: 10px; }
-  .track-toolbar > em { color: var(--accent); font-size: 10px; font-style: normal; }
-  .track-add { position: relative; }
-  .track-menu { position: absolute; z-index: 70; top: calc(100% + 5px); left: 0; width: 250px; display: grid; padding: 7px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2); }
-  .track-menu > strong { padding: 5px 7px 7px; color: var(--text-3); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
-  .track-menu > button { display: flex; justify-content: space-between; gap: 8px; padding: 7px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); text-align: left; cursor: pointer; }
-  .track-menu > button:hover { background: var(--bg-2); color: var(--text-1); }
-  .track-menu > button small { color: var(--text-3); font-size: 9px; }
-  .track-menu .custom { margin-top: 5px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); }
-  .timeline-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 330px; grid-template-rows: minmax(0, 1fr); }
+  .timeline-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .timeline-grid.inspecting { grid-template-columns: minmax(0, 1fr) 330px; }
   /* The overview, the axis, the bar between and the list: one reading in one column,
      where the axis and the list scroll each on their own, so picking an entry in one
      never scrolls the other out of view. */
-  .chronology { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto 12px auto minmax(0, 1fr); overflow: auto hidden; padding: 18px 24px 16px; }
+  .chronology { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto hidden; padding: 14px 24px 16px; }
+  /* A column rather than a grid of fixed rows: the strip under the axis comes and goes,
+     and a snapshot has no entry line, and neither may move the list into the wrong row. */
+  .chronology > * { flex: none; }
+  .chronology > .reading-pane { flex: 1 1 0; }
   .chronology.blank { display: block; overflow: auto; padding-bottom: 28px; }
   /* A panel is a border and a fill. The 35px drop shadow under each one read as a
      floating card, which is a look rather than a reading of the case. */
@@ -2840,6 +2935,12 @@
   .track-label strong { font-size: var(--fs-xs); }
   .track-label small { padding: 1px 5px; border-radius: 999px; background: var(--bg-3); color: var(--text-3); font-size: 9px; }
   .track-actions { grid-column: 3 / -1; display: flex; gap: 2px; }
+  /* A lane's own tools come with the pointer. Always shown, they were a grip and three
+     icons under every name, read by nobody who was reading the lane. */
+  .drag-track, .track-actions { opacity: 0; transition: opacity .12s ease; }
+  .track-row:hover .drag-track, .track-row:hover .track-actions,
+  .track-label:focus-within .drag-track, .track-label:focus-within .track-actions { opacity: 1; }
+  @media (hover: none) { .drag-track, .track-actions { opacity: 1; } }
   .track-label.movable .track-actions { grid-column: 4 / -1; }
   .track-actions button { display: grid; place-items: center; padding: 3px; border: 0; background: none; color: var(--text-3); cursor: pointer; }
   .track-actions button:hover { color: var(--text-1); }
@@ -2862,7 +2963,7 @@
      band as long as its period. Nothing is nudged sideways, so a mark sits exactly on
      its date whichever way the axis is scrolled. */
   .timeline-event { --event-color: var(--track-tint, var(--track-statement)); position: absolute; z-index: 2; height: 18px; color: var(--text-1); }
-  .timeline-event.media { --event-color: var(--track-tint, var(--track-media)); }
+  .timeline-event.media, .timeline-event.as-file { --event-color: var(--track-tint, var(--track-media)); }
   .timeline-event.case_activity { --event-color: var(--track-tint, var(--track-activity)); }
   .timeline-event.chosen, .timeline-event.against, .timeline-event.guided { z-index: 8; }
   .event-select { position: absolute; inset: 0; display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
@@ -2932,7 +3033,8 @@
   .copy-options button { padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
   .copy-options button:hover { background: var(--bg-3); color: var(--text-1); }
   .list-grid { display: grid; padding-bottom: 5px; }
-  .list-row { display: grid; grid-template-columns: 150px minmax(200px, 3fr) minmax(70px, 1.1fr) minmax(60px, .9fr) minmax(70px, 1.1fr) minmax(90px, auto); align-items: center; gap: 10px; padding: 6px 12px; }
+  /* The columns are the ones the window fills (`listTemplate`), set on the grid. */
+  .list-row { display: grid; grid-template-columns: var(--list-columns, 150px minmax(200px, 3fr) minmax(70px, 1.1fr) minmax(60px, .9fr) minmax(70px, 1.1fr) minmax(90px, auto)); align-items: center; gap: 10px; padding: 6px 12px; }
   .list-row.headings { padding-block: 5px; color: var(--text-3); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
   .list-row.month { display: block; padding: 7px 12px; border-top: 1px solid var(--border); background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs); font-weight: 650; }
   .list-row.month small { margin-left: 8px; color: var(--text-3); font-weight: 400; }
@@ -2963,14 +3065,15 @@
   .split::before { content: ''; position: absolute; top: 4px; left: calc(50% - 22px); width: 44px; height: 4px; border-radius: 2px; background: var(--border-strong); }
   .split:hover::before, .split:focus-visible::before { background: var(--accent); }
   .split:focus-visible { outline: none; }
-  .overview-card { display: grid; grid-template-columns: var(--gutter) minmax(500px, 1fr); min-height: 92px; margin-bottom: 12px; }
+  /* Under the axis, so the axis stays where it was when the strip arrives. */
+  .overview-card { display: grid; grid-template-columns: var(--gutter) minmax(500px, 1fr); min-height: 84px; margin-top: 10px; }
   .overview-title { display: grid; align-content: center; gap: 2px; padding: 10px 12px; border-right: 1px solid var(--border); }
   .overview-title > span { font-size: var(--fs-xs); font-weight: 700; }
   .overview-title small { color: var(--text-3); font-size: 9px; }
   .overview-title .capped { color: var(--warn); }
   .overview-counts { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
   .overview-counts span { padding: 1px 4px; border-radius: 2px; background: var(--bg-3); color: var(--text-3); font-size: 8px; }
-  .density-bars { position: relative; min-width: 500px; height: 68px; margin: 12px 10px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--bg-2) 40%, transparent); cursor: crosshair; }
+  .density-bars { position: relative; min-width: 500px; height: 68px; margin: 8px 10px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--bg-2) 40%, transparent); cursor: crosshair; }
   /* One column per bin, as wide as the bin, stacked by category — a histogram, which
      is only readable because the bins are cut as fine as they can be drawn. The floor
      keeps a lone day visible and clickable at a scale where a day is under a pixel.
@@ -3036,7 +3139,12 @@
   .date-reading strong { font-size: var(--fs-xs); }
   .date-reading code { margin-top: 3px; color: var(--text-3); font-size: 9px; }
   .date-reading small { margin-top: 3px; color: var(--text-3); font-size: 9px; }
-  .date-reading .in-zone { color: var(--text-2); }
+  .date-reading .as-stated { color: var(--text-2); }
+  .date-reading.plain { padding: 0; border: 0; background: none; }
+  .date-more { margin-top: 14px; border-top: 1px solid var(--border); }
+  .date-more > summary { padding: 9px 0 3px; color: var(--text-3); font-size: 10px; cursor: pointer; }
+  .date-more[open] > summary { color: var(--text-2); }
+  .date-more .temporal-facts { margin-top: 10px; }
   /* The measurement between two entries. The figure reads first, what it rests on
      under it, and every caveat the reading carries below that — a gap printed bare is
      true and misleading in the same breath. */
@@ -3071,11 +3179,11 @@
   .track-item-actions h3 { grid-column: 1 / -1; margin: 0 0 2px; color: var(--text-3); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
   .track-item-actions button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 7px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2); font-size: 10px; cursor: pointer; }
   .inspector footer { display: flex; justify-content: flex-end; gap: 5px; padding: 12px; border-top: 1px solid var(--border); }
-  .inspector-empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--text-3); font-size: var(--fs-xs); }
   .timeline-tooltip { position: fixed; z-index: 100; width: 270px; display: grid; gap: 3px; padding: 9px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2); color: var(--text-2); pointer-events: none; }
   .timeline-tooltip strong { color: var(--text-1); font-size: var(--fs-xs); }
   .timeline-tooltip span { font: 10px var(--mono); }
   .timeline-tooltip small { color: var(--text-3); font-size: 9px; text-transform: capitalize; }
+  .timeline-tooltip small.sentence { text-transform: none; }
   /* Over the pointer, above the tooltip it replaces: a hover reading and a menu about
      the same entry cannot both be answered, so the menu is the one on top. */
   .item-menu { position: fixed; z-index: 110; width: 196px; padding: 6px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-1); box-shadow: var(--shadow-2); }
@@ -3086,21 +3194,15 @@
   .item-menu button:disabled { color: var(--text-3); cursor: default; }
   :global(.timeline-tool button:focus-visible), .axis-ruler:focus-visible, .track-canvas:focus-visible, .density-bars:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (max-width: 1160px) {
-    .timeline-head { grid-template-columns: 1fr auto; }
-    .range { grid-column: 1 / -1; grid-row: 2; }
-    .head-actions { grid-column: 2; grid-row: 1; }
-    .timeline-grid { grid-template-columns: minmax(0, 1fr) 250px; }
-    .utc-readout { display: none; }
+    .timeline-grid.inspecting { grid-template-columns: minmax(0, 1fr) 250px; }
   }
   @media (max-width: 760px) {
-    .timeline-head { padding-inline: 14px; }
-    .range { width: 100%; justify-self: stretch; }
-    .filter-row { padding-inline: 14px; overflow-x: auto; }
-    .track-toolbar { padding-inline: 14px; }
+    .timeline-bar { padding-inline: 14px; }
+    .range { flex: 1 1 100%; }
+    .range-face { flex: 1; }
     .chronology { padding: 12px 14px 22px; }
-    .timeline-grid { position: relative; grid-template-columns: minmax(0, 1fr); }
+    .timeline-grid, .timeline-grid.inspecting { position: relative; grid-template-columns: minmax(0, 1fr); }
     .inspector { position: absolute; z-index: 30; right: 0; bottom: 0; top: 0; width: min(310px, 88vw); box-shadow: -12px 0 32px color-mix(in srgb, var(--bg-0) 70%, transparent); }
-    .inspector.empty { display: none; }
     .list-row { grid-template-columns: 110px minmax(0, 1fr) auto; }
     .list-row .list-links, .list-row.headings > :nth-child(n + 3):not(:last-child) { display: none; }
   }

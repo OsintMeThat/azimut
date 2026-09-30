@@ -32,6 +32,21 @@ export function offsetAt(raw, zone) {
   return `${minutes < 0 ? '-' : '+'}${pad(Math.floor(size / 60))}:${pad(size % 60)}`;
 }
 
+const DAYS = /^\d{4}(-\d{2}(-\d{2})?)?[~?%]?(\/\d{4}(-\d{2}(-\d{2})?)?[~?%]?)?$/;
+
+/** Whether a stored value is a date or a span of dates, with no hour. A day has no
+ *  offset to carry, so the zone it is a day of travels beside it (`when_zone`). */
+export function isDateOnly(raw) {
+  return DAYS.test(String(raw ?? ''));
+}
+
+/** How a day read in a place's zone says itself: `12 Mar 2024, the day at Kharkiv
+ *  (Europe/Kyiv)`, where the 12th starts at that zone's midnight. */
+export function dayReading(label, zone, place) {
+  if (!zone) return label;
+  return place ? `${label}, the day at ${place} (${zone})` : `${label} (${zone})`;
+}
+
 /** The value given the zone's offset, or the value unchanged when it is not one
  *  unzoned time. */
 export function withZone(raw, zone) {

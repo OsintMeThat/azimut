@@ -80,6 +80,13 @@ describe('composeClaimStatement', () => {
 });
 
 describe('quickClaimBody', () => {
+  it('sends the zone a day was stated in, and only with a date', () => {
+    const base = { statement: 'x', about: [], at: [], cites: [], seat: {} };
+    expect(quickClaimBody({ ...base, when: '2024-03-12', whenZone: 'Europe/Kyiv' }).when_zone).toBe('Europe/Kyiv');
+    expect(quickClaimBody({ ...base, when: '', whenZone: 'Europe/Kyiv' })).not.toHaveProperty('when_zone');
+    expect(quickClaimBody({ ...base, when: '2024-03-12' })).not.toHaveProperty('when_zone');
+  });
+
   const seat = { slot: 'about', count: true, condition: true };
 
   it('files the observation in the shape the claim route takes', () => {

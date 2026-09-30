@@ -259,7 +259,7 @@ describe('the declared fields', () => {
     expect(source).toContain('type={entity.type}');
     expect(source).toContain('bind:values={infoAttrs}');
     expect(source).toContain("exclude={entity.type === 'claim'");
-    expect(source).toContain("['when', 'time_role', 'confidence', 'method', 'verbatim']");
+    expect(source).toContain("['when', 'when_zone', 'time_role', 'confidence', 'method', 'verbatim']");
     expect(source).toContain('{#if declaredFields.length}');
   });
 
@@ -382,7 +382,7 @@ describe('a file the app has no viewer for', () => {
 describe('Claim details tabs', () => {
   it('keeps assessment fields in Time instead of duplicating them in Info', () => {
     expect(source).toContain(
-      "exclude={entity.type === 'claim' ? ['when', 'time_role', 'confidence', 'method', 'verbatim'] : []}"
+      "exclude={entity.type === 'claim' ? ['when', 'when_zone', 'time_role', 'confidence', 'method', 'verbatim'] : []}"
     );
     expect(source).toContain('<EntityTime');
   });

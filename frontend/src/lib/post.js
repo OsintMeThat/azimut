@@ -20,6 +20,7 @@ export const TWEET_TOKENS = [
   { tag: '#description', label: 'Description', sample: 'Rooftop match against the reference imagery' },
   { tag: '#mention', label: 'Mention', sample: '@GeoConfirmed' },
   { tag: '#source', label: 'Source', sample: 'https://x.com/example/status/1' },
+  { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3' },
 ];
 
 export const MAX_POST_MEDIA = 4;
@@ -359,6 +360,7 @@ const TOKEN_FIELD = {
   '#description': 'description',
   '#mention': 'mention',
   '#source': 'source',
+  '#date': 'date',
 };
 
 // A template can omit a draft field by leaving its token out of the body.
@@ -370,9 +372,62 @@ const FIELD_TOKENS = {
   place: ['#place'],
   mention: ['#mention'],
   source: ['#source'],
+  date: ['#date'],
 };
 
-const TOKEN_RE = /#(?:place|pluscode|coordinates|description|mention|source)/gi;
+// A token ends where the word does: `#placement` is text, not `#place` and "ment",
+// and a `#dates` hashtag a template already carried stays a hashtag.
+const TOKEN_TAIL = '(?![\\p{L}\\p{N}_])';
+const TOKEN_RE = new RegExp(
+  `#(?:${Object.keys(TOKEN_FIELD).map((tag) => tag.slice(1)).join('|')})${TOKEN_TAIL}`,
+  'giu',
+);
+
+/** The tokens a body holds, lower-cased, in the order it holds them. */
+export function bodyTokens(body) {
+  return (String(body ?? '').match(TOKEN_RE) ?? []).map((token) => token.toLowerCase());
+}
+
+/**
+ * `#words` in a body that look like a token and are not one: `#coordinate`,
+ * `#Sources`, `#plus_code`. Each would go out as text, silently, so the editor
+ * names them. Close means one edit away, or the same letters with the
+ * separators and a final `s` taken out; a real hashtag is left alone.
+ */
+export function misspelledTokens(body) {
+  const tags = Object.keys(TOKEN_FIELD).map((tag) => tag.slice(1));
+  const found = [];
+  for (const [whole, word] of String(body ?? '').matchAll(/#([\p{L}\p{N}_-]+)/gu)) {
+    const lower = word.toLowerCase();
+    if (tags.includes(lower)) continue;
+    const bare = lower.replace(/[-_]/g, '').replace(/s$/, '');
+    const near = tags.find((tag) => bare === tag || editDistance(lower, tag) === 1);
+    if (near && !found.some((f) => f.written === whole)) found.push({ written: whole, meant: `#${near}` });
+  }
+  return found;
+}
+
+/** A body with every whole-word `written` swapped for `meant`, and nothing else touched. */
+export function fixMisspelledToken(body, written, meant) {
+  const escaped = String(written).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(body ?? '').replace(
+    new RegExp(`${escaped}(?![\\p{L}\\p{N}_-])`, 'gu'),
+    () => meant,
+  );
+}
+
+function editDistance(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return 2;
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) {
+      next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    row = next;
+  }
+  return row[b.length];
+}
 
 // The classic GeoConfirmed thread, as a token body. Place + plus code on the
 // first line, then description, decimal coordinates, mention, and a labelled
@@ -388,6 +443,34 @@ export const DEFAULT_TWEET_BODY = [
   '',
   'Source: #source',
 ].join('\n');
+
+/**
+ * Layouts a new post template can start from, so a blank body is never the first
+ * thing an analyst faces. Each one only replaces the body: the mention, the media
+ * post and the boilerplate stay as they were.
+ */
+export const POST_TEMPLATE_STARTERS = Object.freeze([
+  { id: 'classic', label: 'Classic', body: DEFAULT_TWEET_BODY },
+  { id: 'coordinates', label: 'Coordinates only', body: '#coordinates\n\n#mention' },
+  { id: 'short', label: 'Short', body: '#place\n#coordinates\n\nSource: #source' },
+  {
+    id: 'dated',
+    label: 'With date',
+    body: [
+      '#place - #pluscode',
+      '',
+      '#description',
+      '',
+      'Filmed: #date',
+      '',
+      '#coordinates',
+      '',
+      '#mention',
+      '',
+      'Source: #source',
+    ].join('\n'),
+  },
+].map((starter) => Object.freeze(starter)));
 
 /** What separates a point's name from its coordinates, on the one line it gets. */
 export const POINT_SEPARATOR = ' — ';
@@ -434,7 +517,7 @@ export function postCoordinates(text, { lat, lon } = {}) {
 
 /** Resolve the live draft into the string each token stands for ('' when absent). */
 export function tweetFields({
-  place, plusCode, description, lat, lon, coordsText, mention, source,
+  place, plusCode, description, lat, lon, coordsText, mention, source, date,
 } = {}) {
   return {
     place: place?.trim() ?? '',
@@ -445,7 +528,95 @@ export function tweetFields({
     description: description?.trim() ?? '',
     mention: mention?.trim() ?? '',
     source: source?.trim() ?? '',
+    date: date?.trim() ?? '',
   };
+}
+
+const STAMP = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?$/;
+
+/** An offset as a reader writes it: `UTC+2`, `UTC-3:30`, plain `UTC` at zero. */
+function offsetLabel(minutes) {
+  if (!minutes) return 'UTC';
+  const sign = minutes < 0 ? '-' : '+';
+  const whole = Math.abs(minutes);
+  const tail = whole % 60 ? `:${String(whole % 60).padStart(2, '0')}` : '';
+  return `UTC${sign}${Math.floor(whole / 60)}${tail}`;
+}
+
+function offsetAtInstant(zone, millis) {
+  const part = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' })
+    .formatToParts(new Date(millis))
+    .find((one) => one.type === 'timeZoneName')?.value ?? '';
+  const match = /GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?/.exec(part);
+  if (!match) return null;
+  if (!match[1]) return 0;
+  const value = Number(match[2]) * 60 + Number(match[3] ?? 0);
+  return match[1] === '-' ? -value : value;
+}
+
+/**
+ * Minutes a named zone stands from UTC at a local wall-clock reading. Read twice:
+ * the first guess takes the clock as UTC, which lands up to a day off and can sit
+ * across a clock change from the moment meant, so the offset is read again at the
+ * instant that guess points to.
+ */
+function zoneOffsetAt(zone, day, hour, minute) {
+  try {
+    const wall = Date.parse(`${day}T${hour}:${minute}:00Z`);
+    const first = offsetAtInstant(zone, wall);
+    if (first == null) return null;
+    return offsetAtInstant(zone, wall - first * 60_000);
+  } catch {
+    return null;
+  }
+}
+
+function stampParts(raw) {
+  const match = STAMP.exec(raw);
+  if (!match) return null;
+  const [, day, hour, minute, second, offset] = match;
+  const clock = second === '00' ? `${hour}:${minute}` : `${hour}:${minute}:${second}`;
+  return { day, hour, minute, clock, offset };
+}
+
+function stampZone(parts, zone) {
+  if (parts.offset === 'Z') return 'UTC';
+  if (parts.offset) {
+    const [h, m] = parts.offset.slice(1).split(':').map(Number);
+    return offsetLabel((parts.offset[0] === '-' ? -1 : 1) * (h * 60 + m));
+  }
+  if (!zone) return '';
+  const minutes = zoneOffsetAt(zone, parts.day, parts.hour, parts.minute);
+  return minutes == null ? '' : offsetLabel(minutes);
+}
+
+/**
+ * A stated date as a post carries it: the case's own value, written the same way
+ * in every language. A date or a range of dates goes out exactly as stored,
+ * qualifiers included. A time drops the `T` nobody reads and says which clock it
+ * is on, as an offset from UTC: the zone it was stated in, read on that day, so a
+ * summer reading in Kyiv says `UTC+3` and a winter one `UTC+2`. A time with no zone
+ * goes out bare, since naming one would be inventing it.
+ */
+export function postDate(when, zone = null) {
+  const raw = String(when ?? '').trim();
+  if (!raw) return '';
+  const [from, to] = raw.split('/');
+  const start = stampParts(from);
+  if (!start) return raw;
+  if (to === undefined) {
+    const label = stampZone(start, zone);
+    return `${start.day} ${start.clock}${label ? ` ${label}` : ''}`;
+  }
+  const end = stampParts(to);
+  if (!end) return raw;
+  const startLabel = stampZone(start, zone);
+  const endLabel = stampZone(end, zone);
+  const tail = end.day === start.day ? end.clock : `${end.day} ${end.clock}`;
+  if (startLabel === endLabel) {
+    return `${start.day} ${start.clock}/${tail}${endLabel ? ` ${endLabel}` : ''}`;
+  }
+  return `${start.day} ${start.clock}${startLabel ? ` ${startLabel}` : ''}/${tail}${endLabel ? ` ${endLabel}` : ''}`;
 }
 
 /**
@@ -487,8 +658,8 @@ export function buildTweet1(body, rawFields = {}) {
 export function templateUsesPostField(body, field) {
   const tokens = FIELD_TOKENS[field];
   if (!tokens) return true;
-  const lowerBody = String(body ?? '').toLowerCase();
-  return tokens.some((token) => lowerBody.includes(token));
+  const held = bodyTokens(body);
+  return tokens.some((token) => held.includes(token));
 }
 
 //: What an address looks like inside a source line. The composer joins several with

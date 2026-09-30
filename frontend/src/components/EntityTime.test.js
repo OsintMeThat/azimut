@@ -51,7 +51,7 @@ describe('entity Time tab', () => {
   });
 
   it('uses the Timeline visual language and separates unresolved dates', () => {
-    expect(source).toContain('formatTemporalValue(item.raw ?? \'\').label');
+    expect(source).toContain('formatTemporalValue(item.raw ?? \'\', item.tz).label');
     expect(source).toContain('var(--timeline-statement)');
     expect(source).toContain('Not on UTC axis');
     expect(source).toContain('Undated <span>{visibleUndated.length}</span>');

@@ -21,7 +21,7 @@ export const COPY_LIMIT = 5000;
 
 /** The spreadsheet columns, named for a reader who never saw the app. */
 export const CHRONOLOGY_COLUMNS = [
-  'date_as_written', 'earliest_utc', 'latest_utc', 'statement',
+  'date_as_written', 'time_zone', 'earliest_utc', 'latest_utc', 'statement',
   'subjects', 'places', 'sources', 'confidence', 'status',
 ];
 
@@ -37,7 +37,10 @@ export function chronologyRows(items = []) {
     .map((item) => ({
       id: item.id,
       raw: item.raw ?? '',
-      reading: formatTemporalValue(item.raw ?? '').label,
+      // The zone the date was stated in: without it a day written as the 12th
+      // cannot be told from UTC's 12th by someone reading the sheet alone.
+      zone: item.tz ?? '',
+      reading: formatTemporalValue(item.raw ?? '', item.tz).label,
       earliest: item.earliest ?? '',
       latest: item.latest ?? '',
       statement: item.label ?? '',
@@ -54,7 +57,7 @@ export function chronologyBlock(rows) {
   return toBlock([
     CHRONOLOGY_COLUMNS,
     ...rows.map((row) => [
-      row.raw, row.earliest, row.latest, row.statement,
+      row.raw, row.zone, row.earliest, row.latest, row.statement,
       row.subjects, row.places, row.sources, row.confidence, row.status,
     ]),
   ]);

@@ -388,9 +388,14 @@ export function timeAtRatio(from, to, ratio) {
   return isoInstant(Math.round(milliseconds / SECOND) * SECOND);
 }
 
-export function dateAtRatio(from, to, ratio) {
+export function dateAtRatio(from, to, ratio, tz = null) {
   const instant = timeAtRatio(from, to, ratio);
-  return instant ? instant.slice(0, 10) : '';
+  if (!instant) return '';
+  if (!tz) return instant.slice(0, 10);
+  // A day stated in a zone is that zone's day: the pointer's instant is read on
+  // its calendar, or dragging an edge near midnight would land a day off.
+  const { year, month, day } = zonedFields(new Date(instant).getTime(), tz);
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 /** A calendar year on average, for choosing a precision; nothing is dated with it. */
@@ -519,12 +524,17 @@ function dateLabel(raw) {
   return `${Number(match[3])} ${month} ${year}`;
 }
 
-function timestampLabel(raw) {
+function timestampLabel(raw, tz = null) {
   const match = TIMESTAMP_TOKEN.exec(raw);
   if (!match) return raw;
   const date = `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
-  const fraction = match[7] ? `.${match[7]}` : '';
-  const zone = match[8] === 'Z' ? ' UTC' : match[8] ? ` UTC${match[8]}` : ' local time';
+  // A camera writes its clock to the microsecond, and `17:07:16.000000` is six zeros
+  // nobody reads beside a date. Kept to the millisecond when it says something.
+  const milli = (match[7] ?? '').slice(0, 3);
+  const fraction = /[1-9]/.test(milli) ? `.${milli}` : '';
+  // A time with no offset of its own reads on the clock of the zone it was stated
+  // in, when there is one; without it the words say nothing is known.
+  const zone = match[8] === 'Z' ? ' UTC' : match[8] ? ` UTC${match[8]}` : tz ? ` ${tz}` : ' local time';
   return `${date}, ${match[4]}:${match[5]}:${match[6]}${fraction}${zone}`;
 }
 
@@ -575,14 +585,37 @@ export function changeInterval(first, second) {
   return validateTemporalValue(raw).valid ? raw : '';
 }
 
-export function formatTemporalValue(raw) {
+/**
+ * The clock a row's value is read on, in words for the Timeline's facts. A day
+ * stated in no zone spans UTC's day, which is what the case has always done and
+ * what the analyst could not see; saying so is what lets them correct it.
+ */
+export function temporalZoneWords(item) {
+  if (item?.tz) return item.tz;
+  switch (item?.zone) {
+    case 'date-only': return 'Not stated, read as UTC days';
+    case 'utc': return 'UTC';
+    case 'offset': return 'The offset written in the value';
+    case 'local': return 'Not stated';
+    case 'mixed': return 'Mixed';
+    default: return 'Not set';
+  }
+}
+
+/**
+ * A stored value in words. `tz` is the zone it was stated in, when it was: a day
+ * then names that zone, since the 12th in Kyiv is not UTC's 12th, and a time with
+ * no offset of its own reads on that zone's clock. A value stated in no zone reads
+ * as it always has.
+ */
+export function formatTemporalValue(raw, tz = null) {
   const check = validateTemporalValue(raw ?? '');
   if (!raw) return { ...check, label: 'Undated', qualifiers: [] };
   if (!check.valid) return { ...check, label: raw, qualifiers: [] };
   const parts = raw.split('/');
-  const label = parts.length === 2
-    ? `${DATE_TOKEN.test(parts[0]) ? dateLabel(parts[0]) : timestampLabel(parts[0])} to ${DATE_TOKEN.test(parts[1]) ? dateLabel(parts[1]) : timestampLabel(parts[1])}`
-    : DATE_TOKEN.test(raw) ? dateLabel(raw) : timestampLabel(raw);
+  const words = (part) => (DATE_TOKEN.test(part) ? dateLabel(part) : timestampLabel(part, tz));
+  const base = parts.length === 2 ? `${words(parts[0])} to ${words(parts[1])}` : words(raw);
+  const label = tz && parts.some((part) => DATE_TOKEN.test(part)) ? `${base} (${tz})` : base;
   return { ...check, label, qualifiers: qualifierLabels(raw) };
 }
 

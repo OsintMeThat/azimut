@@ -67,6 +67,10 @@ const BY_TYPE = {
   traced: [FIELDS[1]],
   claim: COUNTED,
   bookmark: [{ key: 'archive_url', label: 'Archived copy', kind: 'url', rungs: [] }, RELIABILITY],
+  proof: [
+    { key: 'when', label: 'Taken', kind: 'temporal', rungs: [] },
+    { key: 'when_zone', label: 'Time zone', kind: 'timezone', rungs: [] },
+  ],
   ip: [
     { key: 'network', label: 'Legacy network', kind: 'text', editable: false, rungs: [] },
     { key: 'provider', label: 'Provider', kind: 'text', rungs: [] },
@@ -415,5 +419,22 @@ describe('a temporal Claim field', () => {
     expect(options.map((option) => option.value)).toEqual([
       '', 'occurred', 'observed', 'valid',
     ]);
+  });
+});
+
+describe('a time zone field', () => {
+  it('offers named zones to pick from and says what an empty one means', () => {
+    const root = open({ when: '2024-03-12' }, 'proof');
+    const input = field(root, 'when_zone');
+
+    expect(input.placeholder).toBe('Not stated, UTC days');
+    const names = [...root.querySelectorAll(`#${input.getAttribute('list')} option`)].map((o) => o.value);
+    expect(names[0]).toBe('UTC');
+    expect(names).toContain('Europe/Paris');
+  });
+
+  it('shows the zone the entity holds', () => {
+    const root = open({ when: '2024-03-12', when_zone: 'Asia/Tokyo' }, 'proof');
+    expect(field(root, 'when_zone').value).toBe('Asia/Tokyo');
   });
 });

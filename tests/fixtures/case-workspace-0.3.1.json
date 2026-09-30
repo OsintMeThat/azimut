@@ -484,24 +484,6 @@
      "media:photo"
     ],
     "time_role": "observed"
-   },
-   {
-    "category": "statement",
-    "confidence": null,
-    "earliest": "2026-07-31T16:20:00.000000Z",
-    "id": "temporal:proof:proof:Bridge proof:taken",
-    "kind": "taken",
-    "label": "Bridge proof",
-    "latest": "2026-07-31T16:20:01.000000Z",
-    "owner_id": "proof:Bridge proof",
-    "parse_error": null,
-    "places": [],
-    "precision": "second",
-    "raw": "2026-07-31T16:20:00Z",
-    "sources": [],
-    "status": null,
-    "subjects": [],
-    "time_role": "occurred"
    }
   ],
   "undated": 2,
@@ -767,24 +749,6 @@
        "media:photo"
       ],
       "time_role": "observed"
-     },
-     {
-      "category": "statement",
-      "confidence": null,
-      "earliest": "2026-07-31T16:20:00.000000Z",
-      "id": "temporal:proof:proof:Bridge proof:taken",
-      "kind": "taken",
-      "label": "Bridge proof",
-      "latest": "2026-07-31T16:20:01.000000Z",
-      "owner_id": "proof:Bridge proof",
-      "parse_error": null,
-      "places": [],
-      "precision": "second",
-      "raw": "2026-07-31T16:20:00Z",
-      "sources": [],
-      "status": null,
-      "subjects": [],
-      "time_role": "occurred"
      }
     ],
     "undated": 2,
@@ -1081,24 +1045,6 @@
        "media:photo"
       ],
       "time_role": "observed"
-     },
-     {
-      "category": "statement",
-      "confidence": null,
-      "earliest": "2026-07-31T16:20:00.000000Z",
-      "id": "temporal:proof:proof:Bridge proof:taken",
-      "kind": "taken",
-      "label": "Bridge proof",
-      "latest": "2026-07-31T16:20:01.000000Z",
-      "owner_id": "proof:Bridge proof",
-      "parse_error": null,
-      "places": [],
-      "precision": "second",
-      "raw": "2026-07-31T16:20:00Z",
-      "sources": [],
-      "status": null,
-      "subjects": [],
-      "time_role": "occurred"
      }
     ],
     "undated": 2,
@@ -1539,24 +1485,6 @@
        "media:photo"
       ],
       "time_role": "observed"
-     },
-     {
-      "category": "statement",
-      "confidence": null,
-      "earliest": "2026-07-31T16:20:00.000000Z",
-      "id": "temporal:proof:proof:Bridge proof:taken",
-      "kind": "taken",
-      "label": "Bridge proof",
-      "latest": "2026-07-31T16:20:01.000000Z",
-      "owner_id": "proof:Bridge proof",
-      "parse_error": null,
-      "places": [],
-      "precision": "second",
-      "raw": "2026-07-31T16:20:00Z",
-      "sources": [],
-      "status": null,
-      "subjects": [],
-      "time_role": "occurred"
      }
     ],
     "undated": 2,
@@ -2273,24 +2201,6 @@
        "status": null,
        "subjects": [],
        "time_role": null
-      },
-      {
-       "category": "statement",
-       "confidence": null,
-       "earliest": "2026-07-31T16:20:00.000000Z",
-       "id": "temporal:proof:proof:Bridge proof:taken",
-       "kind": "taken",
-       "label": "Bridge proof",
-       "latest": "2026-07-31T16:20:01.000000Z",
-       "owner_id": "proof:Bridge proof",
-       "parse_error": null,
-       "places": [],
-       "precision": "second",
-       "raw": "2026-07-31T16:20:00Z",
-       "sources": [],
-       "status": null,
-       "subjects": [],
-       "time_role": "occurred"
       }
      ],
      "timeline_tracks": {
@@ -2305,8 +2215,7 @@
        "temporal:claim:claim:Second convoy suggested",
        "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
        "temporal:claim:claim:Vessel seen leaving around the first",
-       "temporal:claim:claim:Where was the photo taken?",
-       "temporal:proof:proof:Bridge proof:taken"
+       "temporal:claim:claim:Where was the photo taken?"
       ],
       "media": [
        "temporal:media:media:harbour:captured"
@@ -2698,24 +2607,6 @@
         "media:photo"
        ],
        "time_role": "observed"
-      },
-      {
-       "category": "statement",
-       "confidence": null,
-       "earliest": "2026-07-31T16:20:00.000000Z",
-       "id": "temporal:proof:proof:Bridge proof:taken",
-       "kind": "taken",
-       "label": "Bridge proof",
-       "latest": "2026-07-31T16:20:01.000000Z",
-       "owner_id": "proof:Bridge proof",
-       "parse_error": null,
-       "places": [],
-       "precision": "second",
-       "raw": "2026-07-31T16:20:00Z",
-       "sources": [],
-       "status": null,
-       "subjects": [],
-       "time_role": "occurred"
       }
      ],
      "timeline_tracks": {
@@ -2730,8 +2621,7 @@
        "temporal:claim:claim:Second convoy suggested",
        "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
        "temporal:claim:claim:Vessel seen leaving around the first",
-       "temporal:claim:claim:Where was the photo taken?",
-       "temporal:proof:proof:Bridge proof:taken"
+       "temporal:claim:claim:Where was the photo taken?"
       ]
      }
     },

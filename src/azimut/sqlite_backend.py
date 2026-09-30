@@ -56,6 +56,7 @@ from .store.filters import (
 from .store import merges as merge_store
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
+    _FROM_ABOVE_FILE_SQL,
     _PRODUCED_HERE_SQL,
     _PRODUCED_HERE_ROW_SQL,
     _MEDIA_CATEGORIES,
@@ -285,7 +286,8 @@ CREATE TABLE temporal_items (
     sortable    INTEGER NOT NULL DEFAULT 0 CHECK (sortable IN (0, 1)),
     status      TEXT,
     confidence  TEXT,
-    parse_error TEXT
+    parse_error TEXT,
+    tz          TEXT
 );
 -- An id a merge absorbed, and the entity that took it in. Chains are compressed as
 -- they are written, so an old id always names a survivor in one step. No foreign
@@ -445,17 +447,23 @@ class SqliteCase:
         if version < SQLITE_SCHEMA:
             store._upgrade()
         if version == 19:
-            # Development cases may already carry the unshipped search-only 19.
+            # Development cases may already carry an earlier cut of the unshipped 19.
             with store._connect() as conn:
-                missing = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'entity_merges'").fetchone() is None
-            if missing:
-                from .store.migrations import _MERGE_TABLES
+                merges_missing = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'entity_merges'").fetchone() is None
+                zones_missing = "tz" not in {
+                    col["name"] for col in conn.execute("PRAGMA table_info(temporal_items)").fetchall()
+                }
+            if merges_missing or zones_missing:
+                from .store.migrations import _MERGE_TABLES, _add_temporal_zones
                 with store._connect() as conn:
                     conn.execute("BEGIN IMMEDIATE")
                     try:
-                        for statement in _MERGE_TABLES.split(";"):
-                            if statement.strip():
-                                conn.execute(statement)
+                        if merges_missing:
+                            for statement in _MERGE_TABLES.split(";"):
+                                if statement.strip():
+                                    conn.execute(statement)
+                        if zones_missing:
+                            _add_temporal_zones(conn)
                         conn.execute("COMMIT")
                     except BaseException:
                         conn.execute("ROLLBACK")
@@ -2362,6 +2370,20 @@ class SqliteCase:
                 " AND temporal_link.type IN ('about', 'at', 'cites')))"
             )
             params.extend((entity_id, entity_id))
+        # A proof's date is stated for the footage it rests on, as a Claim about that
+        # footage which cites the proof (`api/proofs.py`, `_date_the_material`). While
+        # that Claim still says the proof's date, the proof's own row is the same date
+        # a second time, so it is the Claim alone that is drawn and counted. A proof
+        # with no collected footage under it has no such Claim and keeps its row.
+        where.append(
+            "NOT (t.category = 'statement' AND t.kind = 'taken' AND EXISTS ("
+            "SELECT 1 FROM links proof_date"
+            " JOIN temporal_items stated ON stated.owner_id = proof_date.from_id"
+            " WHERE proof_date.to_id = t.owner_id AND proof_date.type = 'cites'"
+            " AND stated.kind = 'claim' AND stated.time_role = 'observed'"
+            # The same day in another zone is another span, so both are drawn.
+            " AND stated.raw = t.raw AND stated.tz IS t.tz))"
+        )
         query: dict[str, Any] = track if isinstance(track, dict) else {}
         roles = [
             value for value in query.get("roles", [])
@@ -2450,6 +2472,21 @@ class SqliteCase:
                 held = f"(t.owner_id = ? OR {held})"
                 params.append(entity_id)
             where.append(held)
+        as_files = query.get("as_files")
+        if as_files in {"sources", "imagery"}:
+            # A file lane holds the events about a file or citing it. The sources'
+            # pictures and videos (and what Inspect cut from them) are one lane; what
+            # the app pictured from above, Compare and Detect among it, is the other.
+            kind = (
+                _FROM_ABOVE_FILE_SQL if as_files == "imagery"
+                else f"(file.type = 'media' AND NOT {_FROM_ABOVE_FILE_SQL})"
+            )
+            where.append(
+                "EXISTS (SELECT 1 FROM links file_link"
+                " JOIN entities file ON file.id = file_link.to_id"
+                " WHERE file_link.from_id = t.owner_id"
+                f" AND file_link.type IN ('about', 'cites') AND {kind})"
+            )
         hidden_raw: list[Any] = (
             query["hidden"] if isinstance(query.get("hidden"), list) else []
         )
@@ -2480,6 +2517,7 @@ class SqliteCase:
             "uncertain": bool(row["uncertain"]),
             "approximate": bool(row["approximate"]),
             "zone": row["zone"],
+            "tz": row["tz"],
             "sortable": bool(row["sortable"]),
             "status": row["status"],
             "confidence": row["confidence"],

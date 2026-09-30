@@ -113,7 +113,7 @@
   }
 
   function timeLabel(item) {
-    return formatTemporalValue(item.raw ?? '').label;
+    return formatTemporalValue(item.raw ?? '', item.tz).label;
   }
 </script>
 

@@ -1027,8 +1027,10 @@ happened; the Board's or the Graph's open entity, the inspected file, the open p
 or note, the place selected on the map. A place only suggested, or two of them, is
 not seated, since seating it would confirm it without the analyst deciding. The date
 stays empty, and the dates the place knows are offered beside it, one press each and
-never filled in by themselves: a file's camera, orbit and post dates, the camera first
-and the post last (a post rarely goes online when it happened, which its tooltip says),
+never filled in by themselves: first what the analyst already concluded (the date a
+proof gives the footage, then a correction), then the file's camera, orbit and post
+dates, the camera first and the post last (a post rarely goes online when it happened,
+which its tooltip says),
 and in Compare each picture's day and the span between them, a release date marked as
 an estimate. A press fills the field, which stays the analyst's to correct, and the
 reading says where the date came from until it is changed. It closes after **Add**, on
@@ -1065,6 +1067,11 @@ Connections lists those events under *Events*.
   A zone typed with the time is never replaced, **No zone** keeps the hour unzoned,
   and two places in different zones get no default: each is offered. The full
   editor's Timezone menu offers the same **Local at …** entries.
+- **A day at a placed entry is the place's day.** A date has no hour to carry an
+  offset, so its zone is stated beside it (`when_zone`):
+  `Reads: 12 Mar 2024, the day at Kharkiv (Europe/Kyiv)`. **UTC day** reads it as
+  UTC's instead. The full editor's **Day in** menu holds the same choices, and a
+  stored day opens on its zone without being re-read.
 - **`@` mentions anything the case holds**, through the catalog's own search, so other
   names are found too. The list puts an exact name or other name first, then what the
   line already mentions, then the rest, and says which field matched when it was not
@@ -1127,8 +1134,13 @@ recoverable Trash workflow.
 ## Timeline
 
 Timeline is the third Case tab. Its main axis is horizontal and stores its window in
-UTC. One searchable picker decides what the labels read: UTC, this computer's zone, any
-zone in the world, or local time at a place the case has saved. A zone is named rather
+UTC. One searchable picker decides what the labels read, and it opens on **where the
+case is**: the zone most of the case's places stand in, read offline from their points
+(`lib/caseClock.js`) and saying how much of the case that is (`3 of 5 places`), because
+an investigation argues in the local time of where things happened. A case with no
+placed point reads UTC. UTC, this computer's zone, any zone in the world, or local time
+at a place the case has saved is one pick away, and the pick is kept per case in this
+browser. A zone is named rather
 than offered as an offset, so a stated hour survives the two days a year the offset
 moves, and each row shows the offset in force **at the window** rather than today's.
 The list is the platform's own copy of the IANA database, so it matches the renames
@@ -1165,14 +1177,23 @@ of a file. Hovering or focusing a mark draws a line up to the ruler, one for an 
 and one at each end of a span, with the date as written on the ruler. On a focused
 mark, `Alt` with an arrow moves to the entry before or after it on the same track.
 
-The toolbar states the window in words, on the axis's own clock, between two step
+**One bar** sits over the axis: the window, its clock and the **Plot**/**List** split,
+then Views, Export and `⋯`. Under `⋯` wait what is asked for rarely: a track to add,
+grouping, the period handed to another tool, the legend and full screen. It replaced
+three rows of controls, a title repeating the tab and a line of mouse hints, which put
+the first entry halfway down the screen. The bar has no Add of its own: the line under
+the axis adds, and the topbar's **Add event** goes to it.
+
+The bar states the window in words, on the axis's own clock, between two step
 arrows: pressing it opens the exact boundaries, the spans `Hour` to `Year`, and `All`
 for the complete filtered extent. A span is asked for by name rather than reached by
 repeated zoom steps, and the reading is what stays out because a window is checked far
 more often than it is typed. Dragging the ruler pans directly. The wheel zooms around
 the pointer; Shift-wheel and a horizontal trackpad gesture pan. Arrow keys, Page Up/Down, `+`, `-` and Home provide
 the same navigation without a pointer. Full screen keeps the whole workspace available
-for dense cases.
+for dense cases, and is left from the bar. The corner of the ruler names its clock
+(`GMT+3`, `Aden time`), and a ruler, band or strip name that would land on another is
+shortened or left out (`lib/timelineFit.js`).
 Only the visible window is read, 200 items at a time. A separate density request keeps
 the full chronology visible underneath without loading every event. The minimap is a
 histogram: one column per bin, as wide as the bin, stacked by category, with exact
@@ -1181,6 +1202,11 @@ spanning a day, by the day on one spanning months — because a case cut by the 
 happens to span drew one mark for a scraped batch of two hundred in a week and the same
 mark for a single entry that could be anywhere in a month. Column heights go by the
 square root of the share, so that batch does not flatten everything beside it.
+
+The strip appears only once the window leaves part of the case out: opened on the
+whole case, the axis is its own overview, and the strip drew the same marks twice. It
+sits under the axis, so the axis does not move when it arrives, and its height comes
+out of the list rather than out of the lanes being read.
 
 The visible window is a movable, resizable brush, and what it leaves out is dimmed.
 Bars, date scale and brush are placed on one mapping from instant to position, which is
@@ -1191,19 +1217,24 @@ as fit are printed. The columns answer the pointer and the space around them dra
 brush, so a bar under the brush is still clickable; clicking one opens the axis onto
 what that bin holds. `Case activity` is off by default. `Undated`
 contains missing dates; a separate `Not on UTC axis` list keeps local timestamps and
-invalid legacy values visible without inventing a timezone. The date a fact entered
+invalid legacy values visible without inventing a timezone. A value stated in a zone
+names it wherever it is read (`12 Mar 2024 (Europe/Kyiv)`), and the inspector's
+**Timezone** says which clock a row is on, a plain day saying *Not stated, read as
+UTC days*. The chronology copy carries it in a `time_zone` column. The date a fact entered
 Azimut never masquerades as the date of the fact.
 
-Overview stays above the chronology, so expanding a dense track never pushes the global
-navigator out of view. A track holds six rows of marks; past that, marks
+A track holds six rows of marks; past that, marks
 become a `+N` under their column that expands the track in place, and **Collapse** in
 that track's left label restores the bounded view and its `+N`.
 
 **The axis and the list are one reading**, stacked: the axis on top with its ruler
 pinned while its tracks scroll, a bar to drag between the two, and the list of the
 window's dated entries underneath, grouped by month on the axis's clock. A row gives the
-date as written, the statement, its subjects, places and sources, and in words what it
-still waits for: `suggested`, `refuted`, and for a Claim `no source` and `not assessed`.
+date, the statement, its subjects, places and sources, and in words what it still waits
+for: `suggested`, `refuted`, and for a Claim `no source` and `not assessed`. A link
+column no entry of the window fills is left out. An instant reads on the axis's clock,
+which the column heading names (`Date · Kyiv time`), so the list and the ruler agree
+about the hour; a day reads as it was stated, with its zone.
 The entry under the pointer lights both its mark and its row, picking a mark brings its
 row into the list without moving the axis, and a row opens with Enter and walks with the
 arrow keys. **Plot** and **List** say which of the two gets the room, and that is what a
@@ -1214,16 +1245,32 @@ tab-separated block a spreadsheet reads back as columns (`date_as_written`,
 `earliest_utc`, `latest_utc`, `statement`, `subjects`, `places`, `sources`,
 `confidence`, `status`). A frozen view copies what it froze.
 
-The Timeline opens on two tracks. **Events** holds the dates the analyst stated: Claims,
-including a proof's date and a kept Detect pin. **Media** holds the dates of the files
-the case collected and, like the Media Library, holds back the working files the case
-made itself (frames, captures, collages, Compare renders), which would otherwise bury
-the rest. **Include working files** in a track's editor lets them in. A saved view keeps
-the tracks it was saved with. A row handed over from a file's Time tab adds the track
-that holds it first, and lets a working file onto it. When the axis is empty, it says
-how many file dates the tracks leave out, and **Show them** puts them on. **Track** adds editable
-presets for Events, Person, Place, Media, Sources and Case activity, using labels from
-the entity registry. **Custom** opens the shared Search+ builder, then states whether
+The Timeline opens on two tracks. **Media** holds the sources' pictures and videos
+where the analyst dated them, and nowhere else. A file is dated by the date typed on a
+proof (stated for the footage it rests on), by a correction, or by an event about the
+file or citing it. Each of those is a Claim, and the lane draws it as that file, with
+its name and picture, where the analyst put it (`as_files: "sources"`, `file` on the
+row). Picking it opens the event, and a click on the lane creates nothing, since there
+is no file to tie a new event to. What Inspect cut from a source (a frame, a collage)
+counts as the source's. **Events** holds every Claim as its sentence, a kept Detect pin
+among them. A proof's own date is not drawn beside the Claim it wrote for its footage
+while the two say the same date, so a proof dated once is one mark.
+
+Two more lanes are added from `⋯` on purpose. **Imagery** is the Media lane for what
+the app pictured from above: satellite captures, map screenshots, Compare renders and
+the pictures Detect keeps (`as_files: "imagery"`, the `FROM_ABOVE` routes). An event
+about a video that cites a render is the video on one lane and the render on the
+other. **File dates** holds what each file the case collected says about itself: the
+camera's clock, the day a picture was taken from orbit, the post's date. That is a clue
+rather than a finding, and a post's date is rarely when anything happened, so none of
+it is drawn by default. Like the Media Library, it holds back the working files the
+case made itself (frames, captures, collages, Compare renders). **Include working
+files** in a track's editor lets them in. A saved view keeps the tracks it was saved
+with. A row handed over from a file's Time tab adds the track that holds it, and lets
+a working file onto it. When the axis is empty, it says how many file dates the tracks
+leave out, and **Show them** puts them on. `⋯` adds editable presets for Events, Media,
+Imagery, Person, Place, File dates, Sources and Case activity, using labels from the
+entity registry. **Custom** opens the shared Search+ builder, then states whether
 that question matches the entry itself, its subject, place, evidence, or any of those
 connections. Category and time-role filters remain separate from that question.
 
@@ -1231,7 +1278,8 @@ Each track shows its name over two lines before the ellipsis, and hovering it na
 categories and the Search+ question the lane was filled from. A track can be given a
 **colour**: left on **Auto** its entries keep the category colours the legend explains,
 and a chosen colour wins for that track alone. Each track has one reorder grip and a
-fold control. Dragging the grip changes its
+fold control; the grip and the edit, duplicate and delete buttons come with the pointer,
+and a count shows only where the lane holds something. Dragging the grip changes its
 position; `Alt` with an arrow key provides the same action. The track menu can rename,
 duplicate or delete it. Selecting an entry exposes **Pin in track** and **Hide from
 track** in the inspector. Pinning keeps an entry out of density overflow, while hiding
@@ -1254,7 +1302,7 @@ through Trash, restored and carried in a complete case bundle.
 
 **The entry line sits under the axis**, outside a snapshot, and is where a new entry
 is written (see *The entry line* below). A track that includes Claims can date it;
-Media-only and Case activity tracks cannot. Clicking empty space puts a point on the
+File dates and Case activity tracks cannot. Clicking empty space puts a point on the
 line's date and moves to its sentence; dragging puts a bounded range. Nothing opens
 over the axis. When the entry lands somewhere the reading does not show, the toast says
 where: no Events track shown (**Show** adds one), outside the window (**Go there**), or
@@ -1265,17 +1313,20 @@ click on a decade does not claim a day. Date-only Claims support the same confir
 and intervals expose both resize edges. Every direct write shows the old and new
 values before saving.
 
-Selecting an entry opens a fixed-width inspector without changing the axis geometry.
-**A file is shown at its top**: the picture, the video ready to play or the sound, for
-a file's own date and for an event citing one, with the list's thumbnail as its first
-frame and one press to full screen. Below it, the readable and raw date, precision,
-timezone, authority, role, status, confidence, reasoning and named subjects, places
-and evidence. Statements can be
+Selecting an entry opens the inspector beside the axis; with nothing picked there is
+none, and the axis has the width. It is headed the way the entry's track is, **Event**
+or **File date**. **A file is shown at its top**: the picture, the video ready to play
+or the sound, for a file's own date and for an event about or citing one, the file an
+event is *about* first (a proof's date shows the footage, not the proof), with the
+list's thumbnail as its first frame and one press to full screen. Below it, the date on
+the axis's clock with the value as stated under it, one way to change it, reasoning and
+named subjects, places and evidence. How the date is held (the raw value, precision,
+timezone, authority, role, status) is folded under **About this date**. Statements can be
 edited there. **Right-clicking an entry** — on the axis, in the list or in either
 holding queue — names the same four acts where the pointer is: pin, hide, Details and
 Edit claim. It changes no selection, so a pair being measured survives it, and the
 two lane acts follow the inspector's rule of appearing only for an entry that has a
-lane. A media date offers **Add correction**, prefilled from the intrinsic
+lane. A media date offers **Correct this date**, prefilled from the intrinsic
 date; saving creates a sourced Claim about the media and does not rewrite its sidecar.
 The Details view keeps Claim time fields in **Time**, not **Info**. `Open in Timeline`
 applies a visible entity chip that can be cleared in one click.
@@ -1296,9 +1347,7 @@ other Claims.
 
 ### One period, four surfaces
 
-**Open in** ends the track row, not the boundaries menu: a window is set rarely and
-asked of the other surfaces often, so the three targets stay one click away while the
-header keeps the window alone in its middle column. Board and Graph receive it
+**Open this period in**, under `⋯`, hands the window to Board, Graph or Map. Board and Graph receive it
 as a **fact-time** filter and say so in a bar above the answer, with the way back to
 Timeline and Map and a Clear. That filter is the question, so it narrows the page, the
 totals and a saved view alike, and it never touches `since`/`until`, which ask when a
@@ -1444,12 +1493,30 @@ yet, under its default name.
 
 **A collage is a document.** New starts an empty canvas, filed once the first piece
 lands; the name in the header renames it and refuses a name another collage holds.
-Pieces come from **Frames**, the works of any file grouped by file, or **Images**,
-any case image. A piece is a recipe frozen when it is placed, so editing the frame
-later does not change the collage. A piece still rendering holds its place with a
-spinner. A renamed file is followed; a piece whose file was deleted keeps its place
-as a hatched gap, and the export waits until it is removed. The export is a
-transparent PNG of the pieces trimmed to their bounds.
+Pieces come from **Frames**, the works of any file with the files last worked on
+first, or **Images**, any case image with the last added first. Each file shows its own
+thumbnail, one unfolds at a time, a search box beside the tabs narrows either list, and
+the list scrolls on its own so the controls below it stay in reach. A piece is a recipe
+frozen when it is placed, so editing the frame later does not change the collage. A
+piece still rendering holds its place with a spinner. A renamed file is followed; a
+piece whose file was deleted keeps its place as a hatched gap, and the export waits
+until it is removed. The selected piece is named by its file and, for a video, the time
+it was cut at.
+
+**The export keeps full resolution without a setting.** It is a transparent PNG of the
+pieces trimmed to their bounds, enlarged until the sharpest piece is back at its own
+pixels, however small it sits on the canvas. It holds under 8192 px a side and 40
+megapixels in all, and the size it will have is written under Save to case.
+
+**The list shows what each collage holds.** The start page lays the collages out as
+cards and the Collages window as rows, each with a preview. The tool draws the preview
+itself once the pieces are in and the layout has settled, and files it beside the
+collage, so it follows a rename and the Trash and travels in a bundle. Entity pickers
+show the same picture. A collage with no preview yet shows its pieces'
+outlines. A small green check means the picture it exports is in the case as the
+layout stands. Once there are two, a search box narrows the list to the names holding
+every word typed, whatever their accents. **Close** in the header of an open collage waits
+for the last save and goes back to the list; a save that failed keeps it open.
 
 **0.3.0 sessions come over on open.** The sessions of one file merge into its work:
 frames are joined, the latest session carries on, typed names and notes are kept in
@@ -1513,15 +1580,20 @@ each one small from the tile proxy, priced before it is pressed and cached once
 read, and a view that moved says so rather than refreshing on its own.
 
 Difference opens no column: its strip joins the view's own controls in the footer
-under the stage, and its full settings open above that strip only from the gear.
-The strip keeps one width through a read, so the panel hanging from it stays put
-and the gear never moves. **Read** says what the reading is doing on the button
+under the stage, and its full settings open from the gear in a panel docked on
+the stage's right edge, under B's card. The panel lies over map B rather than
+narrowing the maps, since a narrower view would fetch Sentinel-2 bands again;
+it takes the glass of the map's floating panels (88% and a light blur), and the
+search, camera chip and legend step left of it. Read keeps one width through a
+read, so the gear never moves. **Read** says what the reading is doing on the button
 itself: amber **Read** when pressing it is the next move, **Reading…**,
 **Loading…** while map tiles are still coming in, and a disabled **Up to date**
 when nothing moved since the last read. The map legend says the same in words
 ("out of date, press Read"). A reading waits for tiles to finish instead of
 failing on them. The panel
-lies over the highlights and closes on Escape or a press anywhere outside it.
+lies over the highlights and stays open while the map pans or zooms, since
+tuning is watching them answer; the gear, its close button or Escape put it away,
+and it opens closed each time Difference comes on.
 
 **Difference** checks that the sources can be compared before it runs.
 Colour, structure and brightness methods read captured pixels in a worker.
@@ -1808,8 +1880,8 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   layer`. The line between the two is *who chose it*: the stack above is the
   app's, this one is the analyst's. A row here carries four things a curated row
   has no use for — where it came from, how fresh what is drawn actually is, a
-  legend that filters, and Refresh and Remove. See
-  **Added map layers** below.
+  legend that filters, and Refresh and Remove. Its rows are the map's stack,
+  top first. See **Added map layers** below.
 - **The picture** — the provider, the Sentinel-2 layer and date, when the pixels
   were taken, the eco and usage pills, and the compass — belongs to the
   *surface*, in its own top-right corner. Which imagery is on screen is a
@@ -1980,7 +2052,19 @@ layer is labelled on the map; a feature's name is in the hover and in the card.
 Far out, where the marks would be a solid mat, the map keeps only those that fit
 and draws the rest as dots, so a dense layer never looks emptier than it is.
 
-**Refresh and Remove** sit under the row. A followed map is re-read
+**A row opens folded to one line**: the switch, the name, and Refresh and
+Remove as icons, Refresh only on a followed map. Unfolding it shows where it came
+from, how fresh it is, the counts, the time strip and the legend. A folded row
+still says when its copy is stale, with its name in the warning colour and a
+mark beside it. Every row starts folded on every visit, except the one just
+added. **The list is the stack**: the first row draws on top, and the grip left
+of the switch drags a row to another place, or moves it one place with the arrow
+keys. The order is kept on each layer, and a new layer lands on top. Added
+layers stay above the app's own overlays whatever their order. The section head
+carries one more Refresh, for every followed layer at once, read one after the
+other with a single toast at the end.
+
+A followed map is re-read
 when it is added, when Refresh is pressed, and the first time it is switched on
 after the app or the page opens — never on a timer, and never while it is
 switched off. **Every added layer starts off** when the app or the page opens
@@ -2277,12 +2361,11 @@ the ruler clears them all. Measures are a scratch aid and are not saved. Taking
 the ruler up lets go of an area or a candidate being drawn, and drawing one puts
 the ruler down.
 
-The right dock has Routines, Saved and Areas tabs, with New detection always at
-the top. The tabs name their own list, so nothing is titled twice, and a second
-row appears only inside a routine, a review, the wizard or the library, where it
-carries Back. **Analyzers** sits at the end of the tab row, then **Full screen**,
-which gives Detect the whole screen with its dock. Its toggle or the `]`
-key collapses the dock to an icon rail; pressing a tab reopens it and resizes the
+The right dock has a Detect heading with collapse, **Analyzers** and **Full screen**
+controls. Routines, Saved and Areas sit in a tab row below it, with New detection
+at the top of the content. A second heading appears inside a routine, review,
+wizard or library, where it carries Back. Full screen includes the dock. The
+collapse button or `]` reduces the dock to an icon rail; pressing a tab reopens it and resizes the
 map. Detect's basemap, overlays, saved-work visibility and collapsed state are
 viewer preferences carried by Settings → Backup. **Watched areas** is a row of the
 map's own layer list, beside Saved work.
@@ -2304,6 +2387,21 @@ area at once, and deletes. Deleting an area used by a routine lists the routines
 that must release it first. A routine and a one-off run can share an area.
 Older routines migrate their embedded zones to shared areas on first read.
 
+Areas can be put in several named groups without copying their geometry. The
+Areas tab lists groups in a saved order, folds each one, searches through folded
+groups and keeps areas with no membership under **Ungrouped**. Dragging a group
+or an area changes its displayed order; dragging an area to another group moves
+that membership. The dragged row fades, a rule marks its insertion point, and
+the destination group lights up. Its menu can add the same area to another
+group, move it or change the order without dragging. Folding a group does not
+hide map outlines.
+Removing a group leaves its areas in the case. Older saved area sets become
+groups on first read: shared outlines are reused, while temporary drawings and
+outlines that have changed since the set was saved become shared areas with
+their saved shapes. If a shared area's current outline differs from the saved
+one, Areas asks which shape the group should use; Where holds that group until
+the choice is made. Both areas remain in the case after the choice.
+
 The list holds two kinds, and **New detection** asks which before asking anything
 else, because the answer changes every question after it:
 
@@ -2314,15 +2412,18 @@ else, because the answer changes every question after it:
   and showing frames the ground it covers. The layers button beside them snapshots
   what was kept or pinned into a SAT layer, a routine's heading into its one layer;
   a run with nothing kept says so and stays greyed. A change spans its two passes
-  in that layer, so its date filter finds it in any period between them. A group folds shut from its heading.
+  in that layer, so its date filter finds it in any period between them. A group
+  folds shut from its heading; its colour square changes the routine's colour
+  and its saved map overlays. A one pass has its own small colour square, which
+  changes that run's saved map overlay.
 - a **routine** is a place you come back to. It keeps its areas, its analyzer and
   what each pass compares against; it is run again whenever there is a new pass,
   and it remembers what it found.
 
 A routine's card carries what it is for, its analyzer, its areas, its rule and
 where its last run stands: the day of the pass it swept and how many candidates
-are still to review, or how far a working one got. The play button opens the launch
-table, **Run all** queues idle routines with their saved rules, and the title
+are still to review, or how far a working one got. The play button opens dates
+in the dock, **Run all** queues idle routines with their saved rules, and the title
 opens the routine's own page. **Analyzers** is where the things a detection looks
 for are made.
 
@@ -2333,9 +2434,13 @@ Areas tab. Hovering a routine draws its areas heavier.
 A routine's page leads with **Findings**: every candidate it has kept, as a pin or
 just here, newest run first, each marked **Pinned** or **Kept here** and a press
 away from the evidence it came from. **Runs** beside it lists its passes, each
-opening its own review. **Run routine** opens a floating table with a row for each
-area, its A and its B (the newest pass by default), each read and written as the
-app's own day-first date field. One button queues the run, naming what it covers.
+opening its own review. Opening any run shows only that run's saved overlay;
+Back restores the saved eye states from before the review. **Run routine** opens dates in the right dock, with A and B
+for every area. B is the newest eligible pass by default. **The pass before**
+takes A from that area's last completed pass; the first run uses its chosen A.
+Only areas with a newer eligible B are queued. If every area is current, no run
+is created. The dock resizes from its left edge between 300 and 720 pixels,
+while keeping room for the map.
 The page also offers **Export as layer**, editing and deletion.
 
 Either kind is built one step at a time: **Where**, **What**, **When**, then
@@ -2352,33 +2457,35 @@ the result before anything is fetched: ground area, native tiles, Copernicus
 requests and roughly how long. Each date costs two requests a tile, the picture
 reviewed and the bands measured. A radar vessel sweep adds one for the Sentinel-2 water
 classification it is judged against. One-off drawings stay temporary unless **Save as area** is pressed;
-saving a routine promotes its drawings. Legacy area sets remain readable. An area is grabbed by its edge: dragging inside
+saving a routine promotes its drawings. In **Where**, the same groups select
+their current areas in one press, without duplicates, and ungrouped areas stay
+available on their own. A selection can be saved as a group; temporary drawings
+become shared areas first. A routine keeps the areas selected when it was saved,
+so later group edits do not change its scope. An area is grabbed by its edge: dragging inside
 one pans the map as it would anywhere else, a click on the edge shows its corner
 handles, and a press that does not travel selects without nudging the geometry.
 Handles and outlines are projected from the ground, so they stay on it through a
 pan, a zoom or a turn.
 
-**When** asks its questions in the order they are decided, in the step itself. A
-change names **A**, the picture before, and **B**, the one to look in; B is the
-newest pass under the cloud ceiling, and its button names the ceiling (**Newest
-pass under 30% cloud**), since it is not always the newest pass there is. Once
-the passes are found, the line under it names the day it takes and the newer ones
-it steps over, each with its cloud. The ceiling's slider, 30% to start, sits
-wherever the newest pass is taken: under that button, and under a routine's
-question. Above 30% it warns that the pass taken can be mostly cloud. **A day I
-choose** asks for one, and a chosen day is read whatever its cloud: the ceiling
-only picks the newest pass, and ground under cloud is left out pixel by pixel.
-The map shows a chosen day whole, as the run reads it, and its chip adds the
-tile's cloud when that is over 30%. Vessels and hotspots read one image and
-ask only that. A routine names no B: it asks what each run compares the newest pass with,
-**The pass before** (what changed since the last run; A serves the first run only)
-or **A fixed picture** (everything changed since that day), and a one-image routine
-asks nothing but its cloud ceiling, with its picture under **Picture**. The slot still missing is tinted,
-and the reason is written under the Next button. **Passes over the area** lists
-what exists right under the question, each row with its A and B buttons, and a
-typed day works too. One choice stands for every area; **Set them per area…**
-opens the per-area table for areas far enough apart to sit under different swaths,
-and the step then lists each area's days. When the two days see the sun at very
+**When** asks its questions in the step itself. A change names **A**, the picture
+before, and **B**, the one to look in. B is the newest pass under the cloud ceiling
+set in **What**, below target size. After a pass lookup, the step names the chosen
+day and any newer passes skipped for cloud, with their cloud percentage and limit.
+**Date A** and **Date B** each open a calendar of available passes for that area.
+Days without a pass or outside A-before-B order cannot be selected; optical pass
+days show cloud cover, and radar days with multiple passes offer their times. A
+chosen B is read whatever its cloud: the ceiling only picks the newest pass, and
+ground under cloud is left out pixel by pixel. **Use newest pass** returns B to
+automatic selection. Selecting A or B shows that image on the map at left,
+framed on its area. The map chip names the area and side. Vessels and hotspots
+read one image.
+A routine names no B: it asks what each
+run compares the newest pass with, **The pass before** (A serves the first run
+only) or **A fixed picture**. For multiple areas, each area has its own visible
+pass picker and dates; **Find passes** opens directly below that area's dates,
+and a lookup selects and previews passes for that area. The
+slot still missing is tinted, and the reason is written under the Next button.
+When the two days see the sun at very
 different heights, the step says how long a 10 m building's shadow is on each: past
 half a pixel of difference most buildings read as changed, as a January and a
 September pass over an airbase showed. The last step reads the choice back in
@@ -2389,16 +2496,17 @@ a track, so the rows on the other track are closed to the pair. A day typed by
 hand is pinned to the pass on the other side's track at launch, and an automatic
 pass is looked for on the reference's track.
 
-**Find passes** explicitly asks Copernicus about the areas and counts one request
-a catalogue page against its quota, which is one for most windows. The picker
-shows coverage over all of them and the cloud of each pass's 110 km tile, so a
-small area can be clearer or cloudier than its row says. It looks 30 days, 90
-days or a year back, or under **Dates…** between two days picked in a calendar
-that starts at the satellite's launch. The catalogue answers newest first and a
+Typing a date remains available inside each open calendar. **Find passes**
+explicitly asks Copernicus about the areas
+and counts one request a catalogue page against its quota, which is one for
+most windows. The list shows coverage over all of them and the cloud of each
+pass's 110 km tile, so a small area can be clearer or cloudier than its row
+says. It looks 30 days, 90 days or a year back. The catalogue answers newest first and a
 lookup reads up to five pages, so a list it still cut short offers **Older
 passes**, one more lookup for the ones before the oldest listed. At launch, each area independently resolves its latest usable pass
 under the cloud ceiling. Different tracks can therefore use different days.
-An unresolved area fails by name without stopping the rest. Opening Detect reads
+A cloudier newest pass is reported as skipped. An unresolved area fails by name
+without stopping the rest. Opening Detect reads
 local state only; pass lookups happen only on request or during an explicit run.
 
 **What** picks the analyzer from a list grouped by what it looks for — vessels,
@@ -2758,6 +2866,16 @@ the field rather than over it, and it opens on the day the field holds — else 
 month a looser answer named. A month, a range or a mark of doubt is still typed:
 those are not days, and a calendar has no way to offer them.
 
+**A date is read on a clock, and the field names it.** Under a set date, **Clock**
+defaults to *At the point*: the first point's zone, looked up from the bundled
+boundaries, with its offset on that day under it (`UTC+02:00 on that day`), and the
+date's reading names the zone rather than *local time*. So the 12th is Kyiv's 12th
+on the Timeline, from its midnight, and a typed `14:30` is placed on Kyiv's clock
+without being rewritten. **UTC** or **Other zone…** (a named zone, typed to narrow)
+override it. Left at the point, the zone follows the point on every save; with no
+point yet the field says the day is read in UTC. The entity and the footage's Claim
+carry the zone as `when_zone`, which Details also edits.
+
 **Nothing ever fills it in**, unlike the coordinates and the sources beside it. The
 date a file carries is when it was uploaded, or what a camera clock said; neither is
 when the thing happened, and a date offered is a date accepted without being read. So
@@ -2972,6 +3090,34 @@ under `media/.dl/`, which bundles skip and the Doctor ignores; closing the dialo
 deletes it, and one left behind goes when the next import opens. What Create
 writes is a normal proof: it lists, travels in a bundle, and reopens in the
 composer as a composition to annotate — one panel per picture taken.
+
+## Geo Report templates
+
+Settings → Templates lists the thread layouts, made there and nowhere else: the
+composer offers no "save as template". A layout is a body of tokens (`#place`,
+`#pluscode`, `#coordinates`, `#description`, `#mention`, `#source`, `#date`) and
+plain text. A token with no value drops its line. `#date` is the date the proof
+states, and the composer shows its Date field only when the layout uses it. It is
+filled from the proof as the case stores it (`2024-03-12`, `2024-03~`), the same in
+any language; a time says its clock as an offset on that day
+(`2024-07-12 14:30 UTC+3`). A proof with no date leaves it empty and says so, and the
+line drops. A token ends where its word does, so a `#dates` or `#placement` hashtag
+stays text.
+
+- **New** offers **Start from**: Classic, Coordinates only, Short, With date. Each
+  replaces the body and nothing else. A copy does not offer it.
+- **Duplicate** is on every template, proof or post, and opens an unsaved copy named
+  "… copy". Nothing is stored until Save; the 50-per-kind cap answers there.
+- **The preview** fills the layout with a sample or with **Open post**, the post in
+  the composer (off while it is empty). The template's own mention wins in both, and
+  no mention drops the line. Under it, one count per platform, X and Bluesky, red
+  past the limit.
+- **A word one edit from a token** (`#coordinate`) would go out as text, so it is
+  named under the layout with **Fix**, which mends every copy of it.
+- **Default** is the bookmark button on a post row. A blank composer opens on that
+  template without a toast, and its **Remove** goes back to the classic layout for
+  that draft only. Pressing the bookmark again clears it; deleting the template does
+  too. It is a setting, so the Settings backup carries it.
 
 ## Sheet
 

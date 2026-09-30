@@ -1550,6 +1550,235 @@ def test_the_stated_date_shows_on_the_file_it_is_about(client):
     assert "taken_at" not in item
 
 
+def test_a_proofs_date_is_drawn_once_on_the_timeline(client):
+    """The date is the footage's, stated by a Claim that cites the proof. While that
+    Claim says the proof's date, the proof's own row would be the same date twice."""
+    cid = client.post("/api/cases", json={"name": "Drawn once"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}},
+    )
+
+    def statements():
+        page = client.get(
+            f"/api/cases/{cid}/timeline", params={"categories": "statement"}
+        ).json()
+        return page["total"], [(row["kind"], row["raw"]) for row in page["items"]]
+
+    assert statements() == (1, [("claim", "2024-03-11")])
+
+    # Restated by hand, the Claim is the analyst's own reading and no longer the
+    # proof's date, so the two are two dates again and both are drawn.
+    claim = _claims(cid)[0]
+    client.patch(f"/api/cases/{cid}/timeline/claims/{claim['id']}", json={"when": "2024-03-12"})
+    total, rows = statements()
+    assert total == 2
+    assert sorted(rows) == [("claim", "2024-03-12"), ("taken", "2024-03-11")]
+
+
+def test_the_event_a_proof_dates_names_the_footage_it_puts_in_time(client):
+    """The Timeline's Media lane draws a file where an event dates it: the event says
+    which file, the one it is about before the proof it cites."""
+    import json as json_module
+
+    cid = client.post("/api/cases", json={"name": "Situated footage"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}},
+    )
+    media = next(e for e in graph_read.entities(cid) if e["type"] == "media")
+    page = client.get(
+        f"/api/cases/{cid}/timeline",
+        params={"category": "statement", "track": json_module.dumps({"as_files": "sources"})},
+    ).json()
+
+    [row] = page["items"]
+    assert row["kind"] == "claim"
+    assert row["file"]["id"] == media["id"]
+    assert row["file"]["type"] == "media"
+    assert row["file"]["label"] == media["label"]
+
+
+def test_the_media_lane_holds_the_sources_and_the_imagery_lane_what_was_seen_from_above(client):
+    """A Compare render or the picture Detect keeps is not a source's footage: the
+    events that date one are drawn on the Imagery lane, and only there. An event about
+    a video that cites a render is the video on one lane and the render on the other."""
+    import json as json_module
+
+    from azimut.engine import media as media_engine
+
+    cid = client.post("/api/cases", json={"name": "Two file lanes"}).json()["id"]
+    video = _collected_clip(cid)
+    rendered = media_engine.import_image(
+        Case.open(cid), Image.new("RGB", (48, 32), (90, 90, 90)), "render.png",
+        {"type": "compare"}, by="compare",
+    )["item"]["path"]
+    ids = {
+        entity["attrs"]["path"]: entity["id"]
+        for entity in graph_read.entities(cid) if entity["type"] == "media"
+    }
+
+    def claim(statement, **connectors):
+        client.post(
+            f"/api/cases/{cid}/timeline/claims",
+            json={"statement": statement, "when": "2024-03-11", **connectors},
+        ).raise_for_status()
+
+    claim("Seen in the video", about=[ids[video]])
+    claim("A crater in the render", cites=[ids[rendered]])
+    claim("The video's crater", about=[ids[video]], cites=[ids[rendered]])
+
+    def lane(kind):
+        page = client.get(
+            f"/api/cases/{cid}/timeline",
+            params={"category": "statement", "track": json_module.dumps({"as_files": kind})},
+        ).json()
+        return {row["label"]: row["file"]["id"] for row in page["items"]}
+
+    assert lane("sources") == {
+        "Seen in the video": ids[video], "The video's crater": ids[video],
+    }
+    assert lane("imagery") == {
+        "A crater in the render": ids[rendered], "The video's crater": ids[rendered],
+    }
+    # a lane that draws no files names none
+    plain = client.get(
+        f"/api/cases/{cid}/timeline", params={"category": "statement"}
+    ).json()["items"]
+    assert len(plain) == 3 and not any("file" in row for row in plain)
+
+
+def test_a_proofs_date_is_read_on_the_clock_of_its_point(client):
+    """Footage from Kyiv is dated on Kyiv's clock unless the analyst says otherwise:
+    the day spans Kyiv's midnights on the Timeline, for the proof and for the footage."""
+    cid = client.post("/api/cases", json={"name": "Zoned proof"}).json()["id"]
+    video = _collected_clip(cid)
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Kyiv",
+            "spec": {**_with_coords("50.4501, 30.5234", None, video), "when": "2024-03-12"},
+        },
+    ).json()
+
+    assert saved["when_zone"] == "Europe/Kyiv"
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert proof["attrs"]["when_zone"] == "Europe/Kyiv"
+    assert _claims(cid)[0]["attrs"]["when_zone"] == "Europe/Kyiv"
+    rows = client.get(
+        f"/api/cases/{cid}/timeline", params={"categories": "statement"}
+    ).json()["items"]
+    assert {(row["earliest"], row["tz"]) for row in rows} == {
+        ("2024-03-11T22:00:00.000000Z", "Europe/Kyiv"),
+    }
+
+    # Left at the point's, the spec keeps no pick, so moving the point moves the zone.
+    spec = client.get(f"/api/cases/{cid}/proofs/Kyiv").json()
+    assert spec.get("whenZone") is None
+    assert spec["whenZoneStated"] == "Europe/Kyiv"
+
+
+def test_a_proof_date_read_in_another_zone_than_its_claim_is_drawn_twice(client):
+    """The footage's Claim moved to UTC's day no longer says what the proof says,
+    so the proof's own Kyiv day comes back beside it."""
+    cid = client.post("/api/cases", json={"name": "Two clocks"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Kyiv",
+            "spec": {**_with_coords("50.4501, 30.5234", None, video), "when": "2024-03-12"},
+        },
+    )
+    claim = _claims(cid)[0]
+    moved = client.patch(
+        f"/api/cases/{cid}/timeline/claims/{claim['id']}", json={"when_zone": "UTC"}
+    )
+    assert moved.status_code == 200, moved.text
+
+    rows = client.get(
+        f"/api/cases/{cid}/timeline", params={"categories": "statement"}
+    ).json()["items"]
+    assert sorted((row["kind"], row["tz"]) for row in rows) == [
+        ("claim", "UTC"), ("taken", "Europe/Kyiv"),
+    ]
+
+
+def test_a_time_typed_on_the_proof_is_placed_once_its_zone_is_known(client):
+    cid = client.post("/api/cases", json={"name": "Local clock"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Clock",
+            "spec": {**_with_coords("50.4501, 30.5234"), "when": "2024-07-12T14:30:00"},
+        },
+    )
+
+    rows = client.get(
+        f"/api/cases/{cid}/timeline", params={"categories": "statement"}
+    ).json()["items"]
+    assert [(row["earliest"], row["zone"]) for row in rows] == [
+        ("2024-07-12T11:30:00.000000Z", "named"),
+    ]
+
+
+def test_the_analyst_can_state_the_proofs_date_in_utc_instead(client):
+    cid = client.post("/api/cases", json={"name": "UTC proof"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Stamp",
+            "spec": {**_with_coords("50.4501, 30.5234"), "when": "2024-03-12", "whenZone": "UTC"},
+        },
+    )
+
+    spec = client.get(f"/api/cases/{cid}/proofs/Stamp").json()
+    assert spec["whenZone"] == "UTC"
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert proof["attrs"]["when_zone"] == "UTC"
+
+    refused = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Stamp", "spec": {**SPEC, "when": "2024-03-12", "whenZone": "Mars/Base"}},
+    )
+    assert refused.status_code == 422
+
+
+def test_a_zone_set_in_details_opens_as_the_analysts_pick(client):
+    cid = client.post("/api/cases", json={"name": "Zone from Details"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Kyiv", "spec": {**_with_coords("50.4501, 30.5234"), "when": "2024-03-12"}},
+    )
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    patched = client.patch(
+        f"/api/cases/{cid}/entities/{proof['id']}", json={"attrs": {"when_zone": "Europe/Warsaw"}}
+    )
+    assert patched.status_code == 200, patched.text
+
+    spec = client.get(f"/api/cases/{cid}/proofs/Kyiv").json()
+    assert spec["whenZone"] == "Europe/Warsaw"
+    assert spec["whenZoneStated"] == "Europe/Warsaw"
+
+
+def test_a_proof_with_no_point_keeps_a_utc_day_and_no_zone(client):
+    cid = client.post("/api/cases", json={"name": "Nowhere yet"}).json()["id"]
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Undated place", "spec": {**_panels(), "when": "2024-03-12"}},
+    ).json()
+
+    assert saved["when_zone"] is None
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert "when_zone" not in proof["attrs"]
+    rows = client.get(
+        f"/api/cases/{cid}/timeline", params={"categories": "statement"}
+    ).json()["items"]
+    assert [row["earliest"] for row in rows] == ["2024-03-12T00:00:00.000000Z"]
+
+
 def test_a_satellite_capture_is_never_dated_by_the_proof(client, sat_tiles):
     cid = client.post("/api/cases", json={"name": "Reference imagery"}).json()["id"]
     cap = _sat(client, cid, 50.4501, 30.5234)

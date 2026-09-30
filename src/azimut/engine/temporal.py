@@ -4,13 +4,20 @@ Reduced dates, date intervals and their final qualifiers follow EDTF's familiar
 surface. Exact timestamps follow ISO 8601. This module deliberately implements
 neither full EDTF nor timestamp intervals: every accepted value must yield honest,
 exclusive search bounds, or be marked as a local value that cannot join a UTC axis.
+
+A value may be stated in a named zone, stored beside it rather than inside it. A civil
+date then spans that zone's days: the 12th of March in Kyiv starts two hours before
+the 12th in UTC, and reading it as UTC's would put the event on the wrong side of a
+satellite pass. A local timestamp gains its bounds the same way.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 import re
+
+from .localtime import known_zone, zone_info
 
 
 class TemporalError(ValueError):
@@ -29,6 +36,10 @@ class TemporalEndpoint:
     approximate: bool
     zone: str
     sortable: bool
+    #: The IANA zone the bounds were read in, when the value was stated in one and
+    #: the endpoint left it room to apply: a `Z` or an offset already says where
+    #: it stands.
+    tz: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +90,10 @@ class TemporalValue:
     def sortable(self) -> bool:
         return self.start.sortable and bool(self.end is None or self.end.sortable)
 
+    @property
+    def tz(self) -> str | None:
+        return self.start.tz or (self.end.tz if self.end is not None else None)
+
 
 _DATE = re.compile(
     r"(?P<year>\d{4})"
@@ -93,21 +108,28 @@ _TIMESTAMP = re.compile(
 )
 
 
-def parse_temporal(raw: object) -> TemporalValue:
+def parse_temporal(raw: object, *, tz: str | None = None) -> TemporalValue:
     """Parse one supported temporal value without rewriting what the analyst typed.
 
     Bounds are half-open: ``earliest`` is inclusive and ``latest`` is exclusive.
     A reduced month therefore ends at the start of the next month, and a timestamp
     written to seconds ends one second later. Local timestamps remain valid but have
     no UTC bounds until a timezone is known.
+
+    ``tz`` is the IANA zone the value was stated in. Dates are then bounded by that
+    zone's midnights, across a daylight-saving change included, and a local
+    timestamp is read on its clock. Without it a date spans UTC's days, as it always
+    has, so a value stored before zones existed keeps its place.
     """
     if not isinstance(raw, str):
         raise TemporalError("a temporal value must be text")
     if not raw or raw != raw.strip():
         raise TemporalError("a temporal value cannot be empty or padded with spaces")
+    if tz is not None and not valid_zone(tz):
+        raise TemporalError("the timezone is not one this installation knows")
 
     if "/" not in raw:
-        return TemporalValue(raw=raw, start=_parse_endpoint(raw))
+        return TemporalValue(raw=raw, start=_parse_endpoint(raw, tz))
 
     if raw.count("/") != 1:
         raise TemporalError("an interval must contain exactly two dates")
@@ -119,14 +141,24 @@ def parse_temporal(raw: object) -> TemporalValue:
     timestamps = bool(_TIMESTAMP.fullmatch(start_raw) and _TIMESTAMP.fullmatch(end_raw))
     if not dates and not timestamps:
         raise TemporalError("an interval needs two dates or two timestamps")
-    start = _parse_date(start_raw) if dates else _parse_timestamp(start_raw)
-    end = _parse_date(end_raw) if dates else _parse_timestamp(end_raw)
+    start = _parse_date(start_raw, tz) if dates else _parse_timestamp(start_raw, tz)
+    end = _parse_date(end_raw, tz) if dates else _parse_timestamp(end_raw, tz)
     if start.earliest is None or end.earliest is None:
         raise TemporalError("a timestamp interval needs a timezone on both bounds")
     upper = end.latest if dates else end.earliest
     if upper is None or start.earliest >= upper:
         raise TemporalError("an interval cannot end before it starts")
     return TemporalValue(raw=raw, start=start, end=end)
+
+
+def valid_zone(name: object) -> bool:
+    """Whether ``name`` is an IANA zone a value can be stated in here.
+
+    Checked before it is stored, not only when it is read: a name another machine's
+    database held would otherwise leave a value placed on one install and not on
+    the next, with nothing on screen saying why.
+    """
+    return isinstance(name, str) and 0 < len(name) <= 64 and name == name.strip() and known_zone(name)
 
 
 def window_bound(raw: str, *, upper: bool) -> str:
@@ -148,15 +180,20 @@ def window_bound(raw: str, *, upper: bool) -> str:
     return bound
 
 
-def _parse_endpoint(raw: str) -> TemporalEndpoint:
+def _parse_endpoint(raw: str, tz: str | None = None) -> TemporalEndpoint:
     if _DATE.fullmatch(raw):
-        return _parse_date(raw)
+        return _parse_date(raw, tz)
     if _TIMESTAMP.fullmatch(raw):
-        return _parse_timestamp(raw)
+        return _parse_timestamp(raw, tz)
     raise TemporalError("the temporal value is outside the supported date and timestamp profile")
 
 
-def _parse_date(raw: str) -> TemporalEndpoint:
+def _civil(year: int, month: int, day: int, where: tzinfo) -> datetime:
+    """Midnight opening a civil day in a zone, as the UTC instant it is."""
+    return datetime(year, month, day, tzinfo=where).astimezone(UTC)
+
+
+def _parse_date(raw: str, tz: str | None = None) -> TemporalEndpoint:
     match = _DATE.fullmatch(raw)
     if match is None:
         raise TemporalError("date intervals accept dates, not timestamps or open bounds")
@@ -165,25 +202,30 @@ def _parse_date(raw: str) -> TemporalEndpoint:
     month_text = match.group("month")
     day_text = match.group("day")
     qualifier = match.group("qualifier")
+    # Each end is the midnight opening a civil day, never a fixed 24 hours on from
+    # the start: a day that crosses a clock change is 23 or 25 hours long.
+    where: tzinfo = zone_info(tz) if tz else UTC
 
     try:
         if day_text is not None:
             month = int(month_text or 0)
             day = int(day_text)
-            earliest = datetime(year, month, day, tzinfo=UTC)
-            latest = earliest + timedelta(days=1)
+            first = datetime(year, month, day)
+            following = first + timedelta(days=1)
+            earliest = _civil(year, month, day, where)
+            latest = _civil(following.year, following.month, following.day, where)
             precision = "day"
         elif month_text is not None:
             month = int(month_text)
-            earliest = datetime(year, month, 1, tzinfo=UTC)
+            earliest = _civil(year, month, 1, where)
             if month == 12:
-                latest = datetime(year + 1, 1, 1, tzinfo=UTC)
+                latest = _civil(year + 1, 1, 1, where)
             else:
-                latest = datetime(year, month + 1, 1, tzinfo=UTC)
+                latest = _civil(year, month + 1, 1, where)
             precision = "month"
         else:
-            earliest = datetime(year, 1, 1, tzinfo=UTC)
-            latest = datetime(year + 1, 1, 1, tzinfo=UTC)
+            earliest = _civil(year, 1, 1, where)
+            latest = _civil(year + 1, 1, 1, where)
             precision = "year"
     except (OverflowError, ValueError) as exc:
         raise TemporalError("the date is not a valid Gregorian date with representable bounds") from exc
@@ -197,10 +239,11 @@ def _parse_date(raw: str) -> TemporalEndpoint:
         approximate=qualifier in ("~", "%"),
         zone="date-only",
         sortable=True,
+        tz=tz,
     )
 
 
-def _parse_timestamp(raw: str) -> TemporalEndpoint:
+def _parse_timestamp(raw: str, tz: str | None = None) -> TemporalEndpoint:
     match = _TIMESTAMP.fullmatch(raw)
     if match is None:  # guarded by `_parse_endpoint`, useful for direct maintenance
         raise TemporalError("the timestamp is outside the supported ISO profile")
@@ -209,10 +252,10 @@ def _parse_timestamp(raw: str) -> TemporalEndpoint:
     microsecond = int(fraction.ljust(6, "0")) if fraction else 0
     zone_text = match.group("zone")
 
-    tz = None
+    where: tzinfo | None = None
     zone = "local"
     if zone_text == "Z":
-        tz = UTC
+        where = UTC
         zone = "utc"
     elif zone_text:
         offset_hour = int(match.group("offset_hour") or 0)
@@ -222,8 +265,13 @@ def _parse_timestamp(raw: str) -> TemporalEndpoint:
         offset = timedelta(hours=offset_hour, minutes=offset_minute)
         if match.group("sign") == "-":
             offset = -offset
-        tz = timezone(offset)
+        where = timezone(offset)
         zone = "offset"
+    elif tz:
+        # A wall-clock reading with no offset of its own, stated in a named zone:
+        # that zone's clock on that day, summer time included.
+        where = zone_info(tz)
+        zone = "named"
 
     try:
         instant = datetime(
@@ -234,12 +282,12 @@ def _parse_timestamp(raw: str) -> TemporalEndpoint:
             int(match.group("minute")),
             int(match.group("second")),
             microsecond,
-            tzinfo=tz,
+            tzinfo=where,
         )
     except ValueError as exc:
         raise TemporalError("the timestamp is not a valid Gregorian date and time") from exc
 
-    if tz is None:
+    if where is None:
         return TemporalEndpoint(
             raw=raw,
             earliest=None,
@@ -268,6 +316,7 @@ def _parse_timestamp(raw: str) -> TemporalEndpoint:
         approximate=False,
         zone=zone,
         sortable=True,
+        tz=tz if zone == "named" else None,
     )
 
 

@@ -110,7 +110,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
       entity-images/ # private, bounded entity photos and their thumbnails
     .drafts/      # post drafts
     .inspect/     # one Inspect work per file (.v1/ keeps 0.3.0 sessions)
-    .collages/    # collage layouts; the picture is media
+    .collages/    # collage layouts and their previews; the picture is media
     .compare/     # saved Compare session specs
     .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
@@ -285,7 +285,8 @@ temporal projection, schema 16 extends saved analysis views to Timeline recipes
 and snapshots, schema 17 rewrites temporal bounds to fixed microsecond width, and
 schema 18 rebuilds the projection once more, now that a proof's stated date is
 projected beside the dates its files carry. Schema 19 folds the entity and media
-search indexes and adds subject merge redirects and undo records. These changes share
+search indexes, adds subject merge redirects and undo records, and gives the temporal
+projection a `tz` column for the zone a value was stated in. These changes share
 one migration from released schema 18; the case manifest stays at 11.
 The schema counter is independent of the JSON `CASE_SCHEMA`: the
 manifest's `azimut.storage` field selects the backend, and each format counts its own
@@ -391,7 +392,8 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
 `temporal_items`
 : Rebuildable, homogeneous rows for dated Claims, intrinsic media dates and case
   activity. Each row keeps the raw value beside normalized half-open bounds,
-  precision, timezone and uncertainty flags. Claims in `entities.attrs`, indexed
+  precision, timezone kind, the named zone it was stated in (`tz`) and uncertainty
+  flags. Claims in `entities.attrs`, indexed
   media sidecars and entity provenance remain authoritative. Deleting this table's
   contents and running `rebuild_temporal_projection()` recreates the same rows.
   Window/category/owner indexes let Time and Timeline page without scanning entity

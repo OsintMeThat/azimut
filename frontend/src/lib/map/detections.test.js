@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   detectionsWithRuns,
   isActive,
+  routineMatches,
   ruleLabel,
   runDays,
   runState,
@@ -79,5 +80,19 @@ describe('what a row says', () => {
     expect(settledMessage(run('r', 'w')).text).toBe('Harbour: nothing passed the thresholds');
     expect(settledMessage({ title: 'Harbour', status: 'failed', message: 'offline' }).kind).toBe('warn');
     expect(settledMessage({ title: 'Harbour', status: 'cancelled' })).toBe(null);
+  });
+});
+
+describe('routineMatches', () => {
+  const routine = { title: 'Port de Tartous', note: 'Quai nord, jetée', analyzer: 'Vessels by radar' };
+  it('finds a routine by any word of its title, note or analyzer, accents and case aside', () => {
+    expect(routineMatches(routine, 'tartous')).toBe(true);
+    expect(routineMatches(routine, 'JETEE')).toBe(true);
+    expect(routineMatches(routine, 'radar port')).toBe(true);
+    expect(routineMatches(routine, '  ')).toBe(true);
+  });
+  it('needs every word', () => {
+    expect(routineMatches(routine, 'radar airbase')).toBe(false);
+    expect(routineMatches({ title: 'Airbase' }, 'port')).toBe(false);
   });
 });

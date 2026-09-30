@@ -180,6 +180,27 @@ export function drawable(layers = []) {
   return layers.filter((layer) => layer.enabled);
 }
 
+/**
+ * The names in their new order once one row is dropped at `to`, which counts
+ * places in the list as it stood before the drag. Top of the map first.
+ */
+export function moveName(names, name, to) {
+  const from = names.indexOf(name);
+  if (from < 0) return [...names];
+  const rest = names.filter((entry) => entry !== name);
+  const at = Math.max(0, Math.min(rest.length, to > from ? to - 1 : to));
+  return [...rest.slice(0, at), name, ...rest.slice(at)];
+}
+
+/** What a Refresh on every followed layer found, in one toast. */
+export function refreshedLabel({ moved = 0, failed = 0, total = 0 }) {
+  if (total && failed === total) {
+    return total === 1 ? 'That source could not be reached' : 'No source could be reached';
+  }
+  const found = moved ? `${moved} updated` : 'Nothing new';
+  return failed ? `${found}, ${failed} could not be reached` : found;
+}
+
 /** One category switched, as the PATCH body expects it: the whole hidden list. */
 export function toggleCategory(layer, name) {
   const hidden = new Set(layer?.hidden ?? []);
