@@ -106,16 +106,16 @@ function entityCell(page, name) {
     .first();
 }
 
-test('opens from the case it belongs to, not from the rail of stages', async ({ page }) => {
+test('opens from the rail, under the four stages', async ({ page }) => {
   await installAppFixture(page, { catalog });
   await page.goto('/#media');
 
-  // the rail is the pipeline, and the case is not one of its steps
+  // the four stages, then the case a rule apart, then the theme
   const rail = page.getByRole('navigation').first();
-  await expect(rail.getByRole('button')).toHaveText(['Sources', 'Examine', 'Map', 'Compose', /Dark|Light/]);
+  await expect(rail.getByRole('button')).toHaveText(['Sources', 'Examine', 'Map', 'Compose', 'Case', /Dark|Light/]);
 
-  await page.locator('.case-btn').click();
-  await expect(page.locator('.case-btn')).toHaveClass(/topbar-active/);
+  await rail.getByRole('button', { name: 'Case' }).click();
+  await expect(rail.getByRole('button', { name: 'Case' })).toHaveClass(/active/);
   // the Case opens on its Timeline, and the Board is one tab away
   await page.locator('.tabstrip').getByRole('button', { name: 'Board', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Board' })).toBeVisible();

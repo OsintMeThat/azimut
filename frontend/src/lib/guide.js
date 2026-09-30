@@ -63,8 +63,8 @@ export const GUIDE = [
         text: 'Sources, Examine, Map and Compose read top to bottom in the order an investigation runs. Tools are tabs inside a workspace.',
       },
       {
-        label: 'The case is in the topbar, not the rail',
-        text: 'It is not a stage. It is what every stage files into, so it hangs off the case name as the Case button.',
+        label: 'The case sits under the stages',
+        text: 'On the rail, a rule apart from Sources, Examine, Map and Compose, since it is what every stage files into. It opens on its Timeline, Board, Graph and Sheet.',
       },
       {
         label: 'You do not need a case to start',

@@ -7,7 +7,7 @@
    * analyst swap either side, then changes only how that pair is read. The provider, Wayback release and Sentinel-2 day belong to each
    * MapSurface; the camera is the one shared fact.
    */
-  import { onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import {
     caseState,
@@ -99,6 +99,8 @@
   import { SENTINEL_ID, variantId } from '../lib/sentinel.js';
   import { WAYBACK_ID, releaseYearBefore, waybackId } from '../lib/wayback.js';
   import { RADAR_ID, radarId } from '../lib/radar.js';
+  import { offerNote, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { changeInterval, formatTemporalValue } from '../lib/timeline.js';
   import Icon from '../components/Icon.svelte';
   import Compass from '../components/Compass.svelte';
   import TurnGuide from '../components/TurnGuide.svelte';
@@ -1955,10 +1957,33 @@
     return { a: a.surface?.provenance?.() ?? {}, b: b.surface?.provenance?.() ?? {} };
   }
 
+  // What the topbar's Add event offers here: each picture's day, and the span
+  // between them, read when the bar opens.
+  offerNote('compare', null, {
+    dates: () => {
+      const { a: first, b: second } = pictureDates();
+      const side = (picture) =>
+        picture.imageryWhen ? { value: picture.imageryWhen, exact: picture.imageryExact } : null;
+      return pairOffers(side(first), side(second), {
+        interval: changeInterval,
+        label: (value) => formatTemporalValue(value).label,
+      });
+    },
+  });
+  onDestroy(() => withdrawNote('compare'));
+
   /** The export's name: the comparison's, then the two pictures' dates. */
   function exportName() {
     const { a: first, b: second } = pictureDates();
     return comparisonFilename(sessionName, { a: first.imageryWhen, b: second.imageryWhen });
+  }
+
+  /** Keep the colours visible in this comparison while the GIF is quantized. */
+  function gifKeepColours({ signed = false } = {}) {
+    return gifColours(annotations, {
+      signed,
+      changePalette: difference ? changeSettings(changeOptions).palette : null,
+    });
   }
 
   async function saveWorkingPreview(caseId, name) {

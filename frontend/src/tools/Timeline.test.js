@@ -148,7 +148,7 @@ describe('Timeline workspace', () => {
     expect(source).toContain('nudgeTemporalRaw(item, mode');
     expect(source).toContain('aria-label="Resize start"');
     expect(source).toContain("['ArrowLeft', 'ArrowRight'");
-    expect(source).toContain("title={pendingEdit.item.shape === 'interval' ? 'Change this period?' : 'Move this date?'}");
+    expect(source).toContain("title={!pendingEdit.item.raw ? 'Date this entry?' : pendingEdit.item.shape === 'interval' ? 'Change this period?' : 'Move this date?'}");
   });
 
   it('separates local times from missing dates', () => {
@@ -450,7 +450,24 @@ describe('the file an entry is about', () => {
     expect(source.indexOf('<MediaPreview', body)).toBeLessThan(source.indexOf('<div class="item-kind">', body));
   });
 
-  it('goes to its own line when the topbar asks for Add event', () => {
-    expect(source).toContain('if (!snapshotReading) untrack(() => entryLine?.focus());');
+  it('goes to its own line when the topbar asks for Add event, about the picked file', () => {
+    expect(source).toContain('if (!snapshotReading) untrack(() => focusLine());');
+    expect(source).toContain('lineFile = file ? { id: file.id, label: file.label, type: file.type, attrs: file.attrs ?? {} } : null;');
+    expect(source).toContain('Add event from this file');
+    // another entry picked lets go of the file
+    expect(source).toContain('if (lineFile && lineFile.id !== picked) lineFile = null;');
+  });
+});
+
+describe('changing a picked entry’s date', () => {
+  it('is offered where the date is read, and confirmed like a drag', () => {
+    expect(source).toContain("{selected.raw ? 'Change the date' : 'Give it a date'}");
+    expect(source).toContain('pendingEdit = { item: selected, raw: dateEditing.value };');
+    // a file keeps its own date and is corrected beside it
+    expect(source).toContain('<Icon name="edit" size={12} /> Correct this date');
+  });
+
+  it('says both dates in words when it asks', () => {
+    expect(source).toContain("detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw).label}`}");
   });
 });

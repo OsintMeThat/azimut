@@ -138,7 +138,7 @@ test('one Ctrl+V opens one dialog, however many tabs have been visited', async (
   // the point here is to leave three tools mounted at the same time
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Files' })).toBeVisible();
-  await page.locator('.case-btn').click();
+  await page.getByRole('navigation').first().getByRole('button', { name: 'Case' }).click();
   await page.locator('.tabstrip').getByRole('button', { name: 'Board', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Board' })).toBeVisible();
 
@@ -178,7 +178,7 @@ test('a paste in Proof stays the composer\'s own', async ({ page }) => {
   const fixture = await installAppFixture(page, { catalog });
   await page.goto('/#media');
   await expect(page.getByRole('heading', { name: 'Media Library' })).toBeVisible();
-  await page.locator('.case-btn').click();
+  await page.getByRole('navigation').first().getByRole('button', { name: 'Case' }).click();
   await page.locator('.tabstrip').getByRole('button', { name: 'Board', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Board' })).toBeVisible();
 

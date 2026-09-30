@@ -283,15 +283,6 @@
     </button>
     <div class="case-group">
       <CaseSwitcher />
-      <button
-        class="btn btn-ghost case-btn"
-        class:topbar-active={activeWs?.id === CASE_WORKSPACE.id}
-        title="Open the case: its Timeline, Board, Graph and Sheet"
-        onclick={() => openWorkspace(CASE_WORKSPACE)}
-      >
-        <Icon name={CASE_WORKSPACE.icon} size={16} />
-        <span>{CASE_WORKSPACE.label}</span>
-      </button>
     </div>
     <div class="spacer"></div>
     <DetectActivity />
@@ -361,6 +352,19 @@
           <span>{ws.label}</span>
         </button>
       {/each}
+      <!-- The case, under the four stages and apart from them: it is what every stage
+           files into rather than one of them, and one press from any of them opens its
+           Timeline, Board, Graph and Sheet. -->
+      <span class="rail-rule" role="presentation"></span>
+      <button
+        class="rail-btn case-rail"
+        class:active={activeWs?.id === CASE_WORKSPACE.id}
+        onclick={() => openWorkspace(CASE_WORKSPACE)}
+        title="The case: its Timeline, Board, Graph and Sheet"
+      >
+        <Icon name={CASE_WORKSPACE.icon} size={19} />
+        <span>{CASE_WORKSPACE.label}</span>
+      </button>
       <button
         class="rail-btn theme-toggle"
         onclick={toggleTheme}
@@ -465,29 +469,10 @@
   .spacer {
     flex: 1;
   }
-  /* the switcher and the board button are one control — which case, then open
-     it. Both carry the same weight, and the hairline is what says they belong
-     together: their own padding leaves too much air for proximity alone to. */
+  /* which case: the switcher alone, since the case itself opens from the rail */
   .case-group {
     display: flex;
     align-items: center;
-  }
-  .case-btn {
-    position: relative;
-    margin-left: 13px;
-    gap: 8px;
-    padding: 6px 12px;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-  }
-  .case-btn::before {
-    content: '';
-    position: absolute;
-    left: -7px;
-    top: 5px;
-    bottom: 5px;
-    width: 1px;
-    background: var(--border);
   }
   .topbar-active {
     color: var(--text-1);
@@ -583,6 +568,13 @@
   .rail-btn.active {
     color: var(--text-1);
     border-left-color: var(--accent);
+  }
+  /* The case under the four stages, a rule and some air between them. */
+  .rail-rule {
+    flex-shrink: 0;
+    height: 1px;
+    margin: 14px 14px 10px;
+    background: var(--border-strong);
   }
   /* pinned to the foot of the rail, away from the workspace switches */
   .theme-toggle {

@@ -6,10 +6,10 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark (home) · case switcher + Case · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
-├ rail ┬ tab strip (only when the workspace has several tools) ┬ case sidebar ┤
-│      │ tool canvas                                           │              │
-└──────┴───────────────────────────────────────────────────────┴──────────────┘
+┌ topbar: rose+wordmark (home) · case switcher · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
+├ rail: Sources · Examine · Map · Compose · ── · Case · … · theme ┬ tab strip (several tools only) ┬ case sidebar ┤
+│                                                                 │ tool canvas                    │              │
+└─────────────────────────────────────────────────────────────────┴────────────────────────────────┴──────────────┘
 ```
 
 ## Workspace model (UX)
@@ -20,21 +20,21 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
 | **Home** (the mark) | Overview, Guide | |
-| **Case** (topbar) | Timeline, Board, Graph, Sheet | v5: Orchestrator |
+| **Case** (rail, under the stages) | Timeline, Board, Graph, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect, Collage | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
-**Case is not on the rail.** The rail reads as a sequence of stages, and the case is
-not a stage: it is what every stage files into. It hangs off the case switcher in
-the topbar instead, so the header answers *which case* and the rail answers *what
-am I doing*. It stays a workspace in every other respect — tabs, `#case` deep
-links, and its own remembered sidebar. Timeline lives here because it is another
-reading of the case, not a collection or examination stage. The **Case** button
-opens the tab last used there, and the Timeline the first time, since that is where
-events are noted and read; `#board` and the stored tool id `board` still reach the
-Board.
+**Case sits on the rail, under the four stages and a rule apart from them.** The
+stages read in the order an investigation runs, and the case is not one of them: it
+is what every stage files into. Kept in the topbar beside the case switcher, it was a
+door nobody took, so it is one press from any stage instead, while the header still
+answers *which case*. It is a workspace like the others: tabs, `#case` deep links,
+and its own remembered sidebar. Timeline lives here because it is another reading of
+the case, not a collection or examination stage. **Case** opens the tab last used
+there, and the Timeline the first time, since that is where events are noted and
+read; `#board` and the stored tool id `board` still reach the Board.
 That sidebar stays closed by default, because the board already lists the same case
 and two lists side by side only ask which one is real.
 
@@ -1026,10 +1026,16 @@ Details or picture is open cites itself, and its one confirmed place is where it
 happened; the Board's or the Graph's open entity, the inspected file, the open proof
 or note, the place selected on the map. A place only suggested, or two of them, is
 not seated, since seating it would confirm it without the analyst deciding. The date
-stays empty, and a file's own dates are said beside it, read-only (`The file says:
-captured 22 Jun 2023, 17:07:16 UTC`). It closes after **Add**, on `Esc`, and when the
-analyst moves to another tool. On the Timeline the button goes to the line already
-under the axis, and on a frozen snapshot it is greyed with its reason.
+stays empty, and the dates the place knows are offered beside it, one press each and
+never filled in by themselves: a file's camera, orbit and post dates, the camera first
+and the post last (a post rarely goes online when it happened, which its tooltip says),
+and in Compare each picture's day and the span between them, a release date marked as
+an estimate. A press fills the field, which stays the analyst's to correct, and the
+reading says where the date came from until it is changed. It closes after **Add**, on
+`Esc`, and when the analyst moves to another tool. On the Timeline the button goes to
+the line already under the axis, about the picked entry's file when it has one (as
+does **Add event from this file** under its preview), and on a frozen snapshot it is
+greyed with its reason.
 
 **Details opens on a summary.** Above Info · Connections · Time: the name, the type and
 other names, how many events name the entity with the sources and places they reach,

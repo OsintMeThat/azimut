@@ -1183,3 +1183,28 @@ test('shows the file a picked entry is about, one press from full screen', async
   // the inspector stays on the entry
   await expect(preview).toBeVisible();
 });
+
+test('changes a picked entry’s date from the inspector, asked like a drag', async ({ page }) => {
+  const fixture = await openTimeline(page);
+
+  await page.getByRole('button', { name: /Witness arrived/ }).first().click();
+  const inspector = page.locator('.inspector');
+  await inspector.getByRole('button', { name: 'Change the date' }).click();
+  const field = inspector.getByLabel('When');
+  await field.fill('24/04/2021 15:10');
+  await expect(inspector.getByText(/24 Apr 2021/)).toBeVisible();
+  await inspector.getByRole('button', { name: 'Save date' }).click();
+
+  const ask = page.getByRole('alertdialog');
+  await expect(ask).toContainText('→ 24 Apr 2021');
+  await ask.getByRole('button', { name: 'Update date' }).click();
+  await expect.poll(() => fixture.timelineWrites.at(-1)?.body?.when).toBe('2021-04-24T15:10:00');
+  await expect(inspector.getByRole('button', { name: 'Change the date' })).toBeVisible();
+});
+
+test('offers a file’s date as a correction rather than a rewrite', async ({ page }) => {
+  await openTimeline(page);
+  await page.getByRole('button', { name: /Roadside camera frame/ }).first().click();
+  await expect(page.locator('.inspector').getByRole('button', { name: 'Correct this date' })).toBeVisible();
+  await expect(page.locator('.inspector').getByRole('button', { name: 'Change the date' })).toHaveCount(0);
+});

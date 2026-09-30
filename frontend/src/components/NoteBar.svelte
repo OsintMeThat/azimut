@@ -13,7 +13,7 @@
   import { tick } from 'svelte';
   import { api } from '../lib/api.js';
   import { caseState, uiState } from '../lib/state.svelte.js';
-  import { noteEntityFor, placeOf } from '../lib/noteHere.svelte.js';
+  import { noteDatesFor, noteEntityFor, placeOf } from '../lib/noteHere.svelte.js';
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
   import { claimActionTitle } from '../lib/quickClaim.js';
@@ -25,6 +25,7 @@
 
   const caseId = $derived(caseState.current?.id ?? '');
   const entity = $derived(uiState.noting ? noteEntityFor(uiState.tool) : null);
+  const dates = $derived(uiState.noting ? noteDatesFor(uiState.tool) : []);
   const seat = $derived(entity ? claimSeat(entity) : null);
   /** How the thing on screen sits on the event, in the heading's words. */
   const SEAT_WORDS = { about: 'about', at: 'at', cites: 'seen in' };
@@ -102,6 +103,7 @@
         {caseId}
         {entity}
         {also}
+        {dates}
         draftKey={`note:${uiState.tool}:${entity?.id ?? ''}`}
         onsaved={close}
         oncancel={close}

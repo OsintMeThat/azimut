@@ -6,11 +6,21 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(new URL('./App.svelte', import.meta.url), 'utf8');
 const markup = source.slice(source.indexOf('</script>'));
 
-describe('the Case button', () => {
-  it('names the workspace it opens, whose first tab is the Timeline', () => {
-    expect(markup).toContain('title="Open the case: its Timeline, Board, Graph and Sheet"');
-    expect(markup).toContain('<span>{CASE_WORKSPACE.label}</span>');
-    expect(markup).toContain('onclick={() => openWorkspace(CASE_WORKSPACE)}');
+describe('the case on the rail', () => {
+  it('sits under the four stages, a rule between them, with the theme at the foot', () => {
+    const stages = markup.indexOf('{/each}', markup.indexOf('{#each WORKSPACES as ws (ws.id)}'));
+    const rule = markup.indexOf('<span class="rail-rule"');
+    const caseButton = markup.indexOf('onclick={() => openWorkspace(CASE_WORKSPACE)}');
+    const theme = markup.indexOf('class="rail-btn theme-toggle"');
+    expect(stages).toBeGreaterThan(-1);
+    expect(rule).toBeGreaterThan(stages);
+    expect(caseButton).toBeGreaterThan(rule);
+    expect(theme).toBeGreaterThan(caseButton);
+    expect(markup).toContain('title="The case: its Timeline, Board, Graph and Sheet"');
+  });
+
+  it('leaves the topbar to the case switcher', () => {
+    expect(markup).not.toContain('case-btn');
   });
 });
 

@@ -79,6 +79,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
   import MediaPreview from '../components/MediaPreview.svelte';
+  import DateField from '../components/DateField.svelte';
   import EntryLine from '../components/EntryLine.svelte';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
@@ -145,15 +146,37 @@
   /** The entity the reading was scoped from, whole, so the entry line can seat it.
    *  A saved view only keeps the scope's id and label, and then nothing is seated. */
   let scopedEntity = $state(null);
-  const lineEntity = $derived(scopedEntity && scopedEntity.id === entityFilter?.id ? scopedEntity : null);
+  /** A file the line was asked for from (its entry picked, then Add pressed), seated
+   *  with its own dates offered one press each. It follows the pick: another entry
+   *  picked, and the line goes back to the one it had. */
+  let lineFile = $state(null);
+  const lineEntity = $derived(
+    scopedEntity && scopedEntity.id === entityFilter?.id ? scopedEntity : lineFile
+  );
   let entryLine = $state(null);
-  // The topbar's pencil, pressed on the Timeline, is its own line under the axis.
+  // The topbar's Add event, pressed on the Timeline, is its own line under the axis,
+  // about the file whose entry is picked when there is one.
   let lineFocusSeen = uiState.timelineLineFocus;
   $effect(() => {
     const asked = uiState.timelineLineFocus;
     if (asked === lineFocusSeen) return;
     lineFocusSeen = asked;
-    if (!snapshotReading) untrack(() => entryLine?.focus());
+    if (!snapshotReading) untrack(() => focusLine());
+  });
+
+  /** Go to the line, seated on the picked entry's file if it has one. */
+  function focusLine() {
+    const file = previewEntity;
+    lineFile = file ? { id: file.id, label: file.label, type: file.type, attrs: file.attrs ?? {} } : null;
+    void tick().then(() => entryLine?.focus());
+  }
+
+  // Another entry picked, and a file seated for the last one lets go of the line.
+  $effect(() => {
+    const picked = previewEntity?.id ?? null;
+    untrack(() => {
+      if (lineFile && lineFile.id !== picked) lineFile = null;
+    });
   });
   let viewMode = $state('plot');
   let expandedTracks = $state({});
@@ -1507,6 +1530,29 @@
     if (raw && raw !== item.raw) pendingEdit = { item, raw };
   }
 
+  /** A date being changed from the inspector, until it is saved or given up. */
+  let dateEditing = $state(null); // { id, value }
+  const dateEditReady = $derived(
+    Boolean(dateEditing?.value) &&
+      dateEditing.value !== (selected?.raw ?? '') &&
+      formatTemporalValue(dateEditing.value).valid
+  );
+  function startDateEdit() {
+    if (!selected || snapshotReading) return;
+    dateEditing = { id: selected.id, value: selected.raw ?? '' };
+  }
+  // Through the same old → new confirmation a drag on the axis asks.
+  function saveDateEdit() {
+    if (!dateEditReady) return;
+    pendingEdit = { item: selected, raw: dateEditing.value };
+  }
+  $effect(() => {
+    const id = selected?.id ?? null;
+    untrack(() => {
+      if (dateEditing && dateEditing.id !== id) dateEditing = null;
+    });
+  });
+
   async function confirmDirectEdit() {
     if (!pendingEdit || directSaving) return;
     directSaving = true;
@@ -1516,8 +1562,9 @@
         { when: pendingEdit.raw }
       );
       pendingEdit = null;
+      dateEditing = null;
       await reloadCase();
-      toast('Claim updated', 'ok', 1600);
+      toast('Date updated', 'ok', 1600);
     } catch (error) {
       toast(error.message, 'danger');
     } finally {
@@ -1827,7 +1874,7 @@
       />
       <PlateExport surface="timeline" plate={capturePlate} disabled={!caseState.current} />
       <button class="btn btn-ghost fullscreen-btn" aria-pressed={fullscreen} onclick={toggleFullscreen}>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>
-      <button class="btn btn-primary add-event" disabled={snapshotReading || !caseState.current} title="Write it on the line under the axis" onclick={() => entryLine?.focus()}><Icon name="plus" size={13} />Add</button>
+      <button class="btn btn-primary add-event" disabled={snapshotReading || !caseState.current} title="Write it on the line under the axis" onclick={focusLine}><Icon name="plus" size={13} />Add</button>
     </div>
   </header>
 
@@ -2393,6 +2440,11 @@
               thumb={previewThumb}
               label={previewEntity?.label ?? selected.label}
             />
+            {#if previewEntity && !snapshotReading}
+              <button class="btn btn-ghost btn-sm from-file" title="Write an event on the line that cites this file, its dates one press away" onclick={focusLine}>
+                <Icon name="plus" size={12} /> Add event from this file
+              </button>
+            {/if}
           {/if}
           <div class="item-kind">{temporalKindLabel(selected.kind)}{#if selected.time_role} · {selected.time_role}{/if}</div>
           <h2 dir="auto">{selected.label}</h2>
@@ -2409,6 +2461,40 @@
               {/if}
             </div>
           </div>
+          <!-- The date is changed where it is read. Dragging the mark and the full editor
+               still do it; a picked entry just no longer hides how. A file's own date is
+               never rewritten: it is corrected by a sourced event, as Add correction does. -->
+          {#if selected.kind === 'claim' && !snapshotReading}
+            {#if dateEditing?.id === selected.id}
+              <form class="date-edit" onsubmit={(event) => { event.preventDefault(); saveDateEdit(); }}>
+                <DateField
+                  id="inspector-when"
+                  label="When"
+                  placeholder="dd/mm/yyyy hh:mm"
+                  calendar
+                  value={dateEditing.value}
+                  onchange={(value) => (dateEditing = { ...dateEditing, value })}
+                />
+                <div class="date-edit-acts">
+                  <button type="button" class="btn btn-ghost btn-sm" onclick={() => (dateEditing = null)}>Cancel</button>
+                  <button type="submit" class="btn btn-primary btn-sm" disabled={!dateEditReady}>Save date</button>
+                </div>
+              </form>
+            {:else}
+              <button class="btn btn-sm date-change" onclick={startDateEdit}>
+                <Icon name="edit" size={12} /> {selected.raw ? 'Change the date' : 'Give it a date'}
+              </button>
+            {/if}
+          {:else if selected.category === 'media' && !snapshotReading}
+            <button
+              class="btn btn-sm date-change"
+              disabled={!inspectorChain?.entity}
+              title="The file keeps its own date; this files a sourced correction beside it"
+              onclick={addMediaCorrection}
+            >
+              <Icon name="edit" size={12} /> Correct this date
+            </button>
+          {/if}
 
           <!-- What the case knows about the time between two entries. The wording is
                `lib/timeline.js`: a gap printed as one number when the dates only allow
@@ -2574,9 +2660,9 @@
 
 {#if pendingEdit}
   <ConfirmDialog
-    title={pendingEdit.item.shape === 'interval' ? 'Change this period?' : 'Move this date?'}
+    title={!pendingEdit.item.raw ? 'Date this entry?' : pendingEdit.item.shape === 'interval' ? 'Change this period?' : 'Move this date?'}
     message={pendingEdit.item.label}
-    detail={`${pendingEdit.item.raw} → ${pendingEdit.raw}`}
+    detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw).label}`}
     confirmLabel="Update date"
     icon="clock"
     busy={directSaving}
@@ -2937,6 +3023,10 @@
   .inspector > header button { display: grid; margin-left: auto; padding: 4px; border: 0; background: none; color: var(--text-3); cursor: pointer; }
   .inspector-body { min-height: 0; overflow: auto; padding: 16px; }
   .inspector-loading { margin: -7px 0 9px; color: var(--text-3); font-size: 9px; }
+  .from-file { margin: -6px 0 12px; }
+  .date-change { margin-top: 8px; }
+  .date-edit { display: grid; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--accent); border-radius: var(--r-sm); background: var(--bg-2); }
+  .date-edit-acts { display: flex; justify-content: flex-end; gap: 6px; }
   .item-kind { color: var(--accent); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
   .inspector h2 { margin: 4px 0 16px; font-size: 17px; line-height: 1.3; }
   .date-reading { display: flex; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); }

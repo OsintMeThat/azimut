@@ -82,6 +82,9 @@
     /** What else the place it was opened from already knows, seated too: a file's
      *  one confirmed place. `{ id, label, type, attrs, slot }`, locked like the entity. */
     also = [],
+    /** Dates the place it was opened from can offer, one press each: a pair's
+     *  "between A and B". `{ kind, value, words, hint }`, like a file's own. */
+    dates = [],
     /** Where an unsaved line is kept for the session, or '' to keep nothing. */
     draftKey = '',
     /** Whether the line says `Added · Undo` itself. A host with more to say turns
@@ -107,20 +110,31 @@
         attrs: item.attrs ?? {}, slot: item.slot, locked: true })),
   ]);
 
-  // -- the file's own dates, said beside the field and never put in it ----------
-  /** A date the file carries is shown, read-only: offering it as the event's date
-   *  would have it accepted without being read, the argument Geo Proof settled. */
-  let fileSays = $state('');
+  // -- the dates the file and the place offer, one press each ------------------
+  /** A date the file carries is offered, never put in: filled by itself it would be
+   *  accepted without being read, the argument Geo Proof settled. A press fills the
+   *  field, which stays the analyst's to correct, and the reading says where it came
+   *  from until it is changed. */
+  let fileOffers = $state([]);
+  let usedOffer = $state(null);
+  const offers = $derived([...dates, ...fileOffers]);
   $effect(() => {
     const id = entity?.id;
-    fileSays = '';
+    fileOffers = [];
     if (!caseId || !id || !FILE_TYPES.has(entity.type)) return;
     let live = true;
     fetchFileDates(caseId, id)
-      .then((words) => { if (live) fileSays = words; })
+      .then((found) => { if (live) fileOffers = found; })
       .catch(() => {});
     return () => { live = false; };
   });
+  function useOffer(offer) {
+    when = offer.value;
+    zoneChoice = '';
+    usedOffer = offer;
+    queueMicrotask(() => sentence?.focus());
+  }
+  const fromOffer = $derived(usedOffer && usedOffer.value === when ? usedOffer : null);
 
   let when = $state('');
   let text = $state('');
@@ -745,9 +759,12 @@
     </div>
   {/if}
 
-  {#if fileSays}
-    <p class="file-says" title="Read from the file. The event's date is yours to give.">
-      <Icon name="file" size={11} /> The file says: {fileSays}
+  {#if offers.length && !when}
+    <p class="file-says">
+      <span class="lead"><Icon name="calendar" size={11} /> Use</span>
+      {#each offers as offer (offer.value + offer.kind)}
+        <button class="date-offer" title={offer.hint} onclick={() => useOffer(offer)}>{offer.words}</button>
+      {/each}
     </p>
   {/if}
 
@@ -758,6 +775,7 @@
       <span class="said" aria-live="polite">
         {#if zoned && zone}Reads: {zoneReading(when, zone.zone, zone.place)}
         {:else}Reads: {[reading.label, ...reading.qualifiers].join(' · ')}{/if}
+        {#if fromOffer} · from the {fromOffer.kind} date, yours to correct{/if}
       </span>
       {#if zoned}
         <span class="zones">
@@ -915,8 +933,14 @@
   .twin { color: var(--warn); }
   .under { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 22px; }
   .said { color: var(--text-2); font-size: var(--fs-xs); }
-  .file-says { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .file-says { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .file-says .lead { display: inline-flex; align-items: center; gap: 4px; }
   .file-says :global(svg) { flex-shrink: 0; }
+  .date-offer {
+    padding: 2px 8px; border: 1px dashed var(--border-strong); border-radius: 999px;
+    background: none; color: var(--text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .date-offer:hover, .date-offer:focus-visible { border-style: solid; border-color: var(--accent); color: var(--text-1); }
   .help { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; flex: 1; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
   .help code { padding: 0 4px; border-radius: 3px; background: var(--bg-2); color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; }
   .help .aside { color: var(--text-3); font-style: italic; }
