@@ -113,8 +113,10 @@ describe('toolFromHash', () => {
     expect(toolFromHash('#collect', ALL_TOOLS)).toBe('media');
     expect(toolFromHash('#compose', ALL_TOOLS)).toBe('proof');
     // off the rail, still a workspace: #case and #home have to keep resolving
-    expect(toolFromHash('#case', ALL_TOOLS)).toBe('board');
-    expect(toolFromHash('#case/timeline', ALL_TOOLS)).toBe('timeline');
+    // the case opens on its Timeline, and its Board keeps a link of its own
+    expect(toolFromHash('#case', ALL_TOOLS)).toBe('timeline');
+    expect(toolFromHash('#case/board', ALL_TOOLS)).toBe('board');
+    expect(toolFromHash('#board', ALL_TOOLS)).toBe('board');
     expect(toolFromHash('#home', ALL_TOOLS)).toBe('overview');
     expect(toolFromHash('#home/guide', ALL_TOOLS)).toBe('guide');
   });

@@ -902,3 +902,10 @@ describe('the right-click menu', () => {
     expect(lookup.slice(0, 600)).toContain('if (mine !== pointLookupSeq || !pointMenu) return;');
   });
 });
+
+describe('Satellite offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'satellite',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('satellite'))");
+  });
+});

@@ -307,6 +307,16 @@ def _check_claim_connectors(
             except CaseError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+@router.get("/{case_id}/timeline/claims/{claim_id}")
+def read_temporal_claim(case_id: str, claim_id: str) -> dict[str, Any]:
+    """Where one Claim sits on the Timeline: its own row, dated, undated or off the
+    UTC axis. What opening a Claim from anywhere reads, so it lands on its entry."""
+    case = get_case(case_id)
+    entity = case.get_entity(claim_id)
+    if entity is None or entity["type"] != "claim":
+        raise HTTPException(status_code=404, detail=f"claim '{claim_id}' not found")
+    return {"item": _temporal_item(case, claim_id)}
+
 @router.post("/{case_id}/timeline/claims")
 def create_temporal_claim(case_id: str, body: TemporalClaimIn) -> dict[str, Any]:
     """Create the statement, date and all of its connectors in one transaction."""

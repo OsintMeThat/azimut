@@ -1,5 +1,6 @@
 <script>
-  import { onMount, untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import Konva from 'konva';
   import { api } from '../lib/api.js';
@@ -194,6 +195,12 @@
   // reload elsewhere.
   let proofEntities = $state([]);
   let presentPaths = $state(new Set());
+  // The saved proof open here is what the topbar's Add event seats; an unsaved one offers nothing.
+  $effect(() => {
+    const spec = savedName ? specPath('proof', savedName) : null;
+    offerNote('proof', proofEntities.find((e) => e.attrs?.[specAttr('proof')] === spec) ?? null);
+  });
+  onDestroy(() => withdrawNote('proof'));
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;

@@ -74,7 +74,7 @@ function narrowing(
  *  *the newest in this case* and *the newest of the rows already loaded*. `previews`
  *  joins the picture a file, a capture or a proof already has, for a picker. */
 export function buildCatalogQuery(caseId, options = {}) {
-  const { cursor, limit, order, view, previews } = options;
+  const { cursor, limit, order, view, previews, counts } = options;
   const params = new URLSearchParams();
   if (limit != null) params.set('limit', String(limit));
   if (cursor) params.set('cursor', cursor);
@@ -82,8 +82,21 @@ export function buildCatalogQuery(caseId, options = {}) {
   if (order) params.set('order', order);
   if (view) params.set('view', view);
   if (previews) params.set('previews', 'true');
+  // `by_type` beside the page: how much of the answer each type holds, which is what
+  // the Board's groups count themselves from in the one request.
+  if (counts) params.set('counts', counts);
   const qs = params.toString();
   return `/api/cases/${caseId}/catalog/entities${qs ? `?${qs}` : ''}`;
+}
+
+/**
+ * What the case's Claims say about these rows: how many name each one, when the dated
+ * ones fall, how many sources and places they reach, and a density over the case's
+ * own span. One read per page of rows (at most 200 ids), never one per row.
+ */
+export async function fetchEventRows(caseId, ids, { post = api.post } = {}) {
+  if (!caseId || !ids?.length) return { range: null, rows: {} };
+  return post(`/api/cases/${caseId}/catalog/events`, { ids: ids.slice(0, 200) });
 }
 
 /** Build the tally request path: the same narrowing, added up instead of listed.

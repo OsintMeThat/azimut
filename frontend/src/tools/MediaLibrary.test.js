@@ -503,3 +503,10 @@ describe('Media Library — broken thumbnails', () => {
     expect(source).not.toContain('next.delete(path);');
   });
 });
+
+describe('MediaLibrary offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'media',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('media'))");
+  });
+});

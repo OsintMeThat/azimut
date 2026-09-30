@@ -35,6 +35,7 @@ from .engine.textfold import fold_text
 from . import layout
 from .repository import EntityStatus
 from .store.cursors import (
+    _COUNTED_ORDERS,
     _PAGE_ORDERS,
     _page_cursor,
     _parse_timeline_cursor,
@@ -43,6 +44,7 @@ from .store.cursors import (
     _timeline_phase_cursor,
 )
 from .store.filters import (
+    LACKS,
     MAX_ATTR_VALUES,
     _entity_filters,
     _facet_value,
@@ -1300,6 +1302,7 @@ class SqliteCase:
         temporal_until: str | None = None,
         temporal_categories: list[str] | None = None,
         order: str = "",
+        count_by_type: bool = False,
     ) -> dict[str, Any]:
         """A bounded, cursor-paginated slice of entities, in insertion order or sorted.
 
@@ -1322,10 +1325,15 @@ class SqliteCase:
 
         ``total`` counts every row matching the same terms, which is what makes the
         narrowing terms answer a question rather than only shorten a list: *how many
-        videos have coordinates* is that number.
+        videos have coordinates* is that number. ``count_by_type`` adds ``by_type``,
+        the same count split per type, which is what lets the Board say how much of
+        the answer each of its groups holds without asking once per group.
         """
-        if order and order not in _PAGE_ORDERS:
+        orders = {**_PAGE_ORDERS, **_COUNTED_ORDERS}
+        if order and order not in orders:
             raise CaseError(f"'{order}' is not an ordering")
+        if order in _COUNTED_ORDERS and not types:
+            raise CaseError(f"'{order}' orders a set of types, not the whole case")
         filter_clause, filter_params = _entity_filters(
             types=types, status=status, query=query,
             folder=folder, unfiled=unfiled, recursive=recursive,
@@ -1337,11 +1345,20 @@ class SqliteCase:
         )
         clause, params = filter_clause, list(filter_params)
         sort_key = ""
+        computed = ""
         if order:
-            expression, sort_key, descending = _PAGE_ORDERS[order]
+            expression, sort_key, descending = orders[order]
             way = "<" if descending else ">"
+            if sort_key == "_sort":
+                computed = f", {expression} AS _sort"
             if cursor is not None:
-                seat, key = _page_cursor(cursor)
+                seat, raw_key = _page_cursor(cursor)
+                key: Any = raw_key
+                if order in _COUNTED_ORDERS:
+                    try:
+                        key = int(raw_key)
+                    except ValueError:
+                        raise CaseError(f"invalid cursor '{cursor}'") from None
                 joiner = " AND " if clause else " WHERE "
                 clause = (
                     f"{clause}{joiner}({expression} {way} ?"
@@ -1365,10 +1382,22 @@ class SqliteCase:
                 ).fetchone()[0]
             )
             rows = conn.execute(
-                f"SELECT rowid AS _rowid, * FROM entities{clause}"
+                f"SELECT rowid AS _rowid, *{computed} FROM entities{clause}"
                 f" ORDER BY {ordering} LIMIT ?",
                 params,
             ).fetchall()
+            by_type = (
+                {
+                    r["type"]: int(r["n"])
+                    for r in conn.execute(
+                        f"SELECT type, COUNT(*) AS n FROM entities{filter_clause}"
+                        " GROUP BY type",
+                        filter_params,
+                    )
+                }
+                if count_by_type
+                else None
+            )
         has_more = len(rows) > limit
         rows = rows[:limit]
         next_cursor = None
@@ -1377,11 +1406,109 @@ class SqliteCase:
             next_cursor = (
                 f"{tail['_rowid']}:{tail[sort_key]}" if sort_key else str(tail["_rowid"])
             )
-        return {
+        page: dict[str, Any] = {
             "items": [self._entity(r) for r in rows],
             "next_cursor": next_cursor,
             "total": total,
         }
+        if by_type is not None:
+            page["by_type"] = by_type
+        return page
+
+    def event_summaries(self, entity_ids: list[str], *, buckets: int = 12) -> dict[str, Any]:
+        """What the case's Claims say about each of these entities, in a few grouped reads.
+
+        Per id: how many Claims name it (``events``, through ``about``, ``at`` or
+        ``cites``), the first and last instant the dated ones cover, how many distinct
+        sources those Claims cite and how many places they put it at, and ``buckets``
+        counts of their midpoints across ``range``.
+
+        **One range for every row**, the case's own span of dated Claims, so a column
+        of these reads as *when each one was active* rather than as twelve shapes that
+        cannot be compared. Undated Claims count as events and draw nothing.
+
+        Bounded by the ids asked for, which the route caps at a page: the Board asks
+        once per page, never once per row.
+        """
+        ids = list(dict.fromkeys(entity_ids))
+        if not ids:
+            return {"range": None, "rows": {}}
+        marks = ",".join("?" for _ in ids)
+        named = (
+            "WITH named(eid, cid) AS ("
+            " SELECT DISTINCT n.to_id, n.from_id FROM links n"
+            " JOIN entities c ON c.id = n.from_id"
+            f" WHERE n.to_id IN ({marks}) AND c.type = 'claim'"
+            " AND n.type IN ('about', 'at', 'cites'))"
+        )
+        dated = (
+            " FROM named JOIN temporal_items t ON t.owner_id = named.cid"
+            " WHERE t.category = 'statement' AND t.sortable = 1"
+            " AND t.earliest IS NOT NULL AND t.latest IS NOT NULL"
+        )
+        rows: dict[str, dict[str, Any]] = {
+            one: {
+                "events": 0, "first": None, "last": None,
+                "sources": 0, "places": 0, "buckets": [0] * buckets,
+            }
+            for one in ids
+        }
+        with self._connect() as conn:
+            span = conn.execute(
+                "SELECT MIN(earliest) AS lo, MAX(latest) AS hi,"
+                " MIN(julianday(earliest)) AS jlo, MAX(julianday(latest)) AS jhi"
+                " FROM temporal_items WHERE category = 'statement' AND sortable = 1"
+                " AND earliest IS NOT NULL AND latest IS NOT NULL"
+                " AND owner_id IN (SELECT id FROM entities WHERE type = 'claim')"
+            ).fetchone()
+            for r in conn.execute(
+                f"{named} SELECT eid, COUNT(*) AS n FROM named GROUP BY eid", ids
+            ):
+                rows[r["eid"]]["events"] = int(r["n"])
+            for r in conn.execute(
+                f"{named} SELECT named.eid AS eid, MIN(t.earliest) AS first,"
+                f" MAX(t.latest) AS last{dated} GROUP BY named.eid",
+                ids,
+            ):
+                rows[r["eid"]]["first"] = r["first"]
+                rows[r["eid"]]["last"] = r["last"]
+            for r in conn.execute(
+                f"{named} SELECT named.eid AS eid, COUNT(DISTINCT s.to_id) AS n FROM named"
+                " JOIN links s ON s.from_id = named.cid AND s.type = 'cites'"
+                " AND s.to_id != named.eid GROUP BY named.eid",
+                ids,
+            ):
+                rows[r["eid"]]["sources"] = int(r["n"])
+            # A place is reached two ways: a Claim that puts the entity at it, and a
+            # relation the entity states itself (`located-at`, `sited-at`). One count,
+            # distinct, so a place reached both ways is one place.
+            for r in conn.execute(
+                f"{named}, reached(eid, pid) AS ("
+                " SELECT named.eid, a.to_id FROM named"
+                " JOIN links a ON a.from_id = named.cid AND a.type = 'at'"
+                " AND a.to_id != named.eid"
+                " UNION"
+                " SELECT d.from_id, d.to_id FROM links d JOIN entities p ON p.id = d.to_id"
+                f" WHERE d.from_id IN ({marks}) AND p.type = 'place')"
+                " SELECT eid, COUNT(DISTINCT pid) AS n FROM reached GROUP BY eid",
+                [*ids, *ids],
+            ):
+                rows[r["eid"]]["places"] = int(r["n"])
+            low, high = span["jlo"], span["jhi"]
+            if low is not None and high is not None:
+                width = max(high - low, 1e-9)
+                for r in conn.execute(
+                    f"{named} SELECT named.eid AS eid, MIN(?, MAX(0, CAST("
+                    " ((julianday(t.earliest) + julianday(t.latest)) / 2 - ?) / ? * ?"
+                    f" AS INTEGER))) AS bucket, COUNT(*) AS n{dated}"
+                    " GROUP BY named.eid, bucket",
+                    [*ids, buckets - 1, low, width, buckets],
+                ):
+                    rows[r["eid"]]["buckets"][int(r["bucket"])] = int(r["n"])
+        timespan = (
+            {"from": span["lo"], "to": span["hi"]} if span["lo"] is not None else None
+        )
+        return {"range": timespan, "rows": rows}
 
     def catalog_summary(self) -> dict[str, Any]:
         """Total plus per-type, per-status, per-folder and per-filer counts in grouped
@@ -1462,6 +1589,17 @@ class SqliteCase:
                     (link_engine.ABOUT,),
                 ).fetchone()[0]
             )
+            # What the Claims are missing, priced for the same reason `unlinked` is:
+            # the Board offers "No source" and "Not assessed" as standing questions,
+            # and a question that says how many it would answer is one worth asking.
+            lacks = {
+                what: int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM entities e WHERE {predicate.format(alias='e')}"
+                    ).fetchone()[0]
+                )
+                for what, predicate in LACKS.items()
+            }
         return {
             "total": total,
             "by_type": by_type,
@@ -1471,6 +1609,7 @@ class SqliteCase:
             "linked_to": linked_to,
             "unlinked": unlinked,
             "countable": countable,
+            "lacks": lacks,
         }
 
     def attr_facets(

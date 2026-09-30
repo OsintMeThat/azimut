@@ -60,6 +60,7 @@ class CaseStore:
         temporal_until: str | None = None,
         temporal_categories: list[str] | None = None,
         order: str = "",
+        count_by_type: bool = False,
     ) -> dict[str, Any]:
         """A bounded, filtered page of the catalog (Step 5), paged with an indexed
         keyset over the ordering asked for."""
@@ -84,7 +85,12 @@ class CaseStore:
             temporal_until=temporal_until,
             temporal_categories=temporal_categories,
             order=order,
+            count_by_type=count_by_type,
         )
+
+    def event_summaries(self, entity_ids: list[str], *, buckets: int = 12) -> dict[str, Any]:
+        """What the case's Claims say about each of these entities (Board rows)."""
+        return self._graph().event_summaries(entity_ids, buckets=buckets)
 
     def catalog_summary(self) -> dict[str, Any]:
         """Total plus per-type, per-status, per-folder and per-filer counts."""

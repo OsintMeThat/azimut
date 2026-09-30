@@ -28,11 +28,33 @@ from ..workspace import CaseError, _parse_cursor
 #: entities filed in the same second, or two people with one name — so the rowid
 #: breaks it. That is what makes "newest first" an answer about the case rather than
 #: about the hundred rows a table happened to have loaded.
+#: How many Claims name an entity through a connector (`about`, `at` or `cites`),
+#: which is what the Board's "Most noted" reads: the subjects the analyst keeps
+#: writing about come first. Correlated on the outer ``entities`` row, and distinct
+#: per Claim, since one Claim placing *and* citing a thing is one event about it.
+EVENTS_SQL = (
+    "(SELECT COUNT(DISTINCT n.from_id) FROM links n JOIN entities c ON c.id = n.from_id"
+    " WHERE n.to_id = entities.id AND c.type = 'claim'"
+    " AND n.type IN ('about', 'at', 'cites'))"
+)
+
 _PAGE_ORDERS: dict[str, tuple[str, str, bool]] = {
     "label": ("label COLLATE NOCASE", "label", False),
     "-label": ("label COLLATE NOCASE", "label", True),
     "created": ("prov_at", "prov_at", False),
     "-created": ("prov_at", "prov_at", True),
+}
+
+#: Orderings computed per row rather than walked off an index, and therefore asked
+#: of a **type set** only, never of the whole case: the Board's "Most noted" orders
+#: one group of subjects, and what it costs is that group's rows, each one an index
+#: search on `links.to_id`. A count has no column to read the key back from, so the
+#: page selects it as `_sort`, and its cursor key is parsed back as a number: SQLite
+#: ranks every integer below every string, so a text key would resume at the wrong
+#: row.
+_COUNTED_ORDERS: dict[str, tuple[str, str, bool]] = {
+    "events": (EVENTS_SQL, "_sort", False),
+    "-events": (EVENTS_SQL, "_sort", True),
 }
 
 

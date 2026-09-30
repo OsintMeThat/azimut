@@ -58,7 +58,8 @@
     within,
     zoomAround,
   } from '../lib/graphViewport.js';
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { api } from '../lib/api.js';
   import {
     analysisSearch,
@@ -603,6 +604,11 @@
   const bends = $derived(parallelBends(edges));
   const byId = $derived(new Map(nodes.map((node) => [node.id, node])));
   const chosen = $derived(selected ? (byId.get(selected) ?? null) : null);
+  // The node open or selected here is what the topbar's Add event seats.
+  $effect(() => {
+    offerNote('graph', byId.get(openId ?? selected) ?? null);
+  });
+  onDestroy(() => withdrawNote('graph'));
   const edgeById = $derived(new Map(edges.map((link) => [link.id, link])));
   const chosenEdge = $derived(chosenLink ? (edgeById.get(chosenLink) ?? null) : null);
   const snapshotReading = $derived(Boolean(catalogViews.snapshotId || payload?.snapshot));
@@ -5154,7 +5160,7 @@
          drawing where the strips below describe one node in it. -->
     <div class="from-board">
       <Icon name="sliders" size={13} />
-      <span>{fromBoard.label || 'A question from the Board'}</span>
+      <span>{fromBoard.label || 'A question from the case'}</span>
       <button
         class="as-link"
         onclick={() => {
@@ -5793,7 +5799,7 @@
             {#if seat}
               <li>
                 <button onclick={() => chose((id) => (claimFor = byId.get(id) ?? null))} title={claimActionTitle(seat.slot)}>
-                  Add claim…
+                  Add event…
                 </button>
               </li>
             {/if}
@@ -5929,7 +5935,7 @@
 {/if}
 
 {#if claimFor && !snapshotReading}
-  <Modal title="Note an entry" onclose={() => (claimFor = null)} width="640px">
+  <Modal title="Add event" onclose={() => (claimFor = null)} width="640px">
     <EntryLine
       caseId={caseState.current.id}
       entity={claimFor}

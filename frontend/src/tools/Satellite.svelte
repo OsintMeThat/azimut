@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   // The map is lib/map's: the engine, its layers, what is drawn on them and the
   // drag gestures. Nothing in this file knows which engine that is — and the
   // map itself is a surface (satellite/MapSurface.svelte), which is what lets a
@@ -38,6 +38,7 @@
   import { assignFolder } from '../lib/filing.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openComparison, openEntity, openMapAt } from '../lib/navigate.js';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
   import { SENTINEL_ID } from '../lib/sentinel.js';
@@ -2046,9 +2047,25 @@
     else detailsEntityId = null;
   }
 
+  let detailsTitle = '';
+
+  // The saved place open here, in its dialog or its Details, is what the topbar's
+  // Add event seats.
+  $effect(() => {
+    const id = placeModal?.id ?? detailsEntityId;
+    offerNote(
+      'satellite',
+      id
+        ? { id, label: placeModal?.title ?? detailsTitle, type: 'place', attrs: {} }
+        : null,
+    );
+  });
+  onDestroy(() => withdrawNote('satellite'));
+
   function openPlaceDetails() {
     detailsDirty = false; // a fresh panel, whatever the last one was left holding
     detailsEntityId = placeModal?.id ?? null;
+    detailsTitle = placeModal?.title ?? '';
     placeModal = null;
   }
 

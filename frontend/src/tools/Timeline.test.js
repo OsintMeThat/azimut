@@ -439,3 +439,18 @@ describe('exporting the axis', () => {
     expect(source).toContain('<PlateExport surface="timeline" plate={capturePlate}');
   });
 });
+
+describe('the file an entry is about', () => {
+  it('opens the inspector on it, or on the first file an event cites', () => {
+    expect(source).toContain("const PREVIEWS = new Set(['media', 'capture']);");
+    expect(source).toContain(
+      "row.direction === 'out' && row.link?.type === 'cites' && PREVIEWS.has(row.entity?.type)"
+    );
+    const body = source.indexOf('<div class="inspector-body">');
+    expect(source.indexOf('<MediaPreview', body)).toBeLessThan(source.indexOf('<div class="item-kind">', body));
+  });
+
+  it('goes to its own line when the topbar asks for Add event', () => {
+    expect(source).toContain('if (!snapshotReading) untrack(() => entryLine?.focus());');
+  });
+});

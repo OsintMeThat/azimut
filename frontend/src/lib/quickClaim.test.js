@@ -143,9 +143,9 @@ describe('quickClaimBody', () => {
 
 describe('claimActionTitle', () => {
   it('says what the press files from each seat', () => {
-    expect(claimActionTitle('about')).toBe('File a claim about this');
-    expect(claimActionTitle('at')).toBe('File a claim placed here');
-    expect(claimActionTitle('cites')).toBe('File a claim that rests on this');
+    expect(claimActionTitle('about')).toBe('Add an event about this');
+    expect(claimActionTitle('at')).toBe('Add an event that happened here');
+    expect(claimActionTitle('cites')).toBe('Add an event this shows');
     expect(claimActionTitle(null)).toBe('');
   });
 });

@@ -24,8 +24,8 @@ describe('the board is what makes the vocabulary reachable', () => {
     expect(source).toContain('width="640px"');
   });
 
-  it('opens what it just created, since a claim exists to be pointed at things', () => {
-    expect(source).toContain('openId = entity.id;');
+  it('opens what it just created in its group, since a subject exists to be pointed at', () => {
+    expect(source).toMatch(/oncreated=\{\(entity\) => \{[\s\S]{0,300}reveal\(entity\.type\);\s*requestOpen\(entity\.id\);/);
   });
 
   it('opens any row in the one Details panel every other surface uses', () => {
@@ -40,8 +40,8 @@ describe('the board is what makes the vocabulary reachable', () => {
 
   it('uses the primary photo when an entity has one', () => {
     expect(source).toContain('{#if entity.thumb}');
-    expect(source).toContain("entity.thumb.startsWith('data:')");
-    expect(source).toContain('fileUrl(caseState.current.id, entity.thumb)');
+    expect(source).toContain("thumb.startsWith('data:') ? thumb : fileUrl(caseState.current.id, thumb)");
+    expect(source).toContain('<img class="entity-thumb" src={thumbUrl(entity.thumb)}');
     expect(source).toContain('{:else}\n                  <Icon name={entityIcon(entity)}');
   });
 });
@@ -94,9 +94,11 @@ describe('bounded loading', () => {
   });
 
   it('counts a memory-filtered page itself, since the server never heard the term', () => {
-    expect(source).toContain(
-      "pl.serverMode || !filter.q.trim() ? pl.total : matching.length"
+    expect(source).toMatch(
+      /pl\.serverMode \|\| !filter\.q\.trim\(\)\s*\? pl\.total\s*: matching\.length/
     );
+    // grouped, the count is the server's, since every group reads its page from it
+    expect(source).toContain('grouped\n      ? groupedTotal');
   });
 
   it('hands the term to the list, which is what searches past one page', () => {
@@ -195,7 +197,7 @@ describe('one table, and it scrolls', () => {
   it('is the tool shell, so the rows scroll instead of the page growing', () => {
     // `.tool` is a full-height flex column; a body without min-height:0 pushes the
     // column past the viewport and nothing scrolls at all
-    expect(source).toContain('<div class="tool">');
+    expect(source).toContain('<div class="tool" bind:clientWidth={measuredWidth}>');
     expect(source).toContain('.body {');
     expect(source).toMatch(/\.body \{[^}]*min-height: 0;/);
     expect(source).toMatch(/\.body \{[^}]*overflow: auto;/);
@@ -298,7 +300,7 @@ describe('creating one', () => {
     expect(source).toContain(
       '(entry) => !filter.families.length || filter.families.includes(entry.family)'
     );
-    expect(source).toContain('type: onlyType || wanted[0]?.type');
+    expect(source).toContain('type: type || onlyType || wanted[0]?.type');
   });
 
   it('names the first column after the chosen type, as the create form does', () => {
@@ -310,8 +312,7 @@ describe('creating one', () => {
   it('offers the row this case already holds under the same identifier', () => {
     // the warning itself lives in the shared dialog; what the Board owns is where the
     // offer lands — the existing row, opened
-    expect(source).toContain('ontwin={(entity) => {');
-    expect(source).toContain('openId = entity.id;');
+    expect(source).toMatch(/ontwin=\{\(entity\) => \{[\s\S]{0,120}requestOpen\(entity\.id\);/);
   });
 
   it('asks before a close would throw away an unsaved field', () => {
@@ -326,7 +327,7 @@ describe('a frozen analysis snapshot', () => {
     expect(source).toContain('const snapshotReading = $derived(Boolean(catalogViews.snapshotId))');
     expect(source).toContain('disabled={!caseState.current || importing || snapshotReading}');
     expect(source).toContain('disabled={snapshotReading}');
-    expect(source).toContain('{#if openId && !snapshotReading}');
+    expect(source).toContain("{#if openId && !snapshotReading && !docked && uiState.tool === 'board'}");
     expect(source).toContain('{#if !snapshotReading}<span class="review">');
     expect(source).toContain('<Modal title="Snapshot details"');
     expect(source).toContain('<SnapshotDetails');
@@ -355,7 +356,9 @@ describe('taking a file into the case', () => {
   });
 
   it('opens one file where the analyst can say what it is, and a batch nowhere', () => {
-    expect(source).toContain('if (files.length === 1 && last) openId = last;');
+    expect(source).toContain('if (files.length === 1 && last) requestOpen(last);');
+    // and what was filed shows in its group rather than folded away
+    expect(source).toContain("if (added || duplicates) reveal('media');");
   });
 });
 
@@ -415,7 +418,7 @@ describe('a row reaches the drawing', () => {
   });
 
   it('keeps that click off the row it sits on', () => {
-    expect(source).toMatch(/e\.stopPropagation\(\);\s*uiState\.openGraphEntity/);
+    expect(source).toMatch(/e\.stopPropagation\(\);\s*showInGraph\(entity\);/);
   });
 
   it('stays quiet until the row is under the pointer, like the review clicks', () => {
@@ -491,11 +494,11 @@ describe('adding the statements up', () => {
   });
 
   it('offers no Show more under a bounded total', () => {
-    expect(source).toContain('{#if pl.hasMore && !totalling}');
+    expect(source).toContain('{#if pl.hasMore && !totalling && !grouped}');
   });
 
   it('opens the subject a row stands for', () => {
-    expect(source).toContain('onclick={() => (openId = row.id)}');
+    expect(source).toContain('onclick={() => requestOpen(row.id)}');
   });
 });
 
@@ -505,8 +508,8 @@ describe('Ctrl+V on the table', () => {
     expect(source).toContain("import PasteDialog from '../components/PasteDialog.svelte'");
     expect(source).toContain("resolvePaste('board', payload)");
     // opened, not just filed: the next gesture is relating it to what prompted it
-    expect(source).toContain('openId = result.entity.id;');
-    expect(source).toContain('openId = entity.id;');
+    expect(source).toContain('requestOpen(result.entity.id);');
+    expect(source).toContain("reveal(entity.type ?? 'bookmark');");
   });
 
   it('only answers while it is the tool on screen', () => {
@@ -532,7 +535,8 @@ describe('several rows at once', () => {
 
   it('measures a shift-run over the rows on screen, with the shared selection math', () => {
     expect(source).toContain("import { toggleCheck } from '../lib/gridSelect.js'");
-    expect(source).toContain('rows.map((row) => row.id)');
+    expect(source).toContain('shownRows.map((row) => row.id)');
+    expect(source).toContain('const shownRows = $derived(grouped ? groupedRows : rows);');
   });
 
   it('drops the ticks when the question they were made in changes', () => {
@@ -547,10 +551,67 @@ describe('several rows at once', () => {
   });
 });
 
-describe('filing a claim from a row', () => {
-  it('offers it only where the verb registry gives the row a seat', () => {
-    expect(source).toContain('{@const seat = claimSeat(entity)}');
-    expect(source).toContain('title={claimActionTitle(seat.slot)}');
+describe('the groups', () => {
+  it('reads the case by family, from one count of the answer per type', () => {
+    expect(source).toContain("import BoardGroup from './board/BoardGroup.svelte';");
+    expect(source).toContain("counts: 'type',");
+    expect(source).toContain('byType = page.by_type ?? {};');
+    // a group reads its own page only when it is open and holds part of the answer
+    expect(source).toContain('if (counts[group.id] && isOpen(group)) loadGroup(group.id);');
+  });
+
+  it('keeps the question the one Board and Graph share', () => {
+    // no preset in the filter: the groups lay the answer out, they never narrow it
+    expect(source).not.toMatch(/['"]Subjects['"]/);
+    expect(source).toContain('...toQuery(filter, { types: groupTypes[group.id] }),');
+  });
+
+  it('reads the events of the subject rows once per page, never per row', () => {
+    expect(source).toContain("import { fetchEventRows } from '../lib/catalog.js';");
+    expect(source).toContain("entry.open && entry.group.kind === 'subject'");
+    expect(source).toContain('fetchEventRows(id, missing)');
+  });
+
+  it('keeps the layout per case and lets a saved view state its own', () => {
+    expect(source).toContain('layout = loadLayout(id);');
+    expect(source).toContain('board: { order, sortKey, sortDesc, group: shape.group, groupSort: shape.sort },');
+    expect(source).toContain('viewShape = viewLayout(board);');
+  });
+
+  it('opens Details beside the list when there is room, and walks it with the arrows', () => {
+    expect(source).toContain('<aside class="fiche"');
+    expect(source).toContain('onkeydown={walkRows}');
+    expect(source).toContain("if (docked && (openId || snapshotOpen)) next.click();");
+  });
+
+  it('keeps Details where it opened while the window is resized', () => {
+    // a switch on resize would remount it and throw away what was being typed
+    expect(source).toContain('if (dockedWhenOpened === null) dockedWhenOpened = untrack(() => toolWidth >= DOCK_WIDTH);');
+    expect(source).toContain('const docked = $derived(dockedWhenOpened ?? toolWidth >= DOCK_WIDTH);');
+  });
+
+  it('keeps Details beside the list while the Board is hidden', () => {
+    // a hidden tab measures no width, which must not read as a narrow window
+    expect(source).toContain('if (measuredWidth > 0) toolWidth = measuredWidth;');
+  });
+
+  it('asks before an arrow key throws half-typed fields away', () => {
+    expect(source).toContain('if (dirty && openId) {');
+    expect(source).toContain('openId = pendingOpen;');
+  });
+
+  it('offers the waiting questions while nothing else is asked', () => {
+    expect(source).toContain('!filtering && !snapshotReading && !totalling ? waitingOf(summary) : []');
+    expect(source).toContain('onclick={() => (filter = askQuestion(filter, item.id))}');
+  });
+
+  it('says how a case of files only fills its index', () => {
+    expect(source).toContain('No people, places or things yet.');
+  });
+
+  it('leaves adding an event to Details, with no press on each row', () => {
+    expect(source).not.toContain('claimSeat');
+    expect(source).not.toContain('File a claim');
     expect(source).toContain('loadRelationTypes();');
   });
 });

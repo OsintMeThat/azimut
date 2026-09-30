@@ -67,6 +67,7 @@ class CaseRepository(Protocol):
         temporal_until: str | None = None,
         temporal_categories: list[str] | None = None,
         order: str = "",
+        count_by_type: bool = False,
     ) -> dict[str, Any]:
         """A bounded, filtered slice of the catalog (Step 5, "Bounded loading").
 
@@ -87,7 +88,17 @@ class CaseRepository(Protocol):
 
         ``total`` counts the whole filtered set, so the narrowing terms answer a
         question rather than only shortening a list: *how many videos have
-        coordinates* is that number, and the page is which ones.
+        coordinates* is that number, and the page is which ones. ``count_by_type``
+        adds ``by_type``, the same count split per type.
+        """
+        ...
+
+    def event_summaries(self, entity_ids: list[str], *, buckets: int = 12) -> dict[str, Any]:
+        """Per entity: how many Claims name it, when the dated ones fall, and how many
+        sources and places they reach, with ``buckets`` counts over one shared range.
+
+        ``{"range": {"from", "to"} | None, "rows": {id: {events, first, last,
+        sources, places, buckets}}}``.
         """
         ...
 

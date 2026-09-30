@@ -6,7 +6,7 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark (home) · case switcher + Board · (spacer) · guide mark · settings gear · sidebar toggle ┐
+┌ topbar: rose+wordmark (home) · case switcher + Case · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
 ├ rail ┬ tab strip (only when the workspace has several tools) ┬ case sidebar ┤
 │      │ tool canvas                                           │              │
 └──────┴───────────────────────────────────────────────────────┴──────────────┘
@@ -20,7 +20,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
 | **Home** (the mark) | Overview, Guide | |
-| **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
+| **Case** (topbar) | Timeline, Board, Graph, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect, Collage | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
@@ -31,7 +31,10 @@ not a stage: it is what every stage files into. It hangs off the case switcher i
 the topbar instead, so the header answers *which case* and the rail answers *what
 am I doing*. It stays a workspace in every other respect — tabs, `#case` deep
 links, and its own remembered sidebar. Timeline lives here because it is another
-reading of the case, not a collection or examination stage.
+reading of the case, not a collection or examination stage. The **Case** button
+opens the tab last used there, and the Timeline the first time, since that is where
+events are noted and read; `#board` and the stored tool id `board` still reach the
+Board.
 That sidebar stays closed by default, because the board already lists the same case
 and two lists side by side only ask which one is real.
 
@@ -177,11 +180,40 @@ both under **Imports**. Pasting the same crop twice is one file.
 
 ## Board
 
-The case as one table: a row per entity, whatever type it is. It is what makes the
-hand-made vocabulary reachable — a `person`, an `account` or a `claim` had no screen
-before it. One view, a table; the graph is a different question and comes as its own
-view. Following a relation to a type with no tool of its own lands here, on that
-row's Details.
+The case as an index: who, what and where, then the material it is built from. It is
+what makes the hand-made vocabulary reachable — a `person`, an `account` or a `claim`
+had no screen before it. Following a relation to a type with no tool of its own lands
+here, on that row's Details, with its group open.
+
+- **Rows are grouped by family, never hidden.** *People & organizations*, *Accounts
+  & identifiers*, *Places*, *Things* and *Equipment types* open first; *Events*,
+  *Files*, *Work* and *Other* fold underneath, each one click from the tool that reads
+  it (Timeline, Media Library). A case is mostly files, and one table of everything
+  answered "what is in the database" rather than "who is this about". The question is
+  still the one Board and Graph share, so a count, a total or a drawing never depends
+  on which groups are open. Under a question every group holding an answer opens and
+  the empty ones go; a fold made during that question lasts as long as it does. A
+  case holding no subject opens its files and says how the index fills: a name typed
+  with `@` when an event is added, or **New**.
+- **A subject row reads by its events**: how many Claims name it, a dozen bars of
+  when they fall across the case's own span (one span for every row, so the column
+  reads as who was active when), and the dates they cover. One bounded read per page
+  of rows (`POST /catalog/events`), never one per row, and none on a frozen snapshot.
+  A material row keeps type, folder and created; an event row says when it happened,
+  as written.
+- **Sort** orders each group over the whole case: *Most noted* (the subjects most
+  events name first, the files newest first), *Name*, *Recently added*. Most noted
+  is asked of a group's types only, each row one index search on the links.
+  **Group: None** is the one flat table, headings and all, and a Board view saved
+  before the groups opens that way. Grouping, sort and folds are kept per case in
+  this browser, like the question.
+- **Waiting** lists the standing questions that count something (*to review*,
+  *linked to nothing*, *events without a source*, *not assessed*), one click from the
+  rows they count, while nothing else is being asked.
+- **Details opens beside the list** when the Board is wide enough for both, and over
+  it otherwise. `↑`/`↓` walk the rows and Details follows, so reading five people is
+  five presses; `Esc` closes it, and a row changed with edits unsaved asks first. Its
+  width is dragged from its edge and kept in the browser.
 
 - **New entity** offers the types an analyst creates by hand and generates the form
   from the registry. It is **one dialog shared with the graph**, so a claim is filed
@@ -218,11 +250,11 @@ row's Details.
   whole of the onboarding: the answer arrives, and the sentence that produced it is
   sitting there to edit. They are code, not saved state, so nothing new has to reach
   the backup.
-- **Nine axes, every value chosen from the case and counted**: a stored field and one
-  of its values (*kind = video*), one or several types, one or several families, a
+- **Eleven axes, every value chosen from the case and counted**: a stored field and
+  one of its values (*kind = video*), one or several types, one or several families, a
   folder with or without its subfolders or none at all, review state, a one-hop test
-  for touching a type, having no connection at all, when it was filed, and what filed
-  it. A count that would answer a *different* question is not shown: **Linked to a
+  for touching a type, having no connection at all, when it was filed, what filed it,
+  and a Claim with no source or no assessment. A count that would answer a *different* question is not shown: **Linked to a
   place** is priced by how many rows touch a place, never by how many places the case
   holds. A field with no value picked yet asks nothing, and a field the case holds too
   many distinct values for is not offered — a menu of five thousand paths is not a way
@@ -299,19 +331,20 @@ row's Details.
   case, while the complete case bundle is the one transmission boundary.
 - **A proposal is settled from its row**: confirm takes its suggested relations with
   it, dismiss is the standard delete, recoverable from the trash.
-- **Sorting** is a click on any heading, reversed by a second. Two of them name a
+- **Sorting**, in the flat table, is a click on any heading, reversed by a second. Two of them name a
   column the store can order the **case** by — identity and created — so *newest first*
   is the newest in the case rather than the newest of the hundred rows loaded. The
   others sort what is loaded and say so beside the count while there are more. One
   gesture either way: which of the two it is belongs to the column, not to a second
   control the analyst has to find.
-- **Columns** are the four every entity has — identity, type, folder, created — plus
+- **Columns**, in the flat table, are the four every entity has — identity, type, folder, created — plus
   the chosen type's declared fields once a single type is picked. Read-only: a value is
   edited in that row's Details, and the Case Sheet works on the case's CSV files rather
   than on these rows. A primary entity photo replaces the type
   icon in the identity column; without one, the icon remains.
-- **A row is a control**: focusable, opened with Enter, and the review clicks inside
-  it never open it.
+- **A row is a control**: focusable, opened with Enter, walked with the arrow keys,
+  and the review clicks inside it never open it. Adding an event about it is Details'
+  own **Add event**, not a press on every row.
 - **A box per row deletes several at once.** A mistake is rarely one row — a folder
   imported twice, a scraper run that filed forty of the wrong thing, a paste into the
   case next door — and undoing that one Details panel at a time is what made a slip
@@ -455,7 +488,9 @@ single root to expand from. Expansion is the drill-down.
   the picture and the toast's *Undo* is what takes the entity back, through the
   standard recoverable delete.
 - **A node reaches its row**, as a row reaches its node: *In the Board* opens the same
-  entity in the table, and *In the graph* in any Details panel opens it here.
+  entity in the table, its group open and its Details beside it, and *In the graph* in
+  any Details panel opens it here. A Claim followed from anywhere opens on its own
+  Timeline entry, in Undated or off the UTC axis when it has no place there.
 - **Find a node** by name, ranked most-connected first. On a case drawn at a few
   hundred nodes, hunting one by eye does not work, and a canvas cannot be reached
   from the keyboard at all — so this is both the way in without a mouse and the only
@@ -979,10 +1014,27 @@ opening an absorbed subject reaches the survivor and says **Merged into …**. B
 imports retain these redirects but cannot undo merges performed before export.
 
 **The entry line.** One line notes what happened: `[date · optional] │ sentence with
-@mentions │ 📎 │ Add`. It sits under the Timeline's axis, and the Claims group in
-Details, a Board row and a node's menu in the Graph open the same line with their
-entity already seated. Every entry is an ordinary Claim; the line only stops asking
-for the ontology up front.
+@mentions │ 📎 │ Add`. It sits under the Timeline's axis; **Add event** at the top of
+any Details and a node's menu in the Graph open the same line with their entity
+already seated. Every entry is an ordinary Claim; the line only stops asking for the
+ontology up front. Every surface says one verb for it, *Add event*.
+
+**Add event from anywhere.** The topbar's **Add event** button (`Alt+N`, never inside
+a field) opens the line over the bottom of whatever tool is on screen, over its own
+Details or lightbox too, with what that tool shows already seated: the file whose
+Details or picture is open cites itself, and its one confirmed place is where it
+happened; the Board's or the Graph's open entity, the inspected file, the open proof
+or note, the place selected on the map. A place only suggested, or two of them, is
+not seated, since seating it would confirm it without the analyst deciding. The date
+stays empty, and a file's own dates are said beside it, read-only (`The file says:
+captured 22 Jun 2023, 17:07:16 UTC`). It closes after **Add**, on `Esc`, and when the
+analyst moves to another tool. On the Timeline the button goes to the line already
+under the axis, and on a frozen snapshot it is greyed with its reason.
+
+**Details opens on a summary.** Above Info · Connections · Time: the name, the type and
+other names, how many events name the entity with the sources and places they reach,
+when they fall across the case, **Timeline** to read them there, and **Add event**.
+Connections lists those events under *Events*.
 
 - **One thing to say is enough**: a sentence, a mention or a source. Left empty, the
   sentence writes itself from what is on the line — `2 × T-72B3 destroyed at
@@ -1208,8 +1260,11 @@ and intervals expose both resize edges. Every direct write shows the old and new
 values before saving.
 
 Selecting an entry opens a fixed-width inspector without changing the axis geometry.
-It shows the readable and raw date, precision, timezone, authority, role, status,
-confidence, reasoning and named subjects, places and evidence. Statements can be
+**A file is shown at its top**: the picture, the video ready to play or the sound, for
+a file's own date and for an event citing one, with the list's thumbnail as its first
+frame and one press to full screen. Below it, the readable and raw date, precision,
+timezone, authority, role, status, confidence, reasoning and named subjects, places
+and evidence. Statements can be
 edited there. **Right-clicking an entry** — on the axis, in the list or in either
 holding queue — names the same four acts where the pointer is: pin, hide, Details and
 Edit claim. It changes no selection, so a pair being measured survives it, and the

@@ -235,7 +235,7 @@
   <div class="actions">
     <button class="btn btn-ghost" onclick={oncancel}>Cancel</button>
     <button class="btn btn-primary" disabled={!statement.trim() || !whenValid || saving || loading} onclick={save}>
-      {saving ? 'Saving…' : item ? 'Update claim' : 'Add claim'}
+      {saving ? 'Saving…' : item ? 'Update claim' : 'Add event'}
     </button>
   </div>
 </div>

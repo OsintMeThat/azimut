@@ -1,6 +1,8 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { fetchAllEntities } from '../lib/catalog.js';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { foldText } from '../lib/textFold.js';
   import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
   import { entityReference, markdownHtml, remoteImageUrls } from '../lib/markdown.js';
@@ -136,6 +138,11 @@
     .sort((a, b) => a.label.localeCompare(b.label)));
   const activeTab = $derived(tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null);
   const noteId = $derived(activeTab?.noteId ?? null);
+  // The filed note open here is what the topbar's Add event seats; the case notes offer nothing.
+  $effect(() => {
+    offerNote('notebook', noteEntities.find((entity) => entity.id === noteId) ?? null);
+  });
+  onDestroy(() => withdrawNote('notebook'));
   const title = $derived(noteId
     ? noteEntities.find((entity) => entity.id === noteId)?.label ?? 'Note'
     : 'Case Notes');

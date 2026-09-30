@@ -1,6 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 
+/** Details docks beside a wide Board and is a modal below that. */
+const boardDetails = (page) =>
+  page.locator('aside.fiche').or(page.getByRole('dialog', { name: 'Details', exact: true }));
+
+/** The Board's flat table, where a file or a claim is a row on screen rather than one
+ *  in a folded group. */
+const flatBoard = (page) =>
+  page.addInitScript((key) => localStorage.setItem(key, '{"group":"none"}'), `azimut:board-layout:${CASE_ID}`);
+
 const person = {
   id: 'person-1',
   type: 'person',
@@ -184,7 +193,7 @@ async function openTimeline(page, options = {}) {
 test('draws a clear chronology with density, uncertainty and an inspector', async ({ page }, testInfo) => {
   const fixture = await openTimeline(page);
 
-  await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Board', 'Graph', 'Timeline', 'Sheet']);
+  await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Timeline', 'Board', 'Graph', 'Sheet']);
   // the dates the analyst stated, then the files the case collected, not its own frames
   await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Media']);
   await expect(page.getByRole('button', { name: /Roadside camera frame/ })).toBeVisible();
@@ -396,7 +405,7 @@ test('creates a dated statement from a point on the axis', async ({ page }) => {
 
   await page.mouse.click(box.x + box.width * 0.72, box.y + box.height - 8);
   // The click dates the line under the axis and hands it the sentence.
-  const line = page.getByRole('region', { name: 'Note an entry' });
+  const line = page.getByRole('region', { name: 'Add an event' });
   await expect(line.getByLabel('When')).not.toHaveValue('');
   await expect(line.getByLabel('What happened')).toBeFocused();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -420,7 +429,7 @@ test('creates a dated statement from a point on the axis', async ({ page }) => {
 
 test('notes an entry with a new subject and a place, on that place’s clock', async ({ page }) => {
   const fixture = await openTimeline(page, { catalog: [person, source, mediaEntity, quay] });
-  const line = page.getByRole('region', { name: 'Note an entry' });
+  const line = page.getByRole('region', { name: 'Add an event' });
   const say = line.getByLabel('What happened');
 
   await say.pressSequentially('Crane seen at @South');
@@ -450,7 +459,7 @@ test('notes an entry with a new subject and a place, on that place’s clock', a
 
 test('says what the line takes, and cites a source picked by its kind', async ({ page }) => {
   const fixture = await openTimeline(page);
-  const line = page.getByRole('region', { name: 'Note an entry' });
+  const line = page.getByRole('region', { name: 'Add an event' });
 
   await line.getByLabel('When').focus();
   await expect(line.locator('.help')).toContainText('a month March 2026');
@@ -476,7 +485,7 @@ test('keeps the source picker in the viewport and separates images from videos',
   const video = { ...mediaEntity, id: 'clip-2', label: 'Convoy clip', attrs: { kind: 'video', path: 'media/clip.mp4' } };
   const fixture = await openTimeline(page, { catalog: [person, source, mediaEntity, video] });
   await page.setViewportSize({ width: 1024, height: 600 });
-  const line = page.getByRole('region', { name: 'Note an entry' });
+  const line = page.getByRole('region', { name: 'Add an event' });
   // Put the line near the bottom inside its existing clipped tool container.
   await line.evaluate((node) => { node.style.position = 'fixed'; node.style.bottom = '20px'; node.style.left = '240px'; node.style.width = '740px'; node.style.zIndex = '100'; });
   await line.getByRole('button', { name: 'Cite a source' }).click();
@@ -579,7 +588,7 @@ test('reads a mark on the ruler, and walks the track with Alt and an arrow', asy
   await page.getByRole('button', { name: /Vehicle remained/ }).focus();
   await page.keyboard.press('Alt+ArrowRight');
   await expect(page.locator('.track-canvas').first().locator(':focus')).toHaveAttribute('data-mark', /claim-1|claim-4|dense/);
-  await expect(page.getByRole('dialog', { name: 'Add claim' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Add event' })).toHaveCount(0);
 });
 
 test('hangs a card from each mark when the track has the room', async ({ page }) => {
@@ -735,7 +744,7 @@ test('creates and resizes an hourly period on a day view', async ({ page }) => {
   await page.mouse.move(box.x + box.width * .5, y, { steps: 5 });
   await page.mouse.up();
 
-  const line = page.getByRole('region', { name: 'Note an entry' });
+  const line = page.getByRole('region', { name: 'Add an event' });
   await expect(line.getByLabel('When')).toHaveValue(/^23\/06\/2026 \d{2}:\d{2}.* 23\/06\/2026 \d{2}:\d{2}/);
   await page.keyboard.type('Traffic peaked around the checkpoint');
   await page.keyboard.press('Enter');
@@ -767,7 +776,7 @@ test('keeps creation on the Claims track and offers the list view', async ({ pag
   const mediaCanvas = page.locator('.track-canvas').nth(1);
   const box = await mediaCanvas.boundingBox();
   await page.mouse.click(box.x + box.width * .7, box.y + box.height - 8);
-  await expect(page.getByRole('region', { name: 'Note an entry' }).getByLabel('When')).toHaveValue('');
+  await expect(page.getByRole('region', { name: 'Add an event' }).getByLabel('When')).toHaveValue('');
 
   await page.getByRole('button', { name: 'List' }).click();
   await expect(page.getByRole('region', { name: 'Timeline list' })).toBeVisible();
@@ -782,11 +791,11 @@ test('starts a media correction from the captured date', async ({ page }) => {
   await expect(correction).toBeEnabled();
   await correction.click();
 
-  const dialog = page.getByRole('dialog', { name: 'Add claim' });
+  const dialog = page.getByRole('dialog', { name: 'Add event' });
   await expect(dialog.getByLabel('Date format')).toHaveValue('timestamp');
   await expect(dialog.getByLabel('Date and time')).toHaveValue('2026-06-23T18:42:11');
   await expect(dialog.getByLabel('Timezone')).toHaveValue('utc');
-  await dialog.getByRole('button', { name: 'Add claim' }).click();
+  await dialog.getByRole('button', { name: 'Add event' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0]).toMatchObject({
@@ -866,16 +875,16 @@ test('moves and shortens a selected claim on the axis', async ({ page }) => {
 
 test('validates advanced syntax before saving', async ({ page }) => {
   await openTimeline(page);
-  const line = page.getByRole('region', { name: 'Note an entry' });
+  const line = page.getByRole('region', { name: 'Add an event' });
   await line.getByLabel('What happened').fill('A dated observation');
   await line.getByRole('button', { name: 'More' }).click();
   await line.getByRole('button', { name: 'Full editor' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Add claim' });
+  const dialog = page.getByRole('dialog', { name: 'Add event' });
   await expect(dialog.getByLabel('Claim', { exact: true })).toHaveValue('A dated observation');
   await dialog.getByLabel('Date format').selectOption('advanced');
   await dialog.getByLabel('When').fill('late summer');
   await expect(dialog.getByText('Use a supported date or timestamp.')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Add claim' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Add event' })).toBeDisabled();
   await dialog.getByText('Syntax guide').click();
   await expect(dialog.getByRole('region', { name: 'Supported date syntax' })).toBeVisible();
 });
@@ -892,9 +901,10 @@ test('keeps entity history in the same three-tab Details model', async ({ page }
       'claim-3': claimChain('claim-3', timelineItem('claim-3').label, { time_role: 'observed' }),
     },
   });
+  await flatBoard(page);
   await page.goto('/#board');
   await page.locator('tbody tr').filter({ hasText: person.label }).locator('td:not(.pick)').first().click();
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
   await expect(details.getByRole('tab')).toHaveText(['Info', 'Connections', 'Time']);
   await details.getByRole('tab', { name: 'Time' }).click();
 
@@ -913,9 +923,10 @@ test('opens the row handed over from the Time tab', async ({ page }) => {
       'media-1': { entity: mediaEntity, sources: [], lost: [], dependents: [], relations: [], empty: true },
     },
   });
+  await flatBoard(page);
   await page.goto('/#board');
   await page.locator('tbody tr').filter({ hasText: mediaEntity.label }).locator('td:not(.pick)').first().click();
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
   await details.getByRole('tab', { name: 'Time' }).click();
   await details.getByRole('button', { name: `Open ${mediaEntity.label} in Timeline` }).click();
 
@@ -939,9 +950,10 @@ test('edits an existing claim from the Time tab', async ({ page }) => {
       'claim-3': claimChain('claim-3', timelineItem('claim-3').label, { time_role: 'observed' }),
     },
   });
+  await flatBoard(page);
   await page.goto('/#board');
   await page.locator('tbody tr').filter({ hasText: person.label }).locator('td:not(.pick)').first().click();
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
   await details.getByRole('tab', { name: 'Time' }).click();
 
   await details.getByRole('button', { name: `Edit ${timelineItem('claim-1').label}` }).click();
@@ -970,9 +982,10 @@ test('starts a new claim from an empty form after editing one', async ({ page })
       'claim-3': claimChain('claim-3', timelineItem('claim-3').label, { time_role: 'observed' }),
     },
   });
+  await flatBoard(page);
   await page.goto('/#board');
   await page.locator('tbody tr').filter({ hasText: person.label }).locator('td:not(.pick)').first().click();
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
   await details.getByRole('tab', { name: 'Time' }).click();
 
   await details.getByRole('button', { name: `Edit ${timelineItem('claim-1').label}` }).click();
@@ -993,9 +1006,10 @@ test('shows an undated Claim as a missing claim date, not an existing one', asyn
       'claim-3': claimChain('claim-3', undatedClaim.label, undatedClaim.attrs),
     },
   });
+  await flatBoard(page);
   await page.goto('/#board');
   await page.locator('tbody tr').filter({ hasText: undatedClaim.label }).locator('td:not(.pick)').first().click();
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
   await details.getByRole('tab', { name: 'Time' }).click();
 
   await expect(details.getByText('This claim has no date yet.')).toBeVisible();
@@ -1073,8 +1087,9 @@ test('hands one window from the Timeline to the Map, the Board and back', async 
   // and says which window it is answering.
   await expect(page.getByLabel('Fact-time range')).toContainText('1 Jun – 21 Jun 2026');
   await expect.poll(() => fixture.catalogQueries.at(-1)).toContain('temporal_from=2026-06-01');
+  // Grouped by kind, and every group holding part of the window open.
   await expect(page.locator('tbody tr')).toHaveText([
-    /Harbour witness/, /Interview notes/, /South quay/,
+    /Harbour witness/, /South quay/, /Interview notes/,
   ]);
 
   await page.getByLabel('Fact-time range').getByRole('button', { name: 'Timeline' }).click();
@@ -1152,4 +1167,19 @@ test('says a window holds nothing placed instead of pulling the map out to say i
   await expect(page.locator('.temporal-mark')).toHaveCount(0);
   await expect(page.locator('.saved-mark-place')).toHaveCount(0);
   fixture.expectNoUnexpectedRequests();
+});
+
+test('shows the file a picked entry is about, one press from full screen', async ({ page }) => {
+  await openTimeline(page);
+
+  await page.getByRole('button', { name: /Roadside camera frame/ }).first().click();
+  const preview = page.locator('.inspector figure.preview');
+  await expect(preview.locator('img')).toHaveAttribute('src', /media\/panel\.svg/);
+
+  await preview.getByRole('button', { name: 'Open Roadside camera frame full screen' }).click();
+  await expect(page.locator('.stage img')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.stage')).toHaveCount(0);
+  // the inspector stays on the entry
+  await expect(preview).toBeVisible();
 });

@@ -569,8 +569,19 @@ endpoints:
   second cannot tie the paging into a loop. Both sort columns are indexed (schema
   14), so an ordered page walks an index instead of sorting the filtered set in a
   temp B-tree; `tests/test_repository.py` reads the query plan and holds it there.
+  `events` (the Board's *Most noted*) is the one ordering no index can serve: the
+  count of Claims naming each row. It is refused without a `type` set, so what it
+  costs is one Board group's rows, each an index search on `links.to_id`, and the
+  same test holds that plan too.
+- `counts=type` adds `by_type` to a page, the matching count per type under the same
+  terms, which is how the Board sizes every group of an answer in one request.
+- `POST /api/cases/{id}/catalog/events` takes a page of ids (200 at most) and says,
+  per id, how many Claims name it, when the dated ones fall, how many sources and
+  places they reach, and twelve buckets over the case's own span of dated Claims:
+  the Board reads it once per page of subject rows, and Details once per entity.
 - `GET /api/cases/{id}/catalog/summary` returns `{total, by_type, by_status,
-  by_folder, by_source, linked_to, unlinked, countable}` without shipping the graph.
+  by_folder, by_source, linked_to, unlinked, countable, lacks}` without shipping the
+  graph. `lacks` prices the two Claim questions, no source and not assessed.
   `linked_to` counts entities that **have a neighbour** of each type, which is not how
   many of that type the case holds: it is what the filter menu has to price itself
   with, and the other number looks like an answer without being one. `countable` is how

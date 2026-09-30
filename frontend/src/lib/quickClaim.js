@@ -37,13 +37,15 @@ export function quickClaimSeat(family, accepts) {
   };
 }
 
-/** What the press files, said from where it is pressed: a tooltip per seat. */
+/** What the press adds, said from where it is pressed: a tooltip per seat. One verb
+ *  on every surface, "Add event", where the same act used to be filed, noted and
+ *  added under three names. */
 export function claimActionTitle(slot) {
   return (
     {
-      about: 'File a claim about this',
-      at: 'File a claim placed here',
-      cites: 'File a claim that rests on this',
+      about: 'Add an event about this',
+      at: 'Add an event that happened here',
+      cites: 'Add an event this shows',
     }[slot] ?? ''
   );
 }

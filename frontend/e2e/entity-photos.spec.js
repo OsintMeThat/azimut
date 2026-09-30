@@ -18,6 +18,11 @@ const chain = {
   empty: true,
 };
 
+
+/** Details opens beside a wide Board, and over it below that. */
+const boardDetails = (page) =>
+  page.locator('aside.fiche').or(page.getByRole('dialog', { name: 'Details', exact: true }));
+
 async function openDetails(page, options = {}) {
   const fixture = await installAppFixture(page, {
     catalog: [person],
@@ -26,7 +31,7 @@ async function openDetails(page, options = {}) {
   });
   await page.goto('/#board');
   await page.getByRole('cell', { name: 'Unknown subject', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Details' })).toBeVisible();
+  await expect(boardDetails(page)).toBeVisible();
   return fixture;
 }
 
@@ -38,7 +43,7 @@ test('imports a photo from the computer and keeps the main image bounded', async
       title: 'portrait',
     },
   });
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
 
   await expect(details.locator('.main-photo')).toHaveCount(0);
   await details.locator('input[type=file]').setInputFiles({
@@ -72,7 +77,7 @@ test('chooses an existing Media Library image without creating a relation', asyn
       thumbnail: null,
     }],
   });
-  const details = page.getByRole('dialog', { name: 'Details' });
+  const details = boardDetails(page);
 
   await details.getByRole('button', { name: 'Choose from media' }).click();
   const picker = page.getByRole('dialog', { name: 'Choose photos' });
@@ -128,7 +133,7 @@ test('adds private photos while creating an entity and chooses the primary one',
   await dialog.getByRole('button', { name: 'Use portrait two as primary photo' }).click();
   await dialog.getByRole('button', { name: 'Create', exact: true }).click();
 
-  await expect(page.getByRole('dialog', { name: 'Details' })).toBeVisible();
+  await expect(boardDetails(page)).toBeVisible();
   await expect(page.getByText('Primary', { exact: true })).toBeVisible();
   expect(fixture.galleryWrites).toEqual([
     { method: 'UPLOAD', entityId: 'e_new', imageId: 'photo-direct-1' },

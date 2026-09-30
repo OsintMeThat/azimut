@@ -65,6 +65,7 @@ vi.mock('../lib/state.svelte.js', async () => await import('./details.fixture.sv
 vi.mock('../lib/relations.svelte.js', () => ({
   loadRelationTypes: () => Promise.resolve(),
   relatableTypes: () => [],
+  relationOptions: () => [],
   relationAction: () => 'relation',
   saveRelation: vi.fn(),
 }));

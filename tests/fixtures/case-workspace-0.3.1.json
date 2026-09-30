@@ -1804,6 +1804,10 @@
    "vessel": 1
   },
   "countable": 1,
+  "lacks": {
+   "assessment": 6,
+   "source": 6
+  },
   "linked_to": {
    "account": 3,
    "bookmark": 3,

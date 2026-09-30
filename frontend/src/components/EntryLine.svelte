@@ -65,6 +65,7 @@
     typeMenu,
   } from '../lib/entryLine.js';
   import { isUnzonedTime, withZone, zoneReading, zonesOf } from '../lib/localZone.js';
+  import { FILE_TYPES, fetchFileDates } from '../lib/fileDates.js';
   import { formatTemporalValue } from '../lib/timeline.js';
   import DateBuilder from './DateBuilder.svelte';
   import { anchoredPanel } from '../lib/anchoredPanel.js';
@@ -78,6 +79,9 @@
     caseId,
     /** The entity the line was opened from, already in its seat. */
     entity = null,
+    /** What else the place it was opened from already knows, seated too: a file's
+     *  one confirmed place. `{ id, label, type, attrs, slot }`, locked like the entity. */
+    also = [],
     /** Where an unsaved line is kept for the session, or '' to keep nothing. */
     draftKey = '',
     /** Whether the line says `Added · Undo` itself. A host with more to say turns
@@ -92,12 +96,31 @@
   loadRelationTypes();
 
   const seat = $derived(entity ? claimSeat(entity) : null);
-  const seated = $derived(
-    entity && seat
+  const seated = $derived([
+    ...(entity && seat
       ? [{ key: `seat:${entity.id}`, id: entity.id, label: entity.label, type: entity.type,
           attrs: entity.attrs, slot: seat.slot, locked: true }]
-      : []
-  );
+      : []),
+    ...also
+      .filter((item) => item?.id && item.id !== entity?.id && item.slot)
+      .map((item) => ({ key: `seat:${item.id}`, id: item.id, label: item.label, type: item.type,
+        attrs: item.attrs ?? {}, slot: item.slot, locked: true })),
+  ]);
+
+  // -- the file's own dates, said beside the field and never put in it ----------
+  /** A date the file carries is shown, read-only: offering it as the event's date
+   *  would have it accepted without being read, the argument Geo Proof settled. */
+  let fileSays = $state('');
+  $effect(() => {
+    const id = entity?.id;
+    fileSays = '';
+    if (!caseId || !id || !FILE_TYPES.has(entity.type)) return;
+    let live = true;
+    fetchFileDates(caseId, id)
+      .then((words) => { if (live) fileSays = words; })
+      .catch(() => {});
+    return () => { live = false; };
+  });
 
   let when = $state('');
   let text = $state('');
@@ -276,9 +299,11 @@
     queueMicrotask(() => sentence?.focus());
   }
 
-  /** Go to the sentence. */
+  /** Go to the sentence. A sentence the fields wrote is selected, so typing replaces
+   *  it; one the analyst wrote keeps its caret at the end. */
   export function focus() {
     sentence?.focus();
+    if (!edited && text) sentence?.select();
   }
 
   // -- mentions ---------------------------------------------------------------
@@ -720,6 +745,12 @@
     </div>
   {/if}
 
+  {#if fileSays}
+    <p class="file-says" title="Read from the file. The event's date is yours to give.">
+      <Icon name="file" size={11} /> The file says: {fileSays}
+    </p>
+  {/if}
+
   <div class="under">
     {#if when && whenValid}
       {@const reading = formatTemporalValue(stored)}
@@ -801,7 +832,7 @@
 </div>
 
 {#if full}
-  <Modal title="Add claim" onclose={() => (full = null)} width="660px">
+  <Modal title="Add event" onclose={() => (full = null)} width="660px">
     <TemporalClaimEditor
       {caseId}
       subject={full.subject}
@@ -822,7 +853,9 @@
 {/if}
 
 <style>
-  .entry-line { position: relative; display: grid; gap: 6px; min-width: 0; }
+  /* Sized by where it sits rather than by the window: the same line runs the width of
+     the Timeline and fits Details beside the Board. */
+  .entry-line { position: relative; display: grid; gap: 6px; min-width: 0; container: entry-line / inline-size; }
   .entry-line.dragging { outline: 1px dashed var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
   .row { display: flex; align-items: start; gap: 8px; min-width: 0; }
   .row > .btn, .sentence, .when :global(.date-field input) { min-height: 36px; height: 36px; box-sizing: border-box; font-size: var(--fs-sm); }
@@ -882,6 +915,8 @@
   .twin { color: var(--warn); }
   .under { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 22px; }
   .said { color: var(--text-2); font-size: var(--fs-xs); }
+  .file-says { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .file-says :global(svg) { flex-shrink: 0; }
   .help { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0; flex: 1; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
   .help code { padding: 0 4px; border-radius: 3px; background: var(--bg-2); color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; }
   .help .aside { color: var(--text-3); font-style: italic; }
@@ -894,10 +929,15 @@
   .field-name { color: var(--text-3); font-size: var(--fs-xs); }
   .gap { flex: 1; }
   .input-sm { padding: 4px 7px; font-size: var(--fs-xs); }
-  @media (max-width: 620px) {
+  /* Too narrow for one row: the date and the buttons share the first, and the
+     sentence takes the whole of the second, where it has room to be typed. */
+  @container entry-line (max-width: 700px) {
     .row { flex-wrap: wrap; }
-    .when { flex-basis: 100%; }
-    .attach-label { display: none; }
+    .when { flex: 1 1 180px; }
+    .say { flex-basis: 100%; order: 2; }
     .row > .btn { padding: 0 10px; }
+  }
+  @container entry-line (max-width: 420px) {
+    .attach-label { display: none; }
   }
 </style>

@@ -1,22 +1,29 @@
 <script>
   /**
-   * The case as its graph: every entity the case holds, filtered, sorted and opened.
+   * The case as an index: who, what and where, then the material it is built from.
    *
    * Until this existed the vocabulary was reachable only through the API. A case
-   * could hold a `person`, a `claim` or an `account` — the registry declared them,
-   * the relation verbs accepted them — but no screen created one, so a bookmark had
-   * nothing to be related *to* and a statement had nowhere to be read. That is what
-   * this tool is: create the hand-made types, list what the case holds, and open any
-   * row in the same Details panel every other surface uses.
+   * could hold a `person`, a `claim` or an `account`, the registry declared them and
+   * the relation verbs accepted them, but no screen created one. That is what this
+   * tool is: create the hand-made types, list what the case holds, and read any row
+   * in the same Details every other surface uses.
    *
-   * Bounded like every other list here (docs/STORAGE_AND_PERFORMANCE.md): one page
-   * off the catalog endpoint, filters applied server-side, "Show more" for the rest.
-   * A case that fits one page filters in memory, so typing costs no request.
+   * **Grouped by family, never hidden.** A case is mostly files, and one table of
+   * everything answered "what is in the database" rather than "who is this about".
+   * So the rows fall into groups (`lib/boardGroups.js`): people, identifiers, places
+   * and things open first, each saying how many events name it and when; the events,
+   * files and work fold underneath, one click from the tool that reads them. The
+   * question is still the one Board and Graph share, so a count, a total or a drawing
+   * never depends on which groups are open. "Group: None" is the flat table, and a
+   * view saved before the groups opens that way.
    *
-   * One view, a table. Two views of the same rows only asked which one was the real
-   * one. The graph is what comes next, and that is a different question, not a
-   * different rendering of this list.
-  */
+   * **Details beside the list** when there is room for both, so reading five people is
+   * five presses of an arrow key rather than five modals opened and closed.
+   *
+   * Bounded like every other list here (docs/STORAGE_AND_PERFORMANCE.md): one count
+   * of the answer per type, one page per open group, one events read per page of rows.
+   * A folded group reads nothing.
+   */
   import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import {
@@ -50,6 +57,7 @@
   import { deletedToast, deleteEntities, entityDeletePrompt } from '../lib/trash.js';
   import { toggleCheck } from '../lib/gridSelect.js';
   import {
+    askQuestion,
     chipsOf,
     clearAxis,
     emptyFilter,
@@ -85,18 +93,35 @@
   import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
   import ViewSwitch from '../components/ViewSwitch.svelte';
-  import EntryLine, { claimSeat } from '../components/EntryLine.svelte';
-  import { claimActionTitle } from '../lib/quickClaim.js';
+  import BoardGroup from './board/BoardGroup.svelte';
   import { loadRelationTypes } from '../lib/relations.svelte.js';
+  import { fetchEventRows } from '../lib/catalog.js';
+  import { offerNote } from '../lib/noteHere.svelte.js';
+  import {
+    BOARD_GROUPS,
+    GROUPINGS,
+    GROUP_SORTS,
+    boardGroup,
+    groupCounts,
+    groupOfType,
+    groupOpen,
+    holdsSubjects,
+    loadLayout,
+    saveLayout,
+    viewLayout,
+    waitingOf,
+  } from '../lib/boardGroups.js';
 
   const PAGE = 100;
+  /** A group's page: enough to read a group at a glance, small enough that the next
+   *  group is one scroll away. */
+  const GROUP_PAGE = 40;
+  /** Below this width Details opens over the list rather than beside it. */
+  const DOCK_WIDTH = 1100;
 
   loadEntityTypes();
-  // The row's claim press is offered where the verb registry gives the entity a seat.
+  // Details beside a row offers an event where the verb registry gives it a seat.
   loadRelationTypes();
-
-  /** The row a claim is being filed from, while its form is open. */
-  let claimFor = $state(null);
 
   /**
    * The question being asked of the case, as one value (`lib/entityFilter.js`).
@@ -210,12 +235,371 @@
    *  a small case searching in memory — there the server was never told the term, so
    *  its count would answer a wider question than the one on screen. */
   const matchCount = $derived(
-    pl.serverMode || !filter.q.trim() ? pl.total : matching.length
+    grouped
+      ? groupedTotal
+      : pl.serverMode || !filter.q.trim()
+        ? pl.total
+        : matching.length
   );
   /** What the answer is a part of. The **whole case**, always: a proportion is the
    *  information a count carries, and a denominator that shrinks with the numerator
    *  carries none. */
   const caseTotal = $derived(summary?.total ?? pl.total);
+
+  // ── the groups ───────────────────────────────────────────────────────────────
+  /** How this analyst lays the Board out for this case: grouped or flat, the sort,
+   *  the folds. Kept in this browser (`lib/boardGroups.js`). A Board view states its
+   *  own grouping and sort, which hold while it is open. */
+  let layout = $state(loadLayout(null));
+  let viewShape = $state(null); // { group, sort } while a Board view is open
+  const shape = $derived(viewShape ?? { group: layout.group, sort: layout.sort });
+  const grouped = $derived(shape.group === 'kind' && !totalling);
+
+  /** Folds made under the current question, forgotten when it changes: a question
+   *  opens every group that holds an answer, and a fold made while reading it should
+   *  not outlive it. */
+  let asked = $state({});
+  /** Groups opened for the analyst this session, by a file just imported or a row
+   *  followed here, until they fold the group themselves. */
+  let revealed = $state({});
+
+  function setShape(next) {
+    if (viewShape) viewShape = { ...viewShape, ...next };
+    else {
+      layout = { ...layout, ...next };
+      saveLayout(caseState.current?.id, layout);
+    }
+  }
+
+  /** The answer counted per type, which every group reads its size from. */
+  let byType = $state(null);
+  const counts = $derived(groupCounts(byType ?? {}, entityFamily));
+  const groupedTotal = $derived(
+    Object.values(byType ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0)
+  );
+  /** Whether the case holds anything an investigation is about. A case of files only
+   *  opens its files, rather than an index with nothing in it. */
+  const subjects = $derived(holdsSubjects(summary?.by_type ?? {}, entityFamily));
+
+  function isOpen(group) {
+    if (filtering) return groupOpen(group, { asked, filtering: true });
+    if (group.id in revealed) return revealed[group.id];
+    return groupOpen(group, { folds: layout.folds, subjects });
+  }
+
+  function toggleGroup(group) {
+    const next = !isOpen(group);
+    if (filtering) asked = { ...asked, [group.id]: next };
+    else {
+      const { [group.id]: _dropped, ...rest } = revealed;
+      revealed = rest;
+      layout = { ...layout, folds: { ...layout.folds, [group.id]: next } };
+      saveLayout(caseState.current?.id, layout);
+    }
+    if (next && !lists[group.id].items.length) loadGroup(group.id);
+  }
+
+  /** Open the group a type falls in, so what the analyst just made or followed is on
+   *  screen rather than folded away. */
+  function reveal(type) {
+    if (!type) return;
+    const group = groupOfType(type, entityFamily);
+    if (filtering) asked = { ...asked, [group.id]: true };
+    else revealed = { ...revealed, [group.id]: true };
+    if (!lists[group.id].items.length) loadGroup(group.id);
+  }
+
+  /** The types each group's page asks for: the ones the answer holds in it. */
+  const groupTypes = $derived.by(() => {
+    const out = Object.fromEntries(BOARD_GROUPS.map((group) => [group.id, []]));
+    for (const [type, n] of Object.entries(byType ?? {})) {
+      if (Number(n) > 0) out[groupOfType(type, entityFamily).id].push(type);
+    }
+    for (const list of Object.values(out)) list.sort();
+    return out;
+  });
+
+  /** One bounded list per group, each paging on its own. Always a server answer:
+   *  the text term is counted server-side too, and a group filtered in memory while
+   *  its count came from the server could say two different numbers. */
+  const lists = Object.fromEntries(
+    BOARD_GROUPS.map((group) => [
+      group.id,
+      createPagedList({
+        fetchPage: ({ cursor }) =>
+          api.get(
+            buildCatalogQuery(caseState.current.id, {
+              cursor,
+              limit: GROUP_PAGE,
+              ...toQuery(filter, { types: groupTypes[group.id] }),
+              ...(catalogViews.snapshotId ? {} : analysisPeriodQuery(analysisSearch.period)),
+              order: groupOrder(group),
+              view: catalogViews.snapshotId || undefined,
+            })
+          ),
+      }),
+    ])
+  );
+
+  /** "Most noted" orders the subjects; the material under them reads newest first,
+   *  since a file is sought by when it came in rather than by how often it is cited. */
+  function groupOrder(group) {
+    return group.kind === 'material' && shape.sort === '-events' ? '-created' : shape.sort;
+  }
+
+  function loadGroup(id) {
+    if (!caseState.current?.id) return;
+    const list = lists[id];
+    if (!groupTypes[id]?.length) {
+      list.clear();
+      return;
+    }
+    untrack(() => void list.reload().catch(() => {}));
+  }
+
+  /**
+   * Count the answer, then read the open groups that hold some of it.
+   *
+   * One request says how much each group holds; a group then asks for its own page
+   * only if it is open and not empty. Asked again on every change to the question, the
+   * sort or the case, and a quarter second after a keystroke, which is the paged
+   * list's own delay for the same box.
+   */
+  let countedAsk = '';
+  let countedQ = '';
+  let countSeq = 0;
+  $effect(() => {
+    const id = caseState.current?.id;
+    if (!id || !grouped) return;
+    const period = catalogViews.snapshotId ? null : analysisPeriodQuery(analysisSearch.period);
+    const query = toQuery(filter, { types: wantedTypes });
+    const ask = JSON.stringify([
+      id, caseState.rev, query, period, shape.sort, catalogViews.snapshotId,
+    ]);
+    if (ask === countedAsk) return;
+    const typing = countedAsk !== '' && filter.q !== countedQ;
+    const mine = ++countSeq;
+    const timer = setTimeout(async () => {
+      countedAsk = ask;
+      countedQ = filter.q;
+      try {
+        const page = await api.get(
+          buildCatalogQuery(id, {
+            limit: 1,
+            counts: 'type',
+            ...query,
+            ...(period ?? {}),
+            view: catalogViews.snapshotId || undefined,
+          })
+        );
+        if (mine !== countSeq || caseState.current?.id !== id) return;
+        byType = page.by_type ?? {};
+        for (const group of BOARD_GROUPS) {
+          if (counts[group.id] && isOpen(group)) loadGroup(group.id);
+          else lists[group.id].clear();
+        }
+      } catch {
+        if (mine === countSeq) countedAsk = '';
+      }
+    }, typing ? 250 : 0);
+    return () => clearTimeout(timer);
+  });
+
+  // A new question opens every group that answers it, whatever was folded under the
+  // last one.
+  $effect(() => {
+    JSON.stringify(filter);
+    JSON.stringify(analysisSearch.period);
+    untrack(() => (asked = {}));
+  });
+
+  /** The groups on screen, with their rows, in reading order. */
+  const shownGroups = $derived(
+    BOARD_GROUPS.filter((group) => counts[group.id] > 0).map((group) => ({
+      group,
+      open: isOpen(group),
+      list: lists[group.id],
+    }))
+  );
+  /** Every row the groups show, in the order they show them: what a tick range, the
+   *  selection bar and the arrow keys walk. */
+  const groupedRows = $derived(
+    shownGroups.filter((entry) => entry.open).flatMap((entry) => entry.list.items)
+  );
+
+  /**
+   * What the events say about the subject rows on screen: one read per page of rows,
+   * refreshed with the case. A snapshot is a frozen reading and asks nothing of the
+   * live case, so its rows draw without it.
+   */
+  let events = $state({});
+  let eventsRev = -1;
+  let eventsCase = null;
+  $effect(() => {
+    const id = caseState.current?.id;
+    const rev = caseState.rev;
+    const frozen = Boolean(catalogViews.snapshotId);
+    const ids = shownGroups
+      .filter((entry) => entry.open && entry.group.kind === 'subject')
+      .flatMap((entry) => entry.list.items.map((entity) => entity.id));
+    if (!id || !grouped || frozen) {
+      if (Object.keys(untrack(() => events)).length) events = {};
+      return;
+    }
+    const fresh = rev !== eventsRev || id !== eventsCase;
+    const held = fresh ? {} : untrack(() => events);
+    const missing = ids.filter((one) => !(one in held));
+    if (!missing.length) return;
+    eventsRev = rev;
+    eventsCase = id;
+    fetchEventRows(id, missing)
+      .then((body) => {
+        if (caseState.current?.id !== id || caseState.rev !== rev) return;
+        events = { ...(fresh ? {} : events), ...(body?.rows ?? {}) };
+      })
+      .catch(() => {});
+  });
+
+  function openRow(entity) {
+    if (snapshotReading) snapshotOpen = entity;
+    else requestOpen(entity.id);
+  }
+
+  /** Change the open row, asking first when Details holds edits Save has not taken:
+   *  an arrow key is too easy a way to throw a half-typed field away. */
+  let pendingOpen = null;
+  function requestOpen(id) {
+    if (id === openId) return;
+    if (dirty && openId) {
+      pendingOpen = id;
+      discarding = true;
+      return;
+    }
+    openId = id;
+  }
+
+  // The row Details is open on is what the topbar's Add event seats here.
+  $effect(() => {
+    const id = openId ?? snapshotOpen?.id ?? null;
+    const entity = id && !snapshotReading ? shownRows.find((row) => row.id === id) ?? null : null;
+    offerNote('board', entity);
+  });
+
+  function showInGraph(entity) {
+    uiState.openGraphEntity = entity.id;
+    uiState.tool = 'graph';
+  }
+
+  const thumbUrl = (thumb) =>
+    thumb.startsWith('data:') ? thumb : fileUrl(caseState.current.id, thumb);
+
+  /** The waiting questions, priced: shown while nothing is being asked, since a
+   *  question already on the bar is the one being read. */
+  const waiting = $derived(
+    !filtering && !snapshotReading && !totalling ? waitingOf(summary) : []
+  );
+
+  // ── Details beside the list ─────────────────────────────────────────────────
+  let measuredWidth = $state(0);
+  /** The width the Board last had on screen. A hidden tab measures nothing, and
+   *  reading that as a narrow window would turn Details beside the list into a modal
+   *  over whichever tool the analyst moved to. */
+  let toolWidth = $state(0);
+  $effect(() => {
+    if (measuredWidth > 0) toolWidth = measuredWidth;
+  });
+  /** Beside the list or over it is decided when Details opens, and kept until it
+   *  closes: switching on a resize would remount it, and a remount throws away the
+   *  fields being typed and the dialog opened from it. */
+  let dockedWhenOpened = $state(null);
+  $effect(() => {
+    if (!openId && !snapshotOpen) {
+      dockedWhenOpened = null;
+      return;
+    }
+    if (dockedWhenOpened === null) dockedWhenOpened = untrack(() => toolWidth >= DOCK_WIDTH);
+  });
+  const docked = $derived(dockedWhenOpened ?? toolWidth >= DOCK_WIDTH);
+  const FICHE_KEY = 'azimut:boardDetailsW';
+  const FICHE_MIN = 420;
+  let ficheWidth = $state(readFicheWidth());
+  function readFicheWidth() {
+    try {
+      const stored = Number(localStorage.getItem(FICHE_KEY));
+      return Number.isFinite(stored) && stored >= FICHE_MIN ? stored : 560;
+    } catch {
+      return 560;
+    }
+  }
+  /** Never so wide that the list beside it stops being a list. */
+  const ficheShown = $derived(
+    Math.round(
+      Math.min(
+        Math.max(FICHE_MIN, Math.min(ficheWidth, 900, toolWidth - 480)),
+        // a window narrowed while it is open: Details keeps the room there is
+        toolWidth || Infinity
+      )
+    )
+  );
+  function startResize(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = ficheShown;
+    const move = (ev) => (ficheWidth = Math.max(FICHE_MIN, startWidth + (startX - ev.clientX)));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      try {
+        localStorage.setItem(FICHE_KEY, String(Math.round(ficheWidth)));
+      } catch {
+        /* the width holds for the session */
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  function nudgeFiche(e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    ficheWidth = ficheShown + (e.key === 'ArrowLeft' ? 24 : -24);
+    try {
+      localStorage.setItem(FICHE_KEY, String(Math.round(ficheWidth)));
+    } catch {
+      /* the width holds for the session */
+    }
+  }
+
+  /** The arrow keys walk the rows, and with Details open beside the list they carry
+   *  it along: reading five people is five presses rather than five modals. */
+  let bodyElement = $state();
+  function walkRows(e) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const row = e.target;
+    if (!(row instanceof HTMLElement) || row.tagName !== 'TR') return;
+    const all = [...(bodyElement?.querySelectorAll('tbody tr[tabindex]') ?? [])];
+    const next = all[all.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    if (docked && (openId || snapshotOpen)) next.click();
+  }
+
+  /** Escape closes Details beside the list, unless it is closing something inside
+   *  it first (a menu, a field being typed in). */
+  function escapeFiche(e) {
+    if (e.key !== 'Escape' || !docked || (!openId && !snapshotOpen)) return;
+    const target = e.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.closest('input, textarea, select, [contenteditable="true"], [role="listbox"], [role="menu"]'))
+    ) {
+      return;
+    }
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    if (snapshotOpen) snapshotOpen = null;
+    else closeDetails();
+  }
 
   /**
    * The same question, added up instead of listed.
@@ -414,18 +798,20 @@
    * more* is what says the rest is still out there.
    */
   const ticked = $derived(new Set(selected));
+  /** The rows on screen, grouped or flat, in the order they are shown. */
+  const shownRows = $derived(grouped ? groupedRows : rows);
   /** The ticked rows themselves, in the order the table is showing them. It is what
    *  the bar counts and what Delete sends, so the number on screen is never a row
    *  the table has since stopped showing. */
-  const chosen = $derived(rows.filter((entity) => ticked.has(entity.id)));
-  const allTicked = $derived(rows.length > 0 && chosen.length === rows.length);
+  const chosen = $derived(shownRows.filter((entity) => ticked.has(entity.id)));
+  const allTicked = $derived(shownRows.length > 0 && chosen.length === shownRows.length);
 
   function tick(entity, shift) {
     const result = toggleCheck(
       selected,
       entity.id,
       { shift },
-      rows.map((row) => row.id),
+      shownRows.map((row) => row.id),
       anchor
     );
     selected = result.selected;
@@ -433,7 +819,7 @@
   }
 
   function tickAll(on) {
-    selected = on ? rows.map((row) => row.id) : [];
+    selected = on ? shownRows.map((row) => row.id) : [];
     anchor = null;
   }
 
@@ -451,6 +837,7 @@
     JSON.stringify(analysisSearch.period);
     totalling;
     snapshotReading;
+    shape.group;
     untrack(untickAll);
   });
 
@@ -491,19 +878,25 @@
       pl.clear();
       summary = null;
       loadedFor = null;
+      byType = null;
       return;
     }
     if (loadedFor !== id) {
       loadedFor = id;
       pl.clear();
+      for (const list of Object.values(lists)) list.clear();
+      byType = null;
       // The question travels with the case, not with the tab: reopening Azimut on a
-      // case lands on what was being asked of it.
+      // case lands on what was being asked of it. So does the way it was laid out.
       openAnalysisCase(id);
       filter = normalizeFilter(analysisSearch.filter);
+      layout = loadLayout(id);
+      revealed = {};
       fieldsWanted = false;
       facetState = 'unasked';
     }
-    void pl.reload();
+    // The flat table reads its own page; the groups read theirs off the count.
+    if (!grouped) void pl.reload();
     api
       .get(`/api/cases/${id}/catalog/summary`)
       .then((s) => {
@@ -546,7 +939,7 @@
     setAnalysisFilter(caseState.current?.id, filter);
     // The text term is the paged list's own, debounced there; asking again here would
     // be a second request per keystroke.
-    if (!first && caseState.current?.id) void pl.reload();
+    if (!first && caseState.current?.id && !untrack(() => grouped)) void pl.reload();
   });
 
   /**
@@ -628,13 +1021,13 @@
   /** Start from what the analyst is already looking at: the chosen type, or the
    *  first type of the chosen family. Opening on "Person" while the family chip
    *  says Identifier is the menu ignoring the question just asked. */
-  function startCreate() {
+  function startCreate(type = '') {
     if (snapshotReading) return;
     const wanted = creatableTypes().filter(
       (entry) => !filter.families.length || filter.families.includes(entry.family)
     );
     draft = {
-      type: onlyType || wanted[0]?.type || creatableTypes()[0]?.type || '',
+      type: type || onlyType || wanted[0]?.type || creatableTypes()[0]?.type || '',
       label: '',
       notes: '',
       attrs: {},
@@ -724,9 +1117,11 @@
           'warn'
         );
       }
-      // One file opens where the analyst can say what it is; a batch does not, since
-      // a panel over the list would be about whichever one happened to land last.
-      if (files.length === 1 && last) openId = last;
+      // What was filed shows in its group. One file opens where the analyst can say
+      // what it is; a batch does not, since Details would be about whichever one
+      // happened to land last.
+      if (added || duplicates) reveal('media');
+      if (files.length === 1 && last) requestOpen(last);
     } finally {
       importing = false;
     }
@@ -770,12 +1165,14 @@
         // The same bytes twice is not an error and not a second row: the case keeps
         // the one it has, and saying so is what stops the analyst pasting again.
         if (result.duplicate) toast('Already in the case (same SHA-256)', 'warn');
-        openId = result.entity.id;
+        reveal(result.entity.type ?? 'media');
+        requestOpen(result.entity.id);
       } else {
         const entity = await createBookmark(caseId, { ...values, url: payload.url });
         pasted = null;
         await reloadCase();
-        openId = entity.id;
+        reveal(entity.type ?? 'bookmark');
+        requestOpen(entity.id);
       }
     } catch (e) {
       toast(e.message, 'danger');
@@ -785,6 +1182,7 @@
   }
 
   function closeDetails() {
+    pendingOpen = null;
     if (dirty) discarding = true;
     else openId = null;
   }
@@ -799,8 +1197,19 @@
       snapshotOpen = catalogViews.activeView?.spec?.snapshot?.entities?.find(
         (entity) => entity.id === id
       ) ?? null;
+      reveal(snapshotOpen?.type);
     } else {
-      openId = id;
+      requestOpen(id);
+      // Its group opens too, so the row followed here is on screen beside its Details.
+      const caseId = caseState.current?.id;
+      if (caseId) {
+        api
+          .get(`/api/cases/${caseId}/entities/${id}/chain`)
+          .then((chain) => {
+            if (caseState.current?.id === caseId) reveal(chain?.entity?.type);
+          })
+          .catch(() => {});
+      }
     }
   });
 
@@ -868,7 +1277,9 @@
         terms: toGraphQuery(filter, { types: wantedTypes }),
         label: said,
       },
-      board: { order, sortKey, sortDesc },
+      // The grouping and its sort travel with the view: a Board view reopens laid out
+      // the way it was saved.
+      board: { order, sortKey, sortDesc, group: shape.group, groupSort: shape.sort },
       timeline: analysisPeriodSpec(analysisSearch.period),
     };
   }
@@ -886,6 +1297,8 @@
     const board = view.spec?.board ?? {};
     sortKey = typeof board.sortKey === 'string' ? board.sortKey : '';
     sortDesc = board.sortDesc === true;
+    // A view saved before the groups states none, and opens flat as it was saved.
+    viewShape = viewLayout(board);
   }
 
   let appliedViewId = null;
@@ -893,6 +1306,7 @@
     const view = catalogViews.activeView;
     if (!view) {
       appliedViewId = null;
+      viewShape = null;
       return;
     }
     if (view.surface !== 'board' || view.id === appliedViewId) return;
@@ -911,17 +1325,22 @@
     }
     const savedFilter = normalizeFilter(view.spec?.query?.filter);
     const savedBoard = view.spec?.board ?? {};
+    const savedShape = viewLayout(savedBoard);
     const current = JSON.stringify({
       filter: normalizeFilter(filter),
       period: normalizeAnalysisPeriod(analysisSearch.period),
       sortKey,
       sortDesc,
+      group: shape.group,
+      groupSort: shape.sort,
     });
     const saved = JSON.stringify({
       filter: savedFilter,
       period: normalizeAnalysisPeriod(view.spec?.timeline),
       sortKey: typeof savedBoard.sortKey === 'string' ? savedBoard.sortKey : '',
       sortDesc: savedBoard.sortDesc === true,
+      group: savedShape.group,
+      groupSort: savedShape.sort,
     });
     if (observedLiveView !== view.id) {
       observedLiveView = view.id;
@@ -935,6 +1354,7 @@
 
   function leaveAnalysisReading() {
     appliedViewId = null;
+    viewShape = null;
     openId = null;
     snapshotOpen = null;
     filter = normalizeFilter(analysisSearch.filter);
@@ -955,10 +1375,10 @@
   };
 </script>
 
-<div class="tool">
+<div class="tool" bind:clientWidth={measuredWidth}>
   <div class="tool-header">
     <h2>Board</h2>
-    <span class="sub">Everything this case holds</span>
+    <span class="sub">{grouped ? 'People, places and things first' : 'Everything this case holds'}</span>
     <div class="spacer"></div>
     <AnalysisViews
       surface="board"
@@ -984,7 +1404,7 @@
         e.currentTarget.value = '';
       }}
     />
-    <button class="btn btn-primary" onclick={startCreate} disabled={!caseState.current || snapshotReading}>
+    <button class="btn btn-primary" onclick={() => startCreate()} disabled={!caseState.current || snapshotReading}>
       <Icon name="plus" size={14} /> New entity
     </button>
   </div>
@@ -1036,6 +1456,38 @@
       {caseTotal} in this case
     {/if}
     </span>
+    <!-- How the rows are laid out: grouped by what they are, and in which order
+         across the case, or the one flat table. Neither changes the answer. -->
+    {#if caseState.current && !totalling}
+      <span class="layout">
+        {#if grouped}
+          <label class="pick-one" title="How each group is ordered, across the whole case">
+            <span>Sort</span>
+            <select
+              class="select"
+              value={shape.sort}
+              onchange={(e) => setShape({ sort: e.currentTarget.value })}
+            >
+              {#each GROUP_SORTS as option (option.id)}
+                <option value={option.id} title={option.hint}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+        <label class="pick-one" title="Group the rows by what they are, or show one table">
+          <span>Group</span>
+          <select
+            class="select"
+            value={shape.group}
+            onchange={(e) => setShape({ group: e.currentTarget.value })}
+          >
+            {#each GROUPINGS as option (option.id)}
+              <option value={option.id} title={option.hint}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+      </span>
+    {/if}
     <!-- How this screen renders the answer, in the control Files and the Media Library
          already use for the same job. What a single subject comes to is read where
          that subject is, in its own Details; this one reads several at once, ranked. -->
@@ -1045,6 +1497,21 @@
       onpick={(id) => (totalling = id === 'totals')}
     />
   </p>
+
+  <!-- The Board's standing questions, priced, while nothing else is being asked:
+       what is waiting on the analyst, one click from the rows it counts. -->
+  {#if waiting.length}
+    <p class="waiting-line">
+      <span class="lead-in">Waiting</span>
+      {#each waiting as item (item.id)}
+        <button
+          class="as-link"
+          title="Show them"
+          onclick={() => (filter = askQuestion(filter, item.id))}
+        ><strong>{item.count}</strong> {item.words}</button>
+      {/each}
+    </p>
+  {/if}
 
   <!-- What the ticks come to, and the one thing they are for. Outside the scrolling
        body so a selection made at the top of eight hundred rows is still actionable
@@ -1063,9 +1530,13 @@
        `dragleave` is guarded on the container itself: the event fires for every
        child the pointer crosses, so an unguarded handler flickers the overlay off
        halfway across the table. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="split" onkeydown={escapeFiche}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="body"
-    role="presentation"
+    bind:this={bodyElement}
+    onkeydown={walkRows}
     ondragover={(e) => {
       if (!caseState.current || snapshotReading) return;
       e.preventDefault();
@@ -1119,12 +1590,13 @@
               {@const sure = confidenceLine(row, claimReads)}
               <tr
                 tabindex="0"
-                onclick={() => (openId = row.id)}
+                class:current={openId === row.id}
+                onclick={() => requestOpen(row.id)}
                 onkeydown={(e) => {
                   if (e.target !== e.currentTarget) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    openId = row.id;
+                    requestOpen(row.id);
                   }
                 }}
               >
@@ -1151,6 +1623,53 @@
             {/each}
           </tbody>
         </table>
+      {/if}
+    {:else if grouped}
+      {#if byType && !groupedTotal}
+        <p class="empty">{filtering ? 'Nothing matches.' : 'Nothing filed in this case yet.'}</p>
+      {:else}
+        {#if byType && !filtering && !subjects && !snapshotReading}
+          <!-- A case of files only: nothing to index yet, and the way one arrives. -->
+          <div class="no-subjects">
+            <strong>No people, places or things yet.</strong>
+            <span>Name one with @ when you add an event, or</span>
+            <button class="as-link" onclick={() => startCreate()}>create one</button>
+          </div>
+        {/if}
+        {#each shownGroups as entry, index (entry.group.id)}
+          {#if index > 0 && entry.group.kind === 'material' && shownGroups[index - 1].group.kind === 'subject'}
+            <div class="divider" role="presentation"></div>
+          {/if}
+          <BoardGroup
+            group={entry.group}
+            count={counts[entry.group.id]}
+            open={entry.open}
+            rows={entry.list.items}
+            types={groupTypes[entry.group.id]}
+            loading={entry.list.loading}
+            hasMore={entry.list.hasMore}
+            {events}
+            currentId={openId ?? snapshotOpen?.id ?? null}
+            {ticked}
+            {busyId}
+            readOnly={snapshotReading}
+            query={filter.q}
+            creatable={creatableTypes().filter((type) => entry.group.families.includes(type.family))}
+            {matchReasons}
+            {thumbUrl}
+            {folderName}
+            {created}
+            ontoggle={() => toggleGroup(entry.group)}
+            onopen={openRow}
+            ontick={tick}
+            onconfirm={confirmEntity}
+            ondismiss={dismissEntity}
+            ongraph={showInGraph}
+            oncreate={(type) => startCreate(type)}
+            onreads={(tool) => (uiState.tool = tool)}
+            onmore={() => entry.list.loadMore()}
+          />
+        {/each}
       {/if}
     {:else if !rows.length && !pl.loading}
       <p class="empty">{filtering ? 'Nothing matches.' : 'Nothing filed in this case yet.'}</p>
@@ -1207,19 +1726,17 @@
             <tr
               class:suggested={isSuggested(entity)}
               class:busy={busyId === entity.id}
+              class:current={(openId ?? snapshotOpen?.id) === entity.id}
+              data-row-id={entity.id}
               tabindex="0"
-              onclick={() => {
-                if (snapshotReading) snapshotOpen = entity;
-                else openId = entity.id;
-              }}
+              onclick={() => openRow(entity)}
               onkeydown={(e) => {
                 // only the row's own key press: Enter on the confirm button inside
                 // it is that button's, and would otherwise open Details as well
                 if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  if (snapshotReading) snapshotOpen = entity;
-                  else openId = entity.id;
+                  openRow(entity);
                 }
               }}
             >
@@ -1242,14 +1759,7 @@
               {/if}
               <td>
                 {#if entity.thumb}
-                  <img
-                    class="entity-thumb"
-                    src={entity.thumb.startsWith('data:')
-                      ? entity.thumb
-                      : fileUrl(caseState.current.id, entity.thumb)}
-                    alt=""
-                    loading="lazy"
-                  />
+                  <img class="entity-thumb" src={thumbUrl(entity.thumb)} alt="" loading="lazy" />
                 {:else}
                   <Icon name={entityIcon(entity)} size={12} />
                 {/if}
@@ -1297,28 +1807,13 @@
                    row is under the pointer, like the review clicks beside it. -->
               <td class="go">
                 {#if !snapshotReading}
-                {@const seat = claimSeat(entity)}
-                {#if seat}
-                  <button
-                    class="btn btn-ghost btn-sm act"
-                    aria-label="File a claim from {entity.label}"
-                    title={claimActionTitle(seat.slot)}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      claimFor = entity;
-                    }}
-                  >
-                    <Icon name="quote" size={13} />
-                  </button>
-                {/if}
                 <button
                   class="btn btn-ghost btn-sm act"
                   aria-label="Show {entity.label} in the graph"
                   title="Show it in the graph, with what it is connected to"
                   onclick={(e) => {
                     e.stopPropagation();
-                    uiState.openGraphEntity = entity.id;
-                    uiState.tool = 'graph';
+                    showInGraph(entity);
                   }}
                 >
                   <Icon name="graph" size={13} />
@@ -1333,7 +1828,7 @@
 
     <!-- Paging belongs to the list. The addition is bounded server-side and says so on
          its own line, so a "Show more" under it would offer to lengthen a total. -->
-    {#if pl.hasMore && !totalling}
+    {#if pl.hasMore && !totalling && !grouped}
       <div class="more">
         <!-- A sort the store could not answer runs over what is loaded, so it says
              so while there is more: an alphabet over the first hundred of eight
@@ -1351,6 +1846,60 @@
       </div>
     {/if}
   </div>
+
+  <!-- Details beside the list, when there is room for both: the row stays in view
+       while it is read, and the arrow keys walk from one to the next. -->
+  {#if docked && ((openId && !snapshotReading) || (snapshotOpen && snapshotReading))}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="grip"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize Details"
+      aria-valuemin={FICHE_MIN}
+      aria-valuemax="900"
+      aria-valuenow={ficheShown}
+      tabindex="0"
+      title="Drag to resize"
+      onpointerdown={startResize}
+      onkeydown={nudgeFiche}
+    ></div>
+    <aside class="fiche" style="width: {ficheShown}px" aria-label="Details">
+      <div class="fiche-bar">
+        <span class="fiche-title">{snapshotReading ? 'Snapshot details' : 'Details'}</span>
+        <span class="fiche-keys">↑ ↓ next row · Esc close</span>
+        <button
+          class="btn btn-ghost btn-sm"
+          aria-label="Close Details"
+          title="Close (Esc)"
+          onclick={() => (snapshotReading ? (snapshotOpen = null) : closeDetails())}
+        >
+          <Icon name="x" size={14} />
+        </button>
+      </div>
+      <div class="fiche-body">
+        {#if snapshotReading}
+          <SnapshotDetails
+            caseId={caseState.current?.id}
+            entity={snapshotOpen}
+            entities={catalogViews.activeView?.spec?.snapshot?.entities ?? []}
+            links={catalogViews.activeView?.spec?.snapshot?.links ?? []}
+          />
+        {:else}
+          <!-- The tab stays as the rows change, so walking five people on their
+               Connections tab reads five sets of connections. -->
+          <EntityDetails
+            entityId={openId}
+            bind:dirty
+            onclose={() => (openId = null)}
+            ondeleted={() => (openId = null)}
+          />
+        {/if}
+      </div>
+    </aside>
+  {/if}
+  </div>
 </div>
 
 {#if draft}
@@ -1360,13 +1909,15 @@
     startType={draft.type}
     ontwin={(entity) => {
       draft = null;
-      openId = entity.id;
+      reveal(entity.type);
+      requestOpen(entity.id);
     }}
     oncreated={(entity) => {
       draft = null;
-      // Create it, then open it: a claim exists in order to be pointed at things, so
-      // landing on its own Details with the relation picker is the next gesture.
-      openId = entity.id;
+      // Create it, then open it in its group: a new subject exists in order to be
+      // pointed at, so its own Details is where the next gesture is.
+      reveal(entity.type);
+      requestOpen(entity.id);
     }}
     onclose={() => (draft = null)}
   />
@@ -1382,18 +1933,7 @@
   />
 {/if}
 
-{#if claimFor}
-  <Modal title="Note an entry" onclose={() => (claimFor = null)} width="640px">
-    <EntryLine
-      caseId={caseState.current.id}
-      entity={claimFor}
-      onsaved={() => (claimFor = null)}
-      oncancel={() => (claimFor = null)}
-    />
-  </Modal>
-{/if}
-
-{#if openId && !snapshotReading}
+{#if openId && !snapshotReading && !docked && uiState.tool === 'board'}
   <!-- Escape and the backdrop both close a modal, and the panel's fields wait for
        Save: closing over unsaved edits threw them away without a word. The ask is
        only raised when there is something to lose. -->
@@ -1409,7 +1949,7 @@
   </Modal>
 {/if}
 
-{#if snapshotOpen && snapshotReading}
+{#if snapshotOpen && snapshotReading && !docked && uiState.tool === 'board'}
   <Modal title="Snapshot details" onclose={() => (snapshotOpen = null)} width="640px">
     <SnapshotDetails
       caseId={caseState.current?.id}
@@ -1442,8 +1982,16 @@
     message="This item has edits that Save has not taken."
     confirmLabel="Discard"
     icon="alert"
-    onconfirm={() => { discarding = false; dirty = false; openId = null; }}
-    oncancel={() => (discarding = false)}
+    onconfirm={() => {
+      discarding = false;
+      dirty = false;
+      openId = pendingOpen;
+      pendingOpen = null;
+    }}
+    oncancel={() => {
+      discarding = false;
+      pendingOpen = null;
+    }}
   />
 {/if}
 
@@ -1509,15 +2057,145 @@
   .picked .drop:hover {
     color: var(--danger);
   }
-  /* The one scrolling region. `.tool` is a full-height flex column, so the body
+  /* The list and Details beside it. `.tool` is a full-height flex column, so the row
      needs min-height:0 or the table pushes the column taller than the viewport and
      nothing scrolls at all. */
+  .split {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  /* The list's own scrolling region. */
   .body {
     position: relative;
     flex: 1;
+    min-width: 0;
     min-height: 0;
     overflow: auto;
     padding: 0 16px 16px;
+  }
+  /* Details beside the list: its own scroll, its own edge, resized from the rule. */
+  .grip {
+    position: relative;
+    flex: 0 0 5px;
+    margin-left: -2px;
+    cursor: col-resize;
+    border-left: 1px solid var(--border);
+  }
+  .grip:hover,
+  .grip:focus-visible {
+    border-left-color: var(--accent);
+    outline: none;
+  }
+  .fiche {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    min-height: 0;
+    background: var(--bg-1);
+  }
+  .fiche-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px 6px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .fiche-title {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .fiche-keys {
+    margin-left: auto;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .fiche-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px 16px 16px;
+  }
+  /* Grouping and sort sit with the switch they share a job with, quiet until used. */
+  .layout {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pick-one {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .pick-one .select {
+    width: auto;
+    min-height: 0;
+    padding: 2px 22px 2px 6px;
+    font-size: var(--fs-xs);
+  }
+  /* What is waiting on the analyst, one line under the count. */
+  .waiting-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    margin: 0;
+    padding: 0 16px 8px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .waiting-line .lead-in {
+    color: var(--text-3);
+    font-weight: 600;
+  }
+  .waiting-line .as-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    cursor: pointer;
+  }
+  .waiting-line .as-link strong {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .waiting-line .as-link:hover {
+    color: var(--text-1);
+  }
+  /* A case holding files only: the line that says how the index fills. */
+  .no-subjects {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    margin: 10px 0 14px;
+    padding: 12px 14px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  .no-subjects strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .no-subjects .as-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  /* Between what the case is about and what it is built from. */
+  .divider {
+    height: 14px;
   }
   .drop-overlay {
     position: absolute;
@@ -1537,7 +2215,7 @@
     gap: 8px;
     padding: 22px 30px;
     border: 1px dashed var(--accent);
-    border-radius: var(--r);
+    border-radius: var(--r-md);
     color: var(--text-2);
     font-size: var(--fs-sm);
   }
@@ -1620,6 +2298,14 @@
   }
   .table tbody tr.busy {
     opacity: 0.5;
+  }
+  /* The row whose Details are open beside the list. */
+  .table tbody tr.current td {
+    background: var(--accent-soft);
+    color: var(--text-1);
+  }
+  .table tbody tr.current {
+    border-left-color: var(--accent);
   }
   /* the two review clicks, quiet until the row is under the pointer or focused */
   .review {
@@ -1726,13 +2412,10 @@
   .tally .sure {
     display: block;
     margin-top: 2px;
+    color: var(--text-3);
     font-size: var(--fs-xs);
   }
-  .tally .note {
-    color: var(--text-3);
-  }
   .tally .sure {
-    color: var(--text-3);
     font-style: italic;
   }
   .tally td .dim {

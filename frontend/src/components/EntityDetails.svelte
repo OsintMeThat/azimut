@@ -54,8 +54,7 @@
   import RelationPicker from './RelationPicker.svelte';
   import EntityImages from './EntityImages.svelte';
   import EntityTime from './EntityTime.svelte';
-  import EntryLine, { claimSeat } from './EntryLine.svelte';
-  import { claimActionTitle } from '../lib/quickClaim.js';
+  import EntitySummary from './EntitySummary.svelte';
 
   let {
     entityId,
@@ -285,7 +284,7 @@
   // Connections have their own explicit composer. They are graph statements, not
   // unsaved text fields, so waiting on the panel-wide Save made the Add action feel
   // broken and let a mention masquerade as a relation.
-  let connectionComposer = $state(null); // 'relation' | 'mention' | 'claim' | null
+  let connectionComposer = $state(null); // 'relation' | 'mention' | null
   let connectionSaving = $state(false);
   loadRelationTypes();
   loadEntityTypes();
@@ -297,8 +296,6 @@
   );
   const canRelate = $derived(relationTargetTypes.length > 0);
   const canMention = $derived(mentionTargetTypes.length > 0);
-  // Where this entity would sit on a claim filed from here, or null for none.
-  const claimSeatHere = $derived(claimSeat(entity));
   const relationTargetHint = $derived(
     `Relate this to: ${relationTargetTypes.map(entityLabel).join(', ')}.`
   );
@@ -648,6 +645,8 @@
       <div class="info-loading">Loading…</div>
     {/if}
 
+    <EntitySummary caseId={caseState.current.id} {entity} {onclose} />
+
     <div class="ed-tabs" role="tablist" aria-label="Details sections">
       <button
         class="ed-tab" class:on={tab === 'info'} role="tab" aria-selected={tab === 'info'}
@@ -872,7 +871,7 @@
 
     {#if tab === 'connections'}
       <div class="case-layout">
-        {#if canRelate || canMention || claimSeatHere || hasRelations || lineageCount || placedPoints.length}
+        {#if canRelate || canMention || claimRelations.length || hasRelations || lineageCount || placedPoints.length}
           <section class="connections">
             <div class="card-head connections-head"><h3>Connections</h3></div>
 
@@ -998,29 +997,13 @@
                   onchanged={reloadCase}
                 />
               </div>
-            {:else if claimSeatHere || claimRelations.length}
+            {:else if claimRelations.length}
+              <!-- The events that name it. Adding one is the summary's, above the tabs,
+                   where it can be reached from whichever tab is open. -->
               <div class="connection-group">
                 <div class="connection-head">
-                  <h4>Claims</h4>
-                  {#if claimSeatHere}
-                  <button
-                    class="btn btn-ghost btn-sm"
-                    class:on={connectionComposer === 'claim'}
-                    title={claimActionTitle(claimSeatHere.slot)}
-                    onclick={() => (connectionComposer = connectionComposer === 'claim' ? null : 'claim')}
-                  >Add claim</button>
-                  {/if}
+                  <h4>Events</h4>
                 </div>
-                {#if connectionComposer === 'claim'}
-                  <div class="quick-claim-host">
-                    <EntryLine
-                      caseId={caseState.current.id}
-                      {entity}
-                      onsaved={() => (connectionComposer = null)}
-                      oncancel={() => (connectionComposer = null)}
-                    />
-                  </div>
-                {/if}
                 <!-- What those statements come to, above the statements themselves.
                      The rows were always here; adding them up by reading four of them
                      was the arithmetic this line does. Only where a statement is
@@ -1108,7 +1091,7 @@
           </section>
         {/if}
 
-        {#if !canRelate && !canMention && !claimSeatHere && !hasRelations && !lineageCount && !placedPoints.length}
+        {#if !canRelate && !canMention && !claimRelations.length && !hasRelations && !lineageCount && !placedPoints.length}
           <div class="case-card empty-card">
             <Icon name="link" size={16} />
             <p>No connections yet.</p>
@@ -1478,13 +1461,6 @@
   .connection-group {
     padding: 7px 0;
     border-top: 1px solid var(--border);
-  }
-  .quick-claim-host {
-    margin: 6px 0 4px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-1);
   }
   .connection-head {
     display: flex;

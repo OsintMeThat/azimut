@@ -1384,3 +1384,10 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
     expect(source).toContain('showStroke={!solidIconOnly && !strokeless}');
   });
 });
+
+describe('ProofComposer offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'proof',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('proof'))");
+  });
+});

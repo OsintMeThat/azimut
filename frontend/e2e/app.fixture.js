@@ -1299,6 +1299,11 @@ export async function installAppFixture(page, options = {}) {
     const timelineClaimMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/timeline/claims(?:/([^/]+))?$`)
     );
+    if (timelineClaimMatch?.[1] && request.method() === 'GET') {
+      const ownerId = decodeURIComponent(timelineClaimMatch[1]);
+      const held = timelineRows.map(enrichedTimelineItem).find((item) => item.owner_id === ownerId);
+      return held ? json(route, { item: held }) : json(route, { detail: 'not a claim' }, 404);
+    }
     if (timelineClaimMatch && request.method() !== 'GET') {
       const body = request.postDataJSON();
       const ownerId = timelineClaimMatch[1] ?? `claim-browser-${timelineRows.length + 1}`;
@@ -1554,24 +1559,50 @@ export async function installAppFixture(page, options = {}) {
       const descending = order.startsWith('-');
       const column = descending ? order.slice(1) : order;
       const direction = descending ? -1 : 1;
-      const ordered = column
-        ? [...matching].sort((left, right) => {
-            const a = column === 'created' ? left.provenance?.at : left.label;
-            const b = column === 'created' ? right.provenance?.at : right.label;
-            return String(a ?? '').localeCompare(String(b ?? '')) * direction;
-          })
-        : matching;
+      // "Most noted": the Claims naming each row, newest first on a tie, as the store
+      // orders it.
+      const eventsOf = (id) => new Set(caseLinks
+        .filter((link) => link.to === id && ['about', 'at', 'cites'].includes(link.type)
+          && typeOf.get(link.from) === 'claim')
+        .map((link) => link.from)).size;
+      const ordered = column === 'events'
+        ? [...matching].map((entity, at) => ({ entity, at, n: eventsOf(entity.id) }))
+          .sort((left, right) => (left.n - right.n) * direction || (right.at - left.at))
+          .map((entry) => entry.entity)
+        : column
+          ? [...matching].sort((left, right) => {
+              const a = column === 'created' ? left.provenance?.at : left.label;
+              const b = column === 'created' ? right.provenance?.at : right.label;
+              return String(a ?? '').localeCompare(String(b ?? '')) * direction;
+            })
+          : matching;
       catalogQueries.push(url.search);
       // `catalogPage` makes the fixture answer in pages, which is the only way to
       // reach the surface's server-search mode: a case that fits one page filters
       // in the browser and never asks a second question.
       const page = options.catalogPage ?? 0;
       const items = page ? ordered.slice(0, page) : ordered;
+      const byType = {};
+      for (const entity of matching) byType[entity.type] = (byType[entity.type] ?? 0) + 1;
       return json(route, {
         items,
         next_cursor: page && matching.length > page ? 'cursor-2' : null,
         total: matching.length,
+        ...(url.searchParams.get('counts') === 'type' ? { by_type: byType } : {}),
       });
+    }
+    // What the Claims say about a page of rows: the count naming each, from the edges
+    // this fixture holds. Dates stay empty, so no row draws a density it was not given.
+    if (caseId && path === `/api/cases/${caseId}/catalog/events` && request.method() === 'POST') {
+      const { ids = [] } = request.postDataJSON() ?? {};
+      const claims = new Set(catalogRows().filter((entity) => entity.type === 'claim').map((entity) => entity.id));
+      const rows = Object.fromEntries(ids.map((id) => [id, {
+        events: new Set(caseLinks
+          .filter((link) => link.to === id && claims.has(link.from) && ['about', 'at', 'cites'].includes(link.type))
+          .map((link) => link.from)).size,
+        first: null, last: null, sources: 0, places: 0, buckets: Array(12).fill(0),
+      }]));
+      return json(route, { range: null, rows });
     }
     const galleryMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/entities/([^/]+)/images(?:/([^/]+)(/primary)?)?$`)

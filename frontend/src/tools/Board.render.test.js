@@ -123,6 +123,9 @@ async function press(label, root = document.body) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // These drive the flat table, the one the grouped Board keeps under Group: None
+  // (`Board.groups.render.test.js` drives the groups).
+  localStorage.setItem('azimut:board-layout:case-a', JSON.stringify({ group: 'none' }));
 });
 
 afterEach(() => {
@@ -290,32 +293,15 @@ describe('deleting what is ticked', () => {
   });
 });
 
-describe('filing a claim from a row', () => {
-  const claimPress = (label) =>
-    [...target.querySelectorAll('.table tbody tr')]
-      .find((row) => row.textContent.includes(label))
-      ?.querySelector('td.go button[aria-label^="File a claim"]');
-
-  it('says, per row, where the entity would sit on the claim', async () => {
+describe('adding an event about a row', () => {
+  it('is Details’ to offer, not a press on every row', async () => {
+    // One place to add an event about an entity, the top of its Details, where the
+    // line has room; a quote button on every row was the same act a second time.
     await open();
-    expect(claimPress('Quai sud').title).toBe('File a claim placed here');
-    expect(claimPress('Clip').title).toBe('File a claim that rests on this');
-    expect(claimPress('Witness').title).toBe('File a claim about this');
-  });
-
-  it('opens the form on that row without opening the row', async () => {
-    await open();
-    claimPress('Quai sud').click();
-    flushSync();
-    await settle();
-
-    const form = document.querySelector('.entry-line');
-    expect(form).not.toBeNull();
-    expect(form.querySelector('input[aria-label="What happened"]').value).toBe('Seen at Quai sud');
-    // The row's Details stay shut: the press is the claim's, not the row's.
-    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
-
-    await press('Cancel', form);
-    expect(document.querySelector('.entry-line')).toBeNull();
+    const presses = [...target.querySelectorAll('.table tbody td.go button')].map(
+      (button) => button.getAttribute('aria-label')
+    );
+    expect(presses.length).toBe(ROWS.length);
+    expect(presses.every((label) => label.startsWith('Show '))).toBe(true);
   });
 });

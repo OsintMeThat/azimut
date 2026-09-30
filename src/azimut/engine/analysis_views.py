@@ -600,11 +600,37 @@ def prepare(
     return spec
 
 
-def snapshot_page(view: dict[str, Any], *, limit: int, cursor: str | None, order: str) -> dict[str, Any]:
-    """A bounded Board page over immutable captured rows."""
+def snapshot_page(
+    view: dict[str, Any],
+    *,
+    limit: int,
+    cursor: str | None,
+    order: str,
+    types: list[str] | None = None,
+    count_by_type: bool = False,
+) -> dict[str, Any]:
+    """A bounded Board page over immutable captured rows.
+
+    ``types`` narrows the frozen rows the way it narrows a live page, which is what a
+    Board group asks for, and ``count_by_type`` counts every captured row per type.
+    ``events`` orders by the Claims the snapshot itself captured naming a row: a frozen
+    reading is not re-read against the live case.
+    """
     snapshot = view.get("spec", {}).get("snapshot") or {}
-    rows = list(snapshot.get("entities") or [])
-    if order in {"label", "-label"}:
+    captured = list(snapshot.get("entities") or [])
+    rows = [row for row in captured if not types or row.get("type") in types]
+    if order in {"events", "-events"}:
+        claims = {row.get("id") for row in captured if row.get("type") == "claim"}
+        named: dict[str, set[str]] = {}
+        for link in snapshot.get("links") or []:
+            if link.get("type") in {"about", "at", "cites"} and link.get("from") in claims:
+                named.setdefault(str(link.get("to")), set()).add(str(link.get("from")))
+        # Stable, so rows naming the same count keep the order they were captured in.
+        rows.sort(
+            key=lambda row: len(named.get(str(row.get("id")), ())),
+            reverse=order.startswith("-"),
+        )
+    elif order in {"label", "-label"}:
         rows.sort(key=lambda row: str(row.get("label") or "").casefold(), reverse=order.startswith("-"))
     elif order in {"created", "-created"}:
         rows.sort(
@@ -621,4 +647,11 @@ def snapshot_page(view: dict[str, Any], *, limit: int, cursor: str | None, order
         raise CaseError(f"invalid snapshot cursor '{cursor}'")
     page = rows[start : start + limit]
     next_cursor = str(start + limit) if start + limit < len(rows) else None
-    return {"items": page, "next_cursor": next_cursor, "total": len(rows)}
+    result: dict[str, Any] = {"items": page, "next_cursor": next_cursor, "total": len(rows)}
+    if count_by_type:
+        by_type: dict[str, int] = {}
+        for row in rows:
+            kind = str(row.get("type") or "")
+            by_type[kind] = by_type.get(kind, 0) + 1
+        result["by_type"] = by_type
+    return result

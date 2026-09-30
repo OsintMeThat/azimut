@@ -24,7 +24,7 @@
   const TOOL = {
     media: 'Media', proof: 'Proof', place: 'Map', post: 'Post',
     'inspect-session': 'Inspect', collage: 'Collage', note: 'Notebook', bookmark: 'the source',
-    capture: 'Map',
+    capture: 'Map', claim: 'Timeline',
   };
 
   const ordered = $derived(

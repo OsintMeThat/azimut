@@ -123,6 +123,59 @@ describe('a type with no tool of its own', () => {
   });
 });
 
+describe('a Claim', () => {
+  beforeEach(() => {
+    uiState.timelineRange = null;
+    uiState.timelineQueue = null;
+    get.mockReset();
+  });
+  const claim = { id: 'e-claim', type: 'claim', label: 'Column seen', attrs: {} };
+
+  it('opens on the Timeline at its entry, with its neighbours in view', async () => {
+    const item = {
+      id: 'temporal:claim:e-claim', raw: '2026-03-12', sortable: true,
+      earliest: '2026-03-12T00:00:00.000000Z', latest: '2026-03-13T00:00:00.000000Z',
+    };
+    get.mockResolvedValueOnce({ item });
+    await openEntity(claim);
+
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/timeline/claims/e-claim');
+    expect(uiState.tool).toBe('timeline');
+    expect(uiState.timelineRange).toEqual({
+      from: '2026-03-10T00:00:00.000Z',
+      to: '2026-03-15T00:00:00.000Z',
+      itemId: 'temporal:claim:e-claim',
+      item,
+    });
+    expect(uiState.openBoardEntity).toBeNull();
+  });
+
+  it('opens the Undated queue on an entry with no date', async () => {
+    const item = { id: 'temporal:claim:e-claim', raw: null, earliest: null, latest: null, sortable: false };
+    get.mockResolvedValueOnce({ item });
+    await openEntity(claim);
+
+    expect(uiState.tool).toBe('timeline');
+    expect(uiState.timelineQueue).toEqual({ queue: 'undated', itemId: item.id, item });
+  });
+
+  it('opens the list of entries off the UTC axis on one it cannot place', async () => {
+    const item = { id: 'temporal:claim:e-claim', raw: '2026-03-12T14:00', earliest: null, latest: null, sortable: false };
+    get.mockResolvedValueOnce({ item });
+    await openEntity(claim);
+
+    expect(uiState.timelineQueue).toEqual({ queue: 'unplaced', itemId: item.id, item });
+  });
+
+  it('falls back to its row on the Board when the Timeline cannot say', async () => {
+    get.mockRejectedValueOnce(new Error('gone'));
+    await openEntity(claim);
+
+    expect(uiState.tool).toBe('board');
+    expect(uiState.openBoardEntity).toBe('e-claim');
+  });
+});
+
 describe('gotoCapture', () => {
   it('leaves the zoom to the map when the capture records none', () => {
     gotoCapture({ type: 'capture', attrs: { lat: 48.8584, lon: 2.2945, zoom: null } });

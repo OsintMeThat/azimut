@@ -64,7 +64,7 @@ export const GUIDE = [
       },
       {
         label: 'The case is in the topbar, not the rail',
-        text: 'It is not a stage. It is what every stage files into, so it hangs off the case name beside the Board button.',
+        text: 'It is not a stage. It is what every stage files into, so it hangs off the case name as the Case button.',
       },
       {
         label: 'You do not need a case to start',
@@ -292,11 +292,19 @@ export const GUIDE = [
     id: 'case',
     title: 'Case',
     lead: 'Four readings of one case, and the first three share the same question.',
-    tools: ['board', 'graph', 'timeline', 'sheet'],
+    tools: ['timeline', 'board', 'graph', 'sheet'],
     points: [
       {
+        label: 'The Board reads as an index',
+        text: 'People, accounts, places and things come first, each with how many events name it and when. Events, files and work fold below, and Group: None is the one table.',
+      },
+      {
+        label: 'Details opens beside the row',
+        text: 'The arrow keys walk the rows and Details follows. Its top line says how many events name the entity, and Add event notes the next one about it.',
+      },
+      {
         label: 'The filter is a sentence you can edit',
-        text: 'The + Filter menu opens on four standing questions. Picking one drops its terms into the bar as ordinary chips, which is also how the filter language is learned.',
+        text: 'The + Filter menu opens on six standing questions. Picking one drops its terms into the bar as ordinary chips, which is also how the filter language is learned.',
       },
       {
         label: 'The count is a proportion',
@@ -312,7 +320,7 @@ export const GUIDE = [
       },
       {
         label: 'One line notes what happened',
-        text: 'Under the Timeline axis, and on a Board row, a Graph node or the Claims group in Details with the entity already in its place. Type @ to mention a subject, even a new one; only a date you give is used.',
+        text: 'Under the Timeline axis, behind Add event in Details, and from any tool with the pencil in the topbar, what it shows already cited. Type @ to mention a subject, even a new one; only a date you give is used.',
       },
       {
         label: 'Timeline reads in a clock you choose',
@@ -341,6 +349,7 @@ export const GUIDE = [
           { combo: 'Ctrl+V', does: 'files a screenshot or a copied address, on Media, Files, Board and Graph' },
           { combo: 'Escape', does: 'closes whatever is open, shallowest first' },
           { combo: 'Ctrl+Enter', does: 'adds the entry line, from any of its fields' },
+          { combo: 'Alt+N', does: 'opens Add event over the tool on screen, with what it shows already cited' },
         ],
       },
       {
@@ -376,6 +385,14 @@ export const GUIDE = [
           { combo: 'Alt+← / →', does: 'moves from a focused entry to the one before or after it on its track' },
           { combo: '↑ / ↓', does: 'walks the rows of the list under the axis' },
           { combo: 'Enter', does: 'opens the focused row in the inspector' },
+        ],
+      },
+      {
+        where: 'Board',
+        keys: [
+          { combo: '↑ / ↓', does: 'walks the rows, and Details beside them follows' },
+          { combo: 'Enter', does: 'opens the focused row in Details' },
+          { combo: 'Escape', does: 'closes Details beside the rows' },
         ],
       },
       {

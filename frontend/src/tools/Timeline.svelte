@@ -78,6 +78,7 @@
   import PlateExport from '../components/PlateExport.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import MediaPreview from '../components/MediaPreview.svelte';
   import EntryLine from '../components/EntryLine.svelte';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
@@ -146,6 +147,14 @@
   let scopedEntity = $state(null);
   const lineEntity = $derived(scopedEntity && scopedEntity.id === entityFilter?.id ? scopedEntity : null);
   let entryLine = $state(null);
+  // The topbar's pencil, pressed on the Timeline, is its own line under the axis.
+  let lineFocusSeen = uiState.timelineLineFocus;
+  $effect(() => {
+    const asked = uiState.timelineLineFocus;
+    if (asked === lineFocusSeen) return;
+    lineFocusSeen = asked;
+    if (!snapshotReading) untrack(() => entryLine?.focus());
+  });
   let viewMode = $state('plot');
   let expandedTracks = $state({});
   let toolElement = $state(null);
@@ -300,6 +309,24 @@
     }
     return grouped;
   });
+  /**
+   * The file an entry is about, shown at the top of the inspector: the file itself
+   * for a file's date, or the first file an event cites. Seeing it is what a click on
+   * a dated file is most often for, and it used to cost Details, then the file.
+   */
+  const PREVIEWS = new Set(['media', 'capture']);
+  const previewEntity = $derived.by(() => {
+    if (!selected) return null;
+    const own = inspectorChain?.entity;
+    if (own?.id === selected.owner_id && PREVIEWS.has(own.type)) return own;
+    const cited = (inspectorChain?.relations ?? []).find(
+      (row) => row.direction === 'out' && row.link?.type === 'cites' && PREVIEWS.has(row.entity?.type)
+    );
+    return cited?.entity ?? null;
+  });
+  /** The picture the row already carried, drawn before the file is known. */
+  const previewThumb = $derived(selected?.category === 'media' ? selected.thumb ?? '' : '');
+
   /** What the list reads: the dated entries the window holds, the same page as the axis. */
   const windowItems = $derived(axisWindow
     ? dated.filter((item) => Date.parse(item.earliest) < axisWindow.end
@@ -423,15 +450,18 @@
     return () => { live = false; };
   });
 
-  // The Overview's "No date yet" lands on the queue it counted, open.
+  // The Overview's "No date yet" lands on the queue it counted, open. A Claim opened
+  // from elsewhere lands on its own entry in the queue that holds it.
   $effect(() => {
-    const queue = uiState.timelineQueue;
-    if (!queue) return;
+    const asked = uiState.timelineQueue;
+    if (!asked) return;
     uiState.timelineQueue = null;
+    const queue = typeof asked === 'string' ? asked : asked.queue;
     if (queue === 'undated') {
       undatedOpen = true;
       landOnUndated = true;
     }
+    if (typeof asked === 'object' && asked.itemId) handOverSelection(asked.itemId, false, asked.item);
   });
 
   $effect(() => {
@@ -974,11 +1004,11 @@
     ];
   }
 
-  function handOverSelection(itemId, producedHere = false) {
+  function handOverSelection(itemId, producedHere = false, fallback = null) {
     ensureTrackFor(itemId, producedHere);
     const held = itemId ? items.find((item) => item.id === itemId) : null;
     selected = held ?? selected;
-    pendingSelection = itemId && !held ? { id: itemId } : null;
+    pendingSelection = itemId && !held ? { id: itemId, ...(fallback ? { fallback } : {}) } : null;
   }
 
   $effect(() => {
@@ -988,7 +1018,7 @@
     if (!windowMillis(range.from, range.to)) return;
     from = range.from;
     to = range.to;
-    handOverSelection(range.itemId);
+    handOverSelection(range.itemId, false, range.item);
   });
 
   $effect(() => {
@@ -1889,7 +1919,7 @@
       <!-- The entry line, under the axis. None in a snapshot, which takes no writes. -->
       {#snippet line()}
         {#if caseState.current && !snapshotReading}
-          <section class="entry-host" aria-label="Note an entry">
+          <section class="entry-host" aria-label="Add an event">
             {#key `${caseState.current.id}:${lineEntity?.id ?? ''}`}
               <EntryLine
                 bind:this={entryLine}
@@ -2356,6 +2386,14 @@
       {#if selected}
         <header><span class={`category-dot ${selected.category}`}></span><span>{categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
         <div class="inspector-body">
+          {#if previewEntity || previewThumb}
+            <MediaPreview
+              caseId={caseState.current?.id}
+              entity={previewEntity}
+              thumb={previewThumb}
+              label={previewEntity?.label ?? selected.label}
+            />
+          {/if}
           <div class="item-kind">{temporalKindLabel(selected.kind)}{#if selected.time_role} · {selected.time_role}{/if}</div>
           <h2 dir="auto">{selected.label}</h2>
           {#if inspectorLoading}<div class="inspector-loading">Loading details…</div>{/if}
@@ -2502,7 +2540,7 @@
 {/if}
 
 {#if editor}
-  <Modal title={editor.item ? 'Edit claim' : 'Add claim'} onclose={() => (editor = null)} width="660px">
+  <Modal title={editor.item ? 'Edit claim' : 'Add event'} onclose={() => (editor = null)} width="660px">
     <TemporalClaimEditor
       caseId={caseState.current.id}
       item={editor.item}

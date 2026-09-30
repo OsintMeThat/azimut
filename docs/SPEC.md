@@ -195,7 +195,7 @@ proof for publication.
 | ✅ **A date in one field** | Reads a day, a month, a year, a time or a range from one line of text, or builds one from a calendar with its marks of doubt, and says what it understood. |
 | ✅ **Words that hold still** | One name for a Claim on every surface, a tooltip on every icon, a stated reason on a layer that cannot be switched on, the recent work first on Home, and Coords & Sky opening on the point the map is on. |
 | ✅ **A picture sent to Reverse Search** | Opens Reverse Search on a Media Library file, from a row's Open in… menu, or on an Inspect frame as it is cropped, saved or not. |
-| ✅ **A claim from where you are** | Files a claim from Details, a Board row or a Graph node with the entity already seated, asking a count and a condition where its family calls for them and writing the sentence from the fields. |
+| ✅ **Add event from anywhere** | One line for an event under the Timeline axis, atop Details and over any tool (Alt+N), with `@` mentions that can file a new subject, what the tool shows already cited, and a date only the analyst gives. |
 | ✅ **Radar Detect** | Five Sentinel-1 analyzers (vessels, any change, razed buildings, new structures, floods) through the user's own radar layer, calibrated on real scenes, held to one track. |
 | ✅ **Sentinel-1 basemap** | Radar passes as a dated basemap in Satellite, Compare and Detect, named by day, UTC time and direction. |
 | ✅ **All dates** | Lists every dated picture of the point in Compare, oldest first, to set on either side. |
@@ -212,6 +212,10 @@ proof for publication.
 | ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame like a wheel about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back, Shift+← / → steps. |
 | ✅ **Checked proof points** | A proof point taken from a capture's centre reads greyed until checked; Save and To post show each one on the map first, and one saved for later stays off the case map. |
 | ✅ **Compare and Detect full screen** | Both take the whole screen with their bars and panel, as Satellite does, and any change of tab gives it back. |
+| ✅ **A Timeline that reads at a glance** | A point is an instant, a bracket a date known to the day, month or year, a bar a period; it opens on the analyst's dates and the collected files, reads axis and list as one, copies out as a table, and shows the file an entry is about. |
+| ✅ **Names in any script** | Search folds case and accents in Latin, Greek and Cyrillic and vowel marks in Arabic and Hebrew, reads month names in the browser's languages, and keeps right-to-left text in its own direction. |
+| ✅ **Subjects corrected safely** | Changes a subject's type without losing a field or a link, and merges two duplicates with a preview, redirects for the absorbed id and an Undo. |
+| ✅ **The Board as an index** | Groups the case by family, people, places and things first with how many events name each and when, the files folded under; Most noted first, Details beside the list, walked with the arrow keys. |
 
 ---
 

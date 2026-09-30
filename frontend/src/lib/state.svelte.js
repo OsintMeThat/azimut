@@ -273,9 +273,14 @@ export const uiState = $state({
   /** Entity/item handed to Timeline from Details. Timeline consumes and clears it. */
   timelineFocus: null, // { entityId, entityLabel, itemId, producedHere }
   /** A fact-time range handed back to Timeline. Consumed once, never persisted. */
-  timelineRange: null, // { from, to }
+  timelineRange: null, // { from, to, itemId?, item? }
   /** A holding queue the Timeline should open onto, from a count that named it. */
-  timelineQueue: null, // 'undated'
+  timelineQueue: null, // 'undated', or { queue: 'undated' | 'unplaced', itemId, item }
+  /** Whether the Add event bar is open over the tool on screen. Session only. */
+  noting: false,
+  /** Bumped to send the Timeline to its own entry line, which is the Add event bar
+   *  the Timeline already has. */
+  timelineLineFocus: 0,
   /** A fact-time range handed to the Satellite map as a temporary event layer. */
   mapTimelineRange: null, // { from, to }
   /**
@@ -588,6 +593,7 @@ function clearCaseHandoffs() {
   uiState.timelineFocus = null;
   uiState.timelineRange = null;
   uiState.timelineQueue = null;
+  uiState.noting = false;
   uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.lookAt = null;

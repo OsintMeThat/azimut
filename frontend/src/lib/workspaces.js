@@ -12,6 +12,10 @@
  * sidebar — but it is not on the rail. The rail reads as a sequence of stages,
  * and the case is not a stage: it is what every stage files into. It hangs off
  * the case switcher in the topbar instead, beside the name of the case it opens.
+ *
+ * The Timeline is its first tab, so `#case` and a first visit land where events are
+ * noted and read; the Board, the index of who and what, is the next one. `#board`
+ * is still a tab of its own, and the tool id stays `board` in every stored view.
  */
 import { splitHash } from './hash.js';
 
@@ -19,7 +23,7 @@ export const CASE_WORKSPACE = {
   id: 'case',
   label: 'Case',
   icon: 'graph',
-  tools: ['board', 'graph', 'timeline', 'sheet'],
+  tools: ['timeline', 'board', 'graph', 'sheet'],
 };
 
 /**

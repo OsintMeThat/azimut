@@ -6,6 +6,12 @@ const newer = subject('newer', 'Convoy vehicle', '2026-09-02T12:00:00Z');
 const older = subject('older', 'Earlier vehicle', '2026-09-01T12:00:00Z');
 const chain = (entity) => ({ entity, sources: [], lost: [], dependents: [], relations: [], empty: true });
 
+
+/** Details docks beside a wide Board and is a modal below that, as when the window is
+ *  narrowed to a phone's width. */
+const boardDetails = (page) =>
+  page.locator('aside.fiche').or(page.getByRole('dialog', { name: 'Details', exact: true }));
+
 async function setup(page) {
   const fixture = await installAppFixture(page, { catalog: [newer, older] });
   let current = structuredClone(newer);
@@ -44,13 +50,13 @@ async function setup(page) {
   });
   await page.goto('/#board');
   await page.locator('tbody tr').filter({ has: page.locator('.name', { hasText: newer.label }) }).locator('td:not(.pick)').first().click();
-  await expect(page.getByRole('dialog', { name: 'Details', exact: true })).toBeVisible();
+  await expect(boardDetails(page)).toBeVisible();
   return { fixture, writes, restored: () => restored };
 }
 
 test('changes a subject type and explicitly removes a retained field', async ({ page }) => {
   const state = await setup(page);
-  const details = page.getByRole('dialog', { name: 'Details', exact: true });
+  const details = boardDetails(page);
   await details.getByRole('button', { name: 'Change type…', exact: true }).click();
   await details.getByLabel('New type').selectOption('organization');
   await details.getByRole('button', { name: 'Change type', exact: true }).click();
@@ -77,7 +83,7 @@ test('previews the older survivor, merges, and undoes from Details', async ({ pa
   await dialog.getByRole('button', { name: 'Merge subjects', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   expect(state.writes[0]).toEqual({ path: `/api/cases/${CASE_ID}/entities/older/merge`, body: { other: 'newer' } });
-  const details = page.getByRole('dialog', { name: 'Details', exact: true });
+  const details = boardDetails(page);
   await expect(details.getByText('Merged from')).toBeVisible();
   await details.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(state.restored).toBe(true);
