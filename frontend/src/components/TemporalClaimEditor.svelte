@@ -31,7 +31,8 @@
 
   let statement = $state('');
   let when = $state('');
-  // The zone the date was stated in (`when_zone`): which day a date is.
+  // The clock the date was stated on (`when_zone`): which day a date is, and whose
+  // local time a time is.
   let whenZone = $state(null);
   let timeRole = $state('');
   let confidence = $state('');
@@ -165,8 +166,8 @@
     id="temporal-when"
     value={when}
     places={[...places, ...cites]}
-    dayZone={whenZone}
-    ondayzonechange={(zone) => (whenZone = zone)}
+    zone={whenZone}
+    onzonechange={(zone) => (whenZone = zone)}
     onchange={(value) => (when = value)}
     onvaliditychange={(reading) => (whenValid = reading.valid)}
   />

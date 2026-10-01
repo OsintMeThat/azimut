@@ -85,6 +85,9 @@
   import EntityDetails from '../components/EntityDetails.svelte';
   import MediaPreview from '../components/MediaPreview.svelte';
   import DateField from '../components/DateField.svelte';
+  import ClockField from '../components/ClockField.svelte';
+  import { clockOf, isTimed, settleClock, writesOwnClock } from '../lib/clock.js';
+  import { noteAxisZone } from '../lib/caseAxis.svelte.js';
   import EntryLine from '../components/EntryLine.svelte';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
@@ -456,6 +459,10 @@
     if (!sunPlace) return UTC;
     const named = daylight?.zone?.name;
     return named && knownZone(named) ? named : UTC;
+  });
+  // A date typed anywhere in the case opens on the clock the axis reads on.
+  $effect(() => {
+    if (!snapshotReading) noteAxisZone(caseState.current?.id, zone);
   });
   /** What one tick is worth, and which clock is being read. */
   const zoneWord = $derived(
@@ -1598,21 +1605,32 @@
     if (raw && raw !== item.raw) pendingEdit = { item, raw };
   }
 
-  /** A date being changed from the inspector, until it is saved or given up. */
-  let dateEditing = $state(null); // { id, value }
+  /** A date being changed from the inspector, until it is saved or given up. `picked`
+   *  is a clock chosen here, `undefined` while the entry keeps its own. */
+  let dateEditing = $state(null); // { id, value, picked }
+  const dateSettled = $derived(
+    dateEditing
+      ? settleClock(dateEditing.value, {
+        picked: dateEditing.picked,
+        stated: selected?.tz ?? null,
+        // an entry on no known clock stays on none until one is picked
+        fallback: clockOf(selected?.raw, selected?.tz).zone,
+      })
+      : null
+  );
   const dateEditReady = $derived(
     Boolean(dateEditing?.value) &&
-      dateEditing.value !== (selected?.raw ?? '') &&
-      formatTemporalValue(dateEditing.value).valid
+      formatTemporalValue(dateEditing.value).valid &&
+      (dateSettled.raw !== (selected?.raw ?? '') || dateSettled.zone !== (selected?.tz ?? null))
   );
   function startDateEdit() {
     if (!selected || snapshotReading) return;
-    dateEditing = { id: selected.id, value: selected.raw ?? '' };
+    dateEditing = { id: selected.id, value: selected.raw ?? '', picked: undefined };
   }
   // Through the same old → new confirmation a drag on the axis asks.
   function saveDateEdit() {
     if (!dateEditReady) return;
-    pendingEdit = { item: selected, raw: dateEditing.value };
+    pendingEdit = { item: selected, raw: dateSettled.raw, zone: dateSettled.zone };
   }
   $effect(() => {
     const id = selected?.id ?? null;
@@ -1627,7 +1645,11 @@
     try {
       await api.patch(
         `/api/cases/${caseState.current.id}/timeline/claims/${pendingEdit.item.owner_id}`,
-        { when: pendingEdit.raw }
+        {
+          when: pendingEdit.raw,
+          // a drag moves the date on the clock it has; the inspector can change the clock
+          ...(pendingEdit.zone !== undefined ? { when_zone: pendingEdit.zone } : {}),
+        }
       );
       pendingEdit = null;
       dateEditing = null;
@@ -2565,7 +2587,19 @@
                   placeholder="dd/mm/yyyy hh:mm"
                   calendar
                   value={dateEditing.value}
-                  onchange={(value) => (dateEditing = { ...dateEditing, value })}
+                  zone={dateSettled.zone}
+                  onchange={(value) => (dateEditing = {
+                    ...dateEditing,
+                    value,
+                    // a clock typed into the value itself (`14:30 UTC`) takes over
+                    picked: writesOwnClock(value) ? undefined : dateEditing.picked,
+                  })}
+                />
+                <ClockField
+                  value={dateEditing.value}
+                  clock={dateSettled.clock}
+                  timed={isTimed(dateEditing.value)}
+                  onpick={(zone) => (dateEditing = { ...dateEditing, picked: zone })}
                 />
                 <div class="date-edit-acts">
                   <button type="button" class="btn btn-ghost btn-sm" onclick={() => (dateEditing = null)}>Cancel</button>
@@ -2763,7 +2797,7 @@
   <ConfirmDialog
     title={!pendingEdit.item.raw ? 'Date this entry?' : pendingEdit.item.shape === 'interval' ? 'Change this period?' : 'Move this date?'}
     message={pendingEdit.item.label}
-    detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw).label}`}
+    detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw, pendingEdit.item.tz).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw, pendingEdit.zone === undefined ? pendingEdit.item.tz : pendingEdit.zone).label}`}
     confirmLabel="Update date"
     icon="clock"
     busy={directSaving}

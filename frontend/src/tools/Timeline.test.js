@@ -503,13 +503,18 @@ describe('the file an entry is about', () => {
 describe('changing a picked entry’s date', () => {
   it('is offered where the date is read, and confirmed like a drag', () => {
     expect(source).toContain("{selected.raw ? 'Change the date' : 'Give it a date'}");
-    expect(source).toContain('pendingEdit = { item: selected, raw: dateEditing.value };');
+    expect(source).toContain('pendingEdit = { item: selected, raw: dateSettled.raw, zone: dateSettled.zone };');
+    // the clock is changed there too, and a drag keeps the one it has
+    expect(source).toContain('onpick={(zone) => (dateEditing = { ...dateEditing, picked: zone })}');
+    expect(source).toContain('...(pendingEdit.zone !== undefined ? { when_zone: pendingEdit.zone } : {}),');
+    // and a date typed anywhere in the case opens on the axis's clock
+    expect(source).toContain('if (!snapshotReading) noteAxisZone(caseState.current?.id, zone);');
     // a file keeps its own date and is corrected beside it
     expect(source).toContain('<Icon name="edit" size={12} /> Correct this date');
   });
 
-  it('says both dates in words when it asks', () => {
-    expect(source).toContain("detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw).label}`}");
+  it('says both dates in words, each on its clock, when it asks', () => {
+    expect(source).toContain("detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw, pendingEdit.item.tz).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw, pendingEdit.zone === undefined ? pendingEdit.item.tz : pendingEdit.zone).label}`}");
   });
 });
 

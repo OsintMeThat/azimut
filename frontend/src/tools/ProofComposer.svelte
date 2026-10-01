@@ -11,13 +11,13 @@
   // Reading a typed pair back into a point: the one parser the app has, and the
   // one a coordinate row is written in (decimal, hemispheres, or DMS).
   import { parseLatLon } from '../lib/sheetRoles.js';
-  import { knownZone, offsetLabel, worldZones } from '../lib/timeline.js';
   import { zoneAt } from '../lib/localZone.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import DateField from '../components/DateField.svelte';
+  import ClockField from '../components/ClockField.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -173,7 +173,6 @@
   // place it shows, so that point's zone is the default. It is looked up only
   // while a date is set, from the bundled boundaries (no network).
   let pointZone = $state('');
-  let otherZone = $state(false);
   const zonePointKey = $derived.by(() => {
     if (!proof.when.trim()) return '';
     const typed = String(specPoints(proof)[0]?.coords ?? '').trim();
@@ -202,29 +201,10 @@
       clearTimeout(timer);
     };
   });
-  const zoneMode = $derived(
-    otherZone || (proof.whenZone && proof.whenZone !== 'UTC') ? 'other' : proof.whenZone === 'UTC' ? 'UTC' : '',
-  );
-  /** The zone's offset on the stated date, not today's: a summer day in Kyiv is +03:00. */
-  function zoneOffset(zone) {
-    const [, year, month = '01', day = '01'] = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(proof.when.trim()) ?? [];
-    const at = year ? Date.UTC(Number(year), Number(month) - 1, Number(day), 12) : Date.now();
-    return offsetLabel(zone, at);
-  }
-  function pickZoneMode(mode) {
-    otherZone = mode === 'other';
-    if (mode === 'other') return;
-    proof.whenZone = mode === 'UTC' ? 'UTC' : null;
-    dirty = true;
-  }
-  function typeZone(text) {
-    const zone = text.trim();
-    if (!zone) return;
-    if (!knownZone(zone)) {
-      toast(`${zone} is not a time zone name`, 'warn');
-      return;
-    }
-    proof.whenZone = zone;
+  /** The clock the date reads on: the analyst's pick, else the point's, else UTC. A
+   *  pick of the point's own row goes back to following the point. */
+  function pickClock(zone, { here }) {
+    proof.whenZone = here ? null : zone;
     dirty = true;
   }
   // The document as it stands on disk, so an undo that walks all the way back
@@ -448,7 +428,6 @@
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     proof.when = typeof spec.when === 'string' ? spec.when : '';
     proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
-    otherZone = false;
     proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
@@ -763,7 +742,6 @@
     proof.sources = null;
     proof.when = '';
     proof.whenZone = null;
-    otherZone = false;
     proof.description = '';
     proof.material = [];
     proof.captionSize = CAPTION_SIZE;
@@ -4025,7 +4003,6 @@
     // the copy this file was written with.
     proof.when = typeof spec.when === 'string' ? spec.when : '';
     proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
-    otherZone = false;
     proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
@@ -4839,36 +4816,15 @@
                assumed: without it the Timeline would put Kyiv's 12th on UTC's. -->
           {#if proof.when.trim()}
             <div class="when-zone">
-              <label for="proof-when-zone">Clock</label>
-              <select
-                id="proof-when-zone"
-                class="select meta-input"
-                value={zoneMode}
-                onchange={(event) => pickZoneMode(event.currentTarget.value)}
-              >
-                <option value="">{pointZone ? `At the point · ${pointZone}` : 'At the point · no point yet'}</option>
-                <option value="UTC">UTC</option>
-                <option value="other">Other zone…</option>
-              </select>
-              {#if zoneMode === 'other'}
-                <input
-                  class="input meta-input mono"
-                  list="proof-zone-names"
-                  aria-label="Time zone"
-                  placeholder="Europe/Kyiv"
-                  autocomplete="off"
-                  spellcheck="false"
-                  value={proof.whenZone && proof.whenZone !== 'UTC' ? proof.whenZone : ''}
-                  onchange={(event) => typeZone(event.currentTarget.value)}
-                />
-                <datalist id="proof-zone-names">
-                  {#each worldZones() as zone (zone)}<option value={zone}></option>{/each}
-                </datalist>
-              {/if}
-              {#if !zoneMode && !pointZone}
+              <span class="when-zone-label">Clock</span>
+              <ClockField
+                value={proof.when}
+                clock={{ zone: proof.whenZone || pointZone || 'UTC', fixed: '' }}
+                here={pointZone ? [{ zone: pointZone, place: 'the point' }] : []}
+                onpick={pickClock}
+              />
+              {#if !proof.whenZone && !pointZone}
                 <p class="when-zone-note">No point yet, so the day is read in UTC.</p>
-              {:else if proof.whenZone !== 'UTC' && (proof.whenZone || pointZone)}
-                <p class="when-zone-note">{zoneOffset(proof.whenZone || pointZone)} on that day.</p>
               {/if}
             </div>
           {/if}
@@ -5500,8 +5456,7 @@
   }
   .meta-field { margin-bottom: 10px; }
   .when-zone { margin-top: 6px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; }
-  .when-zone label { font-size: var(--fs-xs); color: var(--text-3); }
-  .when-zone input { grid-column: 2; }
+  .when-zone-label { font-size: var(--fs-xs); color: var(--text-3); }
   .when-zone-note { grid-column: 2; margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
   .meta-head {
     display: flex;

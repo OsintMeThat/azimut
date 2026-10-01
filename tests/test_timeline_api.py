@@ -309,6 +309,21 @@ def test_a_day_stated_in_a_zone_is_that_zones_day_on_the_axis(client):
     assert local.json()["temporal"]["zone"] == "named"
 
 
+def test_a_time_keeps_the_clock_it_was_picked_on_beside_its_offset(client):
+    """A time is written with the offset its zone keeps then, and the row still
+    names the zone, so the Timeline says Kyiv rather than a bare +03:00."""
+    case_id = _case(client)
+    created = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Strike", "when": "2024-07-12T14:30:00+03:00", "when_zone": "Europe/Kyiv"},
+    )
+    assert created.status_code == 200, created.text
+    row = created.json()["temporal"]
+    assert (row["earliest"], row["zone"], row["tz"]) == (
+        "2024-07-12T11:30:00.000000Z", "offset", "Europe/Kyiv",
+    )
+
+
 def test_a_zone_leaves_with_the_date_it_read(client):
     case_id = _case(client)
     claim_id = client.post(

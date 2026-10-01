@@ -383,7 +383,8 @@ describe('a temporal Claim field', () => {
 
     choose(root, 'Date format', 'timestamp');
     type(field(root, 'when'), '2026-08-11T18:40');
-    choose(root, 'Timezone', 'utc');
+    // with no place tied to it, a time typed into an empty field reads on UTC
+    expect(root.querySelector('.clock-trigger').getAttribute('aria-label')).toBe('Clock: UTC');
     choose(root, 'Date format', 'advanced');
 
     expect(field(root, 'when').value).toBe('2026-08-11T18:40:00Z');
@@ -422,19 +423,37 @@ describe('a temporal Claim field', () => {
   });
 });
 
-describe('a time zone field', () => {
-  it('offers named zones to pick from and says what an empty one means', () => {
-    const root = open({ when: '2024-03-12' }, 'proof');
-    const input = field(root, 'when_zone');
+describe('the clock a date is read on', () => {
+  const trigger = (root) => root.querySelector('.clock-trigger');
+  function pick(root, words) {
+    trigger(root).click();
+    flushSync();
+    // the world's zones are searched, not scrolled through
+    type(document.querySelector('.clock-menu .search-input'), words);
+    const row = [...document.querySelectorAll('.clock-menu .rows > button')]
+      .find((button) => button.querySelector('span').textContent === words);
+    row.click();
+    flushSync();
+  }
 
-    expect(input.placeholder).toBe('Not stated, UTC days');
-    const names = [...root.querySelectorAll(`#${input.getAttribute('list')} option`)].map((o) => o.value);
-    expect(names[0]).toBe('UTC');
-    expect(names).toContain('Europe/Paris');
+  it('is the date’s own Clock row rather than a second field', () => {
+    const root = open({ when: '2024-03-12' }, 'proof');
+
+    expect(field(root, 'when_zone')).toBeNull();
+    expect(trigger(root).getAttribute('aria-label')).toBe('Clock: UTC');
   });
 
-  it('shows the zone the entity holds', () => {
+  it('shows the zone the entity holds, with its offset on that day', () => {
     const root = open({ when: '2024-03-12', when_zone: 'Asia/Tokyo' }, 'proof');
-    expect(field(root, 'when_zone').value).toBe('Asia/Tokyo');
+    expect(trigger(root).getAttribute('aria-label')).toBe('Clock: Tokyo UTC+09:00');
+  });
+
+  it('takes any zone in the world by search, and UTC back as none', () => {
+    const root = open({ when: '2024-03-12' }, 'proof');
+
+    pick(root, 'Tokyo');
+    expect(trigger(root).getAttribute('aria-label')).toBe('Clock: Tokyo UTC+09:00');
+    pick(root, 'UTC');
+    expect(trigger(root).getAttribute('aria-label')).toBe('Clock: UTC');
   });
 });

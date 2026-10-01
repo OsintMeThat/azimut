@@ -99,7 +99,9 @@ def _project_value(
         status=status,
         confidence=confidence,
         parse_error=None,
-        tz=value.tz,
+        # The clock the value was stated on, kept even where the value writes its own
+        # offset: a time picked on Kyiv's clock says Kyiv, not only `+03:00`.
+        tz=stated_in,
     )
 
 

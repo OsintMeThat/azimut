@@ -64,13 +64,16 @@
     rankMentions,
     typeMenu,
   } from '../lib/entryLine.js';
-  import { dayReading, isDateOnly, isUnzonedTime, withZone, zoneReading, zonesOf } from '../lib/localZone.js';
+  import { zonesOf } from '../lib/localZone.js';
+  import { isTimed, settleClock, writesOwnClock } from '../lib/clock.js';
+  import { axisZone, learnAxisZone } from '../lib/caseAxis.svelte.js';
   import { FILE_TYPES, fetchFileDates } from '../lib/fileDates.js';
   import { formatTemporalValue } from '../lib/timeline.js';
   import DateBuilder from './DateBuilder.svelte';
   import { anchoredPanel } from '../lib/anchoredPanel.js';
   import DateField from './DateField.svelte';
   import EntityFinder from './EntityFinder.svelte';
+  import ClockField from './ClockField.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import TemporalClaimEditor from './TemporalClaimEditor.svelte';
@@ -130,7 +133,7 @@
   });
   function useOffer(offer) {
     when = offer.value;
-    zoneChoice = '';
+    clockPick = undefined;
     usedOffer = offer;
     queueMicrotask(() => sentence?.focus());
   }
@@ -147,7 +150,8 @@
   let saving = $state(false);
   let error = $state('');
   let refused = $state({});
-  let zoneChoice = $state('');
+  /** The clock the analyst picked, `undefined` until they pick one (see `settleClock`). */
+  let clockPick = $state(undefined);
   let zones = $state({ zones: [], only: null });
   let full = $state(null);
   let dragging = $state(false);
@@ -170,14 +174,14 @@
     untrack(() => {
       const held = DRAFTS.get(key);
       if (!held) return;
-      ({ when, text, edited, mentions, count, condition, confidence } = held);
+      ({ when, clockPick, text, edited, mentions, count, condition, confidence } = held);
     });
   });
   const blank = $derived(!when && !text.trim() && !mentions.length && count == null && !condition && !confidence);
   function keepDraft() {
     if (!storeKey) return;
     if (blank) DRAFTS.delete(storeKey);
-    else DRAFTS.set(storeKey, $state.snapshot({ when, text, edited, mentions, count, condition, confidence }));
+    else DRAFTS.set(storeKey, $state.snapshot({ when, clockPick, text, edited, mentions, count, condition, confidence }));
   }
   onDestroy(keepDraft);
 
@@ -224,18 +228,16 @@
     zonesOf(placed).then((found) => { if (live) zones = found; });
     return () => { live = false; };
   });
-  /** The zone the typed hour is read in: the one the analyst picked among several,
-   *  or the only one the draft's places agree on. Never when they turned it down. */
-  const zone = $derived.by(() => {
-    if (zoneChoice === 'none') return null;
-    return zones.zones.find((entry) => entry.zone === zoneChoice) ?? zones.only;
-  });
-  const zoned = $derived(isUnzonedTime(when) && zones.zones.length > 0);
-  const stored = $derived(zoned && zone ? withZone(when, zone.zone) : when);
-  // A day is that place's day in the same way: its zone is stated beside it, since a
-  // day has no offset to write into the value.
-  const zonedDay = $derived(isDateOnly(when) && zones.zones.length > 0);
-  const dayZone = $derived(zonedDay && zone ? zone.zone : null);
+  // The clock the date is read on: the analyst's pick, else the one the value writes
+  // itself, else the zone the line's places agree on, else the clock the case's axis
+  // reads on. A day is that zone's day and a time its local time, said on the chip.
+  $effect(() => { learnAxisZone(caseId); });
+  const settled = $derived(settleClock(when, { picked: clockPick, fallback: zones.only?.zone ?? axisZone(caseId) }));
+  /** A typed date keeps the clock picked, unless it writes its own (`14:30 UTC`). */
+  function typeWhen(value) {
+    when = value;
+    if (writesOwnClock(value)) clockPick = undefined;
+  }
   const whenValid = $derived(!when || formatTemporalValue(when).valid);
 
   // -- sending ---------------------------------------------------------------
@@ -251,8 +253,8 @@
     const ids = (slot) => inSeat(slot).filter((item) => !item.isNew).map((item) => item.id);
     return quickClaimBody({
       statement,
-      when: stored,
-      whenZone: dayZone,
+      when: settled.raw,
+      whenZone: settled.zone,
       confidence,
       count,
       condition,
@@ -272,7 +274,7 @@
     count = null;
     condition = '';
     confidence = '';
-    zoneChoice = '';
+    clockPick = undefined;
     error = '';
     refused = {};
     if (storeKey) DRAFTS.delete(storeKey);
@@ -314,7 +316,7 @@
   /** Put a date on the line, as a click on the axis does, and go to the sentence. */
   export function offer(value) {
     when = value ?? '';
-    zoneChoice = '';
+    clockPick = undefined;
     queueMicrotask(() => sentence?.focus());
   }
 
@@ -577,8 +579,8 @@
       .map(({ id, label, type, attrs }) => ({ id, label, type, attrs }));
     full = {
       statement,
-      when: stored,
-      whenZone: dayZone,
+      when: settled.raw,
+      whenZone: settled.zone,
       confidence,
       about: pick('about').filter((item) => item.id !== entity?.id || seat?.slot !== 'about'),
       at: pick('at'),
@@ -624,7 +626,7 @@
         placeholder="Date · optional"
         value={when}
         reading={false}
-        onchange={(value) => { when = value; zoneChoice = ''; }}
+        onchange={typeWhen}
       />
       <button
         class="panel-toggle calendar"
@@ -706,7 +708,7 @@
 
   {#if panel === 'calendar'}
     <div class="panel calendar-panel" popover="manual" use:anchoredPanel={{ anchor: () => lineElement?.querySelector('.when'), width: 320 }}>
-      <DateBuilder value={formatTemporalValue(when).valid ? when : ''} label="When" onbuild={(value) => { when = value; zoneChoice = ''; }} />
+      <DateBuilder value={formatTemporalValue(when).valid ? when : ''} label="When" onbuild={typeWhen} />
     </div>
   {:else if panel === 'sources'}
     <div class="panel sources-panel" popover="manual" use:anchoredPanel={{ anchor: () => lineElement?.querySelector('.row') }}>
@@ -776,25 +778,19 @@
 
   <div class="under">
     {#if when && whenValid}
-      {@const reading = formatTemporalValue(stored)}
+      {@const reading = formatTemporalValue(settled.raw, settled.zone)}
       <!-- A date it cannot read is said under the field itself, by DateField. -->
       <span class="said" aria-live="polite">
-        {#if zoned && zone}Reads: {zoneReading(when, zone.zone, zone.place)}
-        {:else if dayZone}Reads: {[dayReading(reading.label, zone.zone, zone.place), ...reading.qualifiers].join(' · ')}
-        {:else}Reads: {[reading.label, ...reading.qualifiers].join(' · ')}{/if}
+        Reads: {[reading.label, ...reading.qualifiers].join(' · ')}
         {#if fromOffer} · from the {fromOffer.kind} date, yours to correct{/if}
       </span>
-      {#if zoned || zonedDay}
-        <span class="zones">
-          {#each zones.zones as entry (entry.zone)}
-            {#if zone?.zone !== entry.zone}
-              <button class="btn btn-ghost btn-sm" onclick={() => (zoneChoice = entry.zone)}>Local at {entry.place}</button>
-            {/if}
-          {/each}
-          {#if zone && zoned}<button class="btn btn-ghost btn-sm" title="Keep the time with no zone, off the UTC axis" onclick={() => (zoneChoice = 'none')}>No zone</button>{/if}
-          {#if zone && zonedDay}<button class="btn btn-ghost btn-sm" title="Read the day as UTC's day" onclick={() => (zoneChoice = 'none')}>UTC day</button>{/if}
-        </span>
-      {/if}
+      <ClockField
+        value={when}
+        clock={settled.clock}
+        here={zones.zones}
+        timed={isTimed(when)}
+        onpick={(zone) => (clockPick = zone)}
+      />
     {:else if focused === 'when' && !when}
       <p class="help">
         <span>A day <code>12/03/2026</code></span>
@@ -954,7 +950,6 @@
   .help code { padding: 0 4px; border-radius: 3px; background: var(--bg-2); color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; }
   .help .aside { color: var(--text-3); font-style: italic; }
   .help :global(svg) { vertical-align: -1px; }
-  .zones { display: inline-flex; flex-wrap: wrap; gap: 4px; }
   .more { margin-left: auto; }
   .error { color: var(--warn); font-size: var(--fs-xs); }
   .details { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; padding-top: 8px; border-top: 1px solid var(--border); }

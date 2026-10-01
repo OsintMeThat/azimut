@@ -5,19 +5,13 @@
  * gives is that place's clock. The zone comes from the server's bundled boundaries
  * (`GET /api/geo/zone`, nothing reaches the network) and the offset from this
  * browser's own zone database, for the instant itself: an August hour in Kyiv is
- * `+03:00` and a January one `+02:00`. What is stored is the value with its offset,
- * so the temporal contract does not change.
+ * `+03:00` and a January one `+02:00`. How a value is put on a clock and stored is
+ * `lib/clock.js`; this module finds the zones and their offsets.
  */
 import { api } from './api.js';
-import { instantOf, offsetLabel, zoneOffset } from './timeline.js';
+import { instantOf, zoneOffset } from './timeline.js';
 
 const UNZONED = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?$/;
-
-/** Whether a stored value is one time with no zone, which is the only form a place's
- *  clock can be given to. A date has no hour, and a stated zone was a choice. */
-export function isUnzonedTime(raw) {
-  return UNZONED.test(String(raw ?? ''));
-}
 
 const pad = (value) => String(value).padStart(2, '0');
 
@@ -38,29 +32,6 @@ const DAYS = /^\d{4}(-\d{2}(-\d{2})?)?[~?%]?(\/\d{4}(-\d{2}(-\d{2})?)?[~?%]?)?$/
  *  offset to carry, so the zone it is a day of travels beside it (`when_zone`). */
 export function isDateOnly(raw) {
   return DAYS.test(String(raw ?? ''));
-}
-
-/** How a day read in a place's zone says itself: `12 Mar 2024, the day at Kharkiv
- *  (Europe/Kyiv)`, where the 12th starts at that zone's midnight. */
-export function dayReading(label, zone, place) {
-  if (!zone) return label;
-  return place ? `${label}, the day at ${place} (${zone})` : `${label} (${zone})`;
-}
-
-/** The value given the zone's offset, or the value unchanged when it is not one
- *  unzoned time. */
-export function withZone(raw, zone) {
-  const offset = offsetAt(raw, zone);
-  return offset ? `${raw}${offset}` : raw;
-}
-
-/** How the choice reads under the field: `17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)`. */
-export function zoneReading(raw, zone, place) {
-  const match = UNZONED.exec(String(raw ?? ''));
-  if (!match || !zone) return '';
-  const [, year, month, day, hour, minute, second] = match.map(Number);
-  const instant = instantOf({ year, month, day, hour, minute, second }, zone);
-  return `${match[4]}:${match[5]} at ${place} (${zone}, ${offsetLabel(zone, instant)})`;
 }
 
 /** Where an entity stands, when it is a point: a place, or a proof with its own. */

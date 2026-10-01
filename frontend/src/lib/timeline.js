@@ -533,8 +533,11 @@ function timestampLabel(raw, tz = null) {
   const milli = (match[7] ?? '').slice(0, 3);
   const fraction = /[1-9]/.test(milli) ? `.${milli}` : '';
   // A time with no offset of its own reads on the clock of the zone it was stated
-  // in, when there is one; without it the words say nothing is known.
-  const zone = match[8] === 'Z' ? ' UTC' : match[8] ? ` UTC${match[8]}` : tz ? ` ${tz}` : ' local time';
+  // in, when there is one; without it the words say nothing is known. An offset
+  // written for a named zone says both, since the name is what was picked.
+  const zone = match[8] === 'Z' ? ' UTC'
+    : match[8] ? (tz ? ` ${tz} (UTC${match[8]})` : ` UTC${match[8]}`)
+      : tz ? ` ${tz}` : ' local time';
   return `${date}, ${match[4]}:${match[5]}:${match[6]}${fraction}${zone}`;
 }
 

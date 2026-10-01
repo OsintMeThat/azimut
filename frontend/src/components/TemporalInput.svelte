@@ -7,36 +7,35 @@
     writeTemporalInput,
   } from '../lib/temporalInput.js';
   import { formatTemporalValue } from '../lib/timeline.js';
-  import { zoneReading, zonesOf } from '../lib/localZone.js';
+  import { zonesOf } from '../lib/localZone.js';
+  import { UTC, clockOf } from '../lib/clock.js';
+  import { axisZone, learnAxisZone } from '../lib/caseAxis.svelte.js';
+  import { caseState } from '../lib/state.svelte.js';
+  import ClockField from './ClockField.svelte';
 
   let {
     id,
     value = '',
-    /** Where the claim happened, for a time typed as the local time there (D33). */
+    /** Where the claim happened, for a date read on the clock there (D33). */
     places = [],
     /** The zone the value was stated in (`when_zone`), and where a change to it goes.
-     *  Without the callback the editor has no zone row, as a bare field. */
-    dayZone = null,
-    ondayzonechange = null,
+     *  Without the callback a date has no clock row, as a bare field: a time still
+     *  has one, since its clock is written into the value. */
+    zone = null,
+    onzonechange = null,
     onchange,
     onvaliditychange,
   } = $props();
   let state = $state(readTemporalInput(''));
   let sent = $state('');
-  // Whether the analyst picked a zone, and whether they typed the time here. A place's
-  // clock is the default only for a time typed in this editor while the zone is still
-  // Unknown: a stored time is never rewritten because the editor was opened.
+  // Whether the analyst picked a clock, whether they typed here, and whether the editor
+  // opened empty. The places' clock, else the case's, is the default only for a value typed
+  // into an empty editor: a stored value keeps its clock, and is never rewritten
+  // because the editor was opened or edited.
   let chosen = $state(false);
   let typed = $state(false);
-  let dayChosen = $state(false);
+  let fresh = $state(true);
   let zones = $state({ zones: [], only: null });
-  // The places' zones, and the stated one when no place gives it: a Claim a proof
-  // dated carries its point's zone without being tied to a place entity.
-  const zoneChoices = $derived(
-    dayZone && !zones.zones.some((entry) => entry.zone === dayZone)
-      ? [...zones.zones, { zone: dayZone, place: '' }]
-      : zones.zones,
-  );
   const DATE_SHAPED = /^\d{4}(-\d{2}(-\d{2})?)?[~?%]?(\/\d{4}(-\d{2}(-\d{2})?)?[~?%]?)?$/;
 
   $effect(() => {
@@ -46,41 +45,49 @@
     return () => { live = false; };
   });
 
-  // A day typed here for a Claim tied to one zone is that place's day, the same
-  // default a typed time gets below; a stored day is never re-read by opening it.
-  $effect(() => {
-    const only = zones.only;
-    if (!ondayzonechange || !only || dayChosen || !typed || !DATE_SHAPED.test(rawValue)) return;
-    if (dayZone !== only.zone) ondayzonechange(only.zone);
-  });
-
-  $effect(() => {
-    const only = zones.only;
-    if (!only || chosen || !typed || state.mode !== 'timestamp' || !state.datetime) return;
-    if (state.zone === 'local' || (state.zone === 'place' && state.placeZone !== only.zone)) {
-      emit({ zone: 'place', placeZone: only.zone });
-    }
-  });
-  // A place taken off the claim takes its clock with it, unless it was chosen.
-  $effect(() => {
-    if (state.zone === 'place' && !chosen && !zoneChoices.some((entry) => entry.zone === state.placeZone)) {
-      emit({ zone: 'local', placeZone: '' });
-    }
-  });
-  const placeName = $derived(zoneChoices.find((entry) => entry.zone === state.placeZone)?.place ?? '');
   const rawValue = $derived(writeTemporalInput(state));
-  const reading = $derived(
-    formatTemporalValue(rawValue, DATE_SHAPED.test(rawValue) || state.zone === 'place' ? dayZone : null),
+  const timedMode = $derived(state.mode === 'timestamp' || state.mode === 'time-range');
+  /** A time's clock is written into the value; a date's is the zone kept beside it. */
+  const clock = $derived(
+    timedMode
+      ? { zone: state.zone || null, fixed: state.zone ? '' : state.offset }
+      : { zone: zone || UTC, fixed: '' },
   );
+  const showClock = $derived(timedMode || Boolean(onzonechange && DATE_SHAPED.test(rawValue)));
+  const reading = $derived(
+    formatTemporalValue(rawValue, timedMode ? (state.zone && state.zone !== UTC ? state.zone : null) : zone),
+  );
+
+  /** Put the value on a clock: a zone name, `UTC`, or null for none known. */
+  function setClock(next) {
+    if (timedMode) emit({ zone: next ?? '', offset: '' });
+    onzonechange?.(next && next !== UTC ? next : null);
+  }
+
+  // A value typed into an empty editor reads on the places' clock, else on the clock
+  // the case's axis reads on, and follows them while the analyst has not picked one.
+  $effect(() => { learnAxisZone(caseState.current?.id); });
+  $effect(() => {
+    if (!fresh || chosen || !typed) return;
+    const fallback = zones.only?.zone ?? axisZone(caseState.current?.id);
+    if (timedMode) {
+      if (rawValue && state.zone !== fallback) setClock(fallback);
+    } else if (onzonechange && DATE_SHAPED.test(rawValue)) {
+      const want = fallback === UTC ? null : fallback;
+      if ((zone || null) !== want) onzonechange(want);
+    }
+  });
 
   $effect(() => {
     const incoming = value ?? '';
     if (incoming !== sent) {
       state = readTemporalInput(incoming);
-      // A local time stated in a zone opens on that zone's clock rather than as
-      // Unknown. Nothing is written until the analyst edits it.
-      if (state.mode === 'timestamp' && state.zone === 'local' && dayZone) {
-        state = { ...state, zone: 'place', placeZone: dayZone };
+      if (incoming) fresh = false;
+      // A time stated with its zone opens on that zone, not on the bare offset it was
+      // written with. Nothing is written until the analyst edits it.
+      if (state.mode === 'timestamp' || state.mode === 'time-range') {
+        const read = clockOf(incoming, zone);
+        state = { ...state, zone: read.zone ?? '', offset: read.zone ? '' : read.fixed };
       }
       sent = incoming;
       onvaliditychange?.(formatTemporalValue(incoming));
@@ -100,8 +107,10 @@
       emit({ mode, raw: writeTemporalInput(state) });
       return;
     }
+    // The clock goes with the value: a day read in Kyiv becomes a time read in Kyiv.
+    const carried = state.zone || zone || UTC;
     state = readTemporalInput('');
-    emit({ mode });
+    emit({ mode, zone: carried });
   }
 
   function choosePrecision(precision) {
@@ -185,42 +194,6 @@
           oninput={(event) => { typed = true; emit({ datetime: event.currentTarget.value }); }}
         />
       </label>
-      <label class="field zone-field">
-        <span>Timezone</span>
-        <select
-          class="select input-sm zone"
-          aria-label="Timezone"
-          value={state.zone === 'place' ? `place:${state.placeZone}` : state.zone}
-          onchange={(event) => {
-            const picked = event.currentTarget.value;
-            chosen = true;
-            if (picked.startsWith('place:')) emit({ zone: 'place', placeZone: picked.slice(6) });
-            else emit({ zone: picked, placeZone: '' });
-          }}
-        >
-          <option value="local">Unknown</option>
-          <option value="utc">UTC</option>
-          <option value="offset">UTC offset</option>
-          {#each zoneChoices as entry (entry.zone)}
-            <option value={`place:${entry.zone}`}>{entry.place ? `Local at ${entry.place}` : `Local, ${entry.zone}`}</option>
-          {/each}
-        </select>
-      </label>
-      {#if state.zone === 'offset'}
-        <label class="field offset-field">
-          <span>Offset</span>
-          <input
-            class="input input-sm mono offset"
-            aria-label="UTC offset"
-            type="text"
-            value={state.offset}
-            placeholder="+02:00"
-            autocomplete="off"
-            spellcheck="false"
-            oninput={(event) => emit({ offset: event.currentTarget.value })}
-          />
-        </label>
-      {/if}
     </div>
   {:else if state.mode === 'range'}
     <div class="parts range-parts">
@@ -257,7 +230,7 @@
           type="datetime-local"
           step="any"
           value={state.startTime}
-          oninput={(event) => emit({ startTime: event.currentTarget.value })}
+          oninput={(event) => { typed = true; emit({ startTime: event.currentTarget.value }); }}
         />
       </label>
       <label class="field">
@@ -268,22 +241,9 @@
           type="datetime-local"
           step="any"
           value={state.endTime}
-          oninput={(event) => emit({ endTime: event.currentTarget.value })}
+          oninput={(event) => { typed = true; emit({ endTime: event.currentTarget.value }); }}
         />
       </label>
-      <label class="field zone-field">
-        <span>Timezone</span>
-        <select class="select input-sm zone" aria-label="Range timezone" value={state.rangeZone} onchange={(event) => emit({ rangeZone: event.currentTarget.value })}>
-          <option value="utc">UTC</option>
-          <option value="offset">UTC offset</option>
-        </select>
-      </label>
-      {#if state.rangeZone === 'offset'}
-        <label class="field offset-field">
-          <span>Offset</span>
-          <input class="input input-sm mono offset" aria-label="Range UTC offset" type="text" value={state.rangeOffset} placeholder="+02:00" autocomplete="off" spellcheck="false" oninput={(event) => emit({ rangeOffset: event.currentTarget.value })} />
-        </label>
-      {/if}
     </div>
   {:else}
     <div class="advanced-editor">
@@ -338,30 +298,26 @@
             <li>Ranges contain two dates or two zoned times.</li>
             <li>UTC offsets run from −14:00 to +14:00.</li>
           </ul>
-          <p>A time without a timezone stays outside the UTC timeline.</p>
+          <p>A time without a clock stays off the UTC axis.</p>
           <p>Open ranges and other EDTF Level 2 forms are not supported.</p>
         </section>
       </details>
     </div>
   {/if}
 
-  <!-- Which day a date is: a day has no hour to carry an offset, so the zone is
-       stated beside it. Unstated, it spans UTC's day, and the row says so. -->
-  {#if ondayzonechange && DATE_SHAPED.test(rawValue)}
-    <label class="field day-zone-field">
-      <span>Day in</span>
-      <select
-        class="select input-sm zone day-zone"
-        aria-label="Day in"
-        value={dayZone ?? ''}
-        onchange={(event) => { dayChosen = true; ondayzonechange(event.currentTarget.value || null); }}
-      >
-        <option value="">UTC (not stated)</option>
-        {#each zoneChoices as entry (entry.zone)}
-          <option value={entry.zone}>{entry.place ? `Local at ${entry.place} (${entry.zone})` : entry.zone}</option>
-        {/each}
-      </select>
-    </label>
+  <!-- Which clock the value is read on, one control whatever its shape: a day spans
+       that zone's day, and a time is that zone's local time. -->
+  {#if showClock}
+    <div class="field clock-field">
+      <span>Clock</span>
+      <ClockField
+        value={rawValue}
+        {clock}
+        here={zones.zones}
+        timed={state.mode === 'timestamp'}
+        onpick={(next) => { chosen = true; setClock(next); }}
+      />
+    </div>
   {/if}
   {#if rawValue}
     <div class="temporal-preview" class:error={!reading.valid} aria-live="polite">
@@ -369,9 +325,6 @@
       {#if reading.valid && reading.qualifiers.length}<small>{reading.qualifiers.join(' · ')}</small>{/if}
       {#if reading.valid && reading.label !== rawValue}<code>{rawValue}</code>{/if}
     </div>
-    {#if state.mode === 'timestamp' && state.zone === 'place' && placeName}
-      <p class="zone-rule">{zoneReading(state.datetime.length === 16 ? `${state.datetime}:00` : state.datetime, state.placeZone, placeName)}</p>
-    {/if}
   {/if}
 </div>
 
@@ -386,16 +339,15 @@
   .input-sm { padding: 4px 7px; font-size: var(--fs-xs); }
   .parts { display: grid; align-items: end; gap: 6px; }
   .date-parts { grid-template-columns: auto minmax(150px, 1fr) minmax(170px, .8fr); }
-  .timestamp-parts { grid-template-columns: minmax(190px, 1fr) auto auto; }
+  .timestamp-parts { grid-template-columns: minmax(190px, 1fr); }
   .range-parts { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
-  .time-range-parts { grid-template-columns: repeat(2, minmax(180px, 1fr)) auto auto; }
+  .time-range-parts { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
   .format-line { display: flex; align-items: end; gap: 10px; min-width: 0; }
   .format-hint { padding-bottom: 5px; color: var(--text-3); font-size: var(--fs-xs); }
   .format-field { justify-self: start; }
-  .day-zone-field { justify-self: start; }
-  .format, .precision, .zone { width: max-content; max-width: 100%; }
+  .clock-field { justify-self: start; }
+  .format, .precision { width: max-content; max-width: 100%; }
   .date-value, .datetime-value, .certainty, .advanced { width: 100%; }
-  .offset { width: 90px; }
   .advanced-editor { position: relative; display: grid; gap: 5px; }
   .syntax-help { justify-self: start; }
   .syntax-help > summary { color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
@@ -424,12 +376,11 @@
     color: var(--text-2); font-size: var(--fs-xs);
   }
   .temporal-preview small { color: var(--text-3); }
-  .zone-rule { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
   .temporal-preview code { margin-left: auto; color: var(--text-3); overflow-wrap: anywhere; }
   .temporal-preview.error { border-left-color: var(--danger); color: var(--danger); }
   @media (max-width: 620px) {
     .date-parts, .timestamp-parts, .range-parts, .time-range-parts { grid-template-columns: 1fr; }
     .format-field { justify-self: stretch; }
-    .format, .precision, .zone, .offset { width: 100%; }
+    .format, .precision { width: 100%; }
   }
 </style>

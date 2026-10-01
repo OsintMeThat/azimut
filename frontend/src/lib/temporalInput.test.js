@@ -24,7 +24,7 @@ describe('the temporal input adapter', () => {
 
   it('adds the seconds required by the backend profile', () => {
     expect(writeTemporalInput({
-      mode: 'timestamp', datetime: '2026-08-11T18:40', zone: 'utc', offset: '+00:00',
+      mode: 'timestamp', datetime: '2026-08-11T18:40', zone: 'UTC', offset: '',
     })).toBe('2026-08-11T18:40:00Z');
   });
 
@@ -35,10 +35,20 @@ describe('the temporal input adapter', () => {
     expect(writeTemporalInput(state)).toBe('circa late summer');
   });
 
-  it('writes a place clock as the offset it keeps at that time', () => {
-    const state = { ...readTemporalInput('2026-08-11T17:05:00'), zone: 'place', placeZone: 'Europe/Kyiv' };
+  it('writes a zone as the offset it keeps at that time', () => {
+    const state = { ...readTemporalInput('2026-08-11T17:05:00'), zone: 'Europe/Kyiv' };
     expect(writeTemporalInput(state)).toBe('2026-08-11T17:05:00+03:00');
     expect(writeTemporalInput({ ...state, datetime: '2026-01-11T17:05' })).toBe('2026-01-11T17:05:00+02:00');
+    // each end of a range keeps the offset in force at its own time
+    const range = { ...readTemporalInput('2026-03-28T12:00:00Z/2026-03-30T12:00:00Z'), zone: 'Europe/Kyiv' };
+    expect(writeTemporalInput(range)).toBe('2026-03-28T12:00:00+02:00/2026-03-30T12:00:00+03:00');
+  });
+
+  it('reads the clock a stored time writes, and none when it writes none', () => {
+    expect(readTemporalInput('2026-08-11T16:40:00Z')).toMatchObject({ zone: 'UTC', offset: '' });
+    expect(readTemporalInput('2026-08-11T18:40:00+02:00')).toMatchObject({ zone: '', offset: '+02:00' });
+    expect(readTemporalInput('2026-08-11T18:40:00')).toMatchObject({ zone: '', offset: '' });
+    expect(readTemporalInput('2026-08-11T10:00:00/2026-08-11T11:00:00')).toMatchObject({ mode: 'time-range', zone: '' });
   });
 
   it('documents every supported family with a pattern and an example', () => {

@@ -32,8 +32,8 @@ describe('temporal Claim editor', () => {
   it('keeps the zone a date was stated in, and hands the editor its row', () => {
     expect(editor).toContain("whenZone = chain.entity.attrs?.when_zone ?? item.tz ?? null;");
     expect(editor).toContain('when_zone: (when && whenZone) || null,');
-    expect(editor).toContain('dayZone={whenZone}');
-    expect(editor).toContain('ondayzonechange={(zone) => (whenZone = zone)}');
+    expect(editor).toContain('zone={whenZone}');
+    expect(editor).toContain('onzonechange={(zone) => (whenZone = zone)}');
   });
 
   it('starts a new claim citing the evidence it was opened from, and an edit from its own', () => {

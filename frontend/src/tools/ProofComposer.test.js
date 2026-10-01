@@ -1276,11 +1276,12 @@ describe('Proof Composer — what the proof says about itself', () => {
   it('names the clock a date is read on, the first point\'s unless another is picked', () => {
     const clock = side.slice(side.indexOf('<DateField'));
     expect(clock).toContain('{#if proof.when.trim()}');
-    expect(clock).toContain("`At the point · ${pointZone}`");
-    expect(clock).toContain('{zoneOffset(proof.whenZone || pointZone)} on that day.');
+    expect(clock).toContain("clock={{ zone: proof.whenZone || pointZone || 'UTC', fixed: '' }}");
+    expect(clock).toContain("here={pointZone ? [{ zone: pointZone, place: 'the point' }] : []}");
     expect(clock).toContain('zone={proof.whenZone || pointZone || null}');
-    expect(clock).toContain('<option value="UTC">UTC</option>');
     expect(clock).toContain('No point yet, so the day is read in UTC.');
+    // the point's own row goes back to following the point
+    expect(bodyOfFn('pickClock')).toContain('proof.whenZone = here ? null : zone;');
     expect(source).toContain("await zoneAt({ lat: Number(where.lat), lon: Number(where.lon) })");
     expect(bodyOfFn('resetDoc')).toContain('proof.whenZone = null;');
   });

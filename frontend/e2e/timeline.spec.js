@@ -500,7 +500,9 @@ test('notes an entry with a new subject and a place, on that place’s clock', a
   await expect(line.locator('.chip.new')).toContainText('4th brigade');
 
   await line.getByLabel('When').fill('23/06/2026 17:05');
-  await expect(line).toContainText('Reads: 17:05 at South quay (Europe/Paris, UTC+02:00)');
+  await expect(line).toContainText('Reads: 23 Jun 2026, 17:05:00 Europe/Paris (UTC+02:00)');
+  // the chip names the place whose clock it is
+  await expect(line.getByRole('button', { name: 'Clock: South quay UTC+02:00' })).toBeVisible();
   await say.press('Enter');
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
@@ -509,6 +511,7 @@ test('notes an entry with a new subject and a place, on that place’s clock', a
     statement: 'Crane seen at South quay with 4th brigade',
     at: ['place-1'],
     when: '2026-06-23T17:05:00+02:00',
+    when_zone: 'Europe/Paris',
     create: [{ slot: 'about', type: 'person', label: '4th brigade' }],
   });
   fixture.expectNoUnexpectedRequests();
@@ -523,7 +526,8 @@ test('files a day at a place as that place’s day, and names the zone', async (
   await expect(page.getByRole('listbox', { name: 'Mentions' }).getByRole('option').first()).toContainText('South quay');
   await say.press('Enter');
   await line.getByLabel('When').fill('23/06/2026');
-  await expect(line).toContainText('Reads: 23 Jun 2026, the day at South quay (Europe/Paris)');
+  await expect(line).toContainText('Reads: 23 Jun 2026 (Europe/Paris)');
+  await expect(line.getByRole('button', { name: 'Clock: South quay UTC+02:00' })).toBeVisible();
   await say.press('Enter');
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
@@ -880,7 +884,7 @@ test('starts a media correction from the captured date', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Add event' });
   await expect(dialog.getByLabel('Date format')).toHaveValue('timestamp');
   await expect(dialog.getByLabel('Date and time')).toHaveValue('2026-06-23T18:42:11');
-  await expect(dialog.getByLabel('Timezone')).toHaveValue('utc');
+  await expect(dialog.getByRole('button', { name: 'Clock: UTC' })).toBeVisible();
   await dialog.getByRole('button', { name: 'Add event' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
@@ -1292,8 +1296,30 @@ test('changes a picked entry’s date from the inspector, asked like a drag', as
   const ask = page.getByRole('alertdialog');
   await expect(ask).toContainText('→ 24 Apr 2021');
   await ask.getByRole('button', { name: 'Update date' }).click();
-  await expect.poll(() => fixture.timelineWrites.at(-1)?.body?.when).toBe('2021-04-24T15:10:00');
+  // the entry's day was UTC's, so the time it becomes is read on UTC too
+  await expect.poll(() => fixture.timelineWrites.at(-1)?.body?.when).toBe('2021-04-24T15:10:00Z');
   await expect(inspector.getByRole('button', { name: 'Change the date' })).toBeVisible();
+});
+
+test('gives a picked entry’s day any zone in the world from the inspector', async ({ page }) => {
+  const fixture = await openTimeline(page);
+
+  await page.getByRole('button', { name: /Witness arrived/ }).first().click();
+  const inspector = page.locator('.inspector');
+  await inspector.getByRole('button', { name: 'Change the date' }).click();
+  await expect(inspector.getByRole('button', { name: 'Clock: UTC' })).toBeVisible();
+  // the same day on another clock is a change worth saving
+  await inspector.getByRole('button', { name: 'Clock: UTC' }).click();
+  const menu = page.locator('.clock-menu');
+  await menu.getByRole('textbox').fill('tokyo');
+  await menu.getByRole('button', { name: /^Tokyo/ }).click();
+  await expect(inspector.getByRole('button', { name: 'Clock: Tokyo UTC+09:00' })).toBeVisible();
+  await inspector.getByRole('button', { name: 'Save date' }).click();
+
+  const ask = page.getByRole('alertdialog');
+  await expect(ask).toContainText('→ 18 Jun 2026 (Asia/Tokyo)');
+  await ask.getByRole('button', { name: 'Update date' }).click();
+  await expect.poll(() => fixture.timelineWrites.at(-1)?.body).toMatchObject({ when: '2026-06-18', when_zone: 'Asia/Tokyo' });
 });
 
 test('offers a file’s date as a correction rather than a rewrite', async ({ page }) => {

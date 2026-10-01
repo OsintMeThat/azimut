@@ -157,6 +157,10 @@ describe('temporal reading', () => {
     expect(formatTemporalValue('2024-07-12T14:30:00').label).toBe('12 Jul 2024, 14:30:00 local time');
     // A time that says where it stands keeps its own offset.
     expect(formatTemporalValue('2024-07-12T14:30:00Z', 'Europe/Kyiv').label).toBe('12 Jul 2024, 14:30:00 UTC');
+    // An offset written for a picked zone names the zone and keeps the offset.
+    expect(formatTemporalValue('2024-07-12T14:30:00+03:00', 'Europe/Kyiv').label)
+      .toBe('12 Jul 2024, 14:30:00 Europe/Kyiv (UTC+03:00)');
+    expect(formatTemporalValue('2024-07-12T14:30:00+03:00').label).toBe('12 Jul 2024, 14:30:00 UTC+03:00');
 
     expect(temporalZoneWords({ zone: 'date-only', tz: 'Europe/Kyiv' })).toBe('Europe/Kyiv');
     expect(temporalZoneWords({ zone: 'date-only' })).toBe('Not stated, read as UTC days');

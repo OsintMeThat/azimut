@@ -388,7 +388,9 @@ intervals and the rest of EDTF Level 2 remain outside the announced profile.
 **A day is some place's day.** `when_zone` (an IANA name) says which clock `when`
 was stated on. A date then spans that zone's midnights, the 12th in Kyiv starting at
 22:00 UTC on the 11th, and a time with no offset of its own is placed on that zone's
-clock. A timestamp carrying `Z` or an offset keeps it. Without `when_zone` a date
+clock. A timestamp carrying `Z` or an offset keeps it; one put on a named clock is
+written with the offset that zone keeps then and keeps `when_zone` beside it, so it
+stays sortable and still says which clock it was read on. Without `when_zone` a date
 spans UTC's day, as every date stated before it did. A proof states its date on its
 first point's zone unless the analyst picks another, and the Claim it files for the
 footage carries the same zone.

@@ -77,10 +77,11 @@ vi.mock('../lib/api.js', () => ({ api: { get, post } }));
 
 const reloadCase = vi.fn(async () => {});
 const toast = vi.fn();
-vi.mock('../lib/state.svelte.js', () => ({ reloadCase, toast }));
+vi.mock('../lib/state.svelte.js', () => ({ reloadCase, toast, caseState: { current: { id: 'case-a' } } }));
 
 const { default: EntryLine, claimSeat } = await import('./EntryLine.svelte');
 const { forgetZones } = await import('../lib/localZone.js');
+const { forgetAxisZone, noteAxisZone } = await import('../lib/caseAxis.svelte.js');
 
 let live = null;
 let target = null;
@@ -446,16 +447,29 @@ describe('a new subject', () => {
 });
 
 describe('the time at the place', () => {
+  const clockSays = () => target.querySelector('.clock-trigger')?.getAttribute('aria-label');
+  /** Open the Clock and press the row named `words`, searching for it first. */
+  function pickClock(words, search = '') {
+    target.querySelector('.clock-trigger').click();
+    flushSync();
+    if (search) type(document.querySelector('.clock-menu .search-input'), search);
+    const row = [...document.querySelectorAll('.clock-menu .rows > button')]
+      .find((entry) => entry.querySelector('span').textContent === words);
+    row.click();
+    flushSync();
+  }
+
   it('reads an hour as the local time at the one place, summer or winter', async () => {
     await open(KHARKIV);
     type(sentence(), 'Strike reported');
     type(dateField(), '11/08/2026 17:05');
     await settle();
-    expect(target.textContent).toContain('Reads: 17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)');
+    expect(target.textContent).toContain('Reads: 11 Aug 2026, 17:05:00 Europe/Kyiv (UTC+03:00)');
+    expect(clockSays()).toBe('Clock: Kharkiv UTC+03:00');
 
     addButton().click();
     await settle();
-    expect(post.mock.calls[0][1].when).toBe('2026-08-11T17:05:00+03:00');
+    expect(post.mock.calls[0][1]).toMatchObject({ when: '2026-08-11T17:05:00+03:00', when_zone: 'Europe/Kyiv' });
 
     type(sentence(), 'Second strike');
     type(dateField(), '11/01/2026 17:05');
@@ -467,26 +481,27 @@ describe('the time at the place', () => {
     expect(get.mock.calls.filter(([url]) => url.includes('/api/geo/zone'))).toHaveLength(1);
   });
 
-  it('never replaces a zone the analyst typed, and can be turned down', async () => {
+  it('never replaces a clock the analyst typed, and can leave it unknown', async () => {
     await open(KHARKIV);
     type(sentence(), 'Strike reported');
     type(dateField(), '11/08/2026 17:05 UTC');
     await settle();
+    expect(clockSays()).toBe('Clock: UTC');
     addButton().click();
     await settle();
     expect(post.mock.calls[0][1].when).toBe('2026-08-11T17:05:00Z');
+    expect(post.mock.calls[0][1]).not.toHaveProperty('when_zone');
 
     type(sentence(), 'Strike reported');
     type(dateField(), '11/08/2026 17:05');
     await settle();
-    button('No zone').click();
-    flushSync();
+    pickClock('Clock unknown');
     addButton().click();
     await settle();
     expect(post.mock.calls[1][1].when).toBe('2026-08-11T17:05:00');
   });
 
-  it('takes no zone for granted when two places disagree, and offers each', async () => {
+  it('reads on UTC when two places disagree, and offers each', async () => {
     catalog = [LISBON];
     await open(KHARKIV);
     type(sentence(), 'Seen at Kharkiv and @Lisbon');
@@ -496,21 +511,19 @@ describe('the time at the place', () => {
     type(dateField(), '11/08/2026 17:05');
     await settle();
 
-    expect(button('Local at Kharkiv')).toBeDefined();
-    expect(button('Local at Lisbon')).toBeDefined();
-    button('Local at Lisbon').click();
-    flushSync();
+    expect(clockSays()).toBe('Clock: UTC');
+    pickClock('Local at Lisbon');
     addButton().click();
     await settle();
-    expect(post.mock.calls[0][1].when).toBe('2026-08-11T17:05:00+01:00');
+    expect(post.mock.calls[0][1]).toMatchObject({ when: '2026-08-11T17:05:00+01:00', when_zone: 'Europe/Lisbon' });
   });
 
-  it('reads a day as the day at the place, and can be read as a UTC day instead', async () => {
+  it('reads a day as the day at the place, and as a UTC day once picked', async () => {
     await open(KHARKIV);
     type(sentence(), 'Strike reported');
     type(dateField(), '12/03/2024');
     await settle();
-    expect(target.textContent).toContain('Reads: 12 Mar 2024, the day at Kharkiv (Europe/Kyiv)');
+    expect(target.textContent).toContain('Reads: 12 Mar 2024 (Europe/Kyiv)');
     addButton().click();
     await settle();
     expect(post.mock.calls[0][1]).toMatchObject({ when: '2024-03-12', when_zone: 'Europe/Kyiv' });
@@ -518,12 +531,44 @@ describe('the time at the place', () => {
     type(sentence(), 'Strike reported');
     type(dateField(), '12/03/2024');
     await settle();
-    button('UTC day').click();
-    flushSync();
+    pickClock('UTC');
     addButton().click();
     await settle();
     expect(post.mock.calls[1][1].when).toBe('2024-03-12');
     expect(post.mock.calls[1][1]).not.toHaveProperty('when_zone');
+  });
+
+  it('opens a date with no place on the case’s clock, the one its axis reads on', async () => {
+    noteAxisZone('case-a', 'America/Los_Angeles');
+    try {
+      await open(null);
+      type(sentence(), 'Convoy seen');
+      type(dateField(), '10/09/2026');
+      await settle();
+      expect(clockSays()).toBe('Clock: Los Angeles UTC-07:00');
+      addButton().click();
+      await settle();
+      expect(post.mock.calls[0][1]).toMatchObject({ when: '2026-09-10', when_zone: 'America/Los_Angeles' });
+    } finally {
+      forgetAxisZone();
+    }
+  });
+
+  it('gives a day any zone in the world, with no place on the line', async () => {
+    await open(null);
+    type(sentence(), 'Convoy seen');
+    type(dateField(), '10/09/2026');
+    await settle();
+    expect(clockSays()).toBe('Clock: UTC');
+
+    pickClock('Tokyo', 'tokyo');
+    // the pick holds while the day is corrected
+    type(dateField(), '11/09/2026');
+    await settle();
+    expect(target.textContent).toContain('Reads: 11 Sep 2026 (Asia/Tokyo)');
+    addButton().click();
+    await settle();
+    expect(post.mock.calls[0][1]).toMatchObject({ when: '2026-09-11', when_zone: 'Asia/Tokyo' });
   });
 
   it('counts two places in one zone as one choice', async () => {
@@ -535,7 +580,7 @@ describe('the time at the place', () => {
     await settle();
     type(dateField(), '11/08/2026 17:05');
     await settle();
-    expect(target.textContent).toContain('Reads: 17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)');
+    expect(clockSays()).toBe('Clock: Kharkiv UTC+03:00');
   });
 });
 
