@@ -25,14 +25,13 @@ describe('the case on the rail', () => {
 });
 
 describe('Add event, from every tool', () => {
-  it('is one icon button in the topbar, just before the guide mark', () => {
+  it('is one labelled button in the topbar, just before the guide mark', () => {
     const button = markup.indexOf('aria-label="Add an event"');
     const guide = markup.indexOf('onclick={() => openGuide(uiState.tool)}');
     expect(button).toBeGreaterThan(-1);
     expect(button).toBeLessThan(guide);
-    expect(markup).toContain('<Icon name="eventAdd" size={16} />');
-    // the words live in the tooltip, not beside the icon
-    expect(markup).not.toContain('note-label');
+    expect(markup).toContain('<Icon name="eventAdd" size={15} />');
+    expect(markup).toContain('<kbd>Alt N</kbd>');
     // shown only with a case, since there is nowhere to add an event without one
     expect(markup).toMatch(/\{#if caseState\.current && !solo\}\s*<button[\s\S]{0,200}class:on=\{uiState\.noting\}/);
   });
