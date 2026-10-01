@@ -1289,15 +1289,16 @@ test('changes a picked entry’s date from the inspector, asked like a drag', as
   const inspector = page.locator('.inspector');
   await inspector.getByRole('button', { name: 'Change the date' }).click();
   const field = inspector.getByLabel('When');
-  await field.fill('24/04/2021 15:10');
-  await expect(inspector.getByText(/24 Apr 2021/)).toBeVisible();
+  await field.fill('20/06/2026 15:10');
+  await expect(inspector.getByText(/20 Jun 2026/)).toBeVisible();
   await inspector.getByRole('button', { name: 'Save date' }).click();
 
   const ask = page.getByRole('alertdialog');
-  await expect(ask).toContainText('→ 24 Apr 2021');
+  await expect(ask).toContainText('→ 20 Jun 2026');
   await ask.getByRole('button', { name: 'Update date' }).click();
-  // the entry's day was UTC's, so the time it becomes is read on UTC too
-  await expect.poll(() => fixture.timelineWrites.at(-1)?.body?.when).toBe('2021-04-24T15:10:00Z');
+  // the entry's day was UTC's, so the time it becomes is read on UTC too; the new day
+  // stays inside the window, so the picked entry is still there to read after the reload
+  await expect.poll(() => fixture.timelineWrites.at(-1)?.body?.when).toBe('2026-06-20T15:10:00Z');
   await expect(inspector.getByRole('button', { name: 'Change the date' })).toBeVisible();
 });
 
