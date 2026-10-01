@@ -28,6 +28,17 @@ it('shows only actual passes as selectable calendar days and loads each month', 
   expect(onclose).toHaveBeenCalledOnce();
 });
 
+it('opens on the month of the day it is told to be near when none is chosen', async () => {
+  const onmonth = vi.fn();
+  app = mount(PassCalendar, { target: document.body, props: { list: [], value: '', near: '2026-03-20', label: 'A', onmonth } });
+  await Promise.resolve(); flushSync();
+  expect(onmonth).toHaveBeenCalledWith('2026-03');
+  unmount(app);
+  app = mount(PassCalendar, { target: document.body, props: { list: [], value: '2026-07-02', near: '2026-03-20', label: 'A', onmonth } });
+  await Promise.resolve(); flushSync();
+  expect(onmonth).toHaveBeenLastCalledWith('2026-07');
+});
+
 it('lets a radar day with two passes choose its time', async () => {
   const early = { date: '2026-09-15', time: '05:30:00Z', orbit: 'ascending' };
   const late = { date: '2026-09-15', time: '17:40:00Z', orbit: 'descending' };

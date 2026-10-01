@@ -22,7 +22,6 @@
   import { blinkable } from '../lib/map/detectReview.js';
   import { ADVISED_MAXCC } from '../lib/map/detectWhen.js';
   import { DEFAULT_MAXCC } from '../lib/sentinel.js';
-  import { insideBounds } from '../lib/map/analyzerRules.js';
   import { DEFAULT_BLINK_INTERVAL } from '../lib/map/compare.js';
   import { createImageryState } from './satellite/state/imagery.svelte.js';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
@@ -49,9 +48,11 @@
   import AnalysisOverlay from './detect/AnalysisOverlay.svelte';
   import DetectAreas from './detect/DetectAreas.svelte';
   import DetectPanel from './detect/DetectPanel.svelte';
+  import CheckBench from './detect/CheckBench.svelte';
   import CheckMarks from './detect/CheckMarks.svelte';
   import RuleLayers from './detect/RuleLayers.svelte';
   import RuleProbe from './detect/RuleProbe.svelte';
+  import SecondPass from './detect/SecondPass.svelte';
   import './mapdock.css';
 
   const SENTINEL = 'sentinel2';
@@ -124,9 +125,9 @@
   let highlight = $state([]);
   let manual = $state(null);
   let manualTool = $state('select');
-  // An analyzer of your own being built: its preview, and what the map shows
-  // of it (AnalyzerBuilder). The map is its bench while it is open, so saved
-  // work and watched areas step aside.
+  // An analyzer of your own being built (AnalyzerBuilder): the bench it keeps
+  // (lib/map/bench.svelte.js), which says what the map shows. The map is its
+  // bench while it is open, so saved work and watched areas step aside.
   let builder = $state(null);
   // The builder offers the configuration's Copernicus layers by name; the list
   // is the app's own catalogue until the instance has been asked, so reading
@@ -137,15 +138,36 @@
     layersAsked = true;
     untrack(() => s2.loadLayers(false, true));
   });
-  // While a check is open the map shows what the rules keep inside its frame only:
-  // the check judges that ground, and paint past the frame read as it being off.
-  const previewLayer = $derived(builder?.preview?.ready ? [{
+  // What the last test found, outlined and pinned on the ground it judged.
+  const previewLayer = $derived(builder?.detail ? [{
     id: 'builder-preview', visible: true,
-    input: { recipe: { colour: builder.colour, style: builder.style } },
-    results: builder.preview.candidates
-      .filter((row) => !builder.ground || insideBounds(row.coordinates, builder.ground.bounds))
-      .map((row) => ({ ...row, review: 'new', phenomenon: builder.phenomenon })),
+    input: { recipe: { colour: builder.recipe.colour, style: builder.recipe.style } },
+    results: builder.detail.candidates.map((row) => ({ ...row, review: 'new', phenomenon: builder.recipe.phenomenon })),
   }] : []);
+  const paintedRules = $derived(builder ? builder.recipe.rules.map((_, i) => builder.painted(i)) : []);
+  /** The pin the reading card was opened on, if it was opened on one. */
+  const probedPin = $derived.by(() => {
+    const at = builder?.probe?.pin;
+    const mark = at === null || at === undefined ? null : builder.marks[at];
+    return mark ? { number: at + 1, expect: mark.expect } : null;
+  });
+  // The passes the bench asks for go under the pins: the before pass (or the
+  // only one) on this map, the after pass on a second one laid over it.
+  $effect(() => {
+    const intent = builder?.imagery;
+    if (!intent) return;
+    untrack(() => {
+      if (intent.mode === 'basemap') leavePass();
+      else showDate(intent.mode === 'swipe' ? intent.a : intent.b);
+    });
+  });
+  const building = $derived(!!builder);
+  $effect(() => {
+    if (!building) return;
+    return () => untrack(() => leavePass());
+  });
+  let secondEngine = $state(null);
+  let secondElement = $state(null);
   $effect(() => { manualTool = manual?.kind === 'polygon' ? 'polygon' : 'select'; });
 
   // The ruler: measures drawn over the map, one armed at a time.
@@ -284,19 +306,23 @@
   let rotating = $state(null);
   $effect(() => {
     if (!element || !engine) return;
-    const surface = element;
-    const down = (event) =>
-      turnFromPress(engine, event, {
-        onPivot: (point) => (rotating = point),
-        onEnd: () => (rotating = null),
-      });
-    surface.addEventListener('mousedown', down, true);
-    return () => surface.removeEventListener('mousedown', down, true);
+    const surfaces = [[engine, element], ...(secondEngine && secondElement ? [[secondEngine, secondElement]] : [])];
+    const releases = surfaces.map(([surfaceEngine, surface]) => {
+      const down = (event) =>
+        turnFromPress(surfaceEngine, event, {
+          onPivot: (point) => (rotating = point),
+          onEnd: () => (rotating = null),
+        });
+      surface.addEventListener('mousedown', down, true);
+      return () => surface.removeEventListener('mousedown', down, true);
+    });
+    return () => releases.forEach((release) => release());
   });
   function onKey(event) {
     if (uiState.tool !== 'detect') return;
     // held down, the turn keeps going
     if (turnFromKey(engine, event)) return;
+    if (event.key === 'Escape' && builder?.escape()) { event.preventDefault(); return; }
     if (event.repeat || event.ctrlKey || event.metaKey || event.altKey
       || event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     if (event.key === ']') collapsed = !collapsed;
@@ -304,6 +330,13 @@
     else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedMeasure) dropMeasure(selectedMeasure);
     else return;
     event.preventDefault();
+  }
+
+  /** A click on either map: a candidate to add, a pin to drop, or a point to read the rules at. */
+  function onMapClick({ lon, lat }) {
+    if (manual?.kind === 'point') void panel?.addManual({ type: 'Point', coordinates: [lon, lat] });
+    else if (builder?.pinning && !measuring) builder.dropPin({ lon, lat });
+    else if (builder && !measuring) void builder.probeAt({ lon, lat });
   }
 
   function armMeasure() {
@@ -610,37 +643,20 @@
       />
     </div>
     <div class="map-choices">
-      <ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />
+      <!-- The passes under an analyzer being built are its check's (the console), so the provider is not offered. -->
+      {#if !builder}<ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />{/if}
       <div class="layer-picker cmp-glass">
         <MapLayers rows={layerRows} bind:open={layersOpen} />
       </div>
-      {#if builder?.pass?.b || builder?.pass?.a}
-        <!-- The builder's passes under its preview: A, B or both blinking, and back to the basemap. -->
-        {@const pass = builder.pass}
-        {@const onScreen = pass.showing === 'blink' ? (showingA ? 'a' : 'b') : pass.showing}
-        <div class="pass-chip bench-bar cmp-glass" role="group" aria-label="Passes under the preview">
-          {#each [['a', 'A'], ['b', 'B']] as [id, letter] (id)}
-            {#if pass[id]}
-              <button class="cmp-letter {id}" class:dim={onScreen !== id} aria-pressed={pass.showing === id}
-                title={`Show pass ${letter}, ${pass[id]}`} onclick={() => panel?.showPass(id)}>{letter}</button>
-            {/if}
-          {/each}
-          {#if pass.blink}
-            <button class="blink" class:on={pass.showing === 'blink'} aria-pressed={pass.showing === 'blink'}
-              title="Flip between A and B" onclick={() => panel?.showPass(pass.showing === 'blink' ? 'b' : 'blink')}>Blink</button>
-          {/if}
-          {#if onScreen === 'a' || onScreen === 'b'}<span class="mono">{pass[onScreen]}</span>{/if}
-          <button class="cmp-icon" title="Back to the basemap" aria-label="Back to the basemap"
-            onclick={() => panel?.showPass('basemap')}><Icon name="x" size={12} /></button>
-        </div>
-      {:else if blinkPair}
+      <!-- While an analyzer is built, the console over the map holds its passes. -->
+      {#if blinkPair && !builder}
         <!-- Which of the two is on screen, in Compare's letters and colours. -->
         <div class="pass-chip blink-chip cmp-glass" role="group" aria-label="Blinking A and B">
           <span class="cmp-letter" class:a={showingA} class:b={!showingA}>{showingA ? 'A' : 'B'}</span>
           <span class="mono">{sourceLabel(showingA ? blinkPair.a : blinkPair.b)}</span>
           <button class="cmp-icon" title="Stop blinking" aria-label="Stop blinking" onclick={() => (blinking = false)}><Icon name="x" size={12} /></button>
         </div>
-      {:else if readingPass}
+      {:else if readingPass && !builder}
         <button class="pass-chip cmp-glass" title="Return to your basemap" aria-label="Leave pass imagery" onclick={leavePass}>
           {#if passContext}<strong>{passContext.name} · {passContext.side?.toUpperCase()}</strong>{/if}{passChip}
           {#if cloudyPass}<span class="cloudy" title="Ground under cloud is left out of a run">{Math.round(passCloud)}% cloud</span>{/if}
@@ -678,11 +694,7 @@
           resetToHome={false}
           imperial={prefs.units === 'imperial'}
           armed={measuring ? 'measuring' : drawing !== 'select' || builder?.pinning ? 'selecting' : null}
-          onclick={({ lon, lat }) => {
-            if (manual?.kind === 'point') void panel?.addManual({ type: 'Point', coordinates: [lon, lat] });
-            else if (builder?.pinning && !measuring) panel?.pinAt({ lon, lat });
-            else if (builder && !measuring) void panel?.probeAt({ lon, lat });
-          }}
+          onclick={onMapClick}
           controlsTop={108}
           {alternate}
           alternateOn={showingA}
@@ -690,22 +702,30 @@
           onviewsettled={onSettled}
           oncontextmenu={onMapContextMenu}
         />
+        {#if builder?.split}
+          <SecondPass {imagery} primary={engine} source={builder.imagery.b} {view} {bearing} {home} {overlays}
+            imperial={prefs.units === 'imperial'} armed={measuring ? 'measuring' : builder.pinning ? 'selecting' : null}
+            divider={builder.divider} bind:engine={secondEngine} bind:element={secondElement}
+            onsplit={(percent) => builder.setDivider(percent)} onclick={onMapClick} oncontextmenu={onMapContextMenu}
+            onusage={() => imagery.refreshUsage()} />
+        {/if}
         {#if builder}
-          <RuleLayers {engine} {element} preview={builder.preview} shown={builder.shown} hover={builder.hover}
-            colours={builder.colours} within={builder.ground?.bounds ?? null} />
+          <RuleLayers {engine} {element} detail={builder.detail} rules={builder.recipe.rules} shown={paintedRules}
+            hover={builder.hovered} colours={builder.colours} split={builder.split} divider={builder.divider} stale={builder.stale} />
           {#if previewLayer.length}
             <AnalysisOverlay {engine} layers={previewLayer} onpick={(_, id) => {
-              const row = builder.preview.candidates.find((candidate) => candidate.id === id);
-              if (row) void panel?.probeAt({ lon: row.coordinates[0], lat: row.coordinates[1] });
+              const row = builder.detail.candidates.find((candidate) => candidate.id === id);
+              if (row) void builder.probeAt({ lon: row.coordinates[0], lat: row.coordinates[1] });
             }} />
           {/if}
-          {#if builder.marks.length || builder.ground}
-            <CheckMarks {engine} marks={builder.marks} ground={builder.ground} />
-          {/if}
+          <CheckMarks {engine} pins={builder.pins} armed={!!builder.pinning} selected={builder.probe?.pin ?? null}
+            onpick={(index) => builder.probePin(index)} />
           {#if builder.probe}
-            <RuleProbe {engine} probe={builder.probe} rules={builder.rules} colours={builder.colours}
-              width={element?.clientWidth ?? 0} height={element?.clientHeight ?? 0} onclose={() => panel?.closeProbe()}
-              onmark={(expect) => panel?.markProbe(expect)} markTarget={builder.checking} canMark={builder.canMark} />
+            <RuleProbe {engine} probe={builder.probe} rules={builder.recipe.rules} colours={builder.colours} single={builder.single}
+              width={element?.clientWidth ?? 0} height={(element?.clientHeight ?? 0) - builder.reach} onclose={() => builder.closeProbe()}
+              onmark={(expect) => builder.markProbe(expect)} pin={probedPin}
+              onturn={() => { builder.flipPin(builder.probe.pin); builder.closeProbe(); }}
+              onremove={() => { builder.removePin(builder.probe.pin); builder.closeProbe(); }} />
           {/if}
         {:else if !bare && (focusedRunId || savedVisible) && visibleRunLayers.some((layer) => layer.visible)}
           <AnalysisOverlay {engine} layers={visibleRunLayers} selected={selectedResult} active={!manual}
@@ -753,6 +773,9 @@
       {#if rotating}
         <TurnGuide x={rotating.x} y={rotating.y} />
       {/if}
+      {#if builder}
+        <CheckBench bench={builder} />
+      {/if}
       {#if needs}
         <div class="need-over">
           <CopernicusNeeded need={needs} tool="Detect" />
@@ -761,11 +784,6 @@
       {#if measuring}
         <div class="manual-chip cmp-glass">{trailing ? 'Click the far end' : 'Drag from one end to the other'}
           <button class="cmp-icon" aria-label="Stop measuring" title="Stop measuring (Esc)" onclick={() => (measureTool = 'select')}><Icon name="x" size={13} /></button>
-        </div>
-      {/if}
-      {#if builder?.pinning}
-        <div class="manual-chip cmp-glass">{builder.pinning === 'found' ? 'Click where a candidate should be found' : 'Click where none should be'}
-          <button class="cmp-icon" aria-label="Stop dropping pins" title="Stop dropping pins" onclick={() => panel?.pinMode(null)}><Icon name="x" size={13} /></button>
         </div>
       {/if}
       {#if manual}
@@ -807,9 +825,7 @@
       onshow={showDate}
       onleavepass={leavePass}
       bind:builder
-      onblink={(pair) => { reviewPair = pair; blinking = !!pair; }}
       viewBounds={() => engine?.viewBounds?.() ?? null}
-      mapView={view}
       passLayers={s2.layers}
       onfly={({ lon, lat, zoom, bounds }) => (bounds ? engine?.fitBounds(bounds, { padding: 40 }) : engine?.setView({ lon, lat }, zoom))}
     />
@@ -833,12 +849,6 @@
   .layer-picker :global(.layers) { min-width: 190px; margin-top: 8px; }
   .ruler { position: absolute; top: 66px; left: 12px; z-index: 650; display: flex; padding: 2px; }
   .blink-chip { padding: 2px 2px 2px 4px; }
-  .bench-bar { gap: 4px; padding: 2px 2px 2px 4px; }
-  .bench-bar .cmp-letter { cursor: pointer; }
-  .bench-bar .cmp-letter.dim { opacity: 0.4; }
-  .bench-bar .blink { padding: 2px 7px; border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-xs); }
-  .bench-bar .blink.on { color: var(--accent); background: var(--accent-soft); }
-  .bench-bar .cmp-icon { width: 22px; height: 22px; }
   .blink-chip .cmp-icon { width: 22px; height: 22px; }
   .pass-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: var(--fs-xs); }
   .pass-chip .cloudy { color: var(--warn, #e2a03f); }

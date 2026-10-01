@@ -371,151 +371,306 @@ test('review adds a manual point and uses the standard pin dialog', async ({ pag
   expect(errors).toEqual([]);
 });
 
-test('an analyzer of your own is built over the map: its rules painted, a point read and marked in a check, then kept', async ({ page }) => {
-  const { errors } = await openDetect(page);
-  const R = 6378137;
-  const mercator = (lon, lat) => [R * (lon * Math.PI) / 180, R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))];
-  // What the engine sends: one byte a pixel. 64 is measured ground, 195 a
-  // kept pixel both rules passed (bits 0, 1, 6 and 7).
-  const mask = await page.evaluate(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 512;
-    const context = canvas.getContext('2d');
-    context.fillStyle = 'rgb(64,64,64)'; context.fillRect(0, 0, 512, 512);
-    context.fillStyle = 'rgb(195,195,195)'; context.fillRect(200, 200, 112, 112);
-    return canvas.toDataURL('image/png').split(',')[1];
-  });
-  const saved = [], previews = [], checked = [];
-  await page.route('**/api/compare/analyzers', async (route) => {
+const R = 6378137;
+const WORLD = 2 * Math.PI * R;
+const mercator = (lon, lat) => [R * (lon * Math.PI) / 180, R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))];
+/** The grid tile (level 13) a point is on, and where in it the point falls, 0 to 1. */
+function tileOf(lon, lat) {
+  const [mx, my] = mercator(lon, lat);
+  const count = 2 ** 13;
+  const gx = ((mx + WORLD / 2) / WORLD) * count;
+  const gy = ((WORLD / 2 - my) / WORLD) * count;
+  return { x: Math.floor(gx), y: Math.floor(gy), fx: gx - Math.floor(gx), fy: gy - Math.floor(gy) };
+}
+const tileBox = ({ x, y }) => {
+  const count = 2 ** 13;
+  return { west: (x / count) * WORLD - WORLD / 2, east: ((x + 1) / count) * WORLD - WORLD / 2,
+    north: WORLD / 2 - (y / count) * WORLD, south: WORLD / 2 - ((y + 1) / count) * WORLD };
+};
+const rulesCatalogue = {
+  builtins: [recipe], custom: [], grid: [13, 512], max_tiles: 4096, max_results: 2000, copernicus_key: true, radar_layer: '',
+  methods: [{ id: 'surface', single: false, sizes: {} }, { id: 'rules', single: false, clouds: true, sensor: 'sentinel2', frames: 4,
+    sizes: { all: size(0, 0, 0, 0, 0), medium: size(2000, 0, 1, 0, 30) }, rules: true, measure: '' }],
+  rules: { bands: ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'], classes: ['vegetation', 'bare', 'water'],
+    max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, max_check_tiles: 12 },
+  examples: [],
+};
+
+/** The engine's side of a builder session: passes, what a test costs, what it finds, what a point reads. */
+async function answerBuilder(page) {
+  const log = { saved: [], plans: [], tests: [], probes: [], lookups: [], center: null, hole: null };
+  await page.route('**/api/compare/analyzers', (route) => {
     if (route.request().method() === 'POST') {
-      const body = route.request().postDataJSON();
-      saved.push(body);
-      return route.fulfill({ json: { ...body, id: 'custom-aaaaaaaaaaaa' } });
+      log.saved.push(route.request().postDataJSON());
+      return route.fulfill({ json: { ...route.request().postDataJSON(), id: 'custom-aaaaaaaaaaaa' } });
     }
-    return route.fulfill({ json: {
-      builtins: [recipe], custom: [], grid: [13, 512], max_tiles: 4096, max_results: 2000,
-      methods: [{ id: 'surface', single: false, sizes: {} }, { id: 'rules', single: false, clouds: true, sensor: 'sentinel2', frames: 4,
-        sizes: { medium: { min_area: 0, max_area: 0, cleanup: 0, smoothing: 0, merge_metres: 0 } }, rules: true, measure: '' }],
-      rules: { bands: ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'], classes: ['vegetation', 'bare', 'water'],
-        max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, preview_span: 3 }, examples: [] } });
+    return route.fulfill({ json: rulesCatalogue });
   });
-  await page.route('**/api/satellite/sentinel/acquisitions', (route) => route.fulfill({ json: {
-    dates: [{ date: '2026-09-10', cloud: 4, coverage: 1 }, { date: '2026-09-01', cloud: 2, coverage: 1 }], truncated: false } }));
-  await page.route('**/api/compare/analyzers/preview', (route) => {
-    const body = route.request().postDataJSON();
-    previews.push(body);
-    const { west, south, east, north } = body.bounds;
-    const [x0, y0] = mercator(west, south);
-    const [x1, y1] = mercator(east, north);
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, half = Math.min(x1 - x0, y1 - y0) / 2;
-    const base = { tiles: [[1, 1]], clipped: false, size: [512, 512],
-      box: { west: cx - half, east: cx + half, south: cy - half, north: cy + half } };
-    if (!body.read && previews.filter((entry) => entry.read).length === 0) return route.fulfill({ json: { ...base, ready: false, missing: 2 } });
-    const middle = [(west + east) / 2, (south + north) / 2];
-    return route.fulfill({ json: { ...base, ready: true, missing: 0, mask, measured: 1,
-      rules: body.recipe.rules.map(() => ({ share: 0.048, kept: 0.048 })), kept: 0.048, count: 1, note: '',
-      candidates: [{ id: '0-1', coordinates: middle, bbox: [middle[0] - 0.001, middle[1] - 0.001, middle[0] + 0.001, middle[1] + 0.001],
-        area: 12000, margin: 3.4, strength: 'strong', measure: { before: 0.8, after: 0.2, signed: -0.6 } }] } });
+  await page.route('**/api/satellite/sentinel/acquisitions', (route) => {
+    log.lookups.push(route.request().postDataJSON());
+    return route.fulfill({ json: { dates: [{ date: '2026-09-10', cloud: 4, coverage: 1 }, { date: '2026-09-01', cloud: 2, coverage: 1 }], truncated: false } });
   });
   await page.route('**/api/satellite/sentinel/layers', (route) => route.fulfill({ json: { source: 'catalogue', layers: [
     { id: 'TRUE_COLOR', label: 'True colour' }, { id: 'FALSE_COLOR', label: 'False colour (infrared)' },
     { id: 'SWIR', label: 'SWIR (short-wave infrared)' }, { id: 'NDVI', label: 'NDVI (vegetation index)' }] } }));
-  await page.route('**/api/compare/analyzers/probe', (route) => route.fulfill({ json: {
-    ready: true, imaged: true, measured: true, kept: true,
-    rules: [{ passes: true, value: -0.6, before: 0.8, after: 0.2 }, { passes: true, value: 0.8, before: null, after: null }] } }));
-  await page.route('**/api/compare/analyzers/check', (route) => {
-    const body = route.request().postDataJSON();
-    checked.push(body);
-    return route.fulfill({ json: { ready: true, missing: 0, count: 1, covered: body.check.marks.map(() => true) } });
+  await page.route('**/api/compare/analyzers/check/plan', (route) => {
+    log.plans.push(route.request().postDataJSON());
+    return route.fulfill({ json: { tiles: 1, missing: 4 } });
   });
+  await page.route('**/api/compare/analyzers/check', async (route) => {
+    const body = route.request().postDataJSON();
+    log.tests.push(body);
+    const [lon, lat] = body.check.marks[0].point;
+    const tile = tileOf(lon, lat);
+    log.center = { x: Math.round(tile.fx * 512), y: Math.round(tile.fy * 512) };
+    // the cloud sits in the corner of the tile farthest from the pin
+    log.hole = { x: log.center.x < 256 ? 412 : 0, y: log.center.y < 256 ? 432 : 0 };
+    // What the engine sends: one byte a pixel. 64 is measured ground, and the low bits are the rules that passed;
+    // rule 1 and 2 pass round the first pin, rule 2 alone further out, and a corner is cloud.
+    const mask = await page.evaluate(([cx, cy, hx, hy]) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512; canvas.height = 512;
+      const context = canvas.getContext('2d');
+      const image = context.createImageData(512, 512);
+      for (let j = 0; j < 512; j++) {
+        for (let i = 0; i < 512; i++) {
+          let value = i >= hx && i < hx + 100 && j >= hy && j < hy + 80 ? 0 : 64;
+          const distance = Math.hypot(i - cx, j - cy);
+          if (value && distance < 150) value |= 2;
+          if (value && distance < 80) value |= 1 | 128;
+          const at = (j * 512 + i) * 4;
+          image.data[at] = image.data[at + 1] = image.data[at + 2] = value;
+          image.data[at + 3] = 255;
+        }
+      }
+      context.putImageData(image, 0, 0);
+      return canvas.toDataURL('image/png').split(',')[1];
+    }, [log.center.x, log.center.y, log.hole.x, log.hole.y]);
+    const marks = body.check.marks;
+    // the plot dropped by 0.6, so a line set at a drop of 0.5 or less takes it, and the empty pin is never taken
+    const covered = marks.map((mark) => mark.expect === 'found' && body.recipe.rules[0].value >= -0.5);
+    return route.fulfill({ json: { ready: true, missing: 0, count: covered.filter(Boolean).length, covered, size: 512, measured: 0.93,
+      tiles: [{ x: tile.x, y: tile.y, box: tileBox(tile), mask }],
+      rules: body.recipe.rules.map((_, i) => ({ share: 0.18 - i * 0.04, kept: 0.06 })), kept: 0.04,
+      candidates: [{ id: '0-1', coordinates: [lon, lat], bbox: [lon - 0.001, lat - 0.001, lon + 0.001, lat + 0.001], area: 12000,
+        margin: 3.4, strength: 'strong', measure: { before: 0.8, after: 0.2, signed: -0.6 }, geometry: null }],
+      readings: marks.map((mark) => ({ imaged: true, measured: true, kept: mark.expect === 'found',
+        rules: body.recipe.rules.map(() => ({ passes: true, value: mark.expect === 'found' ? -0.6 : -0.1, before: 0.8, after: 0.3 })) })) } });
+  });
+  await page.route('**/api/compare/analyzers/probe', (route) => {
+    log.probes.push(route.request().postDataJSON());
+    return route.fulfill({ json: { ready: true, imaged: true, measured: true, kept: true,
+      rules: [{ passes: true, value: -0.6, before: 0.8, after: 0.2 }, { passes: true, value: 0.8, before: null, after: null }] } });
+  });
+  return log;
+}
 
+/** A pixel of the canvas a part of the test layers painted, by the tile's own pixel. */
+const painted = (page, part, [x, y]) => page.locator(`.rule-layers .part.${part} canvas.rule-tile`).first().evaluate(
+  (canvas, at) => [...canvas.getContext('2d').getImageData(at[0], at[1], 1, 1).data], [x, y]);
+const near = (expected, tolerance = 6) => (read) => read.every((value, i) => Math.abs(value - expected[i]) <= tolerance);
+
+test('an analyzer of your own is proved on a check made on the map: two passes, pins, a test, the rules painted, then kept', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  const log = await answerBuilder(page);
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [
+    { id: 'esri-world-imagery', label: 'Esri World Imagery', url: 'https://tiles.invalid/{z}/{x}/{y}.png', imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Browser fixture' },
+    { id: 'sentinel2', label: 'Copernicus Sentinel-2', url: 'https://tiles.invalid/{z}/{x}/{y}.png', imagery: true, max_zoom: 19, tile_size: 256, attribution: 'Copernicus' },
+  ] }));
+
+  // what a new one reads is asked first, and stays
   await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
   await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
-  await page.getByRole('button', { name: /^Build your own rules/ }).click();
+  await expect(page.getByRole('heading', { name: 'New analyzer' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Satellite' }).getByRole('button', { name: /^Sentinel-2/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('group', { name: 'Dates' }).getByRole('button', { name: 'Two dates' })).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: test.info().outputPath('detect-builder-new.png') });
+  await page.getByRole('button', { name: /^Blank/ }).click();
   await expect(page.getByRole('heading', { name: 'Build an analyzer' })).toBeVisible();
+  await expect(page.locator('.reads')).toHaveText('Sentinel-2 · two dates');
   await page.getByRole('button', { name: 'Add a rule', exact: true }).click();
-  await page.getByRole('button', { name: 'Find passes', exact: true }).click();
-  await page.getByLabel('Use 2026-09-01').getByRole('button', { name: 'A', exact: true }).click();
-  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'B', exact: true }).click();
-  const read = page.getByRole('button', { name: 'Show the detections here', exact: true });
-  await expect(read).toBeVisible();
-  await read.click();
-  await expect(page.getByText('1 candidate on the map')).toBeVisible();
-  // B is on the map in the layer that reads rule ★, and any other is one pick away
-  await expect(page.getByLabel('Copernicus layer')).toHaveValue('TRUE_COLOR');
-  await page.getByRole('button', { name: /^Show it in NDVI/ }).click();
-  await expect(page.getByLabel('Copernicus layer')).toHaveValue('NDVI');
-  await expect(page.getByRole('button', { name: 'Imagery provider', exact: true })).toContainText('Copernicus Sentinel-2');
+  await expect(page.getByLabel('Rule 2 says')).toHaveText('NDVI before is at least 0.40');
+  // nothing has been asked of Copernicus, and there is no check to test on
+  expect(log.lookups.length + log.plans.length + log.tests.length).toBe(0);
+  const deck = page.locator('.console');
+  await expect(deck.getByText('Pick a check to try the rules on it.')).toBeVisible();
+  await expect(page.locator('.strip').getByRole('button', { name: 'Test', exact: true })).toBeDisabled();
 
-  // the rules are on the ground, each in its colour: the later one on top
-  const layers = page.locator('canvas.rule-layers');
-  await expect(layers).toBeVisible();
-  // A canvas keeps its colours premultiplied, so a channel can read one off.
-  const tint = (expected) => async () => {
-    const read = await layers.evaluate((canvas) => [...canvas.getContext('2d').getImageData(256, 256, 1, 1).data]);
-    return read.every((value, i) => Math.abs(value - expected[i]) <= 2);
-  };
-  await expect.poll(tint([56, 189, 248, 110])).toBe(true);
-  await page.getByRole('button', { name: 'Hide rule 2 on the map', exact: true }).click();
-  await expect.poll(tint([250, 204, 21, 110])).toBe(true);
-  expect(await layers.evaluate((canvas) => canvas.getContext('2d').getImageData(10, 10, 1, 1).data[3])).toBe(0);
+  // a check is made on the map: its passes first, in the drawer
+  await deck.getByRole('button', { name: 'New check' }).click();
+  await expect(page.getByRole('region', { name: 'Passes of the new check' })).toBeVisible();
+  await expect(page.locator('.panel')).toHaveClass(/locked/);
+  await expect(page.getByText('Making a check on the map')).toBeVisible();
+  await deck.getByRole('button', { name: 'Find passes', exact: true }).click();
+  expect(log.lookups).toHaveLength(1);
+  expect(log.lookups[0]).toMatchObject({ collection: 'sentinel2' });
+  await page.getByLabel('Use 2026-09-01').getByRole('button', { name: 'Before', exact: true }).click();
+  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'After', exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath('detect-builder-passes.png') });
 
-  // the detections alone, as a run would return them: no rule painted, the candidate still outlined
-  const shows = page.getByRole('group', { name: 'What the map shows' });
-  await shows.getByRole('button', { name: 'Detections', exact: true }).click();
-  await expect.poll(tint([0, 0, 0, 0])).toBe(true);
-  await expect(page.locator('svg.analysis-overlay [role="button"]')).toHaveCount(1);
-  await shows.getByRole('button', { name: 'Rules', exact: true }).click();
-  await expect.poll(tint([250, 204, 21, 110])).toBe(true);
+  // or from the calendar, as a routine picks its dates
+  await deck.getByRole('button', { name: 'Dates', exact: true }).click();
+  await deck.getByRole('button', { name: 'Before pass' }).click();
+  await expect(page.getByRole('group', { name: 'Before pass calendar' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^2026-09-01:/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /^2026-09-10:/ })).toBeDisabled();      // not before the after pass
+  await page.getByRole('button', { name: /^2026-09-01:/ }).click();
+  await deck.getByRole('button', { name: 'Place the pins' }).click();
 
-  const map = page.locator('.detect-tool .map');
+  // the map is split between the two passes, one surface over the other
+  await expect(page.locator('.detect-tool .map')).toHaveCount(2);
+  const line = page.getByRole('slider', { name: 'Split between the before and after passes' });
+  await expect(line).toHaveAttribute('aria-valuenow', '50');
+  await line.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(line).toHaveAttribute('aria-valuenow', '52');
+  await deck.getByRole('button', { name: /^After/ }).click();
+  await expect(line).toHaveAttribute('aria-valuenow', '0');
+  await deck.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(line).toHaveAttribute('aria-valuenow', '50');
+
+  // pins: a click on the ground drops the armed one, on either half
+  const map = page.locator('.detect-tool .map').first();
   const box = await map.boundingBox();
-  await map.click({ position: { x: box.width / 2 - 40, y: box.height / 2 + 40 } });
+  await expect(deck.getByRole('button', { name: 'Should be found' })).toHaveAttribute('aria-pressed', 'true');
+  // dead centre, which is where the line of the split runs: with a pin armed it lets the click through
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.4);
+  await expect(page.locator('.mark.pin-found')).toHaveCount(1);
+  await expect(line).toHaveAttribute('aria-valuenow', '50');
+  await deck.getByRole('button', { name: 'Should stay empty' }).click();
+  await expect(page.getByText('Click the ground where none should be')).toBeVisible();
+  await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.3);
+  await expect(page.locator('.mark.pin-found')).toHaveCount(1);
+  await expect(page.locator('.mark.pin-empty')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Click the ground where none should be')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('detect-builder-pins.png') });
+  await deck.getByRole('button', { name: 'Finish', exact: true }).click();
+  await expect(page.locator('.panel')).not.toHaveClass(/locked/);
+  await expect(page.getByRole('tab', { name: /^Checks/ })).toContainText('1');
+
+  // what testing costs is asked once the pins are down, and said before anything is read
+  const test_ = deck.getByRole('button', { name: 'Test · 4 requests' });
+  await expect(test_).toBeEnabled();
+  expect(log.plans.length).toBeGreaterThan(0);
+  expect(log.plans.at(-1).check.marks).toHaveLength(2);
+  expect(log.tests).toHaveLength(0);
+  await test_.click();
+  await expect(deck.getByText('1 of 1 found · stayed empty · 1 candidate')).toBeVisible();
+  await expect(deck.getByRole('button', { name: /Tested$/ })).toBeDisabled();
+  expect(log.tests[0]).toMatchObject({ read: true, detail: true });
+  await expect(page.locator('.mark.pass')).toHaveCount(2);
+  await page.screenshot({ path: test.info().outputPath('detect-builder-tested.png') });
+
+  // the rules are on the ground: a change across both halves, a before-state on the before half, the tested ground tinted
+  await expect(page.locator('.rule-layers .part')).toHaveCount(3);
+  await expect.poll(async () => near([250, 204, 21, 110])(await painted(page, 'shared', [log.center.x, log.center.y]))).toBe(true);
+  await expect.poll(async () => near([56, 189, 248, 110])(await painted(page, 'before', [log.center.x, log.center.y]))).toBe(true);
+  await expect.poll(async () => near([0, 0, 0, 0])(await painted(page, 'after', [log.center.x, log.center.y]))).toBe(true);
+  // further out only the before-state passes; ground no rule kept carries the tint, and a corner of cloud nothing
+  const far = [log.center.x + 200 < 512 ? log.center.x + 200 : log.center.x - 200, log.center.y];
+  await expect.poll(async () => near([56, 189, 248, 110])(await painted(page, 'before', far))).toBe(false);
+  await expect.poll(async () => near([120, 170, 255, 30], 8)(await painted(page, 'shared', far))).toBe(true);
+  await expect.poll(async () => near([0, 0, 0, 0])(await painted(page, 'shared', [log.hole.x + 10, log.hole.y + 10]))).toBe(true);
+
+  // a chip hides a rule's pixels, and its row in the column says the same
+  await deck.getByRole('group', { name: 'Rules on the map' }).getByRole('button', { name: /NDVI change/ }).click();
+  await expect.poll(async () => near([120, 170, 255, 30], 8)(await painted(page, 'shared', [log.center.x, log.center.y]))).toBe(true);
+  await expect(page.getByRole('button', { name: 'Show rule 1 on the map', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await deck.getByRole('group', { name: 'Rules on the map' }).getByRole('button', { name: /NDVI change/ }).click();
+  // the pointer is on its chip, which shows that rule alone and brighter
+  await expect.poll(async () => near([250, 204, 21, 190])(await painted(page, 'shared', [log.center.x, log.center.y]))).toBe(true);
+  await page.mouse.move(box.x + 5, box.y + box.height / 2);
+  await expect.poll(async () => near([250, 204, 21, 110])(await painted(page, 'shared', [log.center.x, log.center.y]))).toBe(true);
+
+  // a pin reads the rules under it, and can be turned or taken away
+  await page.getByRole('button', { name: /^Pin 1:/ }).click();
   const reading = page.getByRole('dialog', { name: 'Rules at this point' });
   await expect(reading).toContainText('Kept');
   await expect(reading).toContainText('0.80 → 0.20 (−0.60)');
-  await page.screenshot({ path: test.info().outputPath('detect-builder.png') });
-
-  // the point becomes a check of this view, marked on the ground, read from the cache
-  await expect(reading).toContainText('Mark it in a new check of this view');
-  await reading.getByRole('button', { name: 'Should be found', exact: true }).click();
+  await expect(reading).toContainText('Pin 1: should be found');
+  await page.screenshot({ path: test.info().outputPath('detect-builder-pin.png') });
+  await reading.getByRole('button', { name: 'Close the reading' }).click();
+  await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.6);
+  await expect(reading).toContainText('Drop a pin here');
+  // the card keeps clear of the console, whichever way it opens
+  const card = await reading.boundingBox();
+  const deckBox = await deck.boundingBox();
+  expect(card.y + card.height).toBeLessThanOrEqual(deckBox.y + 1);
+  await page.screenshot({ path: test.info().outputPath('detect-builder-point.png') });
+  await page.keyboard.press('Escape');
   await expect(reading).toHaveCount(0);
-  await expect(page.locator('.mark.pin-found')).toHaveCount(1);
-  await expect(page.getByRole('tab', { name: /^Checks/ })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByText('1 of 1 found')).toBeVisible();
-  await expect(page.locator('.mark.pin-found.pass')).toHaveCount(1);
-  expect(checked.every((body) => body.read === false)).toBe(true);
-  await expect(page.locator('svg.ground polygon')).toHaveCount(1);        // the check's view, framed
 
-  // an armed pin drops where the map is clicked, and the map says which one is armed
-  await page.getByRole('button', { name: 'Should stay empty', exact: true }).click();
-  await expect(page.getByText('Click where none should be')).toBeVisible();
-  await map.click({ position: { x: box.width / 2 + 120, y: box.height / 2 - 80 } });
-  await expect(page.locator('.mark.pin-empty')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Stop dropping pins', exact: true }).click();
-  await expect(page.getByText('Click where none should be')).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath('detect-builder-checks.png') });
+  // a stricter line moves nothing until Test is pressed again, and then the pin is lost
+  await page.getByLabel('Rule 1 value').fill('0.8');
+  await page.getByLabel('Rule 1 value').press('Tab');
+  await expect(deck.getByText('The rules or pins changed since this test.')).toBeVisible();
+  const before = log.tests.length;
+  await page.waitForTimeout(400);
+  expect(log.tests).toHaveLength(before);
+  await page.screenshot({ path: test.info().outputPath('detect-builder-stale.png') });
+  await deck.getByRole('button', { name: /^Test again/ }).click();
+  await expect.poll(() => log.tests.length).toBe(before + 1);
+  expect(log.tests.at(-1).recipe.rules[0].value).toBe(-0.8);
+  await expect(page.locator('.mark.fail')).toHaveCount(1);
+  await expect(deck.getByText('0 of 1 found · stayed empty · 0 candidates')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('detect-builder-lost.png') });
+  // a looser one takes it back
+  await page.getByLabel('Rule 1 value').fill('0.3');
+  await page.getByLabel('Rule 1 value').press('Tab');
+  await deck.getByRole('button', { name: /^Test again/ }).click();
+  await expect(page.locator('.mark.pass')).toHaveCount(2);
 
-  // A, B or the two blinking, from the map itself
-  const bar = page.getByRole('group', { name: 'Passes under the preview' });
-  await bar.getByRole('button', { name: 'Blink', exact: true }).click();
-  await expect(bar.getByRole('button', { name: 'Blink', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await bar.getByRole('button', { name: 'B', exact: true }).click();
-  await expect(bar.getByRole('button', { name: 'Blink', exact: true })).toHaveAttribute('aria-pressed', 'false');
-  // the new pin is read with the rest: the stand-in engine puts a candidate on both
-  await expect(page.getByText('1 of 1 found · 1 of 1 flagged')).toBeVisible();
+  // at its narrowest the dock still holds the rules and the checks without a sideways scroll
+  const dockBody = page.locator('.cmp-dock-body');
+  await page.getByRole('button', { name: 'Resize Detect panel' }).focus();
+  await page.keyboard.press('Home');
+  await expect.poll(async () => Math.round((await page.locator('.cmp-dock').boundingBox()).width)).toBe(300);
+  await expect.poll(() => dockBody.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+  await page.getByRole('tab', { name: /^Checks/ }).click();
+  await expect.poll(() => dockBody.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+  await page.getByRole('tab', { name: /^Rules/ }).click();
+  await page.screenshot({ path: test.info().outputPath('detect-builder-narrow.png') });
 
+  // kept for every case, with the check that proves it
   await page.getByLabel('Analyzer name').fill('Cleared ground');
   await page.getByRole('button', { name: 'Add to my analyzers', exact: true }).click();
-  await expect.poll(() => saved.length).toBe(1);
-  expect(saved[0]).toMatchObject({ method: 'rules', name: 'Cleared ground', match: 'all' });
-  expect(saved[0].rules).toHaveLength(2);
-  expect(saved[0].checks).toEqual([expect.objectContaining({ name: 'Check 1',
+  await expect.poll(() => log.saved.length).toBe(1);
+  expect(log.saved[0]).toMatchObject({ method: 'rules', name: 'Cleared ground', match: 'all', sensor: 'sentinel2', dates: 'two' });
+  expect(log.saved[0].rules).toHaveLength(2);
+  expect(log.saved[0].checks).toEqual([expect.objectContaining({ name: 'Check 1',
+    a: expect.objectContaining({ date: '2026-09-01' }), b: expect.objectContaining({ date: '2026-09-10' }),
     marks: [expect.objectContaining({ expect: 'found' }), expect.objectContaining({ expect: 'empty' })],
-    result: expect.objectContaining({ covered: [true, true] }) })]);
-  await expect(layers).toHaveCount(0);
-  await expect(page.locator('.mark')).toHaveCount(0);
-  expect(previews.every((entry) => entry.recipe.method === 'rules')).toBe(true);
+    result: expect.objectContaining({ covered: [true, false] }) })]);
+  expect(log.saved[0].rules[0]).toMatchObject({ op: 'le', value: -0.3 });
+  expect(log.saved[0].checks[0]).not.toHaveProperty('bounds');
+  await expect(page.locator('.console')).toHaveCount(0);
+  await expect(page.locator('.rule-layers')).toHaveCount(0);
+  await expect(page.locator('.detect-tool .map')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test('an analyzer of one date is tried on one map, with no split and no before or after to choose', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  const log = await answerBuilder(page);
+  await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
+  await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
+  await page.getByRole('group', { name: 'Dates' }).getByRole('button', { name: 'One date' }).click();
+  await page.getByRole('button', { name: /^Blank/ }).click();
+  await expect(page.locator('.reads')).toHaveText('Sentinel-2 · one date');
+  await expect(page.getByLabel('Rule 1 says')).toHaveText('NDVI is at least 0.40');
+  await expect(page.getByLabel('Rule 1 reads')).toHaveCount(0);
+
+  const deck = page.locator('.console');
+  await deck.getByRole('button', { name: 'New check' }).click();
+  await deck.getByRole('button', { name: 'Find passes', exact: true }).click();
+  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'Use', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Place the pins' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Place the pins' }).click();
+  await expect(page.locator('.detect-tool .map')).toHaveCount(1);
+  await expect(page.getByRole('slider', { name: 'Split between the before and after passes' })).toHaveCount(0);
+  await expect(deck.getByRole('group', { name: 'Which pass to look at' })).toHaveCount(0);
+  expect(log.lookups).toHaveLength(1);
   expect(errors).toEqual([]);
 });
 

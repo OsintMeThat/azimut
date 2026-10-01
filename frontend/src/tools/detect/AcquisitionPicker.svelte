@@ -11,6 +11,10 @@
    * Date A and date B each have their own pass calendar above this list. The
    * catalogue answers newest first, five pages at most, so a list it cut short
    * offers the older ones.
+   *
+   * A caller that has a way to pick a day from a calendar hands it in as `dates`,
+   * and the window gains a Dates choice beside the last year that shows it in
+   * place of the list.
    */
   import Icon from '../../components/Icon.svelte';
   import {
@@ -37,14 +41,20 @@
     /** The chosen sources, `{ date, time }` each, or null. */
     a = null,
     b = null,
+    /** What the two buttons of a row say. */
+    nameA = 'A',
+    nameB = 'B',
     onlookback,
     onlook,
     /** Look again before the oldest pass listed, when the catalogue cut the list. */
     onolder,
     onpick,
+    /** What shows under a Dates window: the calendars to pick a day from. Left out, there is no such window. */
+    dates = null,
   } = $props();
 
-  const older = $derived(truncated && onolder ? olderSpan(lookback, list) : null);
+  const older = $derived(truncated && onolder && typeof lookback === 'number' ? olderSpan(lookback, list) : null);
+  const byDate = $derived(!!dates && lookback === 'dates');
 
   /** Whether a row is the pass a side names: a typed radar day matches its day. */
   function names(source, entry) {
@@ -64,13 +74,20 @@
           onclick={() => onlookback(option.id)}
         >{option.label}</button>
       {/each}
+      {#if dates}
+        <button type="button" class:on={byDate} aria-pressed={byDate} disabled={busy} onclick={() => onlookback('dates')}>Dates</button>
+      {/if}
     </div>
-    <button class="btn btn-sm" disabled={busy || !areas} onclick={onlook}>
-      {busy ? 'Looking…' : searched ? 'Look again' : 'Find passes'}
-    </button>
+    {#if !byDate}
+      <button class="btn btn-sm" disabled={busy || !areas} onclick={onlook}>
+        {busy ? 'Looking…' : searched ? 'Look again' : 'Find passes'}
+      </button>
+    {/if}
   </div>
 
-  {#if !areas}
+  {#if byDate}
+    {@render dates()}
+  {:else if !areas}
     <p class="hint">Draw an area in step 1, then look up the passes it has.</p>
   {:else if error}
     <p class="warn" role="alert">{error}</p>
@@ -113,7 +130,7 @@
                 title={pairedB ? 'Another track than B: it sees the ground from another angle'
                   : afterB ? 'Date A must be before date B' : 'Use as A, the picture before'}
                 onclick={() => onpick('a', entry)}
-              >A</button>
+              >{nameA}</button>
             {/if}
             {#if wantsCompare}
               <button
@@ -125,7 +142,7 @@
                   : beforeA ? 'Date A must be before date B'
                   : single ? 'Use this pass' : 'Use as B, the picture to look in'}
                 onclick={() => onpick('b', entry)}
-              >{single ? 'Use' : 'B'}</button>
+              >{single ? 'Use' : nameB}</button>
             {/if}
           </div>
         </li>

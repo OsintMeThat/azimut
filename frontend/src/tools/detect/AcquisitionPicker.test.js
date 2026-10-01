@@ -28,6 +28,30 @@ const button = (target, name) =>
   [...target.querySelectorAll('button')].find((node) => node.textContent.trim() === name);
 
 describe('the acquisition picker', () => {
+  it('has no Dates window unless it is handed a way to pick a day', () => {
+    const { target, done } = render();
+    expect(button(target, 'Dates')).toBeUndefined();
+    done();
+  });
+
+  it('shows what it is handed under a Dates window, in place of the list and the lookup', async () => {
+    const { createRawSnippet } = await import('svelte');
+    const dates = createRawSnippet(() => ({ render: () => '<div class="calendars">pick a day</div>' }));
+    const onlookback = vi.fn();
+    const { target, done } = render({ dates, onlookback });
+    expect(button(target, 'Dates')).toBeDefined();
+    expect(target.querySelector('.calendars')).toBe(null);
+    button(target, 'Dates').click();
+    expect(onlookback).toHaveBeenCalledWith('dates');
+    done();
+    const shown = render({ dates, lookback: 'dates' });
+    expect(shown.target.querySelector('.calendars').textContent).toBe('pick a day');
+    expect(button(shown.target, 'Dates').getAttribute('aria-pressed')).toBe('true');
+    expect(rows(shown.target)).toHaveLength(0);
+    expect(button(shown.target, 'Look again')).toBeUndefined();
+    shown.done();
+  });
+
   it('lists what exists rather than every day on the calendar', () => {
     const { target, done } = render();
     expect(rows(target)).toHaveLength(2);

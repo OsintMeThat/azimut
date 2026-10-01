@@ -71,15 +71,11 @@
     onleavepass = () => {},
     /** The passes the candidate under review was read between, or null. */
     onpair = () => {},
-    /** What the map draws while an analyzer of your own is built (AnalyzerBuilder). */
+    /** The bench the map draws while an analyzer of your own is built (AnalyzerBuilder). */
     builder = $bindable(null),
-    /** Blink A and B on the map for the builder: `onblink({ a, b })`, or null to stop. */
-    onblink = () => {},
-    /** The map's view, for the builder to preview on. */
+    /** The map's view, for the builder to look up passes on. */
     viewBounds = () => null,
-    /** The settled camera, the Copernicus layers on offer and a way to frame a
-     *  place, which the builder's preview and checks use. */
-    mapView = null,
+    /** The Copernicus layers on offer and a way to frame a place, which the builder uses. */
     passLayers = [],
     onfly = () => {},
   } = $props();
@@ -633,16 +629,6 @@
     return current.input.zones.find((zone) => read(zone) && inside(zone))?.id ?? null;
   }
 
-  /** Read every rule of the analyzer being built at a point of the map, and
-   *  mark that point in one of its checks. */
-  export function probeAt(point) { return library?.probeAt(point); }
-  export function closeProbe() { library?.closeProbe(); }
-  export function markProbe(expect) { library?.markProbe(expect); }
-  /** The builder's pins, and its passes under the preview, from the map. */
-  export function pinAt(point) { library?.pinAt(point); }
-  export function pinMode(mode) { library?.pinMode(mode); }
-  export function showPass(which) { library?.showPass(which); }
-
   /** A candidate picked on the map opens its review. */
   export function pick(runId, resultId) {
     collapsed = false;
@@ -823,8 +809,8 @@
         {/if}
       </div>
     {:else if view === 'library'}
-      <AnalyzerLibrary bind:this={library} {catalogue} onchanged={loadCatalogue} bind:builder {viewBounds} {onshow} {onleavepass}
-        {mapView} layers={passLayers} {onfly} {onblink}
+      <AnalyzerLibrary bind:this={library} {catalogue} onchanged={loadCatalogue} bind:builder {viewBounds}
+        layers={passLayers} {onfly}
         onsaved={(recipe) => { if (draft) offer = recipe.id; }} />
     {/if}
   {/if}

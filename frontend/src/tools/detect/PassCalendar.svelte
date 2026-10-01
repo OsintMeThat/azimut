@@ -8,13 +8,15 @@
   import { orbitMark } from '../../lib/radar.js';
 
   let { list = [], value = '', label = 'Date', radar = false, busy = false, error = '',
+    /** A day to open on when none is chosen, such as the other side's: passes of a pair are close in time. */
+    near = '',
     eligible = () => true, onmonth = () => {}, onpick = () => {}, onclose = () => {} } = $props();
   let cursor = $state('');
   let selectedDay = $state('');
   let root;
   const first = $derived(MISSION_START[radar ? 'sentinel1' : 'sentinel2']);
   const latest = today();
-  const month = $derived(cursor || monthOf(value || today()));
+  const month = $derived(cursor || monthOf(value || near || today()));
   const days = $derived(monthDays(month));
   const entries = (day) => list.filter((pass) => pass.date === day && eligible(pass));
   const blocked = (day) => list.some((pass) => pass.date === day);

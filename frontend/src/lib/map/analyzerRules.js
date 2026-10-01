@@ -1,14 +1,19 @@
 /**
  * Analyzers of your own: a list of rules, read the way the engine reads them
- * (engine/detect_rules.py). A rule is a quantity, the date it is read on (A,
- * B, or the change from A to B) and the line it has to cross. Values travel in
- * the engine's units: an index from -1 to 1, reflectance from 0 to 1, radar in
- * decibels. Only the words and the sliders here show reflectance in percent.
+ * (engine/detect_rules.py). A rule is a quantity, the date it is read on (the
+ * before pass, the after pass, or the change from one to the other) and the
+ * line it has to cross. Values travel in the engine's units: an index from -1
+ * to 1, reflectance from 0 to 1, radar in decibels. Only the words and the
+ * sliders here show reflectance in percent.
+ *
+ * The engine names the two passes A and B, and so do the saved recipes; the
+ * words here are Before and After, which is what they are to someone building
+ * a rule. An analyzer declares when it is made which satellite it reads and
+ * whether it judges one date or the change between two (`sensor`, `dates`).
  */
 import { CHANGE_INDICES, indexThreshold } from './changeAssist.js';
-import { toMercator } from './groundFrame.js';
 
-export const MEASURES = Object.freeze([
+const MEASURES = Object.freeze([
   { id: 'index', label: 'Index', hint: 'A published spectral index.' },
   { id: 'nd', label: 'My index', hint: 'Two bands of your choice: (first − second) / (first + second).' },
   { id: 'band', label: 'Band', hint: 'One band’s reflectance.' },
@@ -66,12 +71,60 @@ export function unitOf(rule) {
   return 'index';
 }
 
-/** Ops a rule can use, given what it measures and when. */
-export function opsFor(rule) {
-  if (rule.measure === 'class') return [['is', 'is'], ['not', 'is not']];
-  if (rule.measure === 'colour') return [['ge', 'at least'], ['le', 'at most'], ['between', 'between']];
-  const ops = [['ge', 'at least'], ['le', 'at most'], ['between', 'between']];
-  return rule.on === 'change' ? [...ops, ['moved', 'either way, at least']] : ops;
+/**
+ * How a rule's line is said. A change is a drop, a rise or a move of some
+ * amount, and a state on one date is at least or at most some value; both can
+ * also sit between two values. The engine keeps an operator and a signed value,
+ * and these are the same thing in words.
+ */
+export function directionsFor(rule) {
+  if (rule.measure === 'class') return [['is', 'Is'], ['not', 'Is not']];
+  const between = ['between', 'Between'];
+  if (rule.on === 'change' && rule.measure !== 'colour') {
+    return [['drop', 'Dropped'], ['rise', 'Rose'], ['moved', 'Either way'], between];
+  }
+  return [['ge', 'At least'], ['le', 'At most'], between];
+}
+
+/** Which of `directionsFor` a rule says. */
+export function directionOf(rule) {
+  if (rule.measure === 'class' || rule.op === 'between') return rule.op;
+  if (rule.on === 'change' && rule.measure !== 'colour') {
+    return rule.op === 'le' ? 'drop' : rule.op === 'ge' ? 'rise' : 'moved';
+  }
+  return rule.op;
+}
+
+/** The fields of a rule after it is said another way, keeping the amount it had. */
+export function withDirection(rule, direction) {
+  const amount = Math.abs(rule.value);
+  if (direction === 'drop') return retarget(rule, { op: 'le', value: -amount });
+  if (direction === 'rise') return retarget(rule, { op: 'ge', value: amount });
+  return retarget(rule, { op: direction });
+}
+
+/** A rule's line as an amount: how big a drop, a rise or a move, or else the value itself. */
+export function amountOf(rule, value = rule.value) {
+  if (rule.on !== 'change' || rule.measure === 'colour') return value;
+  if (rule.op === 'le') return -value;
+  return rule.op === 'moved' ? Math.abs(value) : value;
+}
+
+/** The value a rule's line takes for an amount, the opposite of `amountOf`. */
+export function withAmount(rule, amount) {
+  const number = Number(amount);
+  if (rule.on !== 'change' || rule.measure === 'colour' || rule.op === 'between') return number;
+  return rule.op === 'le' ? -Math.abs(number) : Math.abs(number);
+}
+
+/**
+ * The slider a rule's line moves on: the amount of a drop, a rise or a move
+ * from nothing up, or else the value across its whole range.
+ */
+export function lineScale(rule) {
+  const scale = scaleOf(rule);
+  const directional = rule.on === 'change' && rule.measure !== 'colour' && rule.op !== 'between';
+  return directional ? { ...scale, min: 0, max: scale.max } : scale;
 }
 
 /**
@@ -219,8 +272,38 @@ export function recipeBands(recipe) {
 }
 
 export const isRules = (recipe) => recipe?.method === 'rules';
-export const readsRadar = (recipe) => isRules(recipe) && recipe.rules.some((rule) => rule.measure === 'radar');
-export const readsOneDate = (recipe) => isRules(recipe) && recipe.rules.every((rule) => rule.on === 'b');
+
+/**
+ * What an analyzer reads: the satellite and the number of dates it declared.
+ * One saved before it declared them is worked out from its rules, as the
+ * engine does when it loads it.
+ */
+export const sensorOf = (recipe) => recipe?.sensor
+  ?? ((recipe?.rules ?? []).some((rule) => rule.measure === 'radar') ? 'sentinel1' : 'sentinel2');
+export const datesOf = (recipe) => recipe?.dates
+  ?? ((recipe?.rules ?? []).every((rule) => rule.on === 'b') ? 'one' : 'two');
+export const readsRadar = (recipe) => isRules(recipe) && sensorOf(recipe) === 'sentinel1';
+export const readsOneDate = (recipe) => isRules(recipe) && datesOf(recipe) === 'one';
+
+/** What an analyzer reads, in a few words: "Sentinel-2 · two dates". */
+export function describeReads(recipe) {
+  const radar = sensorOf(recipe) === 'sentinel1';
+  return `${radar ? 'Sentinel-1 radar' : 'Sentinel-2'} · ${datesOf(recipe) === 'one' ? 'one date' : 'two dates'}`;
+}
+
+/** The measures an analyzer can use: its satellite's, and a colour distance only where two dates give it a change. */
+export const measuresFor = (recipe) => MEASURES.filter((measure) => (measure.id === 'radar') === readsRadar(recipe)
+  && !(measure.id === 'colour' && readsOneDate(recipe)));
+
+/** The dates a rule can be read on, in the words an analyst uses. A single
+ *  date needs no choice, and a colour distance or a ground class fix theirs. */
+export function whensFor(recipe, rule) {
+  if (readsOneDate(recipe)) return [];
+  const all = [['a', 'Before'], ['b', 'After'], ['change', 'Change']];
+  if (rule.measure === 'colour') return all.filter(([id]) => id === 'change');
+  if (rule.measure === 'class') return all.filter(([id]) => id !== 'change');
+  return all;
+}
 
 /** Band products one date costs: every three bands are one request. */
 export function productCount(recipe) {
@@ -241,8 +324,33 @@ export function recipeProblem(recipe, limits = {}) {
   const radar = new Set(rules.filter((rule) => rule.measure !== 'class').map((rule) => rule.measure === 'radar'));
   if (radar.size > 1) return 'Radar and optical rules read two satellites; keep them in two analyzers.';
   if (radar.has(true) && rules.some((rule) => rule.measure === 'class')) return 'Ground classes come from Sentinel-2, which a radar analyzer does not read.';
+  if (radar.has(true) !== readsRadar(recipe)) {
+    return radar.has(true) ? 'Radar rules need a radar analyzer.' : 'Optical rules need a Sentinel-2 analyzer.';
+  }
+  const single = rules.every((rule) => rule.on === 'b');
+  if (readsOneDate(recipe) && !single) return 'A one-date analyzer has no before pass for this rule to read.';
+  if (!readsOneDate(recipe) && single) return 'Put a rule on the before date or on the change, or the before pass is read for nothing.';
   const bands = limits.max_bands ?? 6;
   if (recipeBands(recipe).length > bands) return `An analyzer reads at most ${bands} bands.`;
+  return '';
+}
+
+/**
+ * Why the analyzer cannot be saved yet, or '' when it can. Checks are how it
+ * is proved, so it needs one, with a pin where something should be found.
+ */
+export function savingProblem(recipe, limits = {}) {
+  const problem = recipeProblem(recipe, limits);
+  if (problem) return problem;
+  const checks = recipe?.checks ?? [];
+  if (!checks.length) return 'Add a check: a place where this analyzer should find something.';
+  const unpinned = checks.find((check) => !check.marks?.length);
+  if (unpinned) return `The check “${unpinned.name}” needs a pin.`;
+  const undated = checks.find((check) => !checkDated(recipe, check));
+  if (undated) return `The check “${undated.name}” needs its passes.`;
+  if (!checks.some((check) => check.marks.some((mark) => mark.expect === 'found'))) {
+    return 'A check needs a pin where something should be found.';
+  }
   return '';
 }
 
@@ -276,7 +384,7 @@ function pairName(bands) {
 }
 
 /** What a rule measures, in a few words. */
-export function quantityLabel(rule) {
+function quantityLabel(rule) {
   switch (rule.measure) {
     case 'index': return INDICES.find((entry) => entry.id === rule.index)?.label ?? rule.index.toUpperCase();
     case 'nd': return pairName(rule.bands) ?? `(${rule.bands[0]} − ${rule.bands[1]}) / (${rule.bands[0]} + ${rule.bands[1]})`;
@@ -289,23 +397,41 @@ export function quantityLabel(rule) {
   }
 }
 
-const sideName = (on) => (on === 'a' ? 'A' : 'B');
+/**
+ * A rule in a couple of words, for a chip on the map: "NDVI change", "B12
+ * after", "VV". An analyzer of one date has no before or after to say.
+ */
+export function shortRule(rule, { single = false } = {}) {
+  const name = rule.measure === 'index' ? INDICES.find((entry) => entry.id === rule.index)?.label ?? rule.index.toUpperCase()
+    : rule.measure === 'nd' ? pairName(rule.bands) ?? `${rule.bands[0]}/${rule.bands[1]}`
+      : rule.measure === 'band' ? rule.band
+        : rule.measure === 'radar' ? POLARISATIONS.find((entry) => entry.id === rule.polarisation)?.label ?? 'VV'
+          : rule.measure === 'class' ? 'ground' : rule.measure;
+  if (single) return name;
+  return `${name} ${rule.on === 'change' ? 'change' : rule.on === 'a' ? 'before' : 'after'}`;
+}
 
-/** A rule as a clause: "NDVI dropped by 0.25 or more", "ground on B is water". */
-export function describeRule(rule) {
+/** Where a state rule is read, for a sentence: nothing on a single date, else before or after. */
+const whenName = (on, single) => (single ? '' : on === 'a' ? ' before' : ' after');
+
+/**
+ * A rule as a clause: "NDVI dropped by 0.25 or more", "NDVI after is at least
+ * 0.40", "ground is water". An analyzer of one date has no before or after to say.
+ */
+export function describeRule(rule, { single = false } = {}) {
   const quantity = quantityLabel(rule);
   if (rule.measure === 'class') {
     const names = rule.classes.map((id) => CLASS_NAMES[id] ?? id);
     const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0] ?? 'nothing';
-    return `ground on ${sideName(rule.on)} ${rule.op === 'not' ? 'is not' : 'is'} ${list}`;
+    return `ground${whenName(rule.on, single)} ${rule.op === 'not' ? 'is not' : 'is'} ${list}`;
   }
   const around = rule.around ? ` against the ground within ${rule.around} m` : '';
   const value = (v, signed = false) => formatValue(rule, v, { signed });
   if (rule.on !== 'change') {
-    const on = `${quantity} on ${sideName(rule.on)}`;
+    const on = `${quantity}${whenName(rule.on, single)} is`;
     if (rule.op === 'between') return `${on} between ${value(rule.value)} and ${value(rule.upper)}${around}`;
-    if (rule.around) return `${on} at ${rule.op === 'ge' ? 'least' : 'most'} ${value(rule.value, true)}${around}`;
-    return `${on} at ${rule.op === 'ge' ? 'least' : 'most'} ${value(rule.value)}`;
+    if (rule.around) return `${on} ${rule.op === 'ge' ? 'at least' : 'at most'} ${value(rule.value, true)}${around}`;
+    return `${on} ${rule.op === 'ge' ? 'at least' : 'at most'} ${value(rule.value)}`;
   }
   if (rule.measure === 'colour') {
     if (rule.op === 'between') return `colour moved by between ${value(rule.value)} and ${value(rule.upper)}${around}`;
@@ -321,7 +447,8 @@ export function describeRule(rule) {
 
 /** The whole analyzer as one sentence, for "Reads as" and a default description. */
 export function describeRecipe(recipe, { clouds = true } = {}) {
-  const clauses = (recipe?.rules ?? []).map(describeRule);
+  const single = readsOneDate(recipe);
+  const clauses = (recipe?.rules ?? []).map((rule) => describeRule(rule, { single }));
   if (!clauses.length) return '';
   const joiner = recipe.match === 'any' ? 'or' : 'and';
   const list = clauses.length > 1 ? `${clauses.slice(0, -1).join(', ')} ${joiner} ${clauses.at(-1)}` : clauses[0];
@@ -351,13 +478,21 @@ export const DEFAULT_PARAMETERS = Object.freeze({
   sar_ground: 'any', ignore_clouds: true, ignore_shadows: true, cloud_margin: 5, merge_metres: 0, shape: 'any',
 });
 
-/** A new analyzer of your own: one change rule, at All sizes like every built-in. */
-export function newRecipe(methods = []) {
-  const sizes = methods.find((entry) => entry.id === 'rules')?.sizes;
+/**
+ * A new analyzer of your own, for the satellite and the number of dates it
+ * was made for: one rule on the first usual line, at All sizes like every
+ * built-in. Radar starts from radar change's sizes, whose averaging is what
+ * keeps speckle from reading as a target.
+ */
+export function newRecipe(methods = [], { sensor = 'sentinel2', dates = 'two' } = {}) {
+  const radar = sensor === 'sentinel1';
+  const sizes = methods.find((entry) => entry.id === (radar ? 'sar-change' : 'rules'))?.sizes;
+  const two = dates === 'two';
+  const first = radar ? newRule('radar', two ? 'change' : 'b') : newRule('index', two ? 'change' : 'b');
   return {
-    id: 'custom', name: '', description: '', phenomenon: 'Candidate', method: 'rules',
+    id: 'custom', name: '', description: '', phenomenon: 'Candidate', method: 'rules', sensor, dates,
     parameters: { ...DEFAULT_PARAMETERS, ...(sizes?.all ?? {}) },
-    colour: '#f6a81a', style: 'both', rules: [newRule('index', 'change')], match: 'all', checks: [],
+    colour: '#f6a81a', style: 'both', rules: [first], match: 'all', checks: [],
   };
 }
 
@@ -386,6 +521,7 @@ export function fromDifference(settings) {
       ignore_shadows: !!settings.ignore_shadows,
       cloud_margin: Math.min(10, Math.max(0, Math.round((settings.cloud_margin ?? 0) / 10))),
     },
+    sensor: 'sentinel2', dates: 'two',
     colour: '#f6a81a', style: 'both', rules: [{ ...rule, ...tuned }], match: 'all', checks: [],
   };
 }
@@ -395,12 +531,17 @@ function rgb(hex) {
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
+/** The tint over ground a test judged, before any rule has painted it. */
+const VEIL = [120, 170, 255];
+
 /**
- * The preview mask painted in the rules' colours: each shown rule lays its
- * pixels in its colour, later ones over earlier, and a hovered rule alone,
- * brighter. `bits` is one byte a pixel, the engine's mask.
+ * A tile's mask painted in the rules' colours: each shown rule lays its pixels
+ * in its colour, later ones over earlier, and a hovered rule alone, brighter.
+ * `bits` is one byte a pixel, the engine's mask. With a `veil` the ground the
+ * test measured is tinted first, so a pixel no rule kept still reads as
+ * tested, and cloud or missing imagery stays clear.
  */
-export function paintMask(bits, { shown = [], hover = null, colours = RULE_COLOURS, alpha = 110 } = {}) {
+export function paintMask(bits, { shown = [], hover = null, colours = RULE_COLOURS, alpha = 110, veil = 0 } = {}) {
   const out = new Uint8ClampedArray(bits.length * 4);
   const order = hover === null ? shown.map((on, i) => (on ? i : -1)).filter((i) => i >= 0) : [hover];
   const tints = colours.map(rgb);
@@ -408,6 +549,9 @@ export function paintMask(bits, { shown = [], hover = null, colours = RULE_COLOU
   for (let p = 0; p < bits.length; p++) {
     const value = bits[p];
     if (!value) continue;
+    if (veil && value & (1 << MEASURED_BIT)) {
+      out[p * 4] = VEIL[0]; out[p * 4 + 1] = VEIL[1]; out[p * 4 + 2] = VEIL[2]; out[p * 4 + 3] = veil;
+    }
     for (const i of order) {
       if (!(value & (1 << i))) continue;
       const [r, g, b] = tints[i % tints.length];
@@ -418,31 +562,13 @@ export function paintMask(bits, { shown = [], hover = null, colours = RULE_COLOU
 }
 
 /**
- * Keep a painted mask to the ground inside `bounds` ({ west, south, east, north }
- * in degrees), clearing every pixel outside. The mask covers `box`, its extent in
- * Web Mercator metres; both are aligned with the ground, so the kept part is a
- * pixel rectangle however the map is turned. Used while a check is open: it
- * judges its own frame, so the map paints nothing past it.
+ * Which part of a split map a rule is painted on: what reads the before pass
+ * on the before half, the after pass on the after half, and a change across
+ * both, since it belongs to neither. A map that is not split has one part.
  */
-export function clipToBounds(rgba, width, height, box, bounds) {
-  const [west, north] = toMercator(bounds.west, bounds.north);
-  const [east, south] = toMercator(bounds.east, bounds.south);
-  const column = (x) => ((x - box.west) / (box.east - box.west)) * width;
-  const row = (y) => ((box.north - y) / (box.north - box.south)) * height;
-  const x0 = Math.max(0, Math.floor(column(west)));
-  const x1 = Math.min(width, Math.ceil(column(east)));
-  const y0 = Math.max(0, Math.floor(row(north)));
-  const y1 = Math.min(height, Math.ceil(row(south)));
-  const out = new Uint8ClampedArray(rgba.length);
-  for (let y = y0; y < y1; y++) {
-    out.set(rgba.subarray((y * width + x0) * 4, (y * width + x1) * 4), (y * width + x0) * 4);
-  }
-  return out;
-}
-
-/** Whether a [lon, lat] point is inside `bounds`. */
-export function insideBounds([lon, lat], bounds) {
-  return lon >= bounds.west && lon <= bounds.east && lat >= bounds.south && lat <= bounds.north;
+export function sideOf(rule, split) {
+  if (!split) return 'shared';
+  return rule.on === 'a' ? 'before' : rule.on === 'b' ? 'after' : 'shared';
 }
 
 /** A share of the measured ground, as the funnel prints it. */
@@ -480,27 +606,62 @@ export function signature(recipe) {
   return hash.toString(36);
 }
 
-/** A check of the view on screen and the passes shown, with no marks yet. */
-export function newCheck({ name, a, b, bounds }) {
+/** A check on the passes shown, with the pins dropped on them so far. */
+export function newCheck({ name, a = {}, b = { date: '' }, marks = [] }) {
   const id = `check-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  return { id, name, a: { ...a }, b: { ...b }, bounds: { ...bounds }, marks: [], result: null };
+  return { id, name, a: { ...a }, b: { ...b }, marks: marks.map((mark) => ({ ...mark, point: [...mark.point] })), result: null };
 }
 
-/**
- * A check with one more mark. Its view grows to hold the mark, and its last
- * result goes, since it answered for the marks it had.
- */
+/** A check with one more pin. Its last result goes, since it answered for the pins it had. */
 export function withMark(check, point, expect) {
-  const [lon, lat] = point;
-  const bounds = {
-    west: Math.min(check.bounds.west, lon - 0.002), south: Math.min(check.bounds.south, lat - 0.002),
-    east: Math.max(check.bounds.east, lon + 0.002), north: Math.max(check.bounds.north, lat + 0.002),
-  };
-  return { ...check, bounds, marks: [...check.marks, { point: [lon, lat], expect }], result: null };
+  return { ...check, marks: [...check.marks, { point: [point[0], point[1]], expect }], result: null };
 }
 
 export function withoutMark(check, index) {
   return { ...check, marks: check.marks.filter((_, i) => i !== index), result: null };
+}
+
+/** A check with one pin turned the other way: where it should be found, or where none should. */
+export function withFlippedMark(check, index) {
+  const marks = check.marks.map((mark, i) => (i === index ? { ...mark, expect: mark.expect === 'found' ? 'empty' : 'found' } : mark));
+  return { ...check, marks, result: null };
+}
+
+/** Whether a check has the passes this analyzer reads: the after pass, and the before one when it has two dates. */
+export const checkDated = (recipe, check) => !!check.b?.date && (readsOneDate(recipe) || !!check.a?.date);
+
+/** The box round a check's pins, widened so one pin alone still frames some ground. */
+export function marksBounds(marks, margin = 0.004) {
+  const lons = marks.map((mark) => mark.point[0]);
+  const lats = marks.map((mark) => mark.point[1]);
+  return { west: Math.min(...lons) - margin, east: Math.max(...lons) + margin,
+    south: Math.min(...lats) - margin, north: Math.max(...lats) + margin };
+}
+
+const passKey = (source) => [source?.provider ?? '', source?.date ?? '', source?.time ?? ''];
+
+/**
+ * What a check reads, for telling whether its last test still holds: its
+ * passes and its pins. The layer they are shown in is how they look, not what
+ * is read, so it is not in it.
+ */
+export const checkKey = (check) => canonical({ a: passKey(check.a), b: passKey(check.b),
+  marks: (check.marks ?? []).map((mark) => [mark.point, mark.expect]) });
+
+/** The recipe a test is asked with: what the rules read, and nothing that only names or colours them. */
+export function readingRecipe(recipe) {
+  return { name: 'Test', method: 'rules', sensor: sensorOf(recipe), dates: datesOf(recipe),
+    rules: recipe.rules, match: recipe.match, parameters: recipe.parameters };
+}
+
+/** A check in the form a test is asked with: without the result it would be told. */
+export const testedCheck = (check) => ({ ...check, result: null });
+
+/** A pass as a source the engine reads: Sentinel-2 in the layer it is shown in, or a radar pass at its time. */
+export function passSource(recipe, pass, layer = 'TRUE_COLOR') {
+  return readsRadar(recipe)
+    ? { provider: 'sentinel1', date: pass.date, time: pass.time ?? '' }
+    : { provider: 'sentinel2', date: pass.date, layer, maxcc: 100 };
 }
 
 /** Mark by mark, whether it came out as expected, from the last result. */
@@ -511,23 +672,23 @@ export function markOutcomes(check) {
 
 /**
  * Where a check stands: 'pass' when every mark came out as it should,
- * 'fail' when one did not, 'counted' for a check with no marks, 'stale' when
- * its last result was read with other rules, 'unrun' when it has none.
+ * 'fail' when one did not, 'unpinned' for a check with no pin yet, 'stale'
+ * when its last result was read with other rules, 'unrun' when it has none.
  */
 export function checkState(check, current) {
+  if (!check.marks.length) return 'unpinned';
   const result = check.result;
   if (!result) return 'unrun';
   if (result.signature !== current) return 'stale';
-  if (!check.marks.length) return 'counted';
   return markOutcomes(check).every(Boolean) ? 'pass' : 'fail';
 }
 
 /** A check's last result in a few words: "2 of 2 found · none flagged". */
 export function describeOutcome(check, current) {
   const state = checkState(check, current);
-  if (state === 'unrun') return 'Not run yet';
-  if (state === 'stale') return 'Not rerun since the rules changed';
-  if (state === 'counted') return `${check.result.count} candidate${check.result.count === 1 ? '' : 's'}`;
+  if (state === 'unpinned') return 'Needs a pin';
+  if (state === 'unrun') return 'Not tested yet';
+  if (state === 'stale') return 'Rules changed since its last test';
   const outcomes = markOutcomes(check);
   const found = check.marks.map((mark, i) => [mark, outcomes[i]]).filter(([mark]) => mark.expect === 'found');
   const empty = check.marks.map((mark, i) => [mark, outcomes[i]]).filter(([mark]) => mark.expect === 'empty');
@@ -540,13 +701,37 @@ export function describeOutcome(check, current) {
   return parts.join(' · ');
 }
 
+/**
+ * What the pins would have come to without one rule, in a few words, from
+ * whether each was on a candidate now and without it. A pin comes out right
+ * when a candidate is on it and it should be found, or none is and it should
+ * stay empty, so a rule that keeps pins right is one their count falls
+ * without, and one that loses pins is one it rises without.
+ */
+export function describeWithout(marks, covered, without) {
+  if (!without || !covered?.length || without.length !== marks.length) return '';
+  let wrong = 0;
+  let right = 0;
+  marks.forEach((mark, i) => {
+    const wanted = mark.expect === 'found';
+    const now = covered[i] === wanted;
+    const then = without[i] === wanted;
+    if (now && !then) wrong++;
+    else if (!now && then) right++;
+  });
+  if (!wrong && !right) return 'Without it, no pin changes.';
+  const pins = (n) => `${n} pin${n === 1 ? '' : 's'}`;
+  if (wrong && right) return `Without it, ${pins(right)} would come out right and ${wrong} wrong.`;
+  return right ? `Without it, ${pins(right)} would come out right.` : `Without it, ${pins(wrong)} would come out wrong.`;
+}
+
 /** Every check of a recipe counted by where it stands. */
 export function checksSummary(recipe) {
   const current = signature(recipe);
   const states = (recipe?.checks ?? []).map((check) => checkState(check, current));
   const count = (state) => states.filter((entry) => entry === state).length;
-  return { total: states.length, pass: count('pass'), fail: count('fail'), counted: count('counted'),
-    waiting: count('stale') + count('unrun') };
+  return { total: states.length, pass: count('pass'), fail: count('fail'),
+    waiting: count('stale') + count('unrun') + count('unpinned') };
 }
 
 /** The summary as the library prints it under an analyzer. */
@@ -555,7 +740,7 @@ export function describeChecks(recipe) {
   if (!total) return '';
   const head = `${total} check${total === 1 ? '' : 's'}`;
   if (fail) return `${head} · ${fail} fail${fail === 1 ? 's' : ''}`;
-  if (waiting === total) return `${head} · not run`;
+  if (waiting === total) return `${head} · not tested`;
   if (pass && !waiting) return `${head} · all pass`;
   return `${head} · ${pass} pass`;
 }
@@ -589,4 +774,30 @@ export function suggestedLayer(rule, layers = []) {
     wanted = ['SCENE_CLASSIFICATION', 'TRUE_COLOR'];
   }
   return firstOf(wanted, ids) ?? fallback;
+}
+
+// -- pins on a rule's line -----------------------------------------------------------
+
+const unit = (value) => Math.max(0, Math.min(1, value));
+
+/**
+ * Where each pin's reading falls along a rule's slider, 0 to 1, so the line
+ * can be set between the pins that should come out and the ones that should
+ * not. A drop is measured as the size of the drop, so a pin where the ground
+ * rose sits at nothing. A reading past an end of the slider is pinned to that
+ * end. `readings` is what a test read under each pin, in the order of the
+ * check's pins.
+ */
+export function pinTicks(rule, marks, readings, index) {
+  if (rule.measure === 'class') return [];
+  const { factor, min, max } = lineScale(rule);
+  const ticks = [];
+  marks.forEach((mark, i) => {
+    const row = readings?.[i]?.rules?.[index];
+    if (!row || row.value === null || row.value === undefined || !Number.isFinite(row.value)) return;
+    const shown = amountOf(rule, row.value) * factor;
+    ticks.push({ pin: i, expect: mark.expect, at: unit((shown - min) / (max - min)),
+      clipped: shown < min || shown > max, value: row.value, passes: !!row.passes });
+  });
+  return ticks;
 }

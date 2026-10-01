@@ -244,11 +244,11 @@ export const GUIDE = [
       },
       {
         label: 'An analyzer of your own is a list of rules',
-        text: 'Analyzers → New analyzer → start from an example, or build your own rules. Each rule is a line a pixel has to cross on A, on B or between them. Pick two passes and every change redraws what each rule keeps on the map; a click on the map says which rule let a point go.',
+        text: 'Analyzers → New analyzer asks what it reads first, Sentinel-2 or radar and one date or two, then starts blank or from an example. Each rule is a line a pixel has to cross, before, after or as the change between them.',
       },
       {
-        label: 'Checks prove an analyzer, if you want them',
-        text: 'Checks → Add a check, pick its passes, then arm Should be found or Should stay empty and click the map to drop pins. Checks reread themselves as the rules change, so a line that loses the burn or catches the reef turns its check red. The examples come with theirs.',
+        label: 'Checks prove an analyzer, and one is needed to save it',
+        text: 'On the map, New check takes its passes, then Should be found and Should stay empty drop pins where a candidate should come out and where none may. Test paints what each rule keeps under the pins, says its cost first and turns each pin green or red; a line that loses the burn or catches the reef shows at once. The examples come with theirs.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',

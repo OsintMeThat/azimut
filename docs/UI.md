@@ -1059,19 +1059,25 @@ Connections lists those events under *Events*.
   `Enter`. It is
   never taken from a file or from the previous entry; a click on the axis is the one
   thing that offers one. Filed with a date, the entry is *observed*.
-- **A time at a placed entry is the place's clock.** When the line has a place with a
-  point (or cites a proof with its own), a typed hour with no zone is read as local
-  time there, with the offset that place keeps on that day, summer time included:
-  `Reads: 17:05 at Kharkiv (Europe/Kyiv, UTC+03:00)`. The zone comes from the bundled
-  boundaries through `GET /api/geo/zone`, once per point, with nothing sent anywhere.
-  A zone typed with the time is never replaced, **No zone** keeps the hour unzoned,
-  and two places in different zones get no default: each is offered. The full
-  editor's Timezone menu offers the same **Local at …** entries.
-- **A day at a placed entry is the place's day.** A date has no hour to carry an
-  offset, so its zone is stated beside it (`when_zone`):
-  `Reads: 12 Mar 2024, the day at Kharkiv (Europe/Kyiv)`. **UTC day** reads it as
-  UTC's instead. The full editor's **Day in** menu holds the same choices, and a
-  stored day opens on its zone without being re-read.
+- **Every date is read on a clock, and a chip beside the reading names it.** The same
+  **Clock** control sits wherever a date is typed: this line, the Timeline's
+  **Change the date**, the full claim editor, Details and the Proof composer. It shows
+  the clock and its offset on that day (`Kharkiv UTC+03:00`), and one press opens a
+  searchable list: the entry's own places (**Local at Kharkiv**), the case's clock, the
+  zones picked lately in this case, **UTC**, this computer, **Clock unknown** for a time
+  only, and every zone in the world. A day takes a zone as well as a time does: `10/09/2026` on
+  Tokyo's clock spans Tokyo's 10th on the axis.
+- **The clock opens on the place.** When the line has a place with a point (or cites a
+  proof with its own), a typed date reads on that place's zone, looked up once per
+  point from the bundled boundaries through `GET /api/geo/zone`. Two places in
+  different zones, or none, open on **the case's clock**: the one the Timeline's axis
+  reads on, where most of the case's places are unless the analyst moved it
+  (`lib/caseAxis.svelte.js`). A date typed with no place then lands on the axis where it
+  was meant, and each place is still offered. A clock typed with
+  the time (`14:30 UTC`) is kept, and a pick holds while the date is corrected.
+  `lib/clock.js` holds the one rule: the value is kept as typed with its zone beside it
+  (`when_zone`), a time also carries the offset its zone keeps then, summer time
+  included, and UTC is stored as no zone.
 - **`@` mentions anything the case holds**, through the catalog's own search, so other
   names are found too. The list puts an exact name or other name first, then what the
   line already mentions, then the rest, and says which field matched when it was not
@@ -1113,7 +1119,7 @@ it is for in a line under it: the sentence, the chosen date format (and that an 
 date waits in Undated), the time role and the confidence, in the words the confidence
 scale is served with. The Time
 section uses a guided editor for a year, month, day, date and time, bounded date
-range or zoned time range. Precision, certainty and timezone are chosen separately, so the analyst does
+range or time range, with one **Clock** row for all of them. Precision and certainty are chosen separately, so the analyst does
 not need to remember suffixes or timestamp punctuation. **Advanced** preserves and
 accepts the announced raw syntax. It opens a complete reference beside the field:
 patterns and examples for reduced dates, local/UTC/offset timestamps, subseconds,
@@ -1319,7 +1325,7 @@ or **File date**. **A file is shown at its top**: the picture, the video ready t
 or the sound, for a file's own date and for an event about or citing one, the file an
 event is *about* first (a proof's date shows the footage, not the proof), with the
 list's thumbnail as its first frame and one press to full screen. Below it, the date on
-the axis's clock with the value as stated under it, one way to change it, reasoning and
+the axis's clock with the value as stated under it, one way to change it (the date and its **Clock**), reasoning and
 named subjects, places and evidence. How the date is held (the raw value, precision,
 timezone, authority, role, status) is folded under **About this date**. Statements can be
 edited there. **Right-clicking an entry** — on the axis, in the list or in either
@@ -2582,100 +2588,106 @@ the way, and tuning them there changes this detection only.
 
 **Analyzers** lists the built-ins and your own, shared by every case; one of your
 own with checks says under its name how they last came out (**3 checks · all
-pass**, **1 fails**, **not run**). **New analyzer** offers three roads, in this
-order. **Start from an example** lists five ready analyzers of your own, each with
-its checks: a fresh burn (Lahaina, August 2023), a forest cleared (Grünheide,
-2019 → 2020), water drained (the Kakhovka reservoir, June 2023), a solar farm built
-(Dubai, 2019 → 2023) and ships at anchor (Fujairah, one pass). A press copies it
-into the library at once, checks and all, under a free name, and opens it on its
-checks with the first one on the map. **Build your own rules** starts blank: an
-analyzer made of up to six rules, each a line a pixel has to cross. The last road
-starts from a built-in: the copy keeps its calibrated method while its name, sizes,
-thresholds, candidate label and colour become yours. Burn scars, vegetation loss
-and new water also carry **rules**, which opens them in the builder as the rules
-they apply. A built-in opens read-only with **Copy to tune** (and **Open as rules**
-where it has them); your own can be edited or removed from the list. A detection
-being built keeps its place while the library is open, and an analyzer saved from
-there comes back picked.
+pass**, **1 fails**, **not tested**). **New analyzer** asks what the analyzer
+reads before anything else: **Sentinel-2 · optical** or **Sentinel-1 · radar**
+(which says what it needs while Settings has no radar layer), and **One date**
+or **Two dates**. That is fixed for good, so its rules and checks always fit it:
+the builder shows it as a locked chip, offers only the measures and dates that
+fit, and another satellite or number of dates is a new analyzer. A saved one
+that never declared it gets it from its rules, once. The same screen offers
+**Blank**, with one rule to begin with, and the ready examples that read the
+same thing: a fresh burn (Lahaina, August 2023), a forest cleared (Grünheide,
+2019 → 2020), water drained (the Kakhovka reservoir, June 2023) and a solar farm
+built (Dubai, 2019 → 2023) on two dates, ships at anchor (Fujairah, one pass) on
+one, each with its checks. A press copies an example into the library at once,
+checks and all, under a free name, and opens it with its first check on the
+map. A built-in opens read-only with **Copy to tune** (and **Open as rules**
+where it has them, which is burn scars, vegetation loss and new water): the copy
+keeps its calibrated method while its name, sizes, thresholds, candidate label
+and colour become yours. Your own can be edited or removed from the list. A
+detection being built keeps its place while the library is open, and an analyzer
+saved from there comes back picked.
 
-The builder keeps the name and the sentence it reads as at the top, the map bench
-under them, and three tabs: **Rules**, **Checks** and **Settings** (sizes, shape,
-cleanup, smoothing, grouping, description, candidate label and colour). A rule
-names a quantity, then when it is read, then the line. The quantity is one of the
-six indices, **My index** (a normalised difference of any two Level-2A bands, with
-NDMI, NDSI, NDRE, NBR2 and GNDVI one pick away), one band's reflectance,
-brightness, a colour change, Sentinel-2's own ground class, or radar backscatter in
-VV, VH or VV − VH. It is read on **A**, on **B** or as the change **A → B** (B minus
-A, so a loss is negative), against **at least**, **at most**, **between** or, for a
-change, **either way**. Reflectance shows in percent and radar in decibels; a change
-in reflectance or radar takes the passes' overall shift in light out, as the
-built-ins do. **Against its surroundings** reads the quantity against the ground
-within a set distance, up to 300 m, the ring with a hole in the middle the vessel
+The builder keeps the name, the locked chip and the sentence the analyzer reads
+as at the top, and three tabs: **Rules**, **Checks** and **Settings** (sizes,
+shape, cleanup, smoothing, grouping, description, candidate label and colour).
+Over the rules a strip names the check on the map, says how it last came out and
+carries **Test**. A rule reads as the sentence it says (*NDVI dropped by 0.25 or
+more*); its dot carries its number and its map colour and hides or shows its
+pixels, and ★ ranks the candidates by it. A rule names a quantity, when it is
+read, and the line. The quantity is one of the six indices, **My index** (a
+normalised difference of any two Level-2A bands, with NDMI, NDSI, NDRE, NBR2 and
+GNDVI one pick away), one band's reflectance, brightness, a colour change,
+Sentinel-2's own ground class, or radar backscatter in VV, VH or VV − VH. On two
+dates it is read **Before**, **After** or as the **Change** (after minus before,
+so a loss is negative), and says which half of the split map it is painted on;
+one date has nothing to choose. The line is a direction and an amount: a change
+**Dropped**, **Rose** or moved **Either way**, a state **At least** or **At most**
+a value, and either **Between** two values, with a drop entered as its size.
+Reflectance shows in percent and radar in decibels; a change in reflectance or
+radar takes the passes' overall shift in light out, as the built-ins do.
+**Against the ground around it** reads the quantity against the ground within a
+set distance, up to 300 m, the ring with a hole in the middle the vessel
 detectors use, so one line holds over a dark sea and a bright desert. **Keep what
-passes all** keeps a pixel that passes every rule and **any** one that passes a
-single one. The first measured rule, marked ★, ranks candidates: two of its units
-past its line is Strong (0.2 of an index, 4% reflectance, 4 dB). Rules that only
-read B need no reference, like a vessel. Radar and optical rules do not mix, and
-one analyzer reads at most six bands, each three a request per date and tile. The
-sentence at the top says the whole analyzer, and becomes its description unless
-one is written.
+passes** all the rules or any rule. The first measured rule, marked ★, ranks
+candidates: two of its units past its line is Strong (0.2 of an index, 4%
+reflectance, 4 dB). Radar and optical rules do not mix, and one analyzer reads at
+most six bands, each three a request per date and tile. The sentence at the top
+says the whole analyzer, and becomes its description unless one is written.
 
-The map is the builder's bench. **On the map** takes two passes typed or picked
-from **Find passes**. The **Imagery** switch lays A, B or the basemap under the
-preview, in any layer the Copernicus configuration offers, and the builder
-suggests the one that reads rule ★ best: NDVI for vegetation, short-wave infrared
-for burns and heat, false colour for water and hulls. The preview follows the map.
-Nothing reaches Copernicus unasked: it reads frames the app already holds, judges
-every tile it has, and when the view lacks some it says how many and waits for
-**Show the detections here** (**Read the rest of the view** once part of it is
-shown), one metered request each. Past three tiles a side it previews the middle
-of the view. From then on every change redraws within a moment, on those frames
-and without a request: each rule paints the pixels it keeps in its own colour (its
-dot hides or shows them, and pointing at a row shows that rule alone), the
-candidates a run would return are outlined with their pins, and each row says what
-share of the measured ground it keeps, alone and with the rules above it. The
-preview runs the engine's own evaluation, cleanup, sizes, shape and grouping, so
-what it outlines is what a sweep of the same ground returns. **Rules** and
-**Detections** beside the count switch the map between that painting and the
-outlined candidates alone, as a run shows them; the dots keep their state for the
-way back, and one pressed from Detections returns to Rules. While a check is open
-the count is the check's own, since the map shows its frame only. A click on the map
-reads every rule at that point: the value, before and after for a change, and a
-tick or a cross, so a thing that was not kept says which rule let it go. Under
-cloud or off the passes the card says so instead.
+The map is where checks are made and tried, and a console over it holds the
+controls. Its selector picks the check on the map, **Basemap only** to see the
+basemap alone, or **New check**. A check of two dates splits the map between its
+passes: the before pass on the left and the after pass on the right, each on its
+own map with the two cameras held together and a handle to drag the cut, and
+**Before**, **Split** and **After** switch between the whole map on one and the
+cut. A check of one date shows its pass on one map. An eye puts the basemap in
+the passes' place and back, and the layer menu picks the Copernicus layer they
+are shown in, with the one that reads rule ★ best marked.
 
-**Checks** are the analyzer's own proof, and optional: nothing asks for one and
-saving never waits on them. A check keeps a place, a pair of passes and the layer B
-shows in, and pins marked **Should be found** or **Should stay empty**. **Add a
-check** opens one where the map is: until it has a pin it moves with the map (the
-map's search box reaches the other side of the world), the passes picked from then
-on are its passes (**Find passes** from the check opens the list), and while one of
-its two pins is armed every click on the map drops it, the crosshair and a chip on
-the map saying which, until the pin is pressed again or the chip closed. **Done**
-closes it; the analyzer is not saved while a check lacks its passes. The point card
-of a click opens anywhere, read or not, and carries both pins too: a point on the
-ground of the open check goes into it, one anywhere else makes the view a new check.
-A view moved off the ground its passes were picked for drops them. A check with no
-pins counts the candidates of its whole view, which its row says costs more frames
-than pins, each read on its own tile. The open check's view is framed on the map
-with its name, and its pins drawn: a filled ring where a candidate should come out,
-a struck ring where none should, green or red once read. While a check is open the
-preview and its candidates stay inside its frame and the ground outside is veiled,
-so what the map paints is what the check judges. While the builder has
-passes, a bar on the map switches the imagery under the preview between **A**,
-**B** and **Blink**, and back to the basemap. Checks reread themselves
-from the tile cache a moment after every change to the rules, with no request, so
-the tab's badge (**2/3**) and each row follow the lines as they move: **2 of 2
-found**, **stayed empty**, **1 of 1 flagged**. A check whose frames are not held
-says how many it lacks; **Run all** reads them, up to the count on its face, one
-request each, and a check reads only the tiles under its marks. A result read with
-other rules than the current ones says **Not rerun since the rules changed**. Each
-example's empty marks are traps for one of its rules: the reef off Lahaina and a
-cloud the mask missed, the mown meadows at Grünheide, the river and the cooling pond
-at Kakhovka (flagged as soon as the change reads **either way**), the panels already
-there in Dubai and the dunes the wind moved, the town of Fujairah. Removing the
-rule that guards one turns it red, which is the lesson. Checks are saved with the
-analyzer, so Settings backup carries them.
+**Checks** are how an analyzer is proved, and one is needed to save it, with a
+pin where something should be found; the others may be traps, where nothing may
+be. A check is two passes (one, for one date) and the pins laid on them. It has
+no frame: it reads the ground under its pins, the tile under each and the tile
+across an edge when a pin is within 48 pixels of it, at most twelve tiles.
+**New check** opens a drawer over the console that takes its passes: a look-up
+for the ground at the middle of the map over 30 days, 90 days or a year, one
+Copernicus request, or **Dates**, which picks each side from a calendar of the
+month's passes, coloured by cloud and offering only days that keep the two in
+order, or from a typed day, as a routine does. The pins come next: **Should be
+found** and **Should stay empty** arm a pin, every click on the map drops it,
+on either half, and Esc puts it down. **Finish** keeps the check, which needs a
+pin; until then the column waits, dimmed, and **Cancel the check** gives it up.
+The Checks tab lists every check with how it came out, **Test all** with what it
+would cost at most, and for the one on the map its name, its passes and its pins
+to turn or take away.
+
+**Test** runs the rules on the ground under the pins and says, before it is
+pressed, how many Copernicus requests it will fetch (none once its frames are
+held), and nothing runs on its own: after a change to a rule or a pin the picture
+dims and the button reads **Test again**. A test paints each rule's pixels in its
+colour, what reads the before pass on the left half, the after pass on the right
+and a change on both, tints the ground it measured so that ground no rule kept
+still reads as tested and cloud stays clear, and outlines the candidates a run
+would return there, since it runs the engine's own evaluation, cleanup, sizes,
+shape and grouping. Each pin turns green or red as it comes out, and the row
+under the console says **2 of 2 found** or **1 of 1 flagged**, keeps a chip for
+every rule, to hide its pixels and see which ones help, and switches the map
+between **Rules** and **Detections**. Each rule's card gives the share of the
+measured ground it keeps, lays the pins along its slider where they were read
+(filled where they should be found, struck where none should), so the line can be
+set between them, and says what the pins would have come to without it (**Without
+it, 1 pin would come out wrong** means the rule keeps pins right, and one that
+would make pins come out right is losing them). A click on the map reads every
+rule at that point: the value, before and after for a change, and a tick or a
+cross, so a thing that was not kept says which rule let it go, and the card can
+drop a pin there; a pin opens the same card to turn it the other way or take it
+away. Each example's empty marks are traps for one of its rules: the reef off
+Lahaina and a cloud the mask missed, the mown meadows at Grünheide, the river and
+the cooling pond at Kakhovka (flagged as soon as the change reads **either
+way**), the panels already there in Dubai and the dunes the wind moved, the town
+of Fujairah. Removing the rule that guards one turns it red, which is the lesson.
+Checks are saved with the analyzer, so Settings backup carries them.
 
 **Shape** is offered to every analyzer: **compact** keeps roofs, craters and
 vehicles, **long and thin** roads, tracks and trenches, measured along each
@@ -2866,15 +2878,14 @@ the field rather than over it, and it opens on the day the field holds — else 
 month a looser answer named. A month, a range or a mark of doubt is still typed:
 those are not days, and a calendar has no way to offer them.
 
-**A date is read on a clock, and the field names it.** Under a set date, **Clock**
-defaults to *At the point*: the first point's zone, looked up from the bundled
-boundaries, with its offset on that day under it (`UTC+02:00 on that day`), and the
-date's reading names the zone rather than *local time*. So the 12th is Kyiv's 12th
-on the Timeline, from its midnight, and a typed `14:30` is placed on Kyiv's clock
-without being rewritten. **UTC** or **Other zone…** (a named zone, typed to narrow)
-override it. Left at the point, the zone follows the point on every save; with no
-point yet the field says the day is read in UTC. The entity and the footage's Claim
-carry the zone as `when_zone`, which Details also edits.
+**A date is read on a clock, and the field names it.** Under a set date, the shared
+**Clock** chip opens on *the point*: the first point's zone, looked up from the bundled
+boundaries, with its offset on that day. The date's reading names the zone rather than
+*local time*, so the 12th is Kyiv's 12th on the Timeline, from its midnight, and a typed
+`14:30` is placed on Kyiv's clock without being rewritten. **UTC** or any zone picked
+from the list overrides it. **Local at the point** goes back to following the point on
+every save; with no point yet the field says the day is read in UTC. The entity and the
+footage's Claim carry the zone as `when_zone`, which Details edits on the same chip.
 
 **Nothing ever fills it in**, unlike the coordinates and the sources beside it. The
 date a file carries is when it was uploaded, or what a camera clock said; neither is

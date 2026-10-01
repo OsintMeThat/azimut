@@ -22,7 +22,7 @@ from ..engine import (
 )
 from ..engine.analysis_models import (
     BUILTINS, GROUPS, MAX_AROUND, MAX_BANDS, MAX_CHECKS, MAX_MARKS, MAX_RULES, METHODS, RELIABILITY, Area, AreaDates,
-    AreaGeometry, AreaGroup, Bounds, Check, Colour, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId,
+    AreaGeometry, AreaGroup, Check, Colour, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId,
     Source, Zone, is_single, stored, unreadable,
 )
 from ..workspace import Case
@@ -54,7 +54,7 @@ def recipes() -> dict[str, Any]:
             "rules": {"bands": list(sentinel.L2A_BANDS), "classes": list(get_args(SceneClass)),
                       "max_rules": MAX_RULES, "max_bands": MAX_BANDS,
                       "max_around": MAX_AROUND, "max_checks": MAX_CHECKS, "max_marks": MAX_MARKS,
-                      "preview_span": detect_rules.PREVIEW_SPAN},
+                      "max_check_tiles": detect_rules.MAX_CHECK_TILES},
             # The built-ins a builder can open as the rules they apply.
             "as_rules": {recipe.id: converted for recipe in BUILTINS
                          if (converted := detect_rules.index_as_rules(recipe))},
@@ -85,36 +85,32 @@ def delete_recipe(ident: str) -> dict[str, bool]:
     return {"deleted": True}
 
 
-class PreviewInput(Model):
-    """An analyzer of your own, the two passes to try it on, and the view."""
+class CheckInput(Model):
+    """An analyzer of your own as it stands, and one of its checks to try it on."""
     recipe: Recipe
-    a: Source = Field(default_factory=Source)
-    b: Source
-    bounds: Bounds
-    #: Fetch the frames the cache lacks. Only the analyst's Read sets it.
+    check: Check
+
+
+class TestInput(CheckInput):
+    #: Fetch the frames the cache lacks. Only the analyst's Test sets it.
     read: bool = False
+    #: Send what the map draws as well: each tile's mask, the candidates and
+    #: what every rule read at every pin.
+    detail: bool = False
 
 
-class ProbeInput(PreviewInput):
-    #: Longitude and latitude, inside the grid the preview reads.
+class ProbeInput(CheckInput):
+    #: Longitude and latitude, inside the ground the check was tested on.
     point: tuple[Longitude, Latitude]
 
 
-class CheckInput(Model):
-    """An analyzer of your own as it stands, and one of its checks to rerun."""
-    recipe: Recipe
-    check: Check
-    #: Fetch the frames the cache lacks. Only the analyst's Run all sets it.
-    read: bool = False
-
-
-def _rules_only(body: PreviewInput | CheckInput) -> None:
+def _rules_only(body: CheckInput) -> None:
     if body.recipe.method != "rules":
-        raise HTTPException(422, "only an analyzer of your own rules has a live preview")
+        raise HTTPException(422, "only an analyzer of your own rules has checks to test")
 
 
-def _previewing(work: Any) -> dict[str, Any]:
-    """Run a preview step, saying what went wrong in words an analyst can act on."""
+def _testing(work: Any) -> dict[str, Any]:
+    """Run a step of a test, saying what went wrong in words an analyst can act on."""
     try:
         result: dict[str, Any] = work()
         return result
@@ -126,34 +122,32 @@ def _previewing(work: Any) -> dict[str, Any]:
         raise HTTPException(502, "Copernicus could not be reached; nothing was fetched") from exc
 
 
-@router.post("/compare/analyzers/preview")
-def preview_rules(body: PreviewInput) -> dict[str, Any]:
-    """What an analyzer of your own keeps over the view, rule by rule.
+@router.post("/compare/analyzers/check/plan")
+def plan_check(body: CheckInput) -> dict[str, Any]:
+    """What testing a check would read: its tiles, and how many frames the cache lacks.
+
+    Each missing frame is one metered Sentinel Hub request. Nothing is fetched.
+    """
+    _rules_only(body)
+    return _testing(lambda: detect_rules.plan(body.recipe, body.check))
+
+
+@router.post("/compare/analyzers/check")
+def test_check(body: TestInput) -> dict[str, Any]:
+    """One check tried with the rules as they stand: what came out on each pin.
 
     Reads the tile cache only unless `read` is set, which fetches the missing
     frames: one metered Sentinel Hub request each, for each date read.
     """
     _rules_only(body)
-    bounds = (body.bounds.west, body.bounds.south, body.bounds.east, body.bounds.north)
-    return _previewing(lambda: detect_rules.preview(body.recipe, body.a, body.b, bounds, read=body.read))
+    return _testing(lambda: detect_rules.check(body.recipe, body.check, read=body.read, detail=body.detail))
 
 
 @router.post("/compare/analyzers/probe")
 def probe_rules(body: ProbeInput) -> dict[str, Any]:
-    """Every rule's reading at one point of the preview. Never fetches."""
+    """Every rule's reading at one point of a tested check. Never fetches."""
     _rules_only(body)
-    return _previewing(lambda: detect_rules.probe(body.recipe, body.a, body.b, body.point))
-
-
-@router.post("/compare/analyzers/check")
-def check_rules(body: CheckInput) -> dict[str, Any]:
-    """One check rerun with the rules as they stand: what came out on each mark.
-
-    Reads the tile cache only unless `read` is set, which fetches the missing
-    frames the way the preview's Read does.
-    """
-    _rules_only(body)
-    return _previewing(lambda: detect_rules.check(body.recipe, body.check, read=body.read))
+    return _testing(lambda: detect_rules.probe(body.recipe, body.check, body.point))
 
 
 Kind = Literal["areas", "zones", "followups", "runs"]
