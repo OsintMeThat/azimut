@@ -1,0 +1,2902 @@
+{
+ "claims": {
+  "Changed: Levelled yard": {
+   "attrs": {
+    "detection": "run/patch-0-1",
+    "time_role": "occurred",
+    "when": "2026-05-04/2026-05-11"
+   },
+   "connectors": {
+    "at": [
+     "place:Levelled yard"
+    ],
+    "cites": [
+     "media:Levelled yard"
+    ]
+   },
+   "status": null
+  },
+  "Convoy crossed the east bridge": {
+   "attrs": {
+    "confidence": "certain",
+    "time_role": "occurred",
+    "when": "2026-08-01T14:05:00Z"
+   },
+   "connectors": {
+    "about": [
+     "vessel:MV Aurora"
+    ],
+    "at": [
+     "place:Tower"
+    ],
+    "cites": [
+     "media:photo"
+    ]
+   },
+   "status": null
+  },
+  "Crew list circulated": {
+   "attrs": {
+    "when": "2026-08-05"
+   },
+   "connectors": {
+    "about": [
+     "person:A. Nadeau"
+    ],
+    "cites": [
+     "note:Witness"
+    ]
+   },
+   "status": null
+  },
+  "Harbour master called in": {
+   "attrs": {
+    "when": "2026-08-02T08:30:00"
+   },
+   "connectors": {
+    "about": [
+     "person:A. Nadeau"
+    ]
+   },
+   "status": null
+  },
+  "Material of Bridge proof was taken": {
+   "attrs": {
+    "proof": "proofs/.meta/Bridge proof.json",
+    "time_role": "observed",
+    "when": "2026-07-31T16:20:00Z"
+   },
+   "connectors": {
+    "about": [
+     "media:piece"
+    ],
+    "cites": [
+     "proof:Bridge proof"
+    ]
+   },
+   "status": null
+  },
+  "Night strike on the quay": {
+   "attrs": {
+    "confidence": "refuted",
+    "when": "2026-08-03T22:10:00+03:00"
+   },
+   "connectors": {
+    "about": [
+     "structure:Quay 4 warehouse"
+    ],
+    "at": [
+     "place:Tower"
+    ]
+   },
+   "status": null
+  },
+  "Owner changed the flag": {
+   "attrs": {},
+   "connectors": {
+    "about": [
+     "organization:Northwind Shipping",
+     "vessel:MV Aurora"
+    ]
+   },
+   "status": null
+  },
+  "Quay 4 warehouse burned": {
+   "attrs": {
+    "confidence": "probable",
+    "time_role": "occurred",
+    "when": "2026-07-30/2026-08-02"
+   },
+   "connectors": {
+    "about": [
+     "structure:Quay 4 warehouse"
+    ],
+    "at": [
+     "place:Tower"
+    ],
+    "cites": [
+     "bookmark:Harbour watch thread"
+    ]
+   },
+   "status": null
+  },
+  "Recruitment announced": {
+   "attrs": {
+    "confidence": "possible",
+    "when": "2026-07"
+   },
+   "connectors": {
+    "about": [
+     "account:@harbourwatch"
+    ],
+    "cites": [
+     "bookmark:Harbour watch thread"
+    ]
+   },
+   "status": null
+  },
+  "Second convoy suggested": {
+   "attrs": {
+    "confidence": "possible",
+    "when": "2026-08-06"
+   },
+   "connectors": {},
+   "status": null
+  },
+  "Two Handysize bulkers berthed at Quay 4": {
+   "attrs": {
+    "condition": "intact",
+    "confidence": "possible",
+    "count": 2
+   },
+   "connectors": {
+    "about": [
+     "equipment-type:Handysize bulker"
+    ],
+    "at": [
+     "place:Tower"
+    ]
+   },
+   "status": null
+  },
+  "Vessel seen leaving around the first": {
+   "attrs": {
+    "time_role": "observed",
+    "when": "2026-08-01~"
+   },
+   "connectors": {
+    "about": [
+     "vessel:MV Aurora"
+    ],
+    "at": [
+     "place:Tower"
+    ]
+   },
+   "status": null
+  },
+  "Where was the photo taken?": {
+   "attrs": {
+    "confidence": "probable",
+    "method": "spans counted against Esri imagery",
+    "time_role": "observed",
+    "when": "2026-08-01T09:12:00Z"
+   },
+   "connectors": {
+    "about": [
+     "media:photo"
+    ],
+    "at": [
+     "place:Tower"
+    ],
+    "cites": [
+     "bookmark:Harbour watch thread",
+     "note:Witness"
+    ]
+   },
+   "status": null
+  }
+ },
+ "detect_claim": "claim:Changed: Levelled yard",
+ "events": {
+  "rows": [
+   {
+    "category": "statement",
+    "confidence": null,
+    "earliest": "2026-05-04T00:00:00.000000Z",
+    "id": "temporal:claim:claim:Changed: Levelled yard",
+    "kind": "claim",
+    "label": "Changed: Levelled yard",
+    "latest": "2026-05-12T00:00:00.000000Z",
+    "owner_id": "claim:Changed: Levelled yard",
+    "parse_error": null,
+    "places": [
+     "place:Levelled yard"
+    ],
+    "precision": "day",
+    "raw": "2026-05-04/2026-05-11",
+    "sources": [
+     "media:Levelled yard"
+    ],
+    "status": "confirmed",
+    "subjects": [],
+    "time_role": "occurred"
+   },
+   {
+    "category": "statement",
+    "confidence": "certain",
+    "earliest": "2026-08-01T14:05:00.000000Z",
+    "id": "temporal:claim:claim:Convoy crossed the east bridge",
+    "kind": "claim",
+    "label": "Convoy crossed the east bridge",
+    "latest": "2026-08-01T14:05:01.000000Z",
+    "owner_id": "claim:Convoy crossed the east bridge",
+    "parse_error": null,
+    "places": [
+     "place:Tower"
+    ],
+    "precision": "second",
+    "raw": "2026-08-01T14:05:00Z",
+    "sources": [
+     "media:photo"
+    ],
+    "status": "confirmed",
+    "subjects": [
+     "vessel:MV Aurora"
+    ],
+    "time_role": "occurred"
+   },
+   {
+    "category": "statement",
+    "confidence": null,
+    "earliest": "2026-08-05T00:00:00.000000Z",
+    "id": "temporal:claim:claim:Crew list circulated",
+    "kind": "claim",
+    "label": "Crew list circulated",
+    "latest": "2026-08-06T00:00:00.000000Z",
+    "owner_id": "claim:Crew list circulated",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2026-08-05",
+    "sources": [
+     "note:Witness"
+    ],
+    "status": "confirmed",
+    "subjects": [
+     "person:A. Nadeau"
+    ],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": null,
+    "earliest": null,
+    "id": "temporal:claim:claim:Harbour master called in",
+    "kind": "claim",
+    "label": "Harbour master called in",
+    "latest": null,
+    "owner_id": "claim:Harbour master called in",
+    "parse_error": null,
+    "places": [],
+    "precision": "second",
+    "raw": "2026-08-02T08:30:00",
+    "sources": [],
+    "status": "confirmed",
+    "subjects": [
+     "person:A. Nadeau"
+    ],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": null,
+    "earliest": "2026-07-31T16:20:00.000000Z",
+    "id": "temporal:claim:claim:Material of Bridge proof was taken",
+    "kind": "claim",
+    "label": "Material of Bridge proof was taken",
+    "latest": "2026-07-31T16:20:01.000000Z",
+    "owner_id": "claim:Material of Bridge proof was taken",
+    "parse_error": null,
+    "places": [],
+    "precision": "second",
+    "raw": "2026-07-31T16:20:00Z",
+    "sources": [
+     "proof:Bridge proof"
+    ],
+    "status": "confirmed",
+    "subjects": [
+     "media:piece"
+    ],
+    "time_role": "observed"
+   },
+   {
+    "category": "statement",
+    "confidence": "refuted",
+    "earliest": "2026-08-03T19:10:00.000000Z",
+    "id": "temporal:claim:claim:Night strike on the quay",
+    "kind": "claim",
+    "label": "Night strike on the quay",
+    "latest": "2026-08-03T19:10:01.000000Z",
+    "owner_id": "claim:Night strike on the quay",
+    "parse_error": null,
+    "places": [
+     "place:Tower"
+    ],
+    "precision": "second",
+    "raw": "2026-08-03T22:10:00+03:00",
+    "sources": [],
+    "status": "confirmed",
+    "subjects": [
+     "structure:Quay 4 warehouse"
+    ],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": null,
+    "earliest": null,
+    "id": "temporal:claim:claim:Owner changed the flag",
+    "kind": "claim",
+    "label": "Owner changed the flag",
+    "latest": null,
+    "owner_id": "claim:Owner changed the flag",
+    "parse_error": null,
+    "places": [],
+    "precision": null,
+    "raw": null,
+    "sources": [],
+    "status": "confirmed",
+    "subjects": [
+     "organization:Northwind Shipping",
+     "vessel:MV Aurora"
+    ],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": "probable",
+    "earliest": "2026-07-30T00:00:00.000000Z",
+    "id": "temporal:claim:claim:Quay 4 warehouse burned",
+    "kind": "claim",
+    "label": "Quay 4 warehouse burned",
+    "latest": "2026-08-03T00:00:00.000000Z",
+    "owner_id": "claim:Quay 4 warehouse burned",
+    "parse_error": null,
+    "places": [
+     "place:Tower"
+    ],
+    "precision": "day",
+    "raw": "2026-07-30/2026-08-02",
+    "sources": [
+     "bookmark:Harbour watch thread"
+    ],
+    "status": "confirmed",
+    "subjects": [
+     "structure:Quay 4 warehouse"
+    ],
+    "time_role": "occurred"
+   },
+   {
+    "category": "statement",
+    "confidence": "possible",
+    "earliest": "2026-07-01T00:00:00.000000Z",
+    "id": "temporal:claim:claim:Recruitment announced",
+    "kind": "claim",
+    "label": "Recruitment announced",
+    "latest": "2026-08-01T00:00:00.000000Z",
+    "owner_id": "claim:Recruitment announced",
+    "parse_error": null,
+    "places": [],
+    "precision": "month",
+    "raw": "2026-07",
+    "sources": [
+     "bookmark:Harbour watch thread"
+    ],
+    "status": "confirmed",
+    "subjects": [
+     "account:@harbourwatch"
+    ],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": "possible",
+    "earliest": "2026-08-06T00:00:00.000000Z",
+    "id": "temporal:claim:claim:Second convoy suggested",
+    "kind": "claim",
+    "label": "Second convoy suggested",
+    "latest": "2026-08-07T00:00:00.000000Z",
+    "owner_id": "claim:Second convoy suggested",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2026-08-06",
+    "sources": [],
+    "status": "suggested",
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": "possible",
+    "earliest": null,
+    "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+    "kind": "claim",
+    "label": "Two Handysize bulkers berthed at Quay 4",
+    "latest": null,
+    "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+    "parse_error": null,
+    "places": [
+     "place:Tower"
+    ],
+    "precision": null,
+    "raw": null,
+    "sources": [],
+    "status": "confirmed",
+    "subjects": [
+     "equipment-type:Handysize bulker"
+    ],
+    "time_role": null
+   },
+   {
+    "category": "statement",
+    "confidence": null,
+    "earliest": "2026-08-01T00:00:00.000000Z",
+    "id": "temporal:claim:claim:Vessel seen leaving around the first",
+    "kind": "claim",
+    "label": "Vessel seen leaving around the first",
+    "latest": "2026-08-02T00:00:00.000000Z",
+    "owner_id": "claim:Vessel seen leaving around the first",
+    "parse_error": null,
+    "places": [
+     "place:Tower"
+    ],
+    "precision": "day",
+    "raw": "2026-08-01~",
+    "sources": [],
+    "status": "confirmed",
+    "subjects": [
+     "vessel:MV Aurora"
+    ],
+    "time_role": "observed"
+   },
+   {
+    "category": "statement",
+    "confidence": "probable",
+    "earliest": "2026-08-01T09:12:00.000000Z",
+    "id": "temporal:claim:claim:Where was the photo taken?",
+    "kind": "claim",
+    "label": "Where was the photo taken?",
+    "latest": "2026-08-01T09:12:01.000000Z",
+    "owner_id": "claim:Where was the photo taken?",
+    "parse_error": null,
+    "places": [
+     "place:Tower"
+    ],
+    "precision": "second",
+    "raw": "2026-08-01T09:12:00Z",
+    "sources": [
+     "bookmark:Harbour watch thread",
+     "note:Witness"
+    ],
+    "status": "confirmed",
+    "subjects": [
+     "media:photo"
+    ],
+    "time_role": "observed"
+   }
+  ],
+  "undated": 2,
+  "unplaced": 1
+ },
+ "filed_note": "# Witness\n\nSaw [[entity:vessel:MV Aurora|MV Aurora]] leave.\n",
+ "galleries": {
+  "organization:Northwind Shipping": [
+   {
+    "media": ".data/entity-images/image:direct.jpg",
+    "primary": true
+   }
+  ],
+  "person:A. Nadeau": [
+   {
+    "media": "media:photo",
+    "primary": true
+   }
+  ]
+ },
+ "live": {
+  "Chronology as list": {
+   "events": {
+    "rows": [
+     {
+      "category": "statement",
+      "confidence": "certain",
+      "earliest": "2026-08-01T14:05:00.000000Z",
+      "id": "temporal:claim:claim:Convoy crossed the east bridge",
+      "kind": "claim",
+      "label": "Convoy crossed the east bridge",
+      "latest": "2026-08-01T14:05:01.000000Z",
+      "owner_id": "claim:Convoy crossed the east bridge",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T14:05:00Z",
+      "sources": [
+       "media:photo"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Harbour master called in",
+      "kind": "claim",
+      "label": "Harbour master called in",
+      "latest": null,
+      "owner_id": "claim:Harbour master called in",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-02T08:30:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "person:A. Nadeau"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-07-31T16:20:00.000000Z",
+      "id": "temporal:claim:claim:Material of Bridge proof was taken",
+      "kind": "claim",
+      "label": "Material of Bridge proof was taken",
+      "latest": "2026-07-31T16:20:01.000000Z",
+      "owner_id": "claim:Material of Bridge proof was taken",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-07-31T16:20:00Z",
+      "sources": [
+       "proof:Bridge proof"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:piece"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "refuted",
+      "earliest": "2026-08-03T19:10:00.000000Z",
+      "id": "temporal:claim:claim:Night strike on the quay",
+      "kind": "claim",
+      "label": "Night strike on the quay",
+      "latest": "2026-08-03T19:10:01.000000Z",
+      "owner_id": "claim:Night strike on the quay",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-03T22:10:00+03:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Owner changed the flag",
+      "kind": "claim",
+      "label": "Owner changed the flag",
+      "latest": null,
+      "owner_id": "claim:Owner changed the flag",
+      "parse_error": null,
+      "places": [],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "organization:Northwind Shipping",
+       "vessel:MV Aurora"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-07-30T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Quay 4 warehouse burned",
+      "kind": "claim",
+      "label": "Quay 4 warehouse burned",
+      "latest": "2026-08-03T00:00:00.000000Z",
+      "owner_id": "claim:Quay 4 warehouse burned",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-07-30/2026-08-02",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": "2026-07-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Recruitment announced",
+      "kind": "claim",
+      "label": "Recruitment announced",
+      "latest": "2026-08-01T00:00:00.000000Z",
+      "owner_id": "claim:Recruitment announced",
+      "parse_error": null,
+      "places": [],
+      "precision": "month",
+      "raw": "2026-07",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "account:@harbourwatch"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": "2026-08-06T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Second convoy suggested",
+      "kind": "claim",
+      "label": "Second convoy suggested",
+      "latest": "2026-08-07T00:00:00.000000Z",
+      "owner_id": "claim:Second convoy suggested",
+      "parse_error": null,
+      "places": [],
+      "precision": "day",
+      "raw": "2026-08-06",
+      "sources": [],
+      "status": "suggested",
+      "subjects": [],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": null,
+      "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+      "kind": "claim",
+      "label": "Two Handysize bulkers berthed at Quay 4",
+      "latest": null,
+      "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "equipment-type:Handysize bulker"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-08-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Vessel seen leaving around the first",
+      "kind": "claim",
+      "label": "Vessel seen leaving around the first",
+      "latest": "2026-08-02T00:00:00.000000Z",
+      "owner_id": "claim:Vessel seen leaving around the first",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-08-01~",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-08-01T09:12:00.000000Z",
+      "id": "temporal:claim:claim:Where was the photo taken?",
+      "kind": "claim",
+      "label": "Where was the photo taken?",
+      "latest": "2026-08-01T09:12:01.000000Z",
+      "owner_id": "claim:Where was the photo taken?",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T09:12:00Z",
+      "sources": [
+       "bookmark:Harbour watch thread",
+       "note:Witness"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:photo"
+      ],
+      "time_role": "observed"
+     }
+    ],
+    "undated": 2,
+    "unplaced": 1
+   },
+   "media": {
+    "rows": [
+     {
+      "category": "media",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:media:media:harbour:captured",
+      "kind": "captured",
+      "label": "harbour",
+      "latest": null,
+      "owner_id": "media:harbour",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-01T13:58:00",
+      "sources": [],
+      "status": null,
+      "subjects": [],
+      "time_role": null
+     }
+    ],
+    "undated": 0,
+    "unplaced": 1
+   }
+  },
+  "Chronology defaults": {
+   "events": {
+    "rows": [
+     {
+      "category": "statement",
+      "confidence": "certain",
+      "earliest": "2026-08-01T14:05:00.000000Z",
+      "id": "temporal:claim:claim:Convoy crossed the east bridge",
+      "kind": "claim",
+      "label": "Convoy crossed the east bridge",
+      "latest": "2026-08-01T14:05:01.000000Z",
+      "owner_id": "claim:Convoy crossed the east bridge",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T14:05:00Z",
+      "sources": [
+       "media:photo"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-08-05T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Crew list circulated",
+      "kind": "claim",
+      "label": "Crew list circulated",
+      "latest": "2026-08-06T00:00:00.000000Z",
+      "owner_id": "claim:Crew list circulated",
+      "parse_error": null,
+      "places": [],
+      "precision": "day",
+      "raw": "2026-08-05",
+      "sources": [
+       "note:Witness"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "person:A. Nadeau"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Harbour master called in",
+      "kind": "claim",
+      "label": "Harbour master called in",
+      "latest": null,
+      "owner_id": "claim:Harbour master called in",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-02T08:30:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "person:A. Nadeau"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-07-31T16:20:00.000000Z",
+      "id": "temporal:claim:claim:Material of Bridge proof was taken",
+      "kind": "claim",
+      "label": "Material of Bridge proof was taken",
+      "latest": "2026-07-31T16:20:01.000000Z",
+      "owner_id": "claim:Material of Bridge proof was taken",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-07-31T16:20:00Z",
+      "sources": [
+       "proof:Bridge proof"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:piece"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "refuted",
+      "earliest": "2026-08-03T19:10:00.000000Z",
+      "id": "temporal:claim:claim:Night strike on the quay",
+      "kind": "claim",
+      "label": "Night strike on the quay",
+      "latest": "2026-08-03T19:10:01.000000Z",
+      "owner_id": "claim:Night strike on the quay",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-03T22:10:00+03:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Owner changed the flag",
+      "kind": "claim",
+      "label": "Owner changed the flag",
+      "latest": null,
+      "owner_id": "claim:Owner changed the flag",
+      "parse_error": null,
+      "places": [],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "organization:Northwind Shipping",
+       "vessel:MV Aurora"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-07-30T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Quay 4 warehouse burned",
+      "kind": "claim",
+      "label": "Quay 4 warehouse burned",
+      "latest": "2026-08-03T00:00:00.000000Z",
+      "owner_id": "claim:Quay 4 warehouse burned",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-07-30/2026-08-02",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": "2026-07-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Recruitment announced",
+      "kind": "claim",
+      "label": "Recruitment announced",
+      "latest": "2026-08-01T00:00:00.000000Z",
+      "owner_id": "claim:Recruitment announced",
+      "parse_error": null,
+      "places": [],
+      "precision": "month",
+      "raw": "2026-07",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "account:@harbourwatch"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": "2026-08-06T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Second convoy suggested",
+      "kind": "claim",
+      "label": "Second convoy suggested",
+      "latest": "2026-08-07T00:00:00.000000Z",
+      "owner_id": "claim:Second convoy suggested",
+      "parse_error": null,
+      "places": [],
+      "precision": "day",
+      "raw": "2026-08-06",
+      "sources": [],
+      "status": "suggested",
+      "subjects": [],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": null,
+      "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+      "kind": "claim",
+      "label": "Two Handysize bulkers berthed at Quay 4",
+      "latest": null,
+      "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "equipment-type:Handysize bulker"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-08-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Vessel seen leaving around the first",
+      "kind": "claim",
+      "label": "Vessel seen leaving around the first",
+      "latest": "2026-08-02T00:00:00.000000Z",
+      "owner_id": "claim:Vessel seen leaving around the first",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-08-01~",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-08-01T09:12:00.000000Z",
+      "id": "temporal:claim:claim:Where was the photo taken?",
+      "kind": "claim",
+      "label": "Where was the photo taken?",
+      "latest": "2026-08-01T09:12:01.000000Z",
+      "owner_id": "claim:Where was the photo taken?",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T09:12:00Z",
+      "sources": [
+       "bookmark:Harbour watch thread",
+       "note:Witness"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:photo"
+      ],
+      "time_role": "observed"
+     }
+    ],
+    "undated": 2,
+    "unplaced": 1
+   },
+   "media": {
+    "rows": [
+     {
+      "category": "media",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:media:media:harbour:captured",
+      "kind": "captured",
+      "label": "harbour",
+      "latest": null,
+      "owner_id": "media:harbour",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-01T13:58:00",
+      "sources": [],
+      "status": null,
+      "subjects": [],
+      "time_role": null
+     }
+    ],
+    "undated": 0,
+    "unplaced": 1
+   }
+  },
+  "Chronology in review": {
+   "events": {
+    "rows": [
+     {
+      "category": "statement",
+      "confidence": "certain",
+      "earliest": "2026-08-01T14:05:00.000000Z",
+      "id": "temporal:claim:claim:Convoy crossed the east bridge",
+      "kind": "claim",
+      "label": "Convoy crossed the east bridge",
+      "latest": "2026-08-01T14:05:01.000000Z",
+      "owner_id": "claim:Convoy crossed the east bridge",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T14:05:00Z",
+      "sources": [
+       "media:photo"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Harbour master called in",
+      "kind": "claim",
+      "label": "Harbour master called in",
+      "latest": null,
+      "owner_id": "claim:Harbour master called in",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-02T08:30:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "person:A. Nadeau"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Owner changed the flag",
+      "kind": "claim",
+      "label": "Owner changed the flag",
+      "latest": null,
+      "owner_id": "claim:Owner changed the flag",
+      "parse_error": null,
+      "places": [],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "organization:Northwind Shipping",
+       "vessel:MV Aurora"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-07-30T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Quay 4 warehouse burned",
+      "kind": "claim",
+      "label": "Quay 4 warehouse burned",
+      "latest": "2026-08-03T00:00:00.000000Z",
+      "owner_id": "claim:Quay 4 warehouse burned",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-07-30/2026-08-02",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": null,
+      "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+      "kind": "claim",
+      "label": "Two Handysize bulkers berthed at Quay 4",
+      "latest": null,
+      "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "equipment-type:Handysize bulker"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-08-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Vessel seen leaving around the first",
+      "kind": "claim",
+      "label": "Vessel seen leaving around the first",
+      "latest": "2026-08-02T00:00:00.000000Z",
+      "owner_id": "claim:Vessel seen leaving around the first",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-08-01~",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-08-01T09:12:00.000000Z",
+      "id": "temporal:claim:claim:Where was the photo taken?",
+      "kind": "claim",
+      "label": "Where was the photo taken?",
+      "latest": "2026-08-01T09:12:01.000000Z",
+      "owner_id": "claim:Where was the photo taken?",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T09:12:00Z",
+      "sources": [
+       "bookmark:Harbour watch thread",
+       "note:Witness"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:photo"
+      ],
+      "time_role": "observed"
+     }
+    ],
+    "undated": 2,
+    "unplaced": 1
+   }
+  },
+  "Chronology with media": {
+   "events": {
+    "rows": [
+     {
+      "category": "statement",
+      "confidence": "certain",
+      "earliest": "2026-08-01T14:05:00.000000Z",
+      "id": "temporal:claim:claim:Convoy crossed the east bridge",
+      "kind": "claim",
+      "label": "Convoy crossed the east bridge",
+      "latest": "2026-08-01T14:05:01.000000Z",
+      "owner_id": "claim:Convoy crossed the east bridge",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T14:05:00Z",
+      "sources": [
+       "media:photo"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Harbour master called in",
+      "kind": "claim",
+      "label": "Harbour master called in",
+      "latest": null,
+      "owner_id": "claim:Harbour master called in",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-02T08:30:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "person:A. Nadeau"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-07-31T16:20:00.000000Z",
+      "id": "temporal:claim:claim:Material of Bridge proof was taken",
+      "kind": "claim",
+      "label": "Material of Bridge proof was taken",
+      "latest": "2026-07-31T16:20:01.000000Z",
+      "owner_id": "claim:Material of Bridge proof was taken",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-07-31T16:20:00Z",
+      "sources": [
+       "proof:Bridge proof"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:piece"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "refuted",
+      "earliest": "2026-08-03T19:10:00.000000Z",
+      "id": "temporal:claim:claim:Night strike on the quay",
+      "kind": "claim",
+      "label": "Night strike on the quay",
+      "latest": "2026-08-03T19:10:01.000000Z",
+      "owner_id": "claim:Night strike on the quay",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-03T22:10:00+03:00",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Owner changed the flag",
+      "kind": "claim",
+      "label": "Owner changed the flag",
+      "latest": null,
+      "owner_id": "claim:Owner changed the flag",
+      "parse_error": null,
+      "places": [],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "organization:Northwind Shipping",
+       "vessel:MV Aurora"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-07-30T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Quay 4 warehouse burned",
+      "kind": "claim",
+      "label": "Quay 4 warehouse burned",
+      "latest": "2026-08-03T00:00:00.000000Z",
+      "owner_id": "claim:Quay 4 warehouse burned",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-07-30/2026-08-02",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "structure:Quay 4 warehouse"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": "2026-07-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Recruitment announced",
+      "kind": "claim",
+      "label": "Recruitment announced",
+      "latest": "2026-08-01T00:00:00.000000Z",
+      "owner_id": "claim:Recruitment announced",
+      "parse_error": null,
+      "places": [],
+      "precision": "month",
+      "raw": "2026-07",
+      "sources": [
+       "bookmark:Harbour watch thread"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "account:@harbourwatch"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": "2026-08-06T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Second convoy suggested",
+      "kind": "claim",
+      "label": "Second convoy suggested",
+      "latest": "2026-08-07T00:00:00.000000Z",
+      "owner_id": "claim:Second convoy suggested",
+      "parse_error": null,
+      "places": [],
+      "precision": "day",
+      "raw": "2026-08-06",
+      "sources": [],
+      "status": "suggested",
+      "subjects": [],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": "possible",
+      "earliest": null,
+      "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+      "kind": "claim",
+      "label": "Two Handysize bulkers berthed at Quay 4",
+      "latest": null,
+      "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "equipment-type:Handysize bulker"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-08-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Vessel seen leaving around the first",
+      "kind": "claim",
+      "label": "Vessel seen leaving around the first",
+      "latest": "2026-08-02T00:00:00.000000Z",
+      "owner_id": "claim:Vessel seen leaving around the first",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-08-01~",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "observed"
+     },
+     {
+      "category": "statement",
+      "confidence": "probable",
+      "earliest": "2026-08-01T09:12:00.000000Z",
+      "id": "temporal:claim:claim:Where was the photo taken?",
+      "kind": "claim",
+      "label": "Where was the photo taken?",
+      "latest": "2026-08-01T09:12:01.000000Z",
+      "owner_id": "claim:Where was the photo taken?",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T09:12:00Z",
+      "sources": [
+       "bookmark:Harbour watch thread",
+       "note:Witness"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "media:photo"
+      ],
+      "time_role": "observed"
+     }
+    ],
+    "undated": 2,
+    "unplaced": 1
+   },
+   "media": {
+    "rows": [
+     {
+      "category": "media",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:media:media:harbour:captured",
+      "kind": "captured",
+      "label": "harbour",
+      "latest": null,
+      "owner_id": "media:harbour",
+      "parse_error": null,
+      "places": [],
+      "precision": "second",
+      "raw": "2026-08-01T13:58:00",
+      "sources": [],
+      "status": null,
+      "subjects": [],
+      "time_role": null
+     }
+    ],
+    "undated": 0,
+    "unplaced": 1
+   },
+   "preset-activity": {
+    "rows": [],
+    "undated": 0,
+    "unplaced": 0
+   },
+   "preset-vessel": {
+    "rows": [
+     {
+      "category": "statement",
+      "confidence": "certain",
+      "earliest": "2026-08-01T14:05:00.000000Z",
+      "id": "temporal:claim:claim:Convoy crossed the east bridge",
+      "kind": "claim",
+      "label": "Convoy crossed the east bridge",
+      "latest": "2026-08-01T14:05:01.000000Z",
+      "owner_id": "claim:Convoy crossed the east bridge",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "second",
+      "raw": "2026-08-01T14:05:00Z",
+      "sources": [
+       "media:photo"
+      ],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "occurred"
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": null,
+      "id": "temporal:claim:claim:Owner changed the flag",
+      "kind": "claim",
+      "label": "Owner changed the flag",
+      "latest": null,
+      "owner_id": "claim:Owner changed the flag",
+      "parse_error": null,
+      "places": [],
+      "precision": null,
+      "raw": null,
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "organization:Northwind Shipping",
+       "vessel:MV Aurora"
+      ],
+      "time_role": null
+     },
+     {
+      "category": "statement",
+      "confidence": null,
+      "earliest": "2026-08-01T00:00:00.000000Z",
+      "id": "temporal:claim:claim:Vessel seen leaving around the first",
+      "kind": "claim",
+      "label": "Vessel seen leaving around the first",
+      "latest": "2026-08-02T00:00:00.000000Z",
+      "owner_id": "claim:Vessel seen leaving around the first",
+      "parse_error": null,
+      "places": [
+       "place:Tower"
+      ],
+      "precision": "day",
+      "raw": "2026-08-01~",
+      "sources": [],
+      "status": "confirmed",
+      "subjects": [
+       "vessel:MV Aurora"
+      ],
+      "time_role": "observed"
+     }
+    ],
+    "undated": 1,
+    "unplaced": 0
+   }
+  },
+  "Fleet graph": [
+   "organization:3rd Harbour Brigade",
+   "organization:Northwind Shipping",
+   "structure:Quay 4 warehouse",
+   "vessel:MV Aurora"
+  ],
+  "People in review": []
+ },
+ "media": {
+  "rows": [
+   {
+    "category": "media",
+    "confidence": null,
+    "earliest": "2026-05-04T00:00:00.000000Z",
+    "id": "temporal:media:media:Levelled yard:imagery-a",
+    "kind": "imagery-a",
+    "label": "Levelled yard",
+    "latest": "2026-05-05T00:00:00.000000Z",
+    "owner_id": "media:Levelled yard",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2026-05-04",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "media",
+    "confidence": null,
+    "earliest": "2026-05-11T00:00:00.000000Z",
+    "id": "temporal:media:media:Levelled yard:imagery-b",
+    "kind": "imagery-b",
+    "label": "Levelled yard",
+    "latest": "2026-05-12T00:00:00.000000Z",
+    "owner_id": "media:Levelled yard",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2026-05-11",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "media",
+    "confidence": null,
+    "earliest": null,
+    "id": "temporal:media:media:harbour:captured",
+    "kind": "captured",
+    "label": "harbour",
+    "latest": null,
+    "owner_id": "media:harbour",
+    "parse_error": null,
+    "places": [],
+    "precision": "second",
+    "raw": "2026-08-01T13:58:00",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   }
+  ],
+  "undated": 0,
+  "unplaced": 1
+ },
+ "notes": "# case\n\nOwner is [[entity:organization:Northwind Shipping|Northwind Shipping]], crew named by [[entity:person:A. Nadeau|A. Nadeau]].\n\n[[media:media/photo.png]]\n",
+ "promoted": "organization:3rd Harbour Brigade",
+ "search": {
+  "@harbourwatch": [
+   "account:@harbourwatch"
+  ],
+  "Nadeau": [
+   "person:A. Nadeau"
+  ],
+  "Quay 4": [
+   "claim:Quay 4 warehouse burned",
+   "claim:Two Handysize bulkers berthed at Quay 4",
+   "structure:Quay 4 warehouse"
+  ],
+  "aurora": [
+   "vessel:MV Aurora"
+  ],
+  "brigade": [
+   "organization:3rd Harbour Brigade"
+  ],
+  "handy bulker": [
+   "claim:Two Handysize bulkers berthed at Quay 4",
+   "equipment-type:Handysize bulker"
+  ]
+ },
+ "summary": {
+  "by_folder": {
+   "Sources/Telegram": 1
+  },
+  "by_source": {
+   "compare": 10,
+   "inspect": 3,
+   "map-layers": 1,
+   "media-library": 3,
+   "post-composer": 1,
+   "proof-composer": 3,
+   "satellite": 2,
+   "sheet": 3,
+   "user": 20
+  },
+  "by_status": {
+   "confirmed": 45,
+   "suggested": 1
+  },
+  "by_type": {
+   "account": 1,
+   "analysis-area": 2,
+   "analysis-follow-up": 1,
+   "analysis-run": 1,
+   "analysis-zones": 1,
+   "bookmark": 1,
+   "capture": 1,
+   "claim": 13,
+   "collage": 1,
+   "compare-session": 1,
+   "equipment-type": 1,
+   "inspect-session": 1,
+   "map-layer": 1,
+   "media": 6,
+   "network": 1,
+   "note": 1,
+   "organization": 2,
+   "person": 1,
+   "place": 2,
+   "post": 1,
+   "proof": 2,
+   "sheet": 2,
+   "structure": 1,
+   "vessel": 1
+  },
+  "countable": 1,
+  "lacks": {
+   "assessment": 6,
+   "source": 6
+  },
+  "linked_to": {
+   "account": 3,
+   "bookmark": 3,
+   "capture": 4,
+   "claim": 14,
+   "equipment-type": 2,
+   "inspect-session": 1,
+   "media": 20,
+   "network": 1,
+   "note": 2,
+   "organization": 3,
+   "person": 4,
+   "place": 10,
+   "post": 2,
+   "proof": 4,
+   "sheet": 3,
+   "structure": 4,
+   "vessel": 6
+  },
+  "total": 46,
+  "unlinked": 9
+ },
+ "views": {
+  "Actors frozen": {
+   "mode": "snapshot",
+   "spec": {
+    "board": {
+     "order": "label",
+     "sortDesc": false,
+     "sortKey": "label"
+    },
+    "query": {
+     "filter": {
+      "families": [
+       "actor"
+      ]
+     },
+     "label": "People and organizations",
+     "terms": {
+      "type": "person,organization"
+     }
+    },
+    "snapshot": {
+     "entities": [
+      "organization:3rd Harbour Brigade",
+      "organization:Northwind Shipping",
+      "person:A. Nadeau"
+     ],
+     "links": [],
+     "timeline_items": [],
+     "timeline_tracks": {}
+    },
+    "surface": "board",
+    "timeline": {
+     "categories": [
+      "statement",
+      "media"
+     ],
+     "field": null,
+     "from": null,
+     "to": null
+    },
+    "version": 1
+   },
+   "surface": "board"
+  },
+  "Chronology as list": {
+   "mode": "live",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-07-01",
+     "group_by": "subject",
+     "timezone": "UTC",
+     "to": "2026-09-01",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [
+        "temporal:claim:claim:Crew list circulated"
+       ],
+       "id": "events",
+       "label": "Events",
+       "pinned": [
+        "temporal:claim:claim:Recruitment announced"
+       ],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      },
+      {
+       "categories": [
+        "media"
+       ],
+       "collapsed": false,
+       "color": "blue",
+       "hidden": [],
+       "id": "media",
+       "label": "Media",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      }
+     ],
+     "view_mode": "list",
+     "visible_categories": [
+      "statement",
+      "media"
+     ],
+     "zone_choice": "utc"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Chronology defaults": {
+   "mode": "live",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-07-01",
+     "group_by": "none",
+     "timezone": "UTC",
+     "to": "2026-09-01",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [],
+       "id": "events",
+       "label": "Events",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      },
+      {
+       "categories": [
+        "media"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [],
+       "id": "media",
+       "label": "Media",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      }
+     ],
+     "view_mode": "plot",
+     "visible_categories": [
+      "statement",
+      "media"
+     ],
+     "zone_choice": "utc"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Chronology frozen": {
+   "mode": "snapshot",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "snapshot": {
+     "entities": [],
+     "links": [],
+     "timeline_items": [
+      {
+       "category": "statement",
+       "confidence": "certain",
+       "earliest": "2026-08-01T14:05:00.000000Z",
+       "id": "temporal:claim:claim:Convoy crossed the east bridge",
+       "kind": "claim",
+       "label": "Convoy crossed the east bridge",
+       "latest": "2026-08-01T14:05:01.000000Z",
+       "owner_id": "claim:Convoy crossed the east bridge",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-01T14:05:00Z",
+       "sources": [
+        "media:photo"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "vessel:MV Aurora"
+       ],
+       "time_role": "occurred"
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": null,
+       "id": "temporal:claim:claim:Harbour master called in",
+       "kind": "claim",
+       "label": "Harbour master called in",
+       "latest": null,
+       "owner_id": "claim:Harbour master called in",
+       "parse_error": null,
+       "places": [],
+       "precision": "second",
+       "raw": "2026-08-02T08:30:00",
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "person:A. Nadeau"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": "2026-07-31T16:20:00.000000Z",
+       "id": "temporal:claim:claim:Material of Bridge proof was taken",
+       "kind": "claim",
+       "label": "Material of Bridge proof was taken",
+       "latest": "2026-07-31T16:20:01.000000Z",
+       "owner_id": "claim:Material of Bridge proof was taken",
+       "parse_error": null,
+       "places": [],
+       "precision": "second",
+       "raw": "2026-07-31T16:20:00Z",
+       "sources": [
+        "proof:Bridge proof"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "media:piece"
+       ],
+       "time_role": "observed"
+      },
+      {
+       "category": "statement",
+       "confidence": "refuted",
+       "earliest": "2026-08-03T19:10:00.000000Z",
+       "id": "temporal:claim:claim:Night strike on the quay",
+       "kind": "claim",
+       "label": "Night strike on the quay",
+       "latest": "2026-08-03T19:10:01.000000Z",
+       "owner_id": "claim:Night strike on the quay",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-03T22:10:00+03:00",
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "structure:Quay 4 warehouse"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": null,
+       "id": "temporal:claim:claim:Owner changed the flag",
+       "kind": "claim",
+       "label": "Owner changed the flag",
+       "latest": null,
+       "owner_id": "claim:Owner changed the flag",
+       "parse_error": null,
+       "places": [],
+       "precision": null,
+       "raw": null,
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "organization:Northwind Shipping",
+        "vessel:MV Aurora"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "probable",
+       "earliest": "2026-07-30T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Quay 4 warehouse burned",
+       "kind": "claim",
+       "label": "Quay 4 warehouse burned",
+       "latest": "2026-08-03T00:00:00.000000Z",
+       "owner_id": "claim:Quay 4 warehouse burned",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "day",
+       "raw": "2026-07-30/2026-08-02",
+       "sources": [
+        "bookmark:Harbour watch thread"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "structure:Quay 4 warehouse"
+       ],
+       "time_role": "occurred"
+      },
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": "2026-07-01T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Recruitment announced",
+       "kind": "claim",
+       "label": "Recruitment announced",
+       "latest": "2026-08-01T00:00:00.000000Z",
+       "owner_id": "claim:Recruitment announced",
+       "parse_error": null,
+       "places": [],
+       "precision": "month",
+       "raw": "2026-07",
+       "sources": [
+        "bookmark:Harbour watch thread"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "account:@harbourwatch"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": "2026-08-06T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Second convoy suggested",
+       "kind": "claim",
+       "label": "Second convoy suggested",
+       "latest": "2026-08-07T00:00:00.000000Z",
+       "owner_id": "claim:Second convoy suggested",
+       "parse_error": null,
+       "places": [],
+       "precision": "day",
+       "raw": "2026-08-06",
+       "sources": [],
+       "status": "suggested",
+       "subjects": [],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": null,
+       "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+       "kind": "claim",
+       "label": "Two Handysize bulkers berthed at Quay 4",
+       "latest": null,
+       "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": null,
+       "raw": null,
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "equipment-type:Handysize bulker"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": "2026-08-01T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Vessel seen leaving around the first",
+       "kind": "claim",
+       "label": "Vessel seen leaving around the first",
+       "latest": "2026-08-02T00:00:00.000000Z",
+       "owner_id": "claim:Vessel seen leaving around the first",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "day",
+       "raw": "2026-08-01~",
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "vessel:MV Aurora"
+       ],
+       "time_role": "observed"
+      },
+      {
+       "category": "statement",
+       "confidence": "probable",
+       "earliest": "2026-08-01T09:12:00.000000Z",
+       "id": "temporal:claim:claim:Where was the photo taken?",
+       "kind": "claim",
+       "label": "Where was the photo taken?",
+       "latest": "2026-08-01T09:12:01.000000Z",
+       "owner_id": "claim:Where was the photo taken?",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-01T09:12:00Z",
+       "sources": [
+        "bookmark:Harbour watch thread",
+        "note:Witness"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "media:photo"
+       ],
+       "time_role": "observed"
+      },
+      {
+       "category": "media",
+       "confidence": null,
+       "earliest": null,
+       "id": "temporal:media:media:harbour:captured",
+       "kind": "captured",
+       "label": "harbour",
+       "latest": null,
+       "owner_id": "media:harbour",
+       "parse_error": null,
+       "places": [],
+       "precision": "second",
+       "raw": "2026-08-01T13:58:00",
+       "sources": [],
+       "status": null,
+       "subjects": [],
+       "time_role": null
+      }
+     ],
+     "timeline_tracks": {
+      "events": [
+       "temporal:claim:claim:Convoy crossed the east bridge",
+       "temporal:claim:claim:Harbour master called in",
+       "temporal:claim:claim:Material of Bridge proof was taken",
+       "temporal:claim:claim:Night strike on the quay",
+       "temporal:claim:claim:Owner changed the flag",
+       "temporal:claim:claim:Quay 4 warehouse burned",
+       "temporal:claim:claim:Recruitment announced",
+       "temporal:claim:claim:Second convoy suggested",
+       "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+       "temporal:claim:claim:Vessel seen leaving around the first",
+       "temporal:claim:claim:Where was the photo taken?"
+      ],
+      "media": [
+       "temporal:media:media:harbour:captured"
+      ],
+      "preset-vessel": [
+       "temporal:claim:claim:Convoy crossed the east bridge",
+       "temporal:claim:claim:Owner changed the flag",
+       "temporal:claim:claim:Vessel seen leaving around the first"
+      ]
+     }
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-07-01",
+     "group_by": "none",
+     "timezone": "UTC",
+     "to": "2026-09-01",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [
+        "temporal:claim:claim:Crew list circulated"
+       ],
+       "id": "events",
+       "label": "Events",
+       "pinned": [
+        "temporal:claim:claim:Recruitment announced"
+       ],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      },
+      {
+       "categories": [
+        "media"
+       ],
+       "collapsed": false,
+       "color": "blue",
+       "hidden": [],
+       "id": "media",
+       "label": "Media",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      },
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [],
+       "id": "preset-vessel",
+       "label": "Vessel",
+       "pinned": [],
+       "query": {
+        "filter": {
+         "types": [
+          "vessel"
+         ]
+        },
+        "label": "",
+        "relation": "about",
+        "roles": [],
+        "terms": {
+         "type": "vessel"
+        }
+       }
+      }
+     ],
+     "view_mode": "plot",
+     "visible_categories": [
+      "statement",
+      "media"
+     ],
+     "zone_choice": "utc"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Chronology in review": {
+   "mode": "live",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-08-01",
+     "group_by": "none",
+     "timezone": "UTC",
+     "to": "2026-08-02",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [],
+       "id": "events",
+       "label": "Events",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      }
+     ],
+     "view_mode": "plot",
+     "visible_categories": [
+      "statement"
+     ],
+     "zone_choice": "utc"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Chronology list frozen": {
+   "mode": "snapshot",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "snapshot": {
+     "entities": [],
+     "links": [],
+     "timeline_items": [
+      {
+       "category": "statement",
+       "confidence": "certain",
+       "earliest": "2026-08-01T14:05:00.000000Z",
+       "id": "temporal:claim:claim:Convoy crossed the east bridge",
+       "kind": "claim",
+       "label": "Convoy crossed the east bridge",
+       "latest": "2026-08-01T14:05:01.000000Z",
+       "owner_id": "claim:Convoy crossed the east bridge",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-01T14:05:00Z",
+       "sources": [
+        "media:photo"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "vessel:MV Aurora"
+       ],
+       "time_role": "occurred"
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": null,
+       "id": "temporal:claim:claim:Harbour master called in",
+       "kind": "claim",
+       "label": "Harbour master called in",
+       "latest": null,
+       "owner_id": "claim:Harbour master called in",
+       "parse_error": null,
+       "places": [],
+       "precision": "second",
+       "raw": "2026-08-02T08:30:00",
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "person:A. Nadeau"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": "2026-07-31T16:20:00.000000Z",
+       "id": "temporal:claim:claim:Material of Bridge proof was taken",
+       "kind": "claim",
+       "label": "Material of Bridge proof was taken",
+       "latest": "2026-07-31T16:20:01.000000Z",
+       "owner_id": "claim:Material of Bridge proof was taken",
+       "parse_error": null,
+       "places": [],
+       "precision": "second",
+       "raw": "2026-07-31T16:20:00Z",
+       "sources": [
+        "proof:Bridge proof"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "media:piece"
+       ],
+       "time_role": "observed"
+      },
+      {
+       "category": "statement",
+       "confidence": "refuted",
+       "earliest": "2026-08-03T19:10:00.000000Z",
+       "id": "temporal:claim:claim:Night strike on the quay",
+       "kind": "claim",
+       "label": "Night strike on the quay",
+       "latest": "2026-08-03T19:10:01.000000Z",
+       "owner_id": "claim:Night strike on the quay",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-03T22:10:00+03:00",
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "structure:Quay 4 warehouse"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": null,
+       "id": "temporal:claim:claim:Owner changed the flag",
+       "kind": "claim",
+       "label": "Owner changed the flag",
+       "latest": null,
+       "owner_id": "claim:Owner changed the flag",
+       "parse_error": null,
+       "places": [],
+       "precision": null,
+       "raw": null,
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "organization:Northwind Shipping",
+        "vessel:MV Aurora"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "probable",
+       "earliest": "2026-07-30T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Quay 4 warehouse burned",
+       "kind": "claim",
+       "label": "Quay 4 warehouse burned",
+       "latest": "2026-08-03T00:00:00.000000Z",
+       "owner_id": "claim:Quay 4 warehouse burned",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "day",
+       "raw": "2026-07-30/2026-08-02",
+       "sources": [
+        "bookmark:Harbour watch thread"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "structure:Quay 4 warehouse"
+       ],
+       "time_role": "occurred"
+      },
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": "2026-07-01T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Recruitment announced",
+       "kind": "claim",
+       "label": "Recruitment announced",
+       "latest": "2026-08-01T00:00:00.000000Z",
+       "owner_id": "claim:Recruitment announced",
+       "parse_error": null,
+       "places": [],
+       "precision": "month",
+       "raw": "2026-07",
+       "sources": [
+        "bookmark:Harbour watch thread"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "account:@harbourwatch"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": "2026-08-06T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Second convoy suggested",
+       "kind": "claim",
+       "label": "Second convoy suggested",
+       "latest": "2026-08-07T00:00:00.000000Z",
+       "owner_id": "claim:Second convoy suggested",
+       "parse_error": null,
+       "places": [],
+       "precision": "day",
+       "raw": "2026-08-06",
+       "sources": [],
+       "status": "suggested",
+       "subjects": [],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": "possible",
+       "earliest": null,
+       "id": "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+       "kind": "claim",
+       "label": "Two Handysize bulkers berthed at Quay 4",
+       "latest": null,
+       "owner_id": "claim:Two Handysize bulkers berthed at Quay 4",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": null,
+       "raw": null,
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "equipment-type:Handysize bulker"
+       ],
+       "time_role": null
+      },
+      {
+       "category": "statement",
+       "confidence": null,
+       "earliest": "2026-08-01T00:00:00.000000Z",
+       "id": "temporal:claim:claim:Vessel seen leaving around the first",
+       "kind": "claim",
+       "label": "Vessel seen leaving around the first",
+       "latest": "2026-08-02T00:00:00.000000Z",
+       "owner_id": "claim:Vessel seen leaving around the first",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "day",
+       "raw": "2026-08-01~",
+       "sources": [],
+       "status": "confirmed",
+       "subjects": [
+        "vessel:MV Aurora"
+       ],
+       "time_role": "observed"
+      },
+      {
+       "category": "statement",
+       "confidence": "probable",
+       "earliest": "2026-08-01T09:12:00.000000Z",
+       "id": "temporal:claim:claim:Where was the photo taken?",
+       "kind": "claim",
+       "label": "Where was the photo taken?",
+       "latest": "2026-08-01T09:12:01.000000Z",
+       "owner_id": "claim:Where was the photo taken?",
+       "parse_error": null,
+       "places": [
+        "place:Tower"
+       ],
+       "precision": "second",
+       "raw": "2026-08-01T09:12:00Z",
+       "sources": [
+        "bookmark:Harbour watch thread",
+        "note:Witness"
+       ],
+       "status": "confirmed",
+       "subjects": [
+        "media:photo"
+       ],
+       "time_role": "observed"
+      }
+     ],
+     "timeline_tracks": {
+      "events": [
+       "temporal:claim:claim:Convoy crossed the east bridge",
+       "temporal:claim:claim:Harbour master called in",
+       "temporal:claim:claim:Material of Bridge proof was taken",
+       "temporal:claim:claim:Night strike on the quay",
+       "temporal:claim:claim:Owner changed the flag",
+       "temporal:claim:claim:Quay 4 warehouse burned",
+       "temporal:claim:claim:Recruitment announced",
+       "temporal:claim:claim:Second convoy suggested",
+       "temporal:claim:claim:Two Handysize bulkers berthed at Quay 4",
+       "temporal:claim:claim:Vessel seen leaving around the first",
+       "temporal:claim:claim:Where was the photo taken?"
+      ]
+     }
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-07-01",
+     "group_by": "none",
+     "timezone": "UTC",
+     "to": "2026-09-01",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [
+        "temporal:claim:claim:Crew list circulated"
+       ],
+       "id": "events",
+       "label": "Events",
+       "pinned": [
+        "temporal:claim:claim:Recruitment announced"
+       ],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      }
+     ],
+     "view_mode": "list",
+     "visible_categories": [
+      "statement"
+     ],
+     "zone_choice": "utc"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Chronology with media": {
+   "mode": "live",
+   "spec": {
+    "query": {
+     "terms": {}
+    },
+    "surface": "timeline",
+    "timeline": {
+     "entity": null,
+     "field": null,
+     "from": "2026-07-01",
+     "group_by": "none",
+     "timezone": "Europe/Kyiv",
+     "to": "2026-09-01",
+     "tracks": [
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [
+        "temporal:claim:claim:Crew list circulated"
+       ],
+       "id": "events",
+       "label": "Events",
+       "pinned": [
+        "temporal:claim:claim:Recruitment announced"
+       ],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      },
+      {
+       "categories": [
+        "media"
+       ],
+       "collapsed": false,
+       "color": "blue",
+       "hidden": [],
+       "id": "media",
+       "label": "Media",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      },
+      {
+       "categories": [
+        "statement"
+       ],
+       "collapsed": false,
+       "color": "",
+       "hidden": [],
+       "id": "preset-vessel",
+       "label": "Vessel",
+       "pinned": [],
+       "query": {
+        "filter": {
+         "types": [
+          "vessel"
+         ]
+        },
+        "label": "",
+        "relation": "about",
+        "roles": [],
+        "terms": {
+         "type": "vessel"
+        }
+       }
+      },
+      {
+       "categories": [
+        "case_activity"
+       ],
+       "collapsed": true,
+       "color": "",
+       "hidden": [],
+       "id": "preset-activity",
+       "label": "Case activity",
+       "pinned": [],
+       "query": {
+        "filter": {},
+        "label": "",
+        "relation": "any",
+        "roles": [],
+        "terms": {}
+       }
+      }
+     ],
+     "view_mode": "plot",
+     "visible_categories": [
+      "statement",
+      "media",
+      "case_activity"
+     ],
+     "zone_choice": "zone:Europe/Kyiv"
+    },
+    "version": 1
+   },
+   "surface": "timeline"
+  },
+  "Fleet graph": {
+   "mode": "live",
+   "spec": {
+    "graph": {
+     "arrangement": [
+      {
+       "id": "vessel:MV Aurora",
+       "x": 40,
+       "y": -12
+      }
+     ],
+     "camera": {
+      "x": 10,
+      "y": 20,
+      "zoom": 1.25
+     },
+     "hops": 2,
+     "kept": [
+      "vessel:MV Aurora"
+     ],
+     "lens": "all"
+    },
+    "query": {
+     "filter": {
+      "families": [
+       "asset",
+       "actor"
+      ]
+     },
+     "terms": {
+      "type": "vessel,organization,structure"
+     }
+    },
+    "surface": "graph",
+    "timeline": {
+     "categories": [
+      "statement",
+      "media"
+     ],
+     "field": null,
+     "from": null,
+     "to": null
+    },
+    "version": 1
+   },
+   "surface": "graph"
+  },
+  "Fleet graph frozen": {
+   "mode": "snapshot",
+   "spec": {
+    "graph": {
+     "hops": 1,
+     "lens": "all"
+    },
+    "query": {
+     "filter": {
+      "families": [
+       "asset"
+      ]
+     },
+     "terms": {
+      "type": "vessel,structure"
+     }
+    },
+    "snapshot": {
+     "entities": [
+      "structure:Quay 4 warehouse",
+      "vessel:MV Aurora"
+     ],
+     "links": [],
+     "timeline_items": [],
+     "timeline_tracks": {}
+    },
+    "surface": "graph",
+    "timeline": {
+     "categories": [
+      "statement",
+      "media"
+     ],
+     "field": null,
+     "from": null,
+     "to": null
+    },
+    "version": 1
+   },
+   "surface": "graph"
+  },
+  "People in review": {
+   "mode": "live",
+   "spec": {
+    "board": {
+     "order": "-created",
+     "sortDesc": true,
+     "sortKey": "created"
+    },
+    "query": {
+     "filter": {
+      "families": [
+       "actor"
+      ],
+      "status": "suggested"
+     },
+     "terms": {
+      "status": "suggested",
+      "type": "person,organization"
+     }
+    },
+    "surface": "board",
+    "timeline": {
+     "categories": [
+      "statement",
+      "media"
+     ],
+     "field": null,
+     "from": null,
+     "to": null
+    },
+    "version": 1
+   },
+   "surface": "board"
+  }
+ }
+}

@@ -5,6 +5,7 @@
  * the Details editor send an analyst to the same place.
  */
 import { caseState, toast, uiState } from './state.svelte.js';
+import { api } from './api.js';
 import { mediaKindOf } from './entityIcon.js';
 import { GUIDE, guideFor } from './guide.js';
 import { revealMediaFolder } from './reveal.js';
@@ -78,14 +79,63 @@ export function showInFolder(entity) {
   return revealMediaFolder(caseId, path).catch((e) => toast(e.message, 'warn', 5000));
 }
 
+/** The window a Claim's entry is read in: the entry, with as much again on either
+ *  side and never less than half a day, so its neighbours are in view. */
+export function claimWindow(item) {
+  const first = new Date(item?.earliest ?? '').getTime();
+  const last = new Date(item?.latest ?? '').getTime();
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return null;
+  const pad = Math.max((last - first) * 2, 12 * 3600 * 1000);
+  return { from: new Date(first - pad).toISOString(), to: new Date(last + pad).toISOString() };
+}
+
+/**
+ * Where a Claim is read: on the Timeline, at its own entry.
+ *
+ * A dated one opens the window around it with the entry selected; an undated one
+ * opens the Undated queue, and one whose clock is unknown the "Not on UTC axis" list,
+ * with the entry selected either way. The row comes from the route that says where a
+ * Claim sits, so a Claim past the first page still lands.
+ */
+export function openClaim(item) {
+  if (!item?.id) return;
+  const window = item.sortable ? claimWindow(item) : null;
+  if (window) uiState.timelineRange = { ...window, itemId: item.id, item };
+  else uiState.timelineQueue = { queue: item.earliest || !item.raw ? 'undated' : 'unplaced', itemId: item.id, item };
+  uiState.tool = 'timeline';
+}
+
 /** Reopen an artifact in its tool, loading whatever spec/draft it carries. */
-export function openEntity(entity) {
+export function openEntity(entity, resolved = false) {
+  // Places navigate by coordinates, so resolve an old snapshot's id before flying.
+  // Other mergeable subjects open Details, whose chain read resolves the id.
+  if (entity?.type === 'place' && entity.id && caseState.current?.id && !resolved) {
+    const cid = caseState.current.id;
+    return api.get(`/api/cases/${cid}/entities/${entity.id}/chain`).then((chain) => {
+      if (caseState.current?.id !== cid) return;
+      if (chain.merged_from) toast(`Merged into ${chain.entity.label}`, 'info');
+      openEntity(chain.entity, true);
+    }).catch((error) => toast(error.message, 'danger'));
+  }
   // A file the app cannot show is opened where it actually lives. This runs before
   // the type branches below, so every surface that follows an entity — a relation
   // row, a chain row, the sidebar — makes the same call.
   if (opensInFileManager(entity)) {
     void showInFolder(entity);
     return;
+  }
+  // A Claim is an event, and events are read on the Timeline. The Board still lists
+  // it with the rest of the case, and its Details are one click from the entry.
+  if (entity?.type === 'claim' && entity.id && caseState.current?.id) {
+    const cid = caseState.current.id;
+    return api.get(`/api/cases/${cid}/timeline/claims/${entity.id}`).then((body) => {
+      if (caseState.current?.id !== cid) return;
+      openClaim(body.item);
+    }).catch(() => {
+      if (caseState.current?.id !== cid) return;
+      uiState.openBoardEntity = entity.id;
+      uiState.tool = 'board';
+    });
   }
   if (entity.type === 'note') {
     uiState.openNotebook = { noteId: entity.id };
@@ -175,10 +225,10 @@ export function openEntity(entity) {
     uiState.tool = tool;
     return;
   }
-  // A person, an account, a claim: the graph-only types have no tool that reopens
-  // them, and until the board existed this call ended here doing nothing at all —
-  // a relation row on the map said "Open …" and swallowed the click. The board is
-  // where they are read, so that is where the jump lands.
+  // A person, an account, a place-less subject: the graph-only types have no tool
+  // that reopens them, and until the board existed this call ended here doing nothing
+  // at all — a relation row on the map said "Open …" and swallowed the click. The
+  // board is where they are read, so that is where the jump lands.
   if (entity.id) {
     uiState.openBoardEntity = entity.id;
     uiState.tool = 'board';

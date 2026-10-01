@@ -32,3 +32,26 @@ Neither file is written by hand. `npm run calibrate:maps` drives the sites again
 rewrites the raw one; `python scripts/build_map_fixture.py` turns that into the other.
 The protocol both follow is `frontend/calibration/protocol.mjs`, and it is itself tested
 against a map whose layout is known (`frontend/e2e/map-calibration.spec.js`).
+
+## The Case workspace
+
+| File | What it is there to break |
+|---|---|
+| `case-workspace-0.3.1.json` | How the Board, Graph and Timeline read a case left the way a 0.3.1 analyst leaves one: saved readings of each surface, Live and Snapshot, in both Timeline modes, with Media tracks, hides and pins; dated, undated and unplaced Claims; a kept Detect pin and a proof date; Notebook mentions, a promoted Sheet row and galleries. Ids are written `type:label` and the moment of the build is scrubbed. |
+
+Written by `tests/caseworkspace.py`, never by hand, and compared by
+`tests/test_case_workspace_fixture.py`; `frontend/src/lib/caseWorkspaceFixture.test.js`
+reopens its saved views through the parsers the three surfaces use. A change that
+means to alter a reading rewrites it with `AZIMUT_WRITE_GOLDEN=1 uv run pytest
+tests/test_case_workspace_fixture.py`, and the diff is that change's account of what
+reads differently.
+
+## Search folding
+
+| File | What it is there to break |
+|---|---|
+| `fold_cases.json` | What a search folds and what it keeps, one line per case: Latin, Greek and Cyrillic accents, Arabic harakat and the tatweel, Hebrew points go; a Devanagari sign, a dakuten, the Hebrew maqaf and the punctuation of an email, a network or a handle stay. |
+
+Written by hand. Read by `tests/test_textfold.py` against `engine/textfold.py` and by
+`frontend/src/lib/textFold.test.js` against `lib/textFold.js`, so the server's index
+and the browser's in-memory search cannot fold one text two ways.

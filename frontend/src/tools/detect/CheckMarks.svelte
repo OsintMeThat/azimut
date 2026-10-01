@@ -1,15 +1,12 @@
 <script>
   /**
-   * The check on the bench, on the ground: its view as a dashed frame with its
-   * name, and its pins, a filled ring where a candidate should come out and a
-   * struck ring where none should, green or red once the check has been read
-   * with the rules as they stand. The map keeps its clicks: this only shows.
-   *
-   * The ground outside the frame is veiled. The rules' preview covers the whole
-   * view, which opens with a margin around the check, so without the veil the
-   * painted ground ran past the frame and read as the frame being off.
+   * The pins of the check on the map: a filled ring where a candidate should
+   * come out and a struck ring where none should, green or red once the check
+   * has been tested with the rules as they stand. A press on one reads the
+   * rules under it, to turn it or take it away. While a pin is armed the map
+   * takes the click instead, so a pin can be dropped beside another.
    */
-  let { engine, marks = [], ground = null } = $props();
+  let { engine, pins = [], armed = false, selected = null, onpick = () => {} } = $props();
 
   let revision = $state(0);
   $effect(() => {
@@ -18,76 +15,43 @@
   });
   const placed = $derived.by(() => {
     revision;
-    return marks.map((mark) => ({
-      ...mark,
-      at: engine?.latLngToContainerPoint({ lon: mark.point[0], lat: mark.point[1] }) ?? { x: 0, y: 0 },
+    return pins.map((pin, index) => ({
+      ...pin,
+      index,
+      at: engine?.latLngToContainerPoint({ lon: pin.point[0], lat: pin.point[1] }) ?? { x: 0, y: 0 },
     }));
   });
-  /** The frame's four corners on screen, turned with the map if it is. */
-  const frame = $derived.by(() => {
-    revision;
-    if (!engine || !ground) return null;
-    const { west, south, east, north } = ground.bounds;
-    const corners = [[west, north], [east, north], [east, south], [west, south]]
-      .map(([lon, lat]) => engine.latLngToContainerPoint({ lon, lat }));
-    const top = corners.reduce((best, point) => (point.y < best.y ? point : best), corners[0]);
-    const points = corners.map((point) => `${point.x},${point.y}`).join(' ');
-    // Everything but the frame: a ring far past any screen, the frame cut out of it.
-    const veil = `M-1e5,-1e5H1e5V1e5H-1e5Z M${corners.map((point) => `${point.x},${point.y}`).join(' L')}Z`;
-    return { points, veil, label: top };
-  });
-  const words = (mark) => `${mark.expect === 'found' ? 'Should be found' : 'Should stay empty'}${
-    mark.ok === true ? ', and it is' : mark.ok === false ? ', and it is not' : ''}`;
+  const words = (pin) => `${pin.expect === 'found' ? 'Should be found' : 'Should stay empty'}${
+    pin.ok === true ? ', and it is' : pin.ok === false ? ', and it is not' : ''}`;
 </script>
 
-{#if frame}
-  <svg class="ground" aria-hidden="true">
-    <path class="veil" d={frame.veil} fill-rule="evenodd" />
-    <polygon points={frame.points} />
-  </svg>
-  <span class="ground-name" style:left={`${frame.label.x}px`} style:top={`${frame.label.y}px`}>{ground.name}</span>
-{/if}
-{#each placed as mark, i (i)}
-  <span class="mark pin-{mark.expect}" class:pass={mark.ok === true} class:fail={mark.ok === false}
-    style:left={`${mark.at.x}px`} style:top={`${mark.at.y}px`} title={words(mark)} aria-label={words(mark)}></span>
+{#each placed as pin (pin.index)}
+  <button type="button" class="mark pin-{pin.expect}" class:pass={pin.ok === true} class:fail={pin.ok === false}
+    class:selected={selected === pin.index} class:armed
+    style:left={`${pin.at.x}px`} style:top={`${pin.at.y}px`} title={words(pin)} aria-label={`Pin ${pin.index + 1}: ${words(pin)}`}
+    onclick={() => onpick(pin.index)}></button>
 {/each}
 
 <style>
-  .ground {
-    position: absolute;
-    inset: 0;
-    z-index: 550;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    pointer-events: none;
-  }
-  .ground polygon { fill: none; stroke: #f8fafc; stroke-width: 1.5; stroke-dasharray: 6 4; }
-  .ground .veil { fill: rgb(0 0 0 / 0.5); }
-  .ground-name {
-    position: absolute;
-    z-index: 551;
-    padding: 1px 6px;
-    transform: translate(0, calc(-100% - 3px));
-    border-radius: 3px;
-    background: rgb(0 0 0 / 0.6);
-    color: #f8fafc;
-    font-size: 11px;
-    white-space: nowrap;
-    pointer-events: none;
-  }
   .mark {
     --ring: #f8fafc;
     position: absolute;
     z-index: 555;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
     transform: translate(-50%, -50%);
     border: 2px solid var(--ring);
     border-radius: 50%;
-    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.65);
-    pointer-events: none;
+    background: transparent;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.65), 0 1px 5px rgb(0 0 0 / 0.45);
+    cursor: pointer;
+    transition: transform 0.12s var(--ease), box-shadow 0.12s var(--ease);
   }
+  .mark.armed { pointer-events: none; }
+  .mark:hover { transform: translate(-50%, -50%) scale(1.15); }
+  .mark.selected { box-shadow: 0 0 0 1px rgb(0 0 0 / 0.65), 0 0 0 4px rgb(255 255 255 / 0.35); }
+  .mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .mark.pass { --ring: #4ade80; }
   .mark.fail { --ring: #f87171; }
   .mark.pin-found::after {
@@ -102,7 +66,7 @@
     position: absolute;
     top: 50%;
     left: -2px;
-    width: 16px;
+    width: 18px;
     height: 2px;
     background: var(--ring);
     transform: rotate(-45deg);

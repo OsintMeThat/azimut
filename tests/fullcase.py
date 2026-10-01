@@ -74,6 +74,7 @@ class FullCase:
     piece: str = ""
     collage: str = ""  # the exported picture, which is media
     collage_doc: str = ""  # the layout it was exported from
+    collage_thumb: str = ""  # the layout's preview, which travels with it
     capture: str = ""
     session: str = ""  # the photo's Inspect work
     compare_session: str = ""
@@ -116,7 +117,7 @@ class FullCase:
     entity_types: set[str] = field(default_factory=set)
 
 
-def build_full_case(client, name: str = "Full case") -> FullCase:
+def build_full_case(client, name: str = "Full case", *, subject_changes: bool = True) -> FullCase:
     """Fill one case through every tool that files an artifact.
 
     Returns once the background queue is idle, so a caller can move or delete the
@@ -205,6 +206,12 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert layout_doc.status_code == 200, layout_doc.text
     full.collage_doc = f".collages/{layout_doc.json()['name']}.json"
+    preview = client.put(
+        f"/api/cases/{case_id}/collages/{layout_doc.json()['name']}/thumb",
+        files={"file": ("preview.png", io.BytesIO(_png((160, 80))), "image/png")},
+    )
+    assert preview.status_code == 200, preview.text
+    full.collage_thumb = preview.json()["thumb"]
 
     comparison = client.post(
         f"/api/cases/{case_id}/compare/sessions",
@@ -558,10 +565,14 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     seed_images(analysis)
     from azimut.engine.analysis_models import Zone
     ring = Zone.model_validate(analysis["zones"][0]).ring()
+    area = client.post(f"/api/cases/{case_id}/analysis/areas", json={
+        "name": "Port", "colour": "#38bdf8", "geometry": {
+            "type": "Polygon", "coordinates": [ring + [ring[0]]]},
+    })
+    assert area.status_code == 200, area.text
+    full.analyzer_area = f"{layout.ANALYSIS_DIR}/areas-{area.json()['id']}.json"
     for kind, body, attr in (
-        ("areas", {"name": "Port", "colour": "#38bdf8", "geometry": {
-            "type": "Polygon", "coordinates": [ring + [ring[0]]]}}, "analyzer_area"),
-        ("zones", {"title": "Port areas", "zones": analysis["zones"]}, "analyzer_zones"),
+        ("zones", {"title": "Port areas", "area_ids": [area.json()["id"]]}, "analyzer_zones"),
         ("followups", analysis, "analyzer_followup"),
         ("runs", analysis, "analyzer_run"),
     ):
@@ -575,6 +586,16 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     run_id = Path(full.analyzer_run).stem.split("-", 1)[1]
     result = client.get(f"/api/cases/{case_id}/analysis/runs/{run_id}").json()
     assert result["status"] == "ready", result
+
+    # Exercise the local merge journal, portable redirects, and retained fields in
+    # the same birth-state and bundle gates as every other case artifact.
+    if subject_changes:
+        first = entity("vehicle", "Unclassified subject")
+        changed = client.patch(f"/api/cases/{case_id}/entities/{first}", json={"type": "vessel"})
+        assert changed.status_code == 200, changed.text
+        duplicate = entity("vessel", "Duplicate subject")
+        merged = client.post(f"/api/cases/{case_id}/entities/{first}/merge", json={"other": duplicate})
+        assert merged.status_code == 200, merged.text
 
     entities = client.get(
         f"/api/cases/{case_id}/catalog/entities", params={"limit": 500}

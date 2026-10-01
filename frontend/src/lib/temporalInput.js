@@ -1,12 +1,14 @@
+import { offsetAt } from './localZone.js';
+
 const DATE = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?([~?%])?$/;
 const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)(Z|[+-]\d{2}:\d{2})?$/;
 
 export const TEMPORAL_FORMATS = [
-  { value: 'date', label: 'Date' },
-  { value: 'timestamp', label: 'Date and time' },
-  { value: 'range', label: 'Date range' },
-  { value: 'time-range', label: 'Time range' },
-  { value: 'advanced', label: 'Advanced syntax' },
+  { value: 'date', label: 'Date', hint: 'a day, a month or a year, and how sure' },
+  { value: 'timestamp', label: 'Date and time', hint: 'a time of day, on the clock picked below' },
+  { value: 'range', label: 'Date range', hint: 'from one day to another' },
+  { value: 'time-range', label: 'Time range', hint: 'between two times, on one clock' },
+  { value: 'advanced', label: 'Advanced syntax', hint: 'the stored form, for what the others cannot say' },
 ];
 
 export const TEMPORAL_SYNTAX = [
@@ -31,59 +33,50 @@ export const TEMPORAL_MARKERS = [
   { value: '%', meaning: 'Approximate and uncertain' },
 ];
 
+/**
+ * The editor's state for a stored value. A time's clock is `zone` (a zone name or
+ * `UTC`), or the `offset` it was written with and no zone named, or neither while
+ * no clock is known. A date's clock lives beside it, with the field's owner.
+ */
 export function readTemporalInput(value) {
   const raw = typeof value === 'string' ? value : '';
+  const blank = {
+    mode: 'date', precision: 'day', certainty: '', date: '', datetime: '', zone: '', offset: '',
+    start: '', end: '', startTime: '', endTime: '', raw,
+  };
+  const clock = (suffix) => (suffix === 'Z' ? { zone: 'UTC', offset: '' } : { zone: '', offset: suffix ?? '' });
   const date = DATE.exec(raw);
   if (date) {
     const precision = date[3] ? 'day' : date[2] ? 'month' : 'year';
-    return {
-      mode: 'date', precision, certainty: date[4] ?? '', date: raw.slice(0, raw.length - (date[4] ? 1 : 0)),
-      datetime: '', zone: 'local', offset: '+00:00', start: '', end: '',
-      startTime: '', endTime: '', rangeZone: 'utc', rangeOffset: '+00:00', raw,
-    };
+    return { ...blank, precision, certainty: date[4] ?? '', date: raw.slice(0, raw.length - (date[4] ? 1 : 0)) };
   }
   const timestamp = TIMESTAMP.exec(raw);
-  if (timestamp) {
-    const suffix = timestamp[2] ?? '';
-    return {
-      mode: 'timestamp', precision: 'day', certainty: '', date: '',
-      datetime: timestamp[1], zone: suffix === 'Z' ? 'utc' : suffix ? 'offset' : 'local',
-      offset: suffix && suffix !== 'Z' ? suffix : '+00:00', start: '', end: '',
-      startTime: '', endTime: '', rangeZone: 'utc', rangeOffset: '+00:00', raw,
-    };
-  }
+  if (timestamp) return { ...blank, mode: 'timestamp', datetime: timestamp[1], ...clock(timestamp[2]) };
   const interval = raw.split('/');
   if (interval.length === 2 && interval.every((part) => /^\d{4}-\d{2}-\d{2}$/.test(part))) {
-    return {
-      mode: 'range', precision: 'day', certainty: '', date: '', datetime: '',
-      zone: 'local', offset: '+00:00', start: interval[0], end: interval[1],
-      startTime: '', endTime: '', rangeZone: 'utc', rangeOffset: '+00:00', raw,
-    };
+    return { ...blank, mode: 'range', start: interval[0], end: interval[1] };
   }
   if (interval.length === 2) {
     const start = TIMESTAMP.exec(interval[0]);
     const end = TIMESTAMP.exec(interval[1]);
-    const startZone = start?.[2] ?? '';
-    const endZone = end?.[2] ?? '';
-    if (start && end && startZone && startZone === endZone) {
-      return {
-        mode: 'time-range', precision: 'day', certainty: '', date: '', datetime: '',
-        zone: 'local', offset: '+00:00', start: '', end: '',
-        startTime: start[1], endTime: end[1],
-        rangeZone: startZone === 'Z' ? 'utc' : 'offset',
-        rangeOffset: startZone === 'Z' ? '+00:00' : startZone, raw,
-      };
+    if (start && end && (start[2] ?? '') === (end[2] ?? '')) {
+      return { ...blank, mode: 'time-range', startTime: start[1], endTime: end[1], ...clock(start[2]) };
     }
   }
-  return {
-    mode: raw ? 'advanced' : 'date', precision: 'day', certainty: '', date: '',
-    datetime: '', zone: 'local', offset: '+00:00', start: '', end: '',
-    startTime: '', endTime: '', rangeZone: 'utc', rangeOffset: '+00:00', raw,
-  };
+  return { ...blank, mode: raw ? 'advanced' : 'date' };
 }
 
 function timestampWithSeconds(value) {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? `${value}:00` : value;
+}
+
+/** A wall time on the state's clock. A zone is written as the offset it keeps at that
+ *  very time, so the stored value is an ordinary zoned timestamp. */
+function onClock(time, state) {
+  const wall = timestampWithSeconds(time);
+  if (state.zone === 'UTC') return `${wall}Z`;
+  if (state.zone) return `${wall}${offsetAt(wall, state.zone)}`;
+  return `${wall}${state.offset ?? ''}`;
 }
 
 export function writeTemporalInput(state) {
@@ -91,11 +84,8 @@ export function writeTemporalInput(state) {
   if (state.mode === 'range') return state.start && state.end ? `${state.start}/${state.end}` : '';
   if (state.mode === 'time-range') {
     if (!state.startTime || !state.endTime) return '';
-    const zone = state.rangeZone === 'utc' ? 'Z' : state.rangeOffset;
-    return `${timestampWithSeconds(state.startTime)}${zone}/${timestampWithSeconds(state.endTime)}${zone}`;
+    return `${onClock(state.startTime, state)}/${onClock(state.endTime, state)}`;
   }
   if (state.mode === 'advanced') return state.raw ?? '';
-  if (!state.datetime) return '';
-  const zone = state.zone === 'utc' ? 'Z' : state.zone === 'offset' ? state.offset : '';
-  return `${timestampWithSeconds(state.datetime)}${zone}`;
+  return state.datetime ? onClock(state.datetime, state) : '';
 }

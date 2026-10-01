@@ -13,7 +13,7 @@
 import { sunPosition } from './changeDetect.js';
 import { zoneRing } from './analyzers.js';
 import { FULL_COVER } from './acquisitions.js';
-import { onTrack } from '../radar.js';
+import { onTrack, sameTrack } from '../radar.js';
 
 /** How much a 10 m building's shadow may change length between two passes,
  *  in metres, before it reads as a change: half a Sentinel-2 pixel. */
@@ -115,16 +115,29 @@ export function withRule(pairs, against) {
   return pairs.map((pair) => ({ ...pair, date_rule: rule }));
 }
 
+/** A dated comparison needs A before B. Radar can compare two timed passes on one day. */
+export function passBefore(a, b, radar = false) {
+  if (!a?.date || !b?.date) return true;
+  if (a.date !== b.date) return a.date < b.date;
+  return !!(radar && a.time && b.time && a.time < b.time);
+}
+
+/** A calendar choice must keep dated comparisons ordered and radar passes on one track. */
+export function canPickPass(letter, pass, a, b, radar = false) {
+  const other = letter === 'a' ? b : a;
+  const ordered = letter === 'a' ? passBefore(pass, b, radar) : passBefore(a, pass, radar);
+  return ordered && (!radar || !other?.time || sameTrack(pass.time, other.time));
+}
+
 /**
  * What still stops the step, in one sentence, or ''.
  *
  * A routine that compares with its previous pass needs A only until a run has
  * finished, which a saved routine may already have.
  */
-export function whenNeed({ single, routine, against, followupId, pairs, chooseB }) {
-  const waived = routine && followupId && against === 'previous';
-  const noA = pairs.filter((pair) => !pair.a?.date);
-  if (!single && !waived && noA.length) {
+export function whenNeed({ single, routine, against, pairs, chooseB, lastPasses = {}, radar = false }) {
+  const noA = pairs.filter((pair) => !pair.a?.date && !(routine && against === 'previous' && lastPasses[pair.area_id]));
+  if (!single && noA.length) {
     if (noA.length < pairs.length) return 'Choose A for every area.';
     if (!routine) return 'Choose A, the picture before.';
     return `Choose A, the picture ${against === 'previous' ? 'the first run' : 'every run'} compares with.`;
@@ -132,6 +145,9 @@ export function whenNeed({ single, routine, against, followupId, pairs, chooseB 
   if (!routine && chooseB && pairs.some((pair) => !pair.b?.date)) {
     return single ? 'Choose the day, or take the newest pass.' : 'Choose the day of B, or take the newest pass.';
   }
+  if (!single && pairs.some((pair) => !passBefore(
+    routine && against === 'previous' && lastPasses[pair.area_id] || pair.a, pair.b, radar
+  ))) return 'Date A must be before date B.';
   return '';
 }
 

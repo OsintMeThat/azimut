@@ -322,12 +322,12 @@ own scale), because an index computed on the server from two dark bands loses it
 meaning at a byte's 0.2% step; the fourth channel is the same sky. Pillow cannot
 hold 16 bits across four channels, so the engine decodes these with OpenCV and
 keeps a run's copy as the PNG that arrived. A recipe reads every three distinct
-bands as one more request per date and tile, which the wizard counts. The
-builder's preview reads the same products over the view from the tile cache and
-fetches the missing ones only when **Read** is pressed, one metered request each,
-over at most three tiles a side. A check does the same on the tiles under its
-marks alone (`detect_rules.check_tiles`), cache first and **Run all** for the
-rest. The shipped examples were calibrated on Planetary Computer's key-less
+bands as one more request per date and tile, which the wizard counts. A check in
+the builder reads the same products from the tile cache, on the tiles under its
+pins and across an edge from a pin within 48 pixels of it, at most twelve
+(`detect_rules.check_tiles`). What it still lacks is counted by `check/plan`
+before anything is fetched, and **Test** fetches it, one metered request each.
+The shipped examples were calibrated on Planetary Computer's key-less
 Level-2A, laid out as this evalscript returns it (the 1000 offset taken off from
 processing baseline 04.00, the way Sentinel Hub harmonises), so their marks cost
 no Copernicus request until a user runs them.

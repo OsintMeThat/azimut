@@ -272,6 +272,80 @@ describe('the acts on a row', () => {
     expect(layers.rows).toHaveLength(1);
   });
 
+  it('reads every followed layer again in turn, and says what it found once', async () => {
+    rows = [FILE_LAYER, followed(), followed({ name: 'Convoys', title: 'Convoys', sha256: 'ddd' })];
+    api.post = vi.fn(async (path) => {
+      calls.push(['POST', path]);
+      if (path.includes('Convoys')) throw new Error('that source answered 503');
+      return { ...followed(), sha256: 'ccc' };
+    });
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    calls.length = 0;
+    notify.mockClear();
+
+    await layers.refreshAll('c1');
+
+    // a file has nothing to read and is left alone
+    expect(calls).toEqual([
+      ['POST', '/api/cases/c1/map-layers/Roadblocks/refresh'],
+      ['POST', '/api/cases/c1/map-layers/Convoys/refresh'],
+    ]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('1 updated, 1 could not be reached', 'warn');
+    expect(layers.refreshing).toBe(false);
+  });
+
+  it('asks nothing when no layer is followed', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    calls.length = 0;
+
+    await layers.refreshAll('c1');
+
+    expect(calls).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('moves the rows at once and keeps the order the backend answers with', async () => {
+    rows = [FILE_LAYER, followed()];
+    api.put = vi.fn(async (path, body) => {
+      calls.push(['PUT', path, body]);
+      return [followed(), FILE_LAYER];
+    });
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    calls.length = 0;
+
+    const saving = layers.reorder('c1', ['Roadblocks', 'Sightings']);
+    // before the answer: the list and what is drawn already follow the drag
+    expect(layers.rows.map((row) => row.name)).toEqual(['Roadblocks', 'Sightings']);
+    await saving;
+
+    expect(calls).toEqual([
+      ['PUT', '/api/cases/c1/map-layers/order', { names: ['Roadblocks', 'Sightings'] }],
+    ]);
+    expect(layers.rows.map((row) => row.name)).toEqual(['Roadblocks', 'Sightings']);
+  });
+
+  it('puts the order back when it could not be kept', async () => {
+    rows = [FILE_LAYER, followed()];
+    api.put = vi.fn(async () => {
+      throw new Error('disk full');
+    });
+    const layers = store();
+    layers.load('c1');
+    await settle();
+
+    await layers.reorder('c1', ['Roadblocks', 'Sightings']);
+
+    expect(layers.rows.map((row) => row.name)).toEqual(['Sightings', 'Roadblocks']);
+    expect(notify).toHaveBeenCalledWith('disk full', 'error');
+  });
+
   it('takes a removed layer off the list and out of what is drawn', async () => {
     const layers = store();
     layers.load('c1');
@@ -338,6 +412,15 @@ describe('adding', () => {
 
     expect(layers.drawn.map((row) => row.name)).toEqual(['Roadblocks']);
     expect(calls).toEqual([]);
+  });
+
+  it('names what was just added, so its row opens unfolded', async () => {
+    const layers = store();
+    expect(layers.justAdded).toBe('');
+
+    await layers.subscribe('https://example.test/roadblocks.kml');
+
+    expect(layers.justAdded).toBe('Roadblocks');
   });
 
   it('leaves the dialog open when the source was refused, with the reason', async () => {

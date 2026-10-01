@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ADVISED_MAXCC, areaLine, ceilingWarning, newestLabel, newestLine, newestPick, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform,
+  ADVISED_MAXCC, areaLine, canPickPass, ceilingWarning, newestLabel, newestLine, newestPick, passBefore, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform,
   whenNeed, whenSummary, withRule,
 } from './detectWhen.js';
 
@@ -61,12 +61,37 @@ describe('the When step of a detection', () => {
     expect(whenNeed({ ...base, single: true, pairs: [pair('x')] })).toBe('');
   });
 
+  it('requires A before B for each dated comparison, including radar time', () => {
+    const base = { single: false, routine: false, against: 'previous', chooseB: true };
+    expect(passBefore({ date: '2026-09-05' }, { date: '2026-09-06' })).toBe(true);
+    expect(passBefore({ date: '2026-09-07' }, { date: '2026-09-06' })).toBe(false);
+    expect(passBefore({ date: '2026-09-06' }, { date: '2026-09-06' })).toBe(false);
+    expect(passBefore({ date: '2026-09-06', time: '05:00:00' },
+      { date: '2026-09-06', time: '17:00:00' }, true)).toBe(true);
+    expect(whenNeed({ ...base, pairs: [pair('x', '2026-09-07', '2026-09-06')] }))
+      .toBe('Date A must be before date B.');
+    expect(whenNeed({ ...base, pairs: [pair('x', '2026-09-05', '2026-09-06'),
+      pair('y', '2026-09-07', '2026-09-06')] })).toBe('Date A must be before date B.');
+  });
+
+  it('keeps radar calendar choices on the other date\'s track', () => {
+    const a = { date: '2026-09-05', time: '05:00:00' };
+    const same = { date: '2026-09-17', time: '05:00:02' };
+    const other = { date: '2026-09-17', time: '05:08:00' };
+    expect(canPickPass('b', same, a, null, true)).toBe(true);
+    expect(canPickPass('b', other, a, null, true)).toBe(false);
+    expect(canPickPass('a', a, null, other, true)).toBe(false);
+    expect(canPickPass('b', { ...same, date: '2026-09-04' }, a, null, true)).toBe(false);
+  });
+
   it('asks a routine for A until a run has finished', () => {
     const base = { single: false, routine: true, chooseB: true, pairs: [pair('x')] };
     expect(whenNeed({ ...base, against: 'previous', followupId: null }))
       .toBe('Choose A, the picture the first run compares with.');
-    expect(whenNeed({ ...base, against: 'previous', followupId: 'abcdef123456' })).toBe('');
-    expect(whenNeed({ ...base, against: 'reference', followupId: 'abcdef123456' }))
+    expect(whenNeed({ ...base, against: 'previous', lastPasses: { x: { date: '2026-08-01' } } })).toBe('');
+    expect(whenNeed({ ...base, against: 'previous', lastPasses: {} }))
+      .toBe('Choose A, the picture the first run compares with.');
+    expect(whenNeed({ ...base, against: 'reference', lastPasses: { x: { date: '2026-08-01' } } }))
       .toBe('Choose A, the picture every run compares with.');
     // a routine names no B, whatever the switch last said
     expect(whenNeed({ ...base, single: true, against: 'previous', followupId: null })).toBe('');

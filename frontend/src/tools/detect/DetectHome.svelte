@@ -6,7 +6,10 @@
    * reviewed and done with, a routine is a place you keep coming back to.
    */
   import Icon from '../../components/Icon.svelte';
-  import { isActive, plural, ruleLabel, runDays, runState, savedGroups } from '../../lib/map/detections.js';
+  import SearchInput from '../../components/SearchInput.svelte';
+  import {
+    ROUTINE_SEARCH_FROM, isActive, plural, routineMatches, ruleLabel, runDays, runState, savedGroups,
+  } from '../../lib/map/detections.js';
 
   let {
     tab = 'routines',
@@ -22,6 +25,8 @@
     oncancel = () => {},
     onopen = () => {},
     onopenrun = () => {},
+    oncolour = () => {},
+    onruncolour = () => {},
     ondelete = () => {},
     onhover = () => {},
     /** Put the map on some ground, so a layer turned on is a layer seen. */
@@ -32,6 +37,10 @@
 
   const single = (method) => !!methods.find((entry) => entry.id === method)?.single;
   const idle = $derived(routines.filter((item) => !item.active));
+  let routineSearch = $state('');
+  const searchable = $derived(routines.length >= ROUTINE_SEARCH_FROM);
+  const listed = $derived(searchable && routineSearch.trim()
+    ? routines.filter((item) => routineMatches(item, routineSearch)) : routines);
   const groups = $derived(savedGroups(routines, passes));
   /** Groups folded shut; every group opens unfolded. */
   let folded = $state({});
@@ -58,7 +67,12 @@
   <section aria-label="Routines">
     {#if routines.length > 1}
       <div class="row head">
-        <span class="grow"></span>
+        {#if searchable}
+          <SearchInput bind:value={routineSearch} placeholder="Search routines…" width="100%"
+            count={routineSearch.trim() ? `${listed.length}/${routines.length}` : null} />
+        {:else}
+          <span class="grow"></span>
+        {/if}
         <button class="btn btn-sm" disabled={busy || !idle.length} onclick={onrunall}
           title="Queue every routine that is not already working">
           <Icon name="play" size={11} /> Run all
@@ -68,11 +82,13 @@
     {#if !routines.length}
       <div class="empty">
         <p>No routine in this case yet.</p>
-        <p class="hint">A routine is an area, what to look for there and what each pass compares against.</p>
         <button class="btn btn-sm" onclick={() => onnew('routine')}>Create a routine</button>
       </div>
     {/if}
-    {#each routines as item (item.id)}
+    {#if searchable && !listed.length}
+      <p class="none">No routine matches “{routineSearch.trim()}”.</p>
+    {/if}
+    {#each listed as item (item.id)}
       {@const state = runState(item.active ?? item.latest)}
       <article class="card" style={`--tint: ${item.colour || 'var(--accent)'}`}>
         <div class="row">
@@ -106,7 +122,6 @@
       {#if !passes.length}
         <div class="empty">
           <p>Nothing has been swept in this case yet.</p>
-          <p class="hint">A run lands here when it finishes, whichever tool you are in.</p>
           <button class="btn btn-sm" onclick={() => onnew('once')}>Sweep an area once</button>
         </div>
       {/if}
@@ -115,10 +130,22 @@
         {@const allOn = shown.length > 0 && shown.every((layer) => layer.visible)}
         <div class="group" style={`--tint: ${group.colour || 'var(--text-3)'}`}>
           <div class="row group-head">
-            <button class="fold grow" aria-expanded={!folded[group.id]}
+            <button class="fold-toggle" aria-label={`${folded[group.id] ? 'Expand' : 'Collapse'} ${group.title}`}
+              title={folded[group.id] ? 'Expand group' : 'Collapse group'}
+              aria-expanded={!folded[group.id]}
               onclick={() => (folded = { ...folded, [group.id]: !folded[group.id] })}>
               <Icon name={folded[group.id] ? 'chevronRight' : 'chevronDown'} size={12} />
-              {#if group.kind === 'routine'}<span class="swatch" aria-hidden="true"></span>{/if}
+            </button>
+            {#if group.kind === 'routine'}
+              <label class="colour-control" title={`Colour of ${group.title}`}>
+                <span class="swatch" style:background={group.colour || '#38bdf8'} aria-hidden="true"></span>
+                <input type="color" aria-label={`Colour of ${group.title}`}
+                  value={group.colour || '#38bdf8'} disabled={busy}
+                  onchange={(event) => oncolour(group, event.currentTarget.value)} />
+              </label>
+            {/if}
+            <button class="fold grow" aria-expanded={!folded[group.id]}
+              onclick={() => (folded = { ...folded, [group.id]: !folded[group.id] })}>
               <span class="name">{group.title}</span>
               <small>{plural(group.runs.length, 'run')}</small>
             </button>
@@ -142,6 +169,14 @@
               {@const layer = layerOf(run)}
               {@const name = rowName(group, run)}
               <div class="row single">
+                {#if group.kind === 'once'}
+                  <label class="colour-control" title={`Colour of ${run.title}`}>
+                    <span class="swatch" style:background={run.colour || 'var(--text-3)'} aria-hidden="true"></span>
+                    <input type="color" aria-label={`Colour of ${run.title}`}
+                      value={run.colour || '#38bdf8'} disabled={busy || isActive(run)}
+                      onchange={(event) => onruncolour(run, event.currentTarget.value)} />
+                  </label>
+                {/if}
                 <button class="past grow" disabled={busy} onclick={() => onopenrun(run)}>
                   {#if group.kind === 'routine'}
                     <span class={state.tone}>{state.text}</span>
@@ -182,87 +217,99 @@
 </div>
 
 <style>
-  .home { display: grid; gap: 16px; }
-  section { display: grid; gap: 8px; }
+  .home { display: grid; gap: 18px; }
+  section { display: grid; gap: 0; }
+  .head { gap: 8px; min-height: 36px; padding-bottom: 8px; }
+  .head :global(.search-box) { flex: 1 1 auto; min-width: 0; }
+  .none { margin: 0; padding: 14px 4px; border-top: 1px solid var(--border); color: var(--text-2); font-size: var(--fs-sm); }
   .empty {
     display: grid;
-    gap: 4px;
-    padding: 14px 12px;
-    border: 1px dashed var(--border);
-    border-radius: var(--r-sm);
-    text-align: center;
+    gap: 7px;
+    padding: 18px 4px;
+    border-top: 1px solid var(--border);
+    text-align: left;
   }
-  .empty p { margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
-  .empty button { justify-self: center; margin-top: 4px; }
+  .empty p { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
+  .empty button { justify-self: start; margin-top: 4px; }
   .card {
+    position: relative;
     display: grid;
-    gap: 3px;
-    padding: 8px 6px 8px 10px;
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--tint);
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
+    gap: 5px;
+    padding: 12px 4px 13px 15px;
+    border-top: 1px solid var(--border);
+    background: transparent;
   }
-  .card .row { gap: 2px; }
+  .card::before {
+    position: absolute;
+    top: 15px;
+    bottom: 15px;
+    left: 3px;
+    width: 3px;
+    background: var(--tint);
+    content: '';
+  }
+  .card:hover { background: var(--bg-2); }
+  .card .row { gap: 4px; }
   .title {
     min-width: 0;
     overflow: hidden;
     color: var(--text-1);
-    font-size: var(--fs-sm);
-    font-weight: 600;
+    font-size: var(--fs-md);
+    font-weight: 650;
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .title:hover:not(:disabled) { color: var(--accent); }
   .go { color: var(--accent); }
-  .note, .meta, .state { margin: 0; font-size: var(--fs-xs); line-height: 1.4; }
+  .note, .meta, .state { margin: 0; font-size: var(--fs-xs); line-height: 1.5; }
   .note { color: var(--text-2); }
-  .meta { color: var(--text-3); }
+  .meta { color: var(--text-2); }
   .state { color: var(--text-2); }
-  .state.new { color: var(--accent); font-weight: 600; }
+  .state.new { color: var(--info); font-weight: 600; }
   .state.busy { color: var(--info); }
   .state.warn { color: var(--warn); }
   progress { width: 100%; height: 6px; accent-color: var(--accent); }
   .past {
     display: grid;
-    gap: 1px;
+    gap: 3px;
     min-width: 0;
-    padding: 4px 6px;
-    border-radius: var(--r-sm);
+    padding: 8px 6px;
     color: var(--text-2);
     font-size: var(--fs-xs);
     text-align: left;
   }
   .past:hover:not(:disabled) { background: var(--bg-3); }
-  .past span { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .past small { color: var(--text-2); font-size: 10.5px; }
-  .past small.new { color: var(--accent); font-weight: 600; }
+  .past span { color: var(--text-1); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .past small { color: var(--text-2); font-size: var(--fs-xs); }
+  .past small.new { color: var(--info); font-weight: 600; }
   .past small.busy { color: var(--info); }
   .past small.warn { color: var(--warn); }
-  .past small.what { color: var(--text-3); }
-  .past span.new { color: var(--accent); font-weight: 600; }
+  .past small.what { color: var(--text-2); }
+  .past span.new { color: var(--info); font-weight: 600; }
   .past span.busy { color: var(--info); }
   .past span.warn { color: var(--warn); }
-  .single { gap: 2px; padding-left: 14px; }
-  .group { display: grid; gap: 2px; }
-  .group-head { gap: 2px; }
-  .fold {
+  .single { gap: 4px; padding: 0 2px 0 16px; border-top: 1px solid var(--border); }
+  .group { display: grid; gap: 0; border-top: 1px solid var(--border); }
+  .group-head { gap: 4px; min-height: 42px; }
+  .fold, .fold-toggle {
     display: flex;
     align-items: center;
-    gap: 6px;
     min-width: 0;
-    padding: 3px 4px;
+    padding: 6px 4px;
     border-radius: var(--r-sm);
     color: var(--text-2);
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    font-size: var(--fs-sm);
+    font-weight: 600;
     text-align: left;
-    text-transform: uppercase;
   }
-  .fold:hover { background: var(--bg-2); color: var(--text-1); }
+  .fold { gap: 6px; }
+  .fold:hover, .fold-toggle:hover { background: var(--bg-2); color: var(--text-1); }
   .fold .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fold small { flex: 0 0 auto; color: var(--text-3); font-weight: 400; letter-spacing: 0; text-transform: none; white-space: nowrap; }
-  .swatch { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 2px; background: var(--tint); }
+  .colour-control { position: relative; flex: 0 0 18px; display: grid; place-items: center; height: 22px; cursor: pointer; }
+  .colour-control .swatch { width: 8px; height: 8px; border-radius: 2px; }
+  .colour-control:hover .swatch, .colour-control:focus-within .swatch { outline: 1px solid var(--text-1); outline-offset: 2px; }
+  .colour-control input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; opacity: 0; cursor: pointer; }
+  .colour-control input:disabled { cursor: default; }
 </style>

@@ -8,11 +8,16 @@
    * written (AnalyzerBuilder). The two are offered side by side because they
    * are different promises: calibrated, or exactly what you set. An example
    * is one of your own already made, with the checks that show it working.
+   *
+   * A new one of your own starts by saying what it reads: Sentinel-2 or radar,
+   * and one date or the change between two. That is fixed from then on, so the
+   * rules it is given and the checks that prove it always fit it.
    */
+  import { onDestroy, untrack } from 'svelte';
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { analyzerGroups, analyzerLock, clone } from '../../lib/map/analyzers.js';
-  import { describeChecks, newRecipe } from '../../lib/map/analyzerRules.js';
+  import { describeChecks, describeReads, newRecipe } from '../../lib/map/analyzerRules.js';
   import AnalyzerBuilder from './AnalyzerBuilder.svelte';
   import AnalyzerLabel from './AnalyzerLabel.svelte';
   import AnalyzerSettings from './AnalyzerSettings.svelte';
@@ -22,33 +27,42 @@
     catalogue,
     onchanged = async () => {},
     onsaved = () => {},
-    /** What the map draws while an analyzer of your own is being built. */
+    /** What the map draws while an analyzer of your own is being built (the bench). */
     builder = $bindable(null),
     viewBounds = () => null,
-    /** The settled camera, the Copernicus layers on offer and a way to frame a
-     *  place: what the builder needs of the map. */
-    mapView = null,
+    /** The Copernicus layers on offer and a way to frame a place: what the
+     *  builder needs of the map. */
     layers = [],
     onfly = () => {},
-    onshow = () => {},
-    onleavepass = () => {},
-    onblink = () => {},
   } = $props();
 
-  /** 'list', 'base' (what a new one starts from), 'edit' (a copy of a
+  /** 'list', 'base' (what a new one reads, and starts from), 'edit' (a copy of a
    *  built-in) or 'build' (rules of your own). */
   let mode = $state('list');
-  let bench = $state(null);
   let recipe = $state(null);
+  /** Counts the analyzers opened in the builder, so each one gets a bench of its own. */
+  let session = $state(0);
+  /** What a new analyzer of your own will read, asked before anything else. */
+  let reads = $state({ sensor: 'sentinel2', dates: 'two' });
   /** Where the builder opens: `{ tab, check }`. */
   let start = $state(null);
   let readonly = $state(false);
   let busy = $state(false);
   let error = $state('');
 
+  // The map holds the builder's bench only while a builder is open, and this is what lets it go: on
+  // leaving the builder, and on leaving the library. An analyzer opened while another is, takes it over.
+  $effect(() => {
+    if (mode !== 'build') untrack(() => { builder = null; });
+  });
+  onDestroy(() => { builder = null; });
+
   const builtins = $derived(catalogue?.builtins ?? []);
   const custom = $derived(catalogue?.custom ?? []);
   const examples = $derived(catalogue?.examples ?? []);
+  /** The examples that read what was asked for. */
+  const matching = $derived(examples.filter((example) => example.recipe.sensor === reads.sensor && example.recipe.dates === reads.dates));
+  const radarLock = $derived(catalogue?.radar_layer ? '' : analyzerLock({ method: 'rules', sensor: 'sentinel1' }, catalogue));
   const methodOf = (method) => catalogue?.methods?.find((m) => m.id === method) ?? {};
   const capability = $derived(methodOf(recipe?.method));
   const isNew = $derived(recipe?.id === 'custom');
@@ -64,13 +78,15 @@
     recipe = entry.method === 'rules' ? { checks: [], ...clone(entry) } : clone(entry);
     readonly = builtins.some((r) => r.id === entry.id);
     start = opening;
+    session++;
     mode = entry.method === 'rules' ? 'build' : 'edit';
   }
 
-  function build(from = newRecipe(catalogue?.methods ?? [])) {
+  function build(from = newRecipe(catalogue?.methods ?? [], reads)) {
     recipe = { checks: [], ...clone(from), id: 'custom' };
     readonly = false;
     start = null;
+    session++;
     mode = 'build';
   }
 
@@ -99,15 +115,6 @@
     const entry = custom.find((row) => row.id === id);
     if (entry) view(entry);
   }
-
-  /** Read every rule at a point of the map, while one is being built, and
-   *  mark that point in a check. */
-  export function probeAt(point) { return bench?.probeAt(point); }
-  export function closeProbe() { bench?.closeProbe(); }
-  export function markProbe(expect) { bench?.markProbe(expect); }
-  export function pinAt(point) { bench?.pinAt(point); }
-  export function pinMode(mode) { bench?.pinMode(mode); }
-  export function showPass(which) { bench?.showPass(which); }
 
   /** Built-ins can't be written over, so a copy is how an analyst keeps a tuned version. */
   function copy(entry) {
@@ -139,7 +146,7 @@
 {#if mode === 'list'}
   <div class="cmp-dock-body">
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
-    <p class="hint">Start from an example, build your own from rules you try on the map, or copy a calibrated built-in to tune it.</p>
+    <p class="hint">Start from an example, build your own from rules you prove on the map, or copy a calibrated built-in to tune it.</p>
     <button class="btn btn-primary" onclick={() => (mode = 'base')}><Icon name="plus" size={14} /> New analyzer</button>
 
     <section aria-label="My analyzers">
@@ -183,45 +190,59 @@
 {:else if mode === 'base'}
   <div class="cmp-dock-body">
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
-    {#if examples.length}
-      <h3>Start from an example</h3>
-      <p class="hint">A ready analyzer whose checks turn red when a rule you change breaks one.</p>
-      <div class="examples">
-        {#each examples as example (example.id)}
-          <button class="pick base grow" style={`--tint: ${example.recipe.colour}`} disabled={busy}
-            aria-label={`Start from the example ${example.recipe.name}`} onclick={() => act(() => startExample(example))}>
-            <span class="swatch" aria-hidden="true"></span>
-            <span class="name">{example.recipe.name}<small>{example.place} · {example.when} · {example.recipe.checks.length} checks</small></span>
-          </button>
-        {/each}
+    <h3>New analyzer</h3>
+    <p class="hint">What it reads is fixed from here on, so its rules and checks always fit it.</p>
+
+    <section aria-label="What it reads">
+      <span class="ask">Satellite</span>
+      <div class="cmp-seg fill" role="group" aria-label="Satellite">
+        <button type="button" class:on={reads.sensor === 'sentinel2'} aria-pressed={reads.sensor === 'sentinel2'}
+          onclick={() => (reads = { ...reads, sensor: 'sentinel2' })}>Sentinel-2 · optical</button>
+        <button type="button" class:on={reads.sensor === 'sentinel1'} aria-pressed={reads.sensor === 'sentinel1'}
+          onclick={() => (reads = { ...reads, sensor: 'sentinel1' })}>Sentinel-1 · radar</button>
       </div>
-    {/if}
-    <button class="pick base own" onclick={() => build()}>
-      <span class="swatch" aria-hidden="true"></span>
-      <span class="name">Build your own rules<small>Say what a pixel has to show, on A, on B or between them, and watch each rule on the map as you set it.</small></span>
-    </button>
-    <h3>Or start from a built-in</h3>
-    <p class="hint">A built-in brings its calibrated method for you to tune, and one marked rules opens as the rules it applies.</p>
-    <div class="bases">
-      {#each [...builtins, ...custom] as entry (entry.id)}
-        {@const rules = catalogue?.as_rules?.[entry.id]}
-        <div class="row entry">
-          <button class="pick base grow" style={`--tint: ${entry.colour}`} onclick={() => (entry.method === 'rules' ? build({ ...entry, name: `${entry.name} copy` }) : copy(entry))}>
-            <span class="swatch" aria-hidden="true"></span>
-            <span class="name">{entry.name}<small>{entry.description || methodOf(entry.method).label}</small></span>
-          </button>
-          {#if rules}
-            <button class="btn btn-sm" title="Open it as the rules it applies" aria-label={`Open ${entry.name} as rules`}
-              onclick={() => build(rules)}>rules</button>
-          {/if}
-        </div>
+      {#if reads.sensor === 'sentinel1'}
+        <p class="hint">Radar sees through cloud and at night.{#if radarLock} <span class="lock"><Icon name="key" size={10} /> {radarLock}</span>{/if}</p>
+      {:else}
+        <p class="hint">Colour and infrared, where the sky is clear.</p>
+      {/if}
+      <span class="ask">Dates</span>
+      <div class="cmp-seg fill" role="group" aria-label="Dates">
+        <button type="button" class:on={reads.dates === 'one'} aria-pressed={reads.dates === 'one'}
+          onclick={() => (reads = { ...reads, dates: 'one' })}>One date</button>
+        <button type="button" class:on={reads.dates === 'two'} aria-pressed={reads.dates === 'two'}
+          onclick={() => (reads = { ...reads, dates: 'two' })}>Two dates</button>
+      </div>
+      <p class="hint">{reads.dates === 'one' ? 'Spots what is there on a day, like a ship or a fire.'
+        : 'Finds what changed between a day before and a day after.'}</p>
+    </section>
+
+    <section aria-label="Start from">
+      <span class="ask">Start from</span>
+      <button class="pick base own" onclick={() => build()}>
+        <span class="swatch" aria-hidden="true"></span>
+        <span class="name">Blank<small>One rule to begin with.</small></span>
+      </button>
+      {#each matching as example (example.id)}
+        <button class="pick base grow" style={`--tint: ${example.recipe.colour}`} disabled={busy}
+          aria-label={`Start from the example ${example.recipe.name}`} onclick={() => act(() => startExample(example))}>
+          <span class="swatch" aria-hidden="true"></span>
+          <span class="name">{example.recipe.name}<small>{example.place} · {example.when} · {example.recipe.checks.length} checks</small></span>
+        </button>
       {/each}
-    </div>
+      {#if !matching.length}
+        <p class="hint">No ready example for {describeReads(reads)} yet.</p>
+      {:else}
+        <p class="hint">An example comes with checks that turn red when a rule you change breaks one.</p>
+      {/if}
+    </section>
   </div>
   <div class="cmp-dock-foot"><button class="btn btn-sm" onclick={back}>Cancel</button></div>
 {:else if mode === 'build' && recipe}
-  <AnalyzerBuilder bind:this={bench} {catalogue} bind:recipe isNew={isNew} {start} bind:builder {viewBounds} {mapView} {layers} {onfly} {onshow} {onleavepass} {onblink}
-    onsave={(next) => save(next)} oncancel={back} />
+  {#key session}
+    <AnalyzerBuilder {catalogue} bind:recipe isNew={isNew} {start} bind:builder {viewBounds} {layers} {onfly}
+      onsave={(next) => save(next)} oncancel={back} />
+  {/key}
 {:else if recipe}
   <div class="cmp-dock-body">
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
@@ -281,8 +302,7 @@
   .pick:hover:not(:disabled) { background: var(--bg-2); }
   .base { border: 1px solid var(--border); background: var(--bg-2); }
   .base:hover { border-color: var(--accent); }
-  .bases, .examples { display: grid; gap: 6px; }
-  .examples { margin-bottom: 4px; }
+  .ask { color: var(--text-2); font-size: var(--fs-xs); font-weight: 700; }
   .name small.checked { color: var(--text-2); }
   .swatch { flex: 0 0 auto; width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: var(--tint); }
   .name { display: grid; gap: 2px; min-width: 0; color: var(--text-1); font-size: var(--fs-xs); font-weight: 600; }

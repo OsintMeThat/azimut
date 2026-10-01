@@ -399,6 +399,9 @@ class Case(CaseStore):
         from .engine import trash as trash_engine
 
         trash_engine.recover(case)
+        from .engine import merge as merge_engine
+
+        merge_engine.recover(case)
         return case
 
     def migrate(self) -> dict[str, Any]:

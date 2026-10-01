@@ -110,6 +110,7 @@ const settings = {
   home_view: { lat: 48.8584, lon: 2.2945, zoom: 16 },
   post_mention: '@GeoConfirmed',
   post_target: 'x',
+  post_template: '',
   signature_handle: '',
   signature: false,
   export_dirs: { notes: '', media: '', proofs: '' },
@@ -919,8 +920,17 @@ export async function installAppFixture(page, options = {}) {
       thumb: entity?.thumb ?? entity?.attrs?.thumb ?? null,
     };
   };
+  /** The server's file lanes: a source's picture or video, or what the app pictured
+   *  from above (a capture, or a file whose `origin` is one of those routes). */
+  const fromAbove = (entry) => entry.type === 'capture'
+    || ['satellite', 'screenshot', 'compare'].includes(timelineEntity(entry.id)?.origin?.type);
+  const laneFile = (item, lane) => [...item.subject_entities, ...item.source_entities]
+    .find((entry) => ['media', 'capture'].includes(entry.type) && fromAbove(entry) === (lane === 'imagery'))
+    ?? null;
   const timelineMatchesTrack = (item, track = {}) => {
     if ((track.hidden ?? []).includes(item.id)) return false;
+    if (['sources', 'imagery'].includes(track.as_files)
+      && (item.category !== 'statement' || !laneFile(item, track.as_files))) return false;
     const roles = Array.isArray(track.roles) ? track.roles : [];
     if (roles.length && !roles.includes(item.time_role ?? 'unset')) return false;
     const terms = track.terms && typeof track.terms === 'object' ? track.terms : {};
@@ -952,6 +962,8 @@ export async function installAppFixture(page, options = {}) {
       && (!entity || item.owner_id === entity || (item.subjects ?? []).includes(entity)
         || (item.places ?? []).includes(entity) || (item.sources ?? []).includes(entity))
       && timelineMatchesTrack(item, track)
+      // the server's `collected_only`: working files stay off, but the one in focus
+      && !(track.collected_only === true && item.produced_here === true && item.owner_id !== entity)
       && (item.earliest
         ? (!from || item.latest > (from.includes('T') ? from : `${from}T00:00:00Z`))
           && (!to || item.earliest < (to.includes('T') ? to : `${to}T23:59:59Z`))
@@ -1112,7 +1124,11 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
     if (path === '/api/cases/relation-types') return json(route, relationTypes);
     if (path === '/api/cases/confidence-levels') return json(route, confidenceLevels);
-    if (path === '/api/cases/entity-types') return json(route, entityTypes);
+    if (path === '/api/cases/entity-types') return json(route, entityTypes.map((entry) => ({
+      ...entry,
+      retypable: entry.manual && ['actor', 'asset', 'class', 'identifier'].includes(entry.family),
+      mergeable: ['actor', 'asset', 'class', 'identifier', 'place'].includes(entry.family),
+    })));
     if (path === '/api/cases/graph-lenses') return json(route, graphLenses);
     if (path === '/api/cases/bundles/inspect' && request.method() === 'POST') {
       bundleCalls.push({ kind: 'inspect' });
@@ -1293,6 +1309,11 @@ export async function installAppFixture(page, options = {}) {
     const timelineClaimMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/timeline/claims(?:/([^/]+))?$`)
     );
+    if (timelineClaimMatch?.[1] && request.method() === 'GET') {
+      const ownerId = decodeURIComponent(timelineClaimMatch[1]);
+      const held = timelineRows.map(enrichedTimelineItem).find((item) => item.owner_id === ownerId);
+      return held ? json(route, { item: held }) : json(route, { detail: 'not a claim' }, 404);
+    }
     if (timelineClaimMatch && request.method() !== 'GET') {
       const body = request.postDataJSON();
       const ownerId = timelineClaimMatch[1] ?? `claim-browser-${timelineRows.length + 1}`;
@@ -1318,9 +1339,21 @@ export async function installAppFixture(page, options = {}) {
       };
       if (index >= 0) timelineRows[index] = temporal;
       else timelineRows.push(temporal);
+      // New subjects named on the entry line are filed with the claim, as the route does.
+      const created = (body.create ?? []).map((entry, at) => ({
+        id: `${entry.type}-browser-${timelineRows.length}-${at + 1}`, ...entry,
+      }));
+      for (const entry of created) {
+        fixtureCatalog.push({
+          id: entry.id, type: entry.type, label: entry.label, attrs: {},
+          provenance: { by: 'user', at: '2026-08-12T10:00:00Z', status: 'confirmed' },
+        });
+        temporal[{ about: 'subjects', at: 'places', cites: 'sources' }[entry.slot]].push(entry.id);
+      }
       return json(route, {
         entity: { id: ownerId, type: 'claim', label: temporal.label, attrs: body, provenance: { by: 'user', at: '2026-08-12T10:00:00Z', status: 'confirmed' } },
         links: [],
+        created,
         temporal,
       });
     }
@@ -1381,8 +1414,14 @@ export async function installAppFixture(page, options = {}) {
         held.categories[item.category] = (held.categories[item.category] ?? 0) + 1;
         bucketCounts.set(key, held);
       }
+      const lane = ['sources', 'imagery'].includes(track.as_files) ? track.as_files : null;
       return json(route, {
-        items: visible,
+        items: lane
+          ? visible.map((item) => {
+            const file = laneFile(item, lane);
+            return { ...item, file: { id: file.id, label: file.label, type: file.type } };
+          })
+          : visible,
         next_cursor: null,
         total: visible.length,
         undated: base.filter((item) => !item.earliest && !item.raw).length,
@@ -1536,24 +1575,50 @@ export async function installAppFixture(page, options = {}) {
       const descending = order.startsWith('-');
       const column = descending ? order.slice(1) : order;
       const direction = descending ? -1 : 1;
-      const ordered = column
-        ? [...matching].sort((left, right) => {
-            const a = column === 'created' ? left.provenance?.at : left.label;
-            const b = column === 'created' ? right.provenance?.at : right.label;
-            return String(a ?? '').localeCompare(String(b ?? '')) * direction;
-          })
-        : matching;
+      // "Most noted": the Claims naming each row, newest first on a tie, as the store
+      // orders it.
+      const eventsOf = (id) => new Set(caseLinks
+        .filter((link) => link.to === id && ['about', 'at', 'cites'].includes(link.type)
+          && typeOf.get(link.from) === 'claim')
+        .map((link) => link.from)).size;
+      const ordered = column === 'events'
+        ? [...matching].map((entity, at) => ({ entity, at, n: eventsOf(entity.id) }))
+          .sort((left, right) => (left.n - right.n) * direction || (right.at - left.at))
+          .map((entry) => entry.entity)
+        : column
+          ? [...matching].sort((left, right) => {
+              const a = column === 'created' ? left.provenance?.at : left.label;
+              const b = column === 'created' ? right.provenance?.at : right.label;
+              return String(a ?? '').localeCompare(String(b ?? '')) * direction;
+            })
+          : matching;
       catalogQueries.push(url.search);
       // `catalogPage` makes the fixture answer in pages, which is the only way to
       // reach the surface's server-search mode: a case that fits one page filters
       // in the browser and never asks a second question.
       const page = options.catalogPage ?? 0;
       const items = page ? ordered.slice(0, page) : ordered;
+      const byType = {};
+      for (const entity of matching) byType[entity.type] = (byType[entity.type] ?? 0) + 1;
       return json(route, {
         items,
         next_cursor: page && matching.length > page ? 'cursor-2' : null,
         total: matching.length,
+        ...(url.searchParams.get('counts') === 'type' ? { by_type: byType } : {}),
       });
+    }
+    // What the Claims say about a page of rows: the count naming each, from the edges
+    // this fixture holds. Dates stay empty, so no row draws a density it was not given.
+    if (caseId && path === `/api/cases/${caseId}/catalog/events` && request.method() === 'POST') {
+      const { ids = [] } = request.postDataJSON() ?? {};
+      const claims = new Set(catalogRows().filter((entity) => entity.type === 'claim').map((entity) => entity.id));
+      const rows = Object.fromEntries(ids.map((id) => [id, {
+        events: new Set(caseLinks
+          .filter((link) => link.to === id && claims.has(link.from) && ['about', 'at', 'cites'].includes(link.type))
+          .map((link) => link.from)).size,
+        first: null, last: null, sources: 0, places: 0, buckets: Array(12).fill(0),
+      }]));
+      return json(route, { range: null, rows });
     }
     const galleryMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/entities/([^/]+)/images(?:/([^/]+)(/primary)?)?$`)
@@ -1624,6 +1689,27 @@ export async function installAppFixture(page, options = {}) {
         galleryWrites.push({ method: 'DELETE', entityId, imageId });
         return json(route, { images: held });
       }
+    }
+    // The identifier already in the case under this value, the way `identity_key`
+    // compares: case aside, and a handle with or without its sigil.
+    if (caseId && path === `/api/cases/${caseId}/entities/twin`) {
+      const type = url.searchParams.get('type');
+      const key = (value) => String(value ?? '').trim().toLowerCase().replace(/^@/, '');
+      const wanted = key(url.searchParams.get('label'));
+      const held = fixtureCatalog.find((entity) => entity.type === type && key(entity.label) === wanted);
+      return json(route, { entity: held ?? null });
+    }
+    // A grouped delete, one trash group: what the entry line's Undo sends.
+    if (caseId && path === `/api/cases/${caseId}/entities/delete` && request.method() === 'POST') {
+      const { ids } = request.postDataJSON();
+      entityWrites.push({ method: 'DELETE', ids });
+      for (const id of ids) {
+        const at = timelineRows.findIndex((item) => item.owner_id === id);
+        if (at >= 0) timelineRows.splice(at, 1);
+        const index = fixtureCatalog.findIndex((entity) => entity.id === id);
+        if (index >= 0) fixtureCatalog.splice(index, 1);
+      }
+      return json(route, { status: 'deleted', deleted: ids, tombstoned: [], trash: 'trash-1' });
     }
     const entityMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/([^/]+)$`));
     if (entityMatch && request.method() !== 'GET') {
@@ -1734,6 +1820,8 @@ export async function installAppFixture(page, options = {}) {
       const row = options.tallies?.[tallyMatch[1]];
       return row ? json(route, row) : route.fulfill({ status: 404, body: '{}' });
     }
+    if (caseId && path === `/api/cases/${caseId}/entities/redirects`) return json(route, { redirects: {} });
+    if (caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/[^/]+/merges$`))) return json(route, { merges: [] });
     const chainMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/(.+)/chain$`));
     if (chainMatch) {
       const chain = fixtureChains[chainMatch[1]];
@@ -1978,6 +2066,15 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { status: 'saved', ...sheetPayload(held) });
     }
 
+    // The civil zone at a point, from the bundled boundaries: two zones are enough to
+    // tell a place's clock from another's.
+    if (path === '/api/geo/zone') {
+      geoQueries.zone = [...(geoQueries.zone ?? []), url.search];
+      const lon = Number(url.searchParams.get('lon'));
+      return json(route, {
+        name: lon > 20 ? 'Europe/Kyiv' : lon > 0 ? 'Europe/Paris' : lon > -30 ? 'Europe/Lisbon' : 'America/New_York',
+      });
+    }
     // The search bar's two layers. The offline one answers coordinates and a
     // handful of cities; the geocoder answers streets, and only ever late.
     if (path === '/api/geo/suggest') {

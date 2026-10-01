@@ -52,6 +52,7 @@ class CaseStore:
         attr_value: str | None = None,
         linked: str | None = None,
         unlinked: bool = False,
+        lacks: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
@@ -59,6 +60,7 @@ class CaseStore:
         temporal_until: str | None = None,
         temporal_categories: list[str] | None = None,
         order: str = "",
+        count_by_type: bool = False,
     ) -> dict[str, Any]:
         """A bounded, filtered page of the catalog (Step 5), paged with an indexed
         keyset over the ordering asked for."""
@@ -75,6 +77,7 @@ class CaseStore:
             attr_value=attr_value,
             linked=linked,
             unlinked=unlinked,
+            lacks=lacks,
             since=since,
             until=until,
             filed_by=filed_by,
@@ -82,7 +85,12 @@ class CaseStore:
             temporal_until=temporal_until,
             temporal_categories=temporal_categories,
             order=order,
+            count_by_type=count_by_type,
         )
+
+    def event_summaries(self, entity_ids: list[str], *, buckets: int = 12) -> dict[str, Any]:
+        """What the case's Claims say about each of these entities (Board rows)."""
+        return self._graph().event_summaries(entity_ids, buckets=buckets)
 
     def catalog_summary(self) -> dict[str, Any]:
         """Total plus per-type, per-status, per-folder and per-filer counts."""
@@ -238,6 +246,7 @@ class CaseStore:
         attr_value: str | None = None,
         linked: str | None = None,
         unlinked_only: bool = False,
+        lacks: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
@@ -251,6 +260,7 @@ class CaseStore:
             limit=limit, types=types, exclude_types=exclude_types, status=status,
             query=query, folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked_only=unlinked_only,
+            lacks=lacks,
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,
@@ -482,6 +492,57 @@ class CaseStore:
         self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
     ) -> dict[str, int]:
         return self._graph().reinsert(entities, links)
+
+    # -- merges and redirects ----------------------------------------------
+
+    def merge_entities(
+        self,
+        survivor_id: str,
+        merged_id: str,
+        *,
+        survivor_attrs: dict[str, Any],
+        survivor_status: str,
+        old_key: str | None,
+        by: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        return self._graph().merge_entities(
+            survivor_id, merged_id, survivor_attrs=survivor_attrs,
+            survivor_status=survivor_status, old_key=old_key, by=by, dry_run=dry_run,
+        )
+
+    def unmerge(self, merge_id: str) -> dict[str, Any]:
+        return self._graph().unmerge(merge_id)
+
+    def pending_merge_work(self) -> list[dict[str, Any]]:
+        return self._graph().pending_merge_work()
+
+    def finish_merge_work(self, merge_id: str) -> None:
+        self._graph().finish_merge_work(merge_id)
+
+    def get_merge(self, merge_id: str) -> dict[str, Any] | None:
+        return self._graph().get_merge(merge_id)
+
+    def merges_into(self, survivor_id: str) -> list[dict[str, Any]]:
+        return self._graph().merges_into(survivor_id)
+
+    def set_merge_sheets(self, merge_id: str, sheets: list[dict[str, Any]]) -> None:
+        self._graph().set_merge_sheets(merge_id, sheets)
+
+    def entity_redirects(self, ids: list[str] | None = None) -> dict[str, dict[str, str]]:
+        return self._graph().entity_redirects(ids)
+
+    def redirect_by_key(self, key: str) -> str | None:
+        return self._graph().redirect_by_key(key)
+
+    def dangling_redirects(self, keep: set[str]) -> list[dict[str, str]]:
+        return self._graph().dangling_redirects(keep)
+
+    def drop_redirects(self, old_ids: list[str]) -> int:
+        return self._graph().drop_redirects(old_ids)
+
+    def forget_merges_of(self, entity_ids: list[str]) -> None:
+        self._graph().forget_merges_of(entity_ids)
 
     # -- durable jobs (thumbnail and background-job model) -------------------
 

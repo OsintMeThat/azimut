@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
@@ -12,6 +13,7 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { deletedToast } from '../lib/trash.js';
   import { openInReverseSearch } from '../lib/navigate.js';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -65,6 +67,18 @@
 
   const videoFilters = $derived(filters.filter((f) => VIDEO_ADJUST_IDS.includes(f.id)));
   const isVideo = $derived(work.source?.kind === 'video');
+
+  // The file open here is what the topbar's Add event seats.
+  $effect(() => {
+    const s = work.source;
+    offerNote(
+      'inspect',
+      s?.entity_id
+        ? { id: s.entity_id, label: s.title ?? s.filename, type: 'media', attrs: { path: s.path, kind: s.kind } }
+        : null,
+    );
+  });
+  onDestroy(() => withdrawNote('inspect'));
   const activeFrame = $derived(work.frames.find((f) => f.id === work.activeFrameId) ?? null);
   const selected = $derived(activeFrame ? activeFrame.id : isVideo ? 'video' : null);
   const framePreview = $derived(activeFrame ? previewStyle(filters, activeFrame.adjust) : { filter: '', transform: '' });

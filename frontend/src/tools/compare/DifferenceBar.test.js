@@ -10,7 +10,7 @@ import { changeSettings } from '../../lib/map/changeAssist.js';
 const ready = { ok: true, label: 'Two dated passes', methods: ['colour', 'brightness'], notes: [],
   family: 'sentinel2', clouds: true };
 
-function render(props = {}, { open = false } = {}) {
+function render(props = {}) {
   const target = document.createElement('div');
   document.body.append(target);
   const live = mount(DifferenceBar, {
@@ -18,10 +18,6 @@ function render(props = {}, { open = false } = {}) {
     props: { settings: changeSettings(), status: ready, ...props },
   });
   flushSync();
-  if (open) {
-    target.querySelector('button[aria-label="Difference settings"]').click();
-    flushSync();
-  }
   return { target, done: () => { unmount(live); target.remove(); } };
 }
 
@@ -34,33 +30,6 @@ const base = (target, label) =>
     .find((entry) => entry.textContent.trim() === label);
 
 describe('Difference strip', () => {
-  it('keeps every tooltip to one short clause', () => {
-    // The settings sit on three tabs, so the written titles are read off the
-    // component rather than opened one tab at a time.
-    const here = dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(join(here, 'DifferenceBar.svelte'), 'utf8');
-    const tips = [...source.matchAll(/title=(?:"([^"]*)"|\{([^}]*)\})/g)].flatMap(([, text, code]) =>
-      text !== undefined ? [text] : [...code.matchAll(/'([^']+)'|`([^`]+)`/g)].map((m) => m[1] ?? m[2]));
-
-    expect(tips.length).toBeGreaterThan(15);
-    for (const tip of tips) {
-      expect(tip.length, tip).toBeLessThanOrEqual(60);
-      expect(tip, tip).not.toContain(';');
-    }
-  });
-
-  it('keeps an index reading as a Detect analyzer, and offers nothing for the picture methods', () => {
-    const onanalyzer = vi.fn();
-    const index = render({ settings: changeSettings({ method: 'index', index: 'nbr' }),
-      status: { ...ready, methods: ['colour', 'index'] }, onanalyzer }, { open: true });
-    button(index.target, 'Save as a Detect analyzer').click();
-    expect(onanalyzer).toHaveBeenCalledOnce();
-    index.done();
-    const colour = render({}, { open: true });
-    expect(button(colour.target, 'Save as a Detect analyzer')).toBeUndefined();
-    colour.done();
-  });
-
   it('lays the highlights over both images by default, and over one on request', () => {
     const { target, done } = render();
     expect(base(target, 'Both').getAttribute('aria-pressed')).toBe('true');
@@ -68,21 +37,6 @@ describe('Difference strip', () => {
     flushSync();
     expect(base(target, 'A').getAttribute('aria-pressed')).toBe('true');
     expect(base(target, 'Both').getAttribute('aria-pressed')).toBe('false');
-    done();
-  });
-
-  it('keeps its settings closed until asked, then opens them over the stage', () => {
-    const { target, done } = render();
-    expect(target.querySelector('.settings')).toBeNull();
-    const gear = target.querySelector('button[aria-label="Difference settings"]');
-    expect(gear.getAttribute('aria-expanded')).toBe('false');
-    gear.click();
-    flushSync();
-    expect(target.querySelector('aside.settings')).not.toBeNull();
-    expect(target.textContent).toContain('Sensitivity');
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    flushSync();
-    expect(target.querySelector('.settings')).toBeNull();
     done();
   });
 
@@ -145,102 +99,18 @@ describe('Difference strip', () => {
     done();
   });
 
-  it('says so in the panel when the highlights are from an earlier read', () => {
-    const result = { share: 0.1, coverage: 1, area: 20, zones: [], zoneCount: 0 };
-    const { target, done } = render({ reading: 'due', result }, { open: true });
-    expect(target.querySelector('.readout').textContent).toContain('From an earlier read');
-    done();
-  });
-
-  it('keeps the strip the same through a read, so the panel hanging from it stays put', () => {
-    // The strip once grew a status label on every read and error, which moved
-    // the open panel under the pointer.
-    const shape = (target) => [...target.querySelector('.difference-bar').children]
-      .filter((node) => !node.matches('aside')).map((node) => node.tagName);
-    const idle = render({}, { open: true });
-    const before = shape(idle.target);
-    idle.done();
-    const reading = render({ reading: 'reading', error: 'Could not compare these pixels' }, { open: true });
-    expect(shape(reading.target)).toEqual(before);
-    expect(reading.target.querySelector('.readout [role="alert"]').textContent).toBe('Could not compare these pixels');
-    reading.done();
-  });
-
-  it('closes the panel on a press off the strip, but not on one inside it or on the gear', () => {
-    const { target, done } = render({}, { open: true });
-    const press = (node) => node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    press(target.querySelector('aside.settings select'));
-    flushSync();
-    expect(target.querySelector('aside.settings')).not.toBeNull();
-    // Reading with the settings open is tuning them, not leaving them.
-    press(button(target, 'Read'));
-    flushSync();
-    expect(target.querySelector('aside.settings')).not.toBeNull();
-    // The gear's own press must not close it, or its click would reopen it.
+  it('opens and closes its settings from the gear, and draws none of them itself', () => {
+    // The panel is Compare's, docked on the stage, so the strip only says whether it is open.
+    const { target, done } = render();
     const gear = target.querySelector('button[aria-label="Difference settings"]');
-    press(gear);
+    expect(gear.getAttribute('aria-expanded')).toBe('false');
     gear.click();
     flushSync();
-    expect(target.querySelector('aside.settings')).toBeNull();
+    expect(gear.getAttribute('aria-expanded')).toBe('true');
+    expect(target.querySelector('aside')).toBeNull();
     gear.click();
     flushSync();
-    expect(target.querySelector('aside.settings')).not.toBeNull();
-    press(document.body);
-    flushSync();
-    expect(target.querySelector('aside.settings')).toBeNull();
-    done();
-  });
-
-  it('offers the cloud filter only where a scene classification exists', () => {
-    const { target, done } = render({}, { open: true });
-    expect(target.textContent).toContain('Clouds & shadows');
-    done();
-    const esri = render({ status: { ...ready, family: 'esri', clouds: false } }, { open: true });
-    expect(esri.target.textContent).not.toContain('Clouds & shadows');
-    esri.done();
-  });
-
-  it('says when a reading reads bands, and never asks to be turned on', () => {
-    // The reading always follows the camera. Reading bands is a different
-    // question: it is what costs a request, and only off the held ground.
-    const { target, done } = render({ settings: changeSettings({ ignore_clouds: true }) }, { open: true });
-    expect(target.textContent).toContain('one request a side');
-    done();
-    const free = render({}, { open: true });
-    expect(free.target.textContent).not.toContain('one request a side');
-    expect(free.target.textContent).not.toContain('Follow the map');
-    free.done();
-  });
-
-  it('reads the view as soon as a method or an index is chosen', async () => {
-    const onrun = vi.fn();
-    const { target, done } = render({ settings: changeSettings({ method: 'index', index: 'nbr' }),
-      status: { ...ready, methods: ['colour', 'index'] }, onrun }, { open: true });
-    const [method, index] = target.querySelectorAll('aside.settings select');
-    index.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve();
-    expect(onrun).toHaveBeenCalledTimes(1);
-    method.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve();
-    expect(onrun).toHaveBeenCalledTimes(2);
-    done();
-  });
-
-  it('reads the view as soon as the cloud filter is switched on', async () => {
-    // The switch says the sky is being read, so it cannot leave an unfiltered
-    // reading up behind it.
-    const onrun = vi.fn();
-    const { target, done } = render({ onrun }, { open: true });
-    target.querySelector('.cloud-filter button').click();
-    flushSync();
-    await Promise.resolve();
-    expect(onrun).toHaveBeenCalledTimes(1);
-    done();
-  });
-
-  it('states the index change it draws the line at', () => {
-    const { target, done } = render({ settings: changeSettings({ method: 'index', index: 'nbr' }) }, { open: true });
-    expect(target.textContent).toContain('NBR moved by 0.19');
+    expect(gear.getAttribute('aria-expanded')).toBe('false');
     done();
   });
 });

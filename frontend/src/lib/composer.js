@@ -1205,6 +1205,9 @@ export function toSpec(proof) {
     // the description is the proof's notes — so the graph and search see them
     // without opening this file (`api/proofs.save_proof`).
     when: proof.when?.trim() ? proof.when.trim() : null,
+    // The clock the date is read on when the analyst picked one; null leaves it to
+    // the first point's zone, resolved on save, so moving the point moves the day.
+    whenZone: proof.when?.trim() && proof.whenZone ? proof.whenZone : null,
     description: proof.description?.trim() ? proof.description.trim() : null,
     // What the plate's footer prints. `footer` is the credit line itself;
     // `footerText` is whether it prints at all, and `footerCoords` whether the

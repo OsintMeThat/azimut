@@ -15,27 +15,27 @@
  */
 import { entityFields } from './entityTypes.svelte.js';
 import { folderOf } from './folderTree.js';
+import { foldTerms, foldText } from './textFold.js';
 
 /** Declared kinds a value is worth finding an entity by. Mirrors
  *  `entities.SEARCHABLE_KINDS`. */
 const SEARCHABLE_KINDS = new Set(['text', 'longtext', 'url']);
 
-/** Everything a term is compared against, lowercased, in one string. */
+/** Everything a term is compared against, folded like the server's index, in one string. */
 export function entitySearchText(entity) {
   if (!entity) return '';
   const declared = entityFields(entity.type)
     .filter((field) => SEARCHABLE_KINDS.has(field.kind ?? 'text'))
     .map((field) => entity.attrs?.[field.key]);
-  return [entity.label, entity.type, folderOf(entity), entity.attrs?.notes, ...declared]
+  return foldText([entity.label, entity.type, folderOf(entity), entity.attrs?.notes, ...declared]
     .filter((value) => value !== null && value !== undefined && value !== '')
-    .join('\n')
-    .toLowerCase();
+    .join('\n'));
 }
 
 /** The fields that explain a hit, with the same declared-kind boundary as the index. */
 export function entitySearchMatches(entity, query) {
   if (!entity) return [];
-  const terms = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = foldTerms(query);
   if (!terms.length) return [];
   const fields = [
     { field: 'label', label: 'Name', value: entity.label },
@@ -51,7 +51,7 @@ export function entitySearchMatches(entity, query) {
   for (const field of fields) {
     if (field.value === null || field.value === undefined || field.value === '') continue;
     const value = String(field.value);
-    const folded = value.toLowerCase();
+    const folded = foldText(value);
     const hit = terms.filter((term) => folded.includes(term));
     if (!hit.length) continue;
     hit.forEach((term) => covered.add(term));
@@ -63,7 +63,7 @@ export function entitySearchMatches(entity, query) {
 /** True when the entity answers the term. An empty term matches everything, so a
  *  caller can hand the box straight through without a guard of its own. */
 export function matchesEntity(entity, query) {
-  const terms = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = foldTerms(query);
   const text = entitySearchText(entity);
   return !terms.length || terms.every((term) => text.includes(term));
 }

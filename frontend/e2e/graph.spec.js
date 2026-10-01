@@ -342,7 +342,8 @@ test('rereads while mounted when the Board files an entity', async ({ page }) =>
   await page.getByLabel('Type').selectOption('person');
   await page.getByLabel('Full name').fill('Second witness');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  // what it creates opens beside the list
+  await page.getByRole('button', { name: 'Close Details' }).click();
 
   await page.locator('.tabstrip').getByRole('button', { name: 'Graph', exact: true }).click();
   await expect(page.getByText('2 of 2')).toBeVisible();

@@ -17,7 +17,7 @@ from ..engine import timeline as timeline_engine
 _TEMPORAL_COLUMNS = (
     "id", "owner_id", "authority", "category", "kind", "raw", "earliest",
     "latest", "precision", "shape", "time_role", "uncertain", "approximate",
-    "zone", "sortable", "status", "confidence", "parse_error",
+    "zone", "sortable", "status", "confidence", "parse_error", "tz",
 )
 
 

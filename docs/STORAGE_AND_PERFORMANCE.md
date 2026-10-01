@@ -110,7 +110,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
       entity-images/ # private, bounded entity photos and their thumbnails
     .drafts/      # post drafts
     .inspect/     # one Inspect work per file (.v1/ keeps 0.3.0 sessions)
-    .collages/    # collage layouts; the picture is media
+    .collages/    # collage layouts and their previews; the picture is media
     .compare/     # saved Compare session specs
     .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
@@ -276,7 +276,7 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 18: schema 8 adds nullable `links.confidence`,
+`case.db` is at SQLite schema 19: schema 8 adds nullable `links.confidence`,
 schema 9 rebuilds every row's `search_text`, schema 10 stores graph pins per lens,
 schema 11 adds `links.nature`, schema 12 adds entity photo galleries, schema 13
 adds saved analysis views with their bounded-list count, and schema 14 indexes the
@@ -284,7 +284,10 @@ two columns the catalog orders the whole case by. Schema 15 adds the rebuildable
 temporal projection, schema 16 extends saved analysis views to Timeline recipes
 and snapshots, schema 17 rewrites temporal bounds to fixed microsecond width, and
 schema 18 rebuilds the projection once more, now that a proof's stated date is
-projected beside the dates its files carry.
+projected beside the dates its files carry. Schema 19 folds the entity and media
+search indexes, adds subject merge redirects and undo records, and gives the temporal
+projection a `tz` column for the zone a value was stated in. These changes share
+one migration from released schema 18; the case manifest stays at 11.
 The schema counter is independent of the JSON `CASE_SCHEMA`: the
 manifest's `azimut.storage` field selects the backend, and each format counts its own
 shape upgrades.
@@ -303,6 +306,16 @@ checkpoint and runs only those last two. Media moves additionally
 use `.data/rename.json`, so a restart can finish references after the bytes moved.
 
 ### Tables
+
+`entity_redirects`
+: Absorbed id, surviving id, original label, optional coordinate key, merge id and
+  timestamp. Chains are compressed when another merge moves the survivor. These
+  rows travel in bundles when their target is still present; the merge id is cleared.
+
+`entity_merges`
+: Local undo journal containing the absorbed entity, original links and photos,
+  graph positions, changed live views, survivor fields and sheet edits. Completed
+  records remain until Undo or permanent deletion. Bundles omit this table's rows.
 
 `meta`
 : Schema version, case name and timestamps.
@@ -379,7 +392,8 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
 `temporal_items`
 : Rebuildable, homogeneous rows for dated Claims, intrinsic media dates and case
   activity. Each row keeps the raw value beside normalized half-open bounds,
-  precision, timezone and uncertainty flags. Claims in `entities.attrs`, indexed
+  precision, timezone kind, the named zone it was stated in (`tz`) and uncertainty
+  flags. Claims in `entities.attrs`, indexed
   media sidecars and entity provenance remain authoritative. Deleting this table's
   contents and running `rebuild_temporal_projection()` recreates the same rows.
   Window/category/owner indexes let Time and Timeline page without scanning entity
@@ -557,8 +571,19 @@ endpoints:
   second cannot tie the paging into a loop. Both sort columns are indexed (schema
   14), so an ordered page walks an index instead of sorting the filtered set in a
   temp B-tree; `tests/test_repository.py` reads the query plan and holds it there.
+  `events` (the Board's *Most noted*) is the one ordering no index can serve: the
+  count of Claims naming each row. It is refused without a `type` set, so what it
+  costs is one Board group's rows, each an index search on `links.to_id`, and the
+  same test holds that plan too.
+- `counts=type` adds `by_type` to a page, the matching count per type under the same
+  terms, which is how the Board sizes every group of an answer in one request.
+- `POST /api/cases/{id}/catalog/events` takes a page of ids (200 at most) and says,
+  per id, how many Claims name it, when the dated ones fall, how many sources and
+  places they reach, and twelve buckets over the case's own span of dated Claims:
+  the Board reads it once per page of subject rows, and Details once per entity.
 - `GET /api/cases/{id}/catalog/summary` returns `{total, by_type, by_status,
-  by_folder, by_source, linked_to, unlinked, countable}` without shipping the graph.
+  by_folder, by_source, linked_to, unlinked, countable, lacks}` without shipping the
+  graph. `lacks` prices the two Claim questions, no source and not assessed.
   `linked_to` counts entities that **have a neighbour** of each type, which is not how
   many of that type the case holds: it is what the filter menu has to price itself
   with, and the other number looks like an answer without being one. `countable` is how
@@ -728,6 +753,20 @@ limit, and reports `remaining` so the client can loop. Progress is the stored
 geography itself, which makes the pass resumable and idempotent.
 
 ## Filesystem and database consistency
+
+A subject merge writes entities, links, galleries, graph positions, live views,
+redirects, temporal rows and its undo journal in one database transaction. Preview
+uses the same operation in a rolled-back savepoint. Incompatible links or cycles
+refuse the whole merge. Parallel relations with different confidence, nature or
+provenance remain separate. A snapshot is never rewritten.
+
+Sheet sidecar edits are recorded before the database commit, then applied with an
+atomic file replacement. Case open resumes pending edits, including interrupted Undo.
+The CSV and Notebook text are untouched. Subsequent sheet edits are preserved and
+reported when they prevent restoration. A pending sidecar write blocks another merge
+or bundle export until it can finish. Direct photos keep their existing paths; their
+database owner changes. Purging a survivor removes its redirects and merge history.
+Doctor reports redirects whose target is neither live nor in the Trash.
 
 SQLite cannot atomically commit a filesystem rename, so file-backed operations are
 recoverable. Creation produces a file under a unique temp name, validates it,

@@ -24,17 +24,22 @@ cannot be taken back, so every session it rewrites is first copied, byte for byt
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import shutil
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from PIL import Image
 
 from .. import layout
 from ..workspace import CaseError
 from . import links as link_engine
 from . import media as media_engine
+from .sheets import replace_atomic
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -50,6 +55,11 @@ COLLAGE_VERSION = 1
 MAX_SPEC_BYTES = 2_000_000
 MAX_FRAMES = 500
 MAX_PIECES = 200
+#: The collage list's preview: the browser draws it no wider than this, and a
+#: larger one is shrunk rather than stored.
+THUMB_EDGE = 480
+MAX_THUMB_BYTES = 4_000_000
+MAX_THUMB_PIXELS = 1024 * 1024
 
 WORK_TYPE = "inspect-session"
 COLLAGE_TYPE = "collage"
@@ -351,14 +361,74 @@ def _collage_specs(case: "Case") -> list[tuple[str, dict[str, Any]]]:
 def list_collages(case: "Case") -> list[dict[str, Any]]:
     rows = []
     for rel, spec in _collage_specs(case):
-        rows.append({
-            "name": Path(rel).stem,
-            "title": Path(rel).stem,
+        stem = Path(rel).stem
+        row: dict[str, Any] = {
+            "name": stem,
+            "title": stem,
             "pieces": len(spec.get("nodes") or []),
             "updated_at": spec.get("updated_at"),
-        })
+            "filed": _export_current(case, spec),
+        }
+        thumb = case.resolve_inside(layout.collage_thumb_rel(stem))
+        # Emptied since it was drawn, the preview would show pieces no longer there.
+        if row["pieces"] and thumb.is_file():
+            # The route revalidates by ETag, so the version only has to change
+            # the URL the list hands out when the picture changed.
+            row["thumb"] = layout.collage_thumb_rel(stem)
+            row["thumb_v"] = thumb.stat().st_mtime_ns
+        else:
+            row["outline"] = _outline(spec)
+        rows.append(row)
     rows.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
     return rows
+
+
+def _export_current(case: "Case", spec: dict[str, Any]) -> bool:
+    """Whether the picture last exported is still in the case and still this layout.
+
+    The signature is the browser's JSON of each piece's recipe and corners, so it is
+    compared parsed rather than as text: the two sides need not print a number alike.
+    """
+    exported = spec.get("exported")
+    if not isinstance(exported, dict):
+        return False
+    path, signature = exported.get("path"), exported.get("signature")
+    if not isinstance(path, str) or not isinstance(signature, str):
+        return False
+    try:
+        recorded = json.loads(signature)
+    except ValueError:
+        return False
+    nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+    if recorded != [[n.get("save"), n.get("quad")] for n in nodes]:
+        return False
+    try:
+        return media_engine.read_item(case, path) is not None
+    except (CaseError, OSError, ValueError):
+        return False
+
+
+def _outline(spec: dict[str, Any]) -> dict[str, Any] | None:
+    """The pieces' corners trimmed to their bounds, for a collage with no preview yet."""
+    quads = []
+    for node in spec.get("nodes") or []:
+        quad = node.get("quad") if isinstance(node, dict) else None
+        if not isinstance(quad, list):
+            continue
+        try:
+            quads.append([(float(x), float(y)) for x, y in quad])
+        except (TypeError, ValueError):
+            continue
+    if not quads:
+        return None
+    xs = [x for quad in quads for x, _ in quad]
+    ys = [y for quad in quads for _, y in quad]
+    x0, y0 = min(xs), min(ys)
+    return {
+        "width": round(max(xs) - x0, 1),
+        "height": round(max(ys) - y0, 1),
+        "quads": [[[round(x - x0, 1), round(y - y0, 1)] for x, y in quad] for quad in quads],
+    }
 
 
 def load_collage(case: "Case", name: str) -> dict[str, Any] | None:
@@ -440,21 +510,73 @@ def save_collage(
                 media_engine.rename_path(source, source.with_name(Path(rel).name))
             _write(case.resolve_inside(rel), written)
             existing = case.find_entity(attr="spec", value=old_rel)
+            renamed = {"spec": rel, **_carry_thumb(case, current, final)}
             if existing:
-                case.update_entity(existing["id"], {"label": final, "attrs": {"spec": rel}})
+                case.update_entity(existing["id"], {"label": final, "attrs": renamed})
         elif old_rel:
             # Written under the new name before the old file goes, so a crash in
             # between leaves the collage twice rather than not at all.
             _write(case.resolve_inside(rel), written)
             existing = case.find_entity(attr="spec", value=old_rel)
+            renamed = {"spec": rel, **_carry_thumb(case, current, final)}
             if existing:
-                case.update_entity(existing["id"], {"label": final, "attrs": {"spec": rel}})
+                case.update_entity(existing["id"], {"label": final, "attrs": renamed})
             case.resolve_inside(old_rel).unlink(missing_ok=True)
         else:
             _write(case.resolve_inside(rel), written)
         if case.find_entity(attr="spec", value=rel) is None:
             case.add_entity(COLLAGE_TYPE, final, attrs={"spec": rel}, by=PRODUCER)
     return {"name": final, "title": final}
+
+
+def _carry_thumb(case: "Case", old: str, new: str) -> dict[str, str]:
+    """Move a renamed collage's preview along, and say where it went."""
+    source = case.resolve_inside(layout.collage_thumb_rel(old))
+    if not source.is_file():
+        return {}
+    target = layout.collage_thumb_rel(new)
+    # Not resolved: on Windows a path resolves to the case on disk, which is the old one.
+    media_engine.rename_path(source, source.with_name(Path(target).name))
+    return {"thumb": target}
+
+
+def _preview_image(raw: bytes) -> "Image.Image":
+    """A PNG the browser drew, checked by its header before a pixel is decoded."""
+    if len(raw) > MAX_THUMB_BYTES:
+        raise CaseError("that preview is too large")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            opened = Image.open(io.BytesIO(raw))
+            if opened.format != "PNG" or opened.width * opened.height > MAX_THUMB_PIXELS:
+                raise ValueError("not a preview")
+            image = opened.convert("RGBA")
+    except Exception as exc:
+        raise CaseError("that preview is not a picture the list can show") from exc
+    image.thumbnail((THUMB_EDGE, THUMB_EDGE), Image.Resampling.LANCZOS)
+    return image
+
+
+def save_collage_thumb(case: "Case", name: str, raw: bytes) -> dict[str, Any] | None:
+    """File the preview of a saved collage, or None when no collage has that name.
+
+    Written as WebP whatever arrived, so what sits in the case is always pixels this
+    side re-encoded, and the entity points at it for the graph and the Timeline.
+    """
+    image = _preview_image(raw)
+    buf = io.BytesIO()
+    image.save(buf, "WEBP", quality=80)
+    stem = layout.slugify(name, "Collage")
+    rel = layout.collage_rel(stem)
+    thumb = layout.collage_thumb_rel(stem)
+    with case.lock:
+        if not case.resolve_inside(rel).is_file():
+            return None
+        replace_atomic(case.resolve_inside(thumb), buf.getvalue())
+        entity = case.find_entity(attr="spec", value=rel)
+        if entity and (entity.get("attrs") or {}).get("thumb") != thumb:
+            case.update_entity(entity["id"], {"attrs": {"thumb": thumb}})
+    return {"thumb": thumb}
 
 
 # -- 0.3.1: one work per file, collages on their own ------------------------------

@@ -37,6 +37,8 @@
   import UpdateModal from './components/UpdateModal.svelte';
   import DetectActivity from './components/DetectActivity.svelte';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
+  import NoteBar from './components/NoteBar.svelte';
+  import { isNoteKey } from './lib/noteHere.svelte.js';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
   import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
 
@@ -154,6 +156,32 @@
   function openWorkspace(ws) {
     uiState.tool = lastTool[ws.id] ?? ws.tools[0];
   }
+
+  // ── Add event, from wherever the analyst is ──────────────────────────────────
+  /** A frozen reading takes no new event, and says so rather than hiding the pencil:
+   *  a control that is visible and unusable teaches something. */
+  const noteFrozen = $derived(
+    (['board', 'graph'].includes(uiState.tool) && Boolean(analysisSearch.catalog.snapshotId)) ||
+      (uiState.tool === 'timeline' && Boolean(analysisSearch.timeline.snapshotId))
+  );
+  const noteTitle = $derived(
+    noteFrozen ? 'A frozen snapshot takes no new event. Leave it to add one.' : 'Add an event about what is on screen (Alt+N)'
+  );
+  function toggleNote() {
+    if (!caseState.current || noteFrozen) return;
+    // The Timeline already has its line under the axis: the pencil goes there.
+    if (uiState.tool === 'timeline') {
+      uiState.noting = false;
+      uiState.timelineLineFocus += 1;
+      return;
+    }
+    uiState.noting = !uiState.noting;
+  }
+  function onGlobalKey(event) {
+    if (!isNoteKey(event)) return;
+    event.preventDefault();
+    toggleNote();
+  }
   function toggleSidebar() {
     const open = !uiState.sidebarOpen;
     const ws = workspaceOf(uiState.tool);
@@ -255,15 +283,6 @@
     </button>
     <div class="case-group">
       <CaseSwitcher />
-      <button
-        class="btn btn-ghost case-btn"
-        class:topbar-active={activeWs?.id === CASE_WORKSPACE.id}
-        title="Open the case board"
-        onclick={() => openWorkspace(CASE_WORKSPACE)}
-      >
-        <Icon name={CASE_WORKSPACE.icon} size={16} />
-        <span>{TOOL_LABELS.board}</span>
-      </button>
     </div>
     <div class="spacer"></div>
     <DetectActivity />
@@ -271,6 +290,23 @@
          the gear rather than in each toolbar so there is one of it, and it opens the
          Guide on the section written about the current tool. Silent on the Guide
          itself, which is the answer. -->
+    <!-- The one way into Add event from every tool: quiet like the marks beside it,
+         since amber is kept for the main action and the selection. -->
+    {#if caseState.current && !solo}
+      <button
+        class="note-btn"
+        class:on={uiState.noting}
+        title={noteTitle}
+        aria-label="Add an event"
+        aria-pressed={uiState.noting}
+        disabled={noteFrozen}
+        onclick={toggleNote}
+      >
+        <Icon name="eventAdd" size={15} />
+        <span class="note-label">Add event</span>
+        <kbd>Alt N</kbd>
+      </button>
+    {/if}
     {#if uiState.tool !== 'guide'}
       <button
         class="btn btn-ghost btn-sm"
@@ -316,6 +352,19 @@
           <span>{ws.label}</span>
         </button>
       {/each}
+      <!-- The case, under the four stages and apart from them: it is what every stage
+           files into rather than one of them, and one press from any of them opens its
+           Timeline, Board, Graph and Sheet. -->
+      <span class="rail-rule" role="presentation"></span>
+      <button
+        class="rail-btn case-rail"
+        class:active={activeWs?.id === CASE_WORKSPACE.id}
+        onclick={() => openWorkspace(CASE_WORKSPACE)}
+        title="The case: its Timeline, Board, Graph and Sheet"
+      >
+        <Icon name={CASE_WORKSPACE.icon} size={19} />
+        <span>{CASE_WORKSPACE.label}</span>
+      </button>
       <button
         class="rail-btn theme-toggle"
         onclick={toggleTheme}
@@ -368,6 +417,9 @@
   </div>
 </div>
 
+<svelte:window onkeydown={onGlobalKey} />
+
+<NoteBar />
 <Toasts />
 
 {#if workspaceStopped}
@@ -417,33 +469,71 @@
   .spacer {
     flex: 1;
   }
-  /* the switcher and the board button are one control — which case, then open
-     it. Both carry the same weight, and the hairline is what says they belong
-     together: their own padding leaves too much air for proximity alone to. */
+  /* which case: the switcher alone, since the case itself opens from the rail */
   .case-group {
     display: flex;
     align-items: center;
   }
-  .case-btn {
-    position: relative;
-    margin-left: 13px;
-    gap: 8px;
-    padding: 6px 12px;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-  }
-  .case-btn::before {
-    content: '';
-    position: absolute;
-    left: -7px;
-    top: 5px;
-    bottom: 5px;
-    width: 1px;
-    background: var(--border);
-  }
   .topbar-active {
     color: var(--text-1);
     background: var(--bg-2);
+  }
+  /* Add event: one outlined pill among the icon marks, since it is the one of them
+     that makes something; amber only while its bar is open. */
+  .note-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 6px 0 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s var(--ease), background 0.15s var(--ease), border-color 0.15s var(--ease);
+  }
+  .note-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--text-1) 35%, transparent);
+    background: var(--bg-2);
+    color: var(--text-1);
+  }
+  .note-btn.on {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .note-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .note-btn kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-2);
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .note-btn.on kbd {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+  }
+  /* A narrow window keeps the mark and drops the words, which the tooltip says. */
+  @media (max-width: 1100px) {
+    .note-btn {
+      padding: 0 7px;
+    }
+    .note-label,
+    .note-btn kbd {
+      display: none;
+    }
   }
   .main {
     flex: 1;
@@ -478,6 +568,13 @@
   .rail-btn.active {
     color: var(--text-1);
     border-left-color: var(--accent);
+  }
+  /* The case under the four stages, a rule and some air between them. */
+  .rail-rule {
+    flex-shrink: 0;
+    height: 1px;
+    margin: 14px 14px 10px;
+    background: var(--border-strong);
   }
   /* pinned to the foot of the rail, away from the workspace switches */
   .theme-toggle {

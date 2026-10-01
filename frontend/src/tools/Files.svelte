@@ -8,6 +8,7 @@
    * The tree and the filing routing are the sidebar's own (lib/folderTree.js,
    * lib/filing.js); the selection math is pure and unit-tested (lib/gridSelect.js).
    */
+  import { onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
@@ -32,6 +33,7 @@
     restoreGroup,
   } from '../lib/trash.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
@@ -321,6 +323,13 @@
     selected = [];
     anchor = null;
   });
+
+  // What is open or alone-selected here is what the topbar's Add event seats.
+  $effect(() => {
+    const id = infoEntityId ?? (selected.length === 1 ? selected[0] : null);
+    offerNote('files', curEntities.find((e) => e.id === id) ?? null);
+  });
+  onDestroy(() => withdrawNote('files'));
 
   function onTileClick(e, id) {
     const r = toggleSelection(selected, id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey }, entityOrder, anchor);

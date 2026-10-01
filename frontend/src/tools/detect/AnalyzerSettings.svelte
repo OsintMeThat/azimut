@@ -22,6 +22,7 @@
     readonly = false,
     /** The wizard asks for the size first, above the analyzers, and not here. */
     showSize = true,
+    showCloud = true,
   } = $props();
 
   let showThresholds = $state(false);
@@ -40,7 +41,7 @@
 
 <fieldset class="settings" disabled={readonly}>
   {#if showSize}<AnalyzerSize bind:recipe {capability} {readonly} />{/if}
-  {#if capability.clouds}
+  {#if showCloud && capability.clouds}
     <CloudFilter clouds={recipe.parameters.ignore_clouds} shadows={recipe.parameters.ignore_shadows}
       ontoggle={setWeather} />
   {/if}

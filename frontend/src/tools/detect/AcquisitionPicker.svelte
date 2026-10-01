@@ -2,30 +2,31 @@
   /**
    * The Sentinel-2 passes the drawn areas actually have, to pick a run's dates from.
    *
-   * It replaces two bare date fields, which offered every day since 2015 and
-   * knew nothing: a sweep pinned to a day without a pass reads nodata, and the
-   * user finds that out after paying for the tiles. A calendar is the wrong
-   * shape for the answer, too — Sentinel-2 revisits every five days, so four
-   * cells in five are dead. So this lists what exists, newest first, with the
+   * It complements the A and B calendars with coverage and cloud details.
+   * A sweep pinned to a day without a pass reads nodata, and the user finds
+   * that out after paying for the tiles. This lists what exists, newest first, with the
    * two facts that decide between them: how much of the areas the pass reaches,
    * and how much of it was cloud.
    *
-   * The calendar has its place one step up, for where to look: past the year the
-   * presets reach, two days picked in it bound the lookup. The catalogue answers
-   * newest first, five pages at most, so a list it cut short offers the older ones.
+   * Date A and date B each have their own pass calendar above this list. The
+   * catalogue answers newest first, five pages at most, so a list it cut short
+   * offers the older ones.
+   *
+   * A caller that has a way to pick a day from a calendar hands it in as `dates`,
+   * and the window gains a Dates choice beside the last year that shows it in
+   * place of the list.
    */
   import Icon from '../../components/Icon.svelte';
-  import MonthGrid from '../../components/MonthGrid.svelte';
   import {
-    LOOKBACK_WINDOWS, MISSION_START, coverClass, coverLabel, lookupSpan, olderSpan, passKey, spanProblem,
+    LOOKBACK_WINDOWS, coverClass, coverLabel, olderSpan, passKey,
   } from '../../lib/map/acquisitions.js';
-  import { isoDay } from '../../lib/sentinel.js';
   import { cloudClass, cloudLabel } from '../../lib/sentinel.js';
+  import { passBefore } from '../../lib/map/detectWhen.js';
   import { orbitMark, sameTrack } from '../../lib/radar.js';
 
   let {
     list = [],
-    /** Days back from today, or two days picked in the calendar, `{ start, end }`. */
+    /** Days back from today. */
     lookback,
     busy = false,
     error = '',
@@ -40,25 +41,20 @@
     /** The chosen sources, `{ date, time }` each, or null. */
     a = null,
     b = null,
+    /** What the two buttons of a row say. */
+    nameA = 'A',
+    nameB = 'B',
     onlookback,
     onlook,
     /** Look again before the oldest pass listed, when the catalogue cut the list. */
     onolder,
     onpick,
+    /** What shows under a Dates window: the calendars to pick a day from. Left out, there is no such window. */
+    dates = null,
   } = $props();
 
-  const picked = $derived(typeof lookback === 'object' && lookback !== null);
-  const problem = $derived(spanProblem(lookback));
-  const older = $derived(truncated && onolder ? olderSpan(lookback, list) : null);
-  const first = $derived(MISSION_START[radar ? 'sentinel1' : 'sentinel2']);
-  const today = isoDay(new Date());
-  /** Which picked day has its month open: 'start', 'end' or ''. */
-  let calendar = $state('');
-
-  function pickDay(day) {
-    onlookback({ ...lookback, [calendar]: day });
-    calendar = '';
-  }
+  const older = $derived(truncated && onolder && typeof lookback === 'number' ? olderSpan(lookback, list) : null);
+  const byDate = $derived(!!dates && lookback === 'dates');
 
   /** Whether a row is the pass a side names: a typed radar day matches its day. */
   function names(source, entry) {
@@ -75,42 +71,23 @@
           type="button"
           class:on={lookback === option.id}
           disabled={busy}
-          onclick={() => { calendar = ''; onlookback(option.id); }}
+          onclick={() => onlookback(option.id)}
         >{option.label}</button>
       {/each}
-      <button
-        type="button"
-        class:on={picked}
-        disabled={busy}
-        title="Pick the first and the last day in the calendar"
-        onclick={() => { if (!picked) onlookback(lookupSpan(lookback)); }}
-      >Dates…</button>
+      {#if dates}
+        <button type="button" class:on={byDate} aria-pressed={byDate} disabled={busy} onclick={() => onlookback('dates')}>Dates</button>
+      {/if}
     </div>
-    <button class="btn btn-sm" disabled={busy || !areas || !!problem} onclick={onlook}>
-      {busy ? 'Looking…' : searched ? 'Look again' : 'Find passes'}
-    </button>
+    {#if !byDate}
+      <button class="btn btn-sm" disabled={busy || !areas} onclick={onlook}>
+        {busy ? 'Looking…' : searched ? 'Look again' : 'Find passes'}
+      </button>
+    {/if}
   </div>
 
-  {#if picked}
-    <div class="span">
-      <button type="button" class="day cmp-mono" class:open={calendar === 'start'} disabled={busy}
-        aria-label="First day" aria-expanded={calendar === 'start'}
-        onclick={() => (calendar = calendar === 'start' ? '' : 'start')}>{lookback.start || 'First day'}</button>
-      <span aria-hidden="true">→</span>
-      <button type="button" class="day cmp-mono" class:open={calendar === 'end'} disabled={busy}
-        aria-label="Last day" aria-expanded={calendar === 'end'}
-        onclick={() => (calendar = calendar === 'end' ? '' : 'end')}>{lookback.end || 'Last day'}</button>
-    </div>
-    {#if calendar}
-      <MonthGrid value={lookback[calendar]} label={calendar === 'start' ? 'First day' : 'Last day'}
-        min={calendar === 'start' ? first : lookback.start || first}
-        max={calendar === 'start' ? lookback.end || today : today}
-        onpick={pickDay} />
-    {/if}
-    {#if problem}<p class="warn">{problem}</p>{/if}
-  {/if}
-
-  {#if !areas}
+  {#if byDate}
+    {@render dates()}
+  {:else if !areas}
     <p class="hint">Draw an area in step 1, then look up the passes it has.</p>
   {:else if error}
     <p class="warn" role="alert">{error}</p>
@@ -129,6 +106,8 @@
       {#each list as entry (passKey(entry))}
         {@const pairedA = !single && radar && a?.time && !sameTrack(entry.time, a.time)}
         {@const pairedB = !single && radar && b?.time && !sameTrack(entry.time, b.time)}
+        {@const afterB = !single && !passBefore(entry, b, radar)}
+        {@const beforeA = !single && !passBefore(a, entry, radar)}
         <li class:chosen={names(a, entry) || names(b, entry)}>
           <div class="facts">
             <strong class="cmp-mono">{entry.date}</strong>
@@ -147,21 +126,23 @@
                 type="button"
                 class:on={names(a, entry)}
                 aria-pressed={names(a, entry)}
-                disabled={pairedB}
-                title={pairedB ? 'Another track than B: it sees the ground from another angle' : 'Use as A, the picture before'}
+                disabled={pairedB || afterB}
+                title={pairedB ? 'Another track than B: it sees the ground from another angle'
+                  : afterB ? 'Date A must be before date B' : 'Use as A, the picture before'}
                 onclick={() => onpick('a', entry)}
-              >A</button>
+              >{nameA}</button>
             {/if}
             {#if wantsCompare}
               <button
                 type="button"
                 class:on={names(b, entry)}
                 aria-pressed={names(b, entry)}
-                disabled={pairedA}
+                disabled={pairedA || beforeA}
                 title={pairedA ? 'Another track than A: it sees the ground from another angle'
+                  : beforeA ? 'Date A must be before date B'
                   : single ? 'Use this pass' : 'Use as B, the picture to look in'}
                 onclick={() => onpick('b', entry)}
-              >{single ? 'Use' : 'B'}</button>
+              >{single ? 'Use' : nameB}</button>
             {/if}
           </div>
         </li>
@@ -194,25 +175,6 @@
   /* Underlined: it sits in the warning's own orange. */
   .link { color: var(--accent); font-size: inherit; text-decoration: underline; }
   .link:disabled { color: var(--text-3); }
-  .span {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
-  .day {
-    padding: 3px 7px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    color: var(--text-1);
-    font-size: var(--fs-xs);
-  }
-  .day:hover:not(:disabled),
-  .day.open {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
   .hint {
     display: flex;
     align-items: center;

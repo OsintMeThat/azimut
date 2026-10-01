@@ -46,6 +46,8 @@ export const AXES = [
     kind: 'toggle',
     hint: 'filed, and joined to nothing at all',
   },
+  { key: 'unsourced', label: 'No source', kind: 'toggle', hint: 'a claim that cites nothing' },
+  { key: 'unassessed', label: 'Not assessed', kind: 'toggle', hint: 'a claim nobody has graded' },
   { key: 'added', label: 'Added', kind: 'added', hint: 'when it was filed into the case' },
   { key: 'by', label: 'Filed by', kind: 'picks', hint: 'which tool filed it, or by hand' },
 ];
@@ -58,6 +60,11 @@ export const ADDED = [
   { value: '7d', label: 'Last 7 days', days: 7 },
   { value: '30d', label: 'Last 30 days', days: 30 },
 ];
+
+/** What a Claim can be missing, and the axis that asks for it (`store/filters.py`
+ *  LACKS). Both ask of Claims only: a file is its own source, and nothing else is
+ *  graded. */
+export const LACKS = { unsourced: 'source', unassessed: 'assessment' };
 
 /** The two review states, worded as the rest of the app words them. */
 export const STATUSES = [
@@ -99,6 +106,18 @@ export const QUESTIONS = [
     hint: 'in none of your folders',
     terms: { unfiled: true },
   },
+  {
+    id: 'unsourced',
+    label: 'No source',
+    hint: 'a claim that cites nothing to show it',
+    terms: { lacks: ['source'] },
+  },
+  {
+    id: 'unassessed',
+    label: 'Not assessed',
+    hint: 'a claim nobody has graded yet',
+    terms: { lacks: ['assessment'] },
+  },
 ];
 
 /** A question with no term set. Every field is present, so nothing downstream has to
@@ -116,6 +135,7 @@ export function emptyFilter() {
     attrValue: '',
     linked: '',
     connections: '', // '' | 'none'
+    lacks: [], // of LACKS' values
     added: '', // one of ADDED, or '' when since/until say it in dates
     since: '',
     until: '',
@@ -146,6 +166,7 @@ export function normalizeFilter(value) {
     attrValue: text(raw.attrValue),
     linked: text(raw.linked, 40),
     connections: raw.connections === 'none' ? 'none' : '',
+    lacks: strings(raw.lacks).filter((value) => Object.values(LACKS).includes(value)),
     added: ADDED.some((entry) => entry.value === raw.added) ? raw.added : '',
     since: text(raw.since, 10),
     until: text(raw.until, 10),
@@ -182,6 +203,9 @@ export function hasTerm(filter, axis) {
       return Boolean(filter.linked);
     case 'connections':
       return filter.connections === 'none';
+    case 'unsourced':
+    case 'unassessed':
+      return filter.lacks.includes(LACKS[axis]);
     case 'added':
       return Boolean(filter.added || filter.since || filter.until);
     case 'by':
@@ -210,6 +234,9 @@ export function clearAxis(filter, axis) {
       return { ...filter, linked: '' };
     case 'connections':
       return { ...filter, connections: '' };
+    case 'unsourced':
+    case 'unassessed':
+      return { ...filter, lacks: filter.lacks.filter((value) => value !== LACKS[axis]) };
     case 'added':
       return { ...filter, added: '', since: '', until: '' };
     case 'by':
@@ -219,10 +246,19 @@ export function clearAxis(filter, axis) {
   }
 }
 
-/** Ask one of the standing questions, over whatever is already set. */
+/** Ask one of the standing questions, over whatever is already set. What a Claim
+ *  lacks adds up: no source and not assessed is one question with two terms. */
 export function askQuestion(filter, id) {
   const question = QUESTIONS.find((entry) => entry.id === id);
-  return question ? { ...filter, ...question.terms } : filter;
+  if (!question) return filter;
+  const asked = { ...filter, ...question.terms };
+  if (question.terms.lacks) asked.lacks = [...new Set([...filter.lacks, ...question.terms.lacks])];
+  return asked;
+}
+
+/** Turn one of the toggles for what a Claim lacks on or off. */
+export function toggleLack(filter, axis) {
+  return { ...filter, lacks: toggleValue(filter.lacks, LACKS[axis]) };
 }
 
 /** Add or drop one value of a multi-value axis. */
@@ -264,6 +300,7 @@ export function toQuery(filter, { types = [], now = Date.now() } = {}) {
     value: filter.attrKey && filter.attrValue ? filter.attrValue : undefined,
     linked: filter.linked || undefined,
     unlinked: filter.connections === 'none' || undefined,
+    lacks: filter.lacks.length ? filter.lacks : undefined,
     since: relative || filter.since || undefined,
     until: (!filter.added && filter.until) || undefined,
     by: filter.by.length ? filter.by : undefined,
@@ -293,6 +330,7 @@ export function toGraphQuery(filter, { types = [], now = Date.now() } = {}) {
   }
   if (asked.linked) params.linked = asked.linked;
   if (asked.unlinked) params.unlinked = 'true';
+  if (asked.lacks?.length) params.lacks = asked.lacks.join(',');
   if (asked.since) params.since = asked.since;
   if (asked.until) params.until = asked.until;
   if (asked.by?.length) params.by = asked.by.join(',');
@@ -337,6 +375,11 @@ export function chipsOf(filter, names = {}) {
   }
   if (filter.connections === 'none') {
     chips.push({ axis: 'connections', text: 'Nothing linked' });
+  }
+  for (const [axis, value] of Object.entries(LACKS)) {
+    if (filter.lacks.includes(value)) {
+      chips.push({ axis, text: AXES.find((entry) => entry.key === axis).label });
+    }
   }
   if (filter.added) {
     const range = ADDED.find((entry) => entry.value === filter.added);

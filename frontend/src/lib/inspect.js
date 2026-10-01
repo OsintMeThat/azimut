@@ -44,6 +44,12 @@ export function timecode(seconds) {
   return `${pad(Math.floor(t / 3600))}-${pad(Math.floor((t % 3600) / 60))}-${pad(t % 60)}`;
 }
 
+/** Where a frame sits in its video, as a player shows it: 1:04.5. */
+export function clockTime(seconds) {
+  const t = Math.max(0, Number(seconds) || 0);
+  return `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+}
+
 /**
  * A captured frame's default name, timecode first.
  *
@@ -495,13 +501,50 @@ export function scaleQuads(quads, k, center = null) {
   return quads.map((q) => scaleQuad(q, k, c));
 }
 
-// A collage canvas is the resolution ceiling of everything on it: a piece is
-// added at whatever fits it (`initialQuad`), auto-stitch fits its answer into it,
-// and the export follows the pieces' bounds. So the size is the analyst's, within
-// the bounds the compose route accepts (`api/inspect.ComposeIn`).
+// A collage canvas is only where the pieces are worked: a piece is added at
+// whatever fits it (`initialQuad`) and auto-stitch grows it to hold its answer. The
+// export does not follow it (`exportFrame`), and neither side ever passes the bounds
+// the compose route accepts (`api/inspect.ComposeIn`).
 export const COLLAGE_MIN_DIM = 16;
 export const COLLAGE_MAX_DIM = 8192;
 export const COLLAGE_DEFAULT_SIZE = { width: 1600, height: 800 };
+/** The most pixels an export holds, so a wide panorama stays within a laptop's memory. */
+export const COLLAGE_MAX_EXPORT_PIXELS = 40_000_000;
+
+const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+/**
+ * The size a collage exports at: its pieces' bounds, enlarged until the sharpest
+ * piece is back at its own pixels, so what was placed small on the canvas does not
+ * come out small. Held under `COLLAGE_MAX_DIM` a side and `COLLAGE_MAX_EXPORT_PIXELS`
+ * in all; `capped` says the limit, not the pieces, set the size.
+ */
+export function exportFrame(nodes) {
+  const b = collageBounds(nodes);
+  let wanted = 1;
+  for (const n of nodes) {
+    const [p0, p1, p2, p3] = n.quad;
+    const across = (dist(p0, p1) + dist(p3, p2)) / 2;
+    const down = (dist(p0, p3) + dist(p1, p2)) / 2;
+    if (n.w > 0 && across > 0) wanted = Math.max(wanted, n.w / across);
+    if (n.h > 0 && down > 0) wanted = Math.max(wanted, n.h / down);
+  }
+  const limit = Math.min(
+    COLLAGE_MAX_DIM / b.width,
+    COLLAGE_MAX_DIM / b.height,
+    Math.sqrt(COLLAGE_MAX_EXPORT_PIXELS / (b.width * b.height)),
+  );
+  const scale = Math.min(wanted, limit);
+  const side = (v) => Math.min(COLLAGE_MAX_DIM, Math.max(COLLAGE_MIN_DIM, Math.round(v * scale)));
+  return {
+    minX: b.minX,
+    minY: b.minY,
+    scale,
+    width: side(b.width),
+    height: side(b.height),
+    capped: wanted > limit,
+  };
+}
 
 /** A new, empty collage — one spelling, used wherever one is created. */
 export function newCollage(name) {

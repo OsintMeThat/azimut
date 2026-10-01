@@ -48,6 +48,15 @@ function slide(value) {
   slider.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 }
+async function typeWhenDay(buttonLabel, fieldLabel, value) {
+  labelled(buttonLabel).click(); await settle();
+  const details = target.querySelector('.manual-date');
+  if (!details.open) { details.querySelector('summary').click(); await settle(); }
+  const field = target.querySelector(`[aria-label="${fieldLabel}"]`);
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+}
 
 const area = [{ id: 'area', name: 'Area', kind: 'rect', points: [[2, 48], [2.001, 48.001]] }];
 const WATCH = 'abcdef123456';
@@ -133,8 +142,8 @@ it('shows a routine with what it is for and where its last run stands', async ()
   expect(target.textContent).toContain('2026-09-06 · 3 to review');
   labelled('Run Harbour weekly').click(); await settle();
   expect(post).not.toHaveBeenCalled();
-  expect(document.querySelector('[aria-label="Dates per area"]')).not.toBe(null);
-  button('Run this area').click(); await settle();
+  expect(target.querySelector('[aria-label="Dates for Area"]')).not.toBe(null);
+  button('Check for new passes').click(); await settle();
   expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/run`, {
     area_dates: [expect.objectContaining({ area_id: 'area', b: expect.objectContaining({ date: '' }) })],
   });
@@ -202,6 +211,54 @@ it('groups the saved runs by routine, and puts one on the map beside its trash',
   expect(target.textContent).not.toContain('2026-09-06 · 3 to review');
 });
 
+it('changes a saved routine colour from its square without folding the group', async () => {
+  let current = watchRow({ colour: '#38bdf8' });
+  const body = watchBody();
+  get.mockImplementation(async (path) => {
+    if (path === '/api/compare/analyzers') return catalogue();
+    if (path === `/api/cases/case-a/analysis/followups/${WATCH}`) return structuredClone(body);
+    if (path.endsWith('/followups')) return [structuredClone(current)];
+    if (path.endsWith('/runs')) return [runRow()];
+    return [];
+  });
+  patch.mockImplementation(async (_, payload) => {
+    current = { ...current, colour: payload.colour };
+    return payload;
+  });
+  await open();
+  button('Saved').click(); await settle();
+  const picker = target.querySelector('input[aria-label="Colour of Harbour weekly"]');
+  expect(picker.value).toBe('#38bdf8');
+  picker.value = '#22d3ee';
+  picker.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  expect(patch).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/colour`,
+    { colour: '#22d3ee' });
+  expect(target.querySelector('input[aria-label="Colour of Harbour weekly"]').value).toBe('#22d3ee');
+  expect(target.querySelector('.fold[aria-expanded="true"]')).not.toBe(null);
+});
+
+it('changes a one pass colour without changing its recorded analyzer', async () => {
+  let once = runRow({ title: 'Port sweep', followup_id: null, colour: '#f6a81a' });
+  get.mockImplementation(async (path) => {
+    if (path === '/api/compare/analyzers') return catalogue();
+    if (path.endsWith('/runs')) return [structuredClone(once)];
+    return [];
+  });
+  patch.mockImplementation(async (_, payload) => {
+    once = { ...once, colour: payload.colour };
+    return { display_colour: payload.colour };
+  });
+  await open();
+  button('Saved').click(); await settle();
+  const picker = target.querySelector('input[aria-label="Colour of Port sweep"]');
+  expect(picker.value).toBe('#f6a81a');
+  picker.value = '#eab308';
+  picker.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  expect(patch).toHaveBeenCalledWith(`/api/cases/case-a/analysis/runs/${RUN}/colour`,
+    { colour: '#eab308' });
+  expect(target.querySelector('input[aria-label="Colour of Port sweep"]').value).toBe('#eab308');
+});
+
 it('reshapes a shared area on the map, saying what its routines will sweep', async () => {
   const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
   const shared = { id: 'aaaaaaaaaaaa', name: 'North site', colour: '#38bdf8', geometry: { type: 'Polygon', coordinates: [ring] } };
@@ -239,6 +296,227 @@ it('reshapes a shared area on the map, saying what its routines will sweep', asy
   expect(put).toHaveBeenCalledTimes(1);
 });
 
+it('shows shared groups and ungrouped areas in Where without selecting an area twice', async () => {
+  const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
+  const harbor = { id: 'aaaaaaaaaaaa', name: 'Harbor', colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] } };
+  const river = { ...harbor, id: 'bbbbbbbbbbbb', name: 'River' };
+  answer({
+    '/api/cases/case-a/analysis/areas': [harbor, river],
+    '/api/cases/case-a/analysis/zones': [
+      { id: '111111111111', title: 'Ports', area_ids: [harbor.id], position: 0 },
+      { id: '222222222222', title: 'Priority', area_ids: [harbor.id], position: 1 },
+    ],
+  });
+  post.mockResolvedValue({ id: '333333333333' });
+  await open();
+  button('New detection').click(); await settle();
+  labelled('New one pass').click(); await settle();
+  const where = target.querySelector('[aria-label="Where to look"]');
+  expect(where.textContent).toContain('Ungrouped');
+  expect(where.textContent).toContain('River');
+  labelled('Use Ports').click(); await settle();
+  labelled('Use Priority').click(); await settle();
+  expect(where.querySelectorAll('.area-row')).toHaveLength(1);
+  const search = where.querySelector('[aria-label="Search areas or groups"]');
+  search.value = 'River'; search.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  expect(where.textContent).not.toContain('Ports');
+  expect(where.textContent).toContain('River');
+  search.value = ''; search.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  button('River').click(); await settle();
+  expect(where.querySelectorAll('.area-row')).toHaveLength(2);
+  [...where.querySelectorAll('summary')].find((node) => node.textContent === 'Save selection as group').click();
+  const name = where.querySelector('[aria-label="Group name"]');
+  name.value = 'My sweep'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  button('Save group').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones', {
+    title: 'My sweep', area_ids: [harbor.id, river.id],
+  });
+});
+
+it('asks which shape a migrated group should use before offering it in Where', async () => {
+  const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
+  const current = { id: 'aaaaaaaaaaaa', name: 'Harbor', colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] } };
+  const saved = { ...current, id: 'bbbbbbbbbbbb', name: 'Harbor saved shape' };
+  const review = { saved_area_id: saved.id, current_area_id: current.id, name: 'Harbor' };
+  answer({
+    '/api/cases/case-a/analysis/areas': [current, saved],
+    '/api/cases/case-a/analysis/zones': [
+      { id: '111111111111', title: 'Ports', area_ids: [saved.id], position: 0, pending_review: [review] },
+    ],
+  });
+  put.mockResolvedValue({});
+  const onframe = vi.fn();
+  await open({ onframe });
+  button('New detection').click(); await settle();
+  labelled('New one pass').click(); await settle();
+  expect(labelled('Use Ports').disabled).toBe(true);
+  button('Review saved shapes in Areas').click(); await settle();
+  expect(target.textContent).toContain('Choose which shape this group should use.');
+  button('Show saved').click(); await settle();
+  expect(onframe).toHaveBeenCalledWith([{ kind: 'polygon', points: ring }]);
+  button('Use current').click(); await settle();
+  expect(put).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones/111111111111', {
+    title: 'Ports', area_ids: [current.id], position: 0, pending_review: [],
+  });
+  expect(del).not.toHaveBeenCalled();
+});
+
+it('reorders groups and adds an area to another group without copying it', async () => {
+  const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
+  const harbor = { id: 'aaaaaaaaaaaa', name: 'Harbor', colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] } };
+  answer({
+    '/api/cases/case-a/analysis/areas': [harbor],
+    '/api/cases/case-a/analysis/zones': [
+      { id: '111111111111', title: 'Ports', area_ids: [harbor.id], position: 0 },
+      { id: '222222222222', title: 'Priority', area_ids: [], position: 1 },
+    ],
+  });
+  put.mockResolvedValue({});
+  await open();
+  button('Areas').click(); await settle();
+  starts('Ports').click(); await settle();
+  const add = target.querySelector('[aria-label="Add Harbor to group"]');
+  add.value = '222222222222'; add.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  expect(put).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones/222222222222',
+    { title: 'Priority', area_ids: [harbor.id], position: 1, pending_review: [] });
+  expect(put).not.toHaveBeenCalledWith('/api/cases/case-a/analysis/areas/aaaaaaaaaaaa', expect.anything());
+
+  const drag = labelled('Drag group Ports');
+  const event = new Event('dragstart', { bubbles: true });
+  Object.defineProperty(event, 'dataTransfer', { value: { setData: () => {}, effectAllowed: '' } });
+  drag.dispatchEvent(event);
+  const priorityHead = target.querySelector('[aria-label="Drop into Priority"]');
+  priorityHead.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(priorityHead.classList.contains('landing-after')).toBe(true);
+  priorityHead.dispatchEvent(new Event('drop', { bubbles: true }));
+  await settle();
+  expect(priorityHead.classList.contains('landing-after')).toBe(false);
+  expect(put).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones/111111111111',
+    { title: 'Ports', area_ids: [harbor.id], position: 1, pending_review: [] });
+
+  const areaDrag = new Event('dragstart', { bubbles: true });
+  Object.defineProperty(areaDrag, 'dataTransfer', { value: { setData: () => {}, effectAllowed: '' } });
+  labelled('Drag Harbor').dispatchEvent(areaDrag);
+  priorityHead.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(priorityHead.classList.contains('landing-area')).toBe(true);
+  priorityHead.dispatchEvent(new Event('drop', { bubbles: true }));
+  await settle();
+  expect(priorityHead.classList.contains('landing-area')).toBe(false);
+  expect(put).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones/111111111111',
+    { title: 'Ports', area_ids: [], position: 0, pending_review: [] });
+  expect(put).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones/222222222222',
+    { title: 'Priority', area_ids: [harbor.id], position: 1, pending_review: [] });
+});
+
+it('orders ungrouped areas and creates an empty group in Areas', async () => {
+  const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
+  const harbor = { id: 'aaaaaaaaaaaa', name: 'Harbor', colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] } };
+  const river = { ...harbor, id: 'bbbbbbbbbbbb', name: 'River' };
+  answer({ '/api/cases/case-a/analysis/areas': [harbor, river] });
+  put.mockResolvedValue({});
+  post.mockResolvedValue({ id: '111111111111' });
+  await open();
+  button('Areas').click(); await settle();
+  const drag = new Event('dragstart', { bubbles: true });
+  Object.defineProperty(drag, 'dataTransfer', { value: { setData: () => {}, effectAllowed: '' } });
+  labelled('Drag River').dispatchEvent(drag);
+  const harborRow = target.querySelector('[role="group"][aria-label="Harbor"]');
+  harborRow.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(harborRow.classList.contains('landing-before')).toBe(true);
+  harborRow.dispatchEvent(new Event('drop', { bubbles: true }));
+  await settle();
+  expect(harborRow.classList.contains('landing-before')).toBe(false);
+  expect(put).toHaveBeenCalledWith('/api/cases/case-a/analysis/areas/bbbbbbbbbbbb',
+    expect.objectContaining({ position: 0 }));
+  button('New group').click(); await settle();
+  const name = target.querySelector('[aria-label="New group name"]');
+  name.value = 'Ports'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  button('Create').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/cases/case-a/analysis/zones',
+    { title: 'Ports', area_ids: [] });
+});
+
+it('searches the routines once there are more than five', async () => {
+  const names = ['Harbour weekly', 'Airbase apron', 'Río crossing', 'Depot north', 'Quarry', 'Border road'];
+  const rows = names.map((title, i) => watchRow({ id: `abcdef12345${i}`, title, note: '' }));
+  answer({ '/api/cases/case-a/analysis/followups': rows.slice(0, 5) });
+  await open();
+  expect(target.querySelector('[aria-label="Search routines…"]')).toBe(null);
+  unmount(live);
+  answer({ '/api/cases/case-a/analysis/followups': rows });
+  await open();
+  const search = target.querySelector('[aria-label="Search routines…"]');
+  const shown = () => [...target.querySelectorAll('.card .title')].map((node) => node.textContent.trim());
+  expect(shown()).toHaveLength(6);
+  search.value = 'rio'; search.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  expect(shown()).toEqual(['Río crossing']);
+  expect(target.textContent).toContain('1/6');
+  search.value = 'nowhere'; search.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  expect(shown()).toEqual([]);
+  expect(target.textContent).toContain('No routine matches “nowhere”.');
+});
+
+it('starts every area group folded, hides a whole group at once, and shuts a menu on a press elsewhere', async () => {
+  const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
+  const harbor = { id: 'aaaaaaaaaaaa', name: 'Harbor', colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] } };
+  const quay = { ...harbor, id: 'bbbbbbbbbbbb', name: 'Quay' };
+  const river = { ...harbor, id: 'cccccccccccc', name: 'River' };
+  answer({
+    '/api/cases/case-a/analysis/areas': [harbor, quay, river],
+    '/api/cases/case-a/analysis/zones': [
+      { id: '111111111111', title: 'Ports', area_ids: [harbor.id, quay.id], position: 0 },
+      { id: '222222222222', title: 'Rivers', area_ids: [river.id], position: 1 },
+    ],
+  });
+  await open();
+  button('Areas').click(); await settle();
+  // the first group used to open by itself
+  expect([...target.querySelectorAll('.fold')].map((fold) => fold.getAttribute('aria-expanded')))
+    .toEqual(['false', 'false']);
+  expect(labelled('Hide Harbor')).toBe(null);
+
+  labelled('Hide group Ports').click(); await settle();
+  expect(labelled('Show group Ports')).not.toBe(null);
+  starts('Ports').click(); await settle();
+  expect(labelled('Show Harbor')).not.toBe(null);
+  expect(labelled('Show Quay')).not.toBe(null);
+  // one area back on the map makes the group read as shown, and its eye hides it again
+  labelled('Show Quay').click(); await settle();
+  expect(labelled('Hide group Ports')).not.toBe(null);
+  labelled('Hide group Ports').click(); await settle();
+  expect(labelled('Show Quay')).not.toBe(null);
+  labelled('Show group Ports').click(); await settle();
+  expect(labelled('Hide Harbor')).not.toBe(null);
+  expect(labelled('Hide Quay')).not.toBe(null);
+
+  const menu = (name) => target.querySelector(`summary[aria-label="More actions for ${name}"]`).parentElement;
+  const toggle = async (details) => { details.open = !details.open; details.dispatchEvent(new Event('toggle')); await settle(); };
+  await toggle(menu('Harbor'));
+  // a second menu shuts the first
+  await toggle(menu('Quay'));
+  expect(menu('Harbor').open).toBe(false);
+  expect(menu('Quay').open).toBe(true);
+  target.querySelector('[aria-label="Search areas or groups"]').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  await settle();
+  expect(menu('Quay').open).toBe(false);
+
+  // and the areas step of a new detection folds them the same way
+  button('New detection').click(); await settle();
+  labelled('New one pass').click(); await settle();
+  const where = target.querySelector('[aria-label="Where to look"]');
+  expect([...where.querySelectorAll('.group-fold')].map((fold) => fold.getAttribute('aria-expanded')))
+    .toEqual(['false', 'false']);
+  expect(where.textContent).not.toContain('Harbor');
+});
+
 // -- a routine's own page ---------------------------------------------------------
 
 it('opens a routine on what it has found, and runs it again on a chosen pass', async () => {
@@ -265,8 +543,64 @@ it('opens a routine on what it has found, and runs it again on a chosen pass', a
   button('Find passes').click(); await settle();
   expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({ zones: area }));
   button('Use').click(); await settle();
-  button('Run this area').click(); await settle();
+  button('Check for new passes').click(); await settle();
   expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/run`, { area_dates: [expect.objectContaining({ b: expect.objectContaining({ date: '2026-09-16' }) })] });
+});
+
+it('shows the last pass per area and leaves a current routine unqueued', async () => {
+  const second = { ...area[0], id: 'second', name: 'Second area' };
+  const body = watchBody({ recipe: structuredClone(recipe), zones: [...area, second], area_dates: [...area, second].map((zone) => ({
+    area_id: zone.id, a: { provider: 'sentinel2', date: '2026-09-01' },
+    b: { provider: 'sentinel2', date: '' }, date_rule: 'latest_previous',
+  })) });
+  answer({
+    '/api/cases/case-a/analysis/followups': [watchRow({ zones: body.zones, areas: 2, method: 'surface' })],
+    [`/api/cases/case-a/analysis/followups/${WATCH}`]: body,
+    [`/api/cases/case-a/analysis/followups/${WATCH}/last-passes`]: {
+      area: { provider: 'sentinel2', date: '2026-09-06' },
+      second: { provider: 'sentinel2', date: '2026-09-07' },
+    },
+  });
+  const onshow = vi.fn();
+  post.mockImplementation(async (path) => path.endsWith('/acquisitions')
+    ? { dates: [{ date: '2026-09-16', cloud: 4, coverage: 1 }], truncated: false }
+    : { status: 'no_new_imagery', message: 'No new pass since 2026-09-07' });
+  await open({ onshow });
+  labelled('Run Harbour weekly').click(); await settle();
+  expect(target.querySelectorAll('.area-date')).toHaveLength(2);
+  expect(target.textContent).toContain('Last completed pass');
+  target.querySelector('.area-date .side button.link').click(); await settle();
+  expect(onshow).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-09-06', side: 'A',
+    area: expect.objectContaining({ id: 'area' }) }));
+  const cards = target.querySelectorAll('.area-date');
+  cards[1].querySelector('button[aria-label="Date B for Second area"]').click(); await settle();
+  expect(cards[1].querySelector('[aria-label="Pass for Second area pass calendar"]')).not.toBe(null);
+  expect(cards[0].querySelector('.pass-calendar')).toBe(null);
+  labelled('Find passes for Second area').click(); await settle();
+  expect(cards[1].querySelector('.passes')).not.toBe(null);
+  expect(cards[0].querySelector('.passes')).toBe(null);
+  await typeWhenDay('Date B for Second area', 'Pass for Second area', '01/09/2026');
+  expect(button('Check for new passes').disabled).toBe(true);
+  button('Use newest').click(); await settle();
+  expect(button('Check for new passes').disabled).toBe(false);
+  button('Check for new passes').click(); await settle();
+  expect(toast).toHaveBeenCalledWith('No new pass since 2026-09-07', 'info');
+  expect(target.querySelector('.launch-body')).toBe(null);
+});
+
+it('resizes the dock through the keyboard and pointer handle', async () => {
+  const onwidth = vi.fn();
+  const onwidthend = vi.fn();
+  await open({ dockWidth: 380, maxDockWidth: () => 720, onwidth, onwidthend });
+  const handle = labelled('Resize Detect panel');
+  handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  expect(onwidth.mock.calls.map(([width]) => width)).toEqual([300, 720]);
+  handle.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 900, bubbles: true }));
+  window.dispatchEvent(new PointerEvent('pointermove', { clientX: 820 }));
+  window.dispatchEvent(new PointerEvent('pointerup'));
+  expect(onwidth).toHaveBeenLastCalledWith(460);
+  expect(onwidthend).toHaveBeenCalledTimes(3);
 });
 
 it('lists a routine\'s runs, and opens one on its candidates', async () => {
@@ -289,6 +623,22 @@ it('lists a routine\'s runs, and opens one on its candidates', async () => {
 
 // -- building one ------------------------------------------------------------------
 
+it('opens a saved group from Files after loading its current shared area', async () => {
+  const ring = [[2, 48], [2.01, 48], [2.01, 48.01], [2, 48.01], [2, 48]];
+  const shared = { id: 'bbbbbbbbbbbb', name: 'Harbor', colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] } };
+  answer({
+    '/api/cases/case-a/analysis/areas': [shared],
+    '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': {
+      id: 'aaaaaaaaaaaa', title: 'Ports', area_ids: [shared.id], position: 0,
+    },
+  });
+  await open({ opening: 'zones-aaaaaaaaaaaa' });
+  expect(heading()).toBe('Where to look');
+  expect(target.querySelectorAll('[aria-label="Where to look"] .area-row')).toHaveLength(1);
+  expect(target.textContent).toContain('Harbor');
+});
+
 it('walks a single pass through its steps and runs it once', async () => {
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   post.mockResolvedValue({ id: RUN, status: 'queued', input: {}, results: [], total: 1, progress: 0 });
@@ -304,13 +654,11 @@ it('walks a single pass through its steps and runs it once', async () => {
   expect(target.textContent).toContain('Choose A, the picture before.');
   // B is the newest pass under the ceiling until a day is asked for, and the
   // button says which ceiling rather than promising the newest pass there is
-  expect(button('Newest pass under 30% cloud').getAttribute('aria-checked')).toBe('true');
-  button('A day I choose').click(); await settle();
-  const pass = target.querySelector('[aria-label="Day of B"]');
-  pass.value = '06/09/2026'; pass.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  expect(labelled('Date B').textContent).toContain('Newest pass under 30% cloud');
+  await typeWhenDay('Date B', 'Day of B', '06/09/2026');
   expect(target.textContent).toContain('Choose A, the picture before.');
   // the passes are listed in the step itself, and only when asked for
-  expect(post).not.toHaveBeenCalled();
+  expect(post.mock.calls.every(([path]) => path.endsWith('/acquisitions'))).toBe(true);
   post.mockImplementationOnce(async () => ({
     dates: [{ date: '2026-08-01', cloud: 2, granules: 1, coverage: 1 }], truncated: false }));
   button('Find passes').click(); await settle();
@@ -357,11 +705,8 @@ it('says why a pass did not start, beside the button that started it', async () 
   await open({ opening: 'zones-aaaaaaaaaaaa' });
   button('Next: What').click(); await settle();
   button('Next: When').click(); await settle();
-  button('A day I choose').click(); await settle();
-  for (const [label, day] of [['Day of A', '01/08/2026'], ['Day of B', '06/09/2026']]) {
-    const field = target.querySelector(`[aria-label="${label}"]`);
-    field.value = day; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
-  }
+  await typeWhenDay('Date A', 'Day of A', '01/08/2026');
+  await typeWhenDay('Date B', 'Day of B', '06/09/2026');
   button('Next: Start').click(); await settle();
   button('Run this pass').click(); await settle();
   expect(heading()).toBe('Name and start');
@@ -394,13 +739,12 @@ it('asks a routine what each pass compares against, not which day to read', asyn
   button('New detection').click(); await settle();
   labelled('New routine').click(); await settle();
   expect(target.textContent).toContain('New routine');
-  button('Port1 area').click(); await settle();
+  labelled('Use Port').click(); await settle();
   button('Next: What').click(); await settle();
-  button('Next: When').click(); await settle();
-  expect(heading()).toBe('Which images, each run');
-  expect(target.textContent).toContain('Each run takes the newest pass under 30% cloud as B and compares it with');
   expect(ceilingSlider().value).toBe('30');
   slide(40);
+  button('Next: When').click(); await settle();
+  expect(heading()).toBe('Which images, each run');
   expect(target.textContent).toContain('Each run takes the newest pass under 40% cloud as B');
   expect(target.textContent).toContain('The pass before');
   expect(target.textContent).toContain('Only the first run');
@@ -444,11 +788,14 @@ it('says which day the newest pass is and why newer ones were skipped, and reads
   expect(target.textContent).toContain(
     'Now 2026-09-19. Newer: 2026-09-26 (51% cloud), 2026-09-24 (82% cloud), 2026-09-22 (89% cloud).');
   // the ceiling sits beside "newest": raised, it takes the 26th and says what that costs
+  button('Back').click(); await settle();
   slide(60);
+  button('Next: When').click(); await settle();
   expect(button('Newest pass under 60% cloud')).toBeDefined();
   expect(target.textContent).toContain('Now 2026-09-26, looked up again when the run starts.');
-  expect(target.textContent).toContain('Above 30%, the pass taken can be mostly cloud');
+  button('Back').click(); await settle();
   slide(30);
+  button('Next: When').click(); await settle();
   expect(target.textContent).not.toContain('Above 30%');
   // the analyst has the last word: the cloudier pass is offered, and read
   target.querySelector('[aria-label="Use 2026-09-26"] button').click(); await settle();
@@ -479,9 +826,9 @@ it('reads the newest pass for a one-image sweep unless a day is asked for', asyn
   expect(target.textContent).toContain('The newest pass under 30% cloud, looked up when the run starts.');
   expect(target.querySelector('[aria-label="Day of A"]')).toBe(null);
   expect(button('Next: Start').disabled).toBe(false);
-  button('A day I choose').click(); await settle();
-  expect(button('Next: Start').disabled).toBe(true);
-  expect(target.textContent).toContain('Choose the day, or take the newest pass.');
+  labelled('Image date').click(); await settle();
+  expect(target.querySelector('[aria-label="B pass calendar"]')).not.toBe(null);
+  expect(button('Next: Start').disabled).toBe(false);
   button('Find passes').click(); await settle();
   button('Use').click(); await settle();
   button('Next: Start').click(); await settle();
@@ -492,7 +839,7 @@ it('reads the newest pass for a one-image sweep unless a day is asked for', asyn
   }));
 });
 
-it('gives every area the same days, and keeps a table for areas that differ', async () => {
+it('shows each area its own dates and pass lookup in When', async () => {
   const two = [...area, { id: 'far', name: 'Far', kind: 'rect', points: [[9, 40], [9.001, 40.001]] }];
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: two } });
   post.mockImplementation(async (path) => (path.endsWith('/acquisitions')
@@ -501,18 +848,14 @@ it('gives every area the same days, and keeps a table for areas that differ', as
   await open({ opening: 'zones-aaaaaaaaaaaa' });
   button('Next: What').click(); await settle();
   button('Next: When').click(); await settle();
-  expect(target.textContent).toContain('Passes over these areas');
-  // one lookup over both, so a pass that covers them all says so
-  button('Find passes').click(); await settle();
-  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({ zones: two }));
+  expect(target.querySelectorAll('[aria-label^="Dates for "]')).toHaveLength(2);
+  labelled('Find passes for Area').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({ zones: [two[0]] }));
   button('A').click(); await settle();
-  expect(target.textContent).toContain('The same days for all 2 areas.');
-  button('Set them per area…').click(); await settle();
-  const far = document.querySelector('[aria-label="Reference for Far"]');
-  far.value = '20/07/2026'; far.dispatchEvent(new Event('input', { bubbles: true })); await settle();
-  button('Done').click(); await settle();
-  expect(target.textContent).toContain('The areas have days of their own.');
-  expect(target.textContent).toContain('A 2026-07-20 → B newest pass');
+  labelled('Find passes for Far').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({ zones: [two[1]] }));
+  await typeWhenDay('Date A for Far', 'Reference for Far', '20/07/2026');
+  expect(target.textContent).toContain('View A');
   button('Next: Start').click(); await settle();
   expect(target.textContent).toContain('Its own days for each area');
   button('Run this pass').click(); await settle();
@@ -531,17 +874,16 @@ it('asks a routine of one image for nothing but its picture', async () => {
   await open();
   button('New detection').click(); await settle();
   labelled('New routine').click(); await settle();
-  button('Port1 area').click(); await settle();
+  labelled('Use Port').click(); await settle();
   button('Next: What').click(); await settle();
+  slide(45);
+  expect(target.textContent).toContain('Above 30%, the pass taken can be mostly cloud, and ground under cloud is left out.');
   button('Next: When').click(); await settle();
   expect(heading()).toBe('Which image, each run');
-  expect(target.textContent).toContain('Each run reads the newest pass under 30% cloud over the area.');
   expect(button('Find passes')).toBeUndefined();
   // its one question is the cloud ceiling, right there, with a word above 30%
   expect(target.textContent).not.toContain('Above 30%');
-  slide(45);
   expect(target.textContent).toContain('Each run reads the newest pass under 45% cloud over the area.');
-  expect(target.textContent).toContain('Above 30%, the pass taken can be mostly cloud, and ground under cloud is left out.');
   expect(button('Next: Start').disabled).toBe(false);
   button('Next: Start').click(); await settle();
   expect(target.textContent).toContain('Each run: the newest pass under 45% cloud');
@@ -556,15 +898,14 @@ it('holds a routine to one fixed picture when asked', async () => {
   await open();
   button('New detection').click(); await settle();
   labelled('New routine').click(); await settle();
-  button('Port1 area').click(); await settle();
+  labelled('Use Port').click(); await settle();
   button('Next: What').click(); await settle();
   button('Next: When').click(); await settle();
   [...target.querySelectorAll('[role="radio"]')].find((node) => node.textContent.includes('A fixed picture')).click();
   await settle();
   expect(target.textContent).toContain('Every run compares with');
   expect(target.textContent).toContain('Choose A, the picture every run compares with.');
-  const day = target.querySelector('[aria-label="Day of A"]');
-  day.value = '01/08/2026'; day.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  await typeWhenDay('Date A', 'Day of A', '01/08/2026');
   button('Next: Start').click(); await settle();
   expect(target.textContent).toContain('Each run: the newest pass under 30% cloud against 2026-08-01');
   button('Save without running').click(); await settle();
@@ -657,16 +998,14 @@ it('makes an analyzer of its own from the closest built-in, and never writes ove
   post.mockImplementation(async (_, body) => ({ ...body, id: 'custom-copy' }));
   await open();
   labelled('Analyzers').click(); await settle();
-  expect(target.textContent).toContain('build your own from rules you try on the map, or copy a calibrated built-in');
+  expect(target.textContent).toContain('build your own from rules you prove on the map, or copy a calibrated built-in');
   starts('Vessels').click(); await settle();
   expect(target.textContent).toContain('Measures Vessels: infrared contrast over water');
   expect(button('Save changes')).toBeUndefined();
   expect(button('Copy to tune')).toBeDefined();
   button('Back').click(); await settle();
 
-  button('New analyzer').click(); await settle();
-  expect(heading()).toBe('Or start from a built-in');
-  [...target.querySelectorAll('button.base')].find((b) => b.textContent.includes(recipe.name)).click(); await settle();
+  labelled(`Copy ${recipe.name}`).click(); await settle();
   const name = target.querySelector('[aria-label="Analyzer name"]');
   expect(name.value).toBe(`${recipe.name} copy`);
   name.value = 'Weekly harbour'; name.dispatchEvent(new Event('input', { bubbles: true }));
@@ -695,124 +1034,220 @@ const rulesMethods = [...methods, { id: 'rules', label: 'Your own rules', single
   sizes, measure: '', smoothing_m: 45 }];
 const rulesCatalogue = (extra = {}) => catalogue({ methods: rulesMethods, rules: {
   bands: ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'], classes: ['vegetation', 'bare', 'water'],
-  max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, preview_span: 3 }, ...extra });
+  max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, max_check_tiles: 12 }, ...extra });
 const VIEW = { west: 2, south: 48, east: 2.05, north: 48.03 };
-const PREVIEWED = { ready: true, missing: 0, tiles: [[4230, 2930]], clipped: false,
-  box: { west: 0, south: 0, east: 1, north: 1 }, size: [512, 512], mask: '', measured: 0.9,
-  rules: [{ share: 0.012, kept: 0.012 }], kept: 0.01, count: 1, note: '',
-  candidates: [{ id: '0-1', coordinates: [2.01, 48.01], bbox: [2.01, 48.01, 2.011, 48.011], area: 900,
-    margin: 4, strength: 'strong', measure: {}, geometry: null }] };
 const debounce = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms));
 const phrase = () => [...target.querySelectorAll('.phrase')].map((p) => p.textContent.trim())[0];
 const tab = (name) => [...target.querySelectorAll('[role="tab"]')].find((b) => b.textContent.trim().startsWith(name));
 const rule = (extra = {}) => ({ measure: 'index', index: 'nbr', bands: ['B08', 'B04'], band: 'B08', polarisation: 'vv',
   classes: [], on: 'change', op: 'le', value: -0.2, upper: 0, around: 0, ...extra });
+const group = (name) => target.querySelector(`[role="group"][aria-label="${name}"]`);
+const inGroup = (name, text) => [...group(name).querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
+const type = (input, value, event = 'input') => { input.value = value; input.dispatchEvent(new Event(event, { bubbles: true })); };
 
-function copernicus(previewed = PREVIEWED, checked = () => ({ ready: true, missing: 0, count: 1, covered: [true] })) {
+/** What a test of a check sends back: every pin found or left empty as it should, unless told otherwise. */
+const tested = (body, covered = body.check.marks.map((mark) => mark.expect === 'found'), without) => ({
+  ready: true, missing: 0, count: covered.filter(Boolean).length, covered, size: 512, tiles: [], measured: 0.9, without,
+  rules: body.recipe.rules.map(() => ({ share: 0.012, kept: 0.012 })), kept: 0.01,
+  candidates: [{ id: '0-1', coordinates: [2.01, 48.01], bbox: [2.01, 48.01, 2.011, 48.011], area: 900,
+    margin: 4, strength: 'strong', measure: {}, geometry: null }],
+  readings: body.check.marks.map(() => ({ imaged: true, measured: true, kept: true,
+    rules: body.recipe.rules.map(() => ({ passes: true, value: -0.6, before: 0.8, after: 0.2 })) })) });
+
+function copernicus({ test = (body) => tested(body), plan = () => ({ tiles: 1, missing: 2 }) } = {}) {
   post.mockImplementation(async (path, body) => {
     if (path === '/api/satellite/sentinel/acquisitions') {
       return { dates: [{ date: '2026-05-11', cloud: 5, coverage: 1 }, { date: '2026-05-04', cloud: 3, coverage: 1 }], truncated: false };
     }
-    if (path === '/api/compare/analyzers/preview') {
-      return body.read ? previewed : { ready: false, missing: 2, tiles: [[4230, 2930]], clipped: false, box: {}, size: [512, 512] };
-    }
+    if (path === '/api/compare/analyzers/check/plan') return plan(body);
+    if (path === '/api/compare/analyzers/check') return body.read ? test(body) : { ready: false, missing: 2 };
     if (path === '/api/compare/analyzers/probe') {
       return { ready: true, imaged: true, measured: true, kept: true, rules: [{ passes: true, value: -0.6, before: 0.8, after: 0.2 }] };
     }
-    if (path === '/api/compare/analyzers/check') return checked(body);
     return { ...body, id: 'custom-aaaaaaaaaaaa' };
   });
 }
 
+/** The panel with the bench the map would read, open on a new analyzer of Sentinel-2 and two dates. */
 async function openBuilder(props = {}) {
-  await open({ viewBounds: () => VIEW, ...props });
+  const { default: Fixture } = await import('./BenchPanel.fixture.svelte');
+  live = mount(Fixture, { target, props: { caseId: 'case-a', viewBounds: () => VIEW, ...props } });
+  await settle();
   labelled('Analyzers').click(); await settle();
   button('New analyzer').click(); await settle();
-  starts('Build your own rules').click(); await settle();
+  starts('Blank').click(); await settle();
+  return benchOf();
 }
+const benchOf = async () => (await import('./benchHolder.fixture.svelte.js')).holder.bench;
 
-/** Pick the two passes of the view and read its frames. */
-async function readTheView() {
-  button('Find passes').click(); await settle();
-  target.querySelector('[aria-label="Use 2026-05-04"] button').click(); await settle();
-  target.querySelectorAll('[aria-label="Use 2026-05-11"] button')[1].click(); await settle();
+/** What the console over the map does to make a check: its passes, then its pins. */
+async function makeCheck(bench, points = [{ lon: 2.01, lat: 48.01 }]) {
+  bench.startDraft(); await settle();
+  await bench.lookUpPasses(); await settle();
+  bench.setPass('a', { date: '2026-05-04' });
+  bench.setPass('b', { date: '2026-05-11' });
+  bench.continueDraft();
+  for (const point of points) bench.dropPin(point);
+  bench.finishDraft(); await settle();
   await debounce(); await settle();
-  button('Show the detections here').click(); await settle();
 }
 
-it('builds an analyzer from rules, tries it on the view, reads a point and keeps it for every case', async () => {
+const SHIP = { id: 'ships', place: 'Fujairah', when: 'one pass, January 2024', recipe: {
+  id: 'custom', name: 'Ships at anchor', description: '', phenomenon: 'Vessel candidate', method: 'rules', sensor: 'sentinel2',
+  dates: 'one', colour: '#38bdf8', style: 'both', match: 'all', parameters: recipe.parameters,
+  rules: [rule({ measure: 'band', band: 'B08', on: 'b', op: 'ge', value: 0.04 })], checks: [] } };
+
+it('asks what a new analyzer reads before anything else, and offers the examples that fit it', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue({ examples: [EXAMPLE, SHIP], radar_layer: '' }) });
+  post.mockImplementation(async (_, body) => ({ ...body, id: 'custom-aaaaaaaaaaaa' }));
+  await open({ viewBounds: () => VIEW });
+  labelled('Analyzers').click(); await settle();
+  button('New analyzer').click(); await settle();
+  expect(heading()).toBe('New analyzer');
+  expect(target.textContent).toContain('What it reads is fixed from here on');
+  // Sentinel-2 and two dates to begin with: the burn fits, the ships do not
+  expect(inGroup('Satellite', 'Sentinel-2').getAttribute('aria-pressed')).toBe('true');
+  expect(inGroup('Dates', 'Two dates').getAttribute('aria-pressed')).toBe('true');
+  expect(labelled('Start from the example Fresh burn')).not.toBe(null);
+  expect(labelled('Start from the example Ships at anchor')).toBe(null);
+  inGroup('Dates', 'One date').click(); await settle();
+  expect(labelled('Start from the example Ships at anchor')).not.toBe(null);
+  expect(labelled('Start from the example Fresh burn')).toBe(null);
+  // radar has no example yet, and says what it needs
+  inGroup('Satellite', 'Sentinel-1').click(); await settle();
+  expect(target.textContent).toContain('No ready example for Sentinel-1 radar · one date yet.');
+  expect(target.textContent).toContain('Needs the Sentinel-1 layer');
+
+  starts('Blank').click(); await settle();
+  expect(heading()).toBe('Build an analyzer');
+  expect(target.querySelector('.reads').textContent.trim()).toBe('Sentinel-1 radar · one date');
+  expect(target.querySelector('[aria-label="Rule 1 polarisation"]')).not.toBe(null);
+  // one date has no before or after to choose, and radar has one thing to measure
+  expect(target.querySelector('[aria-label="Rule 1 reads"]')).toBe(null);
+  expect(target.querySelector('[aria-label="Rule 1 measures"]')).toBe(null);
+  expect(phrase()).toBe('Keeps ground where VV is at least −4.0 dB.');
+});
+
+it('builds an analyzer from rules, proves it on a check made on the map, and keeps it for every case', async () => {
   answer({ '/api/compare/analyzers': rulesCatalogue() });
   copernicus();
-  await openBuilder();
+  const bench = await openBuilder();
   expect(heading()).toBe('Build an analyzer');
-  expect(target.textContent).toContain('Pick pass A and pass B to try the rules on.');
+  expect(target.querySelector('.reads').textContent.trim()).toBe('Sentinel-2 · two dates');
   expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more, outside cloud.');
   expect(tab('Rules').getAttribute('aria-selected')).toBe('true');
-  // building reads nothing: the pass lookup and the frames each wait to be asked for
+  // building reads nothing, and with no check on the map there is nothing to test
   await debounce(); await settle();
   expect(post).not.toHaveBeenCalled();
+  expect(target.querySelector('.strip').textContent).toContain('No check on the map');
+  expect(button('Test').disabled).toBe(true);
+  expect(button('Add to my analyzers').disabled).toBe(true);
+  expect(target.querySelector('.reason').textContent).toBe('Name it to save it.');
+  type(target.querySelector('[aria-label="Analyzer name"]'), 'Cleared ground'); await settle();
+  expect(target.querySelector('.reason').textContent).toBe('Add a check: a place where this analyzer should find something.');
 
-  button('Find passes').click(); await settle();
+  // the map makes the check: the column waits while it does
+  bench.startDraft(); await settle();
+  expect(target.querySelector('.panel').classList.contains('locked')).toBe(true);
+  expect(target.textContent).toContain('Making a check on the map');
+  await bench.lookUpPasses(); await settle();
   expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({ collection: 'sentinel2' }));
-  target.querySelector('[aria-label="Use 2026-05-04"] button').click(); await settle();
-  target.querySelectorAll('[aria-label="Use 2026-05-11"] button')[1].click(); await settle();
-  await debounce(); await settle();
-  const asked = post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/preview');
-  expect(asked).toHaveLength(1);
-  expect(asked[0][1]).toMatchObject({ read: false, a: { date: '2026-05-04' }, b: { date: '2026-05-11' }, bounds: VIEW,
-    recipe: { method: 'rules', match: 'all' } });
-  expect(target.textContent).toContain('2 frames from Copernicus, one request each,');
+  bench.setPass('a', { date: '2026-05-04' });
+  bench.setPass('b', { date: '2026-05-11' });
+  bench.continueDraft();
+  bench.dropPin({ lon: 2.01, lat: 48.01 });
+  bench.finishDraft(); await settle();
+  expect(target.querySelector('.panel').classList.contains('locked')).toBe(false);
+  expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks1');
 
-  button('Show the detections here').click(); await settle();
-  expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/preview', expect.objectContaining({ read: true }));
-  expect(target.textContent).toContain('1 candidate on the map');
+  // what testing it costs is asked once, and said on the button
+  await debounce(); await settle();
+  const planned = post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check/plan');
+  expect(planned).toHaveLength(1);
+  expect(planned[0][1]).toMatchObject({ recipe: { method: 'rules', sensor: 'sentinel2', dates: 'two' },
+    check: { name: 'Check 1', a: { date: '2026-05-04' }, b: { date: '2026-05-11' } } });
+  expect(target.querySelector('.strip').textContent).toContain('Check 1');
+  expect(button('Test · 2 requests')).toBeDefined();
+  button('Test · 2 requests').click(); await settle();
+  expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/check', expect.objectContaining({ read: true, detail: true }));
+  expect(target.querySelector('.strip').textContent).toContain('1 of 1 found');
+  expect(button('Tested').disabled).toBe(true);
   expect(target.textContent).toContain('1.2 % of the ground');
 
-  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
-  expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/probe', expect.objectContaining({ point: [2.01, 48.01] }));
-
-  expect(button('Add to my analyzers').disabled).toBe(true);
-  const name = target.querySelector('[aria-label="Analyzer name"]');
-  name.value = 'Cleared ground'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  expect(button('Add to my analyzers').disabled).toBe(false);
   button('Add to my analyzers').click(); await settle();
   expect(post).toHaveBeenCalledWith('/api/compare/analyzers', expect.objectContaining({
-    id: 'custom', method: 'rules', name: 'Cleared ground', match: 'all', checks: [],
+    id: 'custom', method: 'rules', name: 'Cleared ground', match: 'all', sensor: 'sentinel2', dates: 'two',
     description: 'Keeps ground where NDVI dropped by 0.25 or more, outside cloud.',
-    rules: [expect.objectContaining({ measure: 'index', index: 'ndvi', on: 'change', op: 'le', value: -0.25 })] }));
-  // no check was asked for, so none was read
-  expect(post.mock.calls.some(([path]) => path === '/api/compare/analyzers/check')).toBe(false);
+    rules: [expect.objectContaining({ measure: 'index', index: 'ndvi', on: 'change', op: 'le', value: -0.25 })],
+    checks: [expect.objectContaining({ name: 'Check 1', marks: [{ point: [2.01, 48.01], expect: 'found' }],
+      result: expect.objectContaining({ count: 1, covered: [true] }) })] }));
+});
+
+it('needs a pin where something should be found before it is saved, and a trap alone does not do', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  const bench = await openBuilder();
+  type(target.querySelector('[aria-label="Analyzer name"]'), 'Cleared ground'); await settle();
+  bench.startDraft();
+  await bench.lookUpPasses();
+  bench.setPass('a', { date: '2026-05-04' });
+  bench.setPass('b', { date: '2026-05-11' });
+  bench.continueDraft();
+  bench.arm('empty');
+  bench.dropPin({ lon: 2.02, lat: 48.02 });
+  bench.finishDraft(); await settle();
+  expect(button('Add to my analyzers').disabled).toBe(true);
+  expect(target.querySelector('.reason').textContent).toBe('A check needs a pin where something should be found.');
+  bench.select(bench.checks[0].id);
+  bench.arm('found');
+  bench.dropPin({ lon: 2.03, lat: 48.02 }); await settle();
+  expect(button('Add to my analyzers').disabled).toBe(false);
+});
+
+it('waits for a check being made on the map, and lets it go', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  const bench = await openBuilder();
+  bench.startDraft(); await settle();
+  expect(target.querySelector('.panel').hasAttribute('inert')).toBe(true);
+  expect(target.querySelector('.cmp-dock-foot').hasAttribute('inert')).toBe(true);
+  button('Cancel the check').click(); await settle();
+  expect(bench.draft).toBe(null);
+  expect(target.querySelector('.panel').hasAttribute('inert')).toBe(false);
+  expect(target.textContent).not.toContain('Making a check on the map');
 });
 
 const EXAMPLE = { id: 'burn', place: 'Lahaina, Maui', when: 'August 2023', recipe: {
   id: 'custom', name: 'Fresh burn', description: 'The burn ratio dropped.', phenomenon: 'Fresh burn', method: 'rules',
-  colour: '#ef4444', style: 'both', match: 'all', parameters: { ...recipe.parameters, shape: 'any', merge_metres: 30 },
+  sensor: 'sentinel2', dates: 'two', colour: '#ef4444', style: 'both', match: 'all',
+  parameters: { ...recipe.parameters, shape: 'any', merge_metres: 30 },
   rules: [rule(), rule({ on: 'b', value: 0.1 })],
   checks: [
     { id: 'town', name: 'The town that burned', a: { provider: 'sentinel2', date: '2023-08-08', layer: 'SWIR', maxcc: 100 },
       b: { provider: 'sentinel2', date: '2023-08-13', layer: 'SWIR', maxcc: 100 },
-      bounds: { west: -156.69, south: 20.86, east: -156.66, north: 20.90 },
       marks: [{ point: [-156.675, 20.872], expect: 'found' }, { point: [-156.675, 20.894], expect: 'found' }], result: null },
     { id: 'reef', name: 'The reef off the town', a: { provider: 'sentinel2', date: '2023-08-08', layer: 'SWIR', maxcc: 100 },
       b: { provider: 'sentinel2', date: '2023-08-13', layer: 'SWIR', maxcc: 100 },
-      bounds: { west: -156.69, south: 20.85, east: -156.66, north: 20.87 },
       marks: [{ point: [-156.6753, 20.865], expect: 'empty' }], result: null },
   ] } };
 
-it('starts from an example: copies it with its checks, opens on them and reads them when asked', async () => {
+it('starts from an example: copies it with its checks, opens on the first and tests them all when asked', async () => {
   answer({ '/api/compare/analyzers': rulesCatalogue({ examples: [EXAMPLE] }) });
-  let reads = 0;
-  copernicus(PREVIEWED, (body) => {
-    if (!body.read) return { ready: false, missing: 2 };
-    reads++;
+  const tests = [];
+  copernicus({ test: (body) => {
+    tests.push(body);
     // the reef gets a candidate on it: the check that should stay empty does not
-    return { ready: true, missing: 0, count: 3, covered: body.check.id === 'town' ? [true, true] : [true] };
-  });
+    // and without the second rule the town would lose a pin
+    return tested(body, body.check.id === 'town' ? [true, true] : [true],
+      body.check.id === 'town' ? [{ covered: [true, true] }, { covered: [false, true] }] : undefined);
+  }, plan: () => ({ tiles: 1, missing: 2 }) });
   const onfly = vi.fn();
-  const onshow = vi.fn();
-  await open({ viewBounds: () => VIEW, onfly, onshow });
+  const { default: Fixture } = await import('./BenchPanel.fixture.svelte');
+  live = mount(Fixture, { target, props: { caseId: 'case-a', viewBounds: () => VIEW, onfly } });
+  await settle();
   labelled('Analyzers').click(); await settle();
   button('New analyzer').click(); await settle();
-  expect(target.textContent).toContain('Start from an example');
   expect(target.textContent).toContain('Lahaina, Maui · August 2023 · 2 checks');
   labelled('Start from the example Fresh burn').click(); await settle();
 
@@ -822,200 +1257,128 @@ it('starts from an example: copies it with its checks, opens on them and reads t
   expect(toast).toHaveBeenCalledWith('Fresh burn is in your analyzers, with its checks', 'ok');
   expect(heading()).toBe('Edit Fresh burn');
   expect(tab('Checks').getAttribute('aria-selected')).toBe('true');
-  // the first check is on the bench: its ground, its passes, B in its layer
-  expect(onfly).toHaveBeenCalledWith({ bounds: EXAMPLE.recipe.checks[0].bounds });
-  expect(onshow).toHaveBeenLastCalledWith({ provider: 'sentinel2', date: '2023-08-13', layer: 'SWIR', maxcc: 100 });
-  expect(target.textContent).toContain('A 2023-08-08 → B 2023-08-13');
+  // the first check is on the map: its pins are framed, its passes are the imagery
+  const bench = await benchOf();
+  expect(bench.check.name).toBe('The town that burned');
+  expect(onfly).toHaveBeenCalledWith({ bounds: expect.objectContaining({ west: expect.any(Number) }) });
+  expect(bench.imagery).toMatchObject({ mode: 'swipe', a: { date: '2023-08-08' }, b: { date: '2023-08-13', layer: 'SWIR' } });
+  expect(target.textContent).toContain('Before 2023-08-08 → After 2023-08-13');
 
-  // the cache is read on its own; what it lacks waits for Run all, which says the cost
-  await debounce(900); await settle();
-  const dry = post.mock.calls.filter(([path, body]) => path === '/api/compare/analyzers/check' && !body.read);
-  expect(dry).toHaveLength(2);
-  expect(dry[0][1]).toMatchObject({ recipe: { method: 'rules' }, check: { id: 'town', result: null } });
-  expect(reads).toBe(0);
-  expect(starts('Run all').textContent.trim()).toBe('Run all · up to 4 requests');
-  expect(target.textContent).toContain('2 frames to read');
-
-  starts('Run all').click(); await settle();
-  expect(reads).toBe(2);
+  // what testing costs is asked for each check, and Test all says the total before it reads anything
+  await debounce(); await settle();
+  expect(tests).toHaveLength(0);
+  expect(button('Test all · up to 4 requests')).toBeDefined();
+  expect(target.textContent).toContain('2 requests to read');
+  button('Test all · up to 4 requests').click(); await settle();
+  expect(tests.map((body) => [body.check.id, body.detail])).toEqual([['town', true], ['reef', false]]);
   expect(target.textContent).toContain('2 of 2 found');
   expect(target.textContent).toContain('1 of 1 flagged');
   expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks1/2');
-});
 
-it('marks a point read on the map in a check, which turns red when a rule loses it', async () => {
-  answer({ '/api/compare/analyzers': rulesCatalogue() });
-  let found = true;
-  copernicus(PREVIEWED, () => ({ ready: true, missing: 0, count: 1, covered: [found] }));
-  await openBuilder();
-  await readTheView();
-  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
-  live.markProbe('found'); await settle();
-
-  // no check was on the bench, so the view became one, with the passes shown
-  expect(tab('Checks').getAttribute('aria-selected')).toBe('true');
-  expect(target.textContent).toContain('Check 1');
-  await debounce(900); await settle();
-  const first = post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check').at(-1)[1];
-  expect(first).toMatchObject({ read: false, check: { name: 'Check 1', bounds: VIEW,
-    a: { date: '2026-05-04' }, b: { date: '2026-05-11' }, marks: [{ point: [2.01, 48.01], expect: 'found' }] } });
-  expect(target.textContent).toContain('1 of 1 found');
-  // the result written back asks for no other read, and a read from the cache never says Reading…
-  const reads = () => post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check').length;
-  const settled = reads();
-  await debounce(1600); await settle();
-  expect(reads()).toBe(settled);
-  expect(target.textContent).not.toContain('Reading…');
-
-  // a stricter line loses it: the check is reread from the cache and says so
-  found = false;
+  // the rules say what the pins would come to without each of them
   tab('Rules').click(); await settle();
-  const value = target.querySelector('[aria-label="Rule 1 value"]');
-  value.value = '-0.6'; value.dispatchEvent(new Event('change', { bubbles: true })); await settle();
-  await debounce(900); await settle();
-  tab('Checks').click(); await settle();
-  expect(target.textContent).toContain('0 of 1 found');
-  expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks0/1');
-
-  const name = target.querySelector('[aria-label="Analyzer name"]');
-  name.value = 'Cleared ground'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
-  button('Add to my analyzers').click(); await settle();
-  const saved = post.mock.calls.find(([path]) => path === '/api/compare/analyzers')[1];
-  expect(saved.checks).toEqual([expect.objectContaining({ name: 'Check 1',
-    result: expect.objectContaining({ count: 1, covered: [false] }) })]);
-  expect(saved.checks[0].result.signature).toMatch(/^[0-9a-z]+$/);
+  expect(target.querySelector('[aria-label="Rule 1 effect"]').textContent).toBe('Without it, no pin changes.');
+  expect(target.querySelector('[aria-label="Rule 2 effect"]').textContent).toBe('Without it, 1 pin would come out wrong.');
+  // and stop saying it once a line has moved, since it was said for the old one
+  type(target.querySelector('[aria-label="Rule 1 value"]'), '0.5', 'change'); await settle();
+  expect(target.querySelector('[aria-label="Rule 1 effect"]')).toBe(null);
 });
 
-it('shows the detections alone on the map, keeps each eye for the way back, and counts an open check', async () => {
+it('gives each analyzer opened in the builder a bench of its own, even when another is already open', async () => {
+  const one = { ...structuredClone(recipe), id: 'custom-aaaaaaaaaaaa', name: 'First', method: 'rules', match: 'all', sensor: 'sentinel2',
+    dates: 'two', rules: [rule({ value: -0.3 })], checks: [] };
+  const two = { ...one, id: 'custom-bbbbbbbbbbbb', name: 'Second', rules: [rule({ value: -0.5 })] };
+  answer({ '/api/compare/analyzers': rulesCatalogue({ custom: [one, two] }) });
+  const props = liveProps({ caseId: null, opening: 'analyzer:custom-aaaaaaaaaaaa', viewBounds: () => VIEW });
+  const { default: Fixture } = await import('./BenchPanel.fixture.svelte');
+  live = mount(Fixture, { target, props });
+  await settle();
+  await settle();
+  const first = await benchOf();
+  expect(first.recipe.name).toBe('First');
+  expect(heading()).toBe('Edit First');
+
+  // asked for from elsewhere while the first is open: the second takes the map, and the first lets go of it
+  props.opening = 'analyzer:custom-bbbbbbbbbbbb'; await settle();
+  const second = await benchOf();
+  expect(second).not.toBe(first);
+  expect(second.recipe.name).toBe('Second');
+  expect(heading()).toBe('Edit Second');
+  expect(target.querySelector('[aria-label="Rule 1 value"]').value).toBe('0.5');
+  // what is made now is kept on the second, not on a bench left over from the first
+  second.startDraft(); await settle();
+  expect(target.querySelector('.panel').classList.contains('locked')).toBe(true);
+  second.cancelDraft(); await settle();
+  expect(first.recipe.checks).toEqual([]);
+  // leaving the builder puts the map back
+  button('Cancel').click(); await settle();
+  expect((await benchOf())).toBe(null);
+});
+
+it('reads a point on the map and drops a pin from it, and a stricter line turns the check red', async () => {
   answer({ '/api/compare/analyzers': rulesCatalogue() });
-  copernicus(PREVIEWED, () => ({ ready: true, missing: 0, count: 2, covered: [true] }));
-  await openBuilder();
+  let covered = true;
+  copernicus({ test: (body) => tested(body, [covered]) });
+  const bench = await openBuilder();
+  type(target.querySelector('[aria-label="Analyzer name"]'), 'Cleared ground'); await settle();
+  await makeCheck(bench);
+  bench.select(bench.checks[0].id);
+  await debounce(); await settle();
+  button('Test · 2 requests').click(); await settle();
+  expect(target.querySelector('.strip').textContent).toContain('1 of 1 found');
+
+  // a click on the ground reads every rule there, and can leave a pin
+  await bench.probeAt({ lon: 2.02, lat: 48.02 }); await settle();
+  expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/probe', expect.objectContaining({ point: [2.02, 48.02] }));
+  bench.markProbe('empty'); await settle();
+  expect(bench.marks.map((mark) => mark.expect)).toEqual(['found', 'empty']);
+  expect(target.querySelector('.strip').textContent).toContain('The rules changed since the last test.');
+
+  // a stricter line loses the plot: nothing is reread until the button is pressed
+  covered = false;
+  const tests = () => post.mock.calls.filter(([path, body]) => path === '/api/compare/analyzers/check' && body.read).length;
+  const before = tests();
+  type(target.querySelector('[aria-label="Rule 1 value"]'), '0.6', 'change'); await settle();
+  await debounce(); await settle();
+  expect(tests()).toBe(before);
+  expect(post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check/plan')).toHaveLength(2);
+  starts('Test again').click(); await settle();
+  expect(tests()).toBe(before + 1);
+  expect(target.querySelector('.strip').textContent).toContain('0 of 1 found');
+  expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks0/1');
+  expect(post.mock.calls.findLast(([path]) => path === '/api/compare/analyzers/check')[1].recipe.rules[0].value).toBe(-0.6);
+});
+
+it('shows the detections alone on the map, and keeps each eye for the way back', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  const bench = await openBuilder();
   button('Add a rule').click(); await settle();
-  await readTheView();
-  const eye = (n) => target.querySelector(`button.eye[aria-label$="rule ${n} on the map"]`).getAttribute('aria-pressed');
-  const view = (name) => target.querySelector(`[aria-label="What the map shows"]`)
-    .querySelector(`button:nth-child(${name === 'Rules' ? 1 : 2})`);
+  const eye = (n) => target.querySelector(`button.dot[aria-label$="rule ${n} on the map"]`).getAttribute('aria-pressed');
   labelled('Hide rule 2 on the map').click(); await settle();
   expect([eye(1), eye(2)]).toEqual(['true', 'false']);
-
   // the detections alone: nothing of the rules is painted, so every eye reads closed
-  view('Detections').click(); await settle();
-  expect(view('Detections').getAttribute('aria-pressed')).toBe('true');
+  bench.view = 'detections'; await settle();
   expect([eye(1), eye(2)]).toEqual(['false', 'false']);
   // back to the rules, each eye as it was left
-  view('Rules').click(); await settle();
+  bench.view = 'rules'; await settle();
   expect([eye(1), eye(2)]).toEqual(['true', 'false']);
-
   // an eye pressed from the detections opens its rule and brings the rules back
-  view('Detections').click(); await settle();
+  bench.view = 'detections'; await settle();
   labelled('Show rule 2 on the map').click(); await settle();
-  expect(view('Rules').getAttribute('aria-pressed')).toBe('true');
+  expect(bench.view).toBe('rules');
   expect([eye(1), eye(2)]).toEqual(['true', 'true']);
-
-  // an open check counts its own frame, which is all the map shows, and the choice rides along
-  view('Detections').click(); await settle();
-  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
-  live.markProbe('found'); await settle();
-  await debounce(900); await settle();
-  expect(tab('Checks').getAttribute('aria-selected')).toBe('true');
-  expect(target.textContent).toContain('2 candidates in “Check 1”');
-  expect(target.textContent).not.toContain('candidate on the map');
-  expect(view('Detections').getAttribute('aria-pressed')).toBe('true');
-});
-
-it('adds a check where the map is: pick its passes, drop pins with the map, done', async () => {
-  answer({ '/api/compare/analyzers': rulesCatalogue() });
-  copernicus();
-  let view = VIEW;
-  const props = liveProps({ caseId: 'case-a', viewBounds: () => view, mapView: { lat: 48, lon: 2, zoom: 13 } });
-  live = mount(Panel, { target, props });
-  await settle();
-  labelled('Analyzers').click(); await settle();
-  button('New analyzer').click(); await settle();
-  starts('Build your own rules').click(); await settle();
-  const name = target.querySelector('[aria-label="Analyzer name"]');
-  name.value = 'Cleared ground'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
-  tab('Checks').click(); await settle();
-
-  starts('Add a check').click(); await settle();
-  expect(target.textContent).toContain('Check 1');
-  expect(target.textContent).toContain('None yet: until it has pins, this check is where the map is.');
-  // a check still being placed follows the map, and keeps the analyzer from being saved half made
-  expect(button('Add to my analyzers').disabled).toBe(true);
-  expect(target.textContent).toContain('“Check 1” needs its passes.');
-  view = { west: 139.6, south: 35.6, east: 139.7, north: 35.7 };
-  props.mapView = { lat: 35.65, lon: 139.65, zoom: 13 }; await settle();
-
-  // its dates are the passes picked now
-  button('Find passes').click(); await settle();
-  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({
-    zones: [expect.objectContaining({ points: expect.arrayContaining([[139.6, 35.7]]) })] }));
-  target.querySelector('[aria-label="Use 2026-05-04"] button').click(); await settle();
-  target.querySelectorAll('[aria-label="Use 2026-05-11"] button')[1].click(); await settle();
-  expect(target.textContent).toContain('A 2026-05-04 → B 2026-05-11');
-
-  // arm a pin, and each click on the map drops one
-  button('Should be found').click(); await settle();
-  expect(button('Should be found').getAttribute('aria-pressed')).toBe('true');
-  live.pinAt({ lon: 139.65, lat: 35.65 }); await settle();
-  button('Should stay empty').click(); await settle();
-  live.pinAt({ lon: 139.62, lat: 35.66 }); await settle();
-  live.pinAt({ lon: 139.68, lat: 35.62 }); await settle();
-  expect([...target.querySelectorAll('.marks li')].map((li) => li.textContent.trim())).toEqual(
-    ['Should be found', 'Should stay empty', 'Should stay empty']);
-  labelled('Remove pin 3').click(); await settle();
-  button('Done').click(); await settle();
-  expect(target.querySelector('.editor')).toBe(null);
-  live.pinAt({ lon: 139.66, lat: 35.66 }); await settle();       // no check open: the click drops nothing
-
-  button('Add to my analyzers').click(); await settle();
-  const saved = post.mock.calls.find(([path]) => path === '/api/compare/analyzers')[1];
-  expect(saved.checks).toEqual([expect.objectContaining({ name: 'Check 1',
-    a: expect.objectContaining({ date: '2026-05-04' }), b: expect.objectContaining({ date: '2026-05-11' }),
-    bounds: expect.objectContaining({ west: 139.6, east: 139.7 }),
-    marks: [{ point: [139.65, 35.65], expect: 'found' }, { point: [139.62, 35.66], expect: 'empty' }] })]);
-});
-
-it('opens the reading card anywhere, and a point far off the open check starts a check of its own', async () => {
-  answer({ '/api/compare/analyzers': rulesCatalogue() });
-  copernicus();
-  await openBuilder();
-  // nothing picked yet: the card still opens and says why nothing is read
-  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
-  await readTheView();
-  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
-  live.markProbe('found'); await settle();
-  expect(target.textContent).toContain('Check 1');
-  await live.probeAt({ lon: 2.4, lat: 48.4 }); await settle();
-  live.markProbe('empty'); await settle();
-  expect(target.textContent).toContain('Check 2');
-});
-
-it('shows the passes in any Copernicus layer, and suggests the one that reads rule ★', async () => {
-  answer({ '/api/compare/analyzers': rulesCatalogue() });
-  copernicus();
-  const onshow = vi.fn();
-  await openBuilder({ onshow, passLayers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'SWIR', label: 'SWIR' }, { id: 'NDVI', label: 'NDVI' }] });
-  button('Find passes').click(); await settle();
-  target.querySelector('[aria-label="Use 2026-05-11"] button:nth-child(2)').click(); await settle();
-  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ date: '2026-05-11', layer: 'TRUE_COLOR' }));
-  const layer = target.querySelector('[aria-label="Copernicus layer"]');
-  layer.value = 'SWIR'; layer.dispatchEvent(new Event('change', { bubbles: true })); await settle();
-  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ date: '2026-05-11', layer: 'SWIR' }));
-  starts('Show it in NDVI').click(); await settle();
-  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ layer: 'NDVI' }));
-  expect(starts('Show it in')).toBeUndefined();
 });
 
 it('adds, ranks, rewrites and removes rules, and the sentence follows', async () => {
   answer({ '/api/compare/analyzers': rulesCatalogue() });
   await openBuilder();
   button('Add a rule').click(); await settle();
-  expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more and NDVI on B at least 0.40, outside cloud.');
-  button('any').click(); await settle();
-  expect(phrase()).toContain('or NDVI on B at least 0.40');
+  expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more and NDVI before is at least 0.40, outside cloud.');
+  button('any rule').click(); await settle();
+  expect(phrase()).toContain('or NDVI before is at least 0.40');
   labelled('Rank candidates by rule 2').click(); await settle();
-  expect(phrase()).toMatch(/^Keeps ground where NDVI on B at least 0.40 or NDVI dropped/);
+  expect(phrase()).toMatch(/^Keeps ground where NDVI before is at least 0.40 or NDVI dropped/);
   const measure = target.querySelector('[aria-label="Rule 2 measures"]');
   measure.value = 'band'; measure.dispatchEvent(new Event('change', { bubbles: true })); await settle();
   expect(phrase()).toContain('B08 (near infrared) moved by 5.0% or more either way');
@@ -1030,13 +1393,13 @@ it('adds, ranks, rewrites and removes rules, and the sentence follows', async ()
 
 it('opens a calibrated index built-in as the rules it applies', async () => {
   const asRules = { id: 'custom', name: 'Any surface change (rules)', description: '', phenomenon: 'Surface change',
-    method: 'rules', colour: '#f6a81a', style: 'both', parameters: { ...recipe.parameters, shape: 'any' }, match: 'all',
-    rules: [rule({ value: -0.27 })], checks: [] };
+    method: 'rules', sensor: 'sentinel2', dates: 'two', colour: '#f6a81a', style: 'both',
+    parameters: { ...recipe.parameters, shape: 'any' }, match: 'all', rules: [rule({ value: -0.27 })], checks: [] };
   answer({ '/api/compare/analyzers': rulesCatalogue({ as_rules: { 'large-change': asRules } }) });
   await open({ viewBounds: () => VIEW });
   labelled('Analyzers').click(); await settle();
-  button('New analyzer').click(); await settle();
-  labelled('Open Any surface change as rules').click(); await settle();
+  starts('Any surface change').click(); await settle();
+  button('Open as rules').click(); await settle();
   expect(heading()).toBe('Build an analyzer');
   expect(target.querySelector('[aria-label="Analyzer name"]').value).toBe('Any surface change (rules)');
   expect(phrase()).toBe('Keeps ground where NBR dropped by 0.27 or more, outside cloud.');
@@ -1056,7 +1419,7 @@ it('says in the library how an analyzer’s checks last came out', async () => {
   answer({ '/api/compare/analyzers': rulesCatalogue({ custom: [own] }) });
   await open();
   labelled('Analyzers').click(); await settle();
-  expect(target.textContent).toContain('2 checks · not run');
+  expect(target.textContent).toContain('2 checks · not tested');
 });
 
 // -- review --------------------------------------------------------------------------
@@ -1077,7 +1440,7 @@ it('offers three verdicts, and only the pin reaches the case', async () => {
   await open({ opening: `runs-${RUN}` });
   expect(target.textContent).toContain('1 of 2');
   expect(target.textContent).toContain('Strong · Reflectance moved by 12.3%');
-  expect(target.textContent).toContain('Keep stays in this run. Pin creates a place and evidence in Files.');
+  expect(target.textContent).toContain('Keep in this run, or pin the place and evidence to Files.');
 
   // kept here: no pin, no entity, and it stays among what the detection holds
   button('Keep').click(); await settle();

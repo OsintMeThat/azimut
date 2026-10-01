@@ -16,6 +16,7 @@ from functools import lru_cache
 from typing import Any
 
 from ..engine import timeline as timeline_engine
+from ..engine.textfold import fold_text
 from ..workspace import CaseError
 from .sql import _like_contains, _like_prefix, _marks
 
@@ -148,6 +149,29 @@ def _linked_at_all(alias: str) -> str:
         f" OR l.to_id = {alias}.id)"
     )
 
+#: What a Claim can be missing, as the catalog asks it. A Claim that cites nothing
+#: rests on the analyst's word alone, and one with no confidence has not been graded.
+#: Both ask of Claims only: a file is its own source, and nothing else is graded.
+LACKS = {
+    "source": (
+        "{alias}.type = 'claim' AND NOT EXISTS (SELECT 1 FROM links l"
+        " WHERE l.from_id = {alias}.id AND l.type = 'cites')"
+    ),
+    "assessment": (
+        # The stored text as `json.dumps` writes it, so no JSON1 is needed: a grade
+        # is always a string, and a null or absent one is not a grade.
+        "{alias}.type = 'claim'"
+        " AND {alias}.attrs_json NOT LIKE '%\"confidence\": \"%'"
+    ),
+}
+
+
+def lacking(raw: str | None) -> list[str] | None:
+    """A comma-separated ``lacks`` parameter as the list the store takes."""
+    parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    return list(dict.fromkeys(parts)) or None
+
+
 #: The character that sorts after every other, appended to an inclusive upper bound.
 #: ``prov_at`` holds a full ISO instant and a date range is asked in days, so
 #: ``until='2026-08-10'`` has to reach the whole of that day rather than stopping at
@@ -168,6 +192,7 @@ def _entity_filters(
     attr_value: str | None = None,
     linked: str | None = None,
     unlinked: bool = False,
+    lacks: list[str] | None = None,
     since: str | None = None,
     until: str | None = None,
     filed_by: list[str] | None = None,
@@ -193,6 +218,8 @@ def _entity_filters(
     of it typed as syntax (SPEC anti-goals). ``alias`` names the entity table in the
     statement being built, because the one-hop test has to correlate to the outer row
     and the two callers spell that table differently.
+
+    ``lacks`` asks what a Claim is missing (``LACKS``): a source, an assessment.
 
     ``unlinked`` is that sentence's other half — *connected to nothing* — and
     ``since``/``until``/``filed_by`` are the three terms about how a row got here
@@ -220,7 +247,7 @@ def _entity_filters(
         else:
             where.append("folder = ?")
             params.append(folder)
-    for term in (query or "").casefold().split():
+    for term in fold_text(query or "").split():
         where.append("search_text LIKE ? ESCAPE '\\'")
         params.append(_like_contains(term))
     # A field with no value chosen is not a term: it is the analyst having picked which
@@ -236,6 +263,10 @@ def _entity_filters(
         params.extend(bound)
     if unlinked:
         where.append(f" NOT{_linked_at_all(alias)}")
+    for missing in lacks or ():
+        if missing not in LACKS:
+            raise CaseError(f"unknown lacks term '{missing}'")
+        where.append(LACKS[missing].format(alias=alias))
     if since:
         where.append("prov_at >= ?")
         params.append(since)

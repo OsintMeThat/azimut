@@ -10,16 +10,30 @@
     item = null,
     subject = null,
     initialWhen = '',
+    /** The zone `initialWhen` was stated in, from the entry line. */
+    initialWhenZone = null,
     initialStatement = '',
     initialRole = '',
     /** Evidence a new claim cites from the start, such as the picture it was read on. */
     initialCites = [],
+    initialConfidence = '',
+    initialAbout = [],
+    initialAt = [],
+    /** A count and a state carried over from the entry line, which asks them there. */
+    initialFacts = null,
+    /** Subjects the entry line named for the first time, created with the claim. */
+    initialCreate = [],
+    /** Whether the editor says it saved. The entry line says it itself, with an Undo. */
+    announce = true,
     onsaved,
     oncancel,
   } = $props();
 
   let statement = $state('');
   let when = $state('');
+  // The clock the date was stated on (`when_zone`): which day a date is, and whose
+  // local time a time is.
+  let whenZone = $state(null);
   let timeRole = $state('');
   let confidence = $state('');
   let method = $state('');
@@ -34,14 +48,37 @@
 
   const lockedAbout = $derived(subject ? [subject] : []);
 
+  /** What the date is of, in a line. */
+  const ROLE_HELP = {
+    '': 'what the date is of, which can wait',
+    occurred: 'when it happened',
+    observed: 'when it was seen, filmed or reported',
+    valid: 'the span during which it held',
+  };
+  /** How strongly the claim is supported, in the words the confidence scale is
+   *  served with (`engine/links.py` CONFIDENCE_LEVELS). */
+  const CONFIDENCE_HELP = {
+    '': 'how strongly the claim is supported, once it is weighed',
+    certain: 'established and corroborated',
+    probable: 'more likely than not, and short of established',
+    possible: 'roughly even odds, and it cannot be excluded',
+    refuted: 'checked and eliminated, which is a finding rather than a deletion',
+  };
+
   $effect(() => {
     if (seeded) return;
     seeded = true;
     statement = item?.label ?? initialStatement;
     when = item?.raw ?? initialWhen;
+    whenZone = item ? (item.tz ?? null) : initialWhenZone;
     timeRole = item?.time_role ?? initialRole;
-    confidence = item?.confidence ?? '';
-    if (!item) cites = initialCites.map((entry) => ({ id: entry.id, label: entry.label, type: entry.type }));
+    confidence = item?.confidence ?? initialConfidence;
+    if (!item) {
+      const keep = (entry) => ({ id: entry.id, label: entry.label, type: entry.type, attrs: entry.attrs });
+      cites = initialCites.map(keep);
+      about = initialAbout.map(keep);
+      places = initialAt.map(keep);
+    }
   });
 
   $effect(() => {
@@ -54,6 +91,7 @@
         if (!live) return;
         statement = chain.entity.label ?? item.label;
         when = chain.entity.attrs?.when ?? item.raw ?? '';
+        whenZone = chain.entity.attrs?.when_zone ?? item.tz ?? null;
         timeRole = chain.entity.attrs?.time_role ?? item.time_role ?? '';
         confidence = chain.entity.attrs?.confidence ?? item.confidence ?? '';
         method = chain.entity.attrs?.method ?? '';
@@ -61,7 +99,7 @@
         const choices = (type) =>
           (chain.relations ?? [])
             .filter((row) => row.direction === 'out' && row.link.type === type)
-            .map((row) => ({ id: row.entity.id, label: row.entity.label, type: row.entity.type }));
+            .map((row) => ({ id: row.entity.id, label: row.entity.label, type: row.entity.type, attrs: row.entity.attrs }));
         about = choices('about').filter((choice) => choice.id !== subject?.id);
         places = choices('at');
         cites = choices('cites');
@@ -78,6 +116,7 @@
     const body = {
       statement: text,
       when: when || null,
+      when_zone: (when && whenZone) || null,
       time_role: timeRole || null,
       confidence: confidence || null,
       method: method.trim() || null,
@@ -86,11 +125,16 @@
       at: places.map((entry) => entry.id),
       cites: cites.map((entry) => entry.id),
     };
+    if (!item) {
+      if (initialFacts?.count != null) body.count = initialFacts.count;
+      if (initialFacts?.condition) body.condition = initialFacts.condition;
+      if (initialCreate.length) body.create = initialCreate;
+    }
     try {
       const saved = item
         ? await api.patch(`/api/cases/${caseId}/timeline/claims/${item.owner_id}`, body)
         : await api.post(`/api/cases/${caseId}/timeline/claims`, body);
-      toast(item ? 'Claim updated' : 'Claim added', 'ok', 1800);
+      if (announce) toast(item ? 'Claim updated' : 'Claim added', 'ok', 1800);
       onsaved?.(saved);
     } catch (error) {
       toast(error.message, 'danger');
@@ -109,16 +153,21 @@
   <textarea
     id="temporal-statement"
     class="textarea"
+    dir="auto"
     rows="2"
     bind:value={statement}
     maxlength="300"
     placeholder="What happened or was observed?"
   ></textarea>
+  <p class="help">One sentence, in your words. Who, where and the sources go below; the source's own wording goes under Reasoning.</p>
 
   <label class="modal-label" for="temporal-when">When</label>
   <TemporalInput
     id="temporal-when"
     value={when}
+    places={[...places, ...cites]}
+    zone={whenZone}
+    onzonechange={(zone) => (whenZone = zone)}
     onchange={(value) => (when = value)}
     onvaliditychange={(reading) => (whenValid = reading.valid)}
   />
@@ -143,7 +192,22 @@
         <option value="refuted">Refuted</option>
       </select>
     </label>
+    <!-- Beside the labels rather than in them: a label is the field's name, and
+         a line inside it would be read as part of that name. -->
+    <small class="help">{ROLE_HELP[timeRole]}</small>
+    <small class="help">{CONFIDENCE_HELP[confidence]}</small>
   </div>
+
+  {#if !item && (initialFacts?.count != null || initialFacts?.condition || initialCreate.length)}
+    <p class="carried">
+      Filed with it:
+      {[
+        initialFacts?.count != null ? `${initialFacts.count} counted` : '',
+        initialFacts?.condition ? initialFacts.condition : '',
+        ...initialCreate.map((entry) => `${entry.label} (new)`),
+      ].filter(Boolean).join(' · ')}
+    </p>
+  {/if}
 
   <section class="connections">
     <TemporalTargetPicker
@@ -173,21 +237,24 @@
   <details class="reasoning">
     <summary>Reasoning and source wording</summary>
     <label class="modal-label" for="temporal-method">How this was worked out</label>
-    <textarea id="temporal-method" class="textarea" rows="3" bind:value={method}></textarea>
+    <textarea id="temporal-method" class="textarea" rows="3" dir="auto" bind:value={method}></textarea>
     <label class="modal-label" for="temporal-verbatim">As the source put it</label>
-    <textarea id="temporal-verbatim" class="textarea" rows="3" bind:value={verbatim}></textarea>
+    <textarea id="temporal-verbatim" class="textarea" rows="3" dir="auto" bind:value={verbatim}></textarea>
   </details>
 
   <div class="actions">
     <button class="btn btn-ghost" onclick={oncancel}>Cancel</button>
     <button class="btn btn-primary" disabled={!statement.trim() || !whenValid || saving || loading} onclick={save}>
-      {saving ? 'Saving…' : item ? 'Update claim' : 'Add claim'}
+      {saving ? 'Saving…' : item ? 'Update claim' : 'Add event'}
     </button>
   </div>
 </div>
 
 <style>
   .claim-editor { display: grid; gap: 8px; min-width: 0; }
+  .carried { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .help { margin: -3px 0 2px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; }
+  .two-cols .help { margin: -6px 0 0; }
   .loading { padding: 7px 9px; border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-3); }
   .two-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .two-cols label { display: grid; gap: 4px; }

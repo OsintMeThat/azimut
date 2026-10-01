@@ -11,7 +11,7 @@ export function settleCatalogSummary(current, next, isCurrent) {
  *
  * `unfiled` (no folder) wins over an exact `folder` path when both are given.
  * `attr` with `value` narrows on one stored field, `linked` on having a neighbour of
- * that type and `unlinked` on having none at all; `since`, `until` and `by` ask how
+ * that type and `unlinked` on having none at all, `lacks` on what a Claim is missing; `since`, `until` and `by` ask how
  * the row got here rather than what it says. A field with no value chosen is **not**
  * sent: it is the analyst having picked what they are about to ask about, and asked
  * as a term it would empty the table between two clicks of one act.
@@ -32,6 +32,7 @@ function narrowing(
     value,
     linked,
     unlinked,
+    lacks,
     since,
     until,
     by,
@@ -53,6 +54,7 @@ function narrowing(
   }
   if (linked) params.set('linked', linked);
   if (unlinked) params.set('unlinked', 'true');
+  if (lacks && lacks.length) params.set('lacks', lacks.join(','));
   if (since) params.set('since', since);
   if (until) params.set('until', until);
   if (by && by.length) params.set('by', by.join(','));
@@ -69,17 +71,32 @@ function narrowing(
 /** Build the catalog request path: the narrowing, plus what a *page* needs on top.
  *
  *  `order` sorts the whole filtered set rather than the page — the difference between
- *  *the newest in this case* and *the newest of the rows already loaded*. */
+ *  *the newest in this case* and *the newest of the rows already loaded*. `previews`
+ *  joins the picture a file, a capture or a proof already has, for a picker. */
 export function buildCatalogQuery(caseId, options = {}) {
-  const { cursor, limit, order, view } = options;
+  const { cursor, limit, order, view, previews, counts } = options;
   const params = new URLSearchParams();
   if (limit != null) params.set('limit', String(limit));
   if (cursor) params.set('cursor', cursor);
   narrowing(options, params);
   if (order) params.set('order', order);
   if (view) params.set('view', view);
+  if (previews) params.set('previews', 'true');
+  // `by_type` beside the page: how much of the answer each type holds, which is what
+  // the Board's groups count themselves from in the one request.
+  if (counts) params.set('counts', counts);
   const qs = params.toString();
   return `/api/cases/${caseId}/catalog/entities${qs ? `?${qs}` : ''}`;
+}
+
+/**
+ * What the case's Claims say about these rows: how many name each one, when the dated
+ * ones fall, how many sources and places they reach, and a density over the case's
+ * own span. One read per page of rows (at most 200 ids), never one per row.
+ */
+export async function fetchEventRows(caseId, ids, { post = api.post } = {}) {
+  if (!caseId || !ids?.length) return { range: null, rows: {} };
+  return post(`/api/cases/${caseId}/catalog/events`, { ids: ids.slice(0, 200) });
 }
 
 /** Build the tally request path: the same narrowing, added up instead of listed.

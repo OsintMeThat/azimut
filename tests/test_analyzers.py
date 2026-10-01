@@ -335,7 +335,13 @@ def test_reading_saved_items_never_starts_jobs(client, scenario):
     for kind in ("zones", "followups", "runs"):
         assert client.get(f"/api/cases/{case.id}/analysis/{kind}").json() == []
     assert case.list_jobs() == before
-    area = client.post(f"/api/cases/{case.id}/analysis/zones", json={"title": "Port", "zones": body["zones"]}).json()
+    ring = Zone.model_validate(body["zones"][0]).ring()
+    shared = client.post(f"/api/cases/{case.id}/analysis/areas", json={
+        "name": "Port", "geometry": {"type": "Polygon", "coordinates": [ring + [ring[0]]]},
+    }).json()
+    area = client.post(f"/api/cases/{case.id}/analysis/zones", json={
+        "title": "Port", "area_ids": [shared["id"]],
+    }).json()
     follow = client.post(f"/api/cases/{case.id}/analysis/followups", json=body).json()
     for kind, saved in (("zones", area), ("followups", follow)):
         assert client.get(f"/api/cases/{case.id}/analysis/{kind}/{saved['id']}").status_code == 200
@@ -461,7 +467,7 @@ def test_a_candidate_can_be_kept_in_the_detections_view_without_touching_the_cas
     assert client.get(f"{base}/followups/{watch['id']}/findings").json() == []
     assert client.post(endpoint + "/promote", json={"title": "Gone"}).status_code == 404
     # A later sweep can find the dismissed candidate again.
-    saved = run(client, case, {**body, "followup_id": watch["id"]})
+    saved = run(client, case, {**body, "followup_id": watch["id"], "run_anyway": True})
     endpoint = f"{base}/runs/{saved['id']}/results/{saved['results'][0]['id']}"
     client.post(endpoint + "/promote", json={"title": "Kept change"})
     [pinned] = client.get(f"{base}/followups/{watch['id']}/findings").json()
@@ -500,6 +506,68 @@ def test_a_second_pass_of_a_routine_compares_against_the_pass_before_it(client, 
     assert [saved["input"]["a"]["date"], saved["input"]["b"]["date"]] == [body["b"]["date"], later]
 
 
+def test_a_routine_skips_current_areas_and_only_sweeps_the_area_with_a_new_pass(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    zones = [body["zones"][0], {**body["zones"][0], "id": "other", "name": "Other"}]
+    routine = {**deepcopy(body), "title": "Two areas", "zones": zones, "date_rule": "latest_previous",
+               "area_dates": [{"area_id": zone["id"], "a": body["a"],
+                               "b": {**body["b"], "date": ""}, "date_rule": "latest_previous"}
+                              for zone in zones]}
+    watch = client.post(f"{base}/followups", json=routine).json()
+    chosen = [{**pair, "b": {**pair["b"], "date": body["b"]["date"]}}
+              for pair in watch["area_dates"]]
+    first = client.post(f"{base}/followups/{watch['id']}/run", json={"area_dates": chosen}).json()
+    workqueue.drain(case)
+    assert client.get(f"{base}/runs/{first['id']}").json()["status"] == "ready"
+    last = client.get(f"{base}/followups/{watch['id']}/last-passes").json()
+    assert {source["date"] for source in last.values()} == {body["b"]["date"]}
+
+    before = len(client.get(f"{base}/runs").json())
+    unchanged = client.post(f"{base}/followups/{watch['id']}/run", json={"area_dates": chosen}).json()
+    assert unchanged["status"] == "no_new_imagery" and "id" not in unchanged
+    assert len(client.get(f"{base}/runs").json()) == before
+
+    later = "2026-05-18"
+    seed_images({**body, "a": body["b"], "b": {**body["b"], "date": later}})
+    changed = [chosen[0], {**chosen[1], "b": {**chosen[1]["b"], "date": later}}]
+    second = client.post(f"{base}/followups/{watch['id']}/run", json={"area_dates": changed}).json()
+    assert [row["status"] for row in second["area_runs"]] == ["no_new_imagery", "pending"]
+    workqueue.drain(case)
+    saved = client.get(f"{base}/runs/{second['id']}").json()
+    assert [row["status"] for row in saved["area_runs"]] == ["no_new_imagery", "ready"]
+    assert saved["area_runs"][1]["a"]["date"] == body["b"]["date"]
+    assert saved["area_runs"][0]["status"] == "no_new_imagery"
+    assert saved["area_runs"][1]["status"] == "ready"
+
+
+def test_a_comparison_rejects_a_date_that_is_not_before_b(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis/runs"
+    later_a = {**deepcopy(body), "a": {**body["a"], "date": "2026-05-20"}}
+    assert client.post(base, json=later_a).status_code == 422
+    same_day = {**deepcopy(body), "a": {**body["a"], "date": body["b"]["date"]}}
+    assert client.post(base, json=same_day).status_code == 422
+    per_area = {**deepcopy(body), "area_dates": [{"area_id": body["zones"][0]["id"],
+        "a": later_a["a"], "b": body["b"], "date_rule": "manual"}]}
+    assert client.post(base, json=per_area).status_code == 422
+
+
+def test_previous_pass_follows_image_order_after_a_later_backfill(client, scenario, monkeypatch):
+    case, body = scenario
+    ident = "abcdef123456"
+    dates = ["2026-05-11", "2026-05-18", "2026-05-14"]
+    monkeypatch.setattr(analyzers, "ready_runs", lambda *_: [
+        ({"created_at": f"2026-06-0{index}T00:00:00Z"},
+         {"area_runs": [{"area_id": body["zones"][0]["id"], "status": "ready",
+                          "b": {**body["b"], "date": day}}]})
+        for index, day in enumerate(dates, 1)
+    ])
+    query = RunInput.model_validate({**body, "followup_id": ident,
+                                     "b": {**body["b"], "date": "2026-05-25"}})
+    assert analyzers.previous_pass(case, query).date == "2026-05-18"
+
+
 def test_a_detection_carries_what_it_is_for(client, scenario):
     case, body = scenario
     base = f"/api/cases/{case.id}/analysis"
@@ -508,6 +576,34 @@ def test_a_detection_carries_what_it_is_for(client, scenario):
     started = client.post(f"{base}/followups/{watch['id']}/run").json()
     assert started["input"]["note"] == "Vessels weekly"
     assert client.get(f"{base}/runs").json()[0]["note"] == "Vessels weekly"
+
+
+def test_a_saved_routine_colour_can_change_without_losing_its_areas(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis/followups"
+    watch = client.post(base, json=body).json()
+    before = client.get(f"{base}/{watch['id']}").json()
+    response = client.patch(f"{base}/{watch['id']}/colour", json={"colour": "#22d3ee"})
+    assert response.status_code == 200, response.text
+    changed = client.get(f"{base}/{watch['id']}").json()
+    assert changed["recipe"]["colour"] == "#22d3ee"
+    assert changed["area_dates"] == before["area_dates"]
+    assert client.get(base).json()[0]["colour"] == "#22d3ee"
+    assert client.patch(f"{base}/{watch['id']}/colour", json={"colour": "red"}).status_code == 422
+    assert client.get(f"{base}/{watch['id']}").json()["recipe"]["colour"] == "#22d3ee"
+
+
+def test_a_finished_one_pass_has_a_saved_display_colour(client, scenario):
+    case, body = scenario
+    finished = run(client, case, body)
+    base = f"/api/cases/{case.id}/analysis/runs"
+    original = finished["input"]["recipe"]["colour"]
+    response = client.patch(f"{base}/{finished['id']}/colour", json={"colour": "#eab308"})
+    assert response.status_code == 200, response.text
+    changed = client.get(f"{base}/{finished['id']}").json()
+    assert changed["display_colour"] == "#eab308"
+    assert changed["input"]["recipe"]["colour"] == original
+    assert client.get(base).json()[0]["colour"] == "#eab308"
 
 
 def test_reexecution_uses_preserved_frames_after_tile_cache_loss(client, scenario, monkeypatch):
@@ -1266,8 +1362,40 @@ def test_an_automatic_date_rule_still_honours_the_cloud_ceiling(client, scenario
         {"date": "2026-05-20", "cloud": 80.0, "granules": 1, "coverage": 1.0},
         {"date": "2026-05-11", "cloud": 5.0, "granules": 1, "coverage": 1.0},
     ], "truncated": False})
-    resolved = analyzers.resolve_dates(case, RunInput.model_validate(_rule(body)))
+    notes = []
+    resolved = analyzers.resolve_dates(case, RunInput.model_validate(_rule(body)), notes=notes)
     assert resolved.b.date == "2026-05-11"
+    assert notes == ["Skipped 2026-05-20 (80% cloud, limit 30%); using 2026-05-11."]
+
+
+def test_cloudy_latest_pass_is_explained_when_clear_imagery_has_only_partial_cover(
+    client, scenario, monkeypatch
+):
+    case, body = scenario
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    monkeypatch.setattr(analyzers.sentinel, "acquisitions", lambda *a, **k: {"dates": [
+        {"date": "2026-05-20", "cloud": 80.0, "granules": 1, "coverage": 1.0},
+        {"date": "2026-05-11", "cloud": 5.0, "granules": 1, "coverage": 0.61},
+    ], "truncated": False})
+    with pytest.raises(ValueError, match="latest pass 2026-05-20 has 80% cloud"):
+        analyzers.resolve_dates(case, RunInput.model_validate(_rule(body)))
+
+
+def test_an_automatic_comparison_rejects_a_pass_before_its_fixed_reference(client, scenario, monkeypatch):
+    case, body = scenario
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    monkeypatch.setattr(analyzers.sentinel, "acquisitions", lambda *a, **k: {"dates": [
+        {"date": "2026-05-11", "cloud": 5.0, "granules": 1, "coverage": 1.0},
+    ], "truncated": False})
+    asked = RunInput.model_validate({**_rule(body), "a": {**body["a"], "date": "2026-05-20"},
+                                     "b": {**body["b"], "date": ""}})
+    _, outcomes = analyzers.prepare_areas(case, asked)
+    assert outcomes[0]["status"] == "failed"
+    assert "date A must be before date B" in outcomes[0]["message"]
+    response = client.post(f"/api/cases/{case.id}/analysis/runs", json=asked.model_dump())
+    assert response.status_code == 422
+    assert "date A must be before date B" in response.json()["detail"]
+    assert client.get(f"/api/cases/{case.id}/analysis/runs").json() == []
 
 
 def test_band_products_are_padded_and_keyed_apart_from_older_layouts():

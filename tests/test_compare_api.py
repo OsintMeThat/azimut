@@ -711,7 +711,7 @@ MARKS = {"red": (0xEF, 0x44, 0x44), "blue": (0x38, 0xBD, 0xF8), "green": (0x22, 
 
 
 def _marked_imagery() -> bytes:
-    """Grey-green fields with three thin outlines, the case median cut got wrong."""
+    """Grey-green fields with three thin outlines, useful for palette checks."""
     import random
 
     from PIL import ImageDraw
@@ -753,8 +753,41 @@ def test_a_gif_keeps_the_colours_it_is_asked_to_keep(client):
         assert response.status_code == 200, response.text
         written[asked] = _first_frame_marks(Path(response.json()["path"]) / response.json()["file"])
     assert written[keep] == list(MARKS.values())
-    # Without the list, median cut spends the palette on the fields.
-    assert written[""] != list(MARKS.values())
+
+
+def test_a_gif_uses_the_full_palette_for_satellite_imagery():
+    image = Image.new("RGB", (256, 256))
+    image.putdata([
+        ((index * 37) % 256, (index * 67) % 256, (index * 97) % 256)
+        for index in range(256 * 256)
+    ])
+
+    data = compare_api._gif_bytes(image, image, "blink")
+
+    with Image.open(io.BytesIO(data)) as gif:
+        rgb = gif.convert("RGB")
+        colours = {rgb.getpixel((x, y)) for y in range(rgb.height) for x in range(rgb.width)}
+        assert len(colours) > 192
+
+
+def test_a_gif_preserves_rare_dark_satellite_pixels():
+    image = Image.new("RGB", (256, 256))
+    pixels = [
+        (150 + (index * 37) % 106, 80 + (index * 67) % 110, 40 + (index * 97) % 100)
+        for index in range(256 * 256)
+    ]
+    dark_pixel = 12_345
+    overlay_pixel = 23_456
+    pixels[dark_pixel] = (15, 15, 15)
+    pixels[overlay_pixel] = (0, 114, 178)
+    image.putdata(pixels)
+
+    for kept in ([], [(0, 114, 178), (230, 159, 0), (204, 121, 167)]):
+        data = compare_api._gif_bytes(image, image, "blink", kept=kept)
+        with Image.open(io.BytesIO(data)) as gif:
+            frame = gif.convert("RGB")
+            assert frame.getpixel((dark_pixel % 256, dark_pixel // 256)) == (15, 15, 15)
+            assert frame.getpixel((overlay_pixel % 256, overlay_pixel // 256)) == (0, 114, 178)
 
 
 def test_an_evolution_keeps_its_mark_colours_too(client):

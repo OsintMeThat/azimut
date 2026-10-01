@@ -67,6 +67,12 @@ describe('composeClaimStatement', () => {
     expect(composeClaimStatement({ subjects: ['A', 'B'], places: ['X', ' '] })).toBe('A, B seen at X');
   });
 
+  it('says where it was seen when a source is all there is', () => {
+    expect(composeClaimStatement({ sources: ['clip.mp4'] })).toBe('Seen in clip.mp4');
+    expect(composeClaimStatement({ sources: ['clip.mp4'], places: ['Crossroads'] })).toBe('Seen at Crossroads');
+    expect(composeClaimStatement({ sources: ['clip.mp4'], subjects: ['T-72B3'] })).toBe('T-72B3 seen');
+  });
+
   it('offers nothing with nothing to say', () => {
     expect(composeClaimStatement({})).toBe('');
     expect(composeClaimStatement({ count: 2, condition: 'destroyed' })).toBe('');
@@ -74,6 +80,13 @@ describe('composeClaimStatement', () => {
 });
 
 describe('quickClaimBody', () => {
+  it('sends the zone a day was stated in, and only with a date', () => {
+    const base = { statement: 'x', about: [], at: [], cites: [], seat: {} };
+    expect(quickClaimBody({ ...base, when: '2024-03-12', whenZone: 'Europe/Kyiv' }).when_zone).toBe('Europe/Kyiv');
+    expect(quickClaimBody({ ...base, when: '', whenZone: 'Europe/Kyiv' })).not.toHaveProperty('when_zone');
+    expect(quickClaimBody({ ...base, when: '2024-03-12' })).not.toHaveProperty('when_zone');
+  });
+
   const seat = { slot: 'about', count: true, condition: true };
 
   it('files the observation in the shape the claim route takes', () => {
@@ -99,7 +112,16 @@ describe('quickClaimBody', () => {
       about: ['model'],
       at: ['crossroads'],
       cites: ['video'],
+      create: [],
     });
+  });
+
+  it('names the new subjects the line creates, trimmed', () => {
+    const body = quickClaimBody({
+      statement: 'x', about: [], at: [], cites: [], seat,
+      create: [{ slot: 'about', type: 'organization', label: ' 4th brigade ', key: 'new:1', rule: 'chosen' }],
+    });
+    expect(body.create).toEqual([{ slot: 'about', type: 'organization', label: '4th brigade' }]);
   });
 
   it('states no role without a date, and no count that is not a whole number', () => {
@@ -128,9 +150,9 @@ describe('quickClaimBody', () => {
 
 describe('claimActionTitle', () => {
   it('says what the press files from each seat', () => {
-    expect(claimActionTitle('about')).toBe('File a claim about this');
-    expect(claimActionTitle('at')).toBe('File a claim placed here');
-    expect(claimActionTitle('cites')).toBe('File a claim that rests on this');
+    expect(claimActionTitle('about')).toBe('Add an event about this');
+    expect(claimActionTitle('at')).toBe('Add an event that happened here');
+    expect(claimActionTitle('cites')).toBe('Add an event this shows');
     expect(claimActionTitle(null)).toBe('');
   });
 });

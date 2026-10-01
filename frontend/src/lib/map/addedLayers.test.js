@@ -11,7 +11,9 @@ import {
   freshness,
   legend,
   looksLikeUrl,
+  moveName,
   PALETTE,
+  refreshedLabel,
   renewsOnShow,
   searchFeatures,
   SEARCH_LIMIT,
@@ -238,6 +240,43 @@ describe('what the map draws and what switching on re-reads', () => {
       )
     ).toBe(false);
     expect(renewsOnShow(layer({ source: { kind: 'url', url: 'https://x.test/3' } }))).toBe(true);
+  });
+});
+
+describe('the order the rows were dragged into', () => {
+  const names = ['North', 'South', 'East', 'West'];
+
+  it('moves a row down past the ones it was dropped below', () => {
+    // dropped on the gap above West: counted in the list as it stood
+    expect(moveName(names, 'North', 3)).toEqual(['South', 'East', 'North', 'West']);
+    expect(moveName(names, 'North', 4)).toEqual(['South', 'East', 'West', 'North']);
+  });
+
+  it('moves a row up, and leaves it where it was when dropped on itself', () => {
+    expect(moveName(names, 'West', 0)).toEqual(['West', 'North', 'South', 'East']);
+    expect(moveName(names, 'South', 1)).toEqual(names);
+    expect(moveName(names, 'South', 2)).toEqual(names);
+  });
+
+  it('changes nothing for a name it does not hold', () => {
+    expect(moveName(names, 'Nowhere', 0)).toEqual(names);
+  });
+});
+
+describe('what a refresh of every layer says', () => {
+  it('counts what moved and what could not be reached, in one line', () => {
+    expect(refreshedLabel({ moved: 0, failed: 0, total: 3 })).toBe('Nothing new');
+    expect(refreshedLabel({ moved: 2, failed: 0, total: 3 })).toBe('2 updated');
+    expect(refreshedLabel({ moved: 1, failed: 1, total: 3 })).toBe(
+      '1 updated, 1 could not be reached'
+    );
+  });
+
+  it('says it plainly when no source answered', () => {
+    expect(refreshedLabel({ moved: 0, failed: 2, total: 2 })).toBe('No source could be reached');
+    expect(refreshedLabel({ moved: 0, failed: 1, total: 1 })).toBe(
+      'That source could not be reached'
+    );
   });
 });
 

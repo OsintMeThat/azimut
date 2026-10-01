@@ -14,7 +14,7 @@ same jump. Schema 11 gives each file one Inspect work, dates every kept Detect p
 and stands every saved comparison on the map; 10 was a development checkpoint.
 The entity/link shape is unchanged since v1. Breaking changes require
 a manifest schema bump and migration. The internal SQLite schema is at version
-18: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
+19: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
 search reaches the declared fields (§2) rather than stopping at the label and the
 notes, 11 adds `links.nature` — what kind of tie an edge states, in the analyst's
 own words, and only where the verb declares a qualifier (§3) — and 10 adds
@@ -50,7 +50,13 @@ authoritative. Schema 16 lets Analysis Views own Timeline recipes and immutable
 temporal snapshots. Schema 17 rebuilds temporal bounds at fixed microsecond width so
 SQLite text ordering stays chronological. Schema 18 rebuilds the projection for the
 date a Proof states: a statement, because the analyst concluded it, beside the media
-rows that report what a file claims about itself. A Timeline view stores presentation
+rows that report what a file claims about itself. Schema 19 rebuilds the entity and
+media search indexes folded (case, and the marks a reader skips: Latin, Greek and
+Cyrillic accents, Arabic harakat, Hebrew points), the fold every search term gets as
+it is typed. The same unreleased schema 19 adds `entity_redirects` and
+`entity_merges` for explicit subject merges and their local undo journal, and the
+projection's `tz` column: the zone a value was stated in.
+A Timeline view stores presentation
 and track queries, never copies temporal rows into the graph and never creates a
 temporal relation.
 
@@ -181,7 +187,7 @@ answer by omission (`tests/test_entities.py`).
 |---|---|---|---|---|---|---|
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
-| `place` | place | subject | ✅ | satellite, ingest, enrich | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
+| `place` | place | subject | ✅ | satellite, ingest, enrich | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
@@ -189,18 +195,18 @@ answer by omission (`tests/test_entities.py`).
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
-| `analysis-zones` | document | annex | ✅ | detect | `spec` (json): a saved set of areas | yes (`.analysis/zones-<id>.json`) |
+| `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
 | `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
 | `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
-| `organization` | actor | subject | ✅ | analyst | `echelon`, `country` | no |
+| `organization` | actor | subject | ✅ | analyst | `aliases`, `echelon`, `country` | no |
 | `vehicle` | asset | subject | ✅ | analyst | `plate`, `make`, `model`, `colour`, `condition` | no |
-| `vessel` | asset | subject | ✅ | analyst | `imo`, `mmsi`, `flag`, `kind`, `condition` | no |
+| `vessel` | asset | subject | ✅ | analyst | `aliases`, `imo`, `mmsi`, `flag`, `kind`, `condition` | no |
 | `aircraft` | asset | subject | ✅ | analyst | `registration`, `icao24`, `model`, `condition` | no |
-| `structure` | asset | subject | ✅ | analyst | `kind`, `address`, `condition` | no |
+| `structure` | asset | subject | ✅ | analyst | `aliases`, `kind`, `address`, `condition` | no |
 | `equipment-type` | class | subject | ✅ | analyst | `category`, `aliases` | no |
 | `account` | identifier | subject | ✅ | analyst | handle in the label; `platform?`, `url`, `reliability?` | no |
 | `email` | identifier | subject | ✅ | analyst | address in the label | no |
@@ -208,7 +214,7 @@ answer by omission (`tests/test_entities.py`).
 | `domain` | identifier | subject | ✅ | analyst | hostname in the label; `registrar?` | no |
 | `ip` | identifier | subject | ✅ | analyst | address in the label; legacy read-only `network?`; `asn?`, `provider?` | no |
 | `network` | identifier | subject | ✅ | analyst | network/CIDR in the label; `asn?`, `provider?`, `country?` | no |
-| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `when`, `time_role`, `confidence`, `method`, `verbatim` | no |
+| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `when`, `when_zone`, `time_role`, `confidence`, `method`, `verbatim` | no |
 
 Every row is created by something: the tool-born ones by the save that produces them,
 the analyst's own from the board's **New entity**, which builds its form out of the
@@ -290,9 +296,9 @@ answers it against the case.
 
 Three rules hold it together:
 
-- **It warns, it never refuses.** The case has no merge action, so a create that
-  failed would leave the analyst holding a value with nowhere to put it. Both the
-  create dialog and Details name the row already holding it and offer to open it.
+- **It warns, it never refuses.** The create dialog and Details name the row already
+  holding the value and offer to open it. Details also offers an explicit merge;
+  the warning never performs one automatically.
 - **It catches the same value typed twice, not every spelling that resolves to the
   same thing.** `+33612345678` is not compared against `0612345678` and
   `www.example.org` is not compared against `example.org`: supplying a country code or
@@ -379,8 +385,19 @@ as unplaced rather than undated, but is not globally sortable. Two zoned timesta
 may form an exact interval. Local-time intervals, mixed date/time intervals, open
 intervals and the rest of EDTF Level 2 remain outside the announced profile.
 
-Time reads a derived SQLite projection, never a second authority. Claim `when` and
-`time_role` remain on the Claim; a Proof's `when` remains on the Proof;
+**A day is some place's day.** `when_zone` (an IANA name) says which clock `when`
+was stated on. A date then spans that zone's midnights, the 12th in Kyiv starting at
+22:00 UTC on the 11th, and a time with no offset of its own is placed on that zone's
+clock. A timestamp carrying `Z` or an offset keeps it; one put on a named clock is
+written with the offset that zone keeps then and keeps `when_zone` beside it, so it
+stays sortable and still says which clock it was read on. Without `when_zone` a date
+spans UTC's day, as every date stated before it did. A proof states its date on its
+first point's zone unless the analyst picks another, and the Claim it files for the
+footage carries the same zone.
+
+Time reads a derived SQLite projection, never a second authority. Claim `when`,
+`when_zone` and `time_role` remain on the Claim; a Proof's `when` and `when_zone`
+remain on the Proof;
 capture/publication/imagery dates remain in the media sidecar; filing and collection
 dates remain provenance. The projection labels them `statement`, `media` or
 `case_activity`, and can be deleted and rebuilt from those records. A manually assessed

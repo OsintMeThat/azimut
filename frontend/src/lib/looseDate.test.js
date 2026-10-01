@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   composeLooseDate,
   decomposeLooseDate,
   friendlyDate,
+  monthWordsFor,
   parseLooseDate,
 } from './looseDate.js';
 import { TEMPORAL_SYNTAX } from './temporalInput.js';
@@ -173,5 +174,46 @@ describe('a date built by pointing at it', () => {
       expect(composeLooseDate(decomposeLooseDate(value))).toBe(value);
       expect(parseLooseDate(friendlyDate(value)).value).toBe(value);
     }
+  });
+});
+
+describe('month names in the languages the browser is set to', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads each month in the forms its language writes it, on its own and in a date', () => {
+    const { months, fillers } = monthWordsFor(['ru', 'uk', 'ar', 'es', 'de', 'el', 'he']);
+    // Russian and Ukrainian decline the month inside a date, and both forms are read
+    for (const word of ['март', 'марта', 'березень', 'березня', 'marzo', 'marz', 'μαρτιου', 'مارس', 'מרץ', 'במרץ']) {
+      expect([word, months.get(word)]).toEqual([word, 3]);
+    }
+    expect(months.get('августа')).toBe(8);
+    expect(months.get('dezember')).toBe(12);
+    // the words a date wraps around its parts are skipped, never read as a month
+    expect(fillers.has('de')).toBe(true);
+    expect(fillers.has('г')).toBe(true);
+    expect(fillers.has('marzo')).toBe(false);
+    expect(monthWordsFor(['not a language']).months.size).toBe(0);
+  });
+
+  it('reads a date written in them to the same stored value', () => {
+    vi.stubGlobal('navigator', { languages: ['ru', 'es', 'he', 'ar', 'de'] });
+    expect(read('12 марта 2026')).toBe('2026-03-12');
+    expect(read('12 марта 2026 г.')).toBe('2026-03-12');
+    expect(read('Март 2026')).toBe('2026-03');
+    expect(read('12 de marzo de 2026')).toBe('2026-03-12');
+    expect(read('12 במרץ 2026')).toBe('2026-03-12');
+    expect(read('12 مارس 2026')).toBe('2026-03-12');
+    expect(read('12. März 2026')).toBe('2026-03-12');
+    expect(read('~ марта 2026')).toBe('2026-03~');
+    // the day still comes first, and the fixed base reads whatever the machine is set to
+    expect(read('3/12/2026')).toBe('2026-12-03');
+    expect(read('octobre 2025')).toBe('2025-10');
+  });
+
+  it('keeps English and French on a machine set to neither', () => {
+    vi.stubGlobal('navigator', { languages: ['ja'] });
+    expect(read('12 March 2026')).toBe('2026-03-12');
+    expect(read('12 mars 2026')).toBe('2026-03-12');
+    expect(parseLooseDate('12 марта 2026').value).toBeNull();
   });
 });

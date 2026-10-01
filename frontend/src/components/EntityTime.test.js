@@ -37,7 +37,9 @@ describe('entity Time tab', () => {
   });
 
   it('hands the visible entity scope to the global Timeline', () => {
-    expect(source).toContain('uiState.timelineFocus = { entityId: entity.id, entityLabel: entity.label');
+    expect(source).toContain('uiState.timelineFocus = {\n      entityId: entity.id,\n      entityLabel: entity.label,');
+    // a working file says so, or a Media track holding them back would hide the row
+    expect(source).toContain('producedHere: item?.produced_here === true,');
     expect(source).toContain("uiState.tool = 'timeline'");
   });
 
@@ -49,7 +51,7 @@ describe('entity Time tab', () => {
   });
 
   it('uses the Timeline visual language and separates unresolved dates', () => {
-    expect(source).toContain('formatTemporalValue(item.raw ?? \'\').label');
+    expect(source).toContain('formatTemporalValue(item.raw ?? \'\', item.tz).label');
     expect(source).toContain('var(--timeline-statement)');
     expect(source).toContain('Not on UTC axis');
     expect(source).toContain('Undated <span>{visibleUndated.length}</span>');

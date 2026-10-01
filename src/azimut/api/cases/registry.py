@@ -16,6 +16,8 @@ from ...engine import entities as entity_engine
 from ...engine import graph as graph_engine
 from ...engine import links as link_engine
 from ...engine import sheetpromote as promote_engine
+from ...engine import retype as retype_engine
+from ...engine import merge as merge_engine
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -126,6 +128,8 @@ def entity_types() -> list[dict[str, Any]]:
             "family_reads": entity_engine.FAMILY_READS.get(entry.family, ""),
             "icon": entry.icon,
             "manual": entry.manual,
+            "retypable": retype_engine.retypable(entry.type),
+            "mergeable": entry.family in merge_engine.MERGE_FAMILIES,
             # Whether a sheet row may become one. Not the same question as ``manual``
             # and it drifted the moment it was assumed to be: a ``place`` is never
             # created by hand because it is born from the map, yet a column of

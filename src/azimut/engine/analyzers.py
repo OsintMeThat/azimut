@@ -40,6 +40,8 @@ from .analysis_models import (
     SMOOTHING_M,
     Area,
     AreaDates,
+    AreaGroup,
+    AreaGroupReview,
     AreaGeometry,
     Model,
     Parameters,
@@ -47,8 +49,10 @@ from .analysis_models import (
     RunInput,
     Source,
     Zone,
+    ZoneSet,
     is_radar,
     is_single,
+    ordered_pair,
     recipe_products,
     recipe_sensor,
     stored,
@@ -260,6 +264,14 @@ def read(case: Case, kind: str, ident: str) -> dict[str, Any]:
     if path.stat().st_size > 16_000_000:
         raise ValueError("analysis record is too large")
     saved = json.loads(path.read_text(encoding="utf-8"))
+    if kind == "zones" and "area_ids" not in saved:
+        with LOCK, case._lock:
+            # A set stored copies of shapes. Promote those copies before
+            # replacing the set, so an old drawing or changed outline survives.
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            if "area_ids" not in saved:
+                saved = migrate_area_group(case, saved)
+                media.write_json_atomic(path, saved)
     if kind == "followups":
         with LOCK, case._lock:
             if not saved.get("area_dates"):
@@ -281,6 +293,42 @@ def read(case: Case, kind: str, ident: str) -> dict[str, Any]:
     if kind == "runs" and isinstance(saved.get("input"), dict):
         saved["input"] = current(saved["input"])
     return saved
+
+
+def migrate_area_group(case: Case, saved: dict[str, Any]) -> dict[str, Any]:
+    legacy = stored(ZoneSet, saved)
+    area_ids: list[str] = []
+    reviews: dict[str, AreaGroupReview] = {}
+    for zone in legacy.zones:
+        ring = zone.ring()
+        geometry = AreaGeometry(coordinates=[ring + [ring[0]]]).model_dump(mode="json")
+        changed_id = None
+        if len(zone.id) == 12 and all(c in "0123456789abcdef" for c in zone.id):
+            try:
+                existing = read(case, "areas", zone.id)
+                if existing["geometry"] == geometry:
+                    area_ids.append(zone.id)
+                    continue
+                changed_id = zone.id
+            except FileNotFoundError:
+                pass
+        fingerprint = json.dumps(zone.model_dump(), sort_keys=True)
+        derived = hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
+        path = case.resolve_inside(relpath("areas", derived))
+        if path.exists() and read(case, "areas", derived)["geometry"] != geometry:
+            raise ValueError("saved area id collision")
+        if not path.exists():
+            save(case, "areas", Area(name=zone.name, geometry=AreaGeometry.model_validate(geometry)).model_dump(),
+                 new_id=derived)
+        area_ids.append(derived)
+        if changed_id:
+            reviews[derived] = AreaGroupReview(saved_area_id=derived, current_area_id=changed_id,
+                                                name=zone.name)
+    converted = AreaGroup(title=legacy.title, area_ids=list(dict.fromkeys(area_ids)),
+                          pending_review=list(reviews.values())).model_dump()
+    return converted | {
+        key: saved[key] for key in ("id", "created_at", "updated_at", "version") if key in saved
+    }
 
 
 #: The parts of a saved detection that editing it sends back as they were read.
@@ -394,11 +442,16 @@ def summary(kind: str, saved: dict[str, Any]) -> dict[str, Any]:
                            ("id", "title", "created_at", "updated_at", "status", "progress",
                             "total", "count", "message", "completed_at") if key in saved}
     body = saved.get("input", saved)
-    row["areas"] = len(body.get("zones") or [])
+    row["areas"] = len(body.get("area_ids") or []) if kind == "zones" else len(body.get("zones") or [])
     if kind == "zones":
+        row["area_ids"] = body["area_ids"]
+        row["position"] = body.get("position")
+        row["pending_review"] = body.get("pending_review", [])
         return row
     recipe = body.get("recipe") or {}
-    row.update(analyzer=recipe.get("name", ""), colour=recipe.get("colour", ""),
+    row.update(analyzer=recipe.get("name", ""),
+               colour=saved.get("display_colour", recipe.get("colour", "")) if kind == "runs"
+               else recipe.get("colour", ""),
                method=recipe.get("method", ""), date_rule=body.get("date_rule", "manual"))
     # An analyzer of your own reads one date or two depending on its rules, so
     # the row says which rather than leaving the list to guess from the method.
@@ -430,6 +483,20 @@ def listing(case: Case, kind: str) -> list[dict[str, Any]]:
             rows.append(summary(kind, read(case, kind, path.stem.split("-", 1)[1])))
         except (OSError, ValueError, KeyError):
             continue
+    if kind in {"zones", "areas"}:
+        ordered = sorted(rows, key=lambda row: (row.get("position") is None,
+                                                 row.get("position") or 0,
+                                                 -datetime.fromisoformat(row["created_at"]).timestamp()))
+        if kind == "zones" and any(row.get("position") is None for row in ordered):
+            with LOCK, case._lock:
+                for position, row in enumerate(ordered):
+                    if row.get("position") == position:
+                        continue
+                    path = case.resolve_inside(relpath("zones", row["id"]))
+                    saved = read(case, "zones", row["id"])
+                    media.write_json_atomic(path, {**saved, "position": position})
+                    row["position"] = position
+        return ordered
     return sorted(rows, key=lambda row: row["created_at"], reverse=True)
 
 
@@ -1531,13 +1598,12 @@ def prune_frames(case: Case, run: dict[str, Any]) -> None:
             del run["frames"][key]
 
 
-def previous_pass(case: Case, body: RunInput) -> Source:
-    """The pass this routine's last finished run swept, which the next one
-    compares against. Falls back to the reference the routine was saved with."""
+def last_successful_pass(case: Case, body: RunInput) -> Source | None:
+    """Newest pass this routine finished for this area and radar track."""
     if not body.followup_id:
-        return body.a
-    best: tuple[tuple[str, str], Source] | None = None
-    for summary, previous in ready_runs(case, body.followup_id):
+        return None
+    best: Source | None = None
+    for _, previous in ready_runs(case, body.followup_id):
         area_id = body.zones[0].id
         try:
             if previous.get("area_runs"):
@@ -1554,21 +1620,24 @@ def previous_pass(case: Case, body: RunInput) -> Source:
                 candidate = stored(Source, previous["input"]["b"])
         except (KeyError, ValueError):
             continue
-        if candidate.layer != body.b.layer or not candidate.date:
-            continue
-        if body.b.date and candidate.date >= body.b.date:
+        if candidate.provider != body.b.provider or candidate.layer != body.b.layer or not candidate.date:
             continue
         # Radar compares like with like: a pass from another track sees the
         # same ground at another angle, and that difference is not change.
         if candidate.provider == "sentinel1" and body.b.time and not sentinel.same_track(
                 candidate.time, body.b.time):
             continue
-        # Runs of one routine can share a timestamp, which is only seconds deep,
-        # so the pass they swept settles the order between them.
-        key = (str(summary.get("created_at", "")), candidate.date)
-        if best is None or key > best[0]:
-            best = (key, candidate)
-    return best[1] if best else body.a
+        if best is None or (candidate.date, candidate.time) > (best.date, best.time):
+            best = candidate
+    return best
+
+
+def previous_pass(case: Case, body: RunInput) -> Source:
+    """The last successful pass before B, or the first-run reference."""
+    last = last_successful_pass(case, body)
+    if last and (not body.b.date or (last.date, last.time) < (body.b.date, body.b.time)):
+        return last
+    return body.a
 
 
 def _lookup(body: RunInput, start: str, end: str) -> list[dict[str, Any]]:
@@ -1656,7 +1725,8 @@ def _timed(body: RunInput) -> RunInput:
     return body.model_copy(update={"a": a, "b": b})
 
 
-def resolve_dates(case: Case, body: RunInput, *, selected: bool = False) -> RunInput:
+def resolve_dates(case: Case, body: RunInput, *, selected: bool = False,
+                  notes: list[str] | None = None) -> RunInput:
     body = _sensed_by(body)
     single = is_single(body.recipe)
     radar = is_radar(body.recipe)
@@ -1691,6 +1761,12 @@ def resolve_dates(case: Case, body: RunInput, *, selected: bool = False) -> RunI
     whole = [entry for entry in allowed if entry["coverage"] >= FULL_COVER]
     if not whole:
         best = max((entry["coverage"] for entry in allowed), default=0)
+        cloudy = next((entry for entry in found if not radar and entry["coverage"] >= FULL_COVER
+                       and entry.get("cloud") is not None and entry["cloud"] > source.maxcc), None)
+        if cloudy:
+            raise ValueError(f"latest pass {cloudy['date']} has {round(cloudy['cloud'])}% cloud, "
+                             f"above the {source.maxcc}% limit; no eligible pass in the last "
+                             f"{LOOKBACK_DAYS} days")
         raise ValueError(
             (f"no recent Sentinel-1 pass{' on this track' if track else ''} covers the whole area"
              if radar else "no recent pass covers the whole area under the cloud limit")
@@ -1700,6 +1776,13 @@ def resolve_dates(case: Case, body: RunInput, *, selected: bool = False) -> RunI
     source.date = whole[0]["date"]  # newest first
     if radar:
         source.time = whole[0]["time"]
+    elif notes is not None:
+        cloudy = next((entry for entry in found if entry["date"] > source.date
+                       and entry["coverage"] >= FULL_COVER and entry.get("cloud") is not None
+                       and entry["cloud"] > source.maxcc), None)
+        if cloudy:
+            notes.append(f"Skipped {cloudy['date']} ({round(cloudy['cloud'])}% cloud, "
+                         f"limit {source.maxcc}%); using {source.date}.")
     reference = (source if single else
                  body.a if body.date_rule != "latest_previous" else
                  previous_pass(case, body.model_copy(update={"b": source})))
@@ -1724,8 +1807,17 @@ def prepare_areas(case: Case, body: RunInput) -> tuple[RunInput, list[dict[str, 
         local = for_area(body, zone)
         outcome: dict[str, Any] = {"area_id": zone.id, "name": zone.name}
         try:
-            local = resolve_dates(case, local, selected=bool(body.area_dates))
-            outcome.update(status="pending", a=local.a.model_dump(), b=local.b.model_dump(), message="")
+            notes: list[str] = []
+            local = resolve_dates(case, local, selected=bool(body.area_dates), notes=notes)
+            if not is_single(local.recipe) and not ordered_pair(local.a, local.b):
+                raise ValueError("date A must be before date B for each comparison")
+            last = last_successful_pass(case, local) if body.followup_id and not body.run_anyway else None
+            current = (local.b.date, local.b.time)
+            already_seen = last is not None and current <= (last.date, last.time)
+            status = "no_new_imagery" if already_seen else "pending"
+            message = f"{zone.name}: No new pass since {last.date}" if already_seen and last else ""
+            message = " ".join(part for part in [*notes, message] if part)
+            outcome.update(status=status, a=local.a.model_dump(), b=local.b.model_dump(), message=message)
             pairs.append(AreaDates(area_id=zone.id, a=local.a, b=local.b, date_rule="manual"))
         except Exception as exc:
             message = str(exc) if isinstance(exc, ValueError) else "Imagery could not be read"
@@ -1795,7 +1887,7 @@ def execute(case: Case, job: dict[str, Any]) -> None:
         resolved = []
         for outcome in outcomes:
             check_active(case, ident)
-            if outcome["status"] == "failed":
+            if outcome["status"] != "pending":
                 continue
             zone = next(zone for zone in original.zones if zone.id == outcome["area_id"])
             body = for_area(original, zone).model_copy(update={

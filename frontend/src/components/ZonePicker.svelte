@@ -2,9 +2,12 @@
   /**
    * Which clock a chronology is read on.
    *
-   * Four kinds of answer, in one searchable list because picking between them is one
+   * Five kinds of answer, in one searchable list because picking between them is one
    * decision:
    *
+   * - **Where the case is**, the zone most of its places stand in (`lib/caseClock.js`),
+   *   which is what a chronology opens on: an investigation argues in the local time of
+   *   where things happened.
    * - **UTC**, what the case stores and the only reading that means the same thing on
    *   every machine.
    * - **This computer**, a legitimate reading of the analyst's own working day.
@@ -25,20 +28,27 @@
     zoneMatches,
     zoneWords,
   } from '../lib/timeline.js';
+  import { foldText } from '../lib/textFold.js';
+  import { caseZoneWords } from '../lib/caseClock.js';
   import Icon from './Icon.svelte';
   import SearchInput from './SearchInput.svelte';
 
   let {
-    /** `utc` | `machine` | `zone:<IANA>` | `place:<id>` */
-    choice = $bindable('utc'),
+    /** `case` | `utc` | `machine` | `zone:<IANA>` | `place:<id>` */
+    choice = $bindable('case'),
     /** The case's saved points, as `{ id, label }`. */
     places = [],
+    /** The zone the case's places stand in, `{ zone, count, of }`, or null when it has
+     *  none: then `case` reads as UTC and says so. */
+    home = null,
     /** The instant the offsets are shown at: the window's own start, not today, or a
      *  winter window would be labelled with a summer offset. */
     at = 0,
     /** What the parent resolved the choice to, for the trigger's own label. */
     resolved = UTC,
     disabled = false,
+    /** Told the analyst's pick, so the parent can keep it. */
+    onpick,
   } = $props();
 
   /** How many zones the list shows before it asks for a narrower term. Long enough to
@@ -55,12 +65,13 @@
   const shown = $derived(matching.slice(0, ROWS));
   const matchingPlaces = $derived(
     places.filter((place) =>
-      place.label.toLowerCase().includes(query.trim().toLowerCase())
+      foldText(place.label).includes(foldText(query.trim()))
     )
   );
 
   /** What the button says. The point's or zone's own words, never the raw choice. */
   const label = $derived.by(() => {
+    if (choice === 'case') return home ? zoneWords(home.zone).place : 'UTC';
     if (choice === 'utc') return 'UTC';
     if (choice === 'machine') return zoneWords(local).place;
     if (choice.startsWith('place:')) {
@@ -82,6 +93,7 @@
     choice = value;
     open = false;
     query = '';
+    onpick?.(value);
   }
 </script>
 
@@ -90,20 +102,27 @@
     class="trigger"
     {disabled}
     aria-expanded={open}
-    title="Which clock the axis is labelled with"
+    title={choice === 'case' && home ? `The clock of ${caseZoneWords(home)}` : 'Which clock the axis is labelled with'}
     onclick={() => (open = !open)}
   >
     <Icon name="clock" size={12} />
     <span>{label}</span>
-    <small>{offsetLabel(resolved, at)}</small>
+    <!-- The offset, unless the name already is it: `UTC UTC` said one thing twice. -->
+    {#if label !== 'UTC'}<small>{offsetLabel(resolved, at)}</small>{/if}
   </button>
 
   {#if open}
     <div class="menu">
       <SearchInput bind:value={query} placeholder="Search a zone or a point…" width="100%" />
       <div class="rows">
+        {#if home && zoneMatches(home.zone, query, at)}
+          <button class:on={choice === 'case'} onclick={() => pick('case')}>
+            <span>{zoneWords(home.zone).place}</span>
+            <small>{caseZoneWords(home)} · {offsetLabel(home.zone, at)}</small>
+          </button>
+        {/if}
         {#if zoneMatches('UTC', query, at)}
-          <button class:on={choice === 'utc'} onclick={() => pick('utc')}>
+          <button class:on={choice === 'utc' || (choice === 'case' && !home)} onclick={() => pick('utc')}>
             <span>UTC</span><small>what the case stores</small>
           </button>
         {/if}

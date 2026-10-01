@@ -6,6 +6,7 @@ import {
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
+  exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime,
   COLLAGE_DEFAULT_SIZE,
 } from './inspect.js';
 
@@ -484,5 +485,56 @@ describe('stitchCanvas', () => {
   it('leaves the canvas alone when the answer says nothing about it', () => {
     expect(stitchCanvas(undefined, current)).toEqual({ ...current, scale: 1 });
     expect(stitchCanvas({}, current)).toEqual({ ...current, scale: 1 });
+  });
+});
+
+describe('exportFrame', () => {
+  const rect = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+
+  it('brings a piece placed small back to its own pixels', () => {
+    // a 1920×1080 frame shown at 800×450 on the canvas
+    const frame = exportFrame([{ w: 1920, h: 1080, quad: rect(100, 50, 800, 450) }]);
+    expect(frame).toMatchObject({ minX: 100, minY: 50, scale: 2.4, width: 1920, height: 1080, capped: false });
+  });
+
+  it('follows the sharpest piece, and never shrinks one placed larger than it is', () => {
+    const frame = exportFrame([
+      { w: 400, h: 300, quad: rect(0, 0, 800, 600) }, // blown up: would take 0.5
+      { w: 1200, h: 900, quad: rect(800, 0, 400, 300) }, // shown at a third
+    ]);
+    expect(frame.scale).toBe(3);
+    expect(frame.width).toBe(3600);
+  });
+
+  it('reads a turned piece by its sides, not by its bounding box', () => {
+    const c = Math.SQRT1_2 * 100;
+    const turned = [[c, 0], [2 * c, c], [c, 2 * c], [0, c]]; // a 100×100 square turned 45°
+    expect(exportFrame([{ w: 200, h: 200, quad: turned }]).scale).toBeCloseTo(2);
+  });
+
+  it('holds a wide panorama inside the side limit and says the limit set it', () => {
+    const frame = exportFrame([{ w: 20000, h: 2000, quad: rect(0, 0, 2000, 200) }]);
+    expect(frame.width).toBe(COLLAGE_MAX_DIM);
+    expect(frame.capped).toBe(true);
+  });
+
+  it('holds a large square inside the pixel budget', () => {
+    const frame = exportFrame([{ w: 9000, h: 9000, quad: rect(0, 0, 1000, 1000) }]);
+    expect(frame.width * frame.height).toBeLessThanOrEqual(COLLAGE_MAX_EXPORT_PIXELS + 2 * frame.width);
+    expect(frame.capped).toBe(true);
+  });
+
+  it('shrinks a layout already past what compose accepts', () => {
+    const frame = exportFrame([{ w: 100, h: 100, quad: rect(0, 0, 10000, 500) }]);
+    expect(frame.width).toBe(COLLAGE_MAX_DIM);
+    expect(frame.scale).toBeLessThan(1);
+  });
+});
+
+describe('clockTime', () => {
+  it('reads as a player shows it', () => {
+    expect(clockTime(64.5)).toBe('1:04.5');
+    expect(clockTime(0)).toBe('0:00.0');
+    expect(clockTime(-3)).toBe('0:00.0');
   });
 });

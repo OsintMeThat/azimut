@@ -1,9 +1,10 @@
 <script>
+  import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
   import { caseState, uiState, toast, reloadCase, prefs, updatesState } from '../lib/state.svelte.js';
-  import { templatesState } from '../lib/state.svelte.js';
+  import { templatesState, postDraftState } from '../lib/state.svelte.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
@@ -19,7 +20,7 @@
     normalizePostMediaPickerTarget, postMediaForType, renumberMediaTweetText, retargetMediaTweetText,
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
-    handoffThread, postHandoffUrl,
+    handoffThread, postHandoffUrl, postDate,
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
@@ -43,6 +44,13 @@
   /** The Source box grows with what it holds, up to four lines: a proof read from a
    *  thread carries an address per post, and one row would hide all but the first. */
   const sourceRows = $derived(Math.min(4, Math.max(1, source.split('\n').length)));
+  // The date the proof states, as the post carries it (lib/post.postDate). Only a
+  // template holding `#date` shows the field, so the classic thread never grows a
+  // date line nobody asked for.
+  let date = $state('');
+  // Set when the attached proof was read and states no date, so the empty field
+  // says why rather than looking forgotten.
+  let proofUndated = $state(false);
   let proofPng = $state(null);
   let proofVer = $state(0); // cache-buster: bumped whenever proofPng is (re)assigned
   let tweet1 = $state('');
@@ -230,6 +238,8 @@
     description = p.description?.trim()
       ? p.description.trim()
       : (isDefaultName(p.title, 'proof') ? '' : (p.title ?? ''));
+    date = postDate(p.when, p.whenZone);
+    proofUndated = !date;
     const proofSourceUrl = p.source ?? p.sources?.[0] ?? '';
     source = proofSourceUrl;
     setProof(p.png ?? null);
@@ -301,6 +311,7 @@
       coordsText,
       mention,
       source,
+      date,
     });
   }
 
@@ -339,7 +350,9 @@
     };
   }
 
-  function applyPostTemplate(t) {
+  // `quiet` is a blank composer starting on the default template: no toast, and
+  // nothing to rebuild since the draft holds no facts yet.
+  function applyPostTemplate(t, { quiet = false } = {}) {
     // first apply snapshots the current structure; re-applying keeps that
     // original, so Discard always returns to the pre-template layout.
     const prev = appliedPostTemplate?.prev ?? snapshotPostStructure();
@@ -349,8 +362,22 @@
     mediaEnabled = norm.mediaEnabled;
     extraTweets = norm.extraTweets.map((e) => ({ id: ++extraSeq, ...e }));
     appliedPostTemplate = { name: t.name, prev };
+    if (quiet) return;
     if (!tweet1Edited) regenerate();
     toast(`Template loaded: ${t.name}`, 'ok', 1400);
+  }
+
+  // A blank composer starts on the template chosen in Settings → Templates. One
+  // whose template was since deleted just starts classic. Remove opts this draft
+  // out, so the effect below never puts back what was taken off; the next blank
+  // draft starts on it again.
+  let defaultDeclined = false;
+
+  const defaultTemplate = () => templatesState.post.find((x) => x.id === prefs.postTemplate);
+
+  function startFromDefaultTemplate() {
+    const t = defaultTemplate();
+    if (t) applyPostTemplate(t, { quiet: true });
   }
 
   function applyPostFromSelect(e) {
@@ -374,7 +401,8 @@
       mediaTextIncludesPrefix: e.mediaTextIncludesPrefix === true,
     }));
     appliedPostTemplate = null;
-    if (!tweet1Edited) regenerate();
+    defaultDeclined = true;
+    if (!tweet1Edited && tweet1.trim()) regenerate();
     toast('Template removed', 'ok', 1200);
   }
 
@@ -614,6 +642,10 @@
       // Its sentence, once the spec is here. The picker row carries a filename
       // and a thumbnail, so the title above was only ever a stand-in for this.
       if (blank && spec.description?.trim()) description = spec.description.trim();
+      // The zone the date was stated in travels beside it, so a time reads on the
+      // clock of the place and a day stays that place's day.
+      date = postDate(spec.when, spec.whenZoneStated ?? spec.whenZone);
+      proofUndated = !date;
       const src = proofSource(spec);
       if (src) source = src;
       await preloadProofMedia(item.png, src);
@@ -709,6 +741,7 @@
       place,
       mention,
       source,
+      date,
       proofPng,
       tweet1,
       tweet1Edited,
@@ -810,6 +843,8 @@
       place = s.place ?? '';
       mention = s.mention ?? prefs.postMention;
       source = s.source ?? '';
+      date = typeof s.date === 'string' ? s.date : '';
+      proofUndated = false;
       setProof(s.proofPng ?? null);
       mediaEnabled = s.mediaEnabled ?? true;
       mediaType = s.mediaType ?? 'none';
@@ -869,6 +904,8 @@
     place = '';
     mention = prefs.postMention;
     source = '';
+    date = '';
+    proofUndated = false;
     setProof(null);
     tweet1 = '';
     tweet1Edited = false;
@@ -882,18 +919,40 @@
     draftName = null;
     postName = freshPostName();
     appliedPostTemplate = null;
+    defaultDeclined = false;
     discardConfirm = false;
+    startFromDefaultTemplate();
   }
 
   const hasContent = $derived(
-    !!(draftName || description.trim() || coordsText.trim() || mediaPaths.length || proofPng ||
-      extraTweets.length || tweet1.trim())
+    !!(draftName || description.trim() || coordsText.trim() || date.trim() || mediaPaths.length ||
+      proofPng || extraTweets.length || tweet1.trim())
   );
 
   // Preferences can arrive after this tool mounts. A blank composer follows the
   // preferred platform, while a selected or saved draft keeps its own target.
   $effect(() => {
     if (!hasContent) target = normalizePostTarget(prefs.postTarget);
+  });
+
+  // Templates and preferences can land after this tool mounts, so a blank
+  // composer picks the default template up when they do.
+  $effect(() => {
+    if (hasContent || appliedPostTemplate || defaultDeclined) return;
+    const t = defaultTemplate();
+    if (t) untrack(() => applyPostTemplate(t, { quiet: true }));
+  });
+
+  // The live draft, mirrored for Settings → Templates so a layout can be tried on
+  // the post that is open. Content only, and nothing while the composer is empty.
+  $effect(() => {
+    postDraftState.fields = hasContent
+      ? {
+        place, plusCode: geo?.plus_code, description, lat: geo?.lat, lon: geo?.lon,
+        coordsText, mention, source, date,
+      }
+      : null;
+    return () => (postDraftState.fields = null);
   });
 
   function reportAttachmentPaths() {
@@ -1079,22 +1138,22 @@
     {/if}
     <div class="head-actions">
       {#if caseState.current}
-        <button class="btn btn-ghost btn-sm" onclick={openDraftList} title="Reopen a saved draft">
+        <button class="btn btn-sm" onclick={openDraftList} title="Reopen a saved draft">
           <Icon name="folderOpen" size={14} /> Open
         </button>
       {/if}
       {#if hasContent}
-        <button class="btn btn-ghost btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
+        <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
           <Icon name="reset" size={14} /> Discard
         </button>
       {/if}
-      <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
+      <button class="btn btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
-      <button class="btn btn-ghost btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
+      <button class="btn btn-ok btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
         <Icon name="file" size={14} /> Save report
       </button>
-      <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title={`Copy posts and open ${targetInfo.label}`}>
+      <button class="btn btn-info btn-sm" onclick={publish} disabled={!tweet1.trim()} title={`Copy posts and open ${targetInfo.label}`}>
         <Icon name="post" size={14} /> Publish on {targetInfo.label}
       </button>
     </div>
@@ -1181,6 +1240,23 @@
             disabled={fieldDisabledByTemplate('description')}
           />
         </div>
+
+        {#if templateUsesPostField(body, 'date')}
+          <div class="field">
+            <label class="label" for="pc-date">Date</label>
+            <input
+              id="pc-date"
+              class="input"
+              placeholder="2025-10-24 14:30 UTC+3"
+              bind:value={date}
+              oninput={() => (proofUndated = false)}
+              onchange={regenerate}
+            />
+            {#if proofUndated && !date.trim()}
+              <p class="field-note">This proof has no date. Leave it empty and the line drops.</p>
+            {/if}
+          </div>
+        {/if}
 
         <div
           class="field"
@@ -1782,7 +1858,7 @@
   .head-actions {
     margin-left: auto;
     display: flex;
-    gap: 8px;
+    gap: 10px;
     flex-shrink: 0;
   }
 
@@ -1850,6 +1926,7 @@
     color: var(--text-3);
     line-height: 1.4;
   }
+  .field-note { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-3); }
   .field.template-disabled {
     opacity: 0.48;
     cursor: not-allowed;

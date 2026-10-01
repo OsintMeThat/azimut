@@ -236,8 +236,8 @@ test('spectral frames are requested only by Run, including after reopening and m
   await page.mouse.down();
   await page.mouse.move(box.x + 180, box.y + 130, { steps: 8 });
   await page.mouse.up();
-  // The press on the map put the settings away, and the pan spent nothing.
-  await expect(page.locator('aside.settings')).toBeHidden();
+  // The settings stay up through a pan, and the pan spent nothing.
+  await expect(page.locator('aside.settings')).toBeVisible();
   await expect(page.locator('.secondary .change-map')).not.toHaveCSS('transform', 'none');
   // The reading followed on the frames it holds, and Read says there is nothing to do.
   await expect(read).toHaveText('Up to date');
@@ -245,7 +245,6 @@ test('spectral frames are requested only by Run, including after reopening and m
   expect(requests).toHaveLength(2);
   // Choosing another index is asking for it: its bands come without a second
   // press, and the follow-up the choice schedules does not throw them away.
-  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   await page.locator('aside.settings select').nth(1).selectOption('nbr');
   await expect.poll(() => requests.length).toBe(4);
   expect(requests.slice(2).map((request) => request.product)).toEqual(['nbr', 'nbr']);
@@ -375,6 +374,40 @@ test('changes run in the worker and export a composed PNG', async ({ page }) => 
   await page.getByRole('button', { name: 'Export copy', exact: true }).click();
   await expect.poll(() => exports.length).toBe(1);
   expect(Buffer.from(exports[0].png, 'base64').subarray(1, 4).toString()).toBe('PNG');
+  expect(errors).toEqual([]);
+});
+
+test('a Difference GIF sends the visible palette and annotation colour to the encoder', async ({ page }) => {
+  const { errors } = await openCompare(page, 'Esri Wayback');
+  const canvas = page.getByLabel('Annotations on imagery A', { exact: true });
+  const box = await canvas.boundingBox();
+  await page.getByTitle('Numbered marker (N)', { exact: true }).click();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(canvas.locator('.numeral')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Difference', exact: true }).click();
+  await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Display' }).click();
+  await page.locator('aside.settings label').filter({ hasText: 'Palette' })
+    .locator('select').selectOption('colourblind');
+  await page.keyboard.press('Escape');
+
+  const requests = [];
+  await page.route('**/api/cases/*/compare/gif', async (route) => {
+    requests.push(route.request().postDataBuffer().toString('latin1'));
+    await route.fulfill({ json: { file: 'comparison.gif', path: '/tmp/exports' } });
+  });
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('radio', { name: /GIF · Slide/ }).check();
+  await page.getByRole('button', { name: 'Export copy', exact: true }).click();
+
+  await expect.poll(() => requests.length).toBe(1);
+  const keep = requests[0].match(/name="keep"\r\n\r\n([^\r]+)/)?.[1].split(',');
+  expect(keep?.slice(0, 3)).toEqual(['#0072b2', '#e69f00', '#cc79a7']);
+  expect(keep).toContain('#f6a81a');
+  expect(requests[0]).toContain('name="image_a"');
+  expect(requests[0]).toContain('name="image_b"');
   expect(errors).toEqual([]);
 });
 
@@ -517,14 +550,29 @@ test('the export frame keeps its shape when the camera turns, and still exports'
   expect(errors).toEqual([]);
 });
 
-test("Difference's settings stay put through a read, lie over the highlights, and close outside", async ({ page }) => {
+test("Difference's settings dock on the right over map B, stay put through a read and a pan", async ({ page }) => {
   const { errors } = await openCompare(page, 'Esri Wayback');
   await page.getByRole('button', { name: 'Difference', exact: true }).click();
   await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
+  const stage = page.locator('.compare-stage');
+  const mapsBefore = await page.locator('.surface-shell.secondary').boundingBox();
   await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   const panel = page.locator('aside.settings');
   await expect(panel).toBeVisible();
   const before = await panel.boundingBox();
+  const box = await stage.boundingBox();
+  // Against the stage's right edge, from under B's card to the foot, over the
+  // maps rather than narrowing them.
+  const card = await page.locator('[aria-label="Imagery B"]').boundingBox();
+  expect(box.x + box.width - (before.x + before.width)).toBeCloseTo(8, 0);
+  expect(before.y).toBeGreaterThanOrEqual(card.y + card.height);
+  expect(box.y + box.height - (before.y + before.height)).toBeCloseTo(8, 0);
+  expect((await page.locator('.surface-shell.secondary').boundingBox()).width).toBeCloseTo(mapsBefore.width, 0);
+  // What rides that corner steps aside, so the search, the camera and the legend stay in reach.
+  for (const selector of ['.search-chip', '.camera-chip', '.change-legend']) {
+    const chip = await page.locator(selector).boundingBox();
+    expect(chip.x + chip.width, selector).toBeLessThanOrEqual(before.x);
+  }
 
   // A read in flight used to widen the strip, and the panel hanging off it moved.
   await page.getByLabel('Method', { exact: true }).selectOption('structure');
@@ -540,10 +588,14 @@ test("Difference's settings stay put through a read, lie over the highlights, an
   { x: after.x + 20, y: after.y + 20 });
   expect(inside).toBe(true);
 
-  // A press on the map beside it closes it.
-  const stage = await page.locator('.compare-stage').boundingBox();
-  await page.mouse.click(stage.x + 80, stage.y + 80);
+  // Tuning is watching the map answer: a press on the map leaves it up.
+  await page.mouse.click(box.x + 80, box.y + 80);
+  await expect(panel).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
+  // Put away, the corner is B's own again.
+  const search = await page.locator('.search-chip').boundingBox();
+  expect(search.x + search.width).toBeGreaterThan(before.x);
   expect(errors).toEqual([]);
 });
 

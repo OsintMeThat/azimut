@@ -58,7 +58,8 @@
     within,
     zoomAround,
   } from '../lib/graphViewport.js';
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { api } from '../lib/api.js';
   import {
     analysisSearch,
@@ -139,6 +140,8 @@
     ringsAround,
     shortLabel,
   } from '../lib/graph.js';
+  import { bidiIsolate } from '../lib/bidi.js';
+  import { foldText } from '../lib/textFold.js';
   import { createHistory } from '../lib/history.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { windowWords } from '../lib/timeline.js';
@@ -151,7 +154,7 @@
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
-  import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';
+  import EntryLine, { claimSeat } from '../components/EntryLine.svelte';
   import { claimActionTitle } from '../lib/quickClaim.js';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
@@ -601,6 +604,11 @@
   const bends = $derived(parallelBends(edges));
   const byId = $derived(new Map(nodes.map((node) => [node.id, node])));
   const chosen = $derived(selected ? (byId.get(selected) ?? null) : null);
+  // The node open or selected here is what the topbar's Add event seats.
+  $effect(() => {
+    offerNote('graph', byId.get(openId ?? selected) ?? null);
+  });
+  onDestroy(() => withdrawNote('graph'));
   const edgeById = $derived(new Map(edges.map((link) => [link.id, link])));
   const chosenEdge = $derived(chosenLink ? (edgeById.get(chosenLink) ?? null) : null);
   const snapshotReading = $derived(Boolean(catalogViews.snapshotId || payload?.snapshot));
@@ -908,11 +916,11 @@
    * canvas is the reading.
    */
   const found = $derived.by(() => {
-    const term = find.trim().toLowerCase();
+    const term = foldText(find.trim());
     const hit = new Set();
     if (!term) return hit;
     for (const node of nodes) {
-      if (String(node.label).toLowerCase().includes(term)) hit.add(node.id);
+      if (foldText(node.label).includes(term)) hit.add(node.id);
     }
     return hit;
   });
@@ -925,13 +933,13 @@
    * first, so the obvious answer is the first one.
    */
   const matches = $derived.by(() => {
-    const term = find.trim().toLowerCase();
+    const term = foldText(find.trim());
     if (!term) return [];
     // Over what the case **sent**, not over what is drawn, so a folded node is found
     // where it is rather than reported missing and fetched again. It says it is
     // folded, and picking it gives its fold back.
     return sentNodes
-      .filter((node) => String(node.label).toLowerCase().includes(term))
+      .filter((node) => foldText(node.label).includes(term))
       .sort((a, b) => b.degree - a.degree)
       .slice(0, 8);
   });
@@ -2945,7 +2953,7 @@
         y: node.y + nodeRadius(data.degree) + 5,
         width: 140,
         align: 'center',
-        text: shortLabel(data.label),
+        text: bidiIsolate(shortLabel(data.label)),
         fontSize: 11,
         fontFamily: fontStack,
         listening: false,
@@ -5152,7 +5160,7 @@
          drawing where the strips below describe one node in it. -->
     <div class="from-board">
       <Icon name="sliders" size={13} />
-      <span>{fromBoard.label || 'A question from the Board'}</span>
+      <span>{fromBoard.label || 'A question from the case'}</span>
       <button
         class="as-link"
         onclick={() => {
@@ -5791,7 +5799,7 @@
             {#if seat}
               <li>
                 <button onclick={() => chose((id) => (claimFor = byId.get(id) ?? null))} title={claimActionTitle(seat.slot)}>
-                  Add claim…
+                  Add event…
                 </button>
               </li>
             {/if}
@@ -5927,8 +5935,8 @@
 {/if}
 
 {#if claimFor && !snapshotReading}
-  <Modal title="New claim" onclose={() => (claimFor = null)} width="560px">
-    <QuickClaim
+  <Modal title="Add event" onclose={() => (claimFor = null)} width="640px">
+    <EntryLine
       caseId={caseState.current.id}
       entity={claimFor}
       onsaved={() => (claimFor = null)}
@@ -5956,6 +5964,7 @@
 {#if snapshotOpen && snapshotReading}
   <Modal title="Snapshot details" onclose={() => (snapshotOpen = null)} width="640px">
     <SnapshotDetails
+      caseId={caseState.current?.id}
       entity={snapshotOpen}
       entities={catalogViews.activeView?.spec?.snapshot?.entities ?? []}
       links={catalogViews.activeView?.spec?.snapshot?.links ?? []}

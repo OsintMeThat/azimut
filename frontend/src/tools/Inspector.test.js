@@ -69,3 +69,10 @@ describe('Inspect — words', () => {
     expect(markup).not.toContain('Discard');
   });
 });
+
+describe('Inspector offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'inspect',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('inspect'))");
+  });
+});

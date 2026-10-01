@@ -63,8 +63,8 @@ export const GUIDE = [
         text: 'Sources, Examine, Map and Compose read top to bottom in the order an investigation runs. Tools are tabs inside a workspace.',
       },
       {
-        label: 'The case is in the topbar, not the rail',
-        text: 'It is not a stage. It is what every stage files into, so it hangs off the case name beside the Board button.',
+        label: 'The case sits under the stages',
+        text: 'On the rail, a rule apart from Sources, Examine, Map and Compose, since it is what every stage files into. It opens on its Timeline, Board, Graph and Sheet.',
       },
       {
         label: 'You do not need a case to start',
@@ -126,7 +126,7 @@ export const GUIDE = [
           { tool: 'media', text: 'Paste the post URL. The first attempt is made without cookies, and only an "unavailable" answer offers your saved browser session.' },
           { tool: 'inspect', text: 'Step the video frame by frame and capture the stills the argument rests on, then save them to the case as media made here.' },
           { tool: 'board', text: 'Confirm what the import proposed, then link the frames to the place, the account and the people.' },
-          { tool: 'timeline', text: 'Date the claim, and read it in UTC, in your own clock, or in local time at the place itself.' },
+          { tool: 'timeline', text: 'Date the claim; the axis reads it in the local time of the place, UTC one pick away.' },
         ],
       },
       {
@@ -244,11 +244,11 @@ export const GUIDE = [
       },
       {
         label: 'An analyzer of your own is a list of rules',
-        text: 'Analyzers → New analyzer → start from an example, or build your own rules. Each rule is a line a pixel has to cross on A, on B or between them. Pick two passes and every change redraws what each rule keeps on the map; a click on the map says which rule let a point go.',
+        text: 'Analyzers → New analyzer asks what it reads first, Sentinel-2 or radar and one date or two, then starts blank or from an example. Each rule is a line a pixel has to cross, before, after or as the change between them.',
       },
       {
-        label: 'Checks prove an analyzer, if you want them',
-        text: 'Checks → Add a check, pick its passes, then arm Should be found or Should stay empty and click the map to drop pins. Checks reread themselves as the rules change, so a line that loses the burn or catches the reef turns its check red. The examples come with theirs.',
+        label: 'Checks prove an analyzer, and one is needed to save it',
+        text: 'On the map, New check takes its passes, then Should be found and Should stay empty drop pins where a candidate should come out and where none may. Test paints what each rule keeps under the pins, says its cost first and turns each pin green or red; a line that loses the burn or catches the reef shows at once. The examples come with theirs.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',
@@ -292,11 +292,19 @@ export const GUIDE = [
     id: 'case',
     title: 'Case',
     lead: 'Four readings of one case, and the first three share the same question.',
-    tools: ['board', 'graph', 'timeline', 'sheet'],
+    tools: ['timeline', 'board', 'graph', 'sheet'],
     points: [
       {
+        label: 'The Board reads as an index',
+        text: 'People, accounts, places and things come first, each with how many events name it and when. Events, files and work fold below, and Group: None is the one table.',
+      },
+      {
+        label: 'Details opens beside the row',
+        text: 'The arrow keys walk the rows and Details follows. Its top line says how many events name the entity, and Add event notes the next one about it.',
+      },
+      {
         label: 'The filter is a sentence you can edit',
-        text: 'The + Filter menu opens on four standing questions. Picking one drops its terms into the bar as ordinary chips, which is also how the filter language is learned.',
+        text: 'The + Filter menu opens on six standing questions. Picking one drops its terms into the bar as ordinary chips, which is also how the filter language is learned.',
       },
       {
         label: 'The count is a proportion',
@@ -311,12 +319,16 @@ export const GUIDE = [
         text: 'Expanding, hiding, folding and dragging are your picture. Undo reaches all of them and reaches nothing the case holds.',
       },
       {
-        label: 'Add claim starts from what you are looking at',
-        text: 'On a Board row, a Graph node or the Claims group in Details, the entity is already in its place: a model asks how many, and a place becomes where it was seen.',
+        label: 'One line notes what happened',
+        text: 'Under the Timeline axis, behind Add event in Details, and from any tool with Add event in the topbar, what it shows already cited. Type @ to mention a subject, even a new one; only a date you give is used.',
       },
       {
-        label: 'Timeline reads in a clock you choose',
-        text: 'UTC, this computer, any zone in the world, or local time at a place the case saved. Undated work is counted apart rather than hidden.',
+        label: 'Timeline reads in the place\'s own time',
+        text: 'It opens on the zone the case\'s places stand in, or UTC when it has none. UTC, this computer, any zone, or a saved place with its daylight is one pick away.',
+      },
+      {
+        label: 'Timeline puts your files where you dated them',
+        text: 'Media draws a video or a picture at the date you gave it, on its proof or in an event about it; Events is every sentence you dated. Imagery and File dates wait under ⋯. A point is an instant, a bracket a date known to the day, month or year, a bar a period.',
       },
       {
         label: 'Sheet works on real CSV files',
@@ -336,7 +348,8 @@ export const GUIDE = [
         keys: [
           { combo: 'Ctrl+V', does: 'files a screenshot or a copied address, on Media, Files, Board and Graph' },
           { combo: 'Escape', does: 'closes whatever is open, shallowest first' },
-          { combo: 'Ctrl+Enter', does: 'files an Add claim form' },
+          { combo: 'Ctrl+Enter', does: 'adds the entry line, from any of its fields' },
+          { combo: 'Alt+N', does: 'opens Add event over the tool on screen, with what it shows already cited' },
         ],
       },
       {
@@ -369,6 +382,28 @@ export const GUIDE = [
           { combo: '+ / -', does: 'narrows and widens the window' },
           { combo: 'Home', does: 'shows the whole filtered extent' },
           { combo: 'Shift-wheel', does: 'pans, as does a horizontal trackpad gesture' },
+          { combo: 'Alt+← / →', does: 'moves from a focused entry to the one before or after it on its track' },
+          { combo: '↑ / ↓', does: 'walks the rows of the list under the axis' },
+          { combo: 'Enter', does: 'opens the focused row in the inspector' },
+          { combo: 'Escape', does: 'closes the menu that is open' },
+        ],
+      },
+      {
+        where: 'Board',
+        keys: [
+          { combo: '↑ / ↓', does: 'walks the rows, and Details beside them follows' },
+          { combo: 'Enter', does: 'opens the focused row in Details' },
+          { combo: 'Escape', does: 'closes Details beside the rows' },
+        ],
+      },
+      {
+        where: 'Timeline, Board, Graph',
+        keys: [
+          { combo: '@', does: 'mentions a subject on the entry line, one the case holds or a new one' },
+          { combo: '↑ / ↓, Enter or Tab', does: 'moves through the mentions offered and picks one' },
+          { combo: 'Escape', does: 'closes the mentions and keeps the @ as text' },
+          { combo: 'Enter', does: 'adds the entry, from its sentence' },
+          { combo: 'Alt+↓', does: 'moves a focused mention to its next seat' },
         ],
       },
       {

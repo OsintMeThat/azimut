@@ -464,6 +464,12 @@ def _clean_database(source: Path, target: Path) -> None:
         # Downloads folder a bundle came from), which is the account's own name.
         # An import rebuilds what it needs, thumbnails first.
         conn.execute("DELETE FROM jobs")
+        # A merge's undo record is local state like the Trash, and names what the
+        # Trash would restore: after an import a merge is final. The redirects travel,
+        # so the ids it absorbed keep answering in the imported case.
+        conn.execute("DELETE FROM entity_merges")
+        conn.execute("DELETE FROM entity_redirects WHERE new_id NOT IN (SELECT id FROM entities)")
+        conn.execute("UPDATE entity_redirects SET merge_id = NULL")
         conn.commit()
         conn.execute("VACUUM")
     finally:
@@ -622,6 +628,8 @@ def export_case(
     output: Path | None = None,
 ) -> Path:
     """Write one complete bundle atomically and return its path."""
+    if case.pending_merge_work():
+        raise BundleError("a merge still needs to update a sheet; reopen the case once the sheet is writable")
     config.bundles_dir().mkdir(parents=True, exist_ok=True)
     output = Path(output) if output is not None else bundle_path(case, sealed=bool(password))
     if output.parent.resolve() != config.bundles_dir().resolve():

@@ -1272,6 +1272,24 @@ describe('Proof Composer — what the proof says about itself', () => {
   it('hands the description to the post it opens', () => {
     expect(source).toContain('description: proof.description,');
   });
+
+  it('names the clock a date is read on, the first point\'s unless another is picked', () => {
+    const clock = side.slice(side.indexOf('<DateField'));
+    expect(clock).toContain('{#if proof.when.trim()}');
+    expect(clock).toContain("clock={{ zone: proof.whenZone || pointZone || 'UTC', fixed: '' }}");
+    expect(clock).toContain("here={pointZone ? [{ zone: pointZone, place: 'the point' }] : []}");
+    expect(clock).toContain('zone={proof.whenZone || pointZone || null}');
+    expect(clock).toContain('No point yet, so the day is read in UTC.');
+    // the point's own row goes back to following the point
+    expect(bodyOfFn('pickClock')).toContain('proof.whenZone = here ? null : zone;');
+    expect(source).toContain("await zoneAt({ lat: Number(where.lat), lon: Number(where.lon) })");
+    expect(bodyOfFn('resetDoc')).toContain('proof.whenZone = null;');
+  });
+
+  it('hands the date and its clock to the post it opens', () => {
+    expect(source).toContain('when: proof.when,');
+    expect(source).toContain('whenZone: result.when_zone ?? null,');
+  });
 });
 
 describe('Proof Composer — dating the material', () => {
@@ -1382,5 +1400,12 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
   it('keeps a line width away from the two marks that have no line', () => {
     expect(source).toContain("editableShapes.every((s) => s.kind === 'number' || s.kind === 'blur')");
     expect(source).toContain('showStroke={!solidIconOnly && !strokeless}');
+  });
+});
+
+describe('ProofComposer offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'proof',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('proof'))");
   });
 });

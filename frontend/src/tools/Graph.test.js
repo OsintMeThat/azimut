@@ -381,7 +381,7 @@ describe('the interaction', () => {
     // The teleport this guards: `rebuild` ends in `restyle`, which reads the
     // selection — so the rebuild effect tracked hover, and every mouseover threw
     // the view back to its starting transform.
-    expect(source).toContain("import { tick, untrack } from 'svelte'");
+    expect(source).toContain("import { onDestroy, tick, untrack } from 'svelte'");
     expect(source).toMatch(/void height;\s*untrack\(rebuild\);/);
   });
 
@@ -1896,7 +1896,7 @@ describe('a question handed over by the Board', () => {
   it('is announced over the drawing, with one press back to the case', () => {
     // a picture that silently answers somebody else's question looks broken
     expect(source).toContain('{#if fromBoard}');
-    expect(source).toContain("fromBoard.label || 'A question from the Board'");
+    expect(source).toContain("fromBoard.label || 'A question from the case'");
     expect(source).toContain('Show the whole case');
   });
 
@@ -2138,11 +2138,18 @@ describe('filing a claim from a node', () => {
     expect(source).toContain('{@const seat = claimSeat(at)}');
     expect(source).toContain('chose((id) => (claimFor = byId.get(id) ?? null))');
     expect(source).toContain('title={claimActionTitle(seat.slot)}');
-    expect(source).toContain('Add claim…');
+    expect(source).toContain('Add event…');
   });
 
   it('opens the same form as Details and the Board, never over a snapshot', () => {
-    expect(source).toContain("import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';");
+    expect(source).toContain("import EntryLine, { claimSeat } from '../components/EntryLine.svelte';");
     expect(source).toContain('{#if claimFor && !snapshotReading}');
+  });
+});
+
+describe('Graph offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'graph',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('graph'))");
   });
 });

@@ -41,8 +41,8 @@
   {#each shown as layer (layer.id)}
     {#if layer.input.recipe.style !== 'pins'}
       {#each layer.boxes as shape (shape.id)}
-        <path d={shape.path} fill={layer.input.recipe.colour} fill-opacity="0.08" fill-rule="evenodd"
-          stroke={layer.input.recipe.colour} stroke-width="1.5" stroke-dasharray={shape.manual ? '5 3' : undefined} />
+        <path d={shape.path} fill={layer.displayColour || layer.display_colour || layer.input.recipe.colour} fill-opacity="0.08" fill-rule="evenodd"
+          stroke={layer.displayColour || layer.display_colour || layer.input.recipe.colour} stroke-width="1.5" stroke-dasharray={shape.manual ? '5 3' : undefined} />
       {/each}
     {/if}
     {#each layer.groups as group, i (i)}
@@ -57,7 +57,7 @@
             fill="none" stroke="#fff" stroke-width="2" />
         {/if}
         <circle cx={group.x} cy={group.y} r={group.rows.length > 1 ? 13 : 6}
-          fill={layer.input.recipe.colour} stroke="#fff" stroke-width="1.5"
+          fill={layer.displayColour || layer.display_colour || layer.input.recipe.colour} stroke="#fff" stroke-width="1.5"
           stroke-dasharray={group.rows.some((row) => row.origin === 'manual') ? '3 2' : undefined} />
         {#if group.rows.length > 1}<text x={group.x} y={group.y + 4}>{group.rows.length}</text>
         {:else if kept}<circle cx={group.x} cy={group.y} r="2" fill="#fff" />{/if}

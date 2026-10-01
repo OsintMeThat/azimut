@@ -57,6 +57,9 @@ def doctor_repair(case_id: str, body: DoctorRepair) -> dict[str, Any]:
             elif body.action == "drop" and body.entity_id:
                 doctor_engine.require_missing_media(case, body.entity_id)
                 result = delete_entity_deep(case, body.entity_id)
+            elif body.action == "drop-redirect" and body.entity_id:
+                doctor_engine.require_dangling_redirect(case, body.entity_id)
+                result = {"status": "dropped", "redirects": case.drop_redirects([body.entity_id])}
             elif body.action == "relink" and body.entity_id and body.replacement:
                 doctor_engine.require_missing_media(case, body.entity_id)
                 doctor_engine.require_unknown_media(case, body.replacement)

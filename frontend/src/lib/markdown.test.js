@@ -28,6 +28,19 @@ describe('markdownHtml', () => {
       .toContain('Media unavailable: Deleted image');
   });
 
+  it('opens the survivor while preserving the original wording and escaping its label', () => {
+    const source = '[[entity:old|Earlier name]]';
+    const html = markdownHtml(source, {
+      entities: [{ id: 'kept', label: 'Kept "subject" <test>' }],
+      redirects: { old: { id: 'kept', label: 'Earlier name' } },
+    });
+    expect(html).toContain('data-entity-id="kept"');
+    expect(html).toContain('Merged into Kept &quot;subject&quot; &lt;test&gt;');
+    expect(html).toContain('>Earlier name</a>');
+    expect(markdownHtml(source, { redirects: { old: { id: 'gone' } } }))
+      .toContain('Reference unavailable');
+  });
+
   it('sizes and aligns images without allowing unsafe values', () => {
     const html = markdownHtml('![Map](/map.png){width=50% align=center}');
     expect(html).toContain('class="markdown-image align-center"');

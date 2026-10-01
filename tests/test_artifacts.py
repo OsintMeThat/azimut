@@ -103,6 +103,9 @@ def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     # The tool root, not the case folder: what the analyst keeps beside it is
     # theirs, and a gate on files Azimut never wrote would be meaningless.
     assert tree(emptied.tool_root) == tree(born.tool_root)
+    assert emptied.entity_redirects() == {}
+    with emptied._graph()._connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM entity_merges').fetchone()[0] == 0
 
 
 def test_deleting_a_proof_takes_its_pasted_images(client):
@@ -121,6 +124,15 @@ def test_deleting_a_proof_takes_its_pasted_images(client):
 
     assert not assets.exists()
     assert not case.resolve_inside(full.proof).exists()
+
+
+def test_a_collage_owns_its_preview_but_not_its_exported_picture(client):
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    entity = case.find_entity(attr="spec", value=full.collage_doc)
+
+    assert set(artifacts.owned(case, entity)) == {full.collage_doc, full.collage_thumb}
+    assert artifacts.caches(case, entity) == []
 
 
 def test_every_type_in_a_full_case_declares_what_it_owns(client):

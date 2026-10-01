@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn().mockResolvedValue({ path: '/cases/c1/azimut/media' });
-vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: vi.fn() } }));
+const get = vi.fn();
+vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: (...a) => get(...a) } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
 const { gotoCapture, gotoPoint, openComparison, openEntity, openGuide, openInReverseSearch, openMapAt, opensInFileManager } =
@@ -56,6 +57,14 @@ describe('openInReverseSearch', () => {
 });
 
 describe('openEntity', () => {
+  it('opens a merged place at the survivor coordinates instead of frozen coordinates', async () => {
+    get.mockResolvedValue({ entity: { id: 'kept', type: 'place', label: 'Kept place', attrs: { lat: 3, lon: 4 } }, merged_from: { id: 'old', label: 'Old place' } });
+    openEntity({ id: 'old', type: 'place', attrs: { lat: 1, lon: 2 } });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/entities/old/chain');
+    expect(uiState.gotoCoords.lat).toBe(3);
+    expect(uiState.gotoCoords.lon).toBe(4);
+  });
   it('opens bookmarks and external captures in a new browser tab', () => {
     openEntity({ type: 'bookmark', attrs: { url: 'https://example.test/bookmark' } });
     openEntity({ type: 'capture', attrs: { source_url: 'https://maps.example.test/view' } });
@@ -111,6 +120,59 @@ describe('a type with no tool of its own', () => {
 
     expect(uiState.tool).toBe('media');
     expect(uiState.openBoardEntity).toBeNull();
+  });
+});
+
+describe('a Claim', () => {
+  beforeEach(() => {
+    uiState.timelineRange = null;
+    uiState.timelineQueue = null;
+    get.mockReset();
+  });
+  const claim = { id: 'e-claim', type: 'claim', label: 'Column seen', attrs: {} };
+
+  it('opens on the Timeline at its entry, with its neighbours in view', async () => {
+    const item = {
+      id: 'temporal:claim:e-claim', raw: '2026-03-12', sortable: true,
+      earliest: '2026-03-12T00:00:00.000000Z', latest: '2026-03-13T00:00:00.000000Z',
+    };
+    get.mockResolvedValueOnce({ item });
+    await openEntity(claim);
+
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/timeline/claims/e-claim');
+    expect(uiState.tool).toBe('timeline');
+    expect(uiState.timelineRange).toEqual({
+      from: '2026-03-10T00:00:00.000Z',
+      to: '2026-03-15T00:00:00.000Z',
+      itemId: 'temporal:claim:e-claim',
+      item,
+    });
+    expect(uiState.openBoardEntity).toBeNull();
+  });
+
+  it('opens the Undated queue on an entry with no date', async () => {
+    const item = { id: 'temporal:claim:e-claim', raw: null, earliest: null, latest: null, sortable: false };
+    get.mockResolvedValueOnce({ item });
+    await openEntity(claim);
+
+    expect(uiState.tool).toBe('timeline');
+    expect(uiState.timelineQueue).toEqual({ queue: 'undated', itemId: item.id, item });
+  });
+
+  it('opens the list of entries off the UTC axis on one it cannot place', async () => {
+    const item = { id: 'temporal:claim:e-claim', raw: '2026-03-12T14:00', earliest: null, latest: null, sortable: false };
+    get.mockResolvedValueOnce({ item });
+    await openEntity(claim);
+
+    expect(uiState.timelineQueue).toEqual({ queue: 'unplaced', itemId: item.id, item });
+  });
+
+  it('falls back to its row on the Board when the Timeline cannot say', async () => {
+    get.mockRejectedValueOnce(new Error('gone'));
+    await openEntity(claim);
+
+    expect(uiState.tool).toBe('board');
+    expect(uiState.openBoardEntity).toBe('e-claim');
   });
 });
 

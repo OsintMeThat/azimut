@@ -300,6 +300,25 @@ def test_sky_validates_at_the_edge(client, params):
     assert client.get("/api/geo/sky", params=params).status_code == 422
 
 
+# -- /api/geo/zone --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("lat", "lon", "name"),
+    [(49.99, 36.23, "Europe/Kyiv"), (40.71, -74.0, "America/New_York"), (-90, 0, "UTC")],
+)
+def test_zone_names_the_civil_zone_at_a_point(client, lat, lon, name):
+    response = client.get("/api/geo/zone", params={"lat": lat, "lon": lon})
+    assert response.status_code == 200
+    # The name alone: the offset belongs to an instant, which the browser holds.
+    assert response.json() == {"name": name}
+
+
+@pytest.mark.parametrize("params", [{"lat": 91, "lon": 0}, {"lat": 0, "lon": 181}, {"lat": 0}])
+def test_zone_validates_at_the_edge(client, params):
+    assert client.get("/api/geo/zone", params=params).status_code == 422
+
+
 # -- /api/geo/daylight ----------------------------------------------------------
 #
 # The geometry is covered in tests/test_sky.py. What matters here is the contract the

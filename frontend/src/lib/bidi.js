@@ -12,6 +12,7 @@
 const RTL_CHARS = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 
 export const LRI = '\u2066'; // LEFT-TO-RIGHT ISOLATE
+export const FSI = '\u2068'; // FIRST STRONG ISOLATE
 export const PDI = '\u2069'; // POP DIRECTIONAL ISOLATE
 
 // LTR runs worth isolating: URLs, @mentions, plus codes, coordinate pairs.
@@ -28,4 +29,18 @@ export function bidiSafe(text) {
   return text.replace(LTR_RUN, (run, offset, str) =>
     str[offset - 1] === LRI ? run : LRI + run + PDI
   );
+}
+
+/**
+ * A label drawn where no `dir="auto"` reaches: a canvas node name, an SVG plate.
+ *
+ * Both lay text out in a left-to-right paragraph, so an Arabic name with a number in
+ * it (`مسجد 12`) came out with the number on the wrong side, and a trailing `…` at
+ * the wrong end. A First Strong Isolate takes the direction from the label's own
+ * first letter, as `dir="auto"` does in HTML, and keeps it from reordering what is
+ * drawn beside it. Text without RTL passes through untouched.
+ */
+export function bidiIsolate(text) {
+  const value = String(text ?? '');
+  return hasRtl(value) ? `${FSI}${value}${PDI}` : value;
 }

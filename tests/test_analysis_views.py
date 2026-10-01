@@ -6,6 +6,8 @@ import io
 
 from PIL import Image
 
+from azimut.workspace import Case
+
 
 def _case(client, name: str = "View case") -> str:
     return client.post("/api/cases", json={"name": name}).json()["id"]
@@ -438,6 +440,49 @@ def test_a_track_captures_the_case_activity_it_asks_for(client):
     assert created.json()["snapshot_count"] == 2
 
 
+def test_a_frozen_media_track_holds_back_working_files_as_it_did_live(client):
+    """`collected_only` travels with the saved track and the snapshot honours it; a
+    track saved without it reads back without the key, as it was stored."""
+    case_id = _case(client, "Collected track")
+    case = Case.open(case_id)
+    kept = {}
+    for name, source in (("clip", "upload"), ("frame", "inspect")):
+        entity = case.add_entity("media", name, {"path": f"media/{name}.jpg", "kind": "image"}, by="user")
+        case.upsert_media_item(
+            {
+                "path": f"media/{name}.jpg", "filename": f"{name}.jpg", "kind": "image",
+                "taken_at": "2024-02-03T10:11:12Z", "added_at": "2026-08-11T10:00:00Z",
+                "source": {"type": source},
+            },
+            entity_id=entity["id"],
+        )
+        kept[name] = entity["id"]
+
+    created = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Collected",
+            "mode": "snapshot",
+            "surface": "timeline",
+            "spec": {"timeline": {"tracks": [
+                {"id": "media", "label": "Media", "categories": ["media"],
+                 "query": {"collected_only": True}},
+                {"id": "all", "label": "All files", "categories": ["media"]},
+            ]}},
+        },
+    )
+    assert created.status_code == 200, created.text
+    spec = created.json()["spec"]
+    tracks = {track["id"]: track["query"] for track in spec["timeline"]["tracks"]}
+    assert tracks["media"]["collected_only"] is True
+    assert "collected_only" not in tracks["all"]
+    frozen = spec["snapshot"]["timeline_tracks"]
+    assert frozen["media"] == [f"temporal:media:{kept['clip']}:captured"]
+    assert sorted(frozen["all"]) == sorted(
+        f"temporal:media:{kept[name]}:captured" for name in ("clip", "frame")
+    )
+
+
 def test_empty_timeline_snapshot_duplicates_without_changing_its_tracks(client):
     case_id = _case(client, "Empty Timeline snapshot")
     created = client.post(
@@ -610,6 +655,13 @@ def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client
                         "label": "Media",
                         "categories": ["media"],
                         "color": "chartreuse",
+                        "query": {"as_files": "imagery"},
+                    },
+                    {
+                        "id": "files",
+                        "label": "Files",
+                        "categories": ["statement"],
+                        "query": {"as_files": True},
                     },
                 ],
             },
@@ -621,7 +673,17 @@ def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client
 
     # a zone named outright travels: the view was read on it and must reopen on it
     assert timeline["zone_choice"] == "zone:Asia/Tokyo"
-    assert [track["color"] for track in timeline["tracks"]] == ["blue", ""]
+    assert [track["color"] for track in timeline["tracks"]] == ["blue", "", ""]
+    # a lane drawn as the files its events date keeps the files it draws, and only it
+    assert [track["query"].get("as_files") for track in timeline["tracks"]] == [
+        None, "imagery", None,
+    ]
+
+    # the zone of the case's places is a reading too, and the one a Timeline opens on
+    body["spec"]["timeline"]["zone_choice"] = "case"
+    kept = client.put(f"/api/cases/{case_id}/analysis-views/{created.json()['id']}", json=body)
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["spec"]["timeline"]["zone_choice"] == "case"
 
     for refused in ("zone:../../etc/passwd", "zone:", "somewhere else"):
         body["spec"]["timeline"]["zone_choice"] = refused
@@ -630,3 +692,26 @@ def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client
         )
         assert answer.status_code == 200, answer.text
         assert answer.json()["spec"]["timeline"]["zone_choice"] == "utc"
+
+
+def test_a_snapshot_freezes_the_claims_that_lack_a_source(client):
+    case_id = _case(client)
+    clip = _entity(client, case_id, "media", "clip.mp4", {"kind": "video"})
+    for statement, cites in (("Heard of it", []), ("Seen in the clip", [clip["id"]])):
+        filed = client.post(
+            f"/api/cases/{case_id}/timeline/claims",
+            json={"statement": statement, "cites": cites},
+        )
+        assert filed.status_code == 200, filed.text
+    body = _body("No source yet", mode="snapshot")
+    body["spec"]["query"] = {
+        "filter": {"lacks": ["source"]},
+        "terms": {"lacks": "source"},
+        "label": "No source",
+    }
+
+    saved = client.post(f"/api/cases/{case_id}/analysis-views", json=body)
+
+    assert saved.status_code == 200, saved.text
+    frozen = saved.json()["spec"]["snapshot"]["entities"]
+    assert [entity["label"] for entity in frozen] == ["Heard of it"]

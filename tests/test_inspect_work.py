@@ -421,6 +421,165 @@ def test_deleting_a_collage_leaves_its_exported_picture(client):
     assert graph_read.entity(cid, path=exported) is not None
 
 
+def _preview(size=(320, 160), mode="RGBA", fmt="PNG") -> bytes:
+    buf = io.BytesIO()
+    Image.new(mode, size, (200, 40, 40, 255) if mode == "RGBA" else (200, 40, 40)).save(buf, fmt)
+    return buf.getvalue()
+
+
+def _put_preview(client, cid, name, data=None):
+    return client.put(
+        f"/api/cases/{cid}/collages/{name}/thumb",
+        files={"file": ("preview.png", io.BytesIO(data or _preview()), "image/png")},
+    )
+
+
+def test_a_collage_with_no_preview_lists_its_outline(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    offset = {**_piece(photo, "nd_2"), "quad": [[100, 20], [180, 20], [180, 80], [100, 80]]}
+    _save_collage(client, cid, "Strip", [_piece(photo), offset])
+
+    [row] = client.get(f"/api/cases/{cid}/collages").json()
+
+    assert "thumb" not in row
+    assert row["outline"]["width"] == 180
+    assert row["outline"]["height"] == 80
+    assert row["outline"]["quads"][1][0] == [100, 20]
+
+
+def test_a_preview_is_filed_beside_its_collage_and_listed(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Strip", [_piece(photo)])
+
+    saved = _put_preview(client, cid, "Strip", _preview((900, 300)))
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["thumb"] == ".collages/Strip.webp"
+    on_disk = Case.open(cid).tool_root / ".collages" / "Strip.webp"
+    with Image.open(on_disk) as image:
+        assert image.format == "WEBP"
+        assert max(image.size) == inspectwork.THUMB_EDGE  # shrunk, never stored larger
+    [row] = client.get(f"/api/cases/{cid}/collages").json()
+    assert row["thumb"] == ".collages/Strip.webp"
+    assert isinstance(row["thumb_v"], int)
+    assert "outline" not in row
+    [entity] = _of_type(cid, "collage")
+    assert entity["attrs"]["thumb"] == ".collages/Strip.webp"
+
+
+def test_an_entity_picker_shows_a_collage_by_its_preview(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Strip", [_piece(photo)])
+    _put_preview(client, cid, "Strip")
+
+    found = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"type": "collage", "previews": True}
+    ).json()["items"]
+
+    assert found[0]["thumb"] == ".collages/Strip.webp"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"not an image", _preview(fmt="JPEG", mode="RGB"), _preview((2000, 2000))],
+    ids=["garbage", "jpeg", "too-many-pixels"],
+)
+def test_a_preview_that_is_not_a_small_png_is_refused(client, data):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Strip", [_piece(photo)])
+
+    res = _put_preview(client, cid, "Strip", data)
+
+    assert res.status_code == 400
+    assert not (Case.open(cid).tool_root / ".collages" / "Strip.webp").exists()
+
+
+def test_an_emptied_collage_stops_showing_its_old_preview(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Strip", [_piece(photo)])
+    _put_preview(client, cid, "Strip")
+
+    _save_collage(client, cid, "Strip", [], name="Strip")
+
+    [row] = client.get(f"/api/cases/{cid}/collages").json()
+    assert "thumb" not in row
+    assert row["outline"] is None
+
+
+def test_a_preview_for_no_collage_is_refused(client):
+    cid = _case(client)
+
+    res = _put_preview(client, cid, "Nothing")
+
+    assert res.status_code == 404
+    assert not (Case.open(cid).tool_root / ".collages" / "Nothing.webp").exists()
+
+
+@pytest.mark.parametrize("new_title", ["Harbour strip", "strip"], ids=["rename", "change-of-case"])
+def test_a_renamed_collage_takes_its_preview_along(client, new_title):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Strip", [_piece(photo)])
+    _put_preview(client, cid, "Strip")
+
+    _save_collage(client, cid, new_title, [_piece(photo)], name="Strip")
+
+    folder = Case.open(cid).tool_root / ".collages"
+    assert [p.name for p in folder.glob("*.webp")] == [f"{new_title}.webp"]
+    [row] = client.get(f"/api/cases/{cid}/collages").json()
+    assert row["thumb"] == f".collages/{new_title}.webp"
+    [entity] = _of_type(cid, "collage")
+    assert entity["attrs"]["thumb"] == f".collages/{new_title}.webp"
+
+
+def test_a_deleted_collage_takes_its_preview_to_the_trash_and_back(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Strip", [_piece(photo)])
+    _put_preview(client, cid, "Strip")
+    preview = Case.open(cid).tool_root / ".collages" / "Strip.webp"
+
+    deleted = client.delete(f"/api/cases/{cid}/collages/Strip").json()
+    assert not preview.exists()
+
+    client.post(f"/api/cases/{cid}/trash/{deleted['trash']}/restore")
+    assert preview.is_file()
+    [row] = client.get(f"/api/cases/{cid}/collages").json()
+    assert row["thumb"] == ".collages/Strip.webp"
+
+
+def test_the_list_says_when_the_exported_picture_is_the_layout_as_it_stands(client):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    piece = _piece(photo)
+    exported = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={"width": 80, "height": 60, "label": "Strip",
+              "nodes": [{"src": piece["save"], "quad": piece["quad"]}]},
+    ).json()["item"]["path"]
+    # The browser's own JSON of the pieces, spaced nothing like Python's.
+    signature = json.dumps([[piece["save"], piece["quad"]]], separators=(",", ":"))
+    filed = {"path": exported, "signature": signature}
+    listed = lambda: client.get(f"/api/cases/{cid}/collages").json()[0]["filed"]  # noqa: E731
+
+    _save_collage(client, cid, "Strip", [piece], exported=filed)
+    assert listed() is True
+
+    moved = {**piece, "quad": [[5, 0], [85, 0], [85, 60], [5, 60]]}
+    _save_collage(client, cid, "Strip", [moved], name="Strip", exported=filed)
+    assert listed() is False  # edited since the export
+
+    _save_collage(client, cid, "Strip", [piece], name="Strip", exported=filed)
+    entity = graph_read.entity(cid, path=exported)
+    client.delete(f"/api/cases/{cid}/entities/{entity['id']}")
+    assert listed() is False  # the picture went to the Trash
+
+
 def test_a_piece_without_a_source_is_refused(client):
     cid = _case(client)
 

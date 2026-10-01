@@ -30,7 +30,12 @@ describe('generated fields', () => {
 
   it('can leave fields to a dedicated Details tab without changing the registry', () => {
     expect(source).toContain('exclude = []');
-    expect(source).toContain('if (exclude.includes(field.key)) return false;');
+    expect(source).toContain('if (exclude.includes(field.key) || paired(field)) return false;');
+  });
+
+  it('edits a date’s zone on the date’s own Clock row rather than as a second field', () => {
+    expect(source).toContain('`${other.key}_zone` === field.key');
+    expect(source).toContain('onzonechange={clock ? (zone) => set(clock.key, zone) : null}');
   });
 });
 

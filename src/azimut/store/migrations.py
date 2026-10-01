@@ -13,7 +13,7 @@ import json
 import sqlite3
 from typing import Callable
 
-from .rows import _entity_search_text, _folder_of, _has_gps
+from .rows import _entity_search_text, _folder_of, _has_gps, _media_search_text
 from .temporal import _rebuild_temporal_projection_conn
 
 
@@ -249,7 +249,10 @@ def _migrate_14_to_15(conn: sqlite3.Connection) -> None:
         " uncertain INTEGER NOT NULL DEFAULT 0 CHECK (uncertain IN (0, 1)),"
         " approximate INTEGER NOT NULL DEFAULT 0 CHECK (approximate IN (0, 1)),"
         " zone TEXT, sortable INTEGER NOT NULL DEFAULT 0 CHECK (sortable IN (0, 1)),"
-        " status TEXT, confidence TEXT, parse_error TEXT"
+        " status TEXT, confidence TEXT, parse_error TEXT,"
+        # The rebuilds of later steps write every column the projection has today,
+        # so the table is born with the zone schema 19 added rather than without it.
+        " tz TEXT"
         ")"
     )
     conn.execute(
@@ -304,6 +307,73 @@ def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
     _rebuild_temporal_projection_conn(conn)
 
 
+#: The two tables schema 19 adds for merges, as `sqlite_backend._SCHEMA` declares them.
+#: `IF NOT EXISTS`, so a database a test rewound by its version number alone replays it.
+_MERGE_TABLES = """
+CREATE TABLE IF NOT EXISTS entity_redirects (
+    old_id    TEXT PRIMARY KEY,
+    new_id    TEXT NOT NULL,
+    old_label TEXT NOT NULL,
+    old_key   TEXT,
+    merge_id  TEXT,
+    at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entity_redirects_new ON entity_redirects(new_id);
+CREATE INDEX IF NOT EXISTS idx_entity_redirects_key ON entity_redirects(old_key) WHERE old_key IS NOT NULL;
+CREATE TABLE IF NOT EXISTS entity_merges (
+    id           TEXT PRIMARY KEY,
+    survivor_id  TEXT NOT NULL,
+    merged_id    TEXT NOT NULL,
+    merged_label TEXT NOT NULL,
+    at           TEXT NOT NULL,
+    by           TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entity_merges_survivor ON entity_merges(survivor_id);
+"""
+
+
+def _add_temporal_zones(conn: sqlite3.Connection) -> None:
+    """Give the Time projection the zone each value was stated in, and re-read it.
+
+    A civil date stated in a zone spans that zone's days, so a dated proof's bounds
+    move with the zone its point is in. Nothing stored before carried one, and those
+    rows rebuild exactly as they were; the rebuild is for the column itself. A table
+    born at 15 already has the column, so it is added only where it is missing.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(temporal_items)")}
+    if "tz" not in columns:
+        conn.execute("ALTER TABLE temporal_items ADD COLUMN tz TEXT")
+    _rebuild_temporal_projection_conn(conn)
+
+
+def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
+    """Rebuild both search indexes, folded the way a search term now is, add the
+    two tables a merge writes, and the zone a temporal value was stated in.
+
+    A term is folded as it is typed (``engine/textfold.py``), so an index written
+    before could only be found by the exact accents it holds: ``Cafe`` would reach a
+    new ``Café`` and miss one filed last week. One pass over each table. The merge
+    tables start empty: nothing was merged before they existed.
+    """
+    # One statement at a time: `executescript` commits first, and the upgrade runs
+    # the whole chain in one transaction it owns.
+    for statement in _MERGE_TABLES.split(";"):
+        if statement.strip():
+            conn.execute(statement)
+    for row in conn.execute("SELECT id, type, label, attrs_json FROM entities").fetchall():
+        conn.execute(
+            "UPDATE entities SET search_text = ? WHERE id = ?",
+            (_entity_search_text(row["type"], row["label"], json.loads(row["attrs_json"])), row["id"]),
+        )
+    for row in conn.execute("SELECT path, item_json FROM media_items").fetchall():
+        conn.execute(
+            "UPDATE media_items SET search_text = ? WHERE path = ?",
+            (_media_search_text(json.loads(row["item_json"])), row["path"]),
+        )
+    _add_temporal_zones(conn)
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # The whole chain runs inside one immediate transaction in `SqliteCase._upgrade`,
 # which stamps each new schema_version and records each migration as it goes; a
@@ -327,4 +397,5 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     15: _migrate_15_to_16,
     16: _migrate_16_to_17,
     17: _migrate_17_to_18,
+    18: _migrate_18_to_19,
 }

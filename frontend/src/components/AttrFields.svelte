@@ -12,11 +12,19 @@
    * nothing is flagged for being absent.
    */
   import { entityFields, withHeadings } from '../lib/entityTypes.svelte.js';
+  import { UTC } from '../lib/clock.js';
+  import ClockField from './ClockField.svelte';
   import TemporalInput from './TemporalInput.svelte';
 
   let { type, values = $bindable({}), exclude = [] } = $props();
 
   const fields = $derived(entityFields(type));
+  /** The clock a date is read on is the `<key>_zone` field beside it, edited on the
+   *  date's own Clock row rather than as a second field. */
+  const zoneFor = (key) => fields.find((field) => field.kind === 'timezone' && field.key === `${key}_zone`);
+  const paired = (field) =>
+    field.kind === 'timezone' &&
+    fields.some((other) => other.kind === 'temporal' && `${other.key}_zone` === field.key && !exclude.includes(other.key));
 
   /**
    * A shape is traced on the map, never typed here. So an empty footprint shows
@@ -25,7 +33,7 @@
    * the summary and the Clear that drops it.
    */
   const shown = $derived(withHeadings(fields.filter((field) => {
-    if (exclude.includes(field.key)) return false;
+    if (exclude.includes(field.key) || paired(field)) return false;
     if (field.editable === false) return values?.[field.key] != null && values[field.key] !== '';
     return field.kind !== 'geojson' || values?.[field.key];
   })));
@@ -119,13 +127,21 @@
             {/each}
           </select>
         {:else if field.kind === 'temporal'}
+          {@const clock = zoneFor(field.key)}
           <div class="temporal-field">
             <TemporalInput
               id={`attr-${field.key}`}
               value={values?.[field.key] ?? ''}
+              zone={clock ? values?.[clock.key] ?? null : null}
+              onzonechange={clock ? (zone) => set(clock.key, zone) : null}
               onchange={(value) => set(field.key, value)}
             />
           </div>
+        {:else if field.kind === 'timezone'}
+          <ClockField
+            clock={{ zone: values?.[field.key] || UTC, fixed: '' }}
+            onpick={(zone) => set(field.key, zone && zone !== UTC ? zone : null)}
+          />
         {:else if field.kind === 'longtext'}
           <!-- A quoted source and the reasoning behind a claim run to paragraphs.
                Held in a one-line box they scroll sideways past eighty characters,

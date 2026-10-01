@@ -36,6 +36,9 @@
      *  would rather build than spell. Off by default: most of these fields sit in
      *  a row where a second control would crowd what is already a small box. */
     calendar = false,
+    /** The zone the value is read in, when the field's owner knows it, so the
+     *  reading names that clock instead of saying `local time`. */
+    zone = null,
     onchange,
   } = $props();
 
@@ -62,7 +65,7 @@
   const said = $derived.by(() => {
     if (!text.trim()) return '';
     if (parsed.error) return parsed.error;
-    const format = formatTemporalValue(parsed.value);
+    const format = formatTemporalValue(parsed.value, zone);
     return [format.label, ...format.qualifiers].join(' · ');
   });
 

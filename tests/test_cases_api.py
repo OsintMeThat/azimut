@@ -528,6 +528,42 @@ def test_catalog_lists_what_the_case_connects_to_nothing(client):
     assert client.get(f"/api/cases/{cid}/catalog/summary").json()["unlinked"] == 1
 
 
+def test_catalog_lists_the_claims_with_no_source_or_no_assessment(client):
+    cid = client.post("/api/cases", json={"name": "Waiting"}).json()["id"]
+    clip = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "media", "label": "clip.mp4", "attrs": {"kind": "video"}},
+    ).json()["id"]
+
+    def claim(statement, **extra):
+        body = {"statement": statement, **extra}
+        response = client.post(f"/api/cases/{cid}/timeline/claims", json=body)
+        assert response.status_code == 200, response.text
+        return response.json()["entity"]["id"]
+
+    bare = claim("Heard of it")
+    graded = claim("Graded, no source", confidence="probable")
+    sourced = claim("Sourced, not graded", cites=[clip])
+    whole = claim("Sourced and graded", cites=[clip], confidence="certain")
+
+    def ids(**params):
+        page = client.get(f"/api/cases/{cid}/catalog/entities", params=params)
+        assert page.status_code == 200, page.text
+        return {row["id"] for row in page.json()["items"]}
+
+    # The media is neither: a file is its own source and nothing grades it.
+    assert ids(lacks="source") == {bare, graded}
+    assert ids(lacks="assessment") == {bare, sourced}
+    assert ids(lacks="source,assessment") == {bare}
+    assert whole not in ids(lacks="source") | ids(lacks="assessment")
+    # The graph route asks the same predicate.
+    drawn = client.get(f"/api/cases/{cid}/graph", params={"lacks": "source"}).json()
+    assert {node["id"] for node in drawn["nodes"]} >= {bare, graded}
+    assert sourced not in {node["id"] for node in drawn["nodes"]}
+    refused = client.get(f"/api/cases/{cid}/catalog/entities", params={"lacks": "photo"})
+    assert refused.status_code == 400
+
+
 def test_the_summary_prices_linked_to_by_what_it_would_answer_with(client):
     """Four media pointing at one place is **four** under "linked to a place" and one
     under "type: place". The filter asks the first, so the menu has to price the
@@ -1079,3 +1115,27 @@ def test_details_title_edit_moves_every_named_tool_file(client):
     proof = next(entity for entity in case.list_entities() if entity["type"] == "proof")
     assert proof["attrs"]["path"] == layout.proof_export_rel("New proof")
     assert case.resolve_inside(proof["attrs"]["path"]).is_file()
+
+
+def test_a_picker_page_brings_the_preview_each_source_already_has(client):
+    cid = client.post("/api/cases", json={"name": "Previews"}).json()["id"]
+    case = Case.open(cid)
+    frame = case.add_entity("media", "frame.jpg", {"path": "media/frame.jpg", "kind": "image"}, by="user")
+    case.upsert_media_item(
+        {"path": "media/frame.jpg", "filename": "frame.jpg", "kind": "image",
+         "added_at": "2026-08-11T10:00:00Z", "thumbnail": ".thumbs/frame.jpg"},
+        entity_id=frame["id"],
+    )
+    capture = case.add_entity("capture", "S2 11 Mar", {"thumb": ".thumbs/s2.jpg"}, by="user")
+    note = case.add_entity("note", "Interview", {}, by="user")
+
+    def thumbs(**params):
+        page = client.get(f"/api/cases/{cid}/catalog/entities", params=params).json()
+        return {row["id"]: row.get("thumb") for row in page["items"]}
+
+    # The table draws its own pictures and does not ask.
+    assert thumbs()[frame["id"]] is None
+    picked = thumbs(previews="true")
+    assert picked[frame["id"]] == ".thumbs/frame.jpg"
+    assert picked[capture["id"]] == ".thumbs/s2.jpg"
+    assert picked[note["id"]] is None

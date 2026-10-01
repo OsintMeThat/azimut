@@ -1,5 +1,5 @@
 /**
- * A Claim filed from the entity it is about — the pure half of `QuickClaim.svelte`.
+ * A Claim filed from the entity it is about — the pure half of `EntryLine.svelte`.
  *
  * The shape being filled is the one ONTOLOGY §2 calls a filed observation: a count
  * and a condition on the statement, `about` the model or the object, `at` a place,
@@ -37,13 +37,15 @@ export function quickClaimSeat(family, accepts) {
   };
 }
 
-/** What the press files, said from where it is pressed: a tooltip per seat. */
+/** What the press adds, said from where it is pressed: a tooltip per seat. One verb
+ *  on every surface, "Add event", where the same act used to be filed, noted and
+ *  added under three names. */
 export function claimActionTitle(slot) {
   return (
     {
-      about: 'File a claim about this',
-      at: 'File a claim placed here',
-      cites: 'File a claim that rests on this',
+      about: 'Add an event about this',
+      at: 'Add an event that happened here',
+      cites: 'Add an event this shows',
     }[slot] ?? ''
   );
 }
@@ -53,16 +55,23 @@ const names = (list) => list.map((entry) => String(entry ?? '').trim()).filter(B
 /**
  * The sentence the fields add up to, offered until the analyst writes their own.
  *
- * `2 × T-72B3 destroyed at Crossroads`, `Bridge 4 damaged`, `Seen at Crossroads`.
- * The count takes a `×` rather than a bare number because model names carry digits
- * of their own. With neither a subject nor a place there is nothing to say, and the
- * field stays empty rather than holding a sentence about nothing.
+ * `2 × T-72B3 destroyed at Crossroads`, `Bridge 4 damaged`, `Seen at Crossroads`,
+ * `Seen in clip.mp4`. The count takes a `×` rather than a bare number because model
+ * names carry digits of their own. With neither a subject, a place nor a source there
+ * is nothing to say, and the field stays empty rather than holding a sentence about
+ * nothing.
  */
-export function composeClaimStatement({ count = null, condition = '', subjects = [], places = [] }) {
+export function composeClaimStatement({
+  count = null, condition = '', subjects = [], places = [], sources = [],
+}) {
   const subject = names(subjects);
   const place = names(places);
   const state = String(condition ?? '').trim().toLowerCase();
-  if (!subject) return place ? `Seen at ${place}` : '';
+  if (!subject && !place) {
+    const source = names(sources);
+    return source ? `Seen in ${source}` : '';
+  }
+  if (!subject) return `Seen at ${place}`;
   const counted = Number.isInteger(count) && count > 0 ? `${count} × ${subject}` : subject;
   return `${counted} ${state || 'seen'}${place ? ` at ${place}` : ''}`;
 }
@@ -74,11 +83,15 @@ export function composeClaimStatement({ count = null, condition = '', subjects =
  * `observed` role; without a date there is no role to state. A count or a condition
  * the form did not ask for is never sent, whatever is left in its field.
  */
-export function quickClaimBody({ statement, when, confidence, count, condition, about, at, cites, seat }) {
+export function quickClaimBody({
+  statement, when, whenZone = null, confidence, count, condition, about, at, cites, seat, create = [],
+}) {
   const whole = Number(count);
   return {
     statement: String(statement ?? '').trim(),
     when: when || null,
+    // The zone a day was stated in rides only with a day: a time carries its offset.
+    ...(when && whenZone ? { when_zone: whenZone } : {}),
     time_role: when ? 'observed' : null,
     confidence: confidence || null,
     count: seat?.count && Number.isInteger(whole) && whole > 0 ? whole : null,
@@ -86,5 +99,6 @@ export function quickClaimBody({ statement, when, confidence, count, condition, 
     about: [...new Set(about)],
     at: [...new Set(at)],
     cites: [...new Set(cites)],
+    create: create.map(({ slot, type, label }) => ({ slot, type, label: String(label).trim() })),
   };
 }

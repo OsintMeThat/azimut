@@ -712,7 +712,9 @@
 
   // ---- reusable templates (proof house style + post thread) ----------------
   // One editor draft at a time. `editing` = { kind, id|null, name, data }; a
-  // fresh id is null until first save. Content-free presets, workspace-level.
+  // fresh id is null until first save, and `fresh` marks a blank new template
+  // (a duplicate has no id either, yet is not one). Content-free presets,
+  // workspace-level.
   let editing = $state(null);
   let savingTpl = $state(false);
   let deleteTpl = $state(null); // { kind, id, name } pending confirmation
@@ -722,7 +724,7 @@
   }
 
   function newTemplate(kind) {
-    editing = { kind, id: null, name: '', data: freshTemplate(kind) };
+    editing = { kind, id: null, name: '', data: freshTemplate(kind), fresh: true };
   }
 
   function editTemplate(kind, rec) {
@@ -730,6 +732,17 @@
     // round-trip (not structuredClone) because `rec.data` is a Svelte state
     // proxy and structuredClone throws on a proxy.
     editing = { kind, id: rec.id, name: rec.name, data: JSON.parse(JSON.stringify(rec.data)) };
+  }
+
+  // A copy opens unsaved under a new name, so the original is never touched and
+  // Cancel leaves nothing behind. The server's per-kind cap answers on save.
+  function duplicateTemplate(kind, rec) {
+    editing = {
+      kind,
+      id: null,
+      name: `${rec.name} copy`.slice(0, 120),
+      data: JSON.parse(JSON.stringify(rec.data)),
+    };
   }
 
   function cancelEdit() {
@@ -764,6 +777,7 @@
     try {
       await deleteTemplate(t.kind, t.id);
       if (editing?.kind === t.kind && editing?.id === t.id) editing = null;
+      if (t.kind === 'post' && prefs.postTemplate === t.id) await savePrefs({ post_template: '' });
       toast(`Deleted "${t.name}"`, 'info');
     } catch (e) {
       toast(e.message, 'danger');
@@ -958,7 +972,7 @@
       {/if}
 
       {#if tab === 'templates'}
-        <TemplatesTab {newTemplate} {editTemplate} bind:deleteTpl />
+        <TemplatesTab {newTemplate} {editTemplate} {duplicateTemplate} {savePrefs} bind:deleteTpl />
       {/if}
     </div>
   </div>
@@ -989,7 +1003,7 @@
         {#if editing.kind === 'proof'}
           <ProofTemplateEditor bind:data={editing.data} />
         {:else}
-          <PostTemplateEditor bind:data={editing.data} />
+          <PostTemplateEditor bind:data={editing.data} fresh={editing.fresh === true} />
         {/if}
       </div>
       <div class="tpl-modal-foot">

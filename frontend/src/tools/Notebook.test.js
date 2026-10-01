@@ -95,3 +95,10 @@ describe('Notebook — the debounced save and the export', () => {
     expect(notebook).toMatch(/function cancelPendingSave\(\) \{[\s\S]*?pendingSave = null;/);
   });
 });
+
+describe('Notebook offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'notebook',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('notebook'))");
+  });
+});

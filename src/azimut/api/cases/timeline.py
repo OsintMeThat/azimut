@@ -14,6 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, StrictInt
 
+from ...engine import entities as entity_engine
 from ...engine import links as link_engine
 from ...engine import timeline as timeline_engine
 from ...repository import EntityStatus
@@ -23,9 +24,18 @@ from .common import _check_attrs, _timeline_bound, delete_entity_deep, get_case
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
 
+class NewSubjectIn(BaseModel):
+    """A subject the entry line names for the first time, created with the Claim."""
+
+    slot: Literal["about", "at", "cites"]
+    type: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1, max_length=300)
+
 class TemporalClaimIn(BaseModel):
     statement: str = Field(min_length=1, max_length=300)
     when: str | None = None
+    #: The IANA zone `when` was stated in: a day then spans that zone's day.
+    when_zone: str | None = Field(default=None, max_length=64)
     time_role: Literal["occurred", "observed", "valid"] | None = None
     confidence: Literal["certain", "probable", "possible", "refuted"] | None = None
     method: str | None = None
@@ -35,10 +45,14 @@ class TemporalClaimIn(BaseModel):
     about: list[str] = Field(default_factory=list, max_length=200)
     at: list[str] = Field(default_factory=list, max_length=50)
     cites: list[str] = Field(default_factory=list, max_length=200)
+    #: Subjects named for the first time on this line. They are created in the same
+    #: transaction as the Claim, so abandoning or failing the line leaves nothing.
+    create: list[NewSubjectIn] = Field(default_factory=list, max_length=10)
 
 class TemporalClaimPatch(BaseModel):
     statement: str | None = Field(default=None, min_length=1, max_length=300)
     when: str | None = None
+    when_zone: str | None = Field(default=None, max_length=64)
     time_role: Literal["occurred", "observed", "valid"] | None = None
     confidence: Literal["certain", "probable", "possible", "refuted"] | None = None
     method: str | None = None
@@ -93,7 +107,86 @@ def timeline(
         )
     except (CaseError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # A file's row carries the preview the case already cached for it, so a card on a
+    # zoomed axis can show the picture. One indexed read per page, and nothing is made.
+    media_owners = [
+        str(item["owner_id"]) for item in page["items"]
+        if item.get("category") == timeline_engine.MEDIA
+    ]
+    if media_owners:
+        thumbs = get_case(case_id).media_thumbs(media_owners)
+        for item in page["items"]:
+            thumb = thumbs.get(str(item["owner_id"]))
+            if thumb and item.get("category") == timeline_engine.MEDIA:
+                item["thumb"] = thumb
+    lane = (track_query or {}).get("as_files")
+    if lane in ("sources", "imagery"):
+        _situate_files(get_case(case_id), page["items"], from_above=lane == "imagery")
     return {**page, "window": {"from": since, "to": until}}
+
+
+#: What an event can put at its date: a picture or a video, or a picture from orbit.
+_SITUATED = ("media", "capture")
+
+
+def _situate_files(case: Case, items: list[dict[str, Any]], *, from_above: bool) -> None:
+    """Name, on each event of a file lane, the file it puts at its date, with its preview.
+
+    A file's own dates are what it says about itself; the date an analyst gives it is
+    an event about it or citing it: a proof's date stated for its footage, a
+    correction, "seen in" a video. That event is what places the file in time, so the
+    lane draws the file itself there. The sources' lane draws a picture or a video the
+    case collected, the imagery lane one the app pictured from above (`FROM_ABOVE`),
+    so an event about a video that cites a Compare render is the video on one and the
+    render on the other. The file the event is *about* comes first, since a proof's
+    date is about the footage and cites the proof. Two indexed reads per page.
+    """
+    named = {
+        str(entry["id"]): entry
+        for item in items if item.get("category") == timeline_engine.STATEMENT
+        for key in ("subject_entities", "source_entities")
+        for entry in item.get(key) or [] if entry.get("type") in _SITUATED
+    }
+    if not named:
+        return
+    ids = sorted(named)
+    origins = case.media_origins(ids)
+
+    def above(entry: dict[str, Any]) -> bool:
+        route = (origins.get(str(entry["id"])) or {}).get("type")
+        return entry.get("type") == "capture" or route in link_engine.FROM_ABOVE
+
+    chosen: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if item.get("category") != timeline_engine.STATEMENT:
+            continue
+        for key in ("subject_entities", "source_entities"):
+            entry = next(
+                (e for e in item.get(key) or []
+                 if e.get("type") in _SITUATED and above(e) == from_above),
+                None,
+            )
+            if entry is not None:
+                chosen[str(item["id"])] = entry
+                break
+    if not chosen:
+        return
+    ids = sorted({str(entry["id"]) for entry in chosen.values()})
+    thumbs = dict(case.media_thumbs(ids))
+    for entity in case.entities_by_ids(ids):
+        # A capture records its own preview rather than owning an indexed media row.
+        recorded = (entity.get("attrs") or {}).get("thumb")
+        if recorded and entity["id"] not in thumbs:
+            thumbs[entity["id"]] = recorded
+    for item in items:
+        entry = chosen.get(str(item.get("id")))
+        if entry is not None:
+            item["file"] = {
+                "id": entry["id"],
+                "label": entry.get("label", ""),
+                "type": entry.get("type"),
+                **({"thumb": thumbs[entry["id"]]} if thumbs.get(entry["id"]) else {}),
+            }
 
 # Every way the case puts something on the map. A Claim says where it happened with
 # `at`, and that was the only one this layer knew — so a window full of photographs
@@ -232,8 +325,16 @@ def timeline_map(
     }
 
 _TEMPORAL_CLAIM_ATTRS = (
-    "when", "time_role", "confidence", "method", "verbatim", "count", "condition"
+    "when", "when_zone", "time_role", "confidence", "method", "verbatim", "count",
+    "condition",
 )
+
+
+def _without_orphan_zone(attrs: dict[str, Any]) -> dict[str, Any]:
+    """A zone says how a date reads, so it leaves with the date it read."""
+    if not attrs.get("when"):
+        attrs.pop("when_zone", None)
+    return attrs
 _TEMPORAL_CONNECTORS = ("about", "at", "cites")
 
 def _temporal_item(case: Case, claim_id: str) -> dict[str, Any]:
@@ -284,6 +385,16 @@ def _check_claim_connectors(
             except CaseError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+@router.get("/{case_id}/timeline/claims/{claim_id}")
+def read_temporal_claim(case_id: str, claim_id: str) -> dict[str, Any]:
+    """Where one Claim sits on the Timeline: its own row, dated, undated or off the
+    UTC axis. What opening a Claim from anywhere reads, so it lands on its entry."""
+    case = get_case(case_id)
+    entity = case.get_entity(claim_id)
+    if entity is None or entity["type"] != "claim":
+        raise HTTPException(status_code=404, detail=f"claim '{claim_id}' not found")
+    return {"item": _temporal_item(case, claim_id)}
+
 @router.post("/{case_id}/timeline/claims")
 def create_temporal_claim(case_id: str, body: TemporalClaimIn) -> dict[str, Any]:
     """Create the statement, date and all of its connectors in one transaction."""
@@ -296,20 +407,49 @@ def create_temporal_claim(case_id: str, body: TemporalClaimIn) -> dict[str, Any]
         for key in _TEMPORAL_CLAIM_ATTRS
         if getattr(body, key) is not None
     }
+    _without_orphan_zone(attrs)
     _check_attrs("claim", attrs)
-    connectors = {key: getattr(body, key) for key in _TEMPORAL_CONNECTORS}
-    _check_claim_connectors(case, {"type": "claim"}, connectors)
+    connectors = {key: list(getattr(body, key)) for key in _TEMPORAL_CONNECTORS}
+    new_subjects = [_new_subject(entry) for entry in body.create]
+    created: list[dict[str, Any]] = []
     try:
-        saved = case.save_temporal_claim(
-            entity_id=None,
-            label=statement,
-            attrs=attrs,
-            connectors=connectors,
-            by="user",
-        )
+        # One transaction for the subjects and the Claim: a connector the vocabulary
+        # refuses rolls the new subjects back with it.
+        with case.batch():
+            for entry, label in new_subjects:
+                entity = case.add_entity(entry.type, label, {}, by="user")
+                connectors[entry.slot].append(entity["id"])
+                created.append({"id": entity["id"], "type": entry.type,
+                                "label": label, "slot": entry.slot})
+            _check_claim_connectors(case, {"type": "claim"}, connectors)
+            saved = case.save_temporal_claim(
+                entity_id=None,
+                label=statement,
+                attrs=attrs,
+                connectors=connectors,
+                by="user",
+            )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {**saved, "temporal": _temporal_item(case, saved["entity"]["id"])}
+    return {
+        **saved,
+        "created": created,
+        "temporal": _temporal_item(case, saved["entity"]["id"]),
+    }
+
+def _new_subject(entry: NewSubjectIn) -> tuple[NewSubjectIn, str]:
+    """A new subject checked before anything is written: a type an analyst makes by
+    hand, and a name that is more than spaces. A Claim is not a subject here, since a
+    line that names one files a second statement rather than a subject of this one."""
+    declared = entity_engine.entity_type(entry.type)
+    if declared is None or not declared.manual or entry.type == "claim":
+        raise HTTPException(
+            status_code=400, detail=f"a new subject cannot be a '{entry.type}'"
+        )
+    label = entry.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="a new subject needs a name")
+    return entry, label
 
 @router.patch("/{case_id}/timeline/claims/{claim_id}")
 def update_temporal_claim(
@@ -334,6 +474,7 @@ def update_temporal_claim(
     for key in _TEMPORAL_CLAIM_ATTRS:
         if key in body.model_fields_set:
             attrs[key] = getattr(body, key)
+    _without_orphan_zone(attrs)
     _check_attrs("claim", attrs, current=current.get("attrs") or {})
     connector_keys = set(_TEMPORAL_CONNECTORS) & body.model_fields_set
     connectors = (

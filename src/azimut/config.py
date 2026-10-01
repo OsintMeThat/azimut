@@ -52,7 +52,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # their configuration with Sentinel-1 as its source. Empty until found.
     "sentinel1_layer": "",
     "detect_view": {
-        "collapsed": False, "basemap": "esri-world-imagery", "overlays": ["boundaries", "placenames"], "saved": True,
+        "collapsed": False, "width": 380, "basemap": "esri-world-imagery",
+        "overlays": ["boundaries", "placenames"], "saved": True,
     },
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.
@@ -128,6 +129,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The social composer a new post draft starts with. A saved draft keeps its
     # own target so a later preference change never rewrites it.
     "post_target": "x",
+    # The post template a new post draft starts with, by id. Empty means the
+    # classic layout. An id whose template has since been deleted is ignored
+    # where it is read, so nothing here needs cleaning up after a delete.
+    "post_template": "",
     # Whether Publish lets the capture extension fill that composer — the thread
     # typed in, the proof and the media attached, nothing posted. The only switch
     # for it: the extension keeps none of its own, so this is where the answer

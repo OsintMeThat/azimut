@@ -196,3 +196,10 @@ describe('Files — acting on what the view actually shows', () => {
     expect(source).not.toContain('const ents = confirmed.filter((e) => ids.includes(e.id));');
   });
 });
+
+describe('Files offers what is open to the Add event bar', () => {
+  it('publishes under its own tool id and withdraws on unmount', () => {
+    expect(source).toMatch(/offerNote\(\s*'files',/);
+    expect(source).toContain("onDestroy(() => withdrawNote('files'))");
+  });
+});

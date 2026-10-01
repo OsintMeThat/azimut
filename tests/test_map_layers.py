@@ -481,6 +481,42 @@ def test_the_legend_survives_a_reload_and_the_switch_is_not_stored(client, case_
     assert "enabled" not in spec
 
 
+def test_the_dragged_order_is_kept_and_a_new_layer_lands_on_top(client, case_id):
+    """The list reads as the map stacks, first on top, and the order is stored
+    on each layer so it travels with it."""
+    names = [
+        add(client, case_id, KML, f"{stem}.kml", title=stem)["name"]
+        for stem in ("North", "South", "East")
+    ]
+    wanted = [names[1], names[2], names[0]]
+
+    ordered = client.put(f"/api/cases/{case_id}/map-layers/order", json={"names": wanted})
+
+    assert ordered.status_code == 200
+    assert [entry["name"] for entry in ordered.json()] == wanted
+    listed = client.get(f"/api/cases/{case_id}/map-layers").json()
+    assert [entry["name"] for entry in listed] == wanted
+    newest = add(client, case_id, GEOJSON, "west.geojson", title="West")["name"]
+    listed = client.get(f"/api/cases/{case_id}/map-layers").json()
+    assert [entry["name"] for entry in listed] == [newest, *wanted]
+
+
+def test_reordering_skips_a_name_the_case_does_not_hold(client, case_id):
+    row = add(client, case_id, KML, "sightings.kml")
+
+    ordered = client.put(
+        f"/api/cases/{case_id}/map-layers/order",
+        json={"names": ["../elsewhere", "Nothing", row["name"]]},
+    )
+
+    assert ordered.status_code == 200
+    assert [entry["name"] for entry in ordered.json()] == [row["name"]]
+    spec = json.loads(
+        Case.open(case_id).resolve_inside(layout.layer_spec_rel(row["name"])).read_text()
+    )
+    assert spec["position"] == 0
+
+
 def test_a_local_file_is_never_stale(client, case_id):
     """It is exactly what the analyst opened, and it was never going to change."""
     row = add(client, case_id, KML, "sightings.kml")

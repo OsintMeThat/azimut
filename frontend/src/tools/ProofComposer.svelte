@@ -1,5 +1,6 @@
 <script>
-  import { onMount, untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import Konva from 'konva';
   import { api } from '../lib/api.js';
@@ -10,11 +11,13 @@
   // Reading a typed pair back into a point: the one parser the app has, and the
   // one a coordinate row is written in (decimal, hemispheres, or DMS).
   import { parseLatLon } from '../lib/sheetRoles.js';
+  import { zoneAt } from '../lib/localZone.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import DateField from '../components/DateField.svelte';
+  import ClockField from '../components/ClockField.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -125,6 +128,8 @@
     // post is written from. '' → the panels answer for the date, nothing for the
     // sentence.
     when: '',
+    // The zone the date is read in: null is the first point's, resolved on save.
+    whenZone: null,
     description: '',
     // Case files the proof rests on without composing them, brought in from a stated
     // source address. They join the chain on save, and the point with it.
@@ -162,6 +167,46 @@
   // Saved proof slug, or null before the first save.
   let savedName = $state(null);
   let dirty = $state(false);
+
+  // ---- the clock the date is read on ---------------------------------------
+  // The first point is the conclusion, and footage is read on the clock of the
+  // place it shows, so that point's zone is the default. It is looked up only
+  // while a date is set, from the bundled boundaries (no network).
+  let pointZone = $state('');
+  const zonePointKey = $derived.by(() => {
+    if (!proof.when.trim()) return '';
+    const typed = String(specPoints(proof)[0]?.coords ?? '').trim();
+    if (typed) return typed;
+    const auto = autoCoords(proof.panels ?? []);
+    return auto ? `${auto.lat}, ${auto.lon}` : '';
+  });
+  $effect(() => {
+    const key = zonePointKey;
+    if (!key) {
+      pointZone = '';
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(async () => {
+      try {
+        const where = parseLatLon(key) ?? (await api.post('/api/geo/parse', { text: key }));
+        const zone = await zoneAt({ lat: Number(where.lat), lon: Number(where.lon) });
+        if (live) pointZone = zone;
+      } catch {
+        if (live) pointZone = '';
+      }
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  });
+  /** The clock the date reads on: the analyst's pick, else the point's, else UTC. A
+   *  pick of the point's own row goes back to following the point. */
+  function pickClock(zone, { here }) {
+    proof.whenZone = here ? null : zone;
+    dirty = true;
+  }
   // The document as it stands on disk, so an undo that walks all the way back
   // to it can say the proof is saved again. null until a save or an open has
   // put something there to match.
@@ -194,6 +239,12 @@
   // reload elsewhere.
   let proofEntities = $state([]);
   let presentPaths = $state(new Set());
+  // The saved proof open here is what the topbar's Add event seats; an unsaved one offers nothing.
+  $effect(() => {
+    const spec = savedName ? specPath('proof', savedName) : null;
+    offerNote('proof', proofEntities.find((e) => e.attrs?.[specAttr('proof')] === spec) ?? null);
+  });
+  onDestroy(() => withdrawNote('proof'));
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
@@ -376,6 +427,7 @@
     proof.footerText = spec.footerText !== false;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
     proof.when = typeof spec.when === 'string' ? spec.when : '';
+    proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
     proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
@@ -689,6 +741,7 @@
     proof.points = [blankPoint()];
     proof.sources = null;
     proof.when = '';
+    proof.whenZone = null;
     proof.description = '';
     proof.material = [];
     proof.captionSize = CAPTION_SIZE;
@@ -3836,6 +3889,9 @@
           title: result.title,
           // What the post is written from, when the proof carries one.
           description: proof.description,
+          // The date and the clock the save read it on, for a post template with #date.
+          when: proof.when,
+          whenZone: result.when_zone ?? null,
           // every point, one per line: the post cites the first and carries the rest
           coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,
@@ -3946,6 +4002,7 @@
     // sentence edited from Details opens here as the case's answer rather than as
     // the copy this file was written with.
     proof.when = typeof spec.when === 'string' ? spec.when : '';
+    proof.whenZone = typeof spec.whenZone === 'string' && spec.whenZone ? spec.whenZone : null;
     proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
@@ -4750,9 +4807,27 @@
             label="Date the material was taken"
             placeholder="dd/mm/yyyy · Oct 2025 · ~2025"
             calendar
+            zone={proof.whenZone || pointZone || null}
             value={proof.when}
             onchange={(value) => { proof.when = value; dirty = true; }}
           />
+          <!-- Which clock the date is read on. A day is that place's day, so the
+               default follows the first point and is named here rather than
+               assumed: without it the Timeline would put Kyiv's 12th on UTC's. -->
+          {#if proof.when.trim()}
+            <div class="when-zone">
+              <span class="when-zone-label">Clock</span>
+              <ClockField
+                value={proof.when}
+                clock={{ zone: proof.whenZone || pointZone || 'UTC', fixed: '' }}
+                here={pointZone ? [{ zone: pointZone, place: 'the point' }] : []}
+                onpick={pickClock}
+              />
+              {#if !proof.whenZone && !pointZone}
+                <p class="when-zone-note">No point yet, so the day is read in UTC.</p>
+              {/if}
+            </div>
+          {/if}
         </div>
 
         <ProofLayersPanel
@@ -5380,6 +5455,9 @@
     padding: 12px;
   }
   .meta-field { margin-bottom: 10px; }
+  .when-zone { margin-top: 6px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; }
+  .when-zone-label { font-size: var(--fs-xs); color: var(--text-3); }
+  .when-zone-note { grid-column: 2; margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
   .meta-head {
     display: flex;
     align-items: center;

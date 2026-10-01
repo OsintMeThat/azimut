@@ -25,11 +25,20 @@ describe('temporal Claim editor', () => {
     expect(editor).toContain('relationType="at"');
     expect(editor).toContain('relationType="cites"');
     expect(picker).toContain("relationOptions('claim', entry.type, 'claim')");
-    expect(picker).toContain('buildCatalogQuery(caseId, { types, query: term, limit: 200 })');
+    expect(picker).toContain('types={acceptedTypes}');
+    expect(picker).toContain("order={relationType === 'cites' ? '-created' : ''}");
+  });
+
+  it('keeps the zone a date was stated in, and hands the editor its row', () => {
+    expect(editor).toContain("whenZone = chain.entity.attrs?.when_zone ?? item.tz ?? null;");
+    expect(editor).toContain('when_zone: (when && whenZone) || null,');
+    expect(editor).toContain('zone={whenZone}');
+    expect(editor).toContain('onzonechange={(zone) => (whenZone = zone)}');
   });
 
   it('starts a new claim citing the evidence it was opened from, and an edit from its own', () => {
     expect(editor).toContain('initialCites = [],');
-    expect(editor).toContain('if (!item) cites = initialCites.map(');
+    expect(editor).toContain('cites = initialCites.map(keep);');
+    expect(editor).toContain('confidence = item?.confidence ?? initialConfidence;');
   });
 });

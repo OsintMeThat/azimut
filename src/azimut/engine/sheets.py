@@ -685,7 +685,8 @@ def sync_mentions(case: "Case", sheet_id: str, meta: dict[str, Any]) -> None:
     if source is None:
         return
     wanted: list[str] = []
-    for entity_id in linked_entity_ids(meta):
+    resolved = drop_dead_links(case, meta)
+    for entity_id in linked_entity_ids(resolved):
         try:
             link_engine.check_relation_target(case, source, entity_id, link_engine.MENTIONS)
         except CaseError:
@@ -1044,7 +1045,121 @@ def drop_dead_links(case: "Case", meta: dict[str, Any]) -> dict[str, Any]:
         return meta
     held = {str(entity["id"]) for entity in case.entities_by_ids(wanted)}
     gone = {entity_id for entity_id in wanted if entity_id not in held}
+    # An id a merge absorbed is not dead: it points where its entity went.
+    redirects = case.entity_redirects(sorted(gone)) if gone else {}
+    if redirects:
+        live = {entity["id"] for entity in case.entities_by_ids([target["id"] for target in redirects.values()])}
+        moves = {old: str(target["id"]) for old, target in redirects.items() if target["id"] in live}
+        moved, _ = _with_entities_moved(meta, moves)
+        meta = moved or meta
+        gone -= set(moves)
     return _without_entities(meta, gone) or meta
+
+
+def _with_entities_moved(
+    meta: dict[str, Any], moves: dict[str, str]
+) -> tuple[dict[str, Any] | None, list[list[str]]]:
+    """The sidecar with ids moved (``{old: new}``), and where each move happened.
+
+    A location is a path into the sidecar — ``["links", row, column]``, ``["values",
+    column, word]`` or ``["attachments", row, "replaced" | "joined"]`` — so an undone
+    merge puts back exactly those cells and no other. None when nothing moved. A row
+    already carrying the new id does not carry it twice.
+    """
+    out = json.loads(json.dumps(meta))
+    where: list[list[str]] = []
+    for identity, cells in (out.get("links") or {}).items():
+        if isinstance(cells, dict):
+            for name, value in cells.items():
+                if value in moves:
+                    cells[name] = moves[value]
+                    where.append(["links", identity, name])
+    for column, words in (out.get("values") or {}).items():
+        if isinstance(words, dict):
+            for word, value in words.items():
+                if value in moves:
+                    words[word] = moves[value]
+                    where.append(["values", column, word])
+    for identity, held in (out.get("attachments") or {}).items():
+        if isinstance(held, list):
+            kept: list[Any] = []
+            for value in held:
+                target = moves.get(value, value)
+                if target != value:
+                    # "joined" when the row already carried the new id, which then
+                    # stays after an undo; "replaced" when the old one gives way to it.
+                    how = "joined" if target in held else "replaced"
+                    where.append(["attachments", identity, how])
+                if target not in kept:
+                    kept.append(target)
+            out["attachments"][identity] = kept
+    return (out if where else None), where
+
+
+def plan_entity_move(case: "Case", old: str, new: str) -> list[dict[str, Any]]:
+    """Read the sheet cells to move before the merge transaction records its journal."""
+    plans: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        page = case.page_entities(limit=SHEET_PAGE, cursor=cursor, types=["sheet"])
+        for entity in page["items"]:
+            _, path = _paths(case, entity)
+            try:
+                before = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise CaseError(f"cannot read sheet '{entity['label']}' before merging") from exc
+            if not isinstance(before, dict):
+                raise CaseError(f"invalid sheet '{entity['label']}'")
+            after, where = _with_entities_moved(before, {old: new})
+            if after is None:
+                continue
+            changes: list[dict[str, Any]] = []
+            for section, first, second in where:
+                key = [section, first] if section == "attachments" else [section, first, second]
+                if any(change["key"] == key for change in changes):
+                    continue
+                left, right = before, after
+                for part in key:
+                    left, right = left[part], right[part]
+                changes.append({"key": key, "before": left, "after": right})
+            plans.append({"sheet": entity["id"], "changes": changes})
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return plans
+
+
+def apply_entity_move(case: "Case", records: list[dict[str, Any]], *, undo: bool = False) -> tuple[list[str], bool]:
+    """Replay a durable merge journal, preserving later edits and reporting conflicts."""
+    lost: list[str] = []
+    retry = False
+    for record in records:
+        sheet = case.get_entity(record["sheet"])
+        if sheet is None:
+            lost.append("a sheet used by the merge is no longer in the case")
+            continue
+        try:
+            _, path = _paths(case, sheet)
+            meta = json.loads(path.read_text(encoding="utf-8"))
+            for change in record["changes"]:
+                expected = change["after" if undo else "before"]
+                desired = change["before" if undo else "after"]
+                holder = meta
+                for part in change["key"][:-1]:
+                    holder = holder.get(part, {}) if isinstance(holder, dict) else {}
+                key = change["key"][-1]
+                if holder.get(key) == desired:
+                    continue
+                if holder.get(key) != expected:
+                    lost.append(f"a cell in '{sheet['label']}' was changed since and keeps its value")
+                    continue
+                holder[key] = desired
+            # Write only the sidecar; CSV bytes and its edit stamp stay untouched.
+            write_atomic(path, json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            sync_mentions(case, sheet["id"], meta)
+        except (CaseError, OSError, ValueError) as exc:
+            lost.append(f"sheet '{sheet['label']}' could not be updated: {exc}")
+            retry = True
+    return lost, retry
 
 
 def _without_entities(meta: dict[str, Any], gone: set[str]) -> dict[str, Any] | None:

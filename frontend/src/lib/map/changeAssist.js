@@ -183,10 +183,10 @@ export function changeCompatibility(a, b) {
     if (a.sentinel?.layer === b.sentinel?.layer && same(layerReading(a), layerReading(b))) {
       methods.unshift(...PIXEL_METHODS);
     } else {
-      notes.push('Pixel methods need the same layer and reference layers on A and B.');
+      notes.push('Pixel methods need the same layers on A and B.');
     }
     if (a.sentinel?.maxcc !== b.sentinel?.maxcc) {
-      notes.push('The two sides use different cloud ceilings.');
+      notes.push('A and B use different cloud ceilings.');
     }
     return {
       ok: true,
@@ -226,7 +226,7 @@ export function changeCompatibility(a, b) {
       label: 'Sentinel-1 radar',
       from: passA.date,
       to: passB.date,
-      notes: ['Reads the rendered radar picture. Detect measures the backscatter itself.'],
+      notes: ['Reads the radar picture, not the backscatter.'],
       methods: PIXEL_METHODS,
     };
   }
@@ -253,8 +253,8 @@ export function changeCompatibility(a, b) {
       from: releaseA == null ? 'latest' : String(releaseA),
       to: releaseB == null ? 'latest' : String(releaseB),
       notes: [
-        ...(mixed ? ['World Imagery is the live mosaic, so its date varies from place to place.'] : []),
-        'Releases often share pixels, so an unchanged spot is not proof of no change.',
+        ...(mixed ? ['World Imagery’s date varies by place.'] : []),
+        'Releases share pixels, so no highlight is no proof.',
       ],
       methods: PIXEL_METHODS,
     };
@@ -289,7 +289,7 @@ export function changeCompatibility(a, b) {
       label: `VIIRS · ${a.nightlights.source === 'noaa20' ? 'NOAA-20' : 'Suomi NPP'}`,
       from: a.nightlights.day,
       to: b.nightlights.day,
-      notes: ['Moonlight and cloud change a single night. Compare several before concluding.'],
+      notes: ['Moon and cloud sway one night. Compare several.'],
       methods: ['brightness', 'colour'],
     };
   }

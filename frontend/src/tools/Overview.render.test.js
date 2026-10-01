@@ -302,6 +302,8 @@ describe('with a case open', () => {
     await pressRow('No date yet');
     expect(setAnalysisFilter).not.toHaveBeenCalled();
     expect(uiState.tool).toBe('timeline');
+    // and lands on the queue it counted, rather than on the axis
+    expect(uiState.timelineQueue).toBe('undated');
   });
 
   it('prefers the list stamp, which is recomputed off the database', async () => {

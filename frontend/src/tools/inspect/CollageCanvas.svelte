@@ -490,7 +490,7 @@
         <Icon name="eye" size={14} /> Fit
       </button>
     {:else}
-      <span class="zoom-hint">scroll to zoom · drag background to pan · shift-click to select several</span>
+      <span class="zoom-hint">scroll to zoom · drag background to pan · pull corners to warp · shift-click to select several</span>
     {/if}
   </div>
 

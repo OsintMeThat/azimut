@@ -31,6 +31,7 @@ from azimut.engine.analysis_models import (
     is_radar,
     is_single,
     recipe_products,
+    stored,
 )
 from azimut.workspace import Case
 from analyzerfixture import BARE, CLOUD, DARK, EDGE, SENTINEL_TILE, UNSURE, VEGETATION, WATER, at, put_picture, zone
@@ -145,6 +146,60 @@ def test_only_an_analyzer_of_your_own_carries_rules_and_it_needs_one():
         Recipe(name="x", method="rules", rules=many)
     # built-ins keep saying what they always said
     assert all(not r.rules and r.match == "all" and r.parameters.shape == "any" for r in BUILTINS)
+
+
+def test_an_analyzer_declares_what_it_reads_and_its_rules_have_to_agree():
+    change = recipe(LOSS, GREEN_BEFORE)
+    assert (change.sensor, change.dates) == ("sentinel2", "two")
+    spot = recipe({"measure": "band", "band": "B12", "on": "b", "op": "ge", "value": 0.3})
+    assert (spot.sensor, spot.dates) == ("sentinel2", "one")
+    radar = recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3})
+    assert (radar.sensor, radar.dates) == ("sentinel1", "two")
+    # said out loud, it is kept as said: a rule may not contradict it
+    assert recipe(LOSS, sensor="sentinel2", dates="two").dates == "two"
+    with pytest.raises(ValidationError, match="Sentinel-2 one optical rules"):
+        recipe(LOSS, sensor="sentinel1")
+    with pytest.raises(ValidationError, match="radar analyzer reads radar rules"):
+        recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3}, sensor="sentinel2")
+    with pytest.raises(ValidationError, match="one date reads the pass itself"):
+        recipe(LOSS, dates="one")
+    with pytest.raises(ValidationError, match="two dates needs a rule"):
+        recipe({"measure": "band", "band": "B12", "on": "b", "op": "ge", "value": 0.3}, dates="two")
+    # only the rules declare it: a calibrated method says what it reads in `METHODS`
+    assert "sensor" not in BUILTINS[0].model_dump() and "dates" not in BUILTINS[0].model_dump()
+    with pytest.raises(ValidationError, match="only an analyzer of your own"):
+        Recipe(name="x", method="surface", sensor="sentinel2")
+    assert change.model_dump()["sensor"] == "sentinel2" and change.model_dump()["dates"] == "two"
+
+
+def test_an_analyzer_saved_before_it_declared_what_it_reads_gets_it_from_its_rules_once():
+    raw = recipe(LOSS, GREEN_BEFORE).model_dump()
+    del raw["sensor"], raw["dates"]
+    raw["checks"] = [{"id": "old", "name": "Old", "b": {"date": DAY_B}, "marks": [],
+                      "bounds": {"west": 0, "south": 0, "east": 1, "north": 1}}]
+    loaded = stored(Recipe, raw)
+    assert (loaded.sensor, loaded.dates) == ("sentinel2", "two")
+    assert [check.id for check in loaded.checks] == ["old"]          # its frame is gone, the check is not
+    # and it is asked the same thing whether it comes from a file or from a request
+    assert loaded.model_dump() == Recipe.model_validate({**raw, "checks": []}).model_copy(
+        update={"checks": loaded.checks}).model_dump()
+
+
+def test_a_run_saved_with_an_older_analyzer_still_reads():
+    """Runs and routines keep the analyzer they ran with: one saved before an analyzer declared what
+    it reads, or before a check lost its frame, is history and must still open."""
+    older = recipe(LOSS, GREEN_BEFORE).model_dump()
+    del older["sensor"], older["dates"]
+    older["checks"] = [{"id": "old", "name": "Old", "b": {"date": DAY_B}, "marks": [],
+                        "bounds": {"west": 0, "south": 0, "east": 1, "north": 1}}]
+    body = {**sweep_body(recipe(LOSS, GREEN_BEFORE)), "recipe": older}
+    run = stored(RunInput, body)
+    assert (run.recipe.sensor, run.recipe.dates) == ("sentinel2", "two")
+    assert [check.id for check in run.recipe.checks] == ["old"]
+    assert is_single(older) is False and is_radar(older) is False          # the dictionaries it is saved as
+    # a request that still names the dropped field is a caller's mistake, and is refused
+    with pytest.raises(ValidationError):
+        RunInput.model_validate(body)
 
 
 def test_what_a_recipe_reads_follows_from_its_rules():
@@ -431,125 +486,6 @@ def test_the_shape_filter_applies_to_a_sweep(client, offline):
         assert pixel == pytest.approx(expected, abs=3), shape
 
 
-# -- the preview ---------------------------------------------------------------------------
-
-
-def tile_bounds(tile=SENTINEL_TILE, inset=0.2):
-    z, x, y = tile
-    west, north = analyzers.geographic((x + inset) / 2**z, (y + inset) / 2**z)
-    east, south = analyzers.geographic((x + 1 - inset) / 2**z, (y + 1 - inset) / 2**z)
-    return {"west": west, "south": south, "east": east, "north": north}
-
-
-def preview_body(built, **extra):
-    return {"recipe": built.model_dump(), "a": {"date": DAY_A}, "b": {"date": DAY_B},
-            "bounds": tile_bounds(), **extra}
-
-
-def test_a_preview_reads_only_the_cache_and_says_what_reading_the_rest_would_cost(client, offline):
-    built = recipe(LOSS, GREEN_BEFORE)
-    answer = client.post("/api/compare/analyzers/preview", json=preview_body(built))
-    assert answer.status_code == 200, answer.text
-    body = answer.json()
-    assert body["ready"] is False
-    assert body["missing"] == 2          # one product on each date, over one tile
-    assert body["tiles"] == [list(SENTINEL_TILE[1:])] and body["clipped"] is False
-
-
-def test_reading_fetches_what_is_missing_meters_it_and_then_previews(client, offline, monkeypatch):
-    built = recipe(LOSS, GREEN_BEFORE, parameters={"merge_metres": 30})
-    before, after = cleared()
-    config.update_settings(lambda settings: settings.setdefault("api_keys", {}).update(sentinelhub="inst"))
-    asked = []
-
-    def band_frame(instance, box, width, height, day, name, maxcc, *, layer, time=""):
-        asked.append((day, name, maxcc, layer))
-        assert (width, height) == (EDGE, EDGE)
-        return png16(product(before if day == DAY_A else after, name))
-
-    monkeypatch.setattr(detect_rules.sentinel, "band_frame", band_frame)
-    usage = config.month_usage("sentinelhub")
-    answer = client.post("/api/compare/analyzers/preview", json=preview_body(built, read=True)).json()
-    assert sorted(asked) == [(DAY_A, "bands-B04-B08", 100, "TRUE_COLOR"), (DAY_B, "bands-B04-B08", 100, "TRUE_COLOR")]
-    assert config.month_usage("sentinelhub") == usage + 2
-    assert answer["ready"] is True and answer["missing"] == 0
-    assert answer["count"] == 1
-    candidate = answer["candidates"][0]
-    assert candidate["strength"] == "strong" and "parts" not in candidate
-    # both rules passed on the cleared plot; the second on all the green around it
-    first, second = answer["rules"]
-    assert first["share"] == pytest.approx(1200 / 512**2, rel=0.01)
-    assert second["share"] == pytest.approx(1.0, abs=0.01)
-    assert second["kept"] == pytest.approx(first["share"], rel=0.01)
-    mask = np.array(Image.open(io.BytesIO(base64.b64decode(answer["mask"]))))
-    assert mask.shape == (512, 512)
-    assert mask[160, 160] == 0b11000011          # measured, kept, both rules
-    assert mask[10, 10] == 0b01000010            # measured, green before, nothing lost
-    # moving a slider re-reads the cache and fetches nothing more
-    stricter = recipe({**LOSS, "value": -0.8}, GREEN_BEFORE)
-    again = client.post("/api/compare/analyzers/preview", json=preview_body(stricter)).json()
-    assert again["ready"] and again["count"] == 0 and len(asked) == 2
-
-    point = analyzers.geographic((SENTINEL_TILE[1] + 160.5 / 512) / 2**13, (SENTINEL_TILE[2] + 160.5 / 512) / 2**13)
-    probed = client.post("/api/compare/analyzers/probe", json={**preview_body(built), "point": list(point)}).json()
-    assert probed["ready"] and probed["measured"] and probed["kept"]
-    loss, green = probed["rules"]
-    assert loss["passes"] and loss["before"] == pytest.approx(0.81, abs=0.01)
-    assert loss["value"] == pytest.approx(-0.69, abs=0.01)
-    assert green["passes"] and green["before"] is None and green["value"] == pytest.approx(0.81, abs=0.01)
-
-
-def test_a_preview_finds_what_a_sweep_of_the_same_tiles_finds(client, offline):
-    """The builder's promise: what it shows is what a run returns."""
-    case = offline
-    built = recipe(LOSS, GREEN_BEFORE, parameters={"merge_metres": 30, "cleanup": 1, "min_area": 3000})
-    before, after = cleared()
-    paint(after, 400, 60, 6, 6, B04=0.20, B08=0.24)                   # too small to keep
-    body = sweep_body(built)
-    body["zones"] = [zone(0, 0, 1, 1)]
-    seed_frames(body, before, after)
-    seed_frames(sweep_body(built, maxcc=100), before, after, pictures=False)
-    started = client.post(f"/api/cases/{case.id}/analysis/runs", json=body)
-    workqueue.drain(case)
-    run = client.get(f"/api/cases/{case.id}/analysis/runs/{started.json()['id']}").json()
-    shown = client.post("/api/compare/analyzers/preview", json=preview_body(built)).json()
-    assert run["count"] == shown["count"] == 1
-    assert run["results"][0]["bbox"] == pytest.approx(shown["candidates"][0]["bbox"])
-    assert run["results"][0]["margin"] == shown["candidates"][0]["margin"]
-
-
-def test_a_wide_view_previews_the_three_tiles_around_its_middle():
-    z = analyzers.GRID[0]
-    x, y = SENTINEL_TILE[1:]
-    west, north = analyzers.geographic((x - 3) / 2**z, (y - 3) / 2**z)
-    east, south = analyzers.geographic((x + 4) / 2**z, (y + 4) / 2**z)
-    tiles, clipped = detect_rules.preview_tiles((west, south, east, north))
-    assert clipped and len(tiles) == 9
-    assert (x, y) in tiles
-    with pytest.raises(ValueError, match="antimeridian"):
-        detect_rules.preview_tiles((179, 0, -179, 1))
-
-
-def test_a_preview_needs_its_passes_and_refuses_a_built_in(client, offline):
-    built = recipe(LOSS)
-    missing_a = client.post("/api/compare/analyzers/preview", json={**preview_body(built), "a": {"date": ""}})
-    assert missing_a.status_code == 422 and "reference" in missing_a.text
-    builtin = next(r for r in BUILTINS if r.id == "large-change").model_dump()
-    refused = client.post("/api/compare/analyzers/preview", json={**preview_body(built), "recipe": builtin})
-    assert refused.status_code == 422
-
-
-def test_a_radar_preview_reads_the_users_layer_and_holds_one_track(client, offline):
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
-    radar = recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3})
-    body = {**preview_body(radar), "a": {"date": DAY_A, "time": TIME}, "b": {"date": DAY_B, "time": "17:40:00"}}
-    crossed = client.post("/api/compare/analyzers/preview", json=body)
-    assert crossed.status_code == 422 and "track" in crossed.text
-    same = client.post("/api/compare/analyzers/preview",
-                       json={**body, "b": {"date": DAY_B, "time": TIME}}).json()
-    assert same["missing"] == 2 and same["ready"] is False
-
-
 # -- built-ins as rules ----------------------------------------------------------------------
 
 
@@ -570,6 +506,7 @@ def test_the_catalogue_offers_the_rules_vocabulary_and_the_convertible_built_ins
     catalogue = client.get("/api/compare/analyzers").json()
     assert catalogue["rules"]["bands"] == list(sentinel.L2A_BANDS)
     assert "water" in catalogue["rules"]["classes"]
+    assert catalogue["rules"]["max_check_tiles"] == detect_rules.MAX_CHECK_TILES
     assert set(catalogue["as_rules"]) == {"burn-scars", "vegetation-loss", "new-water"}
     assert any(method["id"] == "rules" and method["rules"] for method in catalogue["methods"])
 
@@ -582,24 +519,6 @@ def test_an_analyzer_of_your_own_is_saved_for_every_case_and_carried_by_the_back
     assert listed[0]["rules"][0]["value"] == -0.2
     exported = client.get("/api/settings/export").json()
     assert "Cleared forest" in str(exported)
-
-
-def test_a_view_half_read_is_judged_where_it_is_held(client, offline):
-    """Panning off the frames already read keeps the detections on them live."""
-    built = recipe(LOSS, GREEN_BEFORE)
-    before, after = cleared()
-    seed_frames(sweep_body(built, maxcc=100), before, after, pictures=False)
-    z, x, y = SENTINEL_TILE
-    west, north = analyzers.geographic((x + 0.5) / 2**z, (y + 0.2) / 2**z)
-    east, south = analyzers.geographic((x + 1.5) / 2**z, (y + 0.8) / 2**z)
-    body = {**preview_body(built), "bounds": {"west": west, "south": south, "east": east, "north": north}}
-    answer = client.post("/api/compare/analyzers/preview", json=body).json()
-    assert answer["tiles"] == [[x, y], [x + 1, y]]
-    assert answer["ready"] is True and answer["missing"] == 2 and answer["count"] == 1
-    mask = np.array(Image.open(io.BytesIO(base64.b64decode(answer["mask"]))))
-    assert mask.shape == (512, 1024)
-    assert mask[160, 160] & (1 << detect_rules.KEPT_BIT)
-    assert not mask[:, 512:].any()        # the unread tile is left blank, not guessed
 
 
 # -- checks --------------------------------------------------------------------------------
@@ -616,30 +535,82 @@ STANDING = pixel_point(400, 400)      # green on both dates
 
 def check_body(marks, **extra):
     return {"id": "plot", "name": "The cleared plot", "a": {"date": DAY_A}, "b": {"date": DAY_B},
-            "bounds": tile_bounds(), "marks": marks, **extra}
+            "marks": marks, **extra}
 
 
-def test_a_check_is_a_place_its_passes_and_its_marks():
+def test_a_check_is_its_passes_and_its_marks():
     found = {"point": PLOT, "expect": "found"}
     check = Check.model_validate(check_body([found]))
     assert check.marks[0].expect == "found" and check.result is None
     with pytest.raises(ValidationError, match="dated pass B"):
         Check.model_validate(check_body([], b={"date": ""}))
-    with pytest.raises(ValidationError, match="antimeridian"):
-        Check.model_validate(check_body([], bounds={"west": 179, "south": 0, "east": -179, "north": 1}))
     with pytest.raises(ValidationError, match="match its marks"):
         Check.model_validate(check_body([found], result={"signature": "abc", "count": 1, "covered": [True, False]}))
     with pytest.raises(ValidationError):
         Check.model_validate(check_body([{"point": [200, 0], "expect": "found"}]))
     with pytest.raises(ValidationError):
         Check.model_validate(check_body([found] * (MAX_MARKS + 1)))
+    # a check has no frame of its own: a request naming one is refused, a saved one is read without it
+    framed = check_body([found], bounds={"west": 0, "south": 0, "east": 1, "north": 1})
+    with pytest.raises(ValidationError):
+        Check.model_validate(framed)
+    assert not hasattr(stored(Check, framed), "bounds")
     # checks belong to rules of your own, one id each
-    with pytest.raises(ValidationError, match="rules and checks"):
+    with pytest.raises(ValidationError, match="rules, checks"):
         Recipe(name="x", method="surface", checks=[check])
     with pytest.raises(ValidationError, match="unique"):
         recipe(LOSS, checks=[check, check])
     with pytest.raises(ValidationError):
         recipe(LOSS, checks=[check.model_copy(update={"id": f"c{i}"}) for i in range(MAX_CHECKS + 1)])
+
+
+def test_a_check_reads_the_tiles_under_its_marks_and_beside_a_mark_near_an_edge():
+    z, x, y = SENTINEL_TILE
+    far = pixel_point(100, 100, (z, x + 2, y))
+    marked = Check.model_validate(check_body([{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"},
+                                              {"point": far, "expect": "empty"}]))
+    assert detect_rules.check_tiles(marked) == [(x, y), (x + 2, y)]
+
+    def reads(px, py):
+        return detect_rules.check_tiles(Check.model_validate(check_body([{"point": pixel_point(px, py), "expect": "found"}])))
+
+    # the examples keep their marks 64 pixels inside a tile, which reads that tile alone
+    assert reads(64, 64) == reads(448, 448) == [(x, y)]
+    # nearer an edge the tile across it is read as well, and in a corner the three around it
+    assert reads(20, 256) == [(x, y), (x - 1, y)]
+    assert reads(256, 500) == [(x, y), (x, y + 1)]
+    assert reads(10, 10) == [(x, y), (x - 1, y), (x, y - 1), (x - 1, y - 1)]
+    with pytest.raises(ValueError, match="drop a pin"):
+        detect_rules.check_tiles(Check.model_validate(check_body([])))
+
+
+def test_a_check_may_not_reach_more_tiles_than_a_handful():
+    z, x, y = SENTINEL_TILE
+    wide = [{"point": pixel_point(256, 256, (z, x + 2 * i, y)), "expect": "found"} for i in range(detect_rules.MAX_CHECK_TILES + 1)]
+    with pytest.raises(ValueError, match="at most 12"):
+        detect_rules.check_tiles(Check.model_validate(check_body(wide)))
+
+
+def test_a_check_asks_what_testing_it_costs_before_anything_is_fetched(client, offline):
+    built = recipe(LOSS, GREEN_BEFORE)
+    marks = [{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"}]
+    body = {"recipe": built.model_dump(), "check": check_body(marks)}
+    # one tile, and one product on each date
+    assert client.post("/api/compare/analyzers/check/plan", json=body).json() == {"tiles": 1, "missing": 2}
+    seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+    assert client.post("/api/compare/analyzers/check/plan", json=body).json() == {"tiles": 1, "missing": 0}
+    # a pin near an edge reads the tile across it too, so it costs twice
+    near = check_body([{"point": pixel_point(500, 256), "expect": "found"}])
+    assert client.post("/api/compare/analyzers/check/plan", json={**body, "check": near}).json() == {"tiles": 2, "missing": 2}
+    # no pin, nothing to read; too many tiles, too much to read
+    empty = client.post("/api/compare/analyzers/check/plan", json={**body, "check": check_body([])})
+    assert empty.status_code == 422 and "drop a pin" in empty.text
+    z, x, y = SENTINEL_TILE
+    wide = [{"point": pixel_point(256, 256, (z, x + 2 * i, y)), "expect": "found"} for i in range(13)]
+    refused = client.post("/api/compare/analyzers/check/plan", json={**body, "check": check_body(wide)})
+    assert refused.status_code == 422 and "at most 12" in refused.text
+    builtin = next(r for r in BUILTINS if r.id == "large-change").model_dump()
+    assert client.post("/api/compare/analyzers/check/plan", json={**body, "recipe": builtin}).status_code == 422
 
 
 def test_a_check_reads_the_cache_then_what_it_lacks_and_says_what_came_out_on_each_mark(client, offline, monkeypatch):
@@ -671,26 +642,176 @@ def test_a_check_reads_the_cache_then_what_it_lacks_and_says_what_came_out_on_ea
     loose = {**body, "recipe": recipe({**LOSS, "value": 0.5}).model_dump()}
     assert client.post("/api/compare/analyzers/check", json=loose).json()["covered"] == [True, True]
     assert len(asked) == 2
-    # a built-in has no checks to rerun
+    # a built-in has no checks to try
     builtin = next(r for r in BUILTINS if r.id == "large-change").model_dump()
     assert client.post("/api/compare/analyzers/check", json={**body, "recipe": builtin}).status_code == 422
 
 
-def test_a_check_reads_the_tiles_under_its_marks_or_else_its_view():
-    z, x, y = SENTINEL_TILE
-    far = pixel_point(100, 100, (z, x + 2, y))
-    marked = Check.model_validate(check_body([{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"},
-                                              {"point": far, "expect": "empty"}]))
-    assert detect_rules.check_tiles(marked) == [(x, y), (x + 2, y)]
-    assert detect_rules.check_tiles(Check.model_validate(check_body([]))) == [(x, y)]
-
-
-def test_a_check_without_marks_counts_what_its_view_gave(client, offline):
-    built = recipe(LOSS, GREEN_BEFORE)
+def test_a_test_hands_back_what_the_map_draws(client, offline):
+    built = recipe(LOSS, GREEN_BEFORE, parameters={"merge_metres": 30})
+    marks = [{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"}]
     seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+    body = {"recipe": built.model_dump(), "check": check_body(marks)}
+    plain = client.post("/api/compare/analyzers/check", json=body).json()
+    assert set(plain) == {"ready", "missing", "count", "covered"}          # the list of checks asks for no more
+    answer = client.post("/api/compare/analyzers/check", json={**body, "detail": True}).json()
+    assert answer["ready"] and answer["count"] == 1 and answer["covered"] == [True, False]
+    z, x, y = SENTINEL_TILE
+    [tile] = answer["tiles"]
+    assert (tile["x"], tile["y"]) == (x, y) and answer["size"] == 512
+    assert tile["box"] == detect_rules.tile_box(x, y)
+    mask = np.array(Image.open(io.BytesIO(base64.b64decode(tile["mask"]))))
+    assert mask.shape == (512, 512)
+    assert mask[160, 160] == 0b11000011          # measured, kept, both rules
+    assert mask[10, 10] == 0b01000010            # measured, green before, nothing lost
+    # both rules passed on the cleared plot; the second on all the green around it
+    first, second = answer["rules"]
+    assert first["share"] == pytest.approx(1200 / 512**2, rel=0.01)
+    assert second["share"] == pytest.approx(1.0, abs=0.01) and second["kept"] == pytest.approx(first["share"], rel=0.01)
+    candidate = answer["candidates"][0]
+    assert candidate["strength"] == "strong" and "parts" not in candidate
+    # what every rule read under each pin, for the line to be set against
+    plot, standing = answer["readings"]
+    assert plot["kept"] and plot["rules"][0]["passes"] and plot["rules"][0]["before"] == pytest.approx(0.81, abs=0.01)
+    assert plot["rules"][0]["value"] == pytest.approx(-0.69, abs=0.01)
+    assert not standing["kept"] and not standing["rules"][0]["passes"] and standing["rules"][1]["passes"]
+    assert standing["rules"][0]["value"] == pytest.approx(0, abs=0.01)
+
+
+def test_a_test_says_what_the_pins_would_come_to_without_each_rule(client, offline):
+    built = recipe(LOSS, GREEN_BEFORE)
+    marks = [{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"}]
+    seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+    body = {"recipe": built.model_dump(), "check": check_body(marks)}
+    answer = client.post("/api/compare/analyzers/check", json={**body, "detail": True}).json()
+    assert answer["covered"] == [True, False]
+    # without the loss every green field is flagged, the trap with it; without the green ground nothing changes
+    assert answer["without"] == [{"covered": [True, True]}, {"covered": [True, False]}]
+    # the list of checks asks for no more than it needs, and one rule has nothing to be left out of
+    assert "without" not in client.post("/api/compare/analyzers/check", json=body).json()
+    alone = {"recipe": recipe(LOSS).model_dump(), "check": check_body(marks), "detail": True}
+    assert "without" not in client.post("/api/compare/analyzers/check", json=alone).json()
+
+
+def test_a_rule_that_loses_a_pin_shows_in_what_the_pins_would_come_to_without_it(client, offline):
+    strict = recipe({**LOSS, "value": -0.9}, GREEN_BEFORE)
+    marks = [{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"}]
+    seed_frames(sweep_body(strict, maxcc=100), *cleared(), pictures=False)
+    body = {"recipe": strict.model_dump(), "check": check_body(marks), "detail": True}
+    answer = client.post("/api/compare/analyzers/check", json=body).json()
+    # the line is past the plot's loss, so the found pin is lost; it is the strict line that loses it
+    assert answer["covered"] == [False, False]
+    assert answer["without"][0]["covered"] == [True, True]
+    assert answer["without"][1]["covered"] == [False, False]
+
+
+def test_a_rule_left_out_that_would_flag_more_fragments_than_a_run_keeps_flags_everything(client, offline, monkeypatch):
+    before, after = scene(), scene()
+    paint(after, 150, 150, 40, 30, sky=BARE, **SOIL)                        # the plot, as bare as soil
+    for i in range(100):                                                     # a hundred patches that lost less
+        paint(after, 20 + (i % 10) * 45, 300 + (i // 10) * 12, 3, 3, sky=BARE, B04=0.12, B08=0.30)
+    built = recipe(LOSS, {"measure": "index", "index": "ndvi", "on": "b", "op": "le", "value": 0.12})
+    seed_frames(sweep_body(built, maxcc=100), before, after, pictures=False)
+    monkeypatch.setattr(analyzers, "MAX_RESULTS", 20)
+    marks = [{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"}]
     answer = client.post("/api/compare/analyzers/check",
-                         json={"recipe": built.model_dump(), "check": check_body([])}).json()
-    assert answer == {"ready": True, "missing": 0, "count": 1, "covered": []}
+                         json={"recipe": built.model_dump(), "check": check_body(marks), "detail": True}).json()
+    assert answer["covered"] == [True, False]
+    assert answer["without"][1]["covered"] == [True, True]          # a run would refuse that many pieces
+    assert answer["without"][0]["covered"] == [True, False]
+
+
+def test_what_a_measured_tile_makes_of_some_rules_is_what_a_recipe_of_those_rules_makes_of_it():
+    before, after = cleared()
+    both = recipe(LOSS, GREEN_BEFORE)
+    products = {name: (product(before, name), product(after, name)) for name in recipe_products(both)}
+    mask = np.ones((512, 512), np.uint8)
+    tile = detect_rules.measure(products, mask, both, (DAY_A, DAY_B), LAT)
+    loss_only = evaluate(recipe(LOSS), before, after).reading
+    assert (detect_rules.judge(tile, [0]).binary == loss_only.binary).all()
+    assert (detect_rules.judge(tile).binary == evaluate(both, before, after).reading.binary).all()
+    # under "any" taking one away can only take pixels away
+    either = recipe(LOSS, GREEN_BEFORE, match="any")
+    tile = detect_rules.measure({name: (product(before, name), product(after, name)) for name in recipe_products(either)},
+                                mask, either, (DAY_A, DAY_B), LAT)
+    assert detect_rules.judge(tile, [0]).binary.sum() < detect_rules.judge(tile).binary.sum()
+
+
+def test_a_test_finds_what_a_sweep_of_the_same_tiles_finds(client, offline):
+    """The builder's promise: what it shows is what a run returns."""
+    case = offline
+    built = recipe(LOSS, GREEN_BEFORE, parameters={"merge_metres": 30, "cleanup": 1, "min_area": 3000})
+    before, after = cleared()
+    paint(after, 400, 60, 6, 6, B04=0.20, B08=0.24)                   # too small to keep
+    body = sweep_body(built)
+    body["zones"] = [zone(0, 0, 1, 1)]
+    seed_frames(body, before, after)
+    seed_frames(sweep_body(built, maxcc=100), before, after, pictures=False)
+    started = client.post(f"/api/cases/{case.id}/analysis/runs", json=body)
+    workqueue.drain(case)
+    run = client.get(f"/api/cases/{case.id}/analysis/runs/{started.json()['id']}").json()
+    marks = [{"point": PLOT, "expect": "found"}]
+    shown = client.post("/api/compare/analyzers/check",
+                        json={"recipe": built.model_dump(), "check": check_body(marks), "detail": True}).json()
+    assert run["count"] == shown["count"] == 1
+    assert run["results"][0]["bbox"] == pytest.approx(shown["candidates"][0]["bbox"])
+    assert run["results"][0]["margin"] == shown["candidates"][0]["margin"]
+
+
+def test_a_candidate_cut_by_a_tile_seam_is_judged_whole_when_the_mark_reads_both_sides(client, offline, monkeypatch):
+    z, x, y = SENTINEL_TILE
+    east = (z, x + 1, y)
+    # a plot that runs across the seam, each half too small to keep and the whole not
+    built = recipe(LOSS, GREEN_BEFORE, parameters={"min_area": 120_000})
+    left_before, left_after = scene(), paint(scene(), 470, 226, 42, 60, sky=BARE, **SOIL)
+    right_before, right_after = scene(), paint(scene(), 0, 226, 30, 60, sky=BARE, **SOIL)
+    body = sweep_body(recipe(LOSS, GREEN_BEFORE), maxcc=100)
+    seed_frames(body, left_before, left_after, pictures=False)
+    seed_frames(body, right_before, right_after, tile=east, pictures=False)
+    near = check_body([{"point": pixel_point(490, 256), "expect": "found"}])
+    request = {"recipe": built.model_dump(), "check": near, "detail": True}
+    whole = client.post("/api/compare/analyzers/check", json=request).json()
+    assert [(tile["x"], tile["y"]) for tile in whole["tiles"]] == [(x, y), (x + 1, y)]
+    assert whole["count"] == 1 and whole["covered"] == [True]
+    assert whole["candidates"][0]["area"] > 120_000
+    # read on its own tile, as a mark nearer the middle is, only its half is left, and too small
+    monkeypatch.setattr(detect_rules, "EDGE_PX", 0)
+    half = client.post("/api/compare/analyzers/check", json=request).json()
+    assert [(tile["x"], tile["y"]) for tile in half["tiles"]] == [(x, y)]
+    assert half["count"] == 0 and half["covered"] == [False]
+
+
+def test_a_point_of_a_tested_check_says_what_every_rule_read_there(client, offline):
+    built = recipe(LOSS, GREEN_BEFORE)
+    body = {"recipe": built.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}]), "point": PLOT}
+    assert client.post("/api/compare/analyzers/probe", json=body).json() == {"ready": False}
+    seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+    probed = client.post("/api/compare/analyzers/probe", json=body).json()
+    assert probed["ready"] and probed["measured"] and probed["kept"]
+    loss, green = probed["rules"]
+    assert loss["passes"] and loss["before"] == pytest.approx(0.81, abs=0.01)
+    assert loss["value"] == pytest.approx(-0.69, abs=0.01)
+    assert green["passes"] and green["before"] is None and green["value"] == pytest.approx(0.81, abs=0.01)
+    # anywhere outside the tiles the check was read on, nothing is held
+    elsewhere = pixel_point(256, 256, (SENTINEL_TILE[0], SENTINEL_TILE[1] + 3, SENTINEL_TILE[2]))
+    assert client.post("/api/compare/analyzers/probe", json={**body, "point": elsewhere}).json() == {"ready": False}
+
+
+def test_a_check_needs_its_passes_and_the_track_they_share(client, offline):
+    built = recipe(LOSS)
+    body = {"recipe": built.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}], a={"date": ""})}
+    unpaired = client.post("/api/compare/analyzers/check", json=body)
+    assert unpaired.status_code == 422 and "before date" in unpaired.text
+    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    radar = recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3})
+    source = lambda day, time: {"provider": "sentinel1", "date": day, "time": time}  # noqa: E731
+    marks = [{"point": PLOT, "expect": "found"}]
+    crossed = check_body(marks, a=source(DAY_A, TIME), b=source(DAY_B, "17:40:00"))
+    refused = client.post("/api/compare/analyzers/check/plan", json={"recipe": radar.model_dump(), "check": crossed})
+    assert refused.status_code == 422 and "track" in refused.text
+    same = check_body(marks, a=source(DAY_A, TIME), b=source(DAY_B, TIME))
+    assert client.post("/api/compare/analyzers/check/plan",
+                       json={"recipe": radar.model_dump(), "check": same}).json() == {"tiles": 1, "missing": 2}
 
 
 def test_a_check_saved_on_other_passes_asks_to_be_saved_again(client, offline):
@@ -731,13 +852,14 @@ def test_the_examples_are_whole_analyzers_whose_marks_sit_well_inside_their_tile
             assert bool(check.a.date) is not single, (example["id"], check.id)
             if not single:
                 assert check.a.date < check.b.date
+            assert check.marks, (example["id"], check.id)
             for mark in check.marks:
-                west, south, east, north = (check.bounds.west, check.bounds.south, check.bounds.east, check.bounds.north)
-                assert west < mark.point[0] < east and south < mark.point[1] < north, (example["id"], check.id)
                 gx, gy = analyzers.mercator(*mark.point)
                 px, py = (gx * 2**z % 1) * 512, (gy * 2**z % 1) * 512
                 assert 64 <= px <= 448 and 64 <= py <= 448, (example["id"], check.id)
             tiles.update(detect_rules.check_tiles(check))
+            # well inside, so no mark reads the tile across an edge as well
+            assert set(detect_rules.check_tiles(check)) == {detect_rules.pixel_of(mark.point)[:2] for mark in check.marks}
         # running all of an example's checks stays a handful of requests
         assert len(tiles) * len(recipe_products(built)) * (1 if single else 2) <= 16, example["id"]
 

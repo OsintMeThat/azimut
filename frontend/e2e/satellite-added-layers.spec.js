@@ -110,3 +110,46 @@ test("the pin's card states its point and copies it", async ({ page, context, br
   await expect(page.getByText('Coordinates copied')).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('48.850000, 2.350000');
 });
+
+test('the rows open folded and a dragged row is stored in its new place', async ({ page }) => {
+  const second = { ...LAYER, name: 'depots', title: 'Depots map' };
+  let order = null;
+  await installAppFixture(page);
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) =>
+    route.request().method() === 'GET' ? route.fulfill({ json: [LAYER, second] }) : route.fallback()
+  );
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/order`, (route) => {
+    order = route.request().postDataJSON().names;
+    route.fulfill({ json: [second, LAYER] });
+  });
+  await page.goto('/#satellite?ll=48.85,2.35&z=16');
+
+  const details = page.getByRole('button', { name: `${LAYER.title}, details` });
+  await expect(details).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('checkpoints.geojson')).toHaveCount(0);
+
+  // dragged by hand, drifting off the rows to the left on the way, as a hand
+  // moving down a grip on the row's edge does: the drop still takes
+  // measured once the panel above has stopped moving the list down
+  const list = page.locator('ul.layers:has(.fold)');
+  let settled = null;
+  await expect
+    .poll(async () => {
+      const top = (await list.boundingBox())?.y;
+      const same = top === settled;
+      settled = top;
+      return same;
+    })
+    .toBe(true);
+  const grip = await page.getByRole('button', { name: `Move ${second.title}`, exact: true }).boundingBox();
+  const target = await page.locator('ul.layers:has(.fold) > li').first().boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(grip.x - 14, grip.y + (target.y + 4 - grip.y) * (step / 8));
+  }
+  await page.mouse.up();
+
+  await expect.poll(() => order).toEqual([second.name, LAYER.name]);
+  await expect(page.locator('.layers > li .fold .name')).toHaveText([second.title, LAYER.title]);
+});

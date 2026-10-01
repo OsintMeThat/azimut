@@ -83,10 +83,12 @@ _DAY = r"^(|\d{4}-\d{2}-\d{2})$"
 #: A picture's date as the browser states it: a day, or a radar pass's UTC instant.
 _PICTURE_DATE = r"^(|\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ)?)$"
 #: The colours a GIF keeps exactly, comma-separated: the marks drawn on the
-#: pictures and the export's own inks. Median cut spends a palette on the
-#: imagery, so a thin red outline over fields came out a dull brown and a green
-#: and a blue mark came out one teal.
-GIF_COLOURS = 192
+#: pictures and the export's own inks. A palette quantizer can spend its entries
+#: on the common sand tones and turn rare dark pixels into grey-brown ones. Use
+#: an octree palette with every GIF entry so the imagery loses as little colour
+#: information as GIF allows after visible overlay colours have been reserved.
+GIF_COLOURS = 256
+GIF_QUANTIZE_METHOD = Image.Quantize.FASTOCTREE
 MAX_KEPT_COLOURS = 32
 _KEPT_COLOURS = r"^(#[0-9a-fA-F]{6}(,#[0-9a-fA-F]{6}){0,31})?$"
 
@@ -576,15 +578,16 @@ def _kept_colours(text: str) -> list[tuple[int, int, int]]:
 
 
 def _quantize(frame: Image.Image, kept: list[tuple[int, int, int]]) -> Image.Image:
-    """One frame in 192 colours, the kept ones among them exactly.
+    """One frame in 256 colours, the kept ones among them exactly.
 
-    The rest of the palette is median cut's answer for the imagery. Mapping onto a
-    fixed palette dithers by default, which would speckle the marks' edges and change
-    how the imagery has always looked, so it maps to the nearest entry instead.
+    The rest of the palette is the octree quantizer's answer for the imagery.
+    Mapping onto a fixed palette dithers by default, which would speckle the marks'
+    edges and change how the imagery has always looked, so it maps to the nearest
+    entry instead.
     """
     if not kept:
-        return frame.quantize(colors=GIF_COLOURS, method=Image.Quantize.MEDIANCUT)
-    base = frame.quantize(colors=GIF_COLOURS - len(kept), method=Image.Quantize.MEDIANCUT)
+        return frame.quantize(colors=GIF_COLOURS, method=GIF_QUANTIZE_METHOD)
+    base = frame.quantize(colors=GIF_COLOURS - len(kept), method=GIF_QUANTIZE_METHOD)
     ground = (base.getpalette() or [])[: 3 * (GIF_COLOURS - len(kept))]
     entries = [channel for rgb in kept for channel in rgb] + ground
     # A palette image holds 256 entries; the spare ones repeat the first kept colour.

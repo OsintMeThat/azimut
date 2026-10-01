@@ -20,6 +20,9 @@ export function trackTint(color) {
   return index < 0 ? undefined : `var(--anno-${index + 1})`;
 }
 const RELATIONS = new Set(['any', 'owner', 'about', 'place', 'source']);
+/** The files a file lane draws: the sources' pictures and videos, or the imagery the
+ *  app pictured from above (satellite, map screenshots, Compare, Detect). */
+const FILE_LANES = new Set(['sources', 'imagery']);
 const ROLES = new Set(['occurred', 'observed', 'valid', 'unset']);
 
 const unique = (values, allowed = null, limit = 500) => [
@@ -46,6 +49,12 @@ export function timelineTrack(value, index = 0) {
       label: typeof query.label === 'string' ? query.label.slice(0, 300) : '',
       relation: RELATIONS.has(query.relation) ? query.relation : 'any',
       roles: unique(query.roles, ROLES, 4),
+      // The Media Library's working-files switch: frames, captures, collages and
+      // renders the case made itself stay off the track. Absent reads as off, which
+      // is what every track saved before it meant.
+      ...(query.collected_only === true ? { collected_only: true } : {}),
+      // A lane that draws each of its events as the file it dates (`fileLane`).
+      ...(FILE_LANES.has(query.as_files) ? { as_files: query.as_files } : {}),
     },
     color: TRACK_COLORS.includes(raw.color) ? raw.color : '',
     collapsed: raw.collapsed === true,
@@ -54,11 +63,85 @@ export function timelineTrack(value, index = 0) {
   };
 }
 
+/** The kinds of file an event can put at its date. */
+const SITUATED = ['media', 'capture'];
+
+/**
+ * The Media lane: the sources' pictures and videos where the analyst dated them, and
+ * nowhere else.
+ *
+ * A file's date is the one an analyst gives it: the date typed on a proof (stated for
+ * the footage it rests on), a correction, an event about the file or citing it ("seen
+ * in" a video). Each of those is a Claim, so the lane holds the Claims tied to a file
+ * and draws each one as that file, with its name and its picture. What a file says
+ * about itself (the post's date, the camera's clock) is a clue and not a finding: it
+ * stays on the File dates track, added on purpose, and one press away when an event is
+ * added from the file. What the app pictured from above is not a source's footage, so
+ * it has a lane of its own (`imageryLane`).
+ */
+export function mediaLane() {
+  return timelineTrack({
+    id: 'files', label: 'Media', categories: ['statement'], query: { as_files: 'sources' },
+  });
+}
+
+/** The Imagery lane: satellite captures, map screenshots, Compare renders and the
+ *  pictures Detect keeps, where an event dates them. Added from the track list. */
+export function imageryLane() {
+  return timelineTrack({
+    id: 'imagery', label: 'Imagery', categories: ['statement'], query: { as_files: 'imagery' },
+  });
+}
+
+/** Whether a track draws its events as the files they date. */
+export function drawsFiles(track) {
+  return FILE_LANES.has(track?.query?.as_files);
+}
+
+/**
+ * The file an event puts at its date: the one the server named (`file`, with its
+ * preview), or else the first file it is about, then the first it cites.
+ */
+export function situatedFile(item) {
+  if (item?.file?.id) return item.file;
+  for (const key of ['subject_entities', 'source_entities']) {
+    const entry = (item?.[key] ?? []).find((entity) => SITUATED.includes(entity?.type));
+    if (entry) return { id: entry.id, label: entry.label, type: entry.type };
+  }
+  return null;
+}
+
+/**
+ * What a fresh reading opens on: the files where the analyst dated them, over the
+ * events. A saved view keeps the tracks it was saved with.
+ */
 export function defaultTimelineTracks() {
   return [
+    mediaLane(),
     timelineTrack({ id: 'events', label: 'Events', categories: ['statement'] }),
-    timelineTrack({ id: 'media', label: 'Media', categories: ['media'] }, 1),
   ];
+}
+
+/** The File dates preset. `collectedOnly` holds back the working files. */
+export function mediaTrack(tracks = [], { collectedOnly = true } = {}) {
+  const used = new Set(tracks.map((track) => track.id));
+  let id = 'media';
+  for (let n = 2; used.has(id); n += 1) id = `media-${n}`;
+  return timelineTrack({
+    id, label: 'File dates', categories: ['media'],
+    query: collectedOnly ? { collected_only: true } : {},
+  });
+}
+
+/** Whether a track leaves the case's working files out. */
+export function holdsBackWorkingFiles(track) {
+  return track?.categories?.includes('media') && track.query?.collected_only === true;
+}
+
+/** The same track with its working files let in. */
+export function withWorkingFiles(track) {
+  const { collected_only: _held, ...query } = track.query ?? {};
+  return { ...track, query };
 }
 
 export function normalizeTimelineTracks(value) {
@@ -85,9 +168,13 @@ export function trackPresets(types = []) {
   });
   return [
     timelineTrack({ id: 'preset-events', label: 'Events', categories: ['statement'] }),
+    { ...mediaLane(), id: 'preset-files' },
+    { ...imageryLane(), id: 'preset-imagery' },
     ofType('person'),
     ofType('place', 'place'),
-    timelineTrack({ id: 'preset-media', label: 'Media', categories: ['media'] }),
+    timelineTrack({
+      id: 'preset-media', label: 'File dates', categories: ['media'], query: { collected_only: true },
+    }),
     timelineTrack({
       id: 'preset-sources', label: 'Sources', categories: ['statement'],
       query: { relation: 'source' },
@@ -190,9 +277,11 @@ export function timelineViewState(value) {
     // `zone:<IANA name>` is the fourth reading, for an investigation at the other end
     // of the world that the case has no saved point in yet. Validated by shape only:
     // whether this machine can load the name is asked when the axis is drawn, so a
-    // view made where the zone exists does not lose it on a stricter box.
+    // view made where the zone exists does not lose it on a stricter box. `case` is
+    // the zone the case's places stand in, found again wherever the view is opened.
+    // A view saved before there was a choice read UTC, and still does.
     zoneChoice: typeof raw.zone_choice === 'string'
-      && /^(utc|machine|place:[^\s]{1,64}|zone:[A-Za-z0-9+\-_/]{1,64})$/.test(raw.zone_choice)
+      && /^(utc|case|machine|place:[^\s]{1,64}|zone:[A-Za-z0-9+\-_/]{1,64})$/.test(raw.zone_choice)
       ? raw.zone_choice : 'utc',
     viewMode: raw.view_mode === 'list' ? 'list' : 'plot',
     groupBy: ['subject', 'type', 'place', 'source', 'role'].includes(raw.group_by)

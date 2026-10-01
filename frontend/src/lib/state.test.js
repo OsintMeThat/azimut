@@ -171,6 +171,12 @@ describe('applyPrefs', () => {
     applyPrefs({ post_target: 'bluesky' });
     expect(prefs.postTarget).toBe('bluesky');
 
+    expect(prefs.postTemplate).toBe(''); // no default template until one is chosen
+    applyPrefs({ post_template: 'tpl_1' });
+    expect(prefs.postTemplate).toBe('tpl_1');
+    applyPrefs({ post_template: '' }); // clearing it is a real choice too
+    expect(prefs.postTemplate).toBe('');
+
     applyPrefs({ signature_handle: '@example' });
     expect(prefs.signatureHandle).toBe('@example');
   });

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from .. import jobs
@@ -344,6 +344,20 @@ def save_collage(case_id: str, body: CollageIn) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/cases/{case_id}/collages/{name}/thumb")
+async def save_collage_thumb(case_id: str, name: str, file: UploadFile) -> dict[str, Any]:
+    """The picture the collage list shows for it, drawn by the browser from the layout."""
+    case = get_case(case_id)
+    raw = await file.read(inspectwork.MAX_THUMB_BYTES + 1)
+    try:
+        saved = inspectwork.save_collage_thumb(case, name, raw)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if saved is None:
+        raise HTTPException(status_code=404, detail="collage not found")
+    return saved
 
 
 @router.delete("/cases/{case_id}/collages/{name}")

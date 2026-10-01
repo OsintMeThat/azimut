@@ -2100,4 +2100,12 @@ describe('the date a proof states for its material', () => {
     expect(blank.when).toBe(null);
     expect(blank.description).toBe(null);
   });
+
+  it('keeps the clock the analyst picked for the date, and none left to the point', () => {
+    const bare = { panels: [], pastes: [], shapes: [], points: [], notes: {} };
+    expect(toSpec({ ...bare, when: '2024-03-12', whenZone: 'UTC' }).whenZone).toBe('UTC');
+    expect(toSpec({ ...bare, when: '2024-03-12', whenZone: null }).whenZone).toBe(null);
+    // A zone with no date to read says nothing.
+    expect(toSpec({ ...bare, when: '', whenZone: 'Asia/Tokyo' }).whenZone).toBe(null);
+  });
 });

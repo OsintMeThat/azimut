@@ -15,9 +15,12 @@ newer SQLite than the code does is a false alarm waiting to fire on one OS.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+
+from azimut.engine import entities as entity_engine
 
 #: Objects created after schema 7, dropped newest first. A migration that adds a
 #: table or an index adds its line here in the same change.
@@ -28,6 +31,12 @@ _AFTER_7 = (
     "DROP TABLE IF EXISTS analysis_views",
     "DROP TABLE IF EXISTS entity_images",
     "DROP TABLE IF EXISTS graph_pins",
+)
+
+#: Objects created after schema 18, the release 0.3.1 shipped.
+_AFTER_18 = (
+    "DROP TABLE IF EXISTS entity_merges",
+    "DROP TABLE IF EXISTS entity_redirects",
 )
 
 #: The `links` table exactly as schema 7 shipped it: before `confidence` (8) and
@@ -52,6 +61,25 @@ CREATE INDEX idx_links_to   ON links(to_id);
 CREATE INDEX idx_links_type ON links(type);
 """
 
+#: The Time projection as 0.3.1 shipped it, before schema 19 added the zone a value
+#: was stated in. Rebuilt rather than altered, for the SQLite floor noted above.
+_TEMPORAL_V18 = """
+CREATE TABLE temporal_rewound AS SELECT id, owner_id, authority, category, kind, raw,
+    earliest, latest, precision, shape, time_role, uncertain, approximate, zone,
+    sortable, status, confidence, parse_error FROM temporal_items;
+DROP TABLE temporal_items;
+ALTER TABLE temporal_rewound RENAME TO temporal_items;
+CREATE INDEX idx_temporal_window ON temporal_items(category, earliest, latest);
+CREATE INDEX idx_temporal_owner  ON temporal_items(owner_id, category);
+CREATE INDEX idx_temporal_kind   ON temporal_items(kind);
+"""
+
+
+def drop_temporal_zones(conn: sqlite3.Connection) -> None:
+    """Take the zone column off the Time projection, as a case before 19 had it."""
+    conn.executescript(_TEMPORAL_V18)
+
+
 #: The `links` table as schema 8 shipped it: `confidence` is in, `nature` is not.
 _LINKS_V8 = """
 CREATE TABLE links_rewound AS SELECT id, from_id, to_id, type, prov_by,
@@ -64,14 +92,49 @@ CREATE INDEX idx_links_type ON links(type);
 """
 
 
+def _unfold_search_text(conn: sqlite3.Connection) -> None:
+    """Write both search indexes the way 0.3.1 did, before schema 19 folded them:
+    case only, every accent kept. Column for column what `_entity_search_text` and
+    `_media_search_text` put in, less the fold."""
+    conn.row_factory = sqlite3.Row
+    for row in conn.execute("SELECT id, type, label, attrs_json FROM entities").fetchall():
+        attrs = json.loads(row["attrs_json"])
+        fixed = (row["label"], row["type"], attrs.get("folder"), attrs.get("notes"))
+        declared = entity_engine.search_values(row["type"], attrs)
+        text = "\n".join(str(value) for value in (*fixed, *declared) if value)
+        conn.execute("UPDATE entities SET search_text = ? WHERE id = ?", (text.casefold(), row["id"]))
+    for row in conn.execute("SELECT path, item_json FROM media_items").fetchall():
+        item = json.loads(row["item_json"])
+        source = item.get("source") or {}
+        text = "\n".join(str(value) for value in (
+            item.get("filename") or Path(str(item.get("path") or "")).name,
+            item.get("title"), item.get("notes"), item.get("folder"),
+            source.get("title"), source.get("uploader"),
+            source.get("webpage_url") or source.get("url"),
+        ) if value)
+        conn.execute(
+            "UPDATE media_items SET search_text = ? WHERE path = ?", (text.casefold(), row["path"])
+        )
+
+
 def rewind(db: Path | str, version: int) -> None:
-    """Put `case.db` back at `version`, shape included, ready to be migrated up."""
-    if version not in (7, 8):
+    """Put `case.db` back at `version`, shape included, ready to be migrated up.
+
+    18 is what 0.3.1 shipped. After it, 19 folds what the search indexes hold, adds
+    the two merge tables and the zone column, so that is what a rewind to it undoes.
+    """
+    if version not in (7, 8, 18):
         raise ValueError(f"no rewind to schema {version}")
     with closing(sqlite3.connect(db)) as conn, conn:
-        conn.executescript(_LINKS_V7 if version == 7 else _LINKS_V8)
-        for statement in _AFTER_7:
-            conn.execute(statement)
+        if version == 18:
+            _unfold_search_text(conn)
+            for statement in _AFTER_18:
+                conn.execute(statement)
+            drop_temporal_zones(conn)
+        else:
+            conn.executescript(_LINKS_V7 if version == 7 else _LINKS_V8)
+            for statement in (*_AFTER_18, *_AFTER_7):
+                conn.execute(statement)
         conn.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(version),)
         )

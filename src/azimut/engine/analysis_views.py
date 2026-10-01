@@ -62,7 +62,7 @@ def _query_terms(spec: dict[str, Any]) -> dict[str, str]:
         return {}
     allowed = {
         "type", "status", "q", "folder", "unfiled", "recursive", "attr",
-        "value", "linked", "unlinked", "since", "until", "by",
+        "value", "linked", "unlinked", "lacks", "since", "until", "by",
     }
     return {
         key: _short(value, 1000)
@@ -134,6 +134,13 @@ def _clean_track(value: Any, index: int) -> dict[str, Any]:
             "label": _short(query.get("label"), 300),
             "relation": relation,
             "roles": roles,
+            # Written only when set, so a track saved before the switch reads back
+            # exactly as it was stored.
+            **({"collected_only": True} if query.get("collected_only") is True else {}),
+            # A lane that draws each event as the file it dates: the sources' files
+            # (the Media track) or the imagery the app made (the Imagery track).
+            **({"as_files": query["as_files"]}
+               if query.get("as_files") in {"sources", "imagery"} else {}),
         },
         "collapsed": bool(value.get("collapsed")),
         "hidden": _string_list(value.get("hidden"), limit=500),
@@ -145,11 +152,12 @@ _ZONE_NAME = re.compile(r"[A-Za-z0-9+\-_/]{1,64}")
 
 
 def _valid_zone_choice(choice: str) -> bool:
-    """Which clock the axis was read on: UTC, this machine, a saved point, or a zone
-    named outright. The last one has to travel — a view made on `zone:Asia/Tokyo` must
-    not come back on UTC — so the name is kept whether or not the machine reopening it
-    can load the name; the axis asks that when it draws."""
-    if choice in {"utc", "machine"}:
+    """Which clock the axis was read on: the zone of the case's places, UTC, this
+    machine, a saved point, or a zone named outright. The last one has to travel — a
+    view made on `zone:Asia/Tokyo` must not come back on UTC — so the name is kept
+    whether or not the machine reopening it can load the name; the axis asks that when
+    it draws. `case` is found again from the places wherever the view is opened."""
+    if choice in {"utc", "case", "machine"}:
         return True
     if choice.startswith("place:"):
         rest = choice.removeprefix("place:")
@@ -299,6 +307,7 @@ def _capture(case: Case, spec: dict[str, Any]) -> dict[str, Any]:
             attr_value=terms.get("value"),
             linked=terms.get("linked"),
             unlinked=terms.get("unlinked") == "true",
+            lacks=[part for part in terms.get("lacks", "").split(",") if part] or None,
             since=terms.get("since"),
             until=terms.get("until"),
             filed_by=filed_by or None,
@@ -476,11 +485,13 @@ def _clean_snapshot(value: Any) -> dict[str, Any]:
             "uncertain": bool(item.get("uncertain")),
             "approximate": bool(item.get("approximate")),
             "zone": _short(item.get("zone"), 24) or None,
+            "tz": _short(item.get("tz"), 64) or None,
             "sortable": bool(item.get("sortable")),
             "status": _short(item.get("status"), 24) or None,
             "confidence": _short(item.get("confidence"), 24) or None,
             "parse_error": _short(item.get("parse_error"), 500) or None,
             "owner_type": _short(item.get("owner_type"), 40),
+            "produced_here": bool(item.get("produced_here")),
             "subjects": _string_list(item.get("subjects"), item_limit=64),
             "places": _string_list(item.get("places"), item_limit=64),
             "sources": _string_list(item.get("sources"), item_limit=64),
@@ -595,11 +606,37 @@ def prepare(
     return spec
 
 
-def snapshot_page(view: dict[str, Any], *, limit: int, cursor: str | None, order: str) -> dict[str, Any]:
-    """A bounded Board page over immutable captured rows."""
+def snapshot_page(
+    view: dict[str, Any],
+    *,
+    limit: int,
+    cursor: str | None,
+    order: str,
+    types: list[str] | None = None,
+    count_by_type: bool = False,
+) -> dict[str, Any]:
+    """A bounded Board page over immutable captured rows.
+
+    ``types`` narrows the frozen rows the way it narrows a live page, which is what a
+    Board group asks for, and ``count_by_type`` counts every captured row per type.
+    ``events`` orders by the Claims the snapshot itself captured naming a row: a frozen
+    reading is not re-read against the live case.
+    """
     snapshot = view.get("spec", {}).get("snapshot") or {}
-    rows = list(snapshot.get("entities") or [])
-    if order in {"label", "-label"}:
+    captured = list(snapshot.get("entities") or [])
+    rows = [row for row in captured if not types or row.get("type") in types]
+    if order in {"events", "-events"}:
+        claims = {row.get("id") for row in captured if row.get("type") == "claim"}
+        named: dict[str, set[str]] = {}
+        for link in snapshot.get("links") or []:
+            if link.get("type") in {"about", "at", "cites"} and link.get("from") in claims:
+                named.setdefault(str(link.get("to")), set()).add(str(link.get("from")))
+        # Stable, so rows naming the same count keep the order they were captured in.
+        rows.sort(
+            key=lambda row: len(named.get(str(row.get("id")), ())),
+            reverse=order.startswith("-"),
+        )
+    elif order in {"label", "-label"}:
         rows.sort(key=lambda row: str(row.get("label") or "").casefold(), reverse=order.startswith("-"))
     elif order in {"created", "-created"}:
         rows.sort(
@@ -616,4 +653,11 @@ def snapshot_page(view: dict[str, Any], *, limit: int, cursor: str | None, order
         raise CaseError(f"invalid snapshot cursor '{cursor}'")
     page = rows[start : start + limit]
     next_cursor = str(start + limit) if start + limit < len(rows) else None
-    return {"items": page, "next_cursor": next_cursor, "total": len(rows)}
+    result: dict[str, Any] = {"items": page, "next_cursor": next_cursor, "total": len(rows)}
+    if count_by_type:
+        by_type: dict[str, int] = {}
+        for row in rows:
+            kind = str(row.get("type") or "")
+            by_type[kind] = by_type.get(kind, 0) + 1
+        result["by_type"] = by_type
+    return result

@@ -100,13 +100,20 @@
   }
 
   function openTimeline(item = null) {
-    uiState.timelineFocus = { entityId: entity.id, entityLabel: entity.label, itemId: item?.id ?? null };
+    uiState.timelineFocus = {
+      entityId: entity.id,
+      entityLabel: entity.label,
+      entityType: entity.type,
+      entityAttrs: entity.attrs ?? {},
+      itemId: item?.id ?? null,
+      producedHere: item?.produced_here === true,
+    };
     uiState.tool = 'timeline';
     onclose?.();
   }
 
   function timeLabel(item) {
-    return formatTemporalValue(item.raw ?? '').label;
+    return formatTemporalValue(item.raw ?? '', item.tz).label;
   }
 </script>
 

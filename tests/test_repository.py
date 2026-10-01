@@ -820,6 +820,29 @@ def test_every_case_wide_ordering_is_served_by_an_index(repo):
         assert "USING INDEX" in detail.upper(), f"{order} has no index to walk: {detail}"
 
 
+def test_a_counted_ordering_costs_one_index_search_per_row_of_its_types(repo):
+    """"Most noted" cannot walk an index, so it is asked of a type set only, and each
+    row it orders costs one search on `links.to_id` rather than a scan of the links."""
+    from azimut.store.cursors import _COUNTED_ORDERS
+
+    repo.add_entity("person", "Ada", by="user")
+    with repo._sqlite._connect() as conn:
+        for order, (expression, _key, descending) in _COUNTED_ORDERS.items():
+            direction = "DESC" if descending else "ASC"
+            plan = " | ".join(
+                row[-1] for row in conn.execute(
+                    "EXPLAIN QUERY PLAN SELECT rowid AS _rowid, *"
+                    f", {expression} AS _sort FROM entities WHERE type IN (?)"
+                    f" ORDER BY {expression} {direction}, rowid {direction} LIMIT ?",
+                    ("person", 41),
+                )
+            ).upper()
+            assert "USING INDEX IDX_ENTITIES_TYPE" in plan, f"{order} scans the case: {plan}"
+            assert "SEARCH N USING INDEX IDX_LINKS_TO" in plan, f"{order} scans links: {plan}"
+    with pytest.raises(CaseError):
+        repo.page_entities(order="-events")
+
+
 def test_an_ordered_page_reads_the_case_in_order_and_pages_without_repeating(repo):
     """The ordering covers the whole case rather than the page, and the cursor keys
     on the sort plus the row's own seat, so the second page starts where the first

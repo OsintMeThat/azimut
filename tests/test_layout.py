@@ -101,6 +101,7 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "inspect work": len(layout.session_rel(longest_name)),
         "pre-0.3.1 session": len(layout.legacy_session_rel(longest_name)),
         "collage": len(layout.collage_rel(longest_name)),
+        "collage preview": len(layout.collage_thumb_rel(longest_name)),
         "compare session": len(layout.compare_session_rel(longest_name)),
         "grid": len(layout.grid_rel(longest_name)),
         "map layer spec": len(layout.layer_spec_rel(longest_name)),

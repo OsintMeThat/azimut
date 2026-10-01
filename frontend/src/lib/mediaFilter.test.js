@@ -33,6 +33,11 @@ describe('matchesQuery', () => {
     expect(matchesQuery(item(), 'mosque')).toBe(false);
   });
 
+  it('finds a title whatever accents it was written with, as the index does', () => {
+    expect(matchesQuery(item({ title: 'Arrivée au quai' }), 'arrivee')).toBe(true);
+    expect(matchesQuery(item({ notes: 'Москва́' }), 'МОСКВА')).toBe(true);
+  });
+
   it('matches on title, notes and folder', () => {
     expect(matchesQuery(item({ title: 'Mosque strike' }), 'mosque')).toBe(true);
     expect(matchesQuery(item({ notes: 'seen near the bridge' }), 'bridge')).toBe(true);
@@ -116,6 +121,7 @@ describe('the shared facet list', () => {
     const links = read('../../../src/azimut/engine/links.py');
     const types = [
       ...quoted(links.match(/^MADE_HERE: .* = \(([^)]*)\)/m)[1]),
+      ...quoted(links.match(/^FROM_ABOVE: .* = \(([^)]*)\)/m)[1]),
       ...quoted(links.match(/^PRODUCED_HERE: .* = \(([^)]*)\)/m)[1]),
     ];
     expect(types).toContain('compare');

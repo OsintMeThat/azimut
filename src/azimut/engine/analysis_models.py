@@ -35,6 +35,7 @@ Band = Literal["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B
 #: Ground as Sentinel-2's scene classification names it.
 SceneClass = Literal["vegetation", "bare", "water", "snow", "cloud", "shadow", "dark"]
 ShortId = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,48}$")]
+AreaId = Annotated[str, Field(pattern=r"^[0-9a-f]{12}$")]
 Colour = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 # Methods that read one image instead of a pair. A vessel or a fire is a thing
@@ -114,6 +115,7 @@ RETIRED_OVERLAYS = frozenset({"labels"})
 
 class DetectPrefs(Model):
     collapsed: bool = False
+    width: int = Field(default=380, ge=300, le=720)
     basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
     overlays: list[Literal["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]] = (
         Field(default=["boundaries", "placenames"], max_length=7))
@@ -354,18 +356,20 @@ class Source(Model):
         return data
 
 
+def ordered_pair(a: Source, b: Source) -> bool:
+    """Whether a dated comparison reads A strictly before B."""
+    if not a.date or not b.date:
+        return True
+    if a.date != b.date:
+        return a.date < b.date
+    return bool(a.provider == b.provider == "sentinel1" and a.time and b.time and a.time < b.time)
+
+
 #: How many checks one analyzer keeps, and how many marks one check holds.
 MAX_CHECKS = 12
 MAX_MARKS = 20
 Longitude = Annotated[float, Field(ge=-180, le=180)]
 Latitude = Annotated[float, Field(ge=-85, le=85)]
-
-
-class Bounds(Model):
-    west: Longitude
-    south: Latitude
-    east: Longitude
-    north: Latitude
 
 
 class Mark(Model):
@@ -391,16 +395,16 @@ class CheckResult(Model):
 class Check(Model):
     """A place the analyst trusts, rerun after each change to the rules.
 
-    It keeps the exact pair of passes it was saved on, so a rerun reads the
-    same images. Marks say where a candidate must come out and where none may;
-    a check without marks still says how many candidates its view gave.
+    It is a pair of passes and the marks laid on them: where a candidate must
+    come out and where none may. It keeps the exact passes it was saved on, so
+    a rerun reads the same images, and it reads the ground under its marks and
+    nothing else, so there is no frame to set.
     """
 
     id: ShortId
     name: str = Field(min_length=1, max_length=120)
     a: Source = Field(default_factory=Source)
     b: Source
-    bounds: Bounds
     marks: list[Mark] = Field(default_factory=list, max_length=MAX_MARKS)
     result: CheckResult | None = None
 
@@ -408,8 +412,6 @@ class Check(Model):
     def placed(self) -> Check:
         if not self.b.date:
             raise ValueError("a check is read on a dated pass B")
-        if self.bounds.west >= self.bounds.east or self.bounds.south >= self.bounds.north:
-            raise ValueError("a check's view must not cross the antimeridian")
         if self.result and self.result.covered and len(self.result.covered) != len(self.marks):
             raise ValueError("a check's last result must match its marks")
         return self
@@ -429,6 +431,12 @@ class Recipe(Model):
     #: to pass all of them or any one.
     rules: list[Rule] = Field(default_factory=list, max_length=MAX_RULES)
     match: Literal["all", "any"] = "all"
+    #: What an analyzer of your own reads, chosen when it is made: which
+    #: satellite, and whether it judges one date or the change between two. The
+    #: rules have to agree. One saved before it was declared gets it worked out
+    #: from its rules, once, and keeps it from then on.
+    sensor: Literal["sentinel2", "sentinel1"] | None = None
+    dates: Literal["one", "two"] | None = None
     #: Places the analyst trusts, rerun after each change (`Check`).
     checks: list[Check] = Field(default_factory=list, max_length=MAX_CHECKS)
 
@@ -447,8 +455,8 @@ class Recipe(Model):
     @model_validator(mode="after")
     def own_rules(self) -> Recipe:
         if self.method != "rules":
-            if self.rules or self.checks:
-                raise ValueError("only an analyzer of your own rules carries rules and checks")
+            if self.rules or self.checks or self.sensor or self.dates:
+                raise ValueError("only an analyzer of your own rules carries rules, checks and what it reads")
             return self
         if not self.rules:
             raise ValueError("add at least one rule")
@@ -457,16 +465,60 @@ class Recipe(Model):
             raise ValueError("radar and optical rules read two satellites; keep them in two analyzers")
         if True in radar and any(rule.measure == "class" for rule in self.rules):
             raise ValueError("ground classes come from Sentinel-2, which a radar analyzer does not read")
+        single = all(rule.on == "b" for rule in self.rules)
+        if self.sensor is None:
+            self.sensor = "sentinel1" if True in radar else "sentinel2"
+        if self.dates is None:
+            self.dates = "one" if single else "two"
+        if (self.sensor == "sentinel1") != (True in radar):
+            raise ValueError("a radar analyzer reads radar rules and a Sentinel-2 one optical rules; "
+                             "start another analyzer for the other satellite")
+        if (self.dates == "one") != single:
+            raise ValueError("an analyzer of one date reads the pass itself, and one of two dates needs a rule "
+                             "on the change or on the before date")
         if len({check.id for check in self.checks}) != len(self.checks):
             raise ValueError("check ids must be unique")
         if len(rule_bands(self)) > MAX_BANDS:
             raise ValueError(f"an analyzer reads at most {MAX_BANDS} bands")
         return self
 
+    @model_serializer(mode="wrap")
+    def compact(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # A calibrated method says what it reads in `METHODS`; only the rules
+        # declare it, so everything else is written as it always was.
+        data: dict[str, Any] = handler(self)
+        for key in ("sensor", "dates"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
 
 class ZoneSet(Model):
+    """Shape snapshots written by Detect before area groups existed."""
     title: str = Field(min_length=1, max_length=120)
     zones: list[Zone] = Field(min_length=1, max_length=32)
+
+
+class AreaGroupReview(Model):
+    saved_area_id: AreaId
+    current_area_id: AreaId
+    name: str = Field(min_length=1, max_length=120)
+
+
+class AreaGroup(Model):
+    title: str = Field(min_length=1, max_length=120)
+    area_ids: list[AreaId] = Field(default_factory=list, max_length=1000)
+    position: int | None = Field(default=None, ge=0, le=100_000)
+    pending_review: list[AreaGroupReview] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def unique_areas(self) -> AreaGroup:
+        if len(self.area_ids) != len(set(self.area_ids)):
+            raise ValueError("an area can appear only once in a group")
+        reviewed = [item.saved_area_id for item in self.pending_review]
+        if len(reviewed) != len(set(reviewed)) or any(area_id not in self.area_ids for area_id in reviewed):
+            raise ValueError("reviewed shapes must belong to this group")
+        return self
 
 
 class AreaGeometry(Model):
@@ -486,6 +538,7 @@ class Area(Model):
     name: str = Field(min_length=1, max_length=120)
     colour: Colour = "#38bdf8"
     geometry: AreaGeometry
+    position: int | None = Field(default=None, ge=0, le=100_000)
 
 
 class AreaDates(Model):
@@ -527,6 +580,8 @@ class RunInput(Model):
                     pair.date_rule == "latest_previous" and self.followup_id
                 ):
                     raise ValueError("choose a reference date for each area")
+                if not is_single(self.recipe) and not ordered_pair(pair.a, pair.b):
+                    raise ValueError("date A must be before date B for each comparison")
             return self
         if not self.zones:
             raise ValueError("choose at least one area")
@@ -539,6 +594,8 @@ class RunInput(Model):
             required.append(self.a)
         if any(not source.date for source in required):
             raise ValueError("choose a dated Copernicus acquisition")
+        if not is_single(self.recipe) and self.date_rule == "manual" and not ordered_pair(self.a, self.b):
+            raise ValueError("date A must be before date B for each comparison")
         return self
 
 
@@ -559,18 +616,18 @@ def is_radar(recipe: Recipe | dict[str, Any]) -> bool:
     """Whether the recipe reads Sentinel-1."""
     recipe = _as_recipe(recipe)
     if recipe.method == "rules":
-        return any(rule.measure == "radar" for rule in recipe.rules)
+        return recipe.sensor == "sentinel1"
     return recipe.method in RADAR_METHODS
 
 
 def is_single(recipe: Recipe | dict[str, Any]) -> bool:
     """Whether the recipe reads one date: a thing present, not a change.
 
-    Rules that only ever read B need no reference, like a vessel or a fire.
+    An analyzer of one date needs no reference, like a vessel or a fire.
     """
     recipe = _as_recipe(recipe)
     if recipe.method == "rules":
-        return all(rule.on == "b" for rule in recipe.rules)
+        return recipe.dates == "one"
     return recipe.method in SINGLE_METHODS
 
 
@@ -757,10 +814,10 @@ def frames_per_tile(method: str) -> int:
 #: metres rather than pixels (`engine/analyzers.py` says why for radar).
 SMOOTHING_M = {"sar-change": 45.0}
 
-# `rules` is the one method whose answers depend on the recipe: which dates,
-# which satellite and how many frames follow from the rules it holds, and the
-# panel works them out from those (lib/map/analyzerRules.js). What it states
-# here is the answer for a change in Sentinel-2 bands.
+# `rules` is the one method whose answers depend on the recipe: which dates and
+# which satellite are what the analyzer declares (`Recipe.dates`, `Recipe.sensor`),
+# and the panel works the frames out from them (lib/map/analyzerRules.js). What
+# it states here is the answer for a change in Sentinel-2 bands.
 METHODS = [
     {"id": method, "label": label, "single": method in SINGLE_METHODS,
      "clouds": method in CLOUD_METHODS or method == "rules", "sensor": sensor_for(method),

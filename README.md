@@ -52,9 +52,9 @@ to fix a point on the map.*
 
 | Tool | What it does |
 |------|--------------|
-| **Board** | The whole case as one sortable table: typed identity fields per entity, one filter bar whose values are all taken from the case, shared Details, and a ticked selection deleted as one recoverable act. |
+| **Timeline** | The case on a time axis, and where events are noted: one line with a date, a sentence and `@` mentions. A point is an instant, a bracket a date known to the day or month, a bar a period; the ruler reads in any zone or at a saved place, the list copies out as a table, and a picked file plays in place. |
+| **Board** | The case as an index: people, accounts, places and things first, each with how many events name it and when, then the files and work folded under. One filter bar whose values are all taken from the case, Details beside the list, and a ticked selection deleted as one recoverable act. |
 | **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. Graph and Timeline both export a reading as an SVG or PNG plate carrying its question, period and legend. |
-| **Timeline** | The same case on a time axis. Dated statements and media stack in coloured tracks, the ruler reads in any zone or at a saved place, date quality is drawn instead of flattened, and the window can be handed to Board, Graph or the map. |
 | **Sheet** | The case's own CSVs in a plain grid: a comparison table, a worklist with its own state, or the half-facts too soft to be entities. Columns can be typed, a workbook arrives one sheet per tab, and a declared sheet promotes into entities, places and dated statements. A worklist can also be built back out of what the case holds. |
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |

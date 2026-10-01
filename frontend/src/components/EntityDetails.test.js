@@ -68,21 +68,22 @@ describe('import enrichment details', () => {
     // a relation says something about the world; the chain says how a file was
     // made and decides what a delete destroys
     expect(source).toContain(
-      '{#if canRelate || canMention || claimSeatHere || hasRelations || lineageCount || placedPoints.length}'
+      '{#if canRelate || canMention || claimRelations.length || hasRelations || lineageCount || placedPoints.length}'
     );
     expect(source).toContain('{#if lineageCount}');
     expect(source).toContain('<details class="lineage-card">');
   });
 
-  it('files a claim from the Claims group of anything that can sit on one', () => {
-    // The group is there before the first claim exists, since that is when it is
-    // needed; the seat comes from the verb registry, not from a list of types.
-    expect(source).toContain('const claimSeatHere = $derived(claimSeat(entity));');
-    expect(source).toContain('{:else if claimSeatHere || claimRelations.length}');
-    expect(source).toContain('title={claimActionTitle(claimSeatHere.slot)}');
-    expect(source).toContain(">Add claim</button>");
-    expect(source).toContain("{#if connectionComposer === 'claim'}");
-    expect(source).toContain('onsaved={() => (connectionComposer = null)}');
+  it('adds an event from the summary above the tabs, and lists events in Connections', () => {
+    // One place to add an event, reachable from whichever tab is open; Connections
+    // keeps the list of the events that name it.
+    const summary = source.indexOf('<EntitySummary caseId={caseState.current.id} {entity} {onclose} />');
+    expect(summary).toBeGreaterThan(-1);
+    expect(summary).toBeLessThan(source.indexOf('class="ed-tabs"'));
+    expect(source).toContain('{:else if claimRelations.length}');
+    expect(source).toContain('<h4>Events</h4>');
+    expect(source).not.toContain("connectionComposer === 'claim'");
+    expect(source).not.toContain('quick-claim-host');
   });
 
   it('files a connection from its own Add action rather than the panel Save', () => {
@@ -258,7 +259,7 @@ describe('the declared fields', () => {
     expect(source).toContain('type={entity.type}');
     expect(source).toContain('bind:values={infoAttrs}');
     expect(source).toContain("exclude={entity.type === 'claim'");
-    expect(source).toContain("['when', 'time_role', 'confidence', 'method', 'verbatim']");
+    expect(source).toContain("['when', 'when_zone', 'time_role', 'confidence', 'method', 'verbatim']");
     expect(source).toContain('{#if declaredFields.length}');
   });
 
@@ -381,7 +382,7 @@ describe('a file the app has no viewer for', () => {
 describe('Claim details tabs', () => {
   it('keeps assessment fields in Time instead of duplicating them in Info', () => {
     expect(source).toContain(
-      "exclude={entity.type === 'claim' ? ['when', 'time_role', 'confidence', 'method', 'verbatim'] : []}"
+      "exclude={entity.type === 'claim' ? ['when', 'when_zone', 'time_role', 'confidence', 'method', 'verbatim'] : []}"
     );
     expect(source).toContain('<EntityTime');
   });

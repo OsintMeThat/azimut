@@ -21,6 +21,7 @@ import {
   formatSpan,
   formatSpanRange,
   formatTemporalValue,
+  temporalZoneWords,
   initialWindow,
   UTC,
   inputWindowValue,
@@ -97,6 +98,8 @@ describe('timeline window', () => {
 
   it('creates exact timestamps when the visible window is close enough', () => {
     expect(dateAtRatio('2026-08-01', '2026-08-10', 0)).toBe('2026-08-01');
+    // 23:00 UTC on the 1st is already the 2nd in Kyiv.
+    expect(dateAtRatio('2026-08-01T23:00:00Z', '2026-08-02T01:00:00Z', 0, 'Europe/Kyiv')).toBe('2026-08-02');
     expect(timeAtRatio('2026-06-23T00:00:00Z', '2026-06-24T00:00:00Z', .39999997))
       .toBe('2026-06-23T09:36:00Z');
     expect(draftWhen('2026-08-11T18:00:00Z', '2026-08-11T19:00:00Z', .5, .5))
@@ -104,6 +107,27 @@ describe('timeline window', () => {
     expect(draftWhen('2026-08-11T18:00:00Z', '2026-08-11T19:00:00Z', .25, .75))
       .toBe('2026-08-11T18:15:00Z/2026-08-11T18:45:00Z');
     expect(draftWhen('2026-08-01', '2026-08-10', .1, .8)).toBe('2026-08-02/2026-08-09');
+  });
+
+  it('proposes a date as precise as the window it was pointed at', () => {
+    const at = (from, span) => new Date(Date.parse(from) + span).toISOString();
+    const start = '2026-01-01T00:00:00Z';
+    // three days is still read to the second, a second more is read to the day
+    expect(draftWhen(start, at(start, 3 * DAY), .5, .5)).toBe('2026-01-02T12:00:00Z');
+    expect(draftWhen(start, at(start, 3 * DAY + 1000), .5, .5)).toBe('2026-01-02');
+    // up to four hundred days a day, then a month
+    expect(draftWhen(start, at(start, 400 * DAY), .5, .5)).toBe('2026-07-20');
+    expect(draftWhen(start, at(start, 401 * DAY), .5, .5)).toBe('2026-07');
+    // up to twelve years a month, then a year
+    expect(draftWhen(start, at(start, 12 * 365.2425 * DAY), .5, .5)).toBe('2032-01');
+    expect(draftWhen(start, at(start, 13 * 365.2425 * DAY), .5, .5)).toBe('2032');
+    // a drag gives a range at the same precision, and one inside a single period is it
+    expect(draftWhen(start, at(start, 2 * 365 * DAY), .1, .6)).toBe('2026-03/2027-03');
+    expect(draftWhen(start, at(start, 40 * 365.2425 * DAY), .1, .6)).toBe('2029/2049');
+    expect(draftWhen(start, at(start, 2 * 365 * DAY), .5, .505)).toBe('2027-01');
+    for (const value of ['2032-01', '2032', '2026-03/2027-03', '2029/2049']) {
+      expect(validateTemporalValue(value).valid, value).toBe(true);
+    }
   });
 });
 
@@ -116,6 +140,32 @@ describe('temporal reading', () => {
       .toBe('11 Aug 2026, 18:40:00 UTC+02:00');
     expect(formatTemporalValue('2026-08-11/2026-08-14').label)
       .toBe('11 Aug 2026 to 14 Aug 2026');
+  });
+
+  it('reads a camera clock to the millisecond at most, and not at all when it is zeros', () => {
+    expect(formatTemporalValue('2023-06-22T17:07:16.000000Z').label).toBe('22 Jun 2023, 17:07:16 UTC');
+    expect(formatTemporalValue('2023-06-22T17:07:16.250000Z').label).toBe('22 Jun 2023, 17:07:16.250 UTC');
+    expect(formatTemporalValue('2023-06-22T17:07:16.1Z').label).toBe('22 Jun 2023, 17:07:16.1 UTC');
+  });
+
+  it('names the zone a value was stated in, and says when none was', () => {
+    expect(formatTemporalValue('2024-03-12', 'Europe/Kyiv').label).toBe('12 Mar 2024 (Europe/Kyiv)');
+    expect(formatTemporalValue('2024-03-12/2024-03-14', 'Asia/Tokyo').label)
+      .toBe('12 Mar 2024 to 14 Mar 2024 (Asia/Tokyo)');
+    expect(formatTemporalValue('2024-07-12T14:30:00', 'Europe/Kyiv').label)
+      .toBe('12 Jul 2024, 14:30:00 Europe/Kyiv');
+    expect(formatTemporalValue('2024-07-12T14:30:00').label).toBe('12 Jul 2024, 14:30:00 local time');
+    // A time that says where it stands keeps its own offset.
+    expect(formatTemporalValue('2024-07-12T14:30:00Z', 'Europe/Kyiv').label).toBe('12 Jul 2024, 14:30:00 UTC');
+    // An offset written for a picked zone names the zone and keeps the offset.
+    expect(formatTemporalValue('2024-07-12T14:30:00+03:00', 'Europe/Kyiv').label)
+      .toBe('12 Jul 2024, 14:30:00 Europe/Kyiv (UTC+03:00)');
+    expect(formatTemporalValue('2024-07-12T14:30:00+03:00').label).toBe('12 Jul 2024, 14:30:00 UTC+03:00');
+
+    expect(temporalZoneWords({ zone: 'date-only', tz: 'Europe/Kyiv' })).toBe('Europe/Kyiv');
+    expect(temporalZoneWords({ zone: 'date-only' })).toBe('Not stated, read as UTC days');
+    expect(temporalZoneWords({ zone: 'local' })).toBe('Not stated');
+    expect(temporalZoneWords({})).toBe('Not set');
   });
 
   it('validates the same supported families before save', () => {
@@ -132,39 +182,155 @@ describe('timeline layout', () => {
   const point = (id, earliest, latest, shape = 'instant', label = id) => ({
     id, earliest, latest, shape, label, raw: earliest.slice(0, 10),
   });
+  const instant = (id, at, label = id) => point(id, at, new Date(Date.parse(at) + 1000).toISOString(), 'instant', label);
+  const one = (items, from = '2026-08-01', to = '2026-08-10', width = 1000, rows = 6, options) =>
+    layoutTimelineItems(items, from, to, width, rows, options);
+  // Two entries stacked at the far end: a stem would cross one, so the track stays on
+  // captions and a test can read them.
+  const crowd = [instant('z1', '2026-08-10T20:00:00Z'), instant('z2', '2026-08-10T20:00:00Z')];
+  const captioned = (items, options) =>
+    one([...items, ...crowd], undefined, undefined, 1000, 6, options).items
+      .filter((item) => !item.id.startsWith('z'));
 
-  it('packs the rendered label width instead of a fixed axis fraction', () => {
-    const layout = layoutTimelineItems([
-      point('a', '2026-08-02T00:00:00Z', '2026-08-03T00:00:00Z', 'instant', 'A long checkpoint observation'),
-      point('b', '2026-08-02T12:00:00Z', '2026-08-03T00:00:00Z', 'instant', 'Another long checkpoint observation'),
-      point('c', '2026-08-05T00:00:00Z', '2026-08-08T00:00:00Z', 'interval', 'Road closure'),
-    ], '2026-08-01', '2026-08-10', 1000);
-    expect(layout.items.map((item) => item.lane)).toEqual([0, 1, 0]);
-    expect(layout.items[0].displayWidth).toBeGreaterThan(150);
-    expect(layout.items[0].haloWidth).toBeCloseTo(10, 3);
-    expect(layout.items[2].displayWidth).toBeGreaterThan(250);
+  it('puts an exact instant on its pixel, at either end of the window and in between', () => {
+    // A stamp to the second covers that second; the point sits in its middle, which is
+    // a thousandth of a pixel from the instant itself on a ten-day axis.
+    const start = Date.parse('2026-08-01T00:00:00Z');
+    const span = 10 * 86_400_000;
+    for (const at of ['2026-08-01T00:00:00Z', '2026-08-06T00:00:00Z', '2026-08-10T23:59:59Z']) {
+      const [item] = one([instant('a', at)]).items;
+      expect(item.mark).toBe('point');
+      expect(item.left).toBeCloseTo(((Date.parse(at) + 500 - start) / span) * 100, 9);
+      expect(item.width).toBe(0);
+    }
   });
 
-  it('collapses overflow into a clear count', () => {
-    const entries = Array.from({ length: 10 }, (_, index) =>
-      point(`same-${index}`, '2026-08-02T00:00:00Z', '2026-08-03T00:00:00Z')
-    );
-    const layout = layoutTimelineItems(entries, '2026-08-01', '2026-08-10', 800, 3);
+  it('never flips a mark to the other side of its date near the end of the window', () => {
+    const late = captioned([instant('late', '2026-08-10T12:00:00Z', 'Last convoy')])[0];
+    expect(late.left).toBeCloseTo(95, 2);
+    expect(late).not.toHaveProperty('endAligned');
+    // its caption goes where there is room, and the mark stays put
+    expect(late.caption.side).toBe('left');
+  });
+
+  it('draws a reduced date across the whole period it covers', () => {
+    const [day] = one([point('day', '2026-08-03T00:00:00Z', '2026-08-04T00:00:00Z')]).items;
+    expect(day.mark).toBe('bracket');
+    expect(day.left).toBeCloseTo(20, 5);
+    expect(day.width).toBeCloseTo(10, 5);
+  });
+
+  it('draws a reduced date as a point once its period is narrower than a few pixels', () => {
+    // A day over a year of axis is under three pixels: as good as an instant.
+    const [day] = one([point('day', '2026-03-10T00:00:00Z', '2026-03-11T00:00:00Z')],
+      '2026-01-01', '2026-12-31').items;
+    expect(day.mark).toBe('point');
+    expect(day.left).toBeCloseTo(((Date.parse('2026-03-10T12:00:00Z') - Date.parse('2026-01-01'))
+      / (Date.parse('2027-01-01') - Date.parse('2026-01-01'))) * 100, 5);
+  });
+
+  it('draws a short period at its true length, never widened to a box', () => {
+    const [bar] = one([point('p', '2026-08-02T00:00:00Z', '2026-08-02T06:00:00Z', 'interval')]).items;
+    expect(bar.mark).toBe('bar');
+    expect(bar.width).toBeCloseTo(2.5, 5);
+    const [sliver] = one([point('s', '2026-08-02T00:00:00Z', '2026-08-02T00:00:10Z', 'interval')]).items;
+    expect(sliver.mark).toBe('bar');
+    expect(sliver.width).toBeCloseTo(0.2, 5); // the 2px floor, and no more
+  });
+
+  it('stacks points that would overlap, pinned first, and never moves one sideways', () => {
+    const layout = one([
+      instant('b', '2026-08-02T00:00:00Z'),
+      instant('a', '2026-08-02T00:00:00Z'),
+      { ...instant('c', '2026-08-02T00:00:00Z'), pinned: true },
+    ]);
+    const rows = Object.fromEntries(layout.items.map((item) => [item.id, item.row]));
+    expect(rows).toEqual({ c: 0, a: 1, b: 2 });
+    expect(new Set(layout.items.map((item) => item.left)).size).toBe(1);
+  });
+
+  it('gives a period the first row free across its whole span', () => {
+    const layout = one([
+      instant('x', '2026-08-03T00:00:00Z'),
+      point('span', '2026-08-02T00:00:00Z', '2026-08-06T00:00:00Z', 'interval'),
+      point('later', '2026-08-08T00:00:00Z', '2026-08-09T00:00:00Z', 'interval'),
+    ]);
+    const rows = Object.fromEntries(layout.items.map((item) => [item.id, item.row]));
+    expect(rows).toEqual({ x: 0, span: 1, later: 0 });
+  });
+
+  it('counts past the ceiling, and a pinned entry escapes it', () => {
+    const entries = Array.from({ length: 10 }, (_, index) => instant(`same-${index}`, '2026-08-02T00:00:00Z'));
+    const layout = one(entries, '2026-08-01', '2026-08-10', 800, 3);
     expect(layout.items).toHaveLength(3);
     expect(layout.clusters).toHaveLength(1);
     expect(layout.clusters[0].count).toBe(7);
+    expect(layout.clusters[0].row).toBe(3);
     expect(layout.rows).toBe(4);
+
+    const pinned = entries.map((entry, index) => ({ ...entry, pinned: index === 8 }));
+    const kept = one(pinned, '2026-08-01', '2026-08-10', 800, 3);
+    expect(kept.items.some((item) => item.id === 'same-8')).toBe(true);
+    expect(kept.clusters.flatMap((cluster) => cluster.items).some((item) => item.id === 'same-8'))
+      .toBe(false);
   });
 
-  it('keeps pinned entries visible when a dense track is packed', () => {
-    const entries = Array.from({ length: 9 }, (_, index) => ({
-      ...point(`same-${index}`, '2026-08-02T00:00:00Z', '2026-08-03T00:00:00Z'),
-      pinned: index === 8,
-    }));
-    const layout = layoutTimelineItems(entries, '2026-08-01', '2026-08-10', 800, 3);
-    expect(layout.items.some((item) => item.id === 'same-8')).toBe(true);
-    expect(layout.clusters.flatMap((cluster) => cluster.items).some((item) => item.id === 'same-8'))
-      .toBe(false);
+  it('captions a mark only where the caption covers nothing else', () => {
+    const [a, b] = captioned([
+      instant('a', '2026-08-02T00:00:00Z', 'A long checkpoint observation'),
+      instant('b', '2026-08-02T06:00:00Z', 'Another long checkpoint observation'),
+    ]);
+    expect(a.row).toBe(0);
+    expect(b.row).toBe(0); // 25px apart: two marks side by side, not stacked
+    expect(a.caption).toBeNull(); // no room on either side of the first
+    expect(b.caption.side).toBe('right');
+  });
+
+  it('captions the selected entry first, and the same way on every render', () => {
+    // b's right is blocked by c, and its left is where a's caption goes, until b is
+    // the one being read.
+    const items = [
+      instant('a', '2026-08-02T00:00:00Z', 'A long checkpoint observation'),
+      instant('b', '2026-08-04T00:00:00Z', 'Another long checkpoint observation'),
+      instant('c', '2026-08-05T00:00:00Z', 'Gate'),
+    ];
+    const plain = Object.fromEntries(captioned(items).map((item) => [item.id, item.caption?.side ?? null]));
+    expect(plain).toEqual({ a: 'right', b: null, c: 'right' });
+    const read = Object.fromEntries(captioned(items, { selectedId: 'b' }).map((item) => [item.id, item.caption?.side ?? null]));
+    expect(read).toEqual({ a: null, b: 'left', c: 'right' });
+    expect(captioned(items)).toEqual(captioned(items));
+  });
+
+  it('writes a period\'s name inside it when it fits, beside it when not', () => {
+    const [wide] = captioned([point('w', '2026-08-02T00:00:00Z', '2026-08-06T00:00:00Z', 'interval', 'Road closure')]);
+    expect(wide.caption.side).toBe('inside');
+    const [narrow] = captioned([point('n', '2026-08-02T00:00:00Z', '2026-08-02T03:00:00Z', 'interval', 'Road closure')]);
+    expect(narrow.caption.side).toBe('right');
+  });
+
+  it('hangs cards under a track only when every card fits', () => {
+    const few = one([
+      instant('a', '2026-08-02T00:00:00Z', 'Convoy crossed the bridge'),
+      { ...instant('m', '2026-08-06T00:00:00Z', 'VID_0312'), category: 'media', thumb: '.thumbs/v.jpg' },
+    ]);
+    expect(few.cards).toBe(true);
+    expect(few.items.every((item) => item.card && !item.caption)).toBe(true);
+    expect(few.items[1].card.width).toBeGreaterThan(few.items[0].card.width - 60);
+    expect(few.height).toBeGreaterThan(one([]).height + 40);
+
+    const many = one(Array.from({ length: 13 }, (_, index) =>
+      instant(`e${index}`, `2026-08-0${1 + (index % 9)}T0${index % 10}:00:00Z`)));
+    expect(many.cards).toBe(false);
+    // a stacked column would run a stem through the mark under it
+    const stacked = one([instant('x', '2026-08-02T00:00:00Z'), instant('y', '2026-08-02T00:00:00Z')]);
+    expect(stacked.cards).toBe(false);
+  });
+
+  it('leaves out what lies outside the window rather than piling it on the edge', () => {
+    const layout = one([instant('before', '2026-07-20T00:00:00Z'), instant('in', '2026-08-05T00:00:00Z')]);
+    expect(layout.items.map((item) => item.id)).toEqual(['in']);
+    const [open] = one([point('long', '2026-07-01T00:00:00Z', '2026-08-03T00:00:00Z', 'interval')]).items;
+    expect(open).toMatchObject({ mark: 'bar', left: 0, openStart: true, openEnd: false });
   });
 
   it('targets a useful number of major ticks and adds context', () => {

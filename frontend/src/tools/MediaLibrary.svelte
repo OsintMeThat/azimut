@@ -1,7 +1,9 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { lookupEntity } from '../lib/catalog.js';
+  import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { buildMediaQuery } from '../lib/mediaQuery.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { pollWhile } from '../lib/poll.js';
@@ -282,6 +284,19 @@
   }
 
   let infoItem = $state(null); // the media row behind the details modal, for Export
+  // What is open here is what the topbar's Add event seats: the picture in the
+  // lightbox, else the file whose Details are open.
+  $effect(() => {
+    const row = lightboxItem?.entity_id ? lightboxItem : infoEntityId && infoItem ? infoItem : null;
+    const id = row === infoItem ? infoEntityId : row?.entity_id;
+    offerNote(
+      'media',
+      row && id
+        ? { id, label: row.title ?? row.filename, type: 'media', attrs: { path: row.path, kind: row.kind } }
+        : null,
+    );
+  });
+  onDestroy(() => withdrawNote('media'));
   // Where a media copy lands, app-wide and remembered. Empty = the case folder.
   let exportDir = $state('');
   let exportPicker = $state(false);

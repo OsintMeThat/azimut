@@ -52,6 +52,7 @@ ECO_TUNABLE = ("mapbox", "google", "sentinelhub")
 DEFAULT_HOME_VIEW = config.DEFAULT_SETTINGS["home_view"]
 DEFAULT_POST_MENTION = config.DEFAULT_SETTINGS["post_mention"]
 DEFAULT_POST_TARGET = config.DEFAULT_SETTINGS["post_target"]
+DEFAULT_POST_TEMPLATE = config.DEFAULT_SETTINGS["post_template"]
 DEFAULT_SIGNATURE_HANDLE = config.DEFAULT_SETTINGS["signature_handle"]
 
 
@@ -112,6 +113,8 @@ class PrefsIn(BaseModel):
     proof_place_auto: bool | None = None
     post_mention: str | None = None  # handle a new post draft is addressed to
     post_target: str | None = None  # social composer a new post draft starts with
+    # id of the post template a new draft starts with; "" is the classic layout
+    post_template: str | None = Field(default=None, pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")
     post_prefill: bool | None = None  # let the extension fill that composer
     reverse_prefill: bool | None = None  # let it open an engine with the image
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
@@ -153,6 +156,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
+        "post_template": settings.get("post_template", DEFAULT_POST_TEMPLATE),
         "post_prefill": bool(settings.get("post_prefill", True)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
@@ -292,6 +296,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_mention"] = body.post_mention.strip()[:64]
     if body.post_target is not None:
         settings["post_target"] = body.post_target
+    if body.post_template is not None:
+        settings["post_template"] = body.post_template
     if body.post_prefill is not None:
         settings["post_prefill"] = bool(body.post_prefill)
     if body.reverse_prefill is not None:
@@ -655,6 +661,7 @@ class ImportedSettings(BaseModel):
     proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
     post_target: str = DEFAULT_POST_TARGET
+    post_template: str = DEFAULT_POST_TEMPLATE
     post_prefill: bool = True
     reverse_prefill: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
@@ -727,6 +734,12 @@ class ImportedSettings(BaseModel):
         value is a bug rather than a machine's history.
         """
         return value if value in config.POST_TARGETS else DEFAULT_POST_TARGET
+
+    @field_validator("post_template")
+    @classmethod
+    def readable_template_id(cls, value: str) -> str:
+        """An id no template carries reads as none rather than failing the backup."""
+        return value if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) else DEFAULT_POST_TEMPLATE
 
 
 class ImportIn(BaseModel):

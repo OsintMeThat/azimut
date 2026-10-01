@@ -31,9 +31,11 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
 from .engine import links as link_engine
 from .engine import timeline as timeline_engine
+from .engine.textfold import fold_text
 from . import layout
 from .repository import EntityStatus
 from .store.cursors import (
+    _COUNTED_ORDERS,
     _PAGE_ORDERS,
     _page_cursor,
     _parse_timeline_cursor,
@@ -42,16 +44,21 @@ from .store.cursors import (
     _timeline_phase_cursor,
 )
 from .store.filters import (
+    LACKS,
     MAX_ATTR_VALUES,
     _entity_filters,
     _facet_value,
     _holds_number,
     _link_scope,
     _linked_at_all,
+    lacking,
 )
+from .store import merges as merge_store
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
+    _FROM_ABOVE_FILE_SQL,
     _PRODUCED_HERE_SQL,
+    _PRODUCED_HERE_ROW_SQL,
     _MEDIA_CATEGORIES,
     _MEDIA_CATEGORY_SQL,
     _entity_search_text,
@@ -122,7 +129,13 @@ if TYPE_CHECKING:
 # Schema 18 rebuilds it again, now that a proof's stated date is projected as a
 # statement: proofs dated before the projection could read them still reach the
 # Timeline, without re-saving each one.
-SQLITE_SCHEMA = 18
+# Schema 19 rebuilds both search indexes folded (`engine/textfold.py`): a search
+# finds a label whatever accents, stress marks or Arabic and Hebrew vowels it was
+# written with, and a term is folded the same way as it is typed. It also adds the
+# two tables a merge writes (`engine/merge.py`): `entity_redirects`, so an id that was
+# absorbed still answers with the entity that took it in, and `entity_merges`, the
+# record that undoes one.
+SQLITE_SCHEMA = 19
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -273,8 +286,36 @@ CREATE TABLE temporal_items (
     sortable    INTEGER NOT NULL DEFAULT 0 CHECK (sortable IN (0, 1)),
     status      TEXT,
     confidence  TEXT,
-    parse_error TEXT
+    parse_error TEXT,
+    tz          TEXT
 );
+-- An id a merge absorbed, and the entity that took it in. Chains are compressed as
+-- they are written, so an old id always names a survivor in one step. No foreign
+-- key: the survivor may be in the Trash, and its restore must find the redirect.
+-- `old_key` is the coordinate key a merged place was found by, so enrichment does
+-- not file the same point again as a new place.
+CREATE TABLE entity_redirects (
+    old_id    TEXT PRIMARY KEY,
+    new_id    TEXT NOT NULL,
+    old_label TEXT NOT NULL,
+    old_key   TEXT,
+    merge_id  TEXT,
+    at        TEXT NOT NULL
+);
+CREATE INDEX idx_entity_redirects_new ON entity_redirects(new_id);
+CREATE INDEX idx_entity_redirects_key ON entity_redirects(old_key) WHERE old_key IS NOT NULL;
+-- One merge, and everything needed to undo it. Local state, like the Trash: a
+-- bundle leaves these behind, and after an import the merge is final.
+CREATE TABLE entity_merges (
+    id           TEXT PRIMARY KEY,
+    survivor_id  TEXT NOT NULL,
+    merged_id    TEXT NOT NULL,
+    merged_label TEXT NOT NULL,
+    at           TEXT NOT NULL,
+    by           TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX idx_entity_merges_survivor ON entity_merges(survivor_id);
 CREATE INDEX idx_entities_type   ON entities(type);
 CREATE INDEX idx_entities_status ON entities(prov_status);
 CREATE INDEX idx_entities_folder ON entities(folder);
@@ -405,6 +446,28 @@ class SqliteCase:
             )
         if version < SQLITE_SCHEMA:
             store._upgrade()
+        if version == 19:
+            # Development cases may already carry an earlier cut of the unshipped 19.
+            with store._connect() as conn:
+                merges_missing = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'entity_merges'").fetchone() is None
+                zones_missing = "tz" not in {
+                    col["name"] for col in conn.execute("PRAGMA table_info(temporal_items)").fetchall()
+                }
+            if merges_missing or zones_missing:
+                from .store.migrations import _MERGE_TABLES, _add_temporal_zones
+                with store._connect() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        if merges_missing:
+                            for statement in _MERGE_TABLES.split(";"):
+                                if statement.strip():
+                                    conn.execute(statement)
+                        if zones_missing:
+                            _add_temporal_zones(conn)
+                        conn.execute("COMMIT")
+                    except BaseException:
+                        conn.execute("ROLLBACK")
+                        raise
         if media_dir is not None:
             store._ensure_media_index(media_dir)
         return store
@@ -789,6 +852,7 @@ class SqliteCase:
         attr_value: str | None = None,
         linked: str | None = None,
         unlinked_only: bool = False,
+        lacks: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
@@ -829,6 +893,7 @@ class SqliteCase:
             types=types, exclude_types=exclude_types, status=status, query=query,
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked_only,
+            lacks=lacks,
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,
@@ -1237,6 +1302,7 @@ class SqliteCase:
         attr_value: str | None = None,
         linked: str | None = None,
         unlinked: bool = False,
+        lacks: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
@@ -1244,6 +1310,7 @@ class SqliteCase:
         temporal_until: str | None = None,
         temporal_categories: list[str] | None = None,
         order: str = "",
+        count_by_type: bool = False,
     ) -> dict[str, Any]:
         """A bounded, cursor-paginated slice of entities, in insertion order or sorted.
 
@@ -1266,25 +1333,40 @@ class SqliteCase:
 
         ``total`` counts every row matching the same terms, which is what makes the
         narrowing terms answer a question rather than only shorten a list: *how many
-        videos have coordinates* is that number.
+        videos have coordinates* is that number. ``count_by_type`` adds ``by_type``,
+        the same count split per type, which is what lets the Board say how much of
+        the answer each of its groups holds without asking once per group.
         """
-        if order and order not in _PAGE_ORDERS:
+        orders = {**_PAGE_ORDERS, **_COUNTED_ORDERS}
+        if order and order not in orders:
             raise CaseError(f"'{order}' is not an ordering")
+        if order in _COUNTED_ORDERS and not types:
+            raise CaseError(f"'{order}' orders a set of types, not the whole case")
         filter_clause, filter_params = _entity_filters(
             types=types, status=status, query=query,
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked,
+            lacks=lacks,
             since=since, until=until, filed_by=filed_by,
             temporal_since=temporal_since, temporal_until=temporal_until,
             temporal_categories=temporal_categories,
         )
         clause, params = filter_clause, list(filter_params)
         sort_key = ""
+        computed = ""
         if order:
-            expression, sort_key, descending = _PAGE_ORDERS[order]
+            expression, sort_key, descending = orders[order]
             way = "<" if descending else ">"
+            if sort_key == "_sort":
+                computed = f", {expression} AS _sort"
             if cursor is not None:
-                seat, key = _page_cursor(cursor)
+                seat, raw_key = _page_cursor(cursor)
+                key: Any = raw_key
+                if order in _COUNTED_ORDERS:
+                    try:
+                        key = int(raw_key)
+                    except ValueError:
+                        raise CaseError(f"invalid cursor '{cursor}'") from None
                 joiner = " AND " if clause else " WHERE "
                 clause = (
                     f"{clause}{joiner}({expression} {way} ?"
@@ -1308,10 +1390,22 @@ class SqliteCase:
                 ).fetchone()[0]
             )
             rows = conn.execute(
-                f"SELECT rowid AS _rowid, * FROM entities{clause}"
+                f"SELECT rowid AS _rowid, *{computed} FROM entities{clause}"
                 f" ORDER BY {ordering} LIMIT ?",
                 params,
             ).fetchall()
+            by_type = (
+                {
+                    r["type"]: int(r["n"])
+                    for r in conn.execute(
+                        f"SELECT type, COUNT(*) AS n FROM entities{filter_clause}"
+                        " GROUP BY type",
+                        filter_params,
+                    )
+                }
+                if count_by_type
+                else None
+            )
         has_more = len(rows) > limit
         rows = rows[:limit]
         next_cursor = None
@@ -1320,11 +1414,109 @@ class SqliteCase:
             next_cursor = (
                 f"{tail['_rowid']}:{tail[sort_key]}" if sort_key else str(tail["_rowid"])
             )
-        return {
+        page: dict[str, Any] = {
             "items": [self._entity(r) for r in rows],
             "next_cursor": next_cursor,
             "total": total,
         }
+        if by_type is not None:
+            page["by_type"] = by_type
+        return page
+
+    def event_summaries(self, entity_ids: list[str], *, buckets: int = 12) -> dict[str, Any]:
+        """What the case's Claims say about each of these entities, in a few grouped reads.
+
+        Per id: how many Claims name it (``events``, through ``about``, ``at`` or
+        ``cites``), the first and last instant the dated ones cover, how many distinct
+        sources those Claims cite and how many places they put it at, and ``buckets``
+        counts of their midpoints across ``range``.
+
+        **One range for every row**, the case's own span of dated Claims, so a column
+        of these reads as *when each one was active* rather than as twelve shapes that
+        cannot be compared. Undated Claims count as events and draw nothing.
+
+        Bounded by the ids asked for, which the route caps at a page: the Board asks
+        once per page, never once per row.
+        """
+        ids = list(dict.fromkeys(entity_ids))
+        if not ids:
+            return {"range": None, "rows": {}}
+        marks = ",".join("?" for _ in ids)
+        named = (
+            "WITH named(eid, cid) AS ("
+            " SELECT DISTINCT n.to_id, n.from_id FROM links n"
+            " JOIN entities c ON c.id = n.from_id"
+            f" WHERE n.to_id IN ({marks}) AND c.type = 'claim'"
+            " AND n.type IN ('about', 'at', 'cites'))"
+        )
+        dated = (
+            " FROM named JOIN temporal_items t ON t.owner_id = named.cid"
+            " WHERE t.category = 'statement' AND t.sortable = 1"
+            " AND t.earliest IS NOT NULL AND t.latest IS NOT NULL"
+        )
+        rows: dict[str, dict[str, Any]] = {
+            one: {
+                "events": 0, "first": None, "last": None,
+                "sources": 0, "places": 0, "buckets": [0] * buckets,
+            }
+            for one in ids
+        }
+        with self._connect() as conn:
+            span = conn.execute(
+                "SELECT MIN(earliest) AS lo, MAX(latest) AS hi,"
+                " MIN(julianday(earliest)) AS jlo, MAX(julianday(latest)) AS jhi"
+                " FROM temporal_items WHERE category = 'statement' AND sortable = 1"
+                " AND earliest IS NOT NULL AND latest IS NOT NULL"
+                " AND owner_id IN (SELECT id FROM entities WHERE type = 'claim')"
+            ).fetchone()
+            for r in conn.execute(
+                f"{named} SELECT eid, COUNT(*) AS n FROM named GROUP BY eid", ids
+            ):
+                rows[r["eid"]]["events"] = int(r["n"])
+            for r in conn.execute(
+                f"{named} SELECT named.eid AS eid, MIN(t.earliest) AS first,"
+                f" MAX(t.latest) AS last{dated} GROUP BY named.eid",
+                ids,
+            ):
+                rows[r["eid"]]["first"] = r["first"]
+                rows[r["eid"]]["last"] = r["last"]
+            for r in conn.execute(
+                f"{named} SELECT named.eid AS eid, COUNT(DISTINCT s.to_id) AS n FROM named"
+                " JOIN links s ON s.from_id = named.cid AND s.type = 'cites'"
+                " AND s.to_id != named.eid GROUP BY named.eid",
+                ids,
+            ):
+                rows[r["eid"]]["sources"] = int(r["n"])
+            # A place is reached two ways: a Claim that puts the entity at it, and a
+            # relation the entity states itself (`located-at`, `sited-at`). One count,
+            # distinct, so a place reached both ways is one place.
+            for r in conn.execute(
+                f"{named}, reached(eid, pid) AS ("
+                " SELECT named.eid, a.to_id FROM named"
+                " JOIN links a ON a.from_id = named.cid AND a.type = 'at'"
+                " AND a.to_id != named.eid"
+                " UNION"
+                " SELECT d.from_id, d.to_id FROM links d JOIN entities p ON p.id = d.to_id"
+                f" WHERE d.from_id IN ({marks}) AND p.type = 'place')"
+                " SELECT eid, COUNT(DISTINCT pid) AS n FROM reached GROUP BY eid",
+                [*ids, *ids],
+            ):
+                rows[r["eid"]]["places"] = int(r["n"])
+            low, high = span["jlo"], span["jhi"]
+            if low is not None and high is not None:
+                width = max(high - low, 1e-9)
+                for r in conn.execute(
+                    f"{named} SELECT named.eid AS eid, MIN(?, MAX(0, CAST("
+                    " ((julianday(t.earliest) + julianday(t.latest)) / 2 - ?) / ? * ?"
+                    f" AS INTEGER))) AS bucket, COUNT(*) AS n{dated}"
+                    " GROUP BY named.eid, bucket",
+                    [*ids, buckets - 1, low, width, buckets],
+                ):
+                    rows[r["eid"]]["buckets"][int(r["bucket"])] = int(r["n"])
+        timespan = (
+            {"from": span["lo"], "to": span["hi"]} if span["lo"] is not None else None
+        )
+        return {"range": timespan, "rows": rows}
 
     def catalog_summary(self) -> dict[str, Any]:
         """Total plus per-type, per-status, per-folder and per-filer counts in grouped
@@ -1405,6 +1597,17 @@ class SqliteCase:
                     (link_engine.ABOUT,),
                 ).fetchone()[0]
             )
+            # What the Claims are missing, priced for the same reason `unlinked` is:
+            # the Board offers "No source" and "Not assessed" as standing questions,
+            # and a question that says how many it would answer is one worth asking.
+            lacks = {
+                what: int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM entities e WHERE {predicate.format(alias='e')}"
+                    ).fetchone()[0]
+                )
+                for what, predicate in LACKS.items()
+            }
         return {
             "total": total,
             "by_type": by_type,
@@ -1414,6 +1617,7 @@ class SqliteCase:
             "linked_to": linked_to,
             "unlinked": unlinked,
             "countable": countable,
+            "lacks": lacks,
         }
 
     def attr_facets(
@@ -2024,7 +2228,7 @@ class SqliteCase:
                 base_params.append(folder)
             else:
                 base_where.append("folder IS NULL")
-        for term in (q or "").casefold().split():
+        for term in fold_text(q or "").split():
             base_where.append("search_text LIKE ? ESCAPE '\\'")
             base_params.append(_like_contains(term))
 
@@ -2166,6 +2370,20 @@ class SqliteCase:
                 " AND temporal_link.type IN ('about', 'at', 'cites')))"
             )
             params.extend((entity_id, entity_id))
+        # A proof's date is stated for the footage it rests on, as a Claim about that
+        # footage which cites the proof (`api/proofs.py`, `_date_the_material`). While
+        # that Claim still says the proof's date, the proof's own row is the same date
+        # a second time, so it is the Claim alone that is drawn and counted. A proof
+        # with no collected footage under it has no such Claim and keeps its row.
+        where.append(
+            "NOT (t.category = 'statement' AND t.kind = 'taken' AND EXISTS ("
+            "SELECT 1 FROM links proof_date"
+            " JOIN temporal_items stated ON stated.owner_id = proof_date.from_id"
+            " WHERE proof_date.to_id = t.owner_id AND proof_date.type = 'cites'"
+            " AND stated.kind = 'claim' AND stated.time_role = 'observed'"
+            # The same day in another zone is another span, so both are drawn.
+            " AND stated.raw = t.raw AND stated.tz IS t.tz))"
+        )
         query: dict[str, Any] = track if isinstance(track, dict) else {}
         roles = [
             value for value in query.get("roles", [])
@@ -2210,6 +2428,7 @@ class SqliteCase:
                 attr_value=term("value") or None,
                 linked=term("linked") or None,
                 unlinked=term("unlinked").lower() == "true",
+                lacks=lacking(term("lacks")),
                 since=term("since") or None,
                 until=term("until") or None,
                 filed_by=filed_by or None,
@@ -2244,6 +2463,30 @@ class SqliteCase:
                 " WHERE track_link.from_id = t.owner_id AND track_link.type = ?)"
             )
             params.append(connector)
+        if query.get("collected_only") is True:
+            # The Media Library's switch, on a track: the files the case produced
+            # itself stay off it. The one a reading is focused on shows whatever made
+            # it, or opening a frame's own dates would land on an empty axis.
+            held = f"NOT {_PRODUCED_HERE_ROW_SQL}"
+            if entity_id:
+                held = f"(t.owner_id = ? OR {held})"
+                params.append(entity_id)
+            where.append(held)
+        as_files = query.get("as_files")
+        if as_files in {"sources", "imagery"}:
+            # A file lane holds the events about a file or citing it. The sources'
+            # pictures and videos (and what Inspect cut from them) are one lane; what
+            # the app pictured from above, Compare and Detect among it, is the other.
+            kind = (
+                _FROM_ABOVE_FILE_SQL if as_files == "imagery"
+                else f"(file.type = 'media' AND NOT {_FROM_ABOVE_FILE_SQL})"
+            )
+            where.append(
+                "EXISTS (SELECT 1 FROM links file_link"
+                " JOIN entities file ON file.id = file_link.to_id"
+                " WHERE file_link.from_id = t.owner_id"
+                f" AND file_link.type IN ('about', 'cites') AND {kind})"
+            )
         hidden_raw: list[Any] = (
             query["hidden"] if isinstance(query.get("hidden"), list) else []
         )
@@ -2274,11 +2517,13 @@ class SqliteCase:
             "uncertain": bool(row["uncertain"]),
             "approximate": bool(row["approximate"]),
             "zone": row["zone"],
+            "tz": row["tz"],
             "sortable": bool(row["sortable"]),
             "status": row["status"],
             "confidence": row["confidence"],
             "parse_error": row["parse_error"],
             "owner_type": row["owner_type"],
+            "produced_here": bool(row["produced_here"]),
             "subjects": [entry["id"] for entry in joined.get("about", [])],
             "places": [entry["id"] for entry in joined.get("at", [])],
             "sources": [entry["id"] for entry in joined.get("cites", [])],
@@ -2391,7 +2636,8 @@ class SqliteCase:
                     "WITH ranked AS (SELECT t.id AS ranked_id,"
                     f" ROW_NUMBER() OVER (ORDER BY {group_sql}, {stamp_sql}, t.id) - 1 AS rn"
                     f" FROM temporal_items t{clause})"
-                    " SELECT t.*, e.label, e.type AS owner_type FROM ranked"
+                    " SELECT t.*, e.label, e.type AS owner_type,"
+                    f" {_PRODUCED_HERE_ROW_SQL} AS produced_here FROM ranked"
                     " JOIN temporal_items t ON t.id = ranked.ranked_id"
                     " JOIN entities e ON e.id = t.owner_id"
                     " WHERE ranked.rn % ? = ? ORDER BY ranked.rn LIMIT ?",
@@ -2399,7 +2645,8 @@ class SqliteCase:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT t.*, e.label, e.type AS owner_type FROM temporal_items t"
+                    "SELECT t.*, e.label, e.type AS owner_type,"
+                    f" {_PRODUCED_HERE_ROW_SQL} AS produced_here FROM temporal_items t"
                     " JOIN entities e ON e.id = t.owner_id"
                     f"{clause} ORDER BY {group_sql}, {stamp_sql}, t.id LIMIT ?",
                     (*params, limit + 1),
@@ -2580,7 +2827,13 @@ class SqliteCase:
                 if key in patch:
                     entity[key] = patch[key]
             if "attrs" in patch:
-                entity["attrs"].update(patch["attrs"])
+                # Remove retained fields explicitly. Ordinary nulls remain tombstones:
+                # file editors use their presence to override older sidecar values.
+                for key, value in patch["attrs"].items():
+                    if value is None and (key == "_retained_fields" or key in (entity["attrs"].get("_retained_fields") or {})):
+                        entity["attrs"].pop(key, None)
+                    else:
+                        entity["attrs"][key] = value
             if patch.get("status") in ("confirmed", "suggested"):
                 entity["provenance"]["status"] = patch["status"]
             conn.execute(
@@ -3109,6 +3362,213 @@ class SqliteCase:
             "size_bytes": int(row["size"]),
         }
 
+    # -- merges and redirects (store/merges.py) ------------------------------
+
+    def merge_entities(
+        self,
+        survivor_id: str,
+        merged_id: str,
+        *,
+        survivor_attrs: dict[str, Any],
+        survivor_status: str,
+        old_key: str | None,
+        by: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Fold one entity into another in one transaction, or report what it would do.
+
+        A dry run is the same transaction rolled back at its end, so a preview cannot
+        say anything the merge would not do.
+        """
+        merge_id = _new_id("m")
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            conn.execute("SAVEPOINT merge_attempt")
+            try:
+                report = merge_store.merge_rows(
+                    conn,
+                    survivor_id=survivor_id,
+                    merged_id=merged_id,
+                    survivor_attrs=survivor_attrs,
+                    survivor_status=survivor_status,
+                    old_key=old_key,
+                    merge_id=merge_id,
+                    by=by,
+                    at=_now(),
+                    entity_row=self._entity,
+                    link_row=self._link,
+                    sync_temporal=_sync_entity_temporal,
+                    search_text=_entity_search_text,
+                    folder_of=_folder_of,
+                )
+                if dry_run:
+                    raise merge_store.DryRun(report)
+                self._touch(conn)
+                conn.execute("RELEASE merge_attempt")
+                return report
+            except BaseException:
+                conn.execute("ROLLBACK TO merge_attempt")
+                conn.execute("RELEASE merge_attempt")
+                raise
+
+        try:
+            return self._write(op)
+        except merge_store.DryRun as preview:
+            if not dry_run:
+                raise CaseError("merge refused: " + "; ".join(link.get("reason", "invalid relation") for link in preview.report["refused"])) from preview
+            return preview.report
+
+    def unmerge(self, merge_id: str) -> dict[str, Any]:
+        """Take one merge back out, saying what could not come back."""
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            result = merge_store.unmerge_rows(
+                conn,
+                merge_id,
+                entity_row=self._entity,
+                sync_temporal=_sync_entity_temporal,
+                search_text=_entity_search_text,
+                folder_of=_folder_of,
+                ensure_primary=self._ensure_entity_image_primary,
+            )
+            self._touch(conn)
+            return result
+
+        return self._write(op)
+
+    def get_merge(self, merge_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM entity_merges WHERE id = ?", (merge_id,)).fetchone()
+        return self._merge(row, payload=True) if row is not None else None
+
+    def merges_into(self, survivor_id: str) -> list[dict[str, Any]]:
+        """The merges this entity took in, newest first, without their payloads."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM entity_merges WHERE survivor_id = ? OR survivor_id IN"
+                " (SELECT old_id FROM entity_redirects WHERE new_id = ?) ORDER BY rowid DESC",
+                (survivor_id, survivor_id),
+            ).fetchall()
+        return [self._merge(row, payload=False) for row in rows]
+
+    def set_merge_sheets(self, merge_id: str, sheets: list[dict[str, Any]]) -> None:
+        """Record the sheet cells a merge rewrote on disk, once they are written."""
+
+        def op(conn: sqlite3.Connection) -> None:
+            row = conn.execute(
+                "SELECT payload_json FROM entity_merges WHERE id = ?", (merge_id,)
+            ).fetchone()
+            if row is None:
+                return
+            payload = json.loads(row["payload_json"])
+            payload["sheets"] = sheets
+            payload["pending_sheets"] = True
+            conn.execute(
+                "UPDATE entity_merges SET payload_json = ? WHERE id = ?",
+                (json.dumps(payload, ensure_ascii=False), merge_id),
+            )
+
+        self._write(op)
+
+    def pending_merge_work(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM entity_merges ORDER BY rowid").fetchall()
+        return [self._merge(row, payload=True) for row in rows if json.loads(row["payload_json"]).get("pending_sheets")]
+
+    def finish_merge_work(self, merge_id: str) -> None:
+        def op(conn: sqlite3.Connection) -> None:
+            row = conn.execute("SELECT payload_json FROM entity_merges WHERE id = ?", (merge_id,)).fetchone()
+            if row is None:
+                return
+            payload = json.loads(row["payload_json"])
+            if payload.get("undo_result"):
+                conn.execute("DELETE FROM entity_merges WHERE id = ?", (merge_id,))
+            else:
+                payload.pop("pending_sheets", None)
+                conn.execute("UPDATE entity_merges SET payload_json = ? WHERE id = ?", (json.dumps(payload, ensure_ascii=False), merge_id))
+        self._write(op)
+
+    @staticmethod
+    def _merge(row: sqlite3.Row, *, payload: bool) -> dict[str, Any]:
+        merge: dict[str, Any] = {
+            "id": row["id"],
+            "survivor_id": row["survivor_id"],
+            "merged_id": row["merged_id"],
+            "merged_label": row["merged_label"],
+            "at": row["at"],
+            "by": row["by"],
+        }
+        if payload:
+            merge["payload"] = json.loads(row["payload_json"])
+        return merge
+
+    def entity_redirects(self, ids: list[str] | None = None) -> dict[str, dict[str, str]]:
+        """Where absorbed ids now answer: ``{old: {id, label}}``, for these ids or all."""
+        with self._connect() as conn:
+            if ids is None:
+                rows = conn.execute(
+                    "SELECT old_id, new_id, old_label FROM entity_redirects"
+                    " ORDER BY at DESC"
+                ).fetchall()
+            else:
+                rows = []
+                for chunk in _chunks(list(dict.fromkeys(ids))):
+                    rows.extend(conn.execute(
+                        "SELECT old_id, new_id, old_label FROM entity_redirects"
+                        f" WHERE old_id IN ({_marks(chunk)})",
+                        chunk,
+                    ).fetchall())
+        return {row["old_id"]: {"id": row["new_id"], "label": row["old_label"]} for row in rows}
+
+    def redirect_by_key(self, key: str) -> str | None:
+        """The survivor of a merged place that was found by this coordinate key."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT new_id FROM entity_redirects WHERE old_key = ? LIMIT 1", (key,)
+            ).fetchone()
+        return row["new_id"] if row is not None else None
+
+    def dangling_redirects(self, keep: set[str]) -> list[dict[str, str]]:
+        """Redirects to an entity neither in the case nor among ``keep`` (the Trash)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT r.old_id, r.new_id, r.old_label FROM entity_redirects r"
+                " LEFT JOIN entities e ON e.id = r.new_id WHERE e.id IS NULL"
+            ).fetchall()
+        return [
+            {"old_id": row["old_id"], "new_id": row["new_id"], "label": row["old_label"]}
+            for row in rows if row["new_id"] not in keep
+        ]
+
+    def drop_redirects(self, old_ids: list[str]) -> int:
+        def op(conn: sqlite3.Connection) -> int:
+            dropped = 0
+            for chunk in _chunks(list(dict.fromkeys(old_ids))):
+                dropped += conn.execute(
+                    f"DELETE FROM entity_redirects WHERE old_id IN ({_marks(chunk)})", chunk
+                ).rowcount
+            if dropped:
+                self._touch(conn)
+            return dropped
+
+        return self._write(op)
+
+    def forget_merges_of(self, entity_ids: list[str]) -> None:
+        """An entity gone for good takes the redirects to it and its merge records."""
+
+        def op(conn: sqlite3.Connection) -> None:
+            for chunk in _chunks(list(dict.fromkeys(entity_ids))):
+                conn.execute(
+                    f"DELETE FROM entity_merges WHERE survivor_id IN ({_marks(chunk)})"
+                    f" OR survivor_id IN (SELECT old_id FROM entity_redirects WHERE new_id IN ({_marks(chunk)}))",
+                    [*chunk, *chunk],
+                )
+                conn.execute(
+                    f"DELETE FROM entity_redirects WHERE new_id IN ({_marks(chunk)})", chunk
+                )
+
+        self._write(op)
+
     def reinsert(
         self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
     ) -> dict[str, int]:
@@ -3148,9 +3608,22 @@ class SqliteCase:
                 r["id"]
                 for r in conn.execute("SELECT id FROM entities")
             }
+            # An end merged into another entity since the delete is found where it
+            # went: restoring a Claim about an absorbed subject lands on its survivor.
+            redirected = {
+                r["old_id"]: r["new_id"]
+                for r in conn.execute("SELECT old_id, new_id FROM entity_redirects")
+            }
             kept = 0
             for link in links:
+                link = {
+                    **link,
+                    "from": redirected.get(link["from"], link["from"]),
+                    "to": redirected.get(link["to"], link["to"]),
+                }
                 if link["from"] not in present or link["to"] not in present:
+                    continue
+                if not merge_store.valid_restored_link(conn, link["from"], link["to"], link["type"]):
                     continue
                 prov = link.get("provenance") or {}
                 conn.execute(

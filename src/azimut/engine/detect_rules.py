@@ -1,4 +1,4 @@
-"""Analyzers made of the analyst's own rules, and the preview that tunes them.
+"""Analyzers made of the analyst's own rules, and the checks that tune them.
 
 A built-in detector is a method calibrated on real scenes (engine/analyzers.py).
 An analyzer of your own is a list of rules instead: a quantity read from
@@ -6,13 +6,14 @@ Sentinel-2's bands or Sentinel-1's backscatter, on one date or as the change
 between two, and the line it has to cross. Nothing here is calibrated. The
 line the analyst sets is the line that runs.
 
-The preview runs `evaluate` on the frames a sweep would read, over the ground
-on screen, and hands back what each rule kept, so the builder shows what a run
-of the same analyzer returns there: the same rules, cleanup, sizes, shape and
-grouping. A check reruns the same evaluation on a place the analyst saved,
-and says whether a candidate came out on each point they marked. Both read the
-tile cache only. Fetching the frames they lack is a separate act, which the
-analyst asks for and which is metered like any other.
+A check is a pair of passes and the pins laid on them, and testing it runs
+`evaluate` on the tiles under the pins and the ones beside them. That is the
+frames a sweep of the same ground would read, so what the test shows there is
+what a run returns: the same rules, cleanup, sizes, shape and grouping. It
+hands back what each rule kept, the candidates, whether one came out on each
+pin and what every rule read there. Testing reads the tile cache, and
+fetching the frames it lacks is a separate act, which the analyst asks for and
+which is metered like any other.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import io
 import math
 import threading
 from collections import OrderedDict
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -51,18 +53,22 @@ UNITS = {"index": 0.1, "nd": 0.1, "band": 0.02, "brightness": 0.02, "colour": 0.
 #: Quantities in reflectance, which a change reads with the passes' overall
 #: shift in light taken out, as the built-in change methods do.
 REFLECTANCE = frozenset({"band", "brightness", "colour"})
-#: The preview's reach: three tiles by three around the view, about 15 km on a
-#: side at the equator and 10 at 45°. Past that the frames it needs to read
-#: stop being a figure an analyst glances at.
-PREVIEW_SPAN = 3
-PREVIEW_CANDIDATES = 300
-#: Bits of the preview mask. Rules take the low ones in order.
+#: How many grid tiles one check may read, the ones beside a pin near an edge
+#: included. Past that the frames to fetch stop being a figure an analyst can
+#: weigh before pressing Test.
+MAX_CHECK_TILES = 12
+#: How near to its tile's edge a pin may come, in pixels, before the tile across
+#: the edge is read as well. The examples keep their marks at least 64 pixels
+#: inside, so each of them reads one tile.
+EDGE_PX = 48
+TEST_CANDIDATES = 300
+#: Bits of a tile's mask. Rules take the low ones in order.
 MEASURED_BIT = 6
 KEPT_BIT = 7
 
-# Decoded frames the preview has read lately, so moving a slider re-reads
-# nothing from disk. A frame is 2.6 MB decoded; this holds a full preview of two
-# dates with room to spare.
+# Decoded frames a test has read lately, so testing again after a change to a
+# rule re-reads nothing from disk. A frame is 2.6 MB decoded; this holds a check
+# of a few tiles on two dates with room to spare.
 _DECODED: OrderedDict[tuple[str, int, int], Any] = OrderedDict()
 _DECODED_MAX = 40
 _DECODED_LOCK = threading.Lock()
@@ -247,20 +253,35 @@ def _past(rule: Rule, value: Any) -> Any:
     return np.abs(value) - rule.value
 
 
-def signal(recipe: Recipe) -> int | None:
-    """The rule that ranks candidates: the first one that measures something."""
-    return next((i for i, rule in enumerate(recipe.rules) if rule.measure != "class"), None)
+@dataclass
+class Measured:
+    """One tile with every rule of the recipe read on it, before they are put together.
+
+    Kept apart from the verdict so that a question about the rules (what do the
+    pins make of them without this one?) is answered from the same reading
+    instead of measuring the tile again.
+    """
+
+    recipe: Recipe
+    shape: tuple[int, int]
+    core: tuple[slice, slice]
+    measured: Any
+    imaged: Any
+    passes: list[Any]
+    values: list[Any]
+    before: list[Any]
+    after: list[Any]
+    distances: list[Any]
 
 
-def evaluate(products: dict[str, tuple[Any, Any]], mask: Any, recipe: Recipe,
-             days: tuple[str, str], lat: float) -> Evaluation:
-    """One tile, judged by every rule of the recipe.
+def measure(products: dict[str, tuple[Any, Any]], mask: Any, recipe: Recipe,
+            days: tuple[str, str], lat: float) -> Measured:
+    """Read every rule of the recipe on one tile.
 
     `products` names each band product with its (A, B) frames, padded by
     `analyzers.PAD`; an analyzer that reads one date passes B twice. `mask`
     is the tile's own ground to judge, unpadded.
     """
-    import cv2
     import numpy as np
 
     options = recipe.parameters
@@ -303,27 +324,44 @@ def evaluate(products: dict[str, tuple[Any, Any]], mask: Any, recipe: Recipe,
         befores.append(before)
         afters.append(after)
         distances.append(distance)
+    return Measured(recipe=recipe, shape=shape, core=core, measured=measured, imaged=imaged, passes=passes,
+                    values=values, before=befores, after=afters, distances=distances)
 
+
+def judge(tile: Measured, keep: Sequence[int] | None = None) -> analyzers.Reading:
+    """What the rules make of a measured tile: the pixels kept, cleaned, and how far past the line.
+
+    `keep` names the rules to put together, in place of all of them, to ask what
+    the tile would have given without one.
+    """
+    import cv2
+    import numpy as np
+
+    recipe = tile.recipe
+    options = recipe.parameters
+    used = list(range(len(recipe.rules))) if keep is None else list(keep)
+    passes = [tile.passes[i] for i in used]
     if recipe.match == "all":
         combined = np.logical_and.reduce(passes)
     else:
         combined = np.logical_or.reduce(passes)
-    binary = measured & combined
+    binary = tile.measured & combined
     if options.cleanup:
         kernel = np.ones((2 * options.cleanup + 1,) * 2, np.uint8)
         cleaned = cv2.morphologyEx(binary.astype(np.uint8), cv2.MORPH_OPEN, kernel,
                                    borderType=cv2.BORDER_REPLICATE)
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8),
                                    borderType=cv2.BORDER_REPLICATE)
-        binary = cleaned.astype(bool) & measured
+        binary = cleaned.astype(bool) & tile.measured
 
     # A candidate's margin is how far past the line it got: the signal's, or
-    # under "any" the best of whichever rules it passed. 1 is on the line.
-    ranked = signal(recipe)
+    # under "any" the best of whichever rules it passed. 1 is on the line. The
+    # signal is the first rule that measures something.
+    ranked = next((i for i in used if recipe.rules[i].measure != "class"), None)
     if recipe.match == "all":
-        past = distances[ranked] if ranked is not None else np.zeros(shape)
+        past = tile.distances[ranked] if ranked is not None else np.zeros(tile.shape)
     else:
-        past = np.fmax.reduce(np.stack(distances), axis=0)
+        past = np.fmax.reduce(np.stack([tile.distances[i] for i in used]), axis=0)
     stat = np.where(binary, 1.0 + np.clip(np.nan_to_num(past, nan=0.0), 0.0, 20.0), 0.0).astype(np.float32)
 
     measures: dict[str, tuple[Any, str]] = {}
@@ -331,17 +369,30 @@ def evaluate(products: dict[str, tuple[Any, Any]], mask: Any, recipe: Recipe,
         rule = recipe.rules[ranked]
         clean = lambda array: np.nan_to_num(array, nan=0.0)  # noqa: E731
         if rule.on == "change" and rule.measure != "colour":
-            measures = {"before": (clean(befores[ranked]), "mean"), "after": (clean(afters[ranked]), "mean"),
-                        "signed": (clean(values[ranked]), "mean")}
+            measures = {"before": (clean(tile.before[ranked]), "mean"), "after": (clean(tile.after[ranked]), "mean"),
+                        "signed": (clean(tile.values[ranked]), "mean")}
         else:
-            measures = {"value": (clean(values[ranked]), "mean")}
+            measures = {"value": (clean(tile.values[ranked]), "mean")}
 
+    core = tile.core
+    return analyzers.Reading(binary=binary[core].astype(np.uint8), stat=stat[core], threshold=1.0,
+                             measures={name: (array[core], how) for name, (array, how) in measures.items()})
+
+
+def evaluation(tile: Measured, reading: analyzers.Reading) -> Evaluation:
+    """A measured tile with its verdict, cropped back to the tile."""
+    core = tile.core
     crop = lambda array: None if array is None else array[core]  # noqa: E731
-    reading = analyzers.Reading(binary=binary[core].astype(np.uint8), stat=stat[core], threshold=1.0,
-                                measures={name: (array[core], how) for name, (array, how) in measures.items()})
-    return Evaluation(reading=reading, passes=[crop(p) for p in passes], values=[crop(v) for v in values],
-                      before=[crop(b) for b in befores], after=[crop(a) for a in afters],
-                      measured=measured[core], imaged=imaged[core])
+    return Evaluation(reading=reading, passes=[crop(p) for p in tile.passes], values=[crop(v) for v in tile.values],
+                      before=[crop(b) for b in tile.before], after=[crop(a) for a in tile.after],
+                      measured=tile.measured[core], imaged=tile.imaged[core])
+
+
+def evaluate(products: dict[str, tuple[Any, Any]], mask: Any, recipe: Recipe,
+             days: tuple[str, str], lat: float) -> Evaluation:
+    """One tile, judged by every rule of the recipe."""
+    tile = measure(products, mask, recipe, days, lat)
+    return evaluation(tile, judge(tile))
 
 
 class _Classes(dict[tuple[str, ...], tuple[int, ...]]):
@@ -356,11 +407,11 @@ class _Classes(dict[tuple[str, ...], tuple[int, ...]]):
 SCENE_CLASSES_FLAT = _Classes()
 
 
-# -- the preview ---------------------------------------------------------------------
+# -- the frames a check reads ----------------------------------------------------------
 
 
-def preview_sources(recipe: Recipe, a: Source, b: Source) -> tuple[Source, Source]:
-    """The sources a preview reads, named for the satellite the rules use.
+def check_sources(recipe: Recipe, a: Source, b: Source) -> tuple[Source, Source]:
+    """The sources a check reads, named for the satellite the rules use.
 
     Every pass is read whatever its cloud cover: the analyst picked it, and
     the cloud switch is what decides what counts under a cloud.
@@ -371,38 +422,25 @@ def preview_sources(recipe: Recipe, a: Source, b: Source) -> tuple[Source, Sourc
         patch = {"provider": "sentinel2", "layer": sentinel.DEFAULT_LAYER, "maxcc": 100, "time": ""}
     b = b.model_copy(update=patch)
     if not b.date:
-        raise ValueError("choose the pass to preview on")
+        raise ValueError("choose the pass this check is read on")
     if is_single(recipe):
         return b, b
     a = a.model_copy(update=patch)
     if not a.date:
-        raise ValueError("these rules read A as well; choose a reference pass")
+        raise ValueError("these rules read the before date as well; choose its pass")
     if a.provider == "sentinel1" and a.time and b.time and not sentinel.same_track(a.time, b.time):
-        raise ValueError("A and B were seen from different radar tracks; choose two passes at the same time of day")
+        raise ValueError("the before and after passes were seen from different radar tracks; "
+                         "choose two passes at the same time of day")
     return a, b
 
 
-def preview_tiles(bounds: tuple[float, float, float, float]) -> tuple[list[tuple[int, int]], bool]:
-    """The grid tiles under a view, at most PREVIEW_SPAN a side around its centre."""
-    west, south, east, north = bounds
-    if west >= east or south >= north:
-        raise ValueError("move the view off the antimeridian to preview it")
+def tile_box(x: int, y: int) -> dict[str, float]:
+    """A grid tile's extent in metres of the Mercator plane, where the map lays its image."""
     z, _ = analyzers.GRID
     count = 1 << z
-    left, top = analyzers.mercator(west, north)
-    right, bottom = analyzers.mercator(east, south)
-
-    def span(low: float, high: float) -> tuple[list[int], bool]:
-        first = max(0, math.floor(low * count))
-        last = min(count - 1, max(first, math.ceil(high * count) - 1))
-        if last - first + 1 <= PREVIEW_SPAN:
-            return list(range(first, last + 1)), False
-        middle = (first + last) // 2
-        return list(range(middle - PREVIEW_SPAN // 2, middle - PREVIEW_SPAN // 2 + PREVIEW_SPAN)), True
-
-    columns, wide = span(left, right)
-    rows, tall = span(top, bottom)
-    return [(x, y) for y in rows for x in columns], wide or tall
+    world = analyzers.WORLD
+    return {"west": x / count * world - world / 2, "east": (x + 1) / count * world - world / 2,
+            "north": world / 2 - y / count * world, "south": world / 2 - (y + 1) / count * world}
 
 
 def held(source: Source, x: int, y: int, product: str) -> Any | None:
@@ -442,9 +480,9 @@ def missing(recipe: Recipe, a: Source, b: Source,
 
 
 def fetch(frames: list[tuple[Source, int, int, str]]) -> None:
-    """Read the frames a preview lacks from Copernicus into the tile cache.
+    """Read the frames a test lacks from Copernicus into the tile cache.
 
-    Only ever called because the analyst pressed Read. Each frame is one
+    Only ever called because the analyst pressed Test. Each frame is one
     request on the Sentinel Hub meter, counted whether it succeeds or not.
     """
     if not frames:
@@ -469,7 +507,7 @@ def fetch(frames: list[tuple[Source, int, int, str]]) -> None:
         list(pool.map(one, frames))
 
 
-def _tile(recipe: Recipe, a: Source, b: Source, x: int, y: int) -> Evaluation:
+def _measure_tile(recipe: Recipe, a: Source, b: Source, x: int, y: int) -> Measured:
     import numpy as np
 
     z, size = analyzers.GRID
@@ -478,10 +516,15 @@ def _tile(recipe: Recipe, a: Source, b: Source, x: int, y: int) -> Evaluation:
         after = held(b, x, y, product)
         before = after if is_single(recipe) else held(a, x, y, product)
         if after is None or before is None:
-            raise ValueError("read this view's frames first")
+            raise ValueError("test the check to read its frames first")
         read[product] = (before, after)
     _, lat = analyzers.geographic((x + .5) / (1 << z), (y + .5) / (1 << z))
-    return evaluate(read, np.ones((size, size), np.uint8), recipe, (a.date, b.date), lat)
+    return measure(read, np.ones((size, size), np.uint8), recipe, (a.date, b.date), lat)
+
+
+def _tile(recipe: Recipe, a: Source, b: Source, x: int, y: int) -> Evaluation:
+    tile = _measure_tile(recipe, a, b, x, y)
+    return evaluation(tile, judge(tile))
 
 
 def _png(mask: Any) -> str:
@@ -490,49 +533,110 @@ def _png(mask: Any) -> str:
     return base64.b64encode(out.getvalue()).decode("ascii")
 
 
-def preview(recipe: Recipe, a: Source, b: Source, bounds: tuple[float, float, float, float],
-            *, read: bool = False) -> dict[str, Any]:
-    """What the recipe keeps over the view, and what each rule kept on the way.
+# -- checks ---------------------------------------------------------------------------------
 
-    Every tile whose frames are held is judged, so a view that is half read
-    still shows its half; `missing` counts the frames the rest lacks. Without
-    `read` nothing reaches the network, and the answer says how many requests
-    would fetch them.
-    """
-    import numpy as np
+#: How close a candidate has to come to a mark to be on it: a pixel and a half.
+MARK_REACH_M = 15.0
 
-    a, b = preview_sources(recipe, a, b)
-    tiles, clipped = preview_tiles(bounds)
+
+def pixel_of(point: tuple[float, float]) -> tuple[int, int, int, int]:
+    """The grid tile under a point, and the pixel of that tile the point falls on."""
     z, size = analyzers.GRID
     count = 1 << z
-    lacking = missing(recipe, a, b, tiles)
-    if lacking and read:
-        fetch(lacking)
-        lacking = missing(recipe, a, b, tiles)
-    xs = sorted({x for x, _ in tiles})
-    ys = sorted({y for _, y in tiles})
-    world = analyzers.WORLD
-    answer: dict[str, Any] = {
-        "tiles": [list(tile) for tile in tiles], "clipped": clipped, "missing": len(lacking),
-        "box": {"west": xs[0] / count * world - world / 2, "east": (xs[-1] + 1) / count * world - world / 2,
-                "north": world / 2 - ys[0] / count * world, "south": world / 2 - (ys[-1] + 1) / count * world},
-        "size": [len(xs) * size, len(ys) * size], "ready": False,
-    }
-    unread = {(x, y) for _, x, y, _ in lacking}
-    judged = [tile for tile in tiles if tile not in unread]
-    if not judged:
-        return answer
+    gx, gy = (value * count for value in analyzers.mercator(*point))
+    x, y = min(count - 1, int(gx)), min(count - 1, int(gy))
+    return x, y, min(size - 1, int((gx - x) * size)), min(size - 1, int((gy - y) * size))
 
-    options = recipe.parameters
-    mosaic = np.zeros((len(ys) * size, len(xs) * size), np.uint8)
-    measured_total = 0
+
+def check_tiles(check: Check) -> list[tuple[int, int]]:
+    """The grid tiles a check reads: the ones under its marks, then the ones beside them.
+
+    A mark is read on its own tile, so a candidate cut by the tile's edge is
+    judged on the part inside it, and two halves that are each too small to
+    keep would both be lost. A mark within EDGE_PX of an edge therefore reads
+    the tile across it as well, and the seam is joined the way a sweep joins it.
+    """
+    if not check.marks:
+        raise ValueError("drop a pin on the ground this check should read")
+    z, size = analyzers.GRID
+    count = 1 << z
+    edge = EDGE_PX / size
+    under: list[tuple[int, int]] = []
+    beside: list[tuple[int, int]] = []
+    for mark in check.marks:
+        gx, gy = (value * count for value in analyzers.mercator(*mark.point))
+        x, y = min(count - 1, int(gx)), min(count - 1, int(gy))
+        if (x, y) not in under:
+            under.append((x, y))
+        dx = -1 if gx - x < edge else 1 if gx - x > 1 - edge else 0
+        dy = -1 if gy - y < edge else 1 if gy - y > 1 - edge else 0
+        for step in ((dx, 0), (0, dy), (dx, dy)):
+            tile = (x + step[0], y + step[1])
+            if step != (0, 0) and 0 <= tile[0] < count and 0 <= tile[1] < count and tile not in beside:
+                beside.append(tile)
+    tiles = under + [tile for tile in beside if tile not in under]
+    if len(tiles) > MAX_CHECK_TILES:
+        raise ValueError(f"these pins reach {len(tiles)} tiles and a check reads at most {MAX_CHECK_TILES}: "
+                         "keep the pins of one place in a check and start another for ground further away")
+    return tiles
+
+
+def _satellite(recipe: Recipe, check: Check) -> None:
+    if check.b.provider != recipe_sensor(recipe):
+        seen = "radar" if check.b.provider == "sentinel1" else "Sentinel-2"
+        raise ValueError(f"this check was saved on {seen} passes; save it again on passes these rules read")
+
+
+def plan(recipe: Recipe, check: Check) -> dict[str, int]:
+    """What testing a check would read: its tiles, and how many frames the cache lacks.
+
+    Each missing frame is one request on the Sentinel Hub meter, so this is
+    what the Test button says before it is pressed. Nothing is fetched.
+    """
+    _satellite(recipe, check)
+    a, b = check_sources(recipe, check.a, check.b)
+    tiles = check_tiles(check)
+    return {"tiles": len(tiles), "missing": len(missing(recipe, a, b, tiles))}
+
+
+def _reading(recipe: Recipe, evaluation: Evaluation, px: int, py: int) -> dict[str, Any]:
+    """What every rule read at one pixel of a tile, and whether it passed."""
+    import numpy as np
+
+    def number(array: Any) -> float | None:
+        if array is None:
+            return None
+        value = float(array[py, px])
+        return round(value, 4) if np.isfinite(value) else None
+
+    return {"imaged": bool(evaluation.imaged[py, px]), "measured": bool(evaluation.measured[py, px]),
+            "kept": bool(evaluation.reading.binary[py, px]),
+            "rules": [{"passes": bool(evaluation.passes[i][py, px]), "value": number(evaluation.values[i]),
+                       "before": number(evaluation.before[i]), "after": number(evaluation.after[i])}
+                      for i in range(len(recipe.rules))]}
+
+
+def probe(recipe: Recipe, check: Check, point: tuple[float, float]) -> dict[str, Any]:
+    """What every rule read at one point of the ground a check was tested on."""
+    a, b = check_sources(recipe, check.a, check.b)
+    x, y, px, py = pixel_of(point)
+    if missing(recipe, a, b, [(x, y)]):
+        return {"ready": False}
+    return {"ready": True, **_reading(recipe, _tile(recipe, a, b, x, y), px, py)}
+
+
+def _detail(recipe: Recipe, check: Check, tiles: list[tuple[int, int]],
+            evaluations: dict[tuple[int, int], Evaluation], candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """What the map draws of a test: each tile's mask, the candidates, and every pin's reading."""
+    import numpy as np
+
+    _, size = analyzers.GRID
+    measured_total = kept_total = 0
     own = [0] * len(recipe.rules)
     running = [0] * len(recipe.rules)
-    kept_total = 0
-    rows: list[dict[str, Any]] = []
-    note = ""
-    for part, (x, y) in enumerate(judged):
-        evaluation = _tile(recipe, a, b, x, y)
+    grid: list[dict[str, Any]] = []
+    for x, y in tiles:
+        evaluation = evaluations[(x, y)]
         bits = evaluation.measured.astype(np.uint8) << MEASURED_BIT
         bits |= evaluation.reading.binary.astype(np.uint8) << KEPT_BIT
         so_far = None
@@ -543,90 +647,62 @@ def preview(recipe: Recipe, a: Source, b: Source, bounds: tuple[float, float, fl
             running[i] += int(so_far.sum())
         measured_total += int(evaluation.measured.sum())
         kept_total += int(evaluation.reading.binary.sum())
-        top, left = ys.index(y) * size, xs.index(x) * size
-        mosaic[top:top + size, left:left + size] = bits
-        if not note:
-            try:
-                rows.extend(analyzers._candidates(evaluation.reading, recipe.phenomenon, x, y, part, []))
-            except ValueError as exc:
-                note, rows = str(exc), []
-    candidates = [row for row in analyzers.merge(rows, options.merge_metres) if analyzers.keeps(row, options)]
-    candidates.sort(key=lambda row: row["margin"], reverse=True)
+        grid.append({"x": x, "y": y, "box": tile_box(x, y), "mask": _png(bits)})
     share = lambda value: round(value / measured_total, 5) if measured_total else 0.0  # noqa: E731
-    return {**answer, "ready": True, "mask": _png(mosaic),
-            "measured": round(measured_total / (len(judged) * size * size), 5),
-            "rules": [{"share": share(own[i]), "kept": share(running[i])} for i in range(len(recipe.rules))],
-            "kept": share(kept_total), "count": len(candidates), "note": note,
-            "candidates": [{key: value for key, value in row.items() if key != "parts"}
-                           for row in candidates[:PREVIEW_CANDIDATES]]}
-
-
-def probe(recipe: Recipe, a: Source, b: Source, point: tuple[float, float]) -> dict[str, Any]:
-    """What every rule read at one point of the preview, and whether it passed."""
-    import numpy as np
-
-    a, b = preview_sources(recipe, a, b)
-    z, size = analyzers.GRID
-    count = 1 << z
-    gx, gy = analyzers.mercator(*point)
-    x, y = int(gx * count), int(gy * count)
-    if missing(recipe, a, b, [(x, y)]):
-        return {"ready": False}
-    evaluation = _tile(recipe, a, b, x, y)
-    px = min(size - 1, int((gx * count - x) * size))
-    py = min(size - 1, int((gy * count - y) * size))
-
-    def number(array: Any) -> float | None:
-        if array is None:
-            return None
-        value = float(array[py, px])
-        return round(value, 4) if np.isfinite(value) else None
-
-    return {"ready": True, "imaged": bool(evaluation.imaged[py, px]),
-            "measured": bool(evaluation.measured[py, px]),
-            "kept": bool(evaluation.reading.binary[py, px]),
-            "rules": [{"passes": bool(evaluation.passes[i][py, px]), "value": number(evaluation.values[i]),
-                       "before": number(evaluation.before[i]), "after": number(evaluation.after[i])}
-                      for i in range(len(recipe.rules))]}
-
-
-# -- checks --------------------------------------------------------------------------
-
-#: How close a candidate has to come to a mark to be on it: a pixel and a half.
-MARK_REACH_M = 15.0
-
-
-def check_tiles(check: Check) -> list[tuple[int, int]]:
-    """The grid tiles a check reads: the ones under its marks, else its view's.
-
-    A mark is read on its own tile, so a candidate cut by that tile's edge is
-    judged on the part inside it. Marks are best placed away from an edge.
-    """
-    if not check.marks:
-        bounds = check.bounds
-        return preview_tiles((bounds.west, bounds.south, bounds.east, bounds.north))[0]
-    z, _ = analyzers.GRID
-    count = 1 << z
-    tiles: list[tuple[int, int]] = []
+    readings = []
     for mark in check.marks:
-        gx, gy = analyzers.mercator(*mark.point)
-        tile = (int(gx * count), int(gy * count))
-        if tile not in tiles:
-            tiles.append(tile)
-    return tiles
+        x, y, px, py = pixel_of(mark.point)
+        readings.append(_reading(recipe, evaluations[(x, y)], px, py))
+    return {"size": size, "tiles": grid,
+            "measured": round(measured_total / (len(tiles) * size * size), 5),
+            "rules": [{"share": share(own[i]), "kept": share(running[i])} for i in range(len(recipe.rules))],
+            "kept": share(kept_total), "readings": readings,
+            "candidates": [{key: value for key, value in row.items() if key != "parts"}
+                           for row in candidates[:TEST_CANDIDATES]]}
 
 
-def check(recipe: Recipe, check: Check, *, read: bool = False) -> dict[str, Any]:
-    """A check rerun with the recipe as it stands: what came out on each mark.
+def _candidates_of(recipe: Recipe, tiles: list[tuple[int, int]],
+                   readings: dict[tuple[int, int], analyzers.Reading]) -> list[dict[str, Any]]:
+    """What a run of the recipe would return over these tiles: outlined, joined across seams, sized."""
+    rows: list[dict[str, Any]] = []
+    for part, tile in enumerate(tiles):
+        rows.extend(analyzers._candidates(readings[tile], recipe.phenomenon, tile[0], tile[1], part, []))
+    options = recipe.parameters
+    return [row for row in analyzers.merge(rows, options.merge_metres) if analyzers.keeps(row, options)]
 
-    It reads the tile cache, as the preview does, and `read` fetches the frames
-    it lacks. `covered` says, mark by mark, whether a candidate a run would
-    return comes within MARK_REACH_M of it; `count` is how many came out.
+
+def _covered(check: Check, candidates: list[dict[str, Any]]) -> list[bool]:
+    return [any(analysis_geometry.near(row["geometry"], mark.point, MARK_REACH_M) for row in candidates)
+            for mark in check.marks]
+
+
+def _without(recipe: Recipe, check: Check, tiles: list[tuple[int, int]],
+             measured: dict[tuple[int, int], Measured], skip: int) -> list[bool]:
+    """Whether each mark would be on a candidate if the recipe had not had one rule.
+
+    The rules were read once; only what they make of it is done again.
     """
-    if check.b.provider != recipe_sensor(recipe):
-        seen = "radar" if check.b.provider == "sentinel1" else "Sentinel-2"
-        raise ValueError(f"this check was saved on {seen} passes; save it again on passes these rules read")
-    a, b = preview_sources(recipe, check.a, check.b)
+    keep = [i for i in range(len(recipe.rules)) if i != skip]
+    try:
+        readings = {tile: judge(measured[tile], keep) for tile in tiles}
+        return _covered(check, _candidates_of(recipe, tiles, readings))
+    except ValueError:
+        # So many fragments that a run would refuse them: without this rule everything is flagged.
+        return [True] * len(check.marks)
+
+
+def check(recipe: Recipe, check: Check, *, read: bool = False, detail: bool = False) -> dict[str, Any]:
+    """A check tested with the recipe as it stands: what came out on each mark.
+
+    It reads the tile cache, and `read` fetches the frames it lacks. `covered`
+    says, mark by mark, whether a candidate a run would return comes within
+    MARK_REACH_M of it; `count` is how many came out. `detail` adds what the
+    map draws: each tile's mask, the candidates and what every rule read at
+    every mark, and with several rules what the marks would have come to
+    without each one (`without`), which is how an analyst sees which rules help.
+    """
+    _satellite(recipe, check)
+    a, b = check_sources(recipe, check.a, check.b)
     tiles = check_tiles(check)
     lacking = missing(recipe, a, b, tiles)
     if lacking and read:
@@ -634,15 +710,17 @@ def check(recipe: Recipe, check: Check, *, read: bool = False) -> dict[str, Any]
         lacking = missing(recipe, a, b, tiles)
     if lacking:
         return {"ready": False, "missing": len(lacking)}
-    rows: list[dict[str, Any]] = []
-    for part, (x, y) in enumerate(tiles):
-        evaluation = _tile(recipe, a, b, x, y)
-        rows.extend(analyzers._candidates(evaluation.reading, recipe.phenomenon, x, y, part, []))
-    options = recipe.parameters
-    candidates = [row for row in analyzers.merge(rows, options.merge_metres) if analyzers.keeps(row, options)]
-    covered = [any(analysis_geometry.near(row["geometry"], mark.point, MARK_REACH_M) for row in candidates)
-               for mark in check.marks]
-    return {"ready": True, "missing": 0, "count": len(candidates), "covered": covered}
+    measured = {tile: _measure_tile(recipe, a, b, *tile) for tile in tiles}
+    evaluations = {tile: evaluation(measured[tile], judge(measured[tile])) for tile in tiles}
+    candidates = _candidates_of(recipe, tiles, {tile: evaluations[tile].reading for tile in tiles})
+    answer: dict[str, Any] = {"ready": True, "missing": 0, "count": len(candidates), "covered": _covered(check, candidates)}
+    if detail:
+        candidates.sort(key=lambda row: row["margin"], reverse=True)
+        answer.update(_detail(recipe, check, tiles, evaluations, candidates))
+        if len(recipe.rules) > 1:
+            answer["without"] = [{"covered": _without(recipe, check, tiles, measured, skip)}
+                                 for skip in range(len(recipe.rules))]
+    return answer
 
 
 # -- built-ins as rules --------------------------------------------------------------
