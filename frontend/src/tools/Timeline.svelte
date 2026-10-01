@@ -575,10 +575,33 @@
         landOnUndated = true;
         return;
       }
-      queue.scrollIntoView({ block: 'start' });
       queue.querySelector('.holding-list button')?.focus({ preventScroll: true });
+      settleOn(queue);
     }));
   });
+  /**
+   * Scrolls the queue to the top of its pane, and again while it keeps moving: the axis,
+   * the lanes and the pane take their measured room over several frames on a slow
+   * machine, and a landing made once is left behind by whatever shifts after it. Ends
+   * once the queue has held still for a few frames, or after about a second and a half.
+   */
+  function settleOn(queue) {
+    let last = null;
+    let still = 0;
+    let frames = 0;
+    const step = () => {
+      if (!queue.isConnected) return;
+      if (queue.getBoundingClientRect().top === last) still += 1;
+      else {
+        queue.scrollIntoView({ block: 'start' });
+        last = queue.getBoundingClientRect().top;
+        still = 0;
+      }
+      frames += 1;
+      if (still < 6 && frames < 90) requestAnimationFrame(step);
+    };
+    step();
+  }
   $effect(() => rangeMenu ? closeOnOutsidePointer(rangeElement, () => (rangeMenu = false)) : undefined);
 
   $effect(() => {
