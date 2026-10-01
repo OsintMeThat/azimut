@@ -276,3 +276,52 @@ describe('open in… from a row', () => {
     expect(doors()).toHaveLength(0);
   });
 });
+
+describe('the worklist of what was brought in', () => {
+  const routes = get.getMockImplementation();
+  const posts = post.getMockImplementation();
+  afterEach(() => {
+    get.mockImplementation(routes);
+    post.mockImplementation(posts);
+    uiState.openSheet = null;
+  });
+
+  const worklistButton = () =>
+    [...target.querySelectorAll('button')].find((node) => node.textContent.trim() === 'Worklist');
+
+  it('opens the worklist the case already has', async () => {
+    get.mockImplementation(async (url) => {
+      if (url.includes('/media/page')) return page;
+      if (url.endsWith('/sheets/from-case/files')) return { total: 2, answered: 0, sheet: 'e_list' };
+      return {};
+    });
+    await open();
+
+    await press(worklistButton());
+
+    expect(post).not.toHaveBeenCalledWith('/api/cases/case-a/sheets/from-case', expect.anything());
+    expect(uiState.openSheet).toBe('e_list');
+    expect(uiState.tool).toBe('sheet');
+  });
+
+  it('builds it on the first press', async () => {
+    get.mockImplementation(async (url) => {
+      if (url.includes('/media/page')) return page;
+      if (url.endsWith('/sheets/from-case/files')) return { total: 2, answered: 0, sheet: null };
+      return {};
+    });
+    post.mockImplementation(async (url) =>
+      url.endsWith('/sheets/from-case') ? { id: 'e_new', taken: 2, total: 2 } : { queued: 1 },
+    );
+    await open();
+
+    await press(worklistButton());
+
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/sheets/from-case', {
+      title: 'Files to geolocate',
+      shape: 'files',
+    });
+    expect(uiState.openSheet).toBe('e_new');
+    expect(uiState.tool).toBe('sheet');
+  });
+});

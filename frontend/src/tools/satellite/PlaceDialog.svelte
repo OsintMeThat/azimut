@@ -17,6 +17,7 @@
   import Modal from '../../components/Modal.svelte';
   import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import FolderSelect from '../../components/FolderSelect.svelte';
+  import { workFolder } from '../../lib/folders.js';
   import RelationList from '../../components/RelationList.svelte';
   import RelationPicker from '../../components/RelationPicker.svelte';
 
@@ -44,6 +45,11 @@
   // was found — is edited in the panel every other surface opens. So this hands over
   // rather than growing a second copy of that form, and asks first if anything was
   // typed: handing over re-reads the place from the case, which would drop it.
+  // A new point starts in the work folder, before what it opened on is read, so
+  // that default is not taken for something the analyst typed.
+  untrack(() => {
+    if (!draft.id && !draft.folder && workFolder()) draft.folder = workFolder();
+  });
   // read once, on purpose: this is what the dialog opened on, not what it now holds
   const opened = untrack(() => ({
     title: draft.title,

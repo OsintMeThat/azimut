@@ -842,6 +842,13 @@ def types_in(*families: str) -> frozenset[str]:
     return frozenset(e.type for e in ENTITY_TYPES if e.family in wanted)
 
 
+#: What the case's work folder files by itself: what was gathered, written or
+#: pinned while working, never the people and things the work is about, nor the
+#: statements made about them. A subject is shared across every thread of a case,
+#: so filing it under the one being worked on would be a guess.
+WORK_FOLDER_TYPES: frozenset[str] = types_in(COLLECTED, DOCUMENT, PLACE)
+
+
 def role_of(type_: str) -> str | None:
     """What a type is for once the case is drawn, or None for a free type.
 

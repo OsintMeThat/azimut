@@ -14,3 +14,24 @@ export const { maxWidth, clampWidth, loadWidth, saveWidth } = panelWidth({
   max: MAX_W,
   def: DEFAULT_W,
 });
+
+/** What the sidebar body shows. Folders first: it is what it showed before. */
+export const SIDEBAR_VIEWS = ['folders', 'todo', 'recent'];
+const VIEW_KEY = 'azimut:sidebarView';
+
+export function loadSidebarView() {
+  try {
+    const stored = localStorage.getItem(VIEW_KEY);
+    return SIDEBAR_VIEWS.includes(stored) ? stored : 'folders';
+  } catch {
+    return 'folders';
+  }
+}
+
+export function saveSidebarView(view) {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    /* a browser that keeps nothing still switches; it just forgets on reload */
+  }
+}

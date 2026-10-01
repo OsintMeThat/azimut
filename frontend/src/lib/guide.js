@@ -315,6 +315,10 @@ export const GUIDE = [
         text: 'The Graph receives the filter rather than the rows it matched, so the drawing answers at any case size and stays live as the case changes.',
       },
       {
+        label: 'The case proposes the links its files state',
+        text: 'Who posted a file, read off its address, and points under 300 m apart are filed as proposals. N proposed in the Graph lists them to confirm or drop.',
+      },
+      {
         label: 'The Graph never writes to the case',
         text: 'Expanding, hiding, folding and dragging are your picture. Undo reaches all of them and reaches nothing the case holds.',
       },
@@ -332,7 +336,7 @@ export const GUIDE = [
       },
       {
         label: 'Sheet works on real CSV files',
-        text: 'The sheets the case holds, in a grid. A declared sheet can be promoted into entities, places and dated claims, read as a plan first.',
+        text: 'The tab opens on the recent sheets and the ones the case could start, like Files to geolocate. A declared sheet can be promoted into entities, places and dated claims, read as a plan first.',
       },
     ],
   },

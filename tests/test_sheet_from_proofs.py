@@ -53,7 +53,19 @@ def build(client, case_id, title="My geolocations"):
     return made.json()
 
 
-COLUMNS = ["id", "Title", "Source media", "Place", "Coordinates", "In case", "Status", "Notes"]
+COLUMNS = [
+    "id", "Title", "Date", "Place", "POV", "Coordinates", "Source media", "Source URL",
+    "Description", "In case", "Status", "Notes",
+]
+
+
+def cell(sheet, row, name):
+    """One cell by its column's name, so a test reads the way the sheet does."""
+    return sheet["rows"][row][sheet["columns"].index(name)]
+
+
+def put_cell(sheet, row, name, value):
+    sheet["rows"][row][sheet["columns"].index(name)] = value
 
 
 # -- the shape ----------------------------------------------------------------
@@ -70,12 +82,14 @@ def test_one_row_per_proof_carrying_its_media_and_its_place(client):
 
     sheet = read_sheet(client, case_id, made["id"])
     assert sheet["columns"] == COLUMNS
-    assert sheet["rows"][0][1:4] == ["Rooftop shot", "GX010234", "Rooftop"]
+    assert [cell(sheet, 0, name) for name in ("Title", "Source media", "Place")] == [
+        "Rooftop shot", "GX010234", "Rooftop",
+    ]
     # Filled off the graph rather than copied in by hand, which is what keeps it true.
-    assert sheet["rows"][0][4] == "47.10000, 37.50000"
-    assert sheet["rows"][0][5] == "YES"
+    assert cell(sheet, 0, "Coordinates") == "47.10000, 37.50000"
+    assert cell(sheet, 0, "In case") == "YES"
     # Every line is a proof that exists: `to do` on all of them would be a lie.
-    assert sheet["rows"][0][6] == "done"
+    assert cell(sheet, 0, "Status") == "done"
 
     key = sheet["rows"][0][0]
     assert sheet["meta"]["links"][key] == {
@@ -93,9 +107,8 @@ def test_the_three_case_columns_are_the_apps_and_the_two_work_columns_are_not(cl
 
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
     roles = sheet["meta"]["roles"]
-    assert roles["Title"]["kind"] == "locked"
-    assert roles["Source media"]["kind"] == "locked"
-    assert roles["Place"]["kind"] == "locked"
+    for column in ("Title", "Date", "Place", "POV", "Source media", "Source URL", "Description"):
+        assert roles[column]["kind"] == "locked", column
     assert roles["Coordinates"] == {"kind": "computed", "of": "point", "from": "Place"}
     assert roles["In case"]["of"] == "in_case"
     assert roles["Status"]["kind"] == "state"
@@ -109,7 +122,9 @@ def test_a_proof_with_no_place_still_gets_its_row(client):
     a_proof(client, case_id, "Unplaced", media=media)
 
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
-    assert sheet["rows"][0][1:5] == ["Unplaced", "GX010234", "", ""]
+    assert [cell(sheet, 0, name) for name in ("Title", "Source media", "Place", "Coordinates")] == [
+        "Unplaced", "GX010234", "", "",
+    ]
     key = sheet["rows"][0][0]
     assert "Place" not in sheet["meta"]["links"][key]
 
@@ -120,7 +135,9 @@ def test_a_proof_with_no_media_still_gets_its_row(client):
     a_proof(client, case_id, "Sourceless", place=place)
 
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
-    assert sheet["rows"][0][1:5] == ["Sourceless", "", "Rooftop", "47.10000, 37.50000"]
+    assert [cell(sheet, 0, name) for name in ("Title", "Source media", "Place", "Coordinates")] == [
+        "Sourceless", "", "Rooftop", "47.10000, 37.50000",
+    ]
     key = sheet["rows"][0][0]
     assert "Source media" not in sheet["meta"]["links"][key]
 
@@ -135,8 +152,90 @@ def test_a_proof_on_several_medias_takes_one_and_the_same_one_twice(client):
 
     first = read_sheet(client, case_id, build(client, case_id, "One")["id"])
     second = read_sheet(client, case_id, build(client, case_id, "Two")["id"])
-    assert first["rows"][0][2] == "alpha.mp4"
-    assert second["rows"][0][2] == "alpha.mp4"
+    assert cell(first, 0, "Source media") == "alpha.mp4"
+    assert cell(second, 0, "Source media") == "alpha.mp4"
+
+
+def test_a_proof_placed_at_three_points_is_three_rows(client):
+    case_id = make_case(client)
+    proof = add(client, case_id, "proof", "Three strikes", when="2026-01-03~",
+                notes="Three impacts filmed from one rooftop.")["id"]
+    for label, lat in (("impact 2", 47.2), ("impact 1", 47.1), ("POV", 47.3)):
+        place = add(client, case_id, "place", label, lat=lat, lon=37.5)["id"]
+        link(case_id, proof, place, "depicts")
+
+    made = build(client, case_id)
+    sheet = read_sheet(client, case_id, made["id"])
+
+    # The limit counts proofs, the rows are the points.
+    assert made["taken"] == 1
+    assert [cell(sheet, row, "Place") for row in range(3)] == ["impact 1", "impact 2", "POV"]
+    assert {cell(sheet, row, "Title") for row in range(3)} == {"Three strikes"}
+    assert {cell(sheet, row, "Date") for row in range(3)} == {"2026-01-03~"}
+    assert {cell(sheet, row, "Description") for row in range(3)} == {
+        "Three impacts filmed from one rooftop."
+    }
+    assert set(sheet["meta"]["built"].values()) == {proof}
+
+
+def test_pov_says_where_the_camera_stood_and_the_source_url_is_the_post(client):
+    case_id = make_case(client)
+    video = add(client, case_id, "media", "clip.mp4",
+                source_url="https://x.com/someone/status/1")["id"]
+    frame = add(client, case_id, "media", "frame")["id"]
+    link(case_id, frame, video, "derived-from")
+    camera = add(client, case_id, "place", "Rooftop", lat=47.1, lon=37.5)["id"]
+    target = add(client, case_id, "place", "Bridge", lat=47.11, lon=37.5)["id"]
+    proof = a_proof(client, case_id, "Bridge from the roof", media=frame, place=camera)
+    link(case_id, proof, target, "depicts")
+    # What the composer writes on the footage: recorded where the camera stood.
+    link(case_id, video, camera, "located-at")
+    link(case_id, video, target, "depicts")
+
+    sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    by_place = {cell(sheet, row, "Place"): row for row in range(len(sheet["rows"]))}
+
+    assert cell(sheet, by_place["Rooftop"], "POV") == "YES"
+    assert cell(sheet, by_place["Bridge"], "POV") == "NO"
+    assert cell(sheet, by_place["Bridge"], "Source URL") == "https://x.com/someone/status/1"
+
+
+def test_refresh_adds_a_point_added_to_a_proof_and_keeps_the_others(client):
+    case_id = make_case(client)
+    first = add(client, case_id, "place", "impact 1", lat=47.1, lon=37.5)["id"]
+    proof = a_proof(client, case_id, "Strikes", place=first)
+    sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    put_cell(sheet, 0, "Notes", "checked")
+    second = add(client, case_id, "place", "impact 2", lat=47.2, lon=37.5)["id"]
+    link(case_id, proof, second, "depicts")
+
+    answer = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["added"] == 1
+    fresh = read_sheet(client, case_id, sheet["id"])
+    assert [cell(fresh, row, "Place") for row in range(2)] == ["impact 1", "impact 2"]
+    assert cell(fresh, 0, "Notes") == "checked"
+
+
+def test_a_sheet_built_with_the_old_columns_keeps_them_on_refresh(client):
+    case_id = make_case(client)
+    place = add(client, case_id, "place", "Rooftop", lat=47.1, lon=37.5)["id"]
+    a_proof(client, case_id, "Rooftop shot", place=place)
+    sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    # The shape before the per-point rows: eight columns, no date, no description.
+    old = ["id", "Title", "Source media", "Place", "Coordinates", "In case", "Status", "Notes"]
+    sheet["rows"] = [[cell(sheet, 0, name) for name in old]]
+    sheet["columns"] = old
+    sheet["meta"]["roles"] = {
+        name: role for name, role in sheet["meta"]["roles"].items() if name in old
+    }
+
+    answer = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["added"] == 0
+    assert answer.json()["columns"] == old
 
 
 def test_rows_are_ordered_by_the_proofs_label(client):
@@ -206,14 +305,14 @@ def test_refresh_leaves_the_analysts_own_columns_alone(client):
     case_id = make_case(client)
     a_proof(client, case_id, "Alpha")
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
-    sheet["rows"][0][6] = "in progress"
-    sheet["rows"][0][7] = "waiting on the second angle"
+    put_cell(sheet, 0, "Status", "in progress")
+    put_cell(sheet, 0, "Notes", "waiting on the second angle")
     saved = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
     assert saved.status_code == 200, saved.text
 
     fresh = read_sheet(client, case_id, sheet["id"])
-    assert fresh["rows"][0][6] == "in progress"
-    assert fresh["rows"][0][7] == "waiting on the second angle"
+    assert cell(fresh, 0, "Status") == "in progress"
+    assert cell(fresh, 0, "Notes") == "waiting on the second angle"
 
 
 def test_refresh_restates_a_proof_renamed_since_without_filing_a_second_row(client):
@@ -237,7 +336,7 @@ def test_refresh_never_removes_a_row_and_says_the_proof_is_gone(client):
     dropped = a_proof(client, case_id, "Bravo")
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
     sheet_id = sheet["id"]
-    sheet["rows"][1][7] = "worth keeping"
+    put_cell(sheet, 1, "Notes", "worth keeping")
     assert post_sheet(client, case_id, sheet_id, "refresh", sheet).status_code == 200
 
     client.delete(f"/api/cases/{case_id}/entities/{dropped}")
@@ -246,10 +345,10 @@ def test_refresh_never_removes_a_row_and_says_the_proof_is_gone(client):
     assert len(fresh["rows"]) == 2
     # The row keeps its text and the note nobody else wrote.
     assert fresh["rows"][1][1] == "Bravo"
-    assert fresh["rows"][1][7] == "worth keeping"
+    assert cell(fresh, 1, "Notes") == "worth keeping"
     # The link is swept, as it is on every sheet — and `built` is what survives to answer.
-    assert fresh["rows"][0][5] == "YES"
-    assert fresh["rows"][1][5] == "NO"
+    assert cell(fresh, 0, "In case") == "YES"
+    assert cell(fresh, 1, "In case") == "NO"
     assert "Title" not in fresh["meta"]["links"].get(fresh["rows"][1][0], {})
     assert fresh["meta"]["built"][fresh["rows"][1][0]] == dropped
     assert fresh["meta"]["built"][fresh["rows"][0][0]] == kept
@@ -265,7 +364,10 @@ def test_a_row_nobody_built_is_left_out_of_the_in_case_column(client):
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
     # A line the analyst adds for a place not yet proven: it arrives as work to do, and
     # the question `In case` asks does not apply to it.
-    sheet["rows"].append(["", "A place still to prove", "", "", "", "", "to do", ""])
+    line = [""] * len(sheet["columns"])
+    line[sheet["columns"].index("Title")] = "A place still to prove"
+    line[sheet["columns"].index("Status")] = "to do"
+    sheet["rows"].append(line)
     saved = client.put(
         f"/api/cases/{case_id}/sheets/{sheet['id']}",
         json={k: sheet[k] for k in ("columns", "rows", "meta", "stamp")},
@@ -273,8 +375,8 @@ def test_a_row_nobody_built_is_left_out_of_the_in_case_column(client):
     assert saved.status_code == 200, saved.text
 
     fresh = read_sheet(client, case_id, sheet["id"])
-    assert fresh["rows"][1][5] == ""
-    assert fresh["rows"][1][6] == "to do"
+    assert cell(fresh, 1, "In case") == ""
+    assert cell(fresh, 1, "Status") == "to do"
 
 
 def test_the_coordinates_follow_a_place_that_moves(client):
@@ -288,7 +390,7 @@ def test_the_coordinates_follow_a_place_that_moves(client):
         json={"attrs": {"lat": 48.9, "lon": 24.7}},
     )
     fresh = read_sheet(client, case_id, sheet_id)
-    assert fresh["rows"][0][4] == "48.90000, 24.70000"
+    assert cell(fresh, 0, "Coordinates") == "48.90000, 24.70000"
 
 
 def test_the_build_is_bounded(client):

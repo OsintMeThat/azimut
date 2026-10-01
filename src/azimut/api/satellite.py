@@ -1504,7 +1504,8 @@ def save_place(case_id: str, body: PlaceIn) -> dict[str, Any]:
     extra: dict[str, Any] = {}
     if body.notes and body.notes.strip():
         extra["notes"] = body.notes.strip()
-    if body.folder and body.folder.strip():
+    # Sent empty, it is a choice of no folder, so the work folder is not applied.
+    if body.folder is not None:
         extra["folder"] = body.folder.strip()
     entity = satellite_engine.save_place(
         case, body.lat, body.lon, body.zoom, body.bearing, body.title, extra_attrs=extra

@@ -27,6 +27,12 @@
     onmoresuggested = () => {},
     oncreatefolder = () => {},
     onremovefolder = () => {},
+    /** The case's work folder, marked with its pin. */
+    workFolder = null,
+    onworkfolder = () => {},
+    /** Right-click on a folder row or an entity row: `(event, path)` / `(event, entity)`. */
+    onfoldermenu = () => {},
+    onentitymenu = () => {},
     onfile = () => {},
     onactivate = () => {},
     oninfo = () => {},
@@ -195,6 +201,7 @@
           onactivate={onRowClick}
           {oninfo}
           {onunfile}
+          onmenu={onentitymenu}
         />
       {/each}
       {#if !unfiled.done}
@@ -277,11 +284,27 @@
     ondrop={(e) => onDropFolder(e, node.path)}
     onclick={() => ontoggle(node.path)}
     onkeydown={(e) => e.key === 'Enter' && ontoggle(node.path)}
+    oncontextmenu={(e) => { e.preventDefault(); onfoldermenu(e, node.path); }}
   >
     <Icon name={isExpanded(node.path) ? 'chevronDown' : 'chevronRight'} size={12} />
     <Icon name={isExpanded(node.path) ? 'folderOpen' : 'folder'} size={13} />
     <span class="fname">{node.name}</span>
+    {#if workFolder === node.path}
+      <span class="pin" title="Work folder: new files and saved work land here"><Icon name="pushpin" size={12} /></span>
+    {/if}
     <span class="fcount">{subtreeCountFrom(node, byFolder)}</span>
+    {#if workFolder !== node.path}
+      <span
+        class="fact"
+        role="button"
+        tabindex="0"
+        title="Work in this folder: new files and saved work land here"
+        onclick={(e) => { e.stopPropagation(); onworkfolder(node.path); }}
+        onkeydown={(e) => e.key === 'Enter' && (e.stopPropagation(), onworkfolder(node.path))}
+      >
+        <Icon name="pushpin" size={12} />
+      </span>
+    {/if}
     <span
       class="fact"
       role="button"
@@ -339,6 +362,7 @@
           onactivate={onRowClick}
           {oninfo}
           {onunfile}
+          onmenu={onentitymenu}
         />
       {/each}
       {#if !sec.done}
@@ -378,6 +402,7 @@
   .fact { opacity: 0; color: var(--text-3); display: flex; padding: 2px; border-radius: 4px; flex-shrink: 0; }
   .fact:hover { color: var(--text-1); }
   .fdel:hover { color: var(--danger, #e55); }
+  .pin { display: flex; color: var(--accent); flex-shrink: 0; }
   .frow:hover .fact { opacity: 1; }
   .trash-head { display: flex; align-items: center; position: relative; }
   .trash-toggle { padding-right: 34px; }

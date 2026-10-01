@@ -52,3 +52,11 @@ describe('Add event, from every tool', () => {
     expect(markup).toContain('<NoteBar />');
   });
 });
+
+describe('the tab strip', () => {
+  it('names the open tool on its tab, since Geo Proof and Geo Report carry no title of their own', () => {
+    expect(markup).toContain("aria-current={uiState.tool === toolId ? 'page' : undefined}");
+    expect(readFileSync(new URL('./tools/ProofComposer.svelte', import.meta.url), 'utf8')).not.toContain('<h2>Geo Proof</h2>');
+    expect(readFileSync(new URL('./tools/PostComposer.svelte', import.meta.url), 'utf8')).not.toContain('<h2>Geo Report</h2>');
+  });
+});

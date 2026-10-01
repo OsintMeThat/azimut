@@ -491,7 +491,11 @@ def _apply_meta(
     exactly the case where a name the user just typed seems to vanish. The gate
     is an explicit act: the last one through it wins.
     """
-    patch = {k: v for k, v in (("title", label), ("folder", folder), ("notes", notes)) if v}
+    patch = {k: v for k, v in (("title", label), ("notes", notes)) if v}
+    # An empty folder is the analyst choosing none, over the work folder the
+    # registration filed the item in.
+    if folder is not None:
+        patch["folder"] = folder
     if patch:
         result["item"] = media_engine.update_media(case, result["item"]["path"], patch)
 

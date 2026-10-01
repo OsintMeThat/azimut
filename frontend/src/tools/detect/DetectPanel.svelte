@@ -16,6 +16,7 @@
   import { detectRuns, refreshRuns } from '../../lib/detectRuns.svelte.js';
   import { clone, zoneRing } from '../../lib/map/analyzers.js';
   import { passBefore } from '../../lib/map/detectWhen.js';
+  import { candidatePair } from '../../lib/map/detectReview.js';
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { containsPoint } from '../../lib/measure.js';
   import { detectionsWithRuns, isActive, plural } from '../../lib/map/detections.js';
@@ -375,7 +376,11 @@
     acceptRun(run);
     if (resultId) candidateId = resultId;
     zones = [];
-    const shown = day(run.input.b);
+    // The pass the candidate was read on, not the end of the run's window: a
+    // click on the map reopens the run, and the review already showing that
+    // candidate would not put its own pass back.
+    const candidate = run.results?.find((row) => row.id === resultId);
+    const shown = day(candidatePair(candidate, run).b);
     if (shown) onshow(shown);
     libraryFrom = detectionId && run.input.followup_id === detectionId ? 'detection' : 'home';
     view = 'review';

@@ -93,7 +93,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
 <case>/           # the analyst's: Azimut writes nothing here but azimut/
   README.txt      # which half of the folder is whose
   azimut/
-    case.json     # small manifest: name, dates, storage format, schema and to-do lists
+    case.json     # small manifest: name, dates, storage format, schema, to-do lists, work folder, link-pass mark
     notes.md      # case-wide Markdown note
     notes/        # note bodies, named after their title, filed as in the notebook
     media/        # imported, downloaded and derived media
@@ -138,7 +138,8 @@ names that keep a case's longest path inside Windows' 260-character limit.
 new directory level or a raised cap breaks it.
 
 `case.json` is the discovery manifest: name, creation date, and the storage and
-schema fields. It no longer holds the graph, so the case switcher can identify a
+schema fields, plus two pieces of case metadata that own no files, the to-do lists
+and the work folder. It no longer holds the graph, so the case switcher can identify a
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
 `proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.analysis/`,
@@ -200,7 +201,7 @@ carry enough information to detect staleness.
 
 | Data | Owner | Notes |
 |---|---|---|
-| Case name and storage version | `case.json` | Small manifest, atomically replaced |
+| Case name, storage version, to-do lists, work folder, link-pass mark | `case.json` | Small manifest, atomically replaced; the mark is how far the link pass has read |
 | Entities, links and folders | `case.db` | Transactional and versioned |
 | Entity photo galleries | `case.db` (`entity_images`) | Ordered private photos or Media references, with one primary |
 | Private entity photo bytes | `.data/entity-images/` | Bounded JPEG plus dedicated thumbnail; never indexed as media |
@@ -363,7 +364,9 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
 
 `folders`
 : Normalized `/`-separated logical paths for the analyst's organisation. Not
-  filesystem directories, not semantic links.
+  filesystem directories, not semantic links. Every entity write registers the
+  folder it carries and its parents, and the list read adds any folder an entity
+  sits in, so a folder exists whichever door it came in by.
 
 `jobs`
 : Durable local background work: `id`, `kind`, an optional `job_key`, `state`,

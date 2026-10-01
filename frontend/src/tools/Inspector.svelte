@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
+  import { workFolder } from '../lib/folders.js';
   import {
     adjustDefaults, buildFrameOps, previewStyle, uid, videoSeed, VIDEO_ADJUST_IDS,
     hasVideoEdits, normalizeRightAngleRotation, rotationOps, sourceStem, frameSaveNames,
@@ -645,7 +646,8 @@
     saving = 'all';
     try {
       const saved = await saveFrames(frames, {
-        folder: saveFolder || null, note: null, names: frames.map((f) => frameNames.get(f.id)),
+        // as in SaveToCase: Unfiled has to be sent when the work folder filed them
+        folder: saveFolder || (workFolder() ? '' : null), note: null, names: frames.map((f) => frameNames.get(f.id)),
       });
       toast(`Saved ${frames.length} frames to the case${dupeNote(saved)}`, 'ok');
     } catch (e) {

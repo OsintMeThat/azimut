@@ -36,7 +36,8 @@ describe('Proof Composer empty state', () => {
 
 describe('Proof Composer header', () => {
   it('uses the same compact controls as Inspect', () => {
-    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('</div>\n\n  <div class="body">'));
+    // Up to the body: the line a save writes under the header sits between the two.
+    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('\n  <div class="body">'));
 
     expect(header).not.toContain('class="btn"');
     expect(header).not.toContain('btn-primary');
@@ -52,7 +53,8 @@ describe('Proof Composer header', () => {
   });
 
   it('exports the current proof and exposes its remembered destination', () => {
-    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('</div>\n\n  <div class="body">'));
+    // Up to the body: the line a save writes under the header sits between the two.
+    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('\n  <div class="body">'));
 
     expect(header).toContain("exporting ? 'Exporting…' : 'Export PNG'");
     expect(header).toContain('onclick={exportProofPng}');
@@ -400,7 +402,7 @@ describe('Proof naming', () => {
   });
 
   it('names the proof in the header and nowhere else', () => {
-    expect(source).toContain('<input\n        class="input title-input"\n        bind:value={proof.title}');
+    expect(source).toContain('<input\n        class="input title-input"\n        aria-label="Proof name"\n        bind:value={proof.title}');
     expect(source).not.toContain('newProofName');
   });
 

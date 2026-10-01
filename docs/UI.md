@@ -442,6 +442,22 @@ single root to expand from. Expansion is the drill-down.
   sends you opening statements one at a time. It concludes nothing: whether three
   citations from one account is a problem is the analyst's to say, and a source with no
   known publisher is left out of the claim rather than assumed.
+- **The case proposes the links its files already state.** Who posted a file is written in
+  its address on X, Telegram, TikTok, YouTube, Instagram, Threads, Bluesky and the
+  fediverse, and two points under 300 m apart are usually one site; the case files both as
+  proposals (`engine/proposals.py`) after an import, dashed on the drawing, so islands of
+  one geolocation each join through their account and their site. **N proposed** in the
+  toolbar opens them as one list of sentences — *@BashaReport posted clip.mp4*, *Hangar and
+  Runway are one site, 110 m apart* — each with Confirm and Drop, and a line pressed shows
+  its node. A dropped proposal does not come back, and dropping the last one of an account
+  the case filed takes the account too. On a case filed before this existed the toolbar
+  offers **Find links** once; after that every import reads the case again and the count
+  is the only news, so the toolbar stays as it was.
+- **A point named by its coordinates is drawn by the town it is near.** *96 km N of Al
+  Ḩazm* says where `16.982714, 45.053931` is to anybody who does not read coordinates,
+  from the offline gazetteer (cities of 15 000 people or more, within 100 km), and the
+  exported plate writes the same. The label stays the entity's: the panel shows both and a
+  search still matches the digits. A point somebody named keeps its name.
 - **The legend is the control** for the budget, where the lens is the control for the
   reading. On a real case one family dwarfs the rest, so leaving `collected` out is
   what spends the budget on the actors, places and statements instead. A handful of
@@ -820,9 +836,16 @@ The sidebar defaults to collapsed in Map and open elsewhere. Open state is
 remembered per workspace for the current session. Reloading restores the defaults.
 
 - **Header** — the case name (its id is a tooltip), a **Notes** button opening
-  `notes.md` in the Notebook, a search field, and one filter chip per entity type
-  present, counted from the catalog summary. The chips wrap; past the fifth they
-  fold behind `+N`, and the active one always shows.
+  `notes.md` in the Notebook, and three views: **Folders**, **To-do** and
+  **Recent**. The choice is remembered across reloads. Folders adds a search field
+  and one filter chip per entity type present, counted from the catalog summary.
+  The chips wrap; past the fifth they fold behind `+N`, and the active one always
+  shows.
+- **Views** — the sidebar sits beside whatever tool is open, so it carries what is
+  worth having there rather than a second Files. **To-do** is the case's lists from
+  Home, one copy shared by both, so a task ticked on the map is ticked on Home.
+  **Recent** is the last forty items filed, newest first, read only while it is
+  open.
 - **Body** — one rule: no filter shows the tree, a query or a chip shows a flat
   result list. A filtered tree would have to badge folders with per-type counts
   the summary cannot give, so the modes are exclusive. Result rows carry their
@@ -833,15 +856,22 @@ remembered per workspace for the current session. Reloading restores the default
   a node only when non-empty), the analyst's nested folders, **Unfiled**, then
   **Trash** when it holds a delete. Trash shows its item count and size; each
   group can be restored or deleted permanently, and the node can be emptied.
-  `+ Folder` and `+ Note` sit above the tree.
+  `+ Folder` and `+ Note` sit above the tree, with the work folder pinned over
+  them when there is one: pressing its name opens the tree down to it, the cross
+  stops working there.
+- **Right-click** — a folder row offers Rename, New subfolder, New note here, Work
+  in this folder and Remove; an item row offers Open, Details, Rename, Move to…,
+  Show in Timeline and Move to Unfiled. Renaming needs a field the row has no room
+  for, so it opens in the menu itself. A suggestion keeps its two buttons and no
+  menu.
 - **Filing** — drag rows onto a folder, or drop them on Unfiled to unfile.
   Ctrl/cmd-click and shift-click select several rows first, and the drag carries
   all of them; folders are targets, never cargo. The tree scrolls itself when the
   pointer nears an edge mid-drag, since a native drag swallows the wheel.
-  Unfiling does not delete data. The **Files** tab presents the same tree with
-  tiles, multi-select and context actions. It also exposes Trash with the same
-  restore, permanent-delete and empty actions as the sidebar. Delete sends the
-  current selection through the standard confirmation.
+  Unfiling does not delete data. The **Files** tab (see Sources) presents the
+  same tree with tiles, multi-select and context actions. It also exposes Trash
+  with the same restore, permanent-delete and empty actions as the sidebar.
+  Delete sends the current selection through the standard confirmation.
 - **Details** — a drawer over the sidebar, closed with the back arrow or Escape, so
   selecting a row never pushes the case out of view. Every entity uses the same three
   tabs. **Info** holds identity, declared profile fields, file metadata, notes and
@@ -1388,6 +1418,51 @@ for a reload that will never come.
 
 ## Sources
 
+**Files is the case's file manager.** Everything filed in the case, by folder, as
+tiles or a list. Folder counts come from the catalog summary, so a case past its
+first page of 200 counts every item. A right-click acts on what was pressed:
+
+- an item, or the selection it is part of — Open; Open in Inspect, Reverse Search
+  or Geo Proof for a picture or a video (the Media Library's own list); Rename
+  (also F2); Move to…; New folder with the selection; Move to Unfiled; Add event;
+  Show in Timeline; Show on map for a capture; Show in folder; Details; Delete;
+- a folder — Open, Rename, New subfolder, New note, New bookmark, Import files
+  here, Work in this folder, Remove folder;
+- empty space — the same additions, into the folder on screen.
+
+Renaming happens in place on the tile, the list row or the tree row: Enter or
+leaving the field keeps it, Escape drops it. An item is renamed by the route
+Details uses, so a media renames its file. A folder carries its subfolders, its
+items and their files: a note's markdown moves with it, and a media's sidecar
+and browse index follow. A name another folder already has, ignoring case, is
+refused, because two such folders would mirror onto one directory of notes on
+Windows and macOS. The toast offers Undo.
+
+Chips under the crumbs narrow the open folder and what is under it by type, and
+**Nothing linked yet** keeps what is connected to nothing at all, the Board's
+term. Either one turns the view into a flat list, as a search does, asked of the
+server past the first page.
+
+**Move to…** is one dialog for Files, the sidebar and the toasts below. It starts
+on where the items already are and moves nothing until another folder is picked.
+
+**The work folder.** One folder of the case can be the one being worked in. New
+files and saved work land in it when nothing else was chosen: uploads, downloads,
+pastes, captures and bookmarks from the extension, Inspect frames, proofs, posts,
+sessions, places and Detect pins. Subjects and Claims never do: a person is shared
+across every thread of a case, so filing them under one would be a guess. Every
+save dialog that picks a folder for something new starts on it and says so, and
+picking Unfiled there wins. Where nothing was asked on the way in, the toast names
+the folder and offers **Move**. It is set from the crumbs in Files (**Work here**),
+a folder's right-click in Files or the sidebar, or the pin on a sidebar folder row.
+A case opens Files on it. It is kept in `case.json`, so a bundle carries it; a
+rename carries it too, and removing the folder clears it.
+
+**A folder exists whichever door it came in by.** Naming a new folder in a save
+dialog used to set it on the item only, so it showed in Files and in no folder
+picker. Every write that files an item now registers its folder, and the list
+also reads the folders items already sit in, for cases filed before.
+
 The Media Library toolbar keeps its explicit maintenance actions behind a `⋮`
 beside Import, because both are repairs pressed once in a while and read as a
 step of importing when they sit next to Download: **Regenerate missing
@@ -1411,7 +1486,9 @@ computed with it so the facets never disagree with the list, and toggling it ref
 because the loaded page is already the collected subset. It reads how the file
 **entered the case**, which is not everything true about it: one imported and later
 found identical to an extracted frame stays on the side it came in by. A case holding
-nothing but working files says so instead of offering to import. Thumbnail polling follows all pending case jobs, including
+nothing but working files says so instead of offering to import. **Worklist**, beside
+Import, opens the pictures and videos brought in as the Sheet *Files to geolocate*, built
+on the first press and the same one after (Sheet section). Thumbnail polling follows all pending case jobs, including
 files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
 paths match. Enrichment respects an existing confirmed GPS relation during backfill.
@@ -2456,16 +2533,18 @@ Editing a routine opens on the last step, which reads the whole thing back with
 each line a way into its step. Both kinds carry a name and a line saying what they
 are for, and that line travels with every run they make.
 
-**Where** offers the case's own areas first, as chips in their colours that toggle
-in and out of the detection; drawing rectangles, polygons or circles, or taking the
-current view as a rectangle, is for ground the case does not watch yet. It prices
-the result before anything is fetched: ground area, native tiles, Copernicus
-requests and roughly how long. Each date costs two requests a tile, the picture
+**Where** offers the case's own areas first, as one list: each group a folded row
+with a tick box that takes all its areas in or out, then the ungrouped areas, each
+ticked on its own. The areas picked are listed under it. Drawing rectangles,
+polygons or circles, or taking the current view as a rectangle, is for ground the
+case does not watch yet. It prices the result before anything is fetched: ground
+area and native tiles in Where, the Copernicus requests there too once an analyzer
+is picked, and roughly how long on the last step. Each date costs two requests a tile, the picture
 reviewed and the bands measured. A radar vessel sweep adds one for the Sentinel-2 water
 classification it is judged against. One-off drawings stay temporary unless **Save as area** is pressed;
-saving a routine promotes its drawings. In **Where**, the same groups select
-their current areas in one press, without duplicates, and ungrouped areas stay
-available on their own. A selection can be saved as a group; temporary drawings
+saving a routine promotes its drawings. A group whose areas are all in reads as
+ticked even when they came through another group, and some of them as partly
+ticked, so an area is never selected twice. A selection can be saved as a group; temporary drawings
 become shared areas first. A routine keeps the areas selected when it was saved,
 so later group edits do not change its scope. An area is grabbed by its edge: dragging inside
 one pans the map as it would anywhere else, a click on the edge shows its corner
@@ -2515,10 +2594,13 @@ A cloudier newest pass is reported as skipped. An unresolved area fails by name
 without stopping the rest. Opening Detect reads
 local state only; pass lookups happen only on request or during an explicit run.
 
-**What** picks the analyzer from a list grouped by what it looks for — vessels,
+**What** starts with nothing picked, so a detection never runs an analyzer nobody
+chose. It picks the analyzer from a list grouped by what it looks for — vessels,
 fires and burns, water and floods, buildings and earthworks, vegetation and small
 marks, any change — with radar first where it reads the same thing better, and
-your own after them. Each built-in says in brackets how far its reading can be
+your own after them. The groups start folded, the one holding the pick open, and a
+folded group names the analyzer picked in it. The analyzer library folds its built-in
+groups the same way. Each built-in says in brackets how far its reading can be
 trusted, from what calibration showed: *reliable* (the published test, or a
 contrast few false hits survive), *approximate* (right more often than not, with
 known look-alikes) or *rough* (a lead to check). Radar vessels are reliable and
@@ -2570,8 +2652,8 @@ passes only flag where to look: the razed-buildings analyzer says so, and the
 flood one starts at Large, since a flood is fields wide. Without the radar layer
 the wizard says where to find it and stops before its dates.
 
-**Small**, **Medium**, **Large** and **All** come first in the What step, above
-the analyzers, and set the target size as a whole: floor and ceiling area, cleanup
+**Small**, **Medium**, **Large** and **All** come once an analyzer is picked, under
+the list, and set the target size as a whole: floor and ceiling area, cleanup
 and grouping together, since a small target needs no cleanup that would erase it.
 What the chosen one accepts is written under the buttons in ground terms — a mark
 outside that band is found and then dropped, which reads as "nothing found" unless
@@ -2820,6 +2902,11 @@ unchecked point through the map first**, one at a time: *Use this point* keeps o
 moves it and goes on to the next. *Later*, offered by Save only, saves the proof and
 keeps those points off the case map, where they would read as conclusions; a place
 already there stays. To post has no *Later*, since the post publishes the point.
+**A save says what the proof just joined**, in one line under the header: *On the same
+site as 2 other geolocations · @BashaReport posted 3 other files here*, with **See in the
+graph**. It is read from the points and the addresses (`GET /entities/{id}/kin`), so it
+answers before the link pass has filed anything, and it goes at the next edit. A proof
+that shares nothing draws no line.
 The exported picture prints them only when asked (Advanced → Show coordinates):
 unnamed points share one line, a named one takes its own, and the plate grows by
 what it prints. **Show text** switches the credit line off beside it, so a plate
@@ -3138,6 +3225,15 @@ carrying its own state and a count; and the half-facts that are too soft to be
 entities and too valuable to lose. The graph says what the case believes, a sheet
 says what it is checking.
 
+- **The tab opens on its home**, the two halves Inspect opens on: the recent sheets,
+  newest edit first with the one last open here leading, each with its rows and its
+  progress (*8 of 21 done*); and a way in. That way in leads with what the case could start
+  now, counted — *Files to geolocate, 21 imported files, 13 without a proof*, *My
+  geolocations, 8 proofs* — and opens the one already built rather than a twin, then the
+  templates, then a file, a paste or a worklist over a type. Reopening the last sheet by
+  itself answered "where was I" and nothing else, and a case with no sheet opened on a
+  lecture about what a sheet is for. **Close** in the header saves what was typed and goes
+  back to the home.
 - **The file is the artifact.** `sheets/<name>.csv`, readable in any spreadsheet, written
   with a byte-order mark so Excel on Windows reads its accents instead of the machine's
   legacy codepage, and replaced by **rename rather than in place** so a save that dies
@@ -3391,9 +3487,12 @@ says what it is checking.
     `dd/MM/yyyy` column puts 1 February before 31 January. A date sorts by the moment, a
     state by its own vocabulary's order, a counting column by the count, and a cell the
     role cannot read goes to the end rather than into the middle of January.
-  - A **set of values** draws one chip per value, and clicking one filters on **that
-    value** — `Buk-M2E, ZU23-2` is two answers, so the filter reads them apart rather than
-    comparing the whole cell. Whether a cell may hold several is a question with a box for
+  - A **set of values** draws one chip per value, and clicking one **opens the column's
+    words** to change it, the way a status chip does: a chip reads as the control that
+    changes it, and a click on `to do` that filtered the column was the grid answering a
+    question nobody asked. Filtering on a value is the heading's funnel, and reads
+    `Buk-M2E, ZU23-2` as two answers rather than comparing the whole cell. A chip the app
+    wrote, or one naming another row, still filters on the value pressed. Whether a cell may hold several is a question with a box for
     the separator under it, rather than one box whose placeholder was the word "no". The
     value menu counts how many rows hold each, which is what the filter hands back. Reading
     `2x S-125` as two of `S-125` was offered here once and is gone: it kept a **count inside
@@ -3516,15 +3615,31 @@ says what it is checking.
 - **A sheet can be built out of the proofs the case already holds, and kept level with
   them.** The template that fetches and this shape carry almost the same columns and run in
   opposite directions, so the modal asks which **before** anything else: *one row per
-  entity* takes a type and its fields, *my geolocations* takes neither. The
-  outgoing one is one row per proof, carrying the media it rests on, the place it puts on
-  the map and coordinates read off the graph. Those three columns are the case's and are
-  read-only; Status, Notes and any column added are the analyst's. It offers no *Build
-  proofs* button, because the proofs already exist and there is nothing left to fetch.
+  entity* takes a type and its fields, *files to geolocate* and *my geolocations* take
+  neither. The outgoing one is **one row per point** a proof concludes on, POV or not, so a
+  video placed at three spots is three rows: the proof's title, its date as Geo Proof holds
+  it (`~` kept), the place, whether the camera stood there, coordinates read off the graph,
+  the media it rests on, the address of the post that media came from, and the
+  description. Those columns are the case's and are read-only, changed in Geo Proof;
+  Status, Notes and any column added are the analyst's. A proof placed nowhere still gets
+  its one row. It offers no *Build proofs* button, because the proofs already exist and
+  there is nothing left to fetch.
+- **Files to geolocate is the same kind of sheet turned the other way**: one row per
+  picture or video the analyst imported, never a frame, a capture or a render the app made,
+  with its source address, the proof that answers for it however many steps down (a proof
+  on a frame answers for the video), and that proof's place. A row starts *done* when a
+  proof already answers and *to do* otherwise, so the count is true the day it is built.
+  The case's columns are locked, Status and Notes are the analyst's. Refresh files the
+  files imported since and moves a row to *done* once a proof answers it, from *to do* or
+  *in progress* only: *ruled out* or a word of the analyst's stays. The Media Library's
+  **Worklist** opens it, building it on the first press, and a second press opens the same
+  one rather than a twin.
   - **Refresh is a press, never automatic.** A sheet that rewrote itself when it was opened
     would move a file under somebody who came to read it, and it would fight the stamp that
-    keeps two readers of one file from overwriting each other. It files the proofs added
-    since, restates the columns the case owns, and says what it did.
+    keeps two readers of one file from overwriting each other. It files the proofs and the
+    points added since, restates the columns the case owns, and says what it did. A row is
+    found again by its proof and its place, so a sheet built when this shape was one row
+    per proof keeps its rows and its columns, and gains a row per point it lacked.
   - **It adds and never removes.** A proof deleted since the build keeps its row, its notes
     and its colour, and answers NO under *In case*. Filtering on that column groups them so
     they can be deleted in one gesture — but that is the analyst's call, because the notes

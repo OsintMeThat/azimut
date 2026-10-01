@@ -12,6 +12,7 @@
   // one a coordinate row is written in (decimal, hemispheres, or DMS).
   import { parseLatLon } from '../lib/sheetRoles.js';
   import { zoneAt } from '../lib/localZone.js';
+  import { kinSentence } from '../lib/proposalReview.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
@@ -3712,6 +3713,26 @@
   // [{ id, label }] — points this save moved the proof off that nothing else in
   // the case holds. Asked about after the question above, never beside it.
   let orphanOffer = $state(null);
+  /** What the proof just saved shares with the rest of the case: other geolocations on
+   *  its site, what its account posted. Read once after a save, gone at the next edit. */
+  let kin = $state(null);
+  const kinWords = $derived(kin && kin.name === savedName && !dirty ? kinSentence(kin) : null);
+
+  async function readKin(caseId, entityId, name) {
+    if (!entityId) return;
+    try {
+      const answer = await api.get(`/api/cases/${caseId}/entities/${entityId}/kin`);
+      kin = { ...answer, id: entityId, name };
+    } catch {
+      kin = null;
+    }
+  }
+
+  function showKin() {
+    if (!kin) return;
+    uiState.openGraphEntity = kin.id;
+    uiState.tool = 'graph';
+  }
   let orphanDeleting = $state(false);
 
   /** Say yes to the points: they are filed exactly as the automatic path files
@@ -3871,6 +3892,7 @@
       savedSnapshot = docSnapshot();
       await reloadCase();
       toast(`Proof saved: ${result.png}`, 'ok');
+      void readKin(c.id, result.id, result.name);
       // The points this proof carries. Filed already, or a question — the server
       // answers with nothing at all when the case already holds them, so
       // re-saving never asks twice.
@@ -4411,10 +4433,10 @@
 
 <div class="tool">
   <div class="tool-header">
-    <h2>Geo Proof</h2>
     {#if proofStarted}
       <input
         class="input title-input"
+        aria-label="Proof name"
         bind:value={proof.title}
         oninput={() => (dirty = true)}
       />
@@ -4476,6 +4498,20 @@
       <Icon name="post" size={14} /> To Post
     </button>
   </div>
+
+  {#if kinWords}
+    <!-- What the save just joined: the site this point shares with other geolocations,
+         the account behind the footage. Said here because this is where the analyst is,
+         not in a graph they would have to think of opening. -->
+    <div class="kin">
+      <Icon name="link" size={13} />
+      <span>{kinWords}</span>
+      <button class="btn btn-ghost btn-xs" onclick={showKin}>See in the graph</button>
+      <button class="btn btn-ghost btn-xs" aria-label="Dismiss" title="Dismiss" onclick={() => (kin = null)}>
+        <Icon name="x" size={12} />
+      </button>
+    </div>
+  {/if}
 
   <div class="body">
     <!-- The drawing tools act on a proof; until one is open or created there is
@@ -5370,9 +5406,6 @@
     padding: 14px 16px 12px;
     flex-shrink: 0;
   }
-  .tool-header h2 {
-    font-weight: 700;
-  }
   .spacer { flex: 1; }
   .export-split {
     position: relative;
@@ -5739,4 +5772,10 @@
   .open-meta { display: flex; flex-direction: column; gap: 2px; }
   .open-title { font-weight: 600; font-size: var(--fs-sm); }
   .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
+  .kin {
+    display: flex; align-items: center; gap: 8px; padding: 5px 14px;
+    border-bottom: 1px solid var(--border); background: var(--accent-soft);
+    color: var(--text-2); font-size: var(--fs-xs);
+  }
+  .kin span { flex: 1; min-width: 0; }
 </style>

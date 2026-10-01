@@ -569,6 +569,14 @@ class CaseRepository(Protocol):
     def add_folder(self, name: str) -> list[str]:
         ...
 
+    def entities_in_folder(self, root: str) -> list[dict[str, Any]]:
+        """Every entity filed under ``root`` or a folder below it."""
+        ...
+
+    def rename_folder(self, old: str, new: str) -> list[str]:
+        """Move a folder subtree and refile its entities, in one transaction."""
+        ...
+
     def remove_folder(self, name: str) -> list[str]:
         ...
 

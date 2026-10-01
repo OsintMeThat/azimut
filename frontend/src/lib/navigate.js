@@ -105,6 +105,22 @@ export function openClaim(item) {
   uiState.tool = 'timeline';
 }
 
+/**
+ * Read an entity on the Timeline: what is dated about it, with `item` (one of its
+ * entries) selected when given.
+ */
+export function openInTimeline(entity, item = null) {
+  uiState.timelineFocus = {
+    entityId: entity.id,
+    entityLabel: entity.label,
+    entityType: entity.type,
+    entityAttrs: entity.attrs ?? {},
+    itemId: item?.id ?? null,
+    producedHere: item?.produced_here === true,
+  };
+  uiState.tool = 'timeline';
+}
+
 /** Reopen an artifact in its tool, loading whatever spec/draft it carries. */
 export function openEntity(entity, resolved = false) {
   // Places navigate by coordinates, so resolve an old snapshot's id before flying.

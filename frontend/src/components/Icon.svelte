@@ -159,7 +159,7 @@
     flame: 'M12 3c3.2 3.4 5 6 5 8.6a5 5 0 0 1-10 0c0-1.6.6-3 1.9-4.3.1 1.2.6 2 1.4 2.6C10 7.6 10.6 5.3 12 3Z',
     // The guide, wherever it is asked for. A question mark rather than a book: the
     // press means "what is this tab", not "open a document".
-    help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.3 6.4a2.3 2.3 0 0 1 4.5.7c0 1.5-2.2 2-2.2 3.4M12 16.7h.01',
+    help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM9.1 9.6a2.9 2.9 0 1 1 4.2 2.6c-.8.4-1.3 1-1.3 1.9v.4M12 16.3a.8.8 0 1 0 0 1.6.8.8 0 1 0 0-1.6Z',
     keyboard: 'M3 7h18a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm3.5 3.2h.01m3.2 0h.01m3.2 0h.01m3.2 0h.01M8 13.8h8',
   };
 </script>

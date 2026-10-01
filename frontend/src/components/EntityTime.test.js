@@ -37,10 +37,8 @@ describe('entity Time tab', () => {
   });
 
   it('hands the visible entity scope to the global Timeline', () => {
-    expect(source).toContain('uiState.timelineFocus = {\n      entityId: entity.id,\n      entityLabel: entity.label,');
-    // a working file says so, or a Media track holding them back would hide the row
-    expect(source).toContain('producedHere: item?.produced_here === true,');
-    expect(source).toContain("uiState.tool = 'timeline'");
+    // lib/navigate.js builds the focus, tested there
+    expect(source).toContain('openInTimeline(entity, item);');
   });
 
   it('opens an existing assessment in an explicit inline editor', () => {

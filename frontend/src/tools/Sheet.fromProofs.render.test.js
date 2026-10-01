@@ -98,11 +98,17 @@ function route(path) {
   return Promise.resolve({});
 }
 
-async function open() {
+async function open({ home = false } = {}) {
   target = document.createElement('div');
   document.body.append(target);
   live = mount(Sheet, { target });
   await settle();
+  // The tab lands on its home. Most tests are about a sheet, so they go in the way the
+  // analyst does: the first of the recent sheets.
+  if (!home) {
+    target.querySelector('.home .sheet')?.click();
+    await settle();
+  }
   return target;
 }
 

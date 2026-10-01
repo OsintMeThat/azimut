@@ -21,6 +21,7 @@
   import AnalyzerBuilder from './AnalyzerBuilder.svelte';
   import AnalyzerLabel from './AnalyzerLabel.svelte';
   import AnalyzerSettings from './AnalyzerSettings.svelte';
+  import FoldGroup from './FoldGroup.svelte';
   import Icon from '../../components/Icon.svelte';
 
   let {
@@ -47,6 +48,8 @@
   /** Where the builder opens: `{ tab, check }`. */
   let start = $state(null);
   let readonly = $state(false);
+  /** Built-in categories opened by hand; all start folded. */
+  let openKinds = $state({});
   let busy = $state(false);
   let error = $state('');
 
@@ -170,20 +173,22 @@
     <section aria-label="Built-in analyzers">
       <strong>Built in</strong>
       {#each analyzerGroups({ ...catalogue, custom: [] }) as group (group.label)}
-        <p class="group">{group.label}</p>
-        {#each group.list as entry (entry.id)}
-          {@const trust = catalogue?.reliability?.[entry.id]}
-          {@const locked = analyzerLock(entry, catalogue)}
-          <div class="row entry">
-            <button class="pick grow" style={`--tint: ${entry.colour}`} onclick={() => view(entry)} title={locked || undefined}>
-              <span class="swatch" aria-hidden="true"></span>
-              <span class="name">{entry.name}{#if trust} <span class="trust {trust}">({trust})</span>{/if}{#if locked} <span class="lock"><Icon name="key" size={10} /> set up</span>{/if}<small>{entry.description}</small></span>
-            </button>
-            <button class="cmp-icon" title="Copy to tune" aria-label={`Copy ${entry.name}`} onclick={() => copy(entry)}>
-              <Icon name="copy" size={13} />
-            </button>
-          </div>
-        {/each}
+        <FoldGroup label={group.label} count={group.list.length} open={!!openKinds[group.label]}
+          ontoggle={() => (openKinds = { ...openKinds, [group.label]: !openKinds[group.label] })}>
+          {#each group.list as entry (entry.id)}
+            {@const trust = catalogue?.reliability?.[entry.id]}
+            {@const locked = analyzerLock(entry, catalogue)}
+            <div class="row entry">
+              <button class="pick grow" style={`--tint: ${entry.colour}`} onclick={() => view(entry)} title={locked || undefined}>
+                <span class="swatch" aria-hidden="true"></span>
+                <span class="name">{entry.name}{#if trust} <span class="trust {trust}">({trust})</span>{/if}{#if locked} <span class="lock"><Icon name="key" size={10} /> set up</span>{/if}<small>{entry.description}</small></span>
+              </button>
+              <button class="cmp-icon" title="Copy to tune" aria-label={`Copy ${entry.name}`} onclick={() => copy(entry)}>
+                <Icon name="copy" size={13} />
+              </button>
+            </div>
+          {/each}
+        </FoldGroup>
       {/each}
     </section>
   </div>
@@ -311,14 +316,6 @@
   .measures span { margin-right: 4px; color: var(--text-3); font-weight: 700; }
   .fields { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
   .own { border-color: var(--accent); --tint: var(--accent); }
-  .group {
-    margin: 8px 0 2px;
-    color: var(--text-3);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
   .trust { color: var(--text-3); font-size: 10.5px; font-weight: 400; }
   .trust.reliable { color: var(--ok, #46a758); }
   .trust.rough { color: var(--warn, #e2a03f); }

@@ -580,6 +580,7 @@ a narrowing can only remove a type, never smuggle one in from elsewhere.
 | `posted` | account → media/bookmark | the account published the content or URL | ✅ |
 | `appears-in` | actor/asset/identifier → image/video media or capture | the entity or a recognizable representation is visible | ✅ |
 | `sited-at` | structure → place | a permanent site, never a dated presence | ✅ |
+| `same-site-as` | place → place | the two points belong to one site; proposed for points under 300 m apart | ✅ |
 | `instance-of` | asset → equipment-type | this particular object is one of that model | ✅ |
 | `in-network` | IP/network → network | an address or subnet belongs inside the network | ✅ |
 | `same-image-as` | image media → image media | a machine perceptual-hash match | ✅ |
@@ -1044,9 +1045,9 @@ joins and a type by its role, so adding either places it with no edit there:
 
 | Lens | Verbs | Derived by | Nodes |
 |---|---|---|---|
-| Everything | all 19 | the whole registry | the case |
+| Everything | all 20 | the whole registry | the case |
 | Subjects | `owns`, `part-of`, `member-of`, `associated-with`, `posted`, `appears-in`, `instance-of`, `in-network`, `same-image-as` | an analyst's relation that is not geography | the case |
-| Ground | `located-at`, `depicts`, `sited-at` | a relation whose object is a `place` | the case |
+| Ground | `located-at`, `depicts`, `sited-at`, `same-site-as` | a relation whose object is a `place` | the case |
 | Statements | `about`, `at`, `cites`, `contradicts` | `action = "claim"` | the case |
 | My work | `derived-from`, `depends-on`, `mentions` | the chain types, plus `action = "mention"` | everything |
 
@@ -1227,7 +1228,7 @@ How it is wired (`engine/links.py`):
 
 - **Provenance** (on every entity and link): `by` (tool id: `media-library`,
   `satellite`, `proof-composer`, `post-composer`, `inspect`, `paste`, `ingest`,
-  or `user`), `at` (UTC), `status` and optional source URL. It borrows the entity/activity/agent
+  `link-finder`, or `user`), `at` (UTC), `status` and optional source URL. It borrows the entity/activity/agent
   shape of W3C PROV without implementing the full standard.
 - **Review status** is `confirmed` (analyst-made or analyst-accepted) vs
   `suggested` (a tool proposed it, awaiting a click). It is not confidence. Import
@@ -1242,6 +1243,15 @@ How it is wired (`engine/links.py`):
   a place can be real while one file's claim about it is wrong. A dismissal sticks,
   so re-reading a file never re-proposes edges already triaged. Anything still
   `suggested` is marked as such wherever it appears.
+  **The link pass** (`engine/proposals.py`, provenance `link-finder`) proposes the
+  rest of what the files already say: the account a post's address names, filed
+  `suggested` with its `posted` edge, and `same-site-as` between points under 300 m
+  apart, one edge per join so a site of eight points gets seven. It runs after a
+  place, a file or a bookmark is filed, and reads each entity once (the manifest's
+  `link_pass` mark), so a dropped proposal does not come back. Dropping the last
+  proposal of an account it filed takes the account too. A proposal nobody has
+  reviewed holds nothing up: a place a proof lets go of is still offered for deletion.
+  ✅
   **A derivation is `confirmed`**: `derived-from`/`depends-on` record what the
   analyst's own click just made. `suggested` is for inference — OCR reading a street
   name, EXIF proposing a `place`. A relation stated by hand is `confirmed` for the

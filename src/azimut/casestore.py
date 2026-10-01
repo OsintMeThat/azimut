@@ -429,8 +429,8 @@ class CaseStore:
     def add_folder(self, name: str) -> list[str]:
         return self._graph().add_folder(name)
 
-    def remove_folder(self, name: str) -> list[str]:
-        return self._graph().remove_folder(name)
+    def entities_in_folder(self, root: str) -> list[dict[str, Any]]:
+        return self._graph().entities_in_folder(root)
 
     # -- trash journal (engine/trash.py owns the files) ----------------------
 

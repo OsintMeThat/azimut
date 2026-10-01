@@ -37,6 +37,7 @@
     densityUnit,
     layoutDensityBuckets,
     layoutTimelineItems,
+    shareItemRows,
     machineZone,
     moveTemporalRaw,
     nowPosition,
@@ -207,9 +208,10 @@
    *
    * The two are one reading, so both are always there. `view_mode` from a saved view
    * says which of them it favours, and dragging the bar between them moves it for now
-   * without rewriting what the view says.
+   * without rewriting what the view says. The share is a ceiling: lanes with few entries
+   * leave the rest to the list, and crowded ones fill it before any `+n`.
    */
-  const SHARES = { plot: 0.62, list: 0.28 };
+  const SHARES = { plot: 0.75, list: 0.28 };
   let axisShare = $state(SHARES.plot);
   let chronologyHeight = $state(0);
   let overviewHeight = $state(0);
@@ -311,22 +313,36 @@
    * one left without its name. A plate is not being read by anyone yet, so it asks for
    * no selection and comes out the same whatever was clicked.
    */
-  function buildTracks(axisWidth, selectedId = null) {
-    return groupedTimelineTracks(trackSpecs, baseTrackItems, groupBy, entityLabel).map((track) => {
+  function buildTracks(axisWidth, selectedId = null, height = 0) {
+    const drawn = groupedTimelineTracks(trackSpecs, baseTrackItems, groupBy, entityLabel).map((track) => {
       const baseId = track.parentId ?? track.id;
       const expanded = Boolean(expandedTracks[baseId]);
+      const dated = track.items.filter((item) => item.earliest);
       return {
         ...track,
         expanded,
+        dated,
         total: groupBy === 'none' ? (trackPages[baseId]?.total ?? track.items.length) : track.items.length,
-        layout: layoutTimelineItems(
-          track.items.filter((item) => item.earliest), from, to, axisWidth,
-          expanded ? PAGE : 6, { selectedId }
-        ),
+        layout: layoutTimelineItems(dated, from, to, axisWidth, PAGE, { selectedId }),
       };
     });
+    // The lanes share the axis's height: what is left once the ruler, the folded lanes
+    // and the opened ones are drawn goes to rows of marks, before any `+n`.
+    const shared = (track) => !track.expanded && !track.collapsed;
+    let room = height - 68;
+    for (const track of drawn) {
+      if (!shared(track)) room -= track.collapsed ? 43 : Math.max(46, track.layout.height) + 1;
+      else room -= MARKS.top + MARKS.row + MARKS.bottom + 1;
+    }
+    const caps = shareItemRows(drawn.map((track) => shared(track) ? track.layout.rows : null), room / MARKS.row);
+    return drawn.map(({ dated, ...track }, index) => {
+      const cap = caps[index] ?? (track.collapsed ? 6 : null);
+      return cap === null || track.layout.rows <= cap
+        ? track
+        : { ...track, layout: layoutTimelineItems(dated, from, to, axisWidth, cap, { selectedId }) };
+    });
   }
-  const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null));
+  const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null, axisMax));
   const density = $derived(layoutDensityBuckets(overview, extent));
   /**
    * The date scale under the minimap: one slot per period, named under its own bar.
@@ -559,10 +575,33 @@
         landOnUndated = true;
         return;
       }
-      queue.scrollIntoView({ block: 'start' });
       queue.querySelector('.holding-list button')?.focus({ preventScroll: true });
+      settleOn(queue);
     }));
   });
+  /**
+   * Scrolls the queue to the top of its pane, and again while it keeps moving: the axis,
+   * the lanes and the pane take their measured room over several frames on a slow
+   * machine, and a landing made once is left behind by whatever shifts after it. Ends
+   * once the queue has held still for a few frames, or after about a second and a half.
+   */
+  function settleOn(queue) {
+    let last = null;
+    let still = 0;
+    let frames = 0;
+    const step = () => {
+      if (!queue.isConnected) return;
+      if (queue.getBoundingClientRect().top === last) still += 1;
+      else {
+        queue.scrollIntoView({ block: 'start' });
+        last = queue.getBoundingClientRect().top;
+        still = 0;
+      }
+      frames += 1;
+      if (still < 6 && frames < 90) requestAnimationFrame(step);
+    };
+    step();
+  }
   $effect(() => rangeMenu ? closeOnOutsidePointer(rangeElement, () => (rangeMenu = false)) : undefined);
 
   $effect(() => {

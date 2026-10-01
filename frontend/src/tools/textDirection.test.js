@@ -38,7 +38,7 @@ describe('text direction on the surfaces that hold the analyst\'s words', () => 
   });
 
   it('isolates what a canvas or a plate draws', () => {
-    expect(read('./Graph.svelte')).toContain('text: bidiIsolate(shortLabel(data.label)),');
+    expect(read('./Graph.svelte')).toContain('text: bidiIsolate(shortLabel(data.caption ?? data.label)),');
     expect(read('../lib/plate.js')).toContain('const clean = bidiIsolate(text);');
   });
 });

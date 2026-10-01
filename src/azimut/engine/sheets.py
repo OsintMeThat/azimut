@@ -35,6 +35,7 @@ import json
 import os
 import tempfile
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -711,6 +712,53 @@ def _paths(case: "Case", entity: dict[str, Any]) -> tuple[Path, Path]:
         raise CaseError(f"sheet '{entity['id']}' has no file")
     stem = Path(rel).stem
     return case.resolve_inside(rel), case.resolve_inside(layout.sheet_meta_rel(stem))
+
+
+def _stored_meta(case: "Case", entity: dict[str, Any]) -> dict[str, Any]:
+    try:
+        _, meta_path = _paths(case, entity)
+        stored = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, CaseError):
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def stored_roles(case: "Case", entity: dict[str, Any]) -> dict[str, Any]:
+    """The column roles a sheet's sidecar declares, read without the table.
+
+    What tells a sheet the case built apart from one somebody typed, and a list of
+    sheets asks it of every one: reading each CSV whole to learn that would read the
+    case's tables to answer a question about their sidecars.
+    """
+    roles = _stored_meta(case, entity).get("roles")
+    return roles if isinstance(roles, dict) else {}
+
+
+#: The shapes a sheet built out of the case is recognised by: the column only that build
+#: writes as `locked`. Mirrors `sheetfromcase` (`FILE_COLUMN`, `TITLE_COLUMN`), named here
+#: so the list can say what each sheet is without importing the builder.
+BUILT_SHAPES = (("files", "File"), ("proofs", "Title"))
+
+#: The state words that mean a row needs nothing more, for the list's progress reading.
+FINISHED_STATES = frozenset({"done", "ruled out"})
+
+
+def _progress(
+    columns: list[str], rows: list[list[str]], meta: dict[str, Any]
+) -> dict[str, Any] | None:
+    """How far along the sheet's progress column is, the way its footer reads it: the
+    finished rows of a status column, or the filled rows of any other."""
+    name = meta.get("progress")
+    if not isinstance(name, str) or name not in columns:
+        return None
+    at = columns.index(name)
+    values = [str(row[at]).strip() if at < len(row) else "" for row in rows]
+    role = (meta.get("roles") or {}).get(name) or {}
+    if isinstance(role, dict) and role.get("kind") == "state":
+        count = sum(1 for value in values if value.casefold() in FINISHED_STATES)
+        return {"kind": "state", "column": name, "count": count, "total": len(values)}
+    count = sum(1 for value in values if value)
+    return {"kind": "fill", "column": name, "count": count, "total": len(values)}
 
 
 def target(case: "Case", title: str, *, taken_by: str | None = None) -> str:
@@ -1541,18 +1589,36 @@ def summary(case: "Case", entity: dict[str, Any]) -> dict[str, Any]:
     rel = (entity.get("attrs") or {}).get("path")
     rows = 0
     headings: list[str] = []
+    table: list[list[str]] = []
+    modified: str | None = None
     if isinstance(rel, str) and rel:
         try:
-            raw = case.resolve_inside(rel).read_text(encoding="utf-8-sig")
+            path = case.resolve_inside(rel)
+            raw = path.read_text(encoding="utf-8-sig")
+            modified = datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
         except (OSError, CaseError):
             raw = ""
         if raw.strip():
             reader = csv.reader(io.StringIO(raw.lstrip("﻿")), delimiter=sniff_delimiter(raw))
             try:
                 headings = [str(name) for name in next(reader, [])]
-                rows = sum(1 for _ in reader)
+                table = [list(row) for row in reader]
+                rows = len(table)
             except csv.Error:
-                headings, rows = [], 0
+                headings, rows, table = [], 0, []
+    stored = _stored_meta(case, entity)
+    held_roles = stored.get("roles")
+    roles: dict[str, Any] = held_roles if isinstance(held_roles, dict) else {}
+    shape = next(
+        (
+            name
+            for name, column in BUILT_SHAPES
+            if (roles.get(column) or {}).get("kind") == "locked"
+        ),
+        None,
+    )
     return {
         "id": entity.get("id"),
         "title": entity.get("label") or "Sheet",
@@ -1568,4 +1634,10 @@ def summary(case: "Case", entity: dict[str, Any]) -> dict[str, Any]:
         # this answered null on every sheet — and the newest-first sort built on it
         # sorted nothing.
         "created_at": (entity.get("provenance") or {}).get("at"),
+        # When the file last changed, which is what "recent" means on the Sheet home:
+        # the worklist being worked down, not the one filed last.
+        "modified_at": modified,
+        # Which fixed shape the case built it as, or None for a sheet somebody made.
+        "shape": shape,
+        "progress": _progress(headings, table, stored),
     }

@@ -77,7 +77,7 @@ describe('trash node', () => {
 describe('browse vs. results', () => {
   it('shows the tree until something is filtered, then a flat list', () => {
     expect(shell).toContain('const filtering = $derived(isFiltering({ query, type: typeFilter }))');
-    expect(shell).toContain('{#if filtering}');
+    expect(shell).toContain('{:else if filtering}');
     expect(shell).toContain('<SidebarResults');
     expect(shell).toContain('{:else}');
     expect(shell).toContain('<SidebarTree');
@@ -104,9 +104,11 @@ describe('browse vs. results', () => {
   });
 
   it('never collapses what the analyst opened: `expanded` is untouched by a search', () => {
-    // the only writes are the declaration, the case reset, a toggle and a create
+    // the only writes are the declaration, the case reset, a toggle, a create and
+    // showing the work folder, which only ever opens
     const writes = shell.match(/expanded(\[[^\]]+\])? =/g) ?? [];
-    expect(writes).toHaveLength(4);
+    expect(writes).toHaveLength(5);
+    expect(shell).toContain('if (!expanded[path]) {\n        expanded[path] = true;');
   });
 
   it('says so plainly when nothing matches', () => {
@@ -234,5 +236,60 @@ describe('details drawer', () => {
 
   it('shares the editor body with the Media Library modal', () => {
     expect(drawer).toContain("import EntityDetails from '../EntityDetails.svelte'");
+  });
+});
+
+describe('views', () => {
+  it('switches between folders, to-do and recent, and remembers the choice', () => {
+    expect(header).toContain("{ id: 'folders', label: 'Folders'");
+    expect(header).toContain("{ id: 'todo', label: 'To-do'");
+    expect(header).toContain("{ id: 'recent', label: 'Recent'");
+    expect(shell).toContain('saveSidebarView(next)');
+  });
+
+  it('keeps search and the type chips to the folder view', () => {
+    expect(header).toContain("{#if view === 'folders'}");
+  });
+
+  it('shows the case to-do lists Home shows, from the same copy', () => {
+    expect(shell).toContain('<CaseTodos caseId={caseState.current.id} compact />');
+  });
+
+  it('reads what was filed last only while that view is open', () => {
+    expect(shell).toContain("if (view !== 'recent' || !id) return;");
+    expect(shell).toContain("order: '-created'");
+  });
+});
+
+describe('work folder', () => {
+  it('pins it above the tree and on its row', () => {
+    expect(shell).toContain('class="work-line"');
+    expect(tree).toContain('{#if workFolder === node.path}');
+    expect(tree).toContain('onworkfolder(node.path)');
+  });
+
+  it('toggles it through the shared folder actions', () => {
+    expect(shell).toContain('await setWorkFolder(caseState.current.id, working === path ? null : path)');
+  });
+});
+
+describe('right-click', () => {
+  it('opens a menu on folder rows and on entity rows, never on a suggestion', () => {
+    expect(tree).toContain('onfoldermenu(e, node.path)');
+    expect(tree).toContain('onmenu={onentitymenu}');
+    expect(row).toContain('if (!onmenu || suggested) return;');
+  });
+
+  it('renames a folder or an item through the routes Files uses', () => {
+    expect(shell).toContain('await renameFolder(caseId, held.path, target)');
+    expect(shell).toContain('await renameEntity(caseId, held.entity, text)');
+  });
+
+  it('removes a folder with the same prompt as Files', () => {
+    expect(shell).toContain('...removeFolderPrompt(path, allFolders)');
+  });
+
+  it('moves an item with the shared Move dialog', () => {
+    expect(shell).toContain('uiState.moving = [m.entity]');
   });
 });

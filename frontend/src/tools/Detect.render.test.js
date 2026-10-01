@@ -305,6 +305,8 @@ describe('Detect', () => {
       starts('One pass').click(); await settle();
       button('Use current view').click(); await settle();
       button('Next: What').click(); await settle();
+      target.querySelector('.fold').click(); await settle();
+      target.querySelector('[role="radio"]').click(); await settle();
       button('Next: When').click(); await settle();
       button('Find passes').click(); await settle();
       target.querySelector('[aria-label="Use 2026-09-26"] button:last-child').click(); await settle();

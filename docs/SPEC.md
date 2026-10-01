@@ -219,6 +219,12 @@ proof for publication.
 | ✅ **The Board as an index** | Groups the case by family, people, places and things first with how many events name each and when, the files folded under; Most noted first, Details beside the list, walked with the arrow keys. |
 | ✅ **Every date on a clock** | One Clock chip wherever a date is typed: a day or a time reads on its place's zone, UTC, this computer or any zone in the world, and the Timeline spans that zone's day. |
 | ✅ **Dates in posts, better templates** | A `#date` token carries the proof's date into a post only where a template asks; templates start from a layout, duplicate, preview on the open post with each platform's count, flag a misspelled token and set the default. |
+| ✅ **A work folder, and Files that acts** | New files and saved work land in the folder being worked in; folders rename with their items and files; Files and the sidebar act on a right-click, Files filters by type or by what is linked to nothing, and the sidebar also shows the case's to-do lists and recent work. |
+| ✅ **Links the case proposes** | Proposes the account a post's address names and joins points under 300 m apart as one site, reviewed in one list from the Graph; a dropped proposal does not come back. |
+| ✅ **A Sheet home** | The Sheet tab opens on the recent sheets and the ones the case could start, counted; Close saves and comes back to it; a status chip opens its words. |
+| ✅ **Files to geolocate** | One row per imported picture or video, done once a proof answers it, opened from the Sheet home or the Media Library and kept level by Refresh. |
+| ✅ **My geolocations by point** | One row per point of every proof, POV or not, with its date, source address and description. |
+| ✅ **Where a geolocation sits** | A point named by its coordinates reads as the town it is near on the Graph; a saved proof says which geolocations share its site and what its account posted. |
 
 ---
 

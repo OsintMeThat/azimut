@@ -1,5 +1,6 @@
 <script>
-  // Zone 1: identity, search, type chips. Fixed — it never scrolls away.
+  // Zone 1: identity, the view switch, then search and type chips for the folder
+  // view. Fixed — it never scrolls away.
   import Icon from '../Icon.svelte';
   import SearchInput from '../SearchInput.svelte';
 
@@ -11,9 +12,19 @@
     chips = [],
     total = 0,
     resultCount = null,
+    view = 'folders',
     onnotes = () => {},
     onselecttype = () => {},
+    onview = () => {},
   } = $props();
+
+  // Three readings of one case beside whatever tool is open: its folders, what is
+  // left to do, and what was filed last.
+  const VIEWS = [
+    { id: 'folders', label: 'Folders', icon: 'folder' },
+    { id: 'todo', label: 'To-do', icon: 'check' },
+    { id: 'recent', label: 'Recent', icon: 'clock' },
+  ];
 
   // A case with a dozen entity types would push its rarest chips off a single
   // line, so the row wraps and only the busiest few show until "+N" is pressed.
@@ -38,6 +49,21 @@
     </button>
   </div>
 
+  <div class="views" role="tablist" aria-label="Sidebar view">
+    {#each VIEWS as v (v.id)}
+      <button
+        class="view"
+        class:active={view === v.id}
+        role="tab"
+        aria-selected={view === v.id}
+        onclick={() => onview(v.id)}
+      >
+        <Icon name={v.icon} size={13} /> {v.label}
+      </button>
+    {/each}
+  </div>
+
+  {#if view === 'folders'}
   <SearchInput
     bind:value={query}
     placeholder="Search this case…"
@@ -65,6 +91,7 @@
         <button class="chip more" onclick={() => (chipsOpen = false)}>Less</button>
       {/if}
     </div>
+  {/if}
   {/if}
 </div>
 
@@ -127,4 +154,20 @@
     background: var(--accent-soft);
   }
   .n { font-weight: 600; }
+  .views {
+    display: flex;
+    gap: 2px;
+    margin: -4px -4px 0;
+  }
+  .view {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 8px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+  }
+  .view:hover { color: var(--text-1); }
+  .view.active { color: var(--text-1); box-shadow: inset 0 -2px 0 var(--accent); }
 </style>

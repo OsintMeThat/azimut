@@ -95,6 +95,13 @@ async function openDetect(page, withRun = false, withRoutine = false, twoRuns = 
   return { errors, calls, prefs };
 }
 
+/** What starts with nothing picked and every category folded: open the first, take its first analyzer. */
+async function pickAnalyzer(page) {
+  const step = page.getByRole('region', { name: 'What to look for' });
+  await step.locator('.fold').first().click();
+  await step.getByRole('radio').first().click();
+}
+
 async function typeWhenDay(page, button, field, value) {
   await page.getByRole('button', { name: button, exact: true }).click();
   const details = page.locator('.manual-date');
@@ -163,6 +170,7 @@ test('clicking a Detect date opens a calendar of passes and previews the chosen 
   await page.getByRole('button', { name: 'New one pass', exact: true }).click();
   await page.getByRole('button', { name: 'North site', exact: true }).click();
   await page.getByRole('button', { name: 'Next: What' }).click();
+  await pickAnalyzer(page);
   await page.getByRole('button', { name: 'Next: When' }).click();
   await page.getByRole('button', { name: 'Date A', exact: true }).click();
   const calendar = page.getByRole('group', { name: 'A pass calendar' });
@@ -188,6 +196,7 @@ test('each area opens its own A and B calendars with its pass list below', async
   await page.getByRole('button', { name: 'North site', exact: true }).click();
   await page.getByRole('button', { name: 'Second site', exact: true }).click();
   await page.getByRole('button', { name: 'Next: What' }).click();
+  await pickAnalyzer(page);
   await page.getByRole('button', { name: 'Next: When' }).click();
   const first = page.getByRole('region', { name: 'Dates for North site' });
   const second = page.getByRole('region', { name: 'Dates for Second site' });
@@ -239,6 +248,7 @@ test('landing, dock rail and the When step fit the existing map workspace', asyn
   await page.getByRole('button', { name: 'New one pass', exact: true }).click();
   await page.getByRole('button', { name: 'North site', exact: true }).click();
   await page.getByRole('button', { name: 'Next: What' }).click();
+  await pickAnalyzer(page);
   await page.getByRole('button', { name: 'Next: When' }).click();
   // A and B are asked in the step itself, B the newest pass until a day is chosen
   await expect(page.getByRole('heading', { name: 'Which two images' })).toBeVisible();
@@ -287,6 +297,7 @@ test('Detect menus fit the dock at its minimum and maximum widths', async ({ pag
     await page.getByRole('button', { name: 'North site', exact: true }).click();
     for (const next of ['Next: What', 'Next: When']) {
       await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
+      if (next === 'Next: When') await pickAnalyzer(page);
       await page.getByRole('button', { name: next }).click();
     }
     await expect.poll(() => dock.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(2);
@@ -300,7 +311,7 @@ test('Detect menus fit the dock at its minimum and maximum widths', async ({ pag
   expect(errors).toEqual([]);
 });
 
-test('the size is asked before the analyzers, and a pair months apart warns about shadows', async ({ page }) => {
+test('the size is asked once an analyzer is picked, and a pair months apart warns about shadows', async ({ page }) => {
   const { errors, calls } = await openDetect(page);
   await page.getByRole('button', { name: 'New detection', exact: true }).click();
   await page.getByRole('button', { name: 'New one pass', exact: true }).click();
@@ -308,14 +319,15 @@ test('the size is asked before the analyzers, and a pair months apart warns abou
   await page.getByRole('button', { name: 'Next: What' }).click();
   const step = page.getByRole('region', { name: 'What to look for' });
   const sizes = step.getByRole('group', { name: 'Target size' });
+  await expect(sizes).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Next: When' })).toBeDisabled();
+  await pickAnalyzer(page);
   await expect(sizes).toHaveCount(1);
   await expect(sizes.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  const [above, list] = [await sizes.boundingBox(), await step.getByRole('radiogroup', { name: 'Analyzer' }).boundingBox()];
-  expect(above.y + above.height).toBeLessThanOrEqual(list.y);
-  const cloud = step.getByLabel('Maximum cloud cover');
-  const cloudBox = await cloud.boundingBox();
-  expect(cloudBox.y).toBeGreaterThanOrEqual(above.y + above.height);
-  expect(cloudBox.y + cloudBox.height).toBeLessThanOrEqual(list.y);
+  const [list, below] = [await step.getByRole('radiogroup', { name: 'Analyzer' }).boundingBox(), await sizes.boundingBox()];
+  expect(list.y + list.height).toBeLessThanOrEqual(below.y);
+  const cloudBox = await step.getByLabel('Maximum cloud cover').boundingBox();
+  expect(cloudBox.y).toBeGreaterThanOrEqual(below.y + below.height);
   await page.screenshot({ path: test.info().outputPath('detect-what.png') });
   await page.getByRole('button', { name: 'Next: When' }).click();
   await typeWhenDay(page, 'Date A', 'Day of A', '21/01/2026');

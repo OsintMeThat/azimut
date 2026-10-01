@@ -145,7 +145,7 @@ export function graphDrawing({
       // A proposal is drawn as one everywhere it appears (ONTOLOGY §4).
       ...(data.status === 'suggested' ? { dash: '3 3' } : {}),
     }));
-    names.push(svgText(shortLabel(data.label ?? node.id), {
+    names.push(svgText(shortLabel(data.caption ?? data.label ?? node.id), {
       // Konva places a text box by its top; SVG by its baseline, hence the drop.
       x: at.x, y: at.y + radius + 14, size: 11, anchor: 'middle',
       fill: PLATE_COLOURS.label, halo: 3,

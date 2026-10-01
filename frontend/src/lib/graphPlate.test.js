@@ -68,6 +68,16 @@ describe('serialising the graph', () => {
     expect(body).not.toContain('White pickup with a very long name indeed');
   });
 
+  it('writes a point named by its coordinates by the town the drawing names it', () => {
+    const nodes = NODES.map((node) =>
+      node.id === 'e_quay' ? { ...node, label: '16.98, 45.05', caption: '96 km N of Al Hazm' } : node,
+    );
+    const { body } = graphDrawing(scene({ byId: new Map(nodes.map((node) => [node.id, node])) }));
+
+    expect(body).toContain('96 km N of Al Hazm');
+    expect(body).not.toContain('16.98, 45.05');
+  });
+
   it('haloes the names and the verbs, which is what makes them readable on the lines', () => {
     const { body } = graphDrawing(scene());
     // The canvas does the same with `fillAfterStrokeEnabled`; without it every name

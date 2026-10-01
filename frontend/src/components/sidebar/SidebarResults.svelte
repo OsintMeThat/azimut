@@ -1,7 +1,7 @@
 <script>
   // Zone 2, results mode: a flat list, whatever the filing. Each row carries its
   // folder as meta, which answers "where is this filed?" without expanding a
-  // single node.
+  // single node. The Recent view is the same list, newest first.
   import { resultMeta } from '../../lib/sidebarSearch.js';
   import EntityRow from './EntityRow.svelte';
 
@@ -14,12 +14,14 @@
     onactivate = () => {},
     oninfo = () => {},
     onunfile = () => {},
+    onmenu = null,
+    empty = 'No match in this case.',
   } = $props();
 </script>
 
 <div class="results">
   {#each rows as e (e.id)}
-    <EntityRow entity={e} {caseId} meta={resultMeta(e)} {onactivate} {oninfo} {onunfile} />
+    <EntityRow entity={e} {caseId} meta={resultMeta(e)} {onactivate} {oninfo} {onunfile} {onmenu} />
   {/each}
 
   {#if hasMore}
@@ -27,7 +29,7 @@
   {/if}
 
   {#if rows.length === 0 && !loading}
-    <div class="none">No match in this case.</div>
+    <div class="none">{empty}</div>
   {/if}
 </div>
 

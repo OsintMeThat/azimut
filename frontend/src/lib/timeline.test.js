@@ -30,6 +30,7 @@ import {
   offsetLabel,
   layoutDensityBuckets,
   layoutTimelineItems,
+  shareItemRows,
   moveTemporalRaw,
   nudgeTemporalRaw,
   resizeTemporalRaw,
@@ -729,5 +730,26 @@ describe('two dated pictures', () => {
     expect(temporalKindLabel('imagery-a')).toBe('Imagery A');
     expect(temporalKindLabel('imagery-b')).toBe('Imagery B');
     expect(temporalKindLabel('something-new')).toBe('something-new');
+  });
+});
+
+describe('rows shared by the lanes', () => {
+  it('gives a lane that needs little only that, and the rest to the crowded one', () => {
+    expect(shareItemRows([3, 30], 25)).toEqual([6, 22]);
+    expect(shareItemRows([3, 3, 30], 25)).toEqual([6, 6, 19]);
+    expect(shareItemRows([3, 12], 25)).toEqual([6, 12]);
+  });
+
+  it('splits evenly between lanes that all need more than the room', () => {
+    expect(shareItemRows([30, 30], 20)).toEqual([10, 10]);
+  });
+
+  it('never goes under the floor on a short axis', () => {
+    expect(shareItemRows([30, 30], 4)).toEqual([6, 6]);
+    expect(shareItemRows([30], -10)).toEqual([6]);
+  });
+
+  it('leaves out the lanes it is not asked about', () => {
+    expect(shareItemRows([null, 30], 20)).toEqual([null, 20]);
   });
 });

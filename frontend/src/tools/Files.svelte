@@ -12,10 +12,40 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
-  import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
-  import { assignFolder, assignFolderBatch } from '../lib/filing.js';
+  import {
+    buildTree,
+    subtreeCount,
+    subtreeCountFrom,
+    folderOf,
+    flattenPaths,
+    isInFolderSubtree,
+  } from '../lib/folderTree.js';
+  import { assignFolder, assignFolderBatch, renameEntity } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
-  import { openEntity, openNotebook } from '../lib/navigate.js';
+  import {
+    gotoCapture,
+    openEntity,
+    openInTimeline,
+    openNotebook,
+    opensInFileManager,
+    showInFolder,
+  } from '../lib/navigate.js';
+  import {
+    inSubtree,
+    leafOf,
+    removeFolder,
+    removeFolderPrompt,
+    renameFolder,
+    renamedPath,
+    setWorkFolder,
+    workFolder,
+  } from '../lib/folders.js';
+  import { openInOptions } from '../lib/openIn.js';
+  import { TOOL_LABELS } from '../lib/workspaces.js';
+  import { typeChips } from '../lib/sidebarSearch.js';
+  import { entityLabel } from '../lib/entityTypes.svelte.js';
+  import { mediaKindOf } from '../lib/entityIcon.js';
+  import { uploadFiles } from '../lib/mediaImport.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
@@ -41,6 +71,7 @@
   import EntityDetails from '../components/EntityDetails.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
+  import SourceDialog from '../components/SourceDialog.svelte';
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
@@ -90,6 +121,9 @@
       loadedFor = id;
       pl.clear();
       showTrash = false;
+      showUnfiled = false;
+      // A case opens where the analyst is working, the way a save dialog does.
+      cwd = caseState.current?.work_folder ?? '';
     }
     pl.reload();
     api
@@ -114,6 +148,55 @@
   const tree = $derived(buildTree(caseState.current?.folders ?? [], confirmed));
   const allFolders = $derived(flattenPaths(tree));
   const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
+  // Counts from the summary, which covers the whole case; the loaded page alone
+  // undercounted every folder of a case past its first 200 items.
+  const countOf = (node) => (summary?.by_folder ? subtreeCountFrom(node, summary.by_folder) : subtreeCount(node));
+  const working = $derived(caseState.current?.work_folder ?? null);
+
+  // ── filters ─────────────────────────────────────────────────────────────────
+  // A type, and what nothing points at yet: the same narrowing the sidebar's chips
+  // and the Board's "Nothing linked yet" make, asked of the open folder and below.
+  // Either one turns the view into a flat result list, as a search does, because a
+  // folder tile cannot say how many of its items are of one type.
+  let typeFilter = $state(null);
+  let unlinkedOnly = $state(false);
+  const filtering = $derived(Boolean(typeFilter || unlinkedOnly));
+  const chips = $derived(typeChips(summary));
+  const fl = createPagedList({
+    fetchPage: ({ query: serverQuery, cursor }) =>
+      api.get(
+        buildCatalogQuery(caseState.current?.id, {
+          status: 'confirmed',
+          query: serverQuery,
+          types: typeFilter ? [typeFilter] : null,
+          unlinked: unlinkedOnly,
+          folder: !showUnfiled && cwd ? cwd : undefined,
+          unfiled: showUnfiled,
+          recursive: Boolean(!showUnfiled && cwd),
+          limit: PAGE,
+          cursor,
+        })
+      ),
+  });
+  let filteredKey = null; // non-reactive: only the effect below reads/writes it
+  $effect(() => {
+    const id = caseState.current?.id;
+    const key = filtering && id
+      ? [id, typeFilter, unlinkedOnly, cwd, showUnfiled, caseState.rev].join('|')
+      : null;
+    if (key === filteredKey) return;
+    filteredKey = key;
+    if (!key) fl.clear();
+    else fl.reload();
+  });
+  $effect(() => {
+    fl.setQuery(query);
+  });
+  const filteredRows = $derived(fl.serverMode ? fl.items : fl.items.filter((e) => matches(e)));
+  function clearFilters() {
+    typeFilter = null;
+    unlinkedOnly = false;
+  }
 
   function tileIcon(e) {
     if (e.type === 'media') {
@@ -267,9 +350,11 @@
   const searchScope = $derived(
     showUnfiled ? unfiled : cwd ? confirmed.filter((e) => isInFolderSubtree(e, cwd)) : confirmed
   );
-  const visibleEntities = $derived(searching ? searchScope.filter(matches) : current.entities);
+  const visibleEntities = $derived(
+    filtering ? filteredRows : searching ? searchScope.filter(matches) : current.entities
+  );
   const completeVisibleEntities = $derived(
-    completeFolderEntities === null
+    completeFolderEntities === null || filtering
       ? visibleEntities
       : (searching ? completeFolderEntities.filter(matches) : completeFolderEntities)
   );
@@ -278,18 +363,17 @@
   // row past 200: a delete silently spared them, and a move reported a count it
   // had not moved.
   const selectable = $derived(
-    completeFolderEntities === null
-      ? confirmed
-      : [...new Map([...confirmed, ...completeFolderEntities].map((e) => [e.id, e])).values()]
+    [...new Map([...confirmed, ...(completeFolderEntities ?? []), ...fl.items].map((e) => [e.id, e])).values()]
   );
-  const curFolders = $derived(searching ? [] : sortFolders(current.children));
+  const narrowed = $derived(searching || filtering);
+  const curFolders = $derived(narrowed ? [] : sortFolders(current.children));
   const curEntities = $derived(sortEntities(completeVisibleEntities));
   const entityOrder = $derived(curEntities.map((e) => e.id));
   const crumbs = $derived(cwd ? cwd.split('/') : []);
   // the Unfiled bucket shows as a tile at the root, even when empty (drop here
   // to unfile). Folder to create a new folder into on empty-space right-click.
-  const showRootUnfiled = $derived(cwd === '' && !showUnfiled && !searching);
-  const ctxParent = $derived(showUnfiled || searching ? '' : cwd);
+  const showRootUnfiled = $derived(cwd === '' && !showUnfiled && !narrowed);
+  const ctxParent = $derived(showUnfiled || narrowed ? '' : cwd);
 
   function openFolder(path) {
     showTrash = false;
@@ -338,6 +422,18 @@
   }
 
   function onFilesKeydown(event) {
+    if (event.key === 'Escape' && ctx) {
+      ctx = null;
+      return;
+    }
+    if (event.key === 'F2' && uiState.tool === 'files' && selected.length === 1 && !renaming) {
+      const entity = curEntities.find((e) => e.id === selected[0]);
+      if (entity) {
+        event.preventDefault();
+        startRename({ kind: 'entity', entity });
+      }
+      return;
+    }
     if (
       event.key !== 'Delete' ||
       event.repeat ||
@@ -453,48 +549,107 @@
 
   // ── folders ────────────────────────────────────────────────────────────────
   let newFolder = $state('');
-  // create `leaf` under `parent` ('' = top level)
+  // create `leaf` under `parent` ('' = top level); the new path, or null
   async function createFolderAt(parent, leaf) {
     const name = (parent ? `${parent}/` : '') + leaf.trim();
     try {
       await api.post(`/api/cases/${caseState.current.id}/folders`, { name });
       await reloadCase();
+      if (parent) expanded[parent] = true; // show where it went
+      return name;
     } catch (e) {
       toast(e.message, 'danger');
+      return null;
     }
   }
   function createFolder() {
     const leaf = newFolder.trim();
     if (!leaf) return;
     newFolder = '';
-    createFolderAt(searching || showUnfiled ? '' : cwd, leaf);
+    createFolderAt(narrowed || showUnfiled ? '' : cwd, leaf);
   }
 
-  // deleting a folder only clears the filing: items inside land in Unfiled,
-  // no files are touched. Same routing the case sidebar uses.
+  // Removing a folder only clears the filing: the server unfiles every item
+  // under it, the ones past the loaded page too, and no file is touched.
   function askDeleteFolder(path) {
-    const prefix = path + '/';
-    const inside = confirmed.filter((e) => {
-      const f = folderOf(e);
-      return f === path || (f && f.startsWith(prefix));
-    });
-    const subs = allFolders.filter((f) => f.startsWith(prefix)).length;
     confirmState = {
-      title: 'Remove this folder?',
-      message: subs
-        ? `“${path}” and its ${subs} subfolder(s) will be removed from My work.`
-        : `“${path}” will be removed from My work.`,
-      detail: 'Items inside are unfiled. No files are deleted.',
-      confirmLabel: 'Remove folder',
-      tone: 'default',
-      icon: 'folderMinus',
+      ...removeFolderPrompt(path, allFolders),
       action: async () => {
-        if (inside.length) await assignFolderBatch(caseState.current.id, inside, '');
-        await api.del(`/api/cases/${caseState.current.id}/folders?name=${encodeURIComponent(path)}`);
-        await reloadCase();
-        if (cwd === path || cwd.startsWith(prefix)) cwd = '';
+        await removeFolder(caseState.current.id, path);
+        if (inSubtree(cwd, path)) cwd = '';
       },
     };
+  }
+
+  async function toggleWorkFolder(path) {
+    try {
+      await setWorkFolder(caseState.current.id, working === path ? null : path);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  // ── rename (F2 or the menu) ─────────────────────────────────────────────────────
+  // One field in place of the name, for an item or a folder. Enter or leaving the
+  // field keeps it, Escape drops it.
+  // A folder shows twice, in the tree rail and as a tile, so the field opens on the
+  // one that was pressed (`inTree`): two fields would take focus from each other,
+  // and losing focus keeps the name.
+  let renaming = $state(null); // { kind: 'entity', id, value } | { kind: 'folder', path, value, inTree }
+  let renameBusy = false;
+
+  function startRename(target) {
+    ctx = null;
+    renaming = target.kind === 'folder'
+      ? { kind: 'folder', path: target.path, value: leafOf(target.path), inTree: Boolean(target.inTree) }
+      : { kind: 'entity', id: target.entity.id, value: target.entity.label };
+  }
+
+  async function commitRename() {
+    const r = renaming;
+    if (!r || renameBusy) return;
+    renaming = null;
+    const caseId = caseState.current.id;
+    renameBusy = true;
+    try {
+      if (r.kind === 'folder') {
+        if (r.value.includes('/')) {
+          toast('A folder name cannot hold a slash', 'warn');
+          return;
+        }
+        const target = renamedPath(r.path, r.value);
+        if (!target) return;
+        await renameFolder(caseId, r.path, target);
+        if (inSubtree(cwd, r.path)) cwd = target + cwd.slice(r.path.length);
+      } else {
+        const entity = selectable.find((e) => e.id === r.id);
+        if (!entity || !r.value.trim() || r.value.trim() === entity.label) return;
+        await renameEntity(caseId, entity, r.value);
+        await reloadCase();
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      renameBusy = false;
+    }
+  }
+
+  function onRenameKey(event) {
+    // The field sits inside a tile whose Enter opens it, and the window's Delete
+    // and F2 act on the selection: typing a name is none of those.
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitRename();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      renaming = null;
+    }
+  }
+  function focusSelect(node) {
+    node.focus();
+    node.select();
   }
 
   // ── delete (irreversible; spells out what it touches) ─────────────────────
@@ -572,45 +727,60 @@
     };
   }
 
-  // right-click → a small menu offering a new folder or a new note under
-  // whatever was clicked (a folder, or the open one on empty space). The menu
-  // opens in 'menu' mode; picking "New folder" swaps to the inline name field.
-  // Right-clicking an actual folder node (tree row or tile) also offers to
-  // delete it; right-clicking a file tile opens a separate entity menu.
-  let ctx = $state(null); // { x, y, parent, mode: 'menu' | 'folder', isFolder } | { x, y, kind: 'entity', ids }
+  // ── right-click ───────────────────────────────────────────────────────────────
+  // Three menus, by what was pressed. An item (or the selection it is part of):
+  // open it, take it to a tool, rename, move, date it, delete. A folder: open,
+  // rename, add inside it, import into it, work in it, remove. Empty space: add
+  // to the folder on screen. "New folder" and "New folder with selection" swap
+  // the menu for a name field rather than opening a dialog.
+  //
+  // ctx: { x, y, kind: 'entity', ids }
+  //    | { x, y, kind: 'folder', parent, isFolder, mode: 'menu' | 'name', withSelection }
+  let ctx = $state(null);
   let ctxName = $state('');
-  function openCtx(e, parent, isFolder = false) {
+  const MENU_W = 230;
+  const MENU_H = 360;
+  /** Keep the menu on screen: a press near the right or bottom edge opens it inward. */
+  function at(e) {
+    return {
+      x: Math.min(e.clientX, window.innerWidth - MENU_W - 8),
+      y: Math.min(e.clientY, Math.max(8, window.innerHeight - MENU_H - 8)),
+    };
+  }
+  function openCtx(e, parent, isFolder = false, inTree = false) {
     e.preventDefault();
     e.stopPropagation();
-    ctx = { x: e.clientX, y: e.clientY, parent, mode: 'menu', isFolder };
+    ctx = { ...at(e), kind: 'folder', parent, isFolder, inTree, mode: 'menu', withSelection: null };
     ctxName = '';
   }
-  function ctxNewFolder() {
-    ctx = { ...ctx, mode: 'folder' };
+  function ctxNewFolder(withSelection = null) {
+    ctx = { ...ctx, kind: 'folder', mode: 'name', withSelection };
     ctxName = '';
   }
-  function ctxCreate() {
+  async function ctxCreate() {
     const leaf = ctxName.trim();
-    const parent = ctx?.parent ?? '';
+    const { parent = '', withSelection = null } = ctx ?? {};
     ctx = null;
-    if (leaf) createFolderAt(parent, leaf);
+    if (!leaf) return;
+    const path = await createFolderAt(parent, leaf);
+    if (path && withSelection?.length) {
+      const ents = selectable.filter((e) => withSelection.includes(e.id));
+      try {
+        await assignFolderBatch(caseState.current.id, ents, path);
+        await reloadCase();
+        selected = [];
+        toast(`Moved ${ents.length} item${ents.length > 1 ? 's' : ''} to ${leaf}`, 'ok', 1800);
+      } catch (e) {
+        toast(e.message, 'danger');
+      }
+    }
   }
-  function ctxNewNote() {
-    const parent = ctx?.parent ?? '';
+  /** Close the menu, then act on what it was opened on. Read before closing:
+   *  `ctxEntities` and `ctxOne` follow `ctx` and are empty once it is null. */
+  function ctxRun(fn) {
+    const held = { ...ctx, entities: ctxEntities, one: ctxOne };
     ctx = null;
-    openNewNote(parent);
-  }
-
-  function ctxNewBookmark() {
-    const parent = ctx?.parent ?? '';
-    ctx = null;
-    openNewBookmark(parent);
-  }
-
-  function ctxDeleteFolder() {
-    const path = ctx?.parent;
-    ctx = null;
-    if (path) askDeleteFolder(path);
+    fn(held);
   }
 
   // right-click on a file tile: select it (unless it's part of the current
@@ -622,8 +792,19 @@
       selected = [entity.id];
       anchor = entity.id;
     }
-    ctx = { x: e.clientX, y: e.clientY, kind: 'entity', ids: [...selected] };
+    ctx = { ...at(e), kind: 'entity', ids: [...selected] };
   }
+  const ctxEntities = $derived(
+    ctx?.kind === 'entity' ? selectable.filter((e) => ctx.ids.includes(e.id)) : []
+  );
+  const ctxOne = $derived(ctxEntities.length === 1 ? ctxEntities[0] : null);
+  const ctxOpenIn = $derived(
+    ctxOne && (ctxOne.type === 'media' || ctxOne.type === 'capture') && ctxOne.attrs?.path
+      ? openInOptions({ path: ctxOne.attrs.path, kind: mediaKindOf(ctxOne), label: ctxOne.label })
+      : []
+  );
+  const onMap = (e) =>
+    e?.type === 'capture' && Number.isFinite(Number(e.attrs?.lat)) && Number.isFinite(Number(e.attrs?.lon));
 
   function openEntityTile(entity) {
     if (entity.type === 'note') {
@@ -636,17 +817,54 @@
     }
     infoEntityId = entity.id;
   }
-  function ctxMoveToUnfiled() {
-    const ids = ctx?.ids ?? [];
-    ctx = null;
-    if (!ids.length) return;
-    draggingIds = ids;
-    dropInto('');
+  function moveTo(ents) {
+    if (ents.length) uiState.moving = ents;
   }
-  function ctxDeleteEntities() {
-    const ids = ctx?.ids ?? [];
-    ctx = null;
-    askDeleteEntities(ids);
+  /** The Add event bar, seated on the item: Files offers what is selected. */
+  function addEvent(entity) {
+    selected = [entity.id];
+    anchor = entity.id;
+    uiState.noting = true;
+  }
+
+  // ── import into a folder ────────────────────────────────────────────────────
+  // The Media Library's import, filed where it was asked for. The origin is asked
+  // once for the batch, as there.
+  let importInput = $state(null);
+  let importFolder = '';
+  let pendingImport = $state(null); // { files, folder }
+  let importBusy = $state(false);
+  function pickImport(folder) {
+    importFolder = folder ?? '';
+    importInput?.click();
+  }
+  function onImportPicked(event) {
+    const files = [...(event.currentTarget.files ?? [])];
+    event.currentTarget.value = '';
+    if (files.length) pendingImport = { files, folder: importFolder };
+  }
+  async function runImport(sourceUrl) {
+    if (!pendingImport || importBusy) return;
+    importBusy = true;
+    const { files, folder } = pendingImport;
+    const caseId = caseState.current.id;
+    try {
+      const { filed, duplicates, failed } = await uploadFiles(caseId, files, sourceUrl);
+      for (const refusal of failed) toast(`${refusal.name}: ${refusal.message}`, 'danger');
+      const astray = filed.filter((e) => (folderOf(e) ?? '') !== folder);
+      if (astray.length) await assignFolderBatch(caseId, astray, folder);
+      pendingImport = null;
+      await reloadCase();
+      if (filed.length) {
+        toast(`${filed.length} file${filed.length > 1 ? 's' : ''} filed in ${folder ? leafOf(folder) : 'Unfiled'}`, 'ok');
+        revealFiled(folder);
+      }
+      if (duplicates) toast(`${duplicates} duplicate${duplicates > 1 ? 's' : ''} skipped (same SHA-256)`, 'warn');
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      importBusy = false;
+    }
   }
 
   // ── notes ────────────────────────────────────────────────────────────────
@@ -732,9 +950,10 @@
         });
         // A duplicate is left where it already sits: the case keeps the copy it has,
         // and refiling it under the folder of this paste would move an item the
-        // analyst filed on purpose the first time.
-        if (!result.duplicate && values.folder) {
-          await assignFolder(caseId, result.entity, values.folder);
+        // analyst filed on purpose the first time. A new one may have landed in the
+        // work folder, so it is moved whenever the dialog said somewhere else.
+        if (!result.duplicate && (values.folder ?? '') !== (folderOf(result.entity) ?? '')) {
+          await assignFolder(caseId, result.entity, values.folder ?? '');
         }
         pasted = null;
         await reloadCase();
@@ -811,7 +1030,7 @@
     const id = caseState.current?.id;
     const folders = caseState.current?.folders ?? [];
     caseState.rev;
-    const needsCompleteList = view === 'list' && (Boolean(cwd) || showUnfiled || searching);
+    const needsCompleteList = view === 'list' && !filtering && (Boolean(cwd) || showUnfiled || searching);
     if (!id || !needsCompleteList) {
       completeFolderRun += 1;
       completeFolderEntities = null;
@@ -931,7 +1150,7 @@
         >
           <Icon name="layers" size={14} />
           <span class="tname">All</span>
-          <span class="tcount">{confirmed.length}</span>
+          <span class="tcount">{summary?.by_status?.confirmed ?? confirmed.length}</span>
         </div>
 
         {#each tree as node (node.path)}
@@ -991,11 +1210,54 @@
               {/if}
             {/each}
           {/if}
+          {#if cwd && !showUnfiled && !showTrash}
+            <button
+              class="work-toggle"
+              class:on={working === cwd}
+              aria-pressed={working === cwd}
+              title={working === cwd
+                ? 'New files and saved work land here. Press to stop.'
+                : 'Make this the work folder: new files and saved work land here'}
+              onclick={() => toggleWorkFolder(cwd)}
+            >
+              <Icon name="pushpin" size={12} /> {working === cwd ? 'Work folder' : 'Work here'}
+            </button>
+          {/if}
           <div class="spacer"></div>
           {#if selected.length}
             <span class="sel-count">{selected.length} selected</span>
           {/if}
         </div>
+
+        {#if !showTrash && chips.length > 1}
+          <div class="filters" role="group" aria-label="Filters">
+            <button class="chip" class:active={!typeFilter} onclick={() => (typeFilter = null)}>All</button>
+            {#each chips as chip (chip.type)}
+              <button
+                class="chip"
+                class:active={typeFilter === chip.type}
+                aria-pressed={typeFilter === chip.type}
+                onclick={() => (typeFilter = typeFilter === chip.type ? null : chip.type)}
+              >
+                {entityLabel(chip.type)}
+                {#if !cwd && !showUnfiled}<span class="n">{chip.count}</span>{/if}
+              </button>
+            {/each}
+            <span class="filters-sep"></span>
+            <button
+              class="chip"
+              class:active={unlinkedOnly}
+              aria-pressed={unlinkedOnly}
+              title="In the case, and connected to nothing at all"
+              onclick={() => (unlinkedOnly = !unlinkedOnly)}
+            >
+              Nothing linked yet
+            </button>
+            {#if filtering}
+              <button class="clear" onclick={clearFilters}>Clear</button>
+            {/if}
+          </div>
+        {/if}
 
         {#if showTrash}
           <div class="trash-pane">
@@ -1075,10 +1337,18 @@
                   ondragleave={() => (dropTarget = dropTarget === node.path ? null : dropTarget)}
                   ondrop={(e) => { e.preventDefault(); dropInto(node.path); }}
                 >
-                  <span class="lcol-name"><Icon name="folder" size={15} /><span class="ltext">{node.name}</span></span>
+                  <span class="lcol-name">
+                    <Icon name="folder" size={15} />
+                    {#if renaming?.kind === 'folder' && !renaming.inTree && renaming.path === node.path}
+                      {@render renameField()}
+                    {:else}
+                      <span class="ltext">{node.name}</span>
+                    {/if}
+                    {#if working === node.path}<span class="work-pin" title="Work folder"><Icon name="pushpin" size={12} /></span>{/if}
+                  </span>
                   <span class="lcol-type">folder</span>
                   <span class="lcol-size">—</span>
-                  <span class="lcol-added">{subtreeCount(node)} item{subtreeCount(node) === 1 ? '' : 's'}</span>
+                  <span class="lcol-added">{countOf(node)} item{countOf(node) === 1 ? '' : 's'}</span>
                 </div>
               {/each}
               {#if showRootUnfiled}
@@ -1123,7 +1393,11 @@
                   {:else}
                     <Icon name={tileIcon(e)} size={15} />
                   {/if}
-                  <span class="ltext">{e.label}</span>
+                  {#if renaming?.kind === 'entity' && renaming.id === e.id}
+                    {@render renameField()}
+                  {:else}
+                    <span class="ltext">{e.label}</span>
+                  {/if}
                 </span>
                 <span class="lcol-type">{e.type}</span>
                 <span class="lcol-size">{fmtSize(tileSize(e))}</span>
@@ -1134,7 +1408,8 @@
               <div class="grid-empty">
                 <Icon name="folder" size={34} />
                 <p>
-                  {#if searching}No files match “{query.trim()}”.
+                  {#if filtering}Nothing here matches these filters.
+                  {:else if searching}No files match “{query.trim()}”.
                   {:else if showUnfiled}Nothing unfiled.
                   {:else}This folder is empty. Drag items here, or right-click to add a subfolder or note.{/if}
                 </p>
@@ -1166,8 +1441,15 @@
                 ondrop={(e) => { e.preventDefault(); dropInto(node.path); }}
               >
                 <div class="thumb folder-thumb"><Icon name="folder" size={dense ? 26 : 38} /></div>
-                <span class="tile-name">{node.name}</span>
-                <span class="tile-sub">{subtreeCount(node)} item{subtreeCount(node) === 1 ? '' : 's'}</span>
+                {#if renaming?.kind === 'folder' && !renaming.inTree && renaming.path === node.path}
+                  {@render renameField()}
+                {:else}
+                  <span class="tile-name">{node.name}</span>
+                {/if}
+                {#if working === node.path}
+                  <span class="tile-pin" title="Work folder: new files and saved work land here"><Icon name="pushpin" size={12} /></span>
+                {/if}
+                <span class="tile-sub">{countOf(node)} item{countOf(node) === 1 ? '' : 's'}</span>
               </div>
             {/each}
 
@@ -1214,7 +1496,11 @@
                   <Icon name={tileIcon(e)} size={dense ? 24 : 34} />
                 {/if}
               </div>
-              <span class="tile-name">{e.label}</span>
+              {#if renaming?.kind === 'entity' && renaming.id === e.id}
+                {@render renameField()}
+              {:else}
+                <span class="tile-name">{e.label}</span>
+              {/if}
               <span class="tile-sub">{e.type}</span>
               <button
                 class="tile-info btn btn-ghost btn-sm"
@@ -1230,7 +1516,8 @@
             <div class="grid-empty">
               <Icon name="folder" size={34} />
               <p>
-                {#if searching}No files match “{query.trim()}”.
+                {#if filtering}Nothing here matches these filters.
+                {:else if searching}No files match “{query.trim()}”.
                 {:else if showUnfiled}Nothing unfiled.
                 {:else}This folder is empty. Drag items here, or right-click to add a subfolder or note.{/if}
               </p>
@@ -1245,7 +1532,14 @@
           {/if}
         </div>
         {/if}
-        {#if !showTrash && pl.hasMore}
+        {#if !showTrash && filtering && fl.hasMore}
+          <div class="show-more">
+            <button class="btn" onclick={() => fl.loadMore()} disabled={fl.loading}>
+              {fl.loading ? 'Loading…' : 'Show more'}
+            </button>
+            <span>Showing {fl.items.length} of {fl.total}</span>
+          </div>
+        {:else if !showTrash && !filtering && pl.hasMore}
           <div class="show-more">
             <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
               {pl.loading ? 'Loading…' : 'Show more'}
@@ -1258,6 +1552,22 @@
   {/if}
 </div>
 
+<!-- the name, made editable in place (rename) -->
+{#snippet renameField()}
+  <!-- svelte-ignore a11y_autofocus -->
+  <input
+    class="input rename-field"
+    aria-label="New name"
+    bind:value={renaming.value}
+    use:focusSelect
+    onkeydown={onRenameKey}
+    onblur={commitRename}
+    onclick={(e) => e.stopPropagation()}
+    ondblclick={(e) => e.stopPropagation()}
+    onpointerdown={(e) => e.stopPropagation()}
+  />
+{/snippet}
+
 <!-- one tree node + subtree (navigation + drop target) -->
 {#snippet treeNode(node, depth)}
   <div
@@ -1269,7 +1579,7 @@
     tabindex="0"
     onclick={() => openFolder(node.path)}
     onkeydown={(e) => e.key === 'Enter' && openFolder(node.path)}
-    oncontextmenu={(e) => openCtx(e, node.path, true)}
+    oncontextmenu={(e) => openCtx(e, node.path, true, true)}
     ondragover={(e) => { e.preventDefault(); dropTarget = node.path; }}
     ondragleave={() => (dropTarget = dropTarget === node.path ? null : dropTarget)}
     ondrop={(e) => { e.preventDefault(); dropInto(node.path); }}
@@ -1289,8 +1599,15 @@
       <span class="tchevron spacer-icon"></span>
     {/if}
     <Icon name={isExpanded(node.path) ? 'folderOpen' : 'folder'} size={14} />
-    <span class="tname">{node.name}</span>
-    <span class="tcount">{subtreeCount(node)}</span>
+    {#if renaming?.kind === 'folder' && renaming.inTree && renaming.path === node.path}
+      {@render renameField()}
+    {:else}
+      <span class="tname">{node.name}</span>
+    {/if}
+    {#if working === node.path}
+      <span class="work-pin" title="Work folder: new files and saved work land here"><Icon name="pushpin" size={12} /></span>
+    {/if}
+    <span class="tcount">{countOf(node)}</span>
   </div>
   {#if isExpanded(node.path)}
     {#each node.children as child (child.path)}
@@ -1299,7 +1616,7 @@
   {/if}
 {/snippet}
 
-<!-- right-click menu: create a folder or a note under whatever was clicked -->
+<!-- right-click menu: what can be done to what was pressed -->
 {#if ctx}
   <div
     class="ctx-backdrop"
@@ -1308,19 +1625,64 @@
     oncontextmenu={(e) => e.preventDefault()}
   ></div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ctx-menu" style="left:{ctx.x}px; top:{ctx.y}px" onpointerdown={(e) => e.stopPropagation()}>
+  <div class="ctx-menu" role="menu" tabindex="-1" style="left:{ctx.x}px; top:{ctx.y}px" onpointerdown={(e) => e.stopPropagation()}>
     {#if ctx.kind === 'entity'}
-      <div class="ctx-head">{ctx.ids.length > 1 ? `${ctx.ids.length} items` : 'Item'}</div>
-      {#if !showUnfiled}
-        <button class="ctx-item" onclick={ctxMoveToUnfiled}>
+      <div class="ctx-head">{ctxOne ? ctxOne.label : `${ctxEntities.length} items`}</div>
+      {#if ctxOne}
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => openEntity(held.one))}>
+          <Icon name="external" size={14} /> Open
+        </button>
+        {#each ctxOpenIn as option (option.id)}
+          <button class="ctx-item" role="menuitem" onclick={() => ctxRun(() => option.run())}>
+            <Icon name={option.icon} size={14} /> Open in {TOOL_LABELS[option.id]}
+          </button>
+        {/each}
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" role="menuitem" onclick={() => startRename({ kind: 'entity', entity: ctxOne })}>
+          <Icon name="edit" size={14} /> Rename <kbd>F2</kbd>
+        </button>
+      {/if}
+      <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => moveTo(held.entities))}>
+        <Icon name="move" size={14} /> Move to…
+      </button>
+      <button class="ctx-item" role="menuitem" onclick={() => ctxNewFolder(ctx.ids)}>
+        <Icon name="folder" size={14} /> New folder with {ctxOne ? 'this item' : 'these items'}
+      </button>
+      {#if !showUnfiled && ctxEntities.some((e) => folderOf(e))}
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => assignFolderBatch(caseState.current.id, held.entities, '').then(reloadCase).catch((e) => toast(e.message, 'danger')))}>
           <Icon name="folderMinus" size={14} /> Move to Unfiled
         </button>
       {/if}
-      <button class="ctx-item danger" onclick={ctxDeleteEntities}>
+      {#if ctxOne}
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => addEvent(held.one))}>
+          <Icon name="eventAdd" size={14} /> Add event
+        </button>
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => openInTimeline(held.one))}>
+          <Icon name="clock" size={14} /> Show in Timeline
+        </button>
+        {#if onMap(ctxOne)}
+          <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => gotoCapture(held.one))}>
+            <Icon name="crosshair" size={14} /> Show on map
+          </button>
+        {/if}
+        {#if (ctxOne.type === 'media' || ctxOne.type === 'capture') && ctxOne.attrs?.path && !opensInFileManager(ctxOne)}
+          <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => showInFolder(held.one))}>
+            <Icon name="folderOpen" size={14} /> Show in folder
+          </button>
+        {/if}
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => (infoEntityId = held.one.id))}>
+          <Icon name="info" size={14} /> Details
+        </button>
+      {/if}
+      <div class="ctx-sep"></div>
+      <button class="ctx-item danger" role="menuitem" onclick={() => ctxRun((held) => askDeleteEntities(held.ids))}>
         <Icon name="trash" size={14} /> Delete
       </button>
-    {:else if ctx.mode === 'folder'}
-      <div class="ctx-head">New folder{ctx.parent ? ` in ${ctx.parent.split('/').pop()}` : ''}</div>
+    {:else if ctx.mode === 'name'}
+      <div class="ctx-head">
+        {ctx.withSelection ? 'New folder with the selection' : 'New folder'}{ctx.parent ? ` in ${leafOf(ctx.parent)}` : ''}
+      </div>
       <form onsubmit={(e) => { e.preventDefault(); ctxCreate(); }}>
         <!-- svelte-ignore a11y_autofocus -->
         <input
@@ -1333,24 +1695,58 @@
         <button class="btn btn-primary btn-sm" type="submit" disabled={!ctxName.trim()}>Create</button>
       </form>
     {:else}
-      <div class="ctx-head">{ctx.parent ? ctx.parent.split('/').pop() : 'All'}</div>
-      <button class="ctx-item" onclick={ctxNewFolder}>
-        <Icon name="folder" size={14} /> New folder
+      <div class="ctx-head">{ctx.parent ? leafOf(ctx.parent) : 'All'}</div>
+      {#if ctx.isFolder && ctx.parent}
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => openFolder(held.parent))}>
+          <Icon name="folderOpen" size={14} /> Open
+        </button>
+        <button class="ctx-item" role="menuitem" onclick={() => startRename({ kind: 'folder', path: ctx.parent, inTree: ctx.inTree })}>
+          <Icon name="edit" size={14} /> Rename
+        </button>
+        <div class="ctx-sep"></div>
+      {/if}
+      <button class="ctx-item" role="menuitem" onclick={() => ctxNewFolder()}>
+        <Icon name="folder" size={14} /> {ctx.isFolder && ctx.parent ? 'New subfolder' : 'New folder'}
       </button>
-      <button class="ctx-item" onclick={ctxNewNote}>
+      <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => openNewNote(held.parent))}>
         <Icon name="note" size={14} /> New note
       </button>
-      <button class="ctx-item" onclick={ctxNewBookmark}>
+      <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => openNewBookmark(held.parent))}>
         <Icon name="link" size={14} /> New bookmark
       </button>
+      <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => pickImport(held.parent))}>
+        <Icon name="upload" size={14} /> Import files here
+      </button>
+      {#if ctx.parent}
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" role="menuitem" onclick={() => ctxRun((held) => toggleWorkFolder(held.parent))}>
+          <Icon name="pushpin" size={14} /> {working === ctx.parent ? 'Stop working here' : 'Work in this folder'}
+        </button>
+      {/if}
       {#if ctx.isFolder && ctx.parent}
         <div class="ctx-sep"></div>
-        <button class="ctx-item danger" onclick={ctxDeleteFolder}>
-          <Icon name="trash" size={14} /> Delete folder
+        <button class="ctx-item danger" role="menuitem" onclick={() => ctxRun((held) => askDeleteFolder(held.parent))}>
+          <Icon name="folderMinus" size={14} /> Remove folder
         </button>
       {/if}
     {/if}
   </div>
+{/if}
+
+<input
+  bind:this={importInput}
+  type="file"
+  multiple
+  hidden
+  onchange={onImportPicked}
+/>
+{#if pendingImport}
+  <SourceDialog
+    count={pendingImport.files.length}
+    busy={importBusy}
+    onconfirm={runImport}
+    onclose={() => (pendingImport = null)}
+  />
 {/if}
 
 <!-- delete confirmation (entities or a folder) -->
@@ -1377,7 +1773,7 @@
     <input id="fnote-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
     <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" />
+    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" fresh />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -1399,7 +1795,7 @@
     <input id="fbm-title" class="input" placeholder="Bookmark title…" bind:value={bookmarkModal.title} />
 
     <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={bookmarkModal.folder} folders={allFolders} emptyLabel="My work (root)" />
+    <FolderSelect bind:value={bookmarkModal.folder} folders={allFolders} emptyLabel="My work (root)" fresh />
 
     <label class="modal-label" for="fbm-notes" style="margin-top:10px">Notes</label>
     <textarea id="fbm-notes" class="textarea" rows="3" placeholder="Why this page matters…" bind:value={bookmarkModal.notes}></textarea>
@@ -1494,7 +1890,9 @@
   .ctx-menu {
     position: fixed;
     z-index: 41;
-    width: 220px;
+    width: 230px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
     padding: 8px;
     background: var(--bg-1);
     border: 1px solid var(--border-strong);
@@ -1540,6 +1938,12 @@
   }
   .ctx-item.danger > :global(svg) {
     color: inherit;
+  }
+  .ctx-item kbd {
+    margin-left: auto;
+    color: var(--text-3);
+    font-family: inherit;
+    font-size: var(--fs-xs);
   }
   .ctx-sep {
     height: 1px;
@@ -1660,6 +2064,59 @@
   .trash-summary {
     margin-left: 8px;
     color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .work-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+  }
+  .work-toggle:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .work-toggle.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .work-pin,
+  .tile-pin {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+  .tile-pin { position: absolute; top: 6px; left: 6px; }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .filters .chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .filters .chip:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .filters .chip.active { color: var(--text-1); border-color: var(--accent); background: var(--accent-soft); }
+  .filters .n { font-weight: 600; }
+  .filters-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--border); }
+  .filters .clear { color: var(--text-3); font-size: var(--fs-xs); text-decoration: underline; }
+  .filters .clear:hover { color: var(--text-1); }
+  .rename-field {
+    width: 100%;
+    min-width: 0;
+    padding: 2px 4px;
     font-size: var(--fs-xs);
   }
   .sel-count {

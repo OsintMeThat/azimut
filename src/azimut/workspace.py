@@ -954,6 +954,7 @@ class Case(CaseStore):
         status: EntityStatus = "confirmed",
         source: str | None = None,
     ) -> dict[str, Any]:
+        attrs = self.in_work_folder(type_, attrs)
         if type_ == "note":
             note_attrs = attrs or {}
             return self.create_note(
@@ -964,7 +965,11 @@ class Case(CaseStore):
                 status=status,
                 source=source,
             )
-        return self._graph().add_entity(type_, label, attrs, by=by, status=status, source=source)
+        entity = self._graph().add_entity(type_, label, attrs, by=by, status=status, source=source)
+        from .engine import proposals
+
+        proposals.on_filed(self, type_)
+        return entity
 
     def update_entity(self, entity_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -1139,6 +1144,132 @@ class Case(CaseStore):
         if len(path) > layout.MAX_FOLDER_PATH:
             raise CaseError(f"a folder path is at most {layout.MAX_FOLDER_PATH} characters")
         return path
+
+    def rename_folder(self, old: str, new: str) -> list[str]:
+        """Rename a folder, carrying its subfolders, its items and their files.
+
+        Refused onto a name another folder already has, ignoring case: two
+        folders a letter's case apart would mirror onto one directory of notes
+        on Windows and macOS.
+        """
+        from .store import folders as folder_store
+
+        source = self._normalize_folder(old)
+        target = self._normalize_folder(new)
+        with self._lock:
+            existing = self.list_folders()
+            if source not in existing:
+                raise CaseError(f"folder '{source}' not found")
+            if target == source:
+                return existing
+            if folder_store.in_subtree(target, source):
+                raise CaseError("a folder cannot move inside itself")
+            outside = {p.casefold() for p in existing if not folder_store.in_subtree(p, source)}
+            if target.casefold() in outside:
+                raise CaseError("another folder already has that name")
+            for path in existing:
+                if folder_store.in_subtree(path, source):
+                    self._normalize_folder(folder_store.moved(path, source, target))
+            inside = self._graph().entities_in_folder(source)
+            folders = self._graph().rename_folder(source, target)
+            self._follow_refiled(inside)
+            current = self.work_folder()
+            if current and folder_store.in_subtree(current, source):
+                self._store_work_folder(folder_store.moved(current, source, target))
+            return folders
+
+    def remove_folder(self, name: str) -> list[str]:
+        """Drop a folder and its subfolders. Items inside are unfiled, not deleted."""
+        from .store import folders as folder_store
+
+        with self._lock:
+            inside = self._graph().entities_in_folder(name)
+            folders = self._graph().remove_folder(name)
+            self._follow_refiled(inside)
+            current = self.work_folder()
+            if current and folder_store.in_subtree(current, name):
+                self._store_work_folder(None)
+            return folders
+
+    def _follow_refiled(self, entities: list[dict[str, Any]]) -> None:
+        """Bring the files beside refiled rows in line with where the rows now are.
+
+        A note's markdown mirrors its folder on disk, and a media's sidecar and
+        browse index carry a copy of it. The rows have already moved; without
+        this a removed folder stayed in the Media Library's folder filter.
+        """
+        from .engine import media as media_engine
+
+        for entity in entities:
+            current = self.get_entity(entity["id"])
+            if current is None:
+                continue
+            folder = (current.get("attrs") or {}).get("folder") or ""
+            path = (current.get("attrs") or {}).get("path")
+            if current["type"] == "note":
+                # An empty patch: the note rename hook reads the folder off the
+                # row and moves the markdown to match.
+                self.update_entity(current["id"], {})
+            elif current["type"] in ("media", "capture") and isinstance(path, str):
+                try:
+                    media_engine.update_media(self, path, {"folder": folder})
+                except (ValueError, CaseError, OSError):
+                    continue  # a file gone from disk keeps only its row, already moved
+
+    # -- the work folder ---------------------------------------------------
+    #
+    # The folder the analyst is working in, kept in the manifest. New files and
+    # saved work land in it when nothing else was chosen, so filing needs no
+    # second pass. A rename carries it and a removal clears it.
+
+    def work_folder(self) -> str | None:
+        folder = self.read().get("work_folder")
+        return folder if isinstance(folder, str) and folder else None
+
+    def set_work_folder(self, folder: str | None) -> str | None:
+        with self._lock:
+            path = self._normalize_folder(folder) if folder else None
+            if path:
+                self.add_folder(path)
+            self._store_work_folder(path)
+            return path
+
+    def _store_work_folder(self, path: str | None) -> None:
+        with self._lock:
+            data = self.read()
+            if path:
+                data["work_folder"] = path
+            else:
+                data.pop("work_folder", None)
+            self._write_json(data)
+
+    def in_work_folder(
+        self, type_: str, attrs: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """`attrs` filed into the work folder, when this type is one it takes and
+        the caller named no folder. An empty folder is a choice and is kept."""
+        from .engine import entities as entity_engine
+
+        if type_ not in entity_engine.WORK_FOLDER_TYPES or "folder" in (attrs or {}):
+            return attrs
+        folder = self.work_folder()
+        return {**(attrs or {}), "folder": folder} if folder else attrs
+
+    # -- proposed links ------------------------------------------------------
+    #
+    # How far `engine/proposals` has read the case, kept in the manifest so it travels
+    # with a bundle: `{"at": <newest filing moment read>, "read": [ids filed then]}`.
+    # A pass reads only past it, which is what keeps a dropped proposal from coming back.
+
+    def link_pass(self) -> dict[str, Any] | None:
+        mark = self.read().get("link_pass")
+        return mark if isinstance(mark, dict) and isinstance(mark.get("at"), str) else None
+
+    def set_link_pass(self, mark: dict[str, Any]) -> None:
+        with self._lock:
+            data = self.read()
+            data["link_pass"] = mark
+            self._write_json(data)
 
 
 

@@ -33,6 +33,7 @@
   import AnalyzerSettings from './AnalyzerSettings.svelte';
   import AnalyzerSize from './AnalyzerSize.svelte';
   import WhenStep from './WhenStep.svelte';
+  import FoldGroup from './FoldGroup.svelte';
   import Icon from '../../components/Icon.svelte';
 
   let {
@@ -63,6 +64,8 @@
   } = $props();
 
   const EMPTY_SOURCE = { provider: 'sentinel2', date: '', layer: 'TRUE_COLOR', maxcc: ADVISED_MAXCC };
+  /** What a new area is saved in before an analyzer gives it a colour. */
+  const AREA_COLOUR = '#38bdf8';
   const STEPS = [[1, 'Where'], [2, 'What'], [3, 'When'], [4, 'Start']];
   const SIZE_NAMES = { small: 'Small', medium: 'Medium', large: 'Large', all: 'All sizes' };
 
@@ -85,6 +88,8 @@
   let areaSearch = $state('');
   /** Groups opened by hand; every group starts folded, the first one too. */
   let openGroups = $state({});
+  /** Analyzer categories opened by hand; they start folded but for the one holding the pick. */
+  let openKinds = $state({});
   let pairs = $state([]);
   /** A one pass reads B on a chosen day rather than the newest pass. */
   let chooseB = $state(false);
@@ -128,14 +133,15 @@
   // start, and saying why here beats a run that comes back failed.
   const groups = $derived(analyzerGroups(catalogue));
   const lock = $derived(analyzerLock(recipe, catalogue));
-  const radarNeeds = $derived(
-    !lock ? ''
+  const whatNeeds = $derived(
+    !recipe ? 'Pick what to look for.'
+    : !lock ? ''
     : radar && catalogue?.copernicus_key !== false
       ? 'Radar analyzers read a Sentinel-1 layer of your Copernicus configuration, not set up yet.'
       : 'Detect reads Copernicus, and no key is set up yet. It is free.'
   );
-  const needsOf = (n) => (n === 1 ? areaNeeds : n === 2 ? radarNeeds : n === 3 ? imageryNeeds : '');
-  const blocked = $derived(areaNeeds || radarNeeds || imageryNeeds);
+  const needsOf = (n) => (n === 1 ? areaNeeds : n === 2 ? whatNeeds : n === 3 ? imageryNeeds : '');
+  const blocked = $derived(areaNeeds || whatNeeds || imageryNeeds);
   /** A step opens once every one before it has what it needs. */
   const reachable = (n) => STEPS.every(([k]) => k >= n || !needsOf(k));
   const defaultName = $derived(
@@ -166,7 +172,6 @@
   untrack(() => {
     kind = seed.kind ?? (seed.followupId ? 'routine' : 'once');
     if (!seed.body) {
-      choose(builtins[0]?.id);
       return;
     }
     const body = seed.body;
@@ -175,6 +180,8 @@
     note = body.note ?? '';
     recipe = clone(body.recipe);
     chosen = body.recipe.id;
+    const holder = groups.find((group) => group.list.some((entry) => entry.id === chosen));
+    if (holder) openKinds = { [holder.label]: true };
     a = sentinelSource(body.a);
     b = sentinelSource(body.b);
     offline = !!body.offline;
@@ -186,7 +193,12 @@
   });
 
   $effect(() => {
-    if (offer) untrack(() => choose(offer));
+    if (!offer) return;
+    untrack(() => {
+      choose(offer);
+      const holder = groups.find((group) => group.list.some((entry) => entry.id === offer));
+      if (holder) openKinds = { ...openKinds, [holder.label]: true };
+    });
   });
 
   // Leaving the first step must not leave the map armed to draw an area.
@@ -238,9 +250,26 @@
   const groupedIds = $derived(new Set(areaGroups.flatMap((group) => group.area_ids ?? [])));
   const ungrouped = $derived(areas.filter((area) => !groupedIds.has(area.id)));
   const matching = (name) => name.toLowerCase().includes(areaSearch.trim().toLowerCase());
+  const loose = $derived(ungrouped.filter((area) => !areaSearch || matching(area.name)));
 
-  function useGroup(group) {
-    const additions = groupZones(group).filter((zone) => !zones.some((selected) => selected.id === zone.id));
+  const isOn = (id) => zones.some((zone) => zone.id === id);
+  /** All, some or none of a group's areas are in the selection. */
+  function groupState(members) {
+    const picked = members.filter((zone) => isOn(zone.id)).length;
+    return !picked ? 'false' : picked === members.length ? 'true' : 'mixed';
+  }
+  const additionsOf = (members) => members.filter((zone) => !isOn(zone.id));
+
+  /** A group goes in whole, or comes out whole once every area of it is in. */
+  function toggleGroup(group) {
+    const members = groupZones(group);
+    if (groupState(members) === 'true') {
+      const ids = new Set(members.map((zone) => zone.id));
+      zones = zones.filter((zone) => !ids.has(zone.id));
+      if (ids.has(selectedZone)) selectedZone = null;
+      return;
+    }
+    const additions = additionsOf(members);
     if (zones.length + additions.length > 32) return;
     zones = [...zones, ...additions];
   }
@@ -254,7 +283,7 @@
         if (areas.some((area) => area.id === zone.id)) continue;
         const ring = zoneRing(zone);
         const saved = await api.post(`/api/cases/${owner.id}/analysis/areas`, {
-          name: zone.name, colour: recipe.colour,
+          name: zone.name, colour: recipe?.colour ?? AREA_COLOUR,
           geometry: { type: 'Polygon', coordinates: [[...ring, ring[0]]] },
         });
         replacements.set(zone.id, saved.id);
@@ -278,7 +307,7 @@
     const owner = await ensureCase();
     const ring = zoneRing(zone);
     const saved = await api.post(`/api/cases/${owner.id}/analysis/areas`, {
-      name: zone.name, colour: recipe.colour, geometry: { type: 'Polygon', coordinates: [[...ring, ring[0]]] },
+      name: zone.name, colour: recipe?.colour ?? AREA_COLOUR, geometry: { type: 'Polygon', coordinates: [[...ring, ring[0]]] },
     });
     pairs = pairs.map((pair) => pair.area_id === zone.id ? { ...pair, area_id: saved.id } : pair);
     zones = zones.map((entry) => entry.id === zone.id ? { ...entry, id: saved.id } : entry);
@@ -331,90 +360,112 @@
       {#if areas.length || areaGroups.length}
         <input class="area-search" aria-label="Search areas or groups" placeholder="Search areas or groups…"
           bind:value={areaSearch} />
-        {#each areaGroups as group (group.id)}
-          {@const members = groupZones(group)}
-          {@const shown = members.filter((zone) => !areaSearch || matching(group.title) || matching(zone.name))}
-          {#if !areaSearch || matching(group.title) || shown.length}
-            <div class="area-group">
-              <div class="area-group-head">
-                <button class="group-fold grow" aria-expanded={!!areaSearch || !!openGroups[group.id]}
-                  onclick={() => (openGroups = { ...openGroups, [group.id]: !openGroups[group.id] })}>
-                  <Icon name={(areaSearch || openGroups[group.id]) ? 'chevronDown' : 'chevronRight'} size={12} />
-                  {group.title} <small>{plural(members.length, 'area')}</small>
-                </button>
-                <button class="btn btn-sm" aria-label={`Use ${group.title}`}
-                  disabled={!!group.pending_review?.length || !members.length || zones.length + members.filter((zone) => !zones.some((selected) => selected.id === zone.id)).length > 32}
-                  onclick={() => useGroup(group)}>Use</button>
-              </div>
-              {#if group.pending_review?.length}
-                <button class="link" onclick={onopenareas}>Review saved shapes in Areas</button>
-              {/if}
-              {#if areaSearch || openGroups[group.id]}
-                <div class="shared">
-                  {#each shown as zone (zone.id)}
-                    {@const area = areas.find((item) => item.id === zone.id)}
-                    {@const on = zones.some((selected) => selected.id === zone.id)}
-                    <button class="area-chip" class:on aria-pressed={on}
-                      disabled={!!group.pending_review?.length || (!on && zones.length >= 32)}
-                      onclick={() => (on ? removeZone(zone.id) : area ? useArea(area) : (zones = [...zones, zone]))}>
-                      <span class="swatch" style={`--tint: ${area?.colour ?? '#38bdf8'}`}></span>{zone.name}
-                    </button>
-                  {/each}
+        <div class="area-list">
+          {#each areaGroups as group (group.id)}
+            {@const members = groupZones(group)}
+            {@const shown = members.filter((zone) => !areaSearch || matching(group.title) || matching(zone.name))}
+            {@const state = groupState(members)}
+            {@const open = !!areaSearch || !!openGroups[group.id]}
+            {@const pending = !!group.pending_review?.length}
+            {#if !areaSearch || matching(group.title) || shown.length}
+              <div class="area-group">
+                <div class="area-group-head">
+                  <button type="button" role="checkbox" class="tick" aria-checked={state}
+                    aria-label={`Use ${group.title}`}
+                    title={state === 'true' ? `Leave out ${group.title}` : `Look in all of ${group.title}`}
+                    disabled={pending || !members.length || (state !== 'true' && zones.length + additionsOf(members).length > 32)}
+                    onclick={() => toggleGroup(group)}>
+                    {#if state === 'true'}<Icon name="check" size={11} />{:else if state === 'mixed'}<Icon name="minus" size={11} />{/if}
+                  </button>
+                  <button type="button" class="group-fold" aria-expanded={open}
+                    onclick={() => (openGroups = { ...openGroups, [group.id]: !openGroups[group.id] })}>
+                    <span class="name">{group.title}</span>
+                    <small>{plural(members.length, 'area')}</small>
+                    <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
+                  </button>
                 </div>
-              {/if}
+                {#if pending}
+                  <button class="link review" onclick={onopenareas}>Review saved shapes in Areas</button>
+                {/if}
+                {#if open}
+                  <div class="members">
+                    {#each shown as zone (zone.id)}
+                      {@const area = areas.find((item) => item.id === zone.id)}
+                      {@const on = isOn(zone.id)}
+                      <button type="button" class="area-item" class:on aria-pressed={on}
+                        disabled={pending || (!on && zones.length >= 32)}
+                        onclick={() => (on ? removeZone(zone.id) : area ? useArea(area) : (zones = [...zones, zone]))}>
+                        <span class="tick" aria-hidden="true">{#if on}<Icon name="check" size={11} />{/if}</span>
+                        <span class="swatch" style={`--tint: ${area?.colour ?? AREA_COLOUR}`}></span>{zone.name}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          {/each}
+          {#if loose.length}
+            <div class="area-group">
+              <p class="loose-head">Ungrouped</p>
+              <div class="members flat">
+                {#each loose as area (area.id)}
+                  {@const on = isOn(area.id)}
+                  <button type="button" class="area-item" class:on aria-pressed={on}
+                    disabled={!on && zones.length >= 32}
+                    onclick={() => (on ? removeZone(area.id) : useArea(area))}>
+                    <span class="tick" aria-hidden="true">{#if on}<Icon name="check" size={11} />{/if}</span>
+                    <span class="swatch" style={`--tint: ${area.colour}`}></span>{area.name}
+                  </button>
+                {/each}
+              </div>
             </div>
           {/if}
-        {/each}
-        {@const loose = ungrouped.filter((area) => !areaSearch || matching(area.name))}
-        {#if loose.length}
-          <div class="area-group">
-            <div class="area-group-head"><strong>Ungrouped</strong><small>{plural(loose.length, 'area')}</small></div>
-            <div class="shared">
-              {#each loose as area (area.id)}
-                {@const on = zones.some((zone) => zone.id === area.id)}
-                <button class="area-chip" class:on aria-pressed={on} disabled={!on && zones.length >= 32}
-                  onclick={() => (on ? removeZone(area.id) : useArea(area))}>
-                  <span class="swatch" style={`--tint: ${area.colour}`}></span>{area.name}
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/if}
+        </div>
       {/if}
-      <div class="row wrap">
-        {#each [['rect', 'Rectangle'], ['polygon', 'Polygon'], ['ellipse', 'Circle']] as [shape, label]}
-          <button class="btn btn-sm" class:active={drawing === shape} disabled={zones.length >= 32}
-            onclick={() => { drawing = drawing === shape ? 'select' : shape; showZones = true; }}>{label}</button>
-        {/each}
+      <div class="draw">
+        <span class="draw-label">{areas.length || areaGroups.length ? 'Or draw' : 'Draw'}</span>
+        <div class="cmp-seg" role="group" aria-label="Draw an area">
+          {#each [['rect', 'Rectangle'], ['polygon', 'Polygon'], ['ellipse', 'Circle']] as [shape, label]}
+            <button type="button" class:on={drawing === shape} aria-pressed={drawing === shape}
+              disabled={zones.length >= 32}
+              onclick={() => { drawing = drawing === shape ? 'select' : shape; showZones = true; }}>{label}</button>
+          {/each}
+        </div>
         <button class="btn btn-sm" disabled={zones.length >= 32} onclick={onusecurrentview}>Use current view</button>
       </div>
       {#if drawing !== 'select'}
         <p class="hint">{drawing === 'polygon' ? 'Click corners on the map; Enter finishes, Escape cancels.' : 'Drag on the map. Escape cancels.'}</p>
       {:else if !zones.length}
-        <p class="hint">{areas.length ? 'Pick an area above, draw on the map, or take the current view.' : 'Draw on the map, or take the current view.'}</p>
+        <p class="hint">{areas.length ? 'Tick saved areas above, draw on the map, or take the current view.' : 'Draw on the map, or take the current view.'}</p>
       {/if}
-      {#each zones as zone (zone.id)}
-        <div class="row area-row">
-          <button class="cmp-icon" aria-label={`Show ${zone.name}`} title={`Show ${zone.name}`}
-            onclick={() => { selectedZone = zone.id; drawing = 'select'; onfocus(zone.points[0]); }}>
-            <Icon name="pin" size={13} />
-          </button>
-          <input class="grow" aria-label="Area name" bind:value={zone.name} maxlength="120" />
-          {#if !areas.some((area) => area.id === zone.id)}
-            <button class="btn btn-sm" disabled={working} onclick={() => act(() => saveArea(zone))}>Save as area</button>
-          {/if}
-          <button class="cmp-icon" aria-label={`Remove ${zone.name}`} title={`Remove ${zone.name}`}
-            onclick={() => removeZone(zone.id)}>
-            <Icon name="x" size={12} />
-          </button>
-        </div>
-      {/each}
       {#if zones.length}
-        <p class="hint" class:warn={tooMany}>{[
-          area,
-          Number.isFinite(cost.tiles) ? plural(cost.tiles, 'tile') : 'over the tile limit',
-          tooMany ? '' : `${plural(frames, 'request')} a run, about ${duration}`,
-        ].filter(Boolean).join(' · ')}</p>
+        <div class="picked">
+          <p class="picked-head">
+            <span>Looking in {plural(zones.length, 'area')}</span>
+            <small class:warn={tooMany}>{[
+              area,
+              Number.isFinite(cost.tiles) ? plural(cost.tiles, 'tile') : 'over the tile limit',
+              // what a tile costs depends on the analyzer, so it waits for one
+              recipe && !tooMany ? `${plural(frames, 'request')} a run` : '',
+            ].filter(Boolean).join(' · ')}</small>
+          </p>
+          {#each zones as zone (zone.id)}
+            <div class="row area-row" class:selected={selectedZone === zone.id}>
+              <button class="cmp-icon" aria-label={`Show ${zone.name}`} title={`Show ${zone.name}`}
+                onclick={() => { selectedZone = zone.id; drawing = 'select'; onfocus(zone.points[0]); }}>
+                <Icon name="pin" size={13} />
+              </button>
+              <input class="grow" aria-label="Area name" bind:value={zone.name} maxlength="120" />
+              {#if !areas.some((saved) => saved.id === zone.id)}
+                <button class="btn btn-sm" disabled={working} onclick={() => act(() => saveArea(zone))}>Save as area</button>
+              {/if}
+              <button class="cmp-icon" aria-label={`Remove ${zone.name}`} title={`Remove ${zone.name}`}
+                onclick={() => removeZone(zone.id)}>
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+          {/each}
+        </div>
       {/if}
       {#if zones.length}
         <details>
@@ -429,7 +480,34 @@
   {:else if step === 2}
     <section class="step" aria-label="What to look for">
       <h3>What to look for</h3>
+      <div class="choices" role="radiogroup" aria-label="Analyzer">
+        {#each groups as group (group.label)}
+          <FoldGroup label={group.label} count={group.list.length}
+            note={group.list.find((entry) => entry.id === chosen)?.name ?? ''}
+            open={!!openKinds[group.label]}
+            ontoggle={() => (openKinds = { ...openKinds, [group.label]: !openKinds[group.label] })}>
+            {#each group.list as entry (entry.id)}
+              {@const locked = analyzerLock(entry, catalogue)}
+              {@const trust = catalogue?.reliability?.[entry.id]}
+              <button type="button" role="radio" aria-checked={chosen === entry.id} class="choice"
+                class:on={chosen === entry.id} class:locked={!!locked} style={`--tint: ${entry.colour}`}
+                title={locked || undefined} onclick={() => choose(entry.id)}>
+                <span class="swatch" aria-hidden="true"></span>{entry.name}
+                {#if trust}<span class="trust {trust}">({trust})</span>{/if}
+                {#if locked}<small class="lock"><Icon name="key" size={11} /> set up</small>{/if}
+              </button>
+            {/each}
+          </FoldGroup>
+        {/each}
+        {#if unlisted}
+          <p class="group">This detection</p>
+          <button type="button" role="radio" aria-checked="true" class="choice on" style={`--tint: ${recipe.colour}`}>
+            <span class="swatch" aria-hidden="true"></span>{recipe.name}<small>as saved</small>
+          </button>
+        {/if}
+      </div>
       {#if recipe}
+        {#if recipe.description}<p class="hint">{recipe.description}</p>{/if}
         <div class="size">
           <p class="group">Target size</p>
           <AnalyzerSize bind:recipe {capability} onpick={(name) => (pickedSize = name)} />
@@ -445,31 +523,8 @@
           </label>
           {#if ceilingWarning(b.maxcc)}<p class="hint warn">{ceilingWarning(b.maxcc)}</p>{/if}
         {/if}
+        <AnalyzerSettings bind:recipe {capability} showSize={false} showCloud={false} />
       {/if}
-      <div class="choices" role="radiogroup" aria-label="Analyzer">
-        {#each groups as group (group.label)}
-          <p class="group">{group.label}</p>
-          {#each group.list as entry (entry.id)}
-            {@const locked = analyzerLock(entry, catalogue)}
-            {@const trust = catalogue?.reliability?.[entry.id]}
-            <button type="button" role="radio" aria-checked={chosen === entry.id} class="choice"
-              class:on={chosen === entry.id} class:locked={!!locked} style={`--tint: ${entry.colour}`}
-              title={locked || undefined} onclick={() => choose(entry.id)}>
-              <span class="swatch" aria-hidden="true"></span>{entry.name}
-              {#if trust}<span class="trust {trust}">({trust})</span>{/if}
-              {#if locked}<small class="lock"><Icon name="key" size={11} /> set up</small>{/if}
-            </button>
-          {/each}
-        {/each}
-        {#if unlisted}
-          <p class="group">This detection</p>
-          <button type="button" role="radio" aria-checked="true" class="choice on" style={`--tint: ${recipe.colour}`}>
-            <span class="swatch" aria-hidden="true"></span>{recipe.name}<small>as saved</small>
-          </button>
-        {/if}
-      </div>
-      {#if recipe.description}<p class="hint">{recipe.description}</p>{/if}
-      <AnalyzerSettings bind:recipe {capability} showSize={false} showCloud={false} />
       <button class="link" onclick={onlibrary}>Make an analyzer of your own…</button>
     </section>
   {:else if step === 3}
@@ -542,7 +597,7 @@
   </div>
   {#if step < 4 && needsOf(step)}
     <span class="reason">{needsOf(step)}</span>
-    {#if step === 2 && radarNeeds}
+    {#if step === 2 && lock}
       <button class="link centre" onclick={openCopernicusSettings}>How to add it, in Settings → Imagery</button>
     {/if}
   {:else if step === 4 && blocked}
@@ -556,28 +611,93 @@
 
 <style>
   .area-search { width: 100%; }
-  .area-group { display: grid; gap: 6px; }
-  .area-group-head { display: flex; align-items: center; gap: 7px; min-height: 30px;
-    padding: 3px 0; font-size: var(--fs-xs); }
-  .area-group-head strong { flex: 1; }
-  .area-group-head small { color: var(--text-3); }
-  .group-fold { display: flex; align-items: center; gap: 5px; min-width: 0; text-align: left;
-    font-size: var(--fs-xs); }
-  .group-fold small { margin-left: auto; }
-  .shared { display: flex; flex-wrap: wrap; gap: 5px; }
-  .area-chip {
+  .area-list {
+    display: grid;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+  }
+  .area-group + .area-group { border-top: 1px solid var(--border); }
+  .area-group-head { display: flex; align-items: center; gap: 8px; padding: 0 10px; }
+  .area-group-head:hover { background: var(--bg-2); }
+  .group-fold {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 36px;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    text-align: left;
+  }
+  .group-fold .name { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+  .group-fold small { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); font-weight: 400; }
+  .group-fold :global(svg) { flex: 0 0 auto; color: var(--text-3); }
+  .tick {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--text-3);
+    border-radius: 4px;
+    color: var(--bg-0);
+  }
+  .tick[aria-checked='true'], .tick[aria-checked='mixed'], .area-item.on .tick {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .tick:disabled { opacity: 0.4; cursor: not-allowed; }
+  .review { margin: 0 10px 8px 34px; }
+  .members { display: grid; padding: 0 0 4px 24px; }
+  .members.flat { padding-left: 0; }
+  .loose-head {
+    margin: 0;
+    padding: 9px 10px 3px;
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .area-item {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 9px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
+    gap: 8px;
+    min-height: 30px;
+    padding: 4px 10px;
     color: var(--text-2);
     font-size: var(--fs-xs);
+    text-align: left;
   }
-  .area-chip:hover:not(:disabled) { color: var(--text-1); border-color: var(--text-3); }
-  .area-chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-  .area-chip .swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--tint); }
+  .area-item:hover:not(:disabled) { color: var(--text-1); background: var(--bg-2); }
+  .area-item.on { color: var(--text-1); }
+  .area-item:disabled { opacity: 0.45; cursor: not-allowed; }
+  .area-item .tick { width: 14px; height: 14px; }
+  .area-item .swatch { width: 8px; height: 8px; border-radius: 2px; }
+  .draw { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .draw-label { color: var(--text-3); font-size: var(--fs-xs); }
+  .picked {
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+  }
+  .picked-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 2px;
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+  }
+  .picked-head small { margin-left: auto; color: var(--text-3); font-weight: 400; }
+  .picked-head small.warn { color: var(--warn, #e2a03f); }
+  .area-row.selected input { border-color: var(--accent); }
   .stepper {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -609,7 +729,6 @@
   .step { display: grid; gap: 12px; }
   h3 { margin: 0 0 3px; font-size: var(--fs-lg); font-weight: 650; }
   .row.wrap { flex-wrap: wrap; }
-  .active { outline: 1px solid var(--accent); }
   .area-row input { font-size: var(--fs-xs); }
   details { display: grid; gap: 8px; }
   details[open] { padding-bottom: 2px; }
@@ -618,7 +737,7 @@
   .link:disabled { opacity: 0.5; }
   .centre { justify-self: center; text-align: center; }
   .size { display: grid; gap: 5px; }
-  .choices { display: grid; gap: 0; }
+  .choices { display: grid; gap: 0; border-top: 1px solid var(--border); }
   .group {
     margin: 6px 0 2px;
     color: var(--text-3);
@@ -640,6 +759,7 @@
     text-align: left;
   }
   .choice:hover { background: var(--bg-2); }
+  .choice:last-child { border-bottom: 0; }
   .choice.on { color: var(--text-1); background: var(--accent-soft); font-weight: 600; }
   .choice small { margin-left: auto; color: var(--text-3); font-weight: 400; }
   .choice.locked { color: var(--text-2); }

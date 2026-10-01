@@ -1,17 +1,30 @@
 <script>
+  import { untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { buildTree, flattenPaths } from '../lib/folderTree.js';
   import { portal } from '../lib/fullscreen.js';
+  import { workFolder } from '../lib/folders.js';
 
   // A folder picker that only lets you choose an existing My-work folder or
   // deliberately create a new one — no free-typing a stray path by accident.
+  //
+  // `fresh` says it picks where something new goes: it then starts on the case's
+  // work folder, which is what the server would have filed it in anyway. Picking
+  // the empty row still sends no folder, and that choice wins.
   let {
     value = $bindable(''),
     folders = [],
     emptyLabel = 'No folder',
     allowCreate = true,
+    fresh = false,
     id = undefined,
   } = $props();
+
+  const working = $derived(workFolder());
+  // Once, when the picker opens on a new item; later changes are the analyst's.
+  untrack(() => {
+    if (fresh && !value && workFolder()) value = workFolder();
+  });
 
   let open = $state(false);
   let creating = $state(false);
@@ -77,6 +90,7 @@
   >
     <Icon name={value ? 'folder' : 'folderMinus'} size={14} />
     <span class="cur" class:none={!value}>{value || emptyLabel}</span>
+    {#if value && value === working}<span class="tag">Work folder</span>{/if}
     <Icon name="chevronDown" size={14} />
   </button>
 
@@ -101,6 +115,7 @@
           >
             <Icon name="folder" size={14} />
             <span class="grow">{o.name}</span>
+            {#if o.path === working}<span class="tag">Work folder</span>{/if}
             {#if value === o.path}<Icon name="check" size={14} />{/if}
           </button>
         {/each}
@@ -161,6 +176,16 @@
   }
   .cur.none {
     color: var(--text-3);
+  }
+  .tag {
+    flex-shrink: 0;
+    padding: 0 6px;
+    border-radius: var(--r-sm);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    white-space: nowrap;
   }
   /* Portaled to <body>, so they sit above the modal overlay (z-index 900). */
   .backdrop {

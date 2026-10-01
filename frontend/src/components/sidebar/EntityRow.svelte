@@ -22,6 +22,8 @@
     ondismiss = () => {},
     ondragstart = () => {},
     ondragend = () => {},
+    /** Right-click: `(event, entity)`. A suggestion has its own two buttons instead. */
+    onmenu = null,
   } = $props();
 
   const isClickable = $derived(
@@ -45,6 +47,11 @@
   role={isClickable ? 'button' : undefined}
   tabindex={isClickable ? 0 : undefined}
   onkeydown={(ev) => ev.key === 'Enter' && onactivate(entity, ev)}
+  oncontextmenu={(ev) => {
+    if (!onmenu || suggested) return;
+    ev.preventDefault();
+    onmenu(ev, entity);
+  }}
 >
   {#if !suggested}<Icon name="grip" size={13} />{/if}
   {#if entity.thumb}

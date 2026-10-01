@@ -113,12 +113,14 @@ already the axis this module varies.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from typing import Any
 
 from ..repository import CaseRepository
 from ..workspace import CaseError
-from . import entities, links
+from . import cities, entities, links
 
 #: **How many nodes a case opens on, not how many it may hold.** A ceiling that
 #: refuses is the app overruling the analyst about their own picture, and the drawing
@@ -1925,6 +1927,27 @@ def _origins(case: CaseRepository, entities: list[dict[str, Any]]) -> dict[str, 
     }
 
 
+#: A label that is nothing but a position: decimal degrees, DMS, the `-2` suffix a second
+#: capture of one spot gets. Such a node is read by where it is, not by its digits.
+_COORDS_ONLY = re.compile(r"^[\d\s.,;°'\"′″_+\-NSEWnsew~]+$")
+
+
+def _caption(entity: dict[str, Any]) -> str | None:
+    """What a point named only by its coordinates is called on the drawing: the town it
+    is near, from the offline gazetteer. Nothing for a point somebody named."""
+    if entity.get("type") not in ("place", "capture"):
+        return None
+    label = str(entity.get("label") or "")
+    if sum(ch.isdigit() for ch in label) < 4 or not _COORDS_ONLY.match(label):
+        return None
+    attrs = entity.get("attrs") or {}
+    try:
+        lat, lon = float(attrs["lat"]), float(attrs["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return cities.describe(lat, lon)
+
+
 def _node(
     entity: dict[str, Any],
     degree: int,
@@ -1994,6 +2017,10 @@ def _node(
         "at": entity.get("provenance", {}).get("at", ""),
         "degree": degree,
     }
+    # The name the drawing writes when the label is only a position. The label stays the
+    # entity's: the panel shows both, and search still matches the digits.
+    if caption := _caption(entity):
+        node["caption"] = caption
     folder = entity.get("attrs", {}).get("folder")
     if folder:
         node["folder"] = folder

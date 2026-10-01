@@ -872,7 +872,7 @@ flowchart LR
       <input id="notebook-note-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
       <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-      <FolderSelect bind:value={noteModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="My work (root)" />
+      <FolderSelect bind:value={noteModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="My work (root)" fresh />
 
       <div class="modal-row">
         <div style="flex:1"></div>

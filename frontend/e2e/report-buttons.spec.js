@@ -18,7 +18,7 @@ for (const theme of ['dark', 'light']) {
     const fixture = await installAppFixture(page);
     await page.addInitScript((value) => localStorage.setItem('azimut:theme', value), theme);
     await page.goto('/#proof');
-    await expect(page.getByRole('heading', { name: 'Geo Proof' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible({ timeout: 15_000 });
 
     const header = page.locator('.tool-header');
     const saveProof = header.getByRole('button', { name: 'Save proof', exact: true });
@@ -43,7 +43,8 @@ for (const theme of ['dark', 'light']) {
     const publishHover = await buttonStyle(toPost);
 
     await page.getByRole('button', { name: 'Geo Report', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Geo Report' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save as draft', exact: true })).toBeVisible();
+    await expect(page.locator('.tabstrip').getByRole('button', { name: 'Geo Report', exact: true })).toHaveAttribute('aria-current', 'page');
     await page.mouse.move(0, 0);
     const actions = header.locator('.head-actions');
     const draft = actions.getByRole('button', { name: 'Save as draft', exact: true });
