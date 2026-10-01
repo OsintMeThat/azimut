@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { api } from './api.js';
-import { assignFolder, assignFolderBatch } from './filing.js';
+import { assignFolder, assignFolderBatch, renameEntity } from './filing.js';
 
 vi.mock('./api.js', () => ({ api: { patch: vi.fn(async () => ({})) } }));
 
@@ -54,5 +54,27 @@ describe('assignFolderBatch', () => {
     expect(api.patch).toHaveBeenNthCalledWith(2, '/api/cases/case-1/entities/n1', {
       attrs: { folder: 'Box' },
     });
+  });
+});
+
+describe('renameEntity', () => {
+  it('renames a media through its own route, which renames the file', async () => {
+    await renameEntity('case-1', media, '  Gate at dawn ');
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case-1/media', { path: 'media/a.jpg', title: 'Gate at dawn' });
+  });
+
+  it('renames a capture through the satellite route, as Details does', async () => {
+    await renameEntity('case-1', capture, 'North pier');
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case-1/satellite', { path: 'media/cap.png', title: 'North pier' });
+  });
+
+  it('renames anything else by its label, which moves a note or a proof file server-side', async () => {
+    await renameEntity('case-1', note, 'Summary');
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case-1/entities/n1', { label: 'Summary' });
+  });
+
+  it('does nothing for an empty name', async () => {
+    await renameEntity('case-1', note, '   ');
+    expect(api.patch).not.toHaveBeenCalled();
   });
 });

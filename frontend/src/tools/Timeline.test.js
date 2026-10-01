@@ -341,7 +341,7 @@ describe('measuring between two entries', () => {
 describe('one reading, the axis over the list', () => {
   it('draws both whatever the mode, which only says which one gets the room', () => {
     expect(source).not.toContain("{#if viewMode === 'plot'}");
-    expect(source).toContain('const SHARES = { plot: 0.62, list: 0.28 };');
+    expect(source).toContain('const SHARES = { plot: 0.75, list: 0.28 };');
     expect(source).toContain('style:max-height={`${axisMax}px`}');
     expect(source).toContain('role="separator"');
     expect(source).toContain("onclick={() => setViewMode('list')}");
@@ -451,7 +451,7 @@ describe('reading a mark', () => {
 describe('exporting the axis', () => {
   it('serialises the tracks the tool laid out, never a canvas', () => {
     expect(source).toContain('timelinePlate({');
-    expect(source).toContain('const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null));');
+    expect(source).toContain('const tracks = $derived(buildTracks(plotWidth, selected?.id ?? null, axisMax));');
   });
 
   it('lays the page out at the plate’s width, not the browser’s', () => {

@@ -2,7 +2,8 @@
   /** Entity-scoped temporal history. Mounted only while the Time tab is open. */
   import { api } from '../lib/api.js';
   import { changeInterval, formatTemporalValue, temporalKindLabel } from '../lib/timeline.js';
-  import { reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { reloadCase, toast } from '../lib/state.svelte.js';
+  import { openInTimeline } from '../lib/navigate.js';
   import Icon from './Icon.svelte';
   import TemporalClaimEditor from './TemporalClaimEditor.svelte';
 
@@ -100,15 +101,7 @@
   }
 
   function openTimeline(item = null) {
-    uiState.timelineFocus = {
-      entityId: entity.id,
-      entityLabel: entity.label,
-      entityType: entity.type,
-      entityAttrs: entity.attrs ?? {},
-      itemId: item?.id ?? null,
-      producedHere: item?.produced_here === true,
-    };
-    uiState.tool = 'timeline';
+    openInTimeline(entity, item);
     onclose?.();
   }
 

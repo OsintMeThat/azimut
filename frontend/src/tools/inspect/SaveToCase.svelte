@@ -3,6 +3,7 @@
   import { saveNameOf } from '../../lib/inspect.js';
   import Icon from '../../components/Icon.svelte';
   import FolderSelect from '../../components/FolderSelect.svelte';
+  import { workFolder } from '../../lib/folders.js';
 
   // Files one output as case media: a frame, the adjusted video, an exported
   // collage. Everything else in Examine is kept with the work as it is made; this
@@ -29,7 +30,10 @@
   const folders = $derived(caseState.current?.folders ?? []);
 
   async function save() {
-    await onsave({ name: saveNameOf({ defaultName }, name), folder: folder || null, note: note.trim() || null });
+    // With a work folder, filing has already put the output there, so Unfiled
+    // has to be sent to mean it; without one, empty leaves a re-save where it was.
+    const chosen = folder || (workFolder() ? '' : null);
+    await onsave({ name: saveNameOf({ defaultName }, name), folder: chosen, note: note.trim() || null });
     typed = null;
     note = '';
     noting = false;
@@ -57,7 +61,7 @@
     aria-label="Name"
     maxlength="200"
   />
-  <FolderSelect bind:value={folder} {folders} emptyLabel="Unfiled" />
+  <FolderSelect bind:value={folder} {folders} emptyLabel="Unfiled" fresh />
   {#if noting}
     <textarea class="input note" bind:value={note} rows="2" placeholder="Why it matters" maxlength="2000" aria-label="Note"></textarea>
   {:else}

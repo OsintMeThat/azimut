@@ -155,6 +155,7 @@
   import SheetGeocode from '../components/SheetGeocode.svelte';
   import SheetHeadingMenu from '../components/SheetHeadingMenu.svelte';
   import SheetHelp from '../components/SheetHelp.svelte';
+  import SheetHome from '../components/SheetHome.svelte';
   import SheetLegend from '../components/SheetLegend.svelte';
   import SheetAnchors from '../components/SheetAnchors.svelte';
   import SheetToCase from '../components/SheetToCase.svelte';
@@ -485,17 +486,44 @@
       const answer = await api.get(`/api/cases/${id}/sheets`);
       sheets = answer.sheets ?? [];
       if (openId && !sheets.some((sheet) => sheet.id === openId)) close();
-      // The one that was being worked on, and the first sheet only as a fallback. A tool
-      // that reopened on sheet number one sent the analyst back through the picker every
-      // morning, and on a case holding nine worklists that is the wrong nine times out of
-      // ten.
-      if (!openId && sheets.length) {
-        const last = lastOpened(id);
-        open(sheets.some((sheet) => sheet.id === last) ? last : sheets[0].id);
+      // The tab lands on its home rather than reopening a sheet: the one last open leads
+      // the recent list there, one click away, beside what the case could start.
+      lastId = lastOpened(id);
+      if (!openId && uiState.openSheet && sheets.some((sheet) => sheet.id === uiState.openSheet)) {
+        const asked = uiState.openSheet;
+        uiState.openSheet = null;
+        open(asked);
       }
     } catch {
       sheets = [];
     }
+  }
+
+  /** The sheet last open in this case, which leads the home's recent list. */
+  let lastId = $state(null);
+
+  // A sheet asked for from another tool: the Media Library's worklist, a toast. Consumed
+  // once, like every other `uiState.open*` handoff.
+  $effect(() => {
+    const asked = uiState.openSheet;
+    if (!asked || !caseId) return;
+    untrack(() => {
+      if (sheets.some((sheet) => sheet.id === asked)) {
+        uiState.openSheet = null;
+        openId = null;
+        open(asked);
+      } else {
+        list(caseId);
+      }
+    });
+  });
+
+  /** Back to the home. Whatever is unsaved is written first, as on any other switch, so
+   *  closing never loses an edit. */
+  async function goHome() {
+    await flush();
+    close();
+    await list(caseId);
   }
 
   /** Which sheet this case was last left on. Kept in the browser rather than in the case:
@@ -1609,13 +1637,21 @@
    * Press a chip in a cell.
    *
    * A yes/no column **flips**: two words is a toggle, and the tooltip said as much while
-   * the only way to do it was a double-click or Enter. Everything else **filters** on the
-   * value pressed — on the value and not on the cell's text, so `2x S-125` asks for
-   * `S-125` and finds the rows holding three of them too.
+   * the only way to do it was a double-click or Enter. A status or a set of values
+   * **opens its list**, because a chip reads as the control that changes it: a click on
+   * `to do` that filtered the column instead was the grid answering a question nobody
+   * asked. Filtering on a value is the heading's funnel. A chip the app wrote, or one
+   * naming another row, still **filters** on the value pressed — on the value and not on
+   * the cell's text, so `2x S-125` asks for `S-125` and finds the rows holding three.
    */
   function onChipClick(rowIndex, column, chip) {
-    if (roles[column.name]?.kind === 'boolean') {
+    const kind = roles[column.name]?.kind;
+    if (kind === 'boolean') {
       flipCell(rowIndex, column.index);
+      return;
+    }
+    if ((kind === 'state' || kind === 'choice') && !appFilled(column.name)) {
+      edit(rowIndex, column.index);
       return;
     }
     toggleValue(column.name, chip.value);
@@ -2233,6 +2269,8 @@
    *  whose headings happen to spell `Title` is not this shape, and `built` is the record
    *  only the build writes. */
   const refreshable = $derived(Object.keys(meta.built ?? {}).length > 0);
+  /** Which of the two built shapes: one row per imported file, or one per proof. */
+  const builtFiles = $derived(meta.roles?.File?.kind === 'locked');
   let refreshing = $state(false);
 
   /**
@@ -2260,7 +2298,9 @@
       await reloadCase();
       const said = [
         answer.added ? `${answer.added} row${answer.added === 1 ? '' : 's'} added` : '',
-        answer.gone ? `${answer.gone} proof${answer.gone === 1 ? '' : 's'} no longer in the case` : '',
+        answer.gone
+          ? `${answer.gone} ${builtFiles ? 'file' : 'proof'}${answer.gone === 1 ? '' : 's'} no longer in the case`
+          : '',
       ].filter(Boolean);
       toast(said.length ? `${said.join(', ')}.` : 'Already level with the case.');
     } catch (error) {
@@ -3796,6 +3836,10 @@
               onclick={() => (confirming = { kind: 'sheet' })}>
         <Icon name="trash" size={13} />
       </button>
+      <!-- Back to the home, saved first: the way out Collage has, under the same word. -->
+      <button class="btn btn-ghost btn-sm" onclick={goHome} title="Save and go back to the sheets">
+        <Icon name="x" size={14} /> Close
+      </button>
     {/if}
     <!-- The grid keeps its power under a right-click, which is right — and a right-click
          nobody tries is a feature nobody has. So one door says what there is. -->
@@ -3806,42 +3850,24 @@
   </header>
 
   {#if !openId}
-    <div class="empty">
-      {#if loading}
-        <p>Opening.</p>
-      {:else}
-        <Icon name="table" size={30} />
-        <p>No sheet in this case.</p>
-        <small>A sheet is a CSV in the case folder.</small>
-        <!-- What the grid is *for*, in an empty state that used to say only that it was
-             empty. A worklist, a comparison grid and the half-facts are the three things no
-             other tool here covers, and an analyst who does not know that files a
-             spreadsheet somewhere else instead. -->
-        <ul class="empty-what">
-          <li>A worklist that counts what is left</li>
-          <li>A comparison grid: candidates down, criteria across</li>
-          <li>Notes too rough for the graph</li>
-        </ul>
-        <div class="row-actions">
-          <button class="btn btn-primary btn-sm" onclick={() => (creating = { title: '' })}>
-            New sheet
-          </button>
-          <!-- The same file kinds the header takes, workbooks included: an empty state that
-               refused an `.xlsx` the menu accepts is the app disagreeing with itself. -->
-          <label class="btn btn-sm">
-            Import a file
-            <input type="file" accept=".csv,.tsv,.xlsx,text/csv,text/plain" hidden
-                   onchange={(event) => { importFile(event.currentTarget.files); event.currentTarget.value = ''; }} />
-          </label>
-          <button class="btn btn-sm" onclick={() => (creating = { title: '', text: '' })}>
-            Paste a table
-          </button>
-          <button class="btn btn-sm" onclick={() => (fromCase = true)}>
-            From the case
-          </button>
-        </div>
-      {/if}
-    </div>
+    {#if loading}
+      <div class="empty"><p>Opening.</p></div>
+    {:else}
+      <!-- The tab opens here, not on the last sheet: recent work and a way in, the two
+           halves Inspect opens on. The case's own proposals lead the way in, counted. -->
+      <SheetHome
+        {caseId}
+        {sheets}
+        last={lastId}
+        busy={building}
+        onopen={open}
+        onbuild={buildFromCase}
+        ontemplate={(template) => (creating = { title: sheetTemplate(template).label, template })}
+        onimport={importFile}
+        onpaste={() => (creating = { title: '', text: '' })}
+        onfromcase={() => (fromCase = true)}
+      />
+    {/if}
   {:else}
     <div class="question">
       {#if refreshable}
@@ -3849,7 +3875,9 @@
              bar is the one that does. Pressed, never automatic — refreshing on open would
              rewrite a file somebody opened to read. It adds and never removes. -->
         <button class="btn btn-ghost btn-sm" disabled={refreshing} onclick={refreshFromCase}
-                title="File the proofs added since, and restate the columns the case owns">
+                title={builtFiles
+                  ? 'Add the files imported since, and mark done the ones a proof now answers'
+                  : 'Add the proofs filed since, and restate the columns the case owns'}>
           <Icon name="reset" size={13} /> {refreshing ? 'Refreshing' : 'Refresh'}
         </button>
       {/if}
@@ -5139,16 +5167,6 @@
     justify-content: center; gap: 8px; color: var(--text-3);
   }
   .empty p { color: var(--text-2); font-size: var(--fs-md); }
-  .empty small { font-size: var(--fs-sm); }
-  /* What the grid is for, in the state that has nothing to show. A list without
-     bullets: three short lines read as three answers, and the browser's own discs
-     and indent read as prose in a panel that is centred. */
-  .empty-what {
-    display: flex; flex-direction: column; gap: 3px;
-    margin: 4px 0 2px; padding: 0; list-style: none; text-align: center;
-    color: var(--text-3); font-size: var(--fs-sm);
-  }
-  .row-actions { display: flex; gap: 8px; margin-top: 6px; }
 
   /* -- the question bar ---------------------------------------------------- */
   .question {

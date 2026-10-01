@@ -22,3 +22,20 @@ export async function assignFolder(caseId, entity, folder) {
 export async function assignFolderBatch(caseId, entities, folder) {
   for (const entity of entities) await assignFolder(caseId, entity, folder);
 }
+
+/**
+ * Rename an entity the way Details does. A media or a capture is its file, so
+ * the name goes through its own route and renames the file on disk; a note,
+ * a proof or a session follows its label on the server.
+ */
+export async function renameEntity(caseId, entity, name) {
+  const title = (name ?? '').trim();
+  if (!title) return;
+  if (entity.type === 'capture' && entity.attrs?.path) {
+    await api.patch(`/api/cases/${caseId}/satellite`, { path: entity.attrs.path, title });
+  } else if (entity.type === 'media' && entity.attrs?.path) {
+    await api.patch(`/api/cases/${caseId}/media`, { path: entity.attrs.path, title });
+  } else {
+    await api.patch(`/api/cases/${caseId}/entities/${entity.id}`, { label: title });
+  }
+}

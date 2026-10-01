@@ -574,6 +574,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     place, released = _place_for(case, entity_id, spec)
     return {
+        # The proof's entity, so the composer can ask what it shares with the case.
+        "id": entity_id,
         "name": name,
         "title": name,
         "png": png_rel,

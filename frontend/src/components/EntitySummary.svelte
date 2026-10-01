@@ -12,7 +12,8 @@
    * One read per entity shown (`/catalog/events`), refreshed with the case.
    */
   import { tick } from 'svelte';
-  import { caseState, uiState } from '../lib/state.svelte.js';
+  import { caseState } from '../lib/state.svelte.js';
+  import { openInTimeline } from '../lib/navigate.js';
   import { fetchEventRows } from '../lib/catalog.js';
   import { entityFamily, entityLabel } from '../lib/entityTypes.svelte.js';
   import { entityIcon } from '../lib/entityIcon.js';
@@ -85,15 +86,7 @@
   });
 
   function openTimeline() {
-    uiState.timelineFocus = {
-      entityId: entity.id,
-      entityLabel: entity.label,
-      entityType: entity.type,
-      entityAttrs: entity.attrs ?? {},
-      itemId: null,
-      producedHere: false,
-    };
-    uiState.tool = 'timeline';
+    openInTimeline(entity);
     onclose?.();
   }
 </script>

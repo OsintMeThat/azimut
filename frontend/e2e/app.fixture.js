@@ -747,6 +747,15 @@ export async function installAppFixture(page, options = {}) {
   const captures = [];
   const placeWrites = [];
   const proofSaves = [];
+  const kinReads = [];
+  const proposalRuns = [];
+  const fixtureProposals = structuredClone(
+    options.proposals ?? {
+      pending: { accounts: 0, posted: 0, sites: 0 }, items: [], listed: 0, radius: 300,
+      // Read already, as a case is once anything was imported: the toolbar stays as it was.
+      through: '2026-07-21T00:00:00Z',
+    },
+  );
   const fixtureSavedIndex = options.savedIndex ?? savedIndex;
   // Located files as the Media position reads them (GET /satellite/media).
   const fixtureMediaIndex = options.mediaIndex ?? [];
@@ -2022,10 +2031,34 @@ export async function installAppFixture(page, options = {}) {
       // composer writes it straight into the header, so dropping it here left
       // the saved document holding a title the composer never gave it.
       return json(route, {
+        id: 'browser-proof-entity',
         name: 'browser-proof',
         title: payload.title,
         png: 'proofs/browser-proof.png',
       });
+    }
+
+    // What a saved proof shares with the case, and the links the case proposes by
+    // itself. Nothing by default, so a spec that never looks sees an empty answer.
+    const kinMatch = path.match(new RegExp(`^/api/cases/${caseId}/entities/([^/]+)/kin$`));
+    if (kinMatch) {
+      kinReads.push(kinMatch[1]);
+      return json(route, options.kin ?? { sites: [], places: [], accounts: [], radius: 300 });
+    }
+    if (path === `/api/cases/${caseId}/proposals`) {
+      if (request.method() === 'POST') proposalRuns.push(Date.now());
+      return json(route, {
+        ...(request.method() === 'POST' ? { filed: { accounts: 0, posted: 0, sites: 0 } } : {}),
+        ...fixtureProposals,
+      });
+    }
+    const dropMatch = path.match(new RegExp(`^/api/cases/${caseId}/proposals/([^/]+)$`));
+    if (dropMatch && request.method() === 'DELETE') {
+      fixtureProposals.items = fixtureProposals.items.filter((item) => item.id !== dropMatch[1]);
+      return json(route, { status: 'deleted', dropped: [], ...fixtureProposals });
+    }
+    if (path === `/api/cases/${caseId}/sheets/from-case/files`) {
+      return json(route, options.filesWorklist ?? { total: 0, answered: 0, sheet: null });
     }
 
     if (path === `/api/cases/${caseId}/sheets` && request.method() === 'GET') {
@@ -2135,6 +2168,8 @@ export async function installAppFixture(page, options = {}) {
 
   return {
     captures,
+    kinReads,
+    proposalRuns,
     placeWrites,
     railTiles,
     referenceTiles,
@@ -2238,7 +2273,7 @@ export function repainted(before, after) {
 
 export async function openProofWithPanel(page) {
   await page.goto('/#proof');
-  await expect(page.getByRole('heading', { name: 'Geo Proof' })).toBeVisible();
+  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New proof' }).first().click();
   await expect(page.getByRole('heading', { name: 'Create proof' })).toBeVisible();
   await page.locator('.selectable-pick').click();

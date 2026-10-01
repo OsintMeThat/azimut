@@ -164,11 +164,17 @@ function route(path) {
   return Promise.resolve({});
 }
 
-async function open() {
+async function open({ home = false } = {}) {
   target = document.createElement('div');
   document.body.append(target);
   live = mount(Sheet, { target });
   await settle();
+  // The tab lands on its home. Most tests are about a sheet, so they go in the way the
+  // analyst does: the first of the recent sheets.
+  if (!home) {
+    target.querySelector('.home .sheet')?.click();
+    await settle();
+  }
   return target;
 }
 
@@ -1590,11 +1596,17 @@ describe('a column that knows what it holds', () => {
     expect(chip.classList.contains('unknown')).toBe(true);
   });
 
-  it('filters on a chip when it is clicked', async () => {
+  it('opens the list on a status chip rather than filtering on it', async () => {
     await openBinder();
-    rows()[0].querySelectorAll('.cell-chip')[0].click();
+    const chip = rows()[0].querySelectorAll('.cell-chip')[0];
+    const before = rows().length;
+    chip.click();
     await settle();
-    expect(rows()).toHaveLength(1);
+    // The chip reads as the control that changes it: the editor opens with the column's
+    // words, and the rows stay as they were.
+    expect(rows()).toHaveLength(before);
+    expect(target.querySelector('.editor')).not.toBeNull();
+    expect(target.textContent).toContain('in progress');
   });
 
   it('says when a point claims less than it looks like it claims', async () => {
@@ -2758,9 +2770,13 @@ describe('the sheet itself', () => {
     get.mockImplementation((path) =>
       path.endsWith('/sheets') ? Promise.resolve({ sheets: [] }) : route(path),
     );
-    await open();
-    expect(target.querySelector('.empty')).not.toBeNull();
-    expect(button('New sheet')).not.toBeUndefined();
+    await open({ home: true });
+    expect(target.querySelector('.home')).not.toBeNull();
+    expect(target.textContent).toContain('No sheet in this case yet.');
+    // The templates and the three ways a table comes in, all on the home.
+    expect(button('Verification worklist')).not.toBeUndefined();
+    expect(button('Paste a table')).not.toBeUndefined();
+    expect(button('From the case')).not.toBeUndefined();
   });
 
   it('exports the rows on screen rather than the file on disk', async () => {
@@ -3952,3 +3968,115 @@ describe('a geolocation index into proofs', () => {
     expect(post.mock.calls.at(-1)[1].skip).toEqual(['r2']);
   });
 });
+
+
+describe('the home the tab lands on', () => {
+  const TWO = [
+    { id: 'e_old', title: 'Old list', rows: 4, columns: 3, modified_at: '2026-09-01T10:00:00Z' },
+    {
+      id: SHEET.id, title: SHEET.title, rows: 3, columns: 3, modified_at: '2026-09-30T10:00:00Z',
+      progress: { kind: 'state', column: 'Status', count: 1, total: 3 },
+    },
+  ];
+
+  function withHome({ sheets = TWO, files = null, proofs = 0 } = {}) {
+    get.mockImplementation((path) => {
+      if (path.endsWith('/sheets')) return Promise.resolve({ sheets });
+      if (path.endsWith('/sheets/from-case/files')) {
+        return Promise.resolve(files ?? { total: 0, answered: 0, sheet: null });
+      }
+      if (path.includes('/catalog/summary')) {
+        return Promise.resolve({ total: proofs, by_type: proofs ? { proof: proofs } : {} });
+      }
+      return route(path);
+    });
+  }
+
+  afterEach(() => {
+    localStorage.clear();
+    uiState.openSheet = null;
+  });
+
+  it('opens on the recent sheets rather than on one of them', async () => {
+    withHome();
+    await open({ home: true });
+
+    expect(target.querySelector('.rows')).toBeNull();
+    const recent = [...target.querySelectorAll('.home .sheet .name')].map((n) => n.textContent);
+    // Newest edit first.
+    expect(recent).toEqual(['Candidates', 'Old list']);
+    // With the footer's own progress words.
+    expect(target.querySelector('.home .sheet small').textContent).toContain('1 of 3 done');
+  });
+
+  it('leads with the sheet last open here', async () => {
+    localStorage.setItem('azimut.sheet.last', JSON.stringify({ 'case-a': 'e_old' }));
+    withHome();
+    await open({ home: true });
+
+    const first = target.querySelector('.home .sheet');
+    expect(first.textContent).toContain('Old list');
+    expect(first.textContent).toContain('Last open');
+  });
+
+  it('offers the worklist the case holds the makings of, counted', async () => {
+    post.mockResolvedValue({ id: SHEET.id, taken: 21, total: 21 });
+    withHome({ files: { total: 21, answered: 8, sheet: null }, proofs: 8 });
+    await open({ home: true });
+
+    expect(target.textContent).toContain('21 imported files, 13 without a proof');
+    expect(target.textContent).toContain('8 proofs');
+    button('Files to geolocate').click();
+    await settle();
+
+    const [path, body] = post.mock.calls.at(-1);
+    expect(path).toBe('/api/cases/case-a/sheets/from-case');
+    expect(body).toEqual({ title: 'Files to geolocate', shape: 'files' });
+  });
+
+  it('opens the worklist already built instead of building a twin', async () => {
+    withHome({ files: { total: 21, answered: 8, sheet: SHEET.id } });
+    await open({ home: true });
+
+    button('Files to geolocate').click();
+    await settle();
+
+    expect(post).not.toHaveBeenCalledWith('/api/cases/case-a/sheets/from-case', expect.anything());
+    expect(rows()).toHaveLength(3);
+  });
+
+  it('closes back to the home, saving what was typed first', async () => {
+    withHome();
+    await open();
+    expect(rows()).toHaveLength(3);
+    put.mockClear();
+    const cell = rows()[0].querySelectorAll('.cell:not(.gutter)')[1];
+    cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    flushSync();
+    const editor = target.querySelector('.editor');
+    editor.value = 'Quai nord';
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    editor.dispatchEvent(new Event('blur', { bubbles: true }));
+    flushSync();
+    // Pressed before the autosave's own delay has run out.
+    expect(put).not.toHaveBeenCalled();
+
+    button('Close').click();
+    await settle();
+
+    expect(target.querySelector('.home')).not.toBeNull();
+    expect(target.querySelector('.rows')).toBeNull();
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][1].rows[0]).toEqual(['r1', 'Quai nord', 'ruled out']);
+  });
+
+  it('opens straight onto a sheet another tool asked for', async () => {
+    uiState.openSheet = SHEET.id;
+    withHome();
+    await open({ home: true });
+
+    expect(rows()).toHaveLength(3);
+    expect(uiState.openSheet).toBeNull();
+  });
+});
+

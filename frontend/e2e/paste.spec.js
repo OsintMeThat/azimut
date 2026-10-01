@@ -184,7 +184,7 @@ test('a paste in Proof stays the composer\'s own', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await page.getByRole('button', { name: 'Geo Proof', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Geo Proof' })).toBeVisible();
+  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New proof' }).first().click();
   await expect(page.getByRole('heading', { name: 'Create proof' })).toBeVisible();
   await page.locator('.selectable-pick').click();

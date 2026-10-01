@@ -559,9 +559,9 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--text-3);
 }
-/* The name of what the tool is editing, next to the tool's own title. Inspect,
-   the Proof Composer and the Post Composer all name their work this way, and
-   the name is the filename it saves under. */
+/* The name of what the tool is editing. Inspect, the Proof Composer and the
+   Post Composer all name their work this way, and the name is the filename it
+   saves under. */
 .tool-header .title-input {
   width: min(320px, 26vw);
   font-weight: 600;

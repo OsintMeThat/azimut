@@ -41,6 +41,17 @@ const button = (text) => [...document.querySelectorAll('button')].find((b) => b.
 const starts = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 const labelled = (label) => target.querySelector(`button[aria-label="${label}"]`);
 const heading = () => target.querySelector('h3')?.textContent.trim();
+/** Every category of analyzers starts folded; open them all. */
+async function unfold() {
+  target.querySelectorAll('.fold[aria-expanded="false"]').forEach((fold) => fold.click());
+  await settle();
+}
+/** Nothing is picked in What until asked: open the category holding an analyzer, then pick it. */
+async function pickAnalyzer(name = recipe.name) {
+  const radio = () => [...target.querySelectorAll('[role="radio"]')].find((b) => b.textContent.includes(name));
+  if (!radio()) await unfold();
+  radio().click(); await settle();
+}
 const ceilingSlider = () => target.querySelector('input[aria-label="Maximum cloud cover"]');
 function slide(value) {
   const slider = ceilingSlider();
@@ -316,8 +327,13 @@ it('shows shared groups and ungrouped areas in Where without selecting an area t
   expect(where.textContent).toContain('Ungrouped');
   expect(where.textContent).toContain('River');
   labelled('Use Ports').click(); await settle();
-  labelled('Use Priority').click(); await settle();
+  // Harbor is all of Priority too, so that group reads as ticked, and unticking it takes Harbor out
+  expect(labelled('Use Priority').getAttribute('aria-checked')).toBe('true');
   expect(where.querySelectorAll('.area-row')).toHaveLength(1);
+  labelled('Use Priority').click(); await settle();
+  expect(where.querySelectorAll('.area-row')).toHaveLength(0);
+  expect(labelled('Use Ports').getAttribute('aria-checked')).toBe('false');
+  labelled('Use Ports').click(); await settle();
   const search = where.querySelector('[aria-label="Search areas or groups"]');
   search.value = 'River'; search.dispatchEvent(new Event('input', { bubbles: true })); await settle();
   expect(where.textContent).not.toContain('Ports');
@@ -644,8 +660,8 @@ it('walks a single pass through its steps and runs it once', async () => {
   post.mockResolvedValue({ id: RUN, status: 'queued', input: {}, results: [], total: 1, progress: 0 });
   await open({ opening: 'zones-aaaaaaaaaaaa' });
   expect(heading()).toBe('Where to look');
-  expect(target.textContent).toContain('1 tile · 4 requests a run');
-  button('Next: What').click(); await settle();
+  expect(target.textContent).toContain('1 tile');
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   expect(heading()).toBe('What to look for');
   button('Next: When').click(); await settle();
   expect(heading()).toBe('Which two images');
@@ -667,6 +683,7 @@ it('walks a single pass through its steps and runs it once', async () => {
   expect(button('Next: Start').disabled).toBe(false);
   button('Next: Start').click(); await settle();
   expect(heading()).toBe('Name and start');
+  expect(target.textContent).toContain('4 requests a run');
   expect(target.textContent).toContain('2026-08-01 → 2026-09-06');
   const note = target.querySelector('[aria-label="Detection description"]');
   note.value = 'Checking the strike'; note.dispatchEvent(new Event('input', { bubbles: true }));
@@ -681,7 +698,7 @@ it('pages back through a pass list the catalogue cut short', async () => {
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   const ago = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   button('Next: When').click(); await settle();
   button('1 year').click(); await settle();
   post.mockResolvedValueOnce({ dates: [{ date: ago(10), cloud: 2, coverage: 1 }, { date: ago(100), cloud: 5, coverage: 0.4 }],
@@ -703,7 +720,7 @@ it('says why a pass did not start, beside the button that started it', async () 
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   post.mockRejectedValue(new Error('an area of this detection was deleted; choose its areas again'));
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   button('Next: When').click(); await settle();
   await typeWhenDay('Date A', 'Day of A', '01/08/2026');
   await typeWhenDay('Date B', 'Day of B', '06/09/2026');
@@ -740,7 +757,7 @@ it('asks a routine what each pass compares against, not which day to read', asyn
   labelled('New routine').click(); await settle();
   expect(target.textContent).toContain('New routine');
   labelled('Use Port').click(); await settle();
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   expect(ceilingSlider().value).toBe('30');
   slide(40);
   button('Next: When').click(); await settle();
@@ -782,7 +799,7 @@ it('says which day the newest pass is and why newer ones were skipped, and reads
     : { id: RUN, status: 'queued', input: {}, results: [], total: 1, progress: 0 }));
   const onshow = vi.fn();
   await open({ opening: 'zones-aaaaaaaaaaaa', onshow });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer('Vessels');
   button('Next: When').click(); await settle();
   button('Find passes').click(); await settle();
   expect(target.textContent).toContain(
@@ -819,7 +836,7 @@ it('reads the newest pass for a one-image sweep unless a day is asked for', asyn
     ? { dates: [{ date: '2026-09-16', cloud: 4, granules: 1, coverage: 1 }], truncated: false }
     : { id: RUN, status: 'queued', input: {}, results: [], total: 1, progress: 0 }));
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer('Vessels');
   button('Next: When').click(); await settle();
   expect(heading()).toBe('Which image');
   // the newest pass is a whole answer, so the step can be passed as it opens
@@ -846,7 +863,7 @@ it('shows each area its own dates and pass lookup in When', async () => {
     ? { dates: [{ date: '2026-08-01', cloud: 2, granules: 2, coverage: 1 }], truncated: false }
     : { id: RUN, status: 'queued', input: {}, results: [], total: 1, progress: 0 }));
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   button('Next: When').click(); await settle();
   expect(target.querySelectorAll('[aria-label^="Dates for "]')).toHaveLength(2);
   labelled('Find passes for Area').click(); await settle();
@@ -875,7 +892,7 @@ it('asks a routine of one image for nothing but its picture', async () => {
   button('New detection').click(); await settle();
   labelled('New routine').click(); await settle();
   labelled('Use Port').click(); await settle();
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer('Vessels');
   slide(45);
   expect(target.textContent).toContain('Above 30%, the pass taken can be mostly cloud, and ground under cloud is left out.');
   button('Next: When').click(); await settle();
@@ -899,7 +916,7 @@ it('holds a routine to one fixed picture when asked', async () => {
   button('New detection').click(); await settle();
   labelled('New routine').click(); await settle();
   labelled('Use Port').click(); await settle();
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   button('Next: When').click(); await settle();
   [...target.querySelectorAll('[role="radio"]')].find((node) => node.textContent.includes('A fixed picture')).click();
   await settle();
@@ -931,7 +948,7 @@ it('refuses an area the engine would reject before the next step', async () => {
 it('sets a size as a whole set of numbers, and shows when it was tuned by hand', async () => {
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   const pressed = () => [...target.querySelectorAll('[aria-label="Target size"] button')]
     .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent.trim());
   expect(pressed()).toEqual(['Medium']);
@@ -944,26 +961,37 @@ it('sets a size as a whole set of numbers, and shows when it was tuned by hand',
   expect(pressed()).toEqual([]);
 });
 
-it('asks the size above the analyzers, and holds a pressed size for the next one picked', async () => {
+it('picks no analyzer for you, keeps its categories folded, and holds a pressed size for the next one', async () => {
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   await open({ opening: 'zones-aaaaaaaaaaaa' });
   button('Next: What').click(); await settle();
   const step = target.querySelector('section[aria-label="What to look for"]');
-  const sizes = step.querySelectorAll('[aria-label="Target size"]');
   const list = step.querySelector('[aria-label="Analyzer"]');
+  expect([...list.querySelectorAll('.fold')].map((fold) => fold.getAttribute('aria-expanded'))).toEqual(['false']);
+  expect(list.querySelectorAll('[role="radio"]')).toHaveLength(0);
+  expect(step.querySelector('[aria-label="Target size"]')).toBe(null);
+  expect(button('Next: When').disabled).toBe(true);
+  expect(target.textContent).toContain('Pick what to look for.');
+  await pickAnalyzer();
+  expect(button('Next: When').disabled).toBe(false);
+  // the size is asked once something is picked, under the list
+  const sizes = step.querySelectorAll('[aria-label="Target size"]');
   expect(sizes.length).toBe(1);
-  expect(sizes[0].compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(list.compareDocumentPosition(sizes[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const pressed = () => [...step.querySelectorAll('[aria-label="Target size"] button')]
     .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent.trim());
   button('Large').click(); await settle();
   [...list.querySelectorAll('[role="radio"]')].find((b) => b.textContent.includes('Vessels')).click(); await settle();
   expect(pressed()).toEqual(['Large']);
+  // folded, a category still names what was picked in it
+  list.querySelector('.fold').click(); await settle();
+  expect(list.querySelector('.fold').textContent).toContain('Vessels');
 });
 
 it('offers the cloud switch on by default, and none for a method that rejects cloud itself', async () => {
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   const chip = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Clouds & shadows'));
   expect(chip.getAttribute('aria-pressed')).toBe('true');
   expect(target.textContent).toContain('traced from the sun');
@@ -973,7 +1001,7 @@ it('offers the cloud switch on by default, and none for a method that rejects cl
     '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area },
   });
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   expect(target.textContent).not.toContain('Clouds & shadows');
 });
 
@@ -981,7 +1009,7 @@ it('says what a partial pass will leave unswept before the run, not after', asyn
   answer({ '/api/cases/case-a/analysis/zones/aaaaaaaaaaaa': { id: 'aaaaaaaaaaaa', title: 'Port', zones: area } });
   post.mockResolvedValue({ dates: [{ date: '2026-05-04', cloud: 12, granules: 1, coverage: 0.62 }], truncated: false });
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   button('Next: When').click(); await settle();
   // Pass lookups stay explicit.
   expect(target.querySelector('input[type="date"]')).toBe(null);
@@ -999,12 +1027,14 @@ it('makes an analyzer of its own from the closest built-in, and never writes ove
   await open();
   labelled('Analyzers').click(); await settle();
   expect(target.textContent).toContain('build your own from rules you prove on the map, or copy a calibrated built-in');
+  await unfold();
   starts('Vessels').click(); await settle();
   expect(target.textContent).toContain('Measures Vessels: infrared contrast over water');
   expect(button('Save changes')).toBeUndefined();
   expect(button('Copy to tune')).toBeDefined();
   button('Back').click(); await settle();
 
+  await unfold();
   labelled(`Copy ${recipe.name}`).click(); await settle();
   const name = target.querySelector('[aria-label="Analyzer name"]');
   expect(name.value).toBe(`${recipe.name} copy`);
@@ -1398,6 +1428,7 @@ it('opens a calibrated index built-in as the rules it applies', async () => {
   answer({ '/api/compare/analyzers': rulesCatalogue({ as_rules: { 'large-change': asRules } }) });
   await open({ viewBounds: () => VIEW });
   labelled('Analyzers').click(); await settle();
+  await unfold();
   starts('Any surface change').click(); await settle();
   button('Open as rules').click(); await settle();
   expect(heading()).toBe('Build an analyzer');
@@ -1563,7 +1594,7 @@ it('reopens a run saved against Wayback without pretending it had a Sentinel-2 d
   expect(target.textContent).toContain('Wayback release 1 → Wayback release 2');
   button('Edit and rerun').click(); await settle();
   expect(heading()).toBe('Where to look');
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer();
   button('Next: When').click(); await settle();
   expect(target.textContent).toContain('Choose A, the picture before.');
   expect(button('Next: Start').disabled).toBe(true);
@@ -1601,12 +1632,13 @@ it('says a radar analyzer needs its layer before a detection is built on it', as
     ? catalogue({ builtins: [radar], methods: [...methods, radarMethod], radar_layer: '' })
     : path in table ? structuredClone(table[path]) : []));
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  // the water it is judged against is one more request a tile
-  expect(target.textContent).toContain('1 tile · 3 requests a run');
-  button('Next: What').click(); await settle();
+  button('Next: What').click(); await settle(); await pickAnalyzer('Vessels by radar');
   expect(target.textContent).toContain('not set up yet');
   expect(button('How to add it, in Settings → Imagery')).toBeDefined();
   expect(button('Next: When').disabled).toBe(true);
+  // the water it is judged against is one more request a tile, said back in Where
+  button('Back').click(); await settle();
+  expect(target.textContent).toContain('1 tile · 3 requests a run');
 });
 
 it('lists the analyzers by what they look for, each saying how far it can be trusted', async () => {
@@ -1622,8 +1654,8 @@ it('lists the analyzers by what they look for, each saying how far it can be tru
       reliability: { 'radar-vessels': 'reliable', boats: 'approximate', 'large-change': 'rough' } })
     : path in table ? structuredClone(table[path]) : []));
   await open({ opening: 'zones-aaaaaaaaaaaa' });
-  button('Next: What').click(); await settle();
-  const groups = [...target.querySelectorAll('.choices .group')].map((node) => node.textContent);
+  button('Next: What').click(); await settle(); await pickAnalyzer();
+  const groups = [...target.querySelectorAll('.choices .fold .label')].map((node) => node.textContent);
   expect(groups).toEqual(['Vessels', 'Any change']);
   const radarRow = [...target.querySelectorAll('.choice')].find((node) => node.textContent.includes('Vessels by radar'));
   expect(radarRow.textContent).toContain('(reliable)');

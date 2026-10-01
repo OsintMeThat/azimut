@@ -27,6 +27,7 @@ from azimut.engine import extinstall
 from azimut.engine import links as link_engine
 from azimut.engine import media as media_engine
 from azimut.engine import thumbnails
+from azimut.engine import workqueue
 from azimut.workspace import Case
 
 _PROV = {"by": "user", "at": "2026-01-01T00:00:00Z", "status": "confirmed"}
@@ -79,11 +80,13 @@ def test_legacy_json_case_migrates_and_every_workflow_answers(tmp_workspace):
     assert case.count_jobs() == {"queued": 1}
 
 
-def test_a_closed_case_folder_copy_opens_identically(tmp_workspace):
+def test_a_closed_case_folder_copy_opens_identically(tmp_workspace, monkeypatch):
     """Copying a closed case directory yields a complete, openable case — the
     doc's "case bundle / manual copy is guaranteed when the case is closed". The
     rollback journal (no WAL) means no checkpoint is owed, so a plain folder copy
     carries the whole graph."""
+    # Closed means nothing is draining it: the jobs are copied as they were queued.
+    monkeypatch.setattr(workqueue, "start_workers", False)
     src = Case.create("Bundle")
     p = src.add_entity("person", "Ada", {"handle": "@ada"}, by="user")
     m = src.add_entity("media", "shot", {"path": "media/x.jpg"}, by="user")
@@ -100,7 +103,10 @@ def test_a_closed_case_folder_copy_opens_identically(tmp_workspace):
     assert copied["entities"] == original["entities"]
     assert copied["links"] == original["links"]
     assert copied["folders"] == original["folders"]
-    assert copy.count_jobs() == {"queued": 1}
+    # The thumbnail travels, and so does the link pass the media's filing queued.
+    assert sorted(job["kind"] for job in copy.list_jobs(state="queued")) == [
+        "propose-links", "thumbnail",
+    ]
 
 
 # -- load: bounded loading on a large migrated case -------------------------

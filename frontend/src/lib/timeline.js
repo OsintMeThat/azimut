@@ -1013,6 +1013,30 @@ export function layoutTimelineItems(items, from, to, axisWidth = 1000, maxItemRo
   };
 }
 
+/**
+ * How many rows of marks each lane may take before the rest go to a `+N`, out of the
+ * `room` rows the axis has. `needs` is what each lane would take uncapped, `null` for
+ * one that is not shared out (opened, or folded). A lane that needs little takes only
+ * that; the rest is split evenly among those that need more, and none gets under
+ * `floor`, so a short axis reads as it always did.
+ */
+export function shareItemRows(needs, room, floor = 6) {
+  const caps = needs.map(() => null);
+  const order = needs
+    .map((need, index) => ({ need, index }))
+    .filter((one) => one.need !== null)
+    .sort((a, b) => a.need - b.need);
+  let left = Math.max(0, Math.floor(room));
+  order.forEach(({ need, index }, at) => {
+    const fair = Math.floor(left / (order.length - at));
+    const cap = Math.max(floor, Math.min(need, fair));
+    caps[index] = cap;
+    // A lane under the floor keeps the floor but only uses what it needs.
+    left = Math.max(0, left - Math.min(need, cap));
+  });
+  return caps;
+}
+
 /** The top of a card row under a track's marks, in pixels from the top of the track. */
 export function cardTop(layout, row) {
   return MARKS.top + layout.rows * MARKS.row + 6 + row * (MARKS.cardHeight + 6);

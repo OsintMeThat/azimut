@@ -36,6 +36,7 @@
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
+  import { filedToast } from '../lib/folders.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openComparison, openEntity, openMapAt } from '../lib/navigate.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
@@ -1844,14 +1845,14 @@
     savingPlace = true;
     try {
       const c = await ensureCase();
-      await api.post(`/api/cases/${c.id}/satellite/place`, {
+      const place = await api.post(`/api/cases/${c.id}/satellite/place`, {
         lat: displayCoords.lat,
         lon: displayCoords.lon,
         zoom: center.zoom,
         bearing,
       });
       await reloadCase();
-      toast('Place saved. Find it in the case sidebar', 'ok');
+      filedToast('Place saved', [place], { fallback: 'Place saved. Find it in the case sidebar' });
     } catch (e) {
       toast(`Could not save place: ${e.message}`, 'danger', 6000);
     } finally {

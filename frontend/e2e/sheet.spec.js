@@ -27,6 +27,8 @@ const SHEETS = [
 async function openSheet(page) {
   await page.goto('/#sheet');
   await expect(page.getByRole('heading', { name: 'Sheet', exact: true })).toBeVisible();
+  // The tab lands on its home; a sheet is opened from its recent list.
+  await page.locator('.home .sheet').first().click();
   await expect(page.getByRole('grid', { name: 'Sheet rows' })).toBeVisible();
 }
 
@@ -226,7 +228,49 @@ test('the empty case says what a sheet is for', async ({ page }) => {
   await installAppFixture(page, { sheets: [] });
   await page.goto('/#sheet');
 
-  await expect(page.getByText('No sheet in this case.')).toBeVisible();
-  await expect(page.getByText('A worklist that counts what is left')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'New sheet' })).toBeVisible();
+  await expect(page.getByText('No sheet in this case yet.')).toBeVisible();
+  await expect(page.getByText(/A worklist that counts what is left/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Verification worklist/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Paste a table' })).toBeVisible();
+});
+
+/**
+ * The tab's home: what is being worked on, and what the case could start. Close takes a
+ * sheet back to it, and whatever was typed reaches the file first.
+ */
+test('lands on the home and closes back to it, saving what was typed', async ({ page }) => {
+  const fixture = await installAppFixture(page, {
+    sheets: SHEETS,
+    filesWorklist: { total: 21, answered: 8, sheet: null },
+  });
+  await page.goto('/#sheet');
+  await expect(page.getByRole('heading', { name: 'Recent sheets' })).toBeVisible();
+  await expect(page.getByText('21 imported files, 13 without a proof')).toBeVisible();
+  await expect(page.getByRole('grid', { name: 'Sheet rows' })).toHaveCount(0);
+
+  await page.locator('.home .sheet').first().click();
+  await expect(page.getByRole('grid', { name: 'Sheet rows' })).toBeVisible();
+  await typeInto(page, 0, 3, 'checked twice');
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Recent sheets' })).toBeVisible();
+  await expect.poll(() => fixture.sheetOnDisk('sheet-1').rows[0][3]).toBe('checked twice');
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('a status chip opens its words instead of filtering the column', async ({ page }) => {
+  await installAppFixture(page, {
+    sheets: [['Worklist', ['Subject', 'Status'], [
+      ['Quai sud', 'to do'],
+      ['Pont nord', 'done'],
+    ], { roles: { Status: { kind: 'state', values: ['to do', 'in progress', 'done', 'ruled out'] } } }]],
+  });
+  await openSheet(page);
+
+  await cell(page, 0, 2).locator('.cell-chip').click();
+
+  await expect(page.locator('.offers')).toBeVisible();
+  await expect(page.locator('.offers').getByRole('button', { name: 'in progress' })).toBeVisible();
+  // Both rows still on screen: nothing was filtered.
+  await expect(page.locator('.rows:not(.ghost) .row')).toHaveCount(2);
 });

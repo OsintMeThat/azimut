@@ -475,7 +475,8 @@ describe('where an imported file came from', () => {
   });
 
   it('carries the stated origin on every file of the batch', () => {
-    expect(source).toContain("if (sourceUrl) form.append('source_url', sourceUrl)");
+    // lib/mediaImport.js sends it on each upload, tested there
+    expect(source).toContain('uploadFiles(c.id, files, sourceUrl)');
   });
 
   it('remembers the last one stated, since a thread arrives in several drops', () => {

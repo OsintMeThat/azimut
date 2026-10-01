@@ -3,10 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 const uiState = { tool: 'inspect', focusMedia: null };
-vi.mock('../../lib/state.svelte.js', () => ({
-  caseState: { current: { id: 'case-a', folders: ['Roofs'] } },
-  uiState,
-}));
+const caseState = { current: { id: 'case-a', folders: ['Roofs'] } };
+vi.mock('../../lib/state.svelte.js', () => ({ caseState, uiState }));
 
 const { default: SaveToCase } = await import('./SaveToCase.svelte');
 
@@ -25,6 +23,7 @@ const nameField = () => target.querySelector('input[aria-label="Name"]');
 const saveButton = () => [...target.querySelectorAll('button')].find((b) => /Save to case|Saved|Saving/.test(b.textContent) && b.classList.contains('btn-primary'));
 
 afterEach(() => {
+  caseState.current = { id: 'case-a', folders: ['Roofs'] };
   if (live) unmount(live);
   live = null;
   target?.remove();
@@ -90,5 +89,33 @@ describe('Save to case', () => {
 
     expect(saveButton().disabled).toBe(true);
     expect(target.textContent).toContain('Add a piece first.');
+  });
+});
+
+describe('Save to case with a work folder', () => {
+  const option = (label) =>
+    [...document.querySelectorAll('.menu .opt')].find((b) => b.textContent.trim().startsWith(label));
+
+  it('starts on the work folder and files there', async () => {
+    caseState.current = { id: 'case-a', folders: ['Roofs'], work_folder: 'Roofs' };
+    const onsave = vi.fn(async () => {});
+    show({ onsave });
+    expect(target.textContent).toContain('Work folder');
+    saveButton().click();
+    await Promise.resolve();
+    expect(onsave).toHaveBeenLastCalledWith({ name: '00-00-12 roof', folder: 'Roofs', note: null });
+  });
+
+  it('sends Unfiled as a choice, since filing already put the output in the work folder', async () => {
+    caseState.current = { id: 'case-a', folders: ['Roofs'], work_folder: 'Roofs' };
+    const onsave = vi.fn(async () => {});
+    show({ onsave });
+    target.querySelector('.folder-select .trigger').click();
+    flushSync();
+    option('Unfiled').click();
+    flushSync();
+    saveButton().click();
+    await Promise.resolve();
+    expect(onsave).toHaveBeenLastCalledWith({ name: '00-00-12 roof', folder: '', note: null });
   });
 });

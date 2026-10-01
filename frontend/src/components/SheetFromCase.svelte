@@ -16,9 +16,12 @@
    * what they came from, so editing them and promoting them again updates those entities
    * rather than minting twins.
    *
-   * **My geolocations** takes neither: its shape is fixed, one row per proof with
-   * the media it rests on and the place it puts on the map. That fixed shape is what lets it
+   * **My geolocations** takes neither: its shape is fixed, one row per point a proof
+   * concludes on, with the media it rests on and what Geo Proof says about it. That fixed shape is what lets it
    * be kept level with the case afterwards, which the other one cannot be.
+   *
+   * **Files to geolocate** is the same kind of fixed shape turned the other way: one row
+   * per picture or video the analyst imported, done once a proof answers for it.
    */
   import Icon from './Icon.svelte';
   import { api } from '../lib/api.js';
@@ -33,6 +36,7 @@
 
   let shape = $state('generic');
   let counts = $state([]);
+  let files = $state(null);
   let type = $state('');
   let fields = $state([]);
   let title = $state('');
@@ -53,6 +57,10 @@
         if (!type && counts.length) type = counts[0].id;
       })
       .catch(() => {});
+    api
+      .get(`/api/cases/${caseId}/sheets/from-case/files`)
+      .then((answer) => live && (files = answer))
+      .catch(() => {});
     return () => (live = false);
   });
 
@@ -67,17 +75,22 @@
   $effect(() => {
     if (touched) return;
     if (proofs) title = 'My geolocations';
+    else if (filesShape) title = 'Files to geolocate';
     else if (type) title = `${entityLabel(type)} to check`;
   });
 
   const proofs = $derived(shape === 'proofs');
+  const filesShape = $derived(shape === 'files');
+  const fixed = $derived(proofs || filesShape);
   const available = $derived(entityFields(type).filter((field) => field.kind !== 'geojson'));
-  // The proofs shape counts proofs, whatever type the other branch is sitting on.
+  // The fixed shapes count what they are made of, whatever type the other branch is on.
   const held = $derived(
-    counts.find((entry) => entry.id === (proofs ? 'proof' : type))?.count ?? 0,
+    filesShape
+      ? (files?.total ?? 0)
+      : (counts.find((entry) => entry.id === (proofs ? 'proof' : type))?.count ?? 0),
   );
   const taken = $derived(Math.min(held, MAX_ROWS));
-  const ready = $derived(Boolean((proofs || type) && title.trim() && held));
+  const ready = $derived(Boolean((fixed || type) && title.trim() && held));
 
   function toggle(key) {
     fields = fields.includes(key) ? fields.filter((entry) => entry !== key) : [...fields, key];
@@ -87,17 +100,21 @@
 <div class="from-case">
   <p class="label">What the sheet is</p>
   <div class="shapes">
-    <button class="shape" class:on={!proofs} onclick={() => (shape = 'generic')}>
+    <button class="shape" class:on={!fixed} onclick={() => (shape = 'generic')}>
       <strong>One row per entity</strong>
       <small>a worklist over a type you choose</small>
     </button>
+    <button class="shape" class:on={filesShape} onclick={() => (shape = 'files')}>
+      <strong>Files to geolocate</strong>
+      <small>one row per imported picture or video</small>
+    </button>
     <button class="shape" class:on={proofs} onclick={() => (shape = 'proofs')}>
       <strong>My geolocations</strong>
-      <small>one row per proof, kept level with the case</small>
+      <small>one row per point of every proof, POV included</small>
     </button>
   </div>
 
-  {#if !proofs}
+  {#if !fixed}
   <p class="label">What is in it</p>
   {#if counts.length}
     <div class="types">
@@ -119,7 +136,7 @@
            oninput={() => (touched = true)} />
   </label>
 
-  {#if !proofs && available.length}
+  {#if !fixed && available.length}
     <p class="label">
       And which fields get a column. None is fine if the sheet only carries your own.
     </p>
@@ -136,10 +153,18 @@
 
   <p class="says" class:none={!ready}>
     {#if !held}
-      {proofs ? 'This case holds no proofs yet.' : 'This case holds nothing of that type.'}
+      {proofs
+        ? 'This case holds no proofs yet.'
+        : filesShape
+          ? 'No picture or video was imported into this case yet.'
+          : 'This case holds nothing of that type.'}
+    {:else if filesShape}
+      <strong>{taken}</strong> {taken === 1 ? 'row' : 'rows'}, one per imported picture or
+      video, {files?.answered ?? 0} already with a proof.
+      {#if held > MAX_ROWS}<span>Only the first {MAX_ROWS} by name.</span>{/if}
     {:else if proofs}
-      <strong>{taken}</strong> {taken === 1 ? 'row' : 'rows'}, one per proof, with its source
-      media, its place and its coordinates.
+      One row per point of {taken} {taken === 1 ? 'proof' : 'proofs'}, POV or not, with the
+      date, the place, its coordinates, the source and the description.
       {#if held > MAX_ROWS}<span>Only the first {MAX_ROWS} by name.</span>{/if}
     {:else}
       <strong>{taken}</strong> {taken === 1 ? 'row' : 'rows'}, one per
@@ -148,7 +173,10 @@
     {/if}
   </p>
   <p class="note">
-    {#if proofs}
+    {#if filesShape && files?.sheet}
+      This case already has this worklist. Its Refresh brings it level, and building here
+      makes a second one.
+    {:else if fixed}
       The case writes those columns and Refresh keeps them level with it. Status, Notes and any
       column you add are yours.
     {:else}
@@ -171,7 +199,7 @@
   .from-case { display: flex; flex-direction: column; min-height: 0; }
   .label { color: var(--text-3); font-size: var(--fs-xs); margin: 12px 0 5px; line-height: 1.5; }
   .label:first-child { margin-top: 0; }
-  .shapes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .shapes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .shape {
     display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; text-align: left;
     border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2);

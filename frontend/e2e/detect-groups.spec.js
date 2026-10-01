@@ -44,8 +44,8 @@ test('Areas groups fold and search, while Where keeps ungrouped areas available'
   const where = dock.getByRole('region', { name: 'Where to look' });
   await expect(where).toContainText('Ungrouped');
   await expect(where.getByRole('button', { name: 'River' })).toBeVisible();
-  await where.getByRole('button', { name: 'Use Ports' }).click();
-  await where.getByRole('button', { name: 'Use Priority' }).click();
+  await where.getByRole('checkbox', { name: 'Use Ports' }).click();
+  await expect(where.getByRole('checkbox', { name: 'Use Priority' })).toHaveAttribute('aria-checked', 'true');
   await expect(where.locator('.area-row')).toHaveCount(1);
   await where.getByRole('button', { name: 'River' }).click();
   await expect(where.locator('.area-row')).toHaveCount(2);

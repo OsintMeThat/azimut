@@ -7,7 +7,7 @@
  */
 import { api } from './api.js';
 import { formatCoords as renderCoords } from './coords.js';
-import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
+import { loadWidth, saveWidth, clampWidth, loadSidebarView } from './sidebar.js';
 import { loadTheme, saveTheme, applyTheme } from './theme.js';
 import { shouldShowUpdate } from './appUpdate.js';
 import { extensionVersion, pingExtensions, extensionState } from './extBridge.js';
@@ -236,6 +236,7 @@ export const uiState = $state({
   theme: loadTheme(), // 'dark' | 'light'; index.html stamps it before first paint
   sidebarOpen: true,
   sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
+  sidebarView: loadSidebarView(), // 'folders' | 'todo' | 'recent', remembered across reloads
   toasts: [],
   settingsTab: null, // settings section id to open when switching to Settings
   // Guide section to land on when switching to the Guide, from the `?` in the
@@ -279,6 +280,8 @@ export const uiState = $state({
    *  of `openBoardEntity`: a node has to be reachable from the row as much as a row
    *  from the node. */
   openGraphEntity: null,
+  /** A sheet id the Sheet tab should open instead of its home. Consumed once. */
+  openSheet: null,
   /** Entity/item handed to Timeline from Details. Timeline consumes and clears it. */
   timelineFocus: null, // { entityId, entityLabel, itemId, producedHere }
   /** A fact-time range handed back to Timeline. Consumed once, never persisted. */
@@ -287,6 +290,9 @@ export const uiState = $state({
   timelineQueue: null, // 'undated', or { queue: 'undated' | 'unplaced', itemId, item }
   /** Whether the Add event bar is open over the tool on screen. Session only. */
   noting: false,
+  /** Entities the Move to… dialog is open on, from Files, the sidebar or a toast
+   *  that filed something into the work folder. Session only. */
+  moving: null,
   /** Bumped to send the Timeline to its own entry line, which is the Add event bar
    *  the Timeline already has. */
   timelineLineFocus: 0,
@@ -599,10 +605,12 @@ function clearCaseHandoffs() {
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;
   uiState.openGraphEntity = null;
+  uiState.openSheet = null;
   uiState.timelineFocus = null;
   uiState.timelineRange = null;
   uiState.timelineQueue = null;
   uiState.noting = false;
+  uiState.moving = null;
   uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.lookAt = null;

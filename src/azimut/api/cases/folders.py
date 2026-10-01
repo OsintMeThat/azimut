@@ -29,3 +29,32 @@ def add_folder(case_id: str, body: FolderIn) -> list[str]:
 @router.delete("/{case_id}/folders")
 def remove_folder(case_id: str, name: str) -> list[str]:
     return get_case(case_id).remove_folder(name)
+
+
+class FolderRenameIn(BaseModel):
+    source: str = Field(min_length=1, max_length=400)
+    target: str = Field(min_length=1, max_length=400)
+
+
+@router.post("/{case_id}/folders/rename")
+def rename_folder(case_id: str, body: FolderRenameIn) -> list[str]:
+    """Rename a folder. Its subfolders, items and their files follow."""
+    case = get_case(case_id)
+    try:
+        return case.rename_folder(body.source, body.target)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class WorkFolderIn(BaseModel):
+    folder: str | None = Field(default=None, max_length=400)
+
+
+@router.put("/{case_id}/work-folder")
+def set_work_folder(case_id: str, body: WorkFolderIn) -> dict[str, str | None]:
+    """Choose the folder new files and saved work land in, or none."""
+    case = get_case(case_id)
+    try:
+        return {"work_folder": case.set_work_folder(body.folder)}
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

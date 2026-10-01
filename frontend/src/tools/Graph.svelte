@@ -151,6 +151,7 @@
   import Icon, { paths } from '../components/Icon.svelte';
   import AnalysisViews from '../components/AnalysisViews.svelte';
   import PlateExport from '../components/PlateExport.svelte';
+  import ProposalReview from '../components/ProposalReview.svelte';
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
@@ -2953,7 +2954,7 @@
         y: node.y + nodeRadius(data.degree) + 5,
         width: 140,
         align: 'center',
-        text: bidiIsolate(shortLabel(data.label)),
+        text: bidiIsolate(shortLabel(data.caption ?? data.label)),
         fontSize: 11,
         fontFamily: fontStack,
         listening: false,
@@ -3612,7 +3613,7 @@
         x: textLeft,
         y: CARD.pad + 1,
         width: textWidth,
-        text: data.label,
+        text: data.caption ?? data.label,
         fontSize: 12,
         fontStyle: '600',
         fontFamily: fontStack,
@@ -4903,6 +4904,12 @@
 
     <span class="spacer"></span>
 
+    <!-- What the case proposed by itself, first among the counts: it is the one that asks
+         for something, and the edges it names are dashed somewhere in the drawing. -->
+    {#if !snapshotReading}
+      <ProposalReview caseId={caseState.current?.id} />
+    {/if}
+
     {#if payload}
       <!-- What is **drawn**, which the folds change and the case does not hear about.
            Counting what the case sent would leave the number arguing with the picture
@@ -5415,6 +5422,7 @@
             <Icon name="x" size={14} />
           </button>
         </header>
+        {#if chosen.caption}<p class="meta">{chosen.caption}</p>{/if}
         <p class="meta">
           {madeHereLabel(chosen) ?? entityKindLabel(chosen, entityLabel(chosen.type))}
           · {entityFamily(chosen.type)}

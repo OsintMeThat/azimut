@@ -13,7 +13,7 @@ describe('Files bounded loading', () => {
   });
 
   it('offers Show more with an honest filtered total', () => {
-    expect(source).toContain('{#if !showTrash && pl.hasMore}');
+    expect(source).toContain('{:else if !showTrash && !filtering && pl.hasMore}');
     expect(source).toContain('pl.loadMore()');
     expect(source).toContain('Showing {confirmed.length} of {total}');
     expect(source).toContain('/catalog/summary');
@@ -166,7 +166,7 @@ describe('Ctrl+V on the desktop', () => {
   });
 
   it('files the image where the dialog said, and takes a link as a bookmark', () => {
-    expect(source).toContain('await assignFolder(caseId, result.entity, values.folder)');
+    expect(source).toContain("await assignFolder(caseId, result.entity, values.folder ?? '')");
     expect(source).toContain('await createBookmark(caseId, { ...values, url: payload.url })');
   });
 
@@ -178,7 +178,12 @@ describe('Ctrl+V on the desktop', () => {
 
   it('leaves a duplicate where it already sits', () => {
     // refiling it under this paste's folder would move an item filed on purpose
-    expect(source).toContain('if (!result.duplicate && values.folder)');
+    expect(source).toContain('if (!result.duplicate && (values.folder');
+  });
+
+  it('moves a new image out of the work folder when the dialog named another', () => {
+    // registration filed it in the work folder; "My work (root)" has to be applied too
+    expect(source).toContain("(values.folder ?? '') !== (folderOf(result.entity) ?? '')");
   });
 
   it('offers the folder picker the same tree every other dialog here gets', () => {
@@ -201,5 +206,133 @@ describe('Files offers what is open to the Add event bar', () => {
   it('publishes under its own tool id and withdraws on unmount', () => {
     expect(source).toMatch(/offerNote\(\s*'files',/);
     expect(source).toContain("onDestroy(() => withdrawNote('files'))");
+  });
+});
+
+describe('Files counts folders across the whole case', () => {
+  it('reads folder counts from the summary, not the loaded page', () => {
+    expect(source).toContain('subtreeCountFrom(node, summary.by_folder)');
+    expect(source).toContain('{countOf(node)}');
+    expect(source).not.toContain('{subtreeCount(node)}');
+    expect(source).toContain('summary?.by_status?.confirmed ?? confirmed.length');
+  });
+
+  it('removes a folder through the server, which unfiles items past the first page too', () => {
+    expect(source).toContain('...removeFolderPrompt(path, allFolders)');
+    expect(source).toContain('await removeFolder(caseState.current.id, path)');
+    expect(source).not.toContain("assignFolderBatch(caseState.current.id, inside, '')");
+  });
+});
+
+describe('Files right-click', () => {
+  const menu = source.slice(source.indexOf('<!-- right-click menu'), source.indexOf('<!-- delete confirmation'));
+
+  it('offers an item what Details and the Media Library offer it', () => {
+    expect(menu).toContain('openEntity(held.one)');
+    expect(menu).toContain('{#each ctxOpenIn as option (option.id)}');
+    expect(menu).toContain("startRename({ kind: 'entity', entity: ctxOne })");
+    expect(menu).toContain('moveTo(held.entities)');
+    expect(menu).toContain('addEvent(held.one)');
+    expect(menu).toContain('openInTimeline(held.one)');
+    expect(menu).toContain('showInFolder(held.one)');
+    expect(menu).toContain('askDeleteEntities(held.ids)');
+  });
+
+  it('takes a picture or a video to the same tools as the Media Library', () => {
+    expect(source).toContain("import { openInOptions } from '../lib/openIn.js'");
+    expect(source).toContain('openInOptions({ path: ctxOne.attrs.path, kind: mediaKindOf(ctxOne), label: ctxOne.label })');
+  });
+
+  it('reads what the menu was opened on before closing it', () => {
+    // ctxOne and ctxEntities follow ctx, so after `ctx = null` they are empty and
+    // every action did nothing (the browser spec caught Move to… opening nothing)
+    expect(source).toContain('const held = { ...ctx, entities: ctxEntities, one: ctxOne };');
+    expect(menu.replace('ctxRun(() => option.run())', '')).not.toMatch(/ctxRun\(\(\) =>/);
+  });
+
+  it('makes a folder out of the selection', () => {
+    expect(menu).toContain('ctxNewFolder(ctx.ids)');
+    expect(source).toContain('await assignFolderBatch(caseState.current.id, ents, path)');
+  });
+
+  it('offers a folder rename, import, the work folder and removal', () => {
+    expect(menu).toContain("startRename({ kind: 'folder', path: ctx.parent, inTree: ctx.inTree })");
+    expect(menu).toContain('pickImport(held.parent)');
+    expect(menu).toContain('toggleWorkFolder(held.parent)');
+    expect(menu).toContain('askDeleteFolder(held.parent)');
+  });
+
+  it('keeps the menu inside the window and closes it on Escape', () => {
+    expect(source).toContain('window.innerWidth - MENU_W - 8');
+    expect(source).toContain("if (event.key === 'Escape' && ctx)");
+  });
+});
+
+describe('Files rename', () => {
+  it('renames in place, from F2 or the menu', () => {
+    expect(source).toContain("event.key === 'F2'");
+    expect(source).toContain('{@render renameField()}');
+    expect(source).toContain('onblur={commitRename}');
+  });
+
+  it('opens one field per rename, where it was asked for', () => {
+    // a folder shows in the tree rail and as a tile; two fields took focus from
+    // each other and the blur kept the old name
+    expect(source).toContain("renaming?.kind === 'folder' && renaming.inTree && renaming.path === node.path");
+    expect(source).toContain("renaming?.kind === 'folder' && !renaming.inTree && renaming.path === node.path");
+  });
+
+  it('keeps the keys typed in the field away from the tile and the window', () => {
+    // Enter on the tile opens the folder, and F2 / Delete act on the selection
+    expect(source).toMatch(/function onRenameKey\(event\) \{[^}]*event\.stopPropagation\(\);/);
+  });
+
+  it('renames an item through the route Details uses, and a folder with its subtree', () => {
+    expect(source).toContain('await renameEntity(caseId, entity, r.value)');
+    expect(source).toContain('const target = renamedPath(r.path, r.value)');
+    expect(source).toContain('await renameFolder(caseId, r.path, target)');
+    // the open folder follows its own rename
+    expect(source).toContain('if (inSubtree(cwd, r.path)) cwd = target + cwd.slice(r.path.length)');
+  });
+});
+
+describe('Files filters', () => {
+  it('narrows by type and by what nothing points at, on the server past one page', () => {
+    expect(source).toContain('types: typeFilter ? [typeFilter] : null');
+    expect(source).toContain('unlinked: unlinkedOnly');
+    expect(source).toContain('const chips = $derived(typeChips(summary))');
+    expect(source).toContain('Nothing linked yet');
+  });
+
+  it('asks the open folder and what is under it', () => {
+    expect(source).toContain('folder: !showUnfiled && cwd ? cwd : undefined');
+    expect(source).toContain('recursive: Boolean(!showUnfiled && cwd)');
+  });
+
+  it('shows a flat result list while filtering, as a search does', () => {
+    expect(source).toContain('const narrowed = $derived(searching || filtering)');
+    expect(source).toContain('const curFolders = $derived(narrowed ? [] : sortFolders(current.children))');
+  });
+});
+
+describe('Files and the work folder', () => {
+  it('opens a case on its work folder', () => {
+    expect(source).toContain("cwd = caseState.current?.work_folder ?? ''");
+  });
+
+  it('marks the work folder and toggles it from the crumbs', () => {
+    expect(source).toContain('class="work-toggle"');
+    expect(source).toContain('toggleWorkFolder(cwd)');
+    expect(source).toContain('await setWorkFolder(caseState.current.id, working === path ? null : path)');
+  });
+
+  it('starts the new note and bookmark dialogs on it', () => {
+    expect(source).toMatch(/<FolderSelect bind:value=\{noteModal\.folder\}[^>]*fresh/);
+    expect(source).toMatch(/<FolderSelect bind:value=\{bookmarkModal\.folder\}[^>]*fresh/);
+  });
+
+  it('files an import where it was asked for, past the work folder', () => {
+    expect(source).toContain('uploadFiles(caseId, files, sourceUrl)');
+    expect(source).toContain("const astray = filed.filter((e) => (folderOf(e) ?? '') !== folder)");
   });
 });

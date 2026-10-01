@@ -86,3 +86,21 @@ it('keeps every verdict tab while another is open, and lands on its first candid
   await press('Pinned');
   expect(target.textContent).toContain('Kept as a pin in this case');
 });
+
+it('keeps the candidate\'s pass when its mark on the map is clicked', async () => {
+  // the run's window ends on the 23rd, the candidate was read on the 27th
+  const optical = { provider: 'sentinel2', date: '2026-09-23', layer: 'TRUE-COLOR', maxcc: 100 };
+  const read = { ...optical, date: '2026-09-27' };
+  served = { ...run, input: { ...run.input, a: optical, b: optical }, results: [row('0-1', read), row('0-2', read)] };
+  const shown = [];
+  target = document.createElement('div'); document.body.append(target);
+  live = mount(Panel, { target, props: { caseId: 'case-a', opening: `runs-${RUN}`,
+    onshow: (source) => shown.push(source.date) } });
+  await settle();
+  expect(shown.at(-1)).toBe('2026-09-27');
+  const before = shown.length;
+  live.pick(RUN, '0-2');
+  await settle();
+  expect(target.textContent).toContain('2 of 2');
+  expect(shown.slice(before)).toEqual(['2026-09-27']);
+});

@@ -14,6 +14,7 @@ CC BY 4.0 — the attribution rides with every answer.
 from __future__ import annotations
 
 import gzip
+import math
 import threading
 import unicodedata
 from bisect import bisect_left
@@ -88,9 +89,100 @@ def _load() -> None:
 
 def _reset() -> None:
     """Test seam: forget the loaded table."""
-    global _rows, _index
+    global _rows, _index, _cells
     with _lock:
-        _rows, _index = None, []
+        _rows, _index, _cells = None, [], None
+
+
+#: The cities bucketed on a one-degree grid, built the first time a point asks, so
+#: "which town is this near" reads a handful of cells rather than 34 000 rows.
+_cells: dict[tuple[int, int], list[int]] | None = None
+
+_COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def _grid() -> dict[tuple[int, int], list[int]]:
+    global _cells
+    if _rows is None:
+        _load()
+    with _lock:
+        if _cells is None:
+            cells: dict[tuple[int, int], list[int]] = {}
+            for row, line in enumerate(_rows or []):
+                parts = line.split("\t")
+                try:
+                    lat, lon = float(parts[4]), float(parts[5])
+                except (IndexError, ValueError):
+                    continue
+                cells.setdefault((math.floor(lat), math.floor(lon)), []).append(row)
+            _cells = cells
+        return _cells
+
+
+def nearest(lat: float, lon: float, *, within_km: float = 100.0) -> dict[str, Any] | None:
+    """The closest city to a point, how far and which way, or None past ``within_km``.
+
+    What a point named only by its coordinates is called where a person reads it:
+    "8 km W of Al Hazm" says where `16.98, 45.05` is to anybody who does not read
+    coordinates. The cities are those of 15 000 people or more, so in empty country
+    the answer is honestly none rather than a hamlet.
+    """
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    cells = _grid()
+    rows = _rows or []
+    best: tuple[float, int] | None = None
+    # Enough one-degree cells around the point to hold the whole radius: a degree of
+    # latitude is 111 km everywhere, a degree of longitude shrinks towards the poles.
+    reach_lat = math.ceil(within_km / 111.0)
+    span = 111.0 * max(math.cos(math.radians(lat)), 0.01)
+    reach_lon = min(180, math.ceil(within_km / span))
+    base_lat, base_lon = math.floor(lat), math.floor(lon)
+    for dlat in range(-reach_lat, reach_lat + 1):
+        for dlon in range(-reach_lon, reach_lon + 1):
+            wrapped = (base_lon + dlon + 180) % 360 - 180
+            for row in cells.get((base_lat + dlat, wrapped), ()):
+                parts = rows[row].split("\t")
+                km = _km(lat, lon, float(parts[4]), float(parts[5]))
+                if best is None or km < best[0]:
+                    best = (km, row)
+    if best is None or best[0] > within_km:
+        return None
+    km, row = best
+    city = _unpack(rows[row])
+    return {
+        "name": city["name"],
+        "country": city["country"],
+        "km": round(km),
+        "bearing": _bearing(city["lat"], city["lon"], lat, lon),
+    }
+
+
+def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
+    """Which way the second point lies from the first, on eight points of the compass."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    degrees = (math.degrees(math.atan2(y, x)) + 360) % 360
+    return _COMPASS[int((degrees + 22.5) // 45) % 8]
+
+
+def describe(lat: float, lon: float) -> str | None:
+    """A point as the town it is near: `Al Hazm`, or `8 km W of Al Hazm`."""
+    city = nearest(lat, lon)
+    if city is None:
+        return None
+    if city["km"] < 2:
+        return str(city["name"])
+    return f"{city['km']} km {city['bearing']} of {city['name']}"
 
 
 def _unpack(line: str) -> dict[str, Any]:

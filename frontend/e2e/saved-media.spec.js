@@ -98,7 +98,7 @@ test('opens the proof a file was placed by', async ({ page }) => {
   await page.locator('.saved-mark').click();
   await page.keyboard.press('ArrowRight');
   await panel(page).getByRole('button', { name: 'Roofline' }).click();
-  await expect(page.getByRole('heading', { name: 'Geo Proof' })).toBeVisible();
+  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#proof/);
 });
 

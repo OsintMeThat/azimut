@@ -1,15 +1,19 @@
 <script>
-  import { onMount, tick } from 'svelte';
-  import { api } from '../../lib/api.js';
+  import { tick, untrack } from 'svelte';
+  import { loadTodos, saveTodos, todos } from '../../lib/todos.svelte.js';
   import Icon from '../../components/Icon.svelte';
   import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 
-  let { caseId } = $props();
-  let data = $state(null);
+  // `compact` is the sidebar's: no heading of its own (the view switch names it)
+  // and a list that runs the panel's height rather than a dashboard cell's.
+  let { caseId, compact = false } = $props();
+  // The lists are shared with every other surface showing them (lib/todos.svelte.js);
+  // what is local is which one is open and what is being typed.
+  const data = $derived(todos.caseId === caseId ? todos.data : null);
+  const busy = $derived(todos.caseId === caseId && todos.busy);
+  const error = $derived(todos.caseId === caseId ? todos.error : '');
+  const conflict = $derived(todos.caseId === caseId && todos.conflict);
   let active = $state('');
-  let busy = $state(false);
-  let error = $state('');
-  let conflict = $state(false);
   let taskText = $state('');
   let naming = $state(null);
   let listName = $state('');
@@ -18,33 +22,24 @@
   let deleting = $state(null);
   let menu = $state(false);
   const selected = $derived(data?.lists.find((list) => list.id === active));
-  const endpoint = $derived(`/api/cases/${encodeURIComponent(caseId)}/todos`);
 
-  onMount(() => { void load(); });
+  // Read on mount and again for another case, which a surface that stays mounted
+  // across a case switch would otherwise go on showing.
+  $effect(() => {
+    const id = caseId;
+    untrack(() => void loadTodos(id));
+  });
+  // The open list survives a reload, and the first one opens when there is none.
+  $effect(() => {
+    if (data && !data.lists.some((list) => list.id === active)) active = data.lists[0]?.id ?? '';
+  });
 
   async function load() {
-    busy = true;
-    error = '';
-    try {
-      data = await api.get(endpoint);
-      active = data.lists.some((list) => list.id === active) ? active : (data.lists[0]?.id ?? '');
-      conflict = false;
-    } catch (e) { error = e.message; }
-    finally { busy = false; }
+    await loadTodos(caseId);
   }
 
-  async function save(lists) {
-    if (busy || conflict) return false;
-    busy = true;
-    error = '';
-    try {
-      data = await api.put(endpoint, { revision: data.revision, lists });
-      return true;
-    } catch (e) {
-      error = e.message;
-      conflict = e.status === 409;
-      return false;
-    } finally { busy = false; }
+  function save(lists) {
+    return saveTodos(caseId, lists);
   }
 
   function copy() { return JSON.parse(JSON.stringify(data.lists)); }
@@ -108,8 +103,12 @@
   }
 </script>
 
-<section class="todos" aria-label="To-do">
-  <header><h2 class="label">To-do</h2><span aria-live="polite">{busy && data ? 'Saving…' : ''}</span></header>
+<section class="todos" class:compact aria-label="To-do">
+  {#if compact}
+    <span class="saving" aria-live="polite">{busy && data ? 'Saving…' : ''}</span>
+  {:else}
+    <header><h2 class="label">To-do</h2><span aria-live="polite">{busy && data ? 'Saving…' : ''}</span></header>
+  {/if}
   {#if error}
     <p role="alert">{error} <button class="btn btn-sm" onclick={load} disabled={busy}>Reload lists</button></p>
   {/if}
@@ -183,6 +182,10 @@
   .entry, .options { margin-top: 10px; }
   .entry .input { flex: 1; min-width: 0; }
   ul { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+  .compact ul { max-height: none; }
+  .compact .task { font-size: var(--fs-sm); padding: 4px; }
+  .compact .tab { padding: 6px 8px; font-size: var(--fs-xs); }
+  .saving { display: block; min-height: 1em; color: var(--text-3); font-size: var(--fs-xs); text-align: right; }
   /* The Recent work row: a hairline between rows, the amber edge under the pointer. */
   li { padding: 2px 4px 2px 8px; border-bottom: 1px solid var(--border); border-left: 2px solid transparent; transition: background 0.14s var(--ease), border-color 0.14s var(--ease); }
   li:hover, li:focus-within { background: var(--bg-1); border-left-color: var(--accent); }

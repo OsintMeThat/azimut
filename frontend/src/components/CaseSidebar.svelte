@@ -9,14 +9,23 @@
     setSidebarWidth,
     persistSidebarWidth,
   } from '../lib/state.svelte.js';
-  import { DEFAULT_W } from '../lib/sidebar.js';
+  import { DEFAULT_W, saveSidebarView } from '../lib/sidebar.js';
   import { buildTree, flattenPaths } from '../lib/folderTree.js';
   import { buildCatalogQuery, settleCatalogSummary } from '../lib/catalog.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { filterEntities, isFiltering, typeChips } from '../lib/sidebarSearch.js';
-  import { assignFolder as fileEntity, assignFolderBatch } from '../lib/filing.js';
+  import { assignFolder as fileEntity, assignFolderBatch, renameEntity } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
-  import { openEntity, openNotebook } from '../lib/navigate.js';
+  import { openEntity, openInTimeline, openNotebook } from '../lib/navigate.js';
+  import {
+    ancestorsOf,
+    leafOf,
+    removeFolder,
+    removeFolderPrompt,
+    renameFolder,
+    renamedPath,
+    setWorkFolder,
+  } from '../lib/folders.js';
   import { emptyTrash, purgeGroup, readTrash, restoreGroup, undoAction } from '../lib/trash.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -26,6 +35,7 @@
   import SidebarTree from './sidebar/SidebarTree.svelte';
   import SidebarResults from './sidebar/SidebarResults.svelte';
   import DetailsDrawer from './sidebar/DetailsDrawer.svelte';
+  import CaseTodos from '../tools/overview/CaseTodos.svelte';
 
   // ── bounded catalog loading (docs/STORAGE_AND_PERFORMANCE.md, Step 5) ───────
   // The sidebar no longer holds the whole graph. It builds the folder tree from
@@ -376,26 +386,121 @@
   }
 
   function askDeleteFolder(path) {
-    const prefix = path + '/';
-    const subs = allFolders.filter((f) => f.startsWith(prefix)).length;
     confirmState = {
-      title: 'Remove this folder?',
-      message: subs
-        ? `“${path}” and its ${subs} subfolder(s) will be removed from My work.`
-        : `“${path}” will be removed from My work.`,
-      detail: 'Items inside are unfiled. No files are deleted.',
-      confirmLabel: 'Remove folder',
-      tone: 'default',
-      icon: 'folderMinus',
+      ...removeFolderPrompt(path, allFolders),
       // The backend unfiles every entity under the removed subtree, so this
       // does not enumerate the graph — it just drops the folder and refreshes.
-      action: async () => {
-        await api.del(
-          `/api/cases/${caseState.current.id}/folders?name=${encodeURIComponent(path)}`
-        );
-        await reloadCase();
-      },
+      action: () => removeFolder(caseState.current.id, path),
     };
+  }
+
+  // ── the work folder ───────────────────────────────────────────────────────
+  // Pinned above the tree, so the folder new files land in is always in view, and
+  // one press away from being opened.
+  const working = $derived(caseState.current?.work_folder ?? null);
+  async function toggleWorkFolder(path) {
+    try {
+      await setWorkFolder(caseState.current.id, working === path ? null : path);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+  function revealWorkFolder() {
+    if (!working) return;
+    for (const path of ancestorsOf(working)) {
+      if (!expanded[path]) {
+        expanded[path] = true;
+        loadFolder(path);
+      }
+    }
+  }
+
+  // ── views: folders, to-do, recent ─────────────────────────────────────────
+  const view = $derived(uiState.sidebarView);
+  function setView(next) {
+    uiState.sidebarView = next;
+    saveSidebarView(next);
+  }
+  // What was filed last, read only while the view is open, and again after any
+  // write so a save in another tool shows up here.
+  const RECENT = 40;
+  let recent = $state({ items: [], loading: false });
+  $effect(() => {
+    const id = caseState.current?.id;
+    void caseState.rev;
+    if (view !== 'recent' || !id) return;
+    untrack(() => loadRecent(id));
+  });
+  async function loadRecent(id) {
+    recent.loading = true;
+    try {
+      const page = await api.get(buildCatalogQuery(id, { status: 'confirmed', limit: RECENT, order: '-created' }));
+      if (caseState.current?.id === id) recent.items = page.items ?? [];
+    } catch {
+      if (caseState.current?.id === id) recent.items = [];
+    } finally {
+      recent.loading = false;
+    }
+  }
+
+  // ── right-click ───────────────────────────────────────────────────────────
+  // A short menu on a folder or an item: what the row's hover buttons do, plus
+  // renaming, which needs a field the row has no room for. The field opens in
+  // the menu itself.
+  // menu: { x, y, kind: 'folder', path, mode } | { x, y, kind: 'entity', entity, mode }
+  // mode: 'menu' | 'rename' | 'subfolder'
+  let menu = $state(null);
+  let menuText = $state('');
+  const MENU_W = 220;
+  const MENU_H = 280;
+  function placeMenu(ev) {
+    return {
+      x: Math.min(ev.clientX, window.innerWidth - MENU_W - 8),
+      y: Math.min(ev.clientY, Math.max(8, window.innerHeight - MENU_H - 8)),
+    };
+  }
+  function openFolderMenu(ev, path) {
+    menu = { ...placeMenu(ev), kind: 'folder', path, mode: 'menu' };
+  }
+  function openEntityMenu(ev, entity) {
+    menu = { ...placeMenu(ev), kind: 'entity', entity, mode: 'menu' };
+  }
+  function menuField(mode) {
+    menuText = mode === 'rename' ? (menu.kind === 'folder' ? leafOf(menu.path) : menu.entity.label) : '';
+    menu = { ...menu, mode };
+  }
+  function menuRun(fn) {
+    const held = menu;
+    menu = null;
+    fn(held);
+  }
+  async function submitMenuField() {
+    const held = menu;
+    const text = menuText.trim();
+    menu = null;
+    if (!held || !text) return;
+    const caseId = caseState.current.id;
+    try {
+      if (held.mode === 'subfolder') {
+        await createFolder(`${held.path}/${text}`);
+      } else if (held.kind === 'folder') {
+        if (text.includes('/')) {
+          toast('A folder name cannot hold a slash', 'warn');
+          return;
+        }
+        const target = renamedPath(held.path, text);
+        if (target) await renameFolder(caseId, held.path, target);
+      } else if (text !== held.entity.label) {
+        await renameEntity(caseId, held.entity, text);
+        await reloadCase();
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+  function focusSelect(node) {
+    node.focus();
+    node.select();
   }
 
   // ── details drawer (docs/UI.md §Case sidebar) ─────────────────────────────
@@ -513,8 +618,10 @@
       {chips}
       total={summary?.total ?? 0}
       resultCount={filtering ? resultRows.length : null}
+      {view}
       onnotes={() => openNotebook()}
       onselecttype={(t) => (typeFilter = t)}
+      onview={setView}
     />
 
     <!-- the drag handlers here only auto-scroll; the drop targets are the
@@ -528,7 +635,22 @@
       ondrop={() => setEdgeScroll(0)}
       onwheel={onBodyWheel}
     >
-      {#if filtering}
+      {#if view === 'todo'}
+        <div class="todo-view">
+          <CaseTodos caseId={caseState.current.id} compact />
+        </div>
+      {:else if view === 'recent'}
+        <SidebarResults
+          rows={recent.items}
+          caseId={caseState.current.id}
+          loading={recent.loading}
+          empty="Nothing filed yet."
+          onactivate={onEntityActivate}
+          oninfo={openInfo}
+          onunfile={askRemoveFromMyWork}
+          onmenu={openEntityMenu}
+        />
+      {:else if filtering}
         <SidebarResults
           rows={resultRows}
           caseId={caseState.current.id}
@@ -538,8 +660,29 @@
           onactivate={onEntityActivate}
           oninfo={openInfo}
           onunfile={askRemoveFromMyWork}
+          onmenu={openEntityMenu}
         />
       {:else}
+        {#if working}
+          <div class="work-line">
+            <Icon name="pushpin" size={13} />
+            <button
+              class="work-name"
+              title="New files and saved work land in this folder. Press to show it."
+              onclick={revealWorkFolder}
+            >
+              {working}
+            </button>
+            <button
+              class="work-stop"
+              title="Stop working in this folder"
+              aria-label="Stop working in this folder"
+              onclick={() => toggleWorkFolder(working)}
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        {/if}
         <div class="actions">
           <button class="act-btn" onclick={() => (newFolderOpen = !newFolderOpen)}>
             <Icon name="plus" size={12} /><Icon name="folder" size={13} /><span>Folder</span>
@@ -582,6 +725,10 @@
           onmoresuggested={() => loadSuggested(true)}
           oncreatefolder={createFolder}
           onremovefolder={askDeleteFolder}
+          workFolder={working}
+          onworkfolder={toggleWorkFolder}
+          onfoldermenu={openFolderMenu}
+          onentitymenu={openEntityMenu}
           onfile={onFileDrop}
           onactivate={onEntityActivate}
           oninfo={openInfo}
@@ -605,6 +752,78 @@
   {/if}
 </aside>
 
+<!-- right-click menu on a folder or an item -->
+{#if menu}
+  <div
+    class="menu-backdrop"
+    role="presentation"
+    onpointerdown={() => (menu = null)}
+    oncontextmenu={(e) => { e.preventDefault(); menu = null; }}
+  ></div>
+  <div
+    class="menu card"
+    role="menu"
+    tabindex="-1"
+    style="left:{menu.x}px; top:{menu.y}px"
+    onkeydown={(e) => e.key === 'Escape' && (menu = null)}
+  >
+    <div class="menu-head">{menu.kind === 'folder' ? leafOf(menu.path) : menu.entity.label}</div>
+    {#if menu.mode !== 'menu'}
+      <form class="menu-field" onsubmit={(e) => { e.preventDefault(); submitMenuField(); }}>
+        <input
+          class="input"
+          aria-label={menu.mode === 'subfolder' ? 'Subfolder name' : 'New name'}
+          placeholder={menu.mode === 'subfolder' ? 'Subfolder…' : 'Name…'}
+          bind:value={menuText}
+          use:focusSelect
+        />
+        <button class="btn btn-primary btn-sm" type="submit" disabled={!menuText.trim()}>
+          {menu.mode === 'subfolder' ? 'Create' : 'Rename'}
+        </button>
+      </form>
+    {:else if menu.kind === 'folder'}
+      <button class="menu-item" role="menuitem" onclick={() => menuField('rename')}>
+        <Icon name="edit" size={13} /> Rename
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuField('subfolder')}>
+        <Icon name="folder" size={13} /> New subfolder
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => (noteModal = { title: '', folder: m.path }))}>
+        <Icon name="note" size={13} /> New note here
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => toggleWorkFolder(m.path))}>
+        <Icon name="pushpin" size={13} /> {working === menu.path ? 'Stop working here' : 'Work in this folder'}
+      </button>
+      <div class="menu-sep"></div>
+      <button class="menu-item danger" role="menuitem" onclick={() => menuRun((m) => askDeleteFolder(m.path))}>
+        <Icon name="folderMinus" size={13} /> Remove folder
+      </button>
+    {:else}
+      <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => onEntityActivate(m.entity))}>
+        <Icon name="external" size={13} /> Open
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => openInfo(m.entity))}>
+        <Icon name="info" size={13} /> Details
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuField('rename')}>
+        <Icon name="edit" size={13} /> Rename
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => (uiState.moving = [m.entity]))}>
+        <Icon name="move" size={13} /> Move to…
+      </button>
+      <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => openInTimeline(m.entity))}>
+        <Icon name="clock" size={13} /> Show in Timeline
+      </button>
+      {#if menu.entity.attrs?.folder}
+        <div class="menu-sep"></div>
+        <button class="menu-item" role="menuitem" onclick={() => menuRun((m) => askRemoveFromMyWork(m.entity))}>
+          <Icon name="folderMinus" size={13} /> Move to Unfiled
+        </button>
+      {/if}
+    {/if}
+  </div>
+{/if}
+
 <!-- Note create modal -->
 {#if noteModal}
   <Modal title="New note" onclose={() => (noteModal = null)} width="580px">
@@ -612,7 +831,7 @@
     <input id="note-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
     <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" />
+    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" fresh />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -693,5 +912,64 @@
   .new-folder { display: flex; gap: 6px; padding: 2px 8px 8px; }
   .new-folder .input { flex: 1; font-size: var(--fs-xs); }
   .modal-label { display: block; font-size: var(--fs-xs); color: var(--text-3); margin: 8px 0 4px; }
+  .todo-view { padding: 4px 8px 12px; }
+  .work-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 8px 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: var(--fs-xs);
+  }
+  .work-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-1);
+    font-weight: 600;
+    text-align: left;
+  }
+  .work-stop { display: flex; color: var(--text-3); padding: 2px; border-radius: 4px; }
+  .work-stop:hover { color: var(--text-1); }
+  .menu-backdrop { position: fixed; inset: 0; z-index: 940; }
+  .menu {
+    position: fixed;
+    z-index: 950;
+    width: 220px;
+    padding: 6px;
+    box-shadow: var(--shadow-2);
+  }
+  .menu-head {
+    margin: 2px 4px 6px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    text-align: left;
+  }
+  .menu-item:hover { background: var(--bg-2); }
+  .menu-item > :global(svg) { color: var(--text-3); flex-shrink: 0; }
+  .menu-item.danger { color: var(--danger, #e5484d); }
+  .menu-item.danger > :global(svg) { color: inherit; }
+  .menu-sep { height: 1px; margin: 5px 2px; background: var(--border); }
+  .menu-field { display: flex; gap: 6px; }
+  .menu-field .input { flex: 1; min-width: 0; font-size: var(--fs-sm); }
   .modal-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 </style>

@@ -477,7 +477,6 @@ def ingest_bookmark(
         {
             "url": url,
             "site": split.hostname,
-            "folder": "",
             "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         },
         by="ingest",

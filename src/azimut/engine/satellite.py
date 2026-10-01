@@ -30,6 +30,7 @@ from . import countries
 from . import geo as geo_engine
 from . import links
 from . import media as media_engine
+from . import proposals as proposal_engine
 from . import timeline
 
 # Saved work is places, captures and saved comparisons; a screenshot filed by the
@@ -227,7 +228,8 @@ def restate_proof_point(
 
     Answers with the places this proof let go of that nothing else holds — the
     caller asks about deleting them (``api/proofs``), since a point nobody points
-    at is the analyst's own leftover to keep or drop, not ours to sweep.
+    at is the analyst's own leftover to keep or drop, not ours to sweep. A link
+    proposal nobody has reviewed holds nothing (``proposals.unreviewed``).
     """
     material = _material_of(case, proof_id)
     wanted = {entry["id"]: bool(entry.get("pov")) for entry in stated}
@@ -237,7 +239,9 @@ def restate_proof_point(
             continue
         _withdraw_point(case, proof_id, old_id, material)
         old = case.get_entity(old_id)
-        if old is not None and not case.links_of(old_id):
+        if old is not None and all(
+            proposal_engine.unreviewed(link) for link in case.links_of(old_id)
+        ):
             released.append(old)
     for place_id, pov in wanted.items():
         _state_point(case, proof_id, place_id, material, pov=pov, by=by)

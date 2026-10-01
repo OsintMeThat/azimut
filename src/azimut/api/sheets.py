@@ -166,9 +166,12 @@ class SheetFromCaseIn(SheetIn):
     media it was made from and the place it puts on the map. It takes neither ``type``
     nor ``fields`` — its shape is fixed, which is what lets it be kept level with the case
     afterwards.
+
+    ``files`` is the same kind of fixed shape turned the other way: one row per picture
+    or video the analyst imported, with the proof that answers for it when there is one.
     """
 
-    shape: Literal["generic", "proofs"] = "generic"
+    shape: Literal["generic", "proofs", "files"] = "generic"
     # Required by `generic` and unread by `proofs`, so it cannot be a required field on
     # the model: a caller asking for the proofs shape has no type to name.
     type: str = Field(default="", max_length=40)
@@ -189,13 +192,14 @@ def sheet_from_case(case_id: str, body: SheetFromCaseIn) -> dict[str, Any]:
     if body.shape == "generic" and not body.type.strip():
         raise HTTPException(status_code=422, detail="a worklist needs a type to be built from")
     try:
-        built = (
-            fromcase_engine.build_proofs(case, limit=body.limit)
-            if body.shape == "proofs"
-            else fromcase_engine.build(
+        if body.shape == "proofs":
+            built = fromcase_engine.build_proofs(case, limit=body.limit)
+        elif body.shape == "files":
+            built = fromcase_engine.build_files(case, limit=body.limit)
+        else:
+            built = fromcase_engine.build(
                 case, entity_type=body.type, fields=body.fields, limit=body.limit
             )
-        )
         entity = sheet_engine.create(case, body.title.strip(), built["columns"], built["rows"])
         saved = sheet_engine.write(
             case, entity["id"], built["columns"], built["rows"], built["meta"]
@@ -204,6 +208,13 @@ def sheet_from_case(case_id: str, body: SheetFromCaseIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     _sync_mentions(case, entity["id"], saved["meta"])
     return {**entity, "taken": built["taken"], "total": built["total"]}
+
+
+@router.get("/{case_id}/sheets/from-case/files")
+def files_worklist(case_id: str) -> dict[str, Any]:
+    """How many imported files a worklist would hold, how many a proof answers, and the
+    worklist the case already has. Read only: offering the list must not build it."""
+    return fromcase_engine.files_preview(get_case(case_id))
 
 
 #: How many entities one request may ask the place of, and how many addresses one row may
@@ -524,7 +535,7 @@ def save_sheet(case_id: str, sheet_id: str, body: SheetSaveIn) -> dict[str, Any]
 
 
 class SheetRefreshIn(SheetSaveIn):
-    """The proofs sheet as the grid holds it, to be brought level with the case.
+    """A sheet built out of the case, as the grid holds it, to be brought level with the case.
 
     The table travels with the request for the same reason a move's does: the analyst
     presses this on what is on screen, and the copy on disk may be a minute behind. The
@@ -534,7 +545,10 @@ class SheetRefreshIn(SheetSaveIn):
 
 @router.post("/{case_id}/sheets/{sheet_id}/refresh")
 def refresh_sheet(case_id: str, sheet_id: str, body: SheetRefreshIn) -> dict[str, Any]:
-    """Add the proofs filed since this sheet was built, and rewrite what the case owns.
+    """Add what was filed since this sheet was built, and rewrite what the case owns.
+
+    Proofs for `My geolocations`, imported files for `Files to geolocate`; the second
+    also moves a status on to `done` once a proof answers for its file.
 
     Pressed, never automatic. Refreshing on open would mean that looking at a sheet
     changes it — and it would fight the stamp, which exists so that two readers of one
@@ -546,7 +560,7 @@ def refresh_sheet(case_id: str, sheet_id: str, body: SheetRefreshIn) -> dict[str
     """
     case = get_case(case_id)
     try:
-        fresh = fromcase_engine.refresh_proofs(case, body.columns, body.rows, body.meta)
+        fresh = fromcase_engine.refresh(case, body.columns, body.rows, body.meta)
         saved = sheet_engine.write(
             case, sheet_id, fresh["columns"], fresh["rows"], fresh["meta"], expected=body.stamp
         )

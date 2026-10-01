@@ -53,6 +53,7 @@ from .store.filters import (
     _linked_at_all,
     lacking,
 )
+from .store import folders as folder_store
 from .store import merges as merge_store
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
@@ -761,10 +762,7 @@ class SqliteCase:
                     self._entity(r) for r in conn.execute("SELECT * FROM entities ORDER BY rowid")
                 ]
                 links = [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
-                folders = [
-                    r["path"]
-                    for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
-                ]
+                folders = folder_store.listed(conn)
                 conn.execute("COMMIT")
             except BaseException:
                 conn.execute("ROLLBACK")
@@ -1724,10 +1722,7 @@ class SqliteCase:
 
     def list_folders(self) -> list[str]:
         with self._connect() as conn:
-            return [
-                r["path"]
-                for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
-            ]
+            return folder_store.listed(conn)
 
     # -- entity image galleries ------------------------------------------
 
@@ -2811,6 +2806,7 @@ class SqliteCase:
                     source or None,
                 ),
             )
+            folder_store.register(conn, _folder_of(entity["attrs"]))
             _sync_entity_temporal(conn, entity)
             self._touch(conn)
             return entity
@@ -2823,6 +2819,9 @@ class SqliteCase:
             if row is None:
                 raise CaseError(f"entity '{entity_id}' not found")
             entity = self._entity(row)
+            # The folder an item leaves stays listed: it may have existed only
+            # through the item, and moving the last one out is not deleting it.
+            folder_store.register(conn, row["folder"])
             for key in ("type", "label"):
                 if key in patch:
                     entity[key] = patch[key]
@@ -2851,6 +2850,7 @@ class SqliteCase:
                     entity_id,
                 ),
             )
+            folder_store.register(conn, _folder_of(entity["attrs"]))
             _sync_entity_temporal(conn, entity)
             self._touch(conn)
             return entity
@@ -2921,6 +2921,7 @@ class SqliteCase:
                     ),
                 )
                 provenance = {"by": by, "at": now, "status": status}
+            folder_store.register(conn, _folder_of(attrs))
 
             if connectors is not None:
                 for type_, raw_targets in connectors.items():
@@ -3169,27 +3170,67 @@ class SqliteCase:
 
         def op(conn: sqlite3.Connection) -> list[str]:
             before = conn.total_changes
-            segments = path.split("/")
-            for i in range(1, len(segments) + 1):
-                ancestor = "/".join(segments[:i])
-                conn.execute("INSERT OR IGNORE INTO folders(path) VALUES(?)", (ancestor,))
+            folder_store.register(conn, path)
             if conn.total_changes > before:
                 self._touch(conn)
+            return folder_store.listed(conn)
+
+        return self._write(op)
+
+    def entities_in_folder(self, root: str) -> list[dict[str, Any]]:
+        """Every entity filed under `root` or a folder below it."""
+        with self._connect() as conn:
             return [
-                r["path"]
-                for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
+                self._entity(row)
+                for row in conn.execute(
+                    "SELECT * FROM entities WHERE folder = ? OR substr(folder, 1, ?) = ?",
+                    (root, len(root) + 1, root + "/"),
+                )
             ]
+
+    def rename_folder(self, old: str, new: str) -> list[str]:
+        """Move `old` and everything below it to `new`, in one transaction.
+
+        Entities are refiled in the same write, so the folder list and the items
+        never disagree about where the subtree is. The files a note or a media
+        keeps beside its row are the caller's (`Case.rename_folder`).
+        """
+
+        def op(conn: sqlite3.Connection) -> list[str]:
+            paths = [r["path"] for r in conn.execute("SELECT path FROM folders")]
+            doomed = [(p,) for p in paths if folder_store.in_subtree(p, old)]
+            conn.executemany("DELETE FROM folders WHERE path = ?", doomed)
+            folder_store.register(conn, new)
+            for (path,) in doomed:
+                folder_store.register(conn, folder_store.moved(path, old, new))
+            for row in conn.execute(
+                "SELECT id, type, label, attrs_json, folder FROM entities"
+                " WHERE folder = ? OR substr(folder, 1, ?) = ?",
+                (old, len(old) + 1, old + "/"),
+            ).fetchall():
+                attrs = json.loads(row["attrs_json"])
+                attrs["folder"] = folder_store.moved(row["folder"], old, new)
+                conn.execute(
+                    "UPDATE entities SET attrs_json = ?, folder = ?, search_text = ? WHERE id = ?",
+                    (
+                        json.dumps(attrs, ensure_ascii=False),
+                        attrs["folder"],
+                        _entity_search_text(row["type"], row["label"], attrs),
+                        row["id"],
+                    ),
+                )
+                folder_store.register(conn, attrs["folder"])
+            self._touch(conn)
+            return folder_store.listed(conn)
 
         return self._write(op)
 
     def remove_folder(self, name: str) -> list[str]:
-        prefix = name + "/"
-
         def op(conn: sqlite3.Connection) -> list[str]:
             doomed = [
                 (p["path"],)
                 for p in conn.execute("SELECT path FROM folders")
-                if p["path"] == name or p["path"].startswith(prefix)
+                if folder_store.in_subtree(p["path"], name)
             ]
             if doomed:
                 conn.executemany("DELETE FROM folders WHERE path = ?", doomed)
@@ -3198,8 +3239,7 @@ class SqliteCase:
                 "SELECT id, type, label, attrs_json FROM entities"
             ).fetchall():
                 attrs = json.loads(row["attrs_json"])
-                folder = attrs.get("folder")
-                if folder is not None and (folder == name or folder.startswith(prefix)):
+                if folder_store.in_subtree(attrs.get("folder"), name):
                     attrs.pop("folder", None)
                     conn.execute(
                         "UPDATE entities SET attrs_json = ?, folder = NULL,"
@@ -3211,10 +3251,7 @@ class SqliteCase:
                         ),
                     )
             self._touch(conn)
-            return [
-                r["path"]
-                for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
-            ]
+            return folder_store.listed(conn)
 
         return self._write(op)
 
@@ -3603,6 +3640,8 @@ class SqliteCase:
                         prov.get("source"),
                     ),
                 )
+                # Put back into a folder removed since, it brings the folder back.
+                folder_store.register(conn, _folder_of(attrs))
                 _sync_entity_temporal(conn, entity)
             present = {
                 r["id"]

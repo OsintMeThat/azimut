@@ -1130,9 +1130,6 @@
 
 <div class="tool">
   <div class="tool-header">
-    <div class="head-text">
-      <h2>Geo Report</h2>
-    </div>
     {#if caseState.current}
       <input class="input title-input" bind:value={postName} maxlength="200" aria-label="Post name" />
     {/if}
@@ -1580,7 +1577,7 @@
     <input id="report-note-title" class="input" placeholder="Report title…" bind:value={reportModal.title} />
 
     <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={reportModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="My work (root)" />
+    <FolderSelect bind:value={reportModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="My work (root)" fresh />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -1846,18 +1843,12 @@
 
   /* header actions */
   .tool-header {
-    display: flex;
-    align-items: flex-start;
     gap: 16px;
-  }
-  .head-text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
   }
   .head-actions {
     margin-left: auto;
     display: flex;
+    align-items: center;
     gap: 10px;
     flex-shrink: 0;
   }

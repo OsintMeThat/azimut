@@ -396,6 +396,10 @@ def _register(
     thumb_rel = thumbnail_engine.on_register(case, rel_path, digest, kind)
 
     display_name = media_path.stem
+    # Filed into the work folder here rather than by `add_entity`, so the
+    # sidecar and the browse index carry the same folder as the row.
+    extra_attrs = case.in_work_folder(entity_type, extra_attrs)
+    folder = (extra_attrs or {}).get("folder")
     sidecar = {
         "filename": media_path.name,
         "title": display_name,
@@ -405,6 +409,7 @@ def _register(
         "added_at": _now(),
         "source": source,
         "thumbnail": thumb_rel,
+        **({"folder": folder} if folder else {}),
     }
     _write_sidecar(media_path, sidecar)
 

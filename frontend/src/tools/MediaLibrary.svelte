@@ -18,7 +18,10 @@
     SORTS,
   } from '../lib/mediaFilter.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
-  import { gotoPoint, openInReverseSearch } from '../lib/navigate.js';
+  import { gotoPoint } from '../lib/navigate.js';
+  import { openInOptions } from '../lib/openIn.js';
+  import { filedToast } from '../lib/folders.js';
+  import { uploadFiles } from '../lib/mediaImport.js';
   import { TOOL_LABELS } from '../lib/workspaces.js';
   import { revealMediaFolder } from '../lib/reveal.js';
   import { thisBrowser } from '../lib/thisBrowser.js';
@@ -523,20 +526,8 @@
     importBusy = true;
     try {
       const c = await ensureCase();
-      let dups = 0;
-      const landed = [];
-      for (const file of files) {
-        const form = new FormData();
-        form.append('file', file);
-        if (sourceUrl) form.append('source_url', sourceUrl);
-        try {
-          const res = await api.post(`/api/cases/${c.id}/media/upload`, form);
-          if (res.duplicate) dups++;
-          else if (res.item?.path) landed.push(res.item.path);
-        } catch (e) {
-          toast(`${file.name}: ${e.message}`, 'danger');
-        }
-      }
+      const { landed, filed, duplicates: dups, failed } = await uploadFiles(c.id, files, sourceUrl);
+      for (const refusal of failed) toast(`${refusal.name}: ${refusal.message}`, 'danger');
       lastSource = sourceUrl;
       pendingImport = null;
       await Promise.all([refresh(), reloadCase()]);
@@ -547,7 +538,7 @@
         const offer = sourceUrl
           ? null
           : { label: 'Set source', onClick: () => (statingSource = { paths: landed }) };
-        toast(`${count} added to the case`, 'ok', offer ? 6000 : 3800, offer);
+        filedToast(`${count} filed`, filed, { fallback: `${count} added to the case`, action: offer });
       }
       if (dups) toast(`${dups} duplicate${dups > 1 ? 's' : ''} skipped (same SHA-256)`, 'warn');
     } finally {
@@ -571,6 +562,41 @@
       toast(`Could not save the source: ${e.message}`, 'danger');
     } finally {
       statingBusy = false;
+    }
+  }
+
+  /**
+   * Open the case's files worklist in Sheet, building it on the first press.
+   *
+   * The second press opens the one already built rather than a twin of it: the worklist
+   * is where the statuses are, and a fresh copy would start them all over.
+   */
+  let worklistBusy = $state(false);
+  async function openWorklist() {
+    const id = caseState.current?.id;
+    if (!id || worklistBusy) return;
+    worklistBusy = true;
+    try {
+      const preview = await api.get(`/api/cases/${id}/sheets/from-case/files`);
+      if (!preview.total && !preview.sheet) {
+        toast('No picture or video was imported into this case yet.');
+        return;
+      }
+      let sheetId = preview.sheet;
+      if (!sheetId) {
+        const made = await api.post(`/api/cases/${id}/sheets/from-case`, {
+          title: 'Files to geolocate',
+          shape: 'files',
+        });
+        sheetId = made.id;
+        await reloadCase();
+      }
+      uiState.openSheet = sheetId;
+      uiState.tool = 'sheet';
+    } catch (error) {
+      toast(error.message || 'The worklist could not be opened.', 'error');
+    } finally {
+      worklistBusy = false;
     }
   }
 
@@ -670,13 +696,12 @@
         // several attachments — nothing was downloaded yet, let the analyst pick
         picker = { url: job.url, items: status.result.items.map((i) => ({ ...i, selected: true })) };
       } else if (status.status === 'done') {
-        toast(
-          status.result?.duplicate
-            ? 'Already in the case (same SHA-256)'
-            : `Downloaded: ${status.result?.item?.filename}`,
-          status.result?.duplicate ? 'warn' : 'ok'
-        );
         await Promise.all([refresh(), reloadCase()]);
+        if (status.result?.duplicate) toast('Already in the case (same SHA-256)', 'warn');
+        else {
+          const name = status.result?.item?.filename;
+          filedToast(`Downloaded ${name}`, [status.result?.entity], { fallback: `Downloaded: ${name}` });
+        }
       } else {
         toast(`Download failed: ${status.error}`, 'danger', 6000);
       }
@@ -708,22 +733,6 @@
     }
   }
 
-  function sendToComposer(item) {
-    if (!uiState.composeQueue.includes(item.path)) {
-      uiState.composeQueue.push(item.path);
-    }
-    uiState.tool = 'proof';
-  }
-
-  function inspect(item) {
-    uiState.inspectPath = item.path;
-    uiState.tool = 'inspect';
-  }
-
-  function reverseSearch(item) {
-    openInReverseSearch({ path: item.path, kind: item.kind, label: item.title ?? item.filename });
-  }
-
   // --- open in… ---
   // The tools a picture can be taken on to, behind one door per row. Three of them
   // side by side made the widest row seven buttons, and a small card more buttons
@@ -731,11 +740,7 @@
   const OPEN_IN_HEIGHT = 130; // room the menu needs under its button before it opens upward
   let openIn = $state(null); // { item, left, right, top, bottom } while a row's menu is up
 
-  const openInOptions = (item) => [
-    { id: 'inspect', icon: 'inspect', run: inspect },
-    { id: 'reverse', icon: 'search', run: reverseSearch },
-    ...(item.kind === 'image' ? [{ id: 'proof', icon: 'proof', run: sendToComposer }] : []),
-  ];
+  const fileOf = (item) => ({ path: item.path, kind: item.kind, label: item.title ?? item.filename });
 
   /**
    * Open a row's menu beside its button. Placed against the window rather than
@@ -762,9 +767,8 @@
   }
 
   function runOpenIn(option) {
-    const { item } = openIn;
     openIn = null;
-    option.run(item);
+    option.run();
   }
 
   function fmtSize(bytes) {
@@ -818,7 +822,7 @@
       // the one it has, and saying so is what stops the analyst pasting again.
       if (result.duplicate) toast('Already in the case (same SHA-256)', 'warn');
       else {
-        toast('Image added to the case', 'ok');
+        filedToast('Image filed', [result.entity], { fallback: 'Image added to the case' });
         uiState.focusMedia = result.item.path;
       }
     } catch (e) {
@@ -930,6 +934,11 @@
     </form>
     <button class="btn" onclick={() => fileInput.click()}>
       <Icon name="upload" size={15} /> Import
+    </button>
+    <!-- The pictures and videos brought in here, as the sheet they are worked down in. -->
+    <button class="btn" onclick={openWorklist} disabled={!items.length || worklistBusy}
+            title="The imported pictures and videos as a sheet, each marked done once a proof answers it">
+      <Icon name="table" size={15} /> Worklist
     </button>
     <!-- The two upkeep sweeps, behind one door. The door stays put on an empty
          case with its rows disabled: a header that reorganises itself on the
@@ -1379,7 +1388,7 @@
     style:top={openIn.top == null ? null : `${openIn.top}px`}
     style:bottom={openIn.bottom == null ? null : `${openIn.bottom}px`}
   >
-    {#each openInOptions(openIn.item) as option (option.id)}
+    {#each openInOptions(fileOf(openIn.item)) as option (option.id)}
       <button class="upkeep-option" role="menuitem" onclick={() => runOpenIn(option)}>
         <Icon name={option.icon} size={14} />
         <span>{TOOL_LABELS[option.id]}</span>

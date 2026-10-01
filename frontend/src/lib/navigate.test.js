@@ -5,7 +5,7 @@ const get = vi.fn();
 vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: (...a) => get(...a) } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
-const { gotoCapture, gotoPoint, openComparison, openEntity, openGuide, openInReverseSearch, openMapAt, opensInFileManager } =
+const { gotoCapture, gotoPoint, openComparison, openEntity, openGuide, openInReverseSearch, openInTimeline, openMapAt, opensInFileManager } =
   await import('./navigate.js');
 
 beforeEach(() => {
@@ -19,6 +19,28 @@ beforeEach(() => {
   post.mockClear();
   caseState.current = { id: 'c1', name: 'Case', entities: [], links: [], folders: [] };
   vi.stubGlobal('window', { open: vi.fn() });
+});
+
+describe('openInTimeline', () => {
+  it('scopes the Timeline to the entity and selects the entry it was pressed on', () => {
+    const entity = { id: 'm1', label: 'Frame', type: 'media', attrs: { path: 'media/f.png' } };
+    openInTimeline(entity, { id: 'event-a', produced_here: true });
+    expect(uiState.tool).toBe('timeline');
+    expect(uiState.timelineFocus).toEqual({
+      entityId: 'm1',
+      entityLabel: 'Frame',
+      entityType: 'media',
+      entityAttrs: { path: 'media/f.png' },
+      itemId: 'event-a',
+      // a working file says so, or a Media track holding them back would hide the row
+      producedHere: true,
+    });
+  });
+
+  it('opens on the whole entity when no entry is named', () => {
+    openInTimeline({ id: 'p1', label: 'Pier', type: 'place' });
+    expect(uiState.timelineFocus).toMatchObject({ entityId: 'p1', itemId: null, producedHere: false, entityAttrs: {} });
+  });
 });
 
 describe('openGuide', () => {

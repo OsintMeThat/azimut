@@ -11,6 +11,7 @@
     checkForUpdatesOnStart,
     toggleTheme,
   } from './lib/state.svelte.js';
+  import { api } from './lib/api.js';
   import { updateBadges } from './lib/staleness.js';
   import { startEvents, onEvent } from './lib/events.js';
   import {
@@ -38,6 +39,8 @@
   import DetectActivity from './components/DetectActivity.svelte';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import NoteBar from './components/NoteBar.svelte';
+  import MoveDialog from './components/MoveDialog.svelte';
+  import { filedToast, workFolder } from './lib/folders.js';
   import { isNoteKey } from './lib/noteHere.svelte.js';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
   import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
@@ -244,18 +247,30 @@
   // the capture extension files screenshots while this tab just sits here, and
   // they must show up without a reload. Refresh only what the nudge names.
   startEvents();
-  onEvent('capture', (ev) => {
-    toast(`Capture filed from ${ev.site}: ${ev.title}`, 'ok', 5000);
-    if (caseState.current?.id === ev.case_id) reloadCase();
-  });
-  onEvent('bookmark', (ev) => {
-    toast(`Bookmark saved: ${ev.title}`, 'ok', 5000);
-    if (caseState.current?.id === ev.case_id) reloadCase();
-  });
-  onEvent('place', (ev) => {
-    toast(`Place saved from ${ev.site}: ${ev.title}`, 'ok', 5000);
-    if (caseState.current?.id === ev.case_id) reloadCase();
-  });
+  // Filed from another window, so the toast is where the analyst hears which
+  // folder it landed in, with Move when the work folder took it.
+  async function filedFromExtension(ev, lead, fallback) {
+    if (caseState.current?.id !== ev.case_id) return toast(fallback, 'ok', 5000);
+    await reloadCase();
+    let entity = null;
+    if (workFolder()) {
+      try {
+        entity = ev.entity_id
+          ? (await api.get(`/api/cases/${ev.case_id}/entities/${ev.entity_id}/chain`)).entity
+          : (await api.get(`/api/cases/${ev.case_id}/entities/lookup?attr=path&value=${encodeURIComponent(ev.path)}`)).entity;
+      } catch {
+        /* the toast still says it was filed */
+      }
+    }
+    filedToast(lead, [entity], { fallback, timeout: 5000 });
+  }
+  onEvent('capture', (ev) =>
+    filedFromExtension(ev, `“${ev.title}” filed from ${ev.site}`, `Capture filed from ${ev.site}: ${ev.title}`)
+  );
+  onEvent('bookmark', (ev) => filedFromExtension(ev, `Bookmark “${ev.title}” saved`, `Bookmark saved: ${ev.title}`));
+  onEvent('place', (ev) =>
+    filedFromExtension(ev, `“${ev.title}” saved from ${ev.site}`, `Place saved from ${ev.site}: ${ev.title}`)
+  );
   // The case's saved work, moved from another window onto it: a second app tab,
   // or the map panel the extension draws over someone else's map. Silent, unlike
   // the three above — the analyst did this themselves, just not here — and the
@@ -383,6 +398,7 @@
             <button
               class="tab-btn"
               class:active={uiState.tool === toolId}
+              aria-current={uiState.tool === toolId ? 'page' : undefined}
               onclick={() => (uiState.tool = toolId)}
             >
               {toolLabel(toolId)}
@@ -420,6 +436,7 @@
 <svelte:window onkeydown={onGlobalKey} />
 
 <NoteBar />
+<MoveDialog />
 <Toasts />
 
 {#if workspaceStopped}

@@ -116,6 +116,7 @@ CHAIN_ENDPOINTS: dict[str, dict[str, frozenset[str]]] = {
 
 LOCATED_AT = "located-at"
 SAME_IMAGE_AS = "same-image-as"
+SAME_SITE_AS = "same-site-as"
 DEPICTS = "depicts"
 OWNS = "owns"
 PART_OF = "part-of"
@@ -347,6 +348,21 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         from_families=frozenset({entities.ASSET}),
         to_families=frozenset({entities.PLACE}),
         from_only=frozenset({"structure"}),
+    ),
+    # Two points that belong to one site: the hangar and the runway, the camera and
+    # what it filmed across the street. Without it, two geolocations on one airfield
+    # drew as two islands. `engine/proposals` files it for points under 300 m apart;
+    # the analyst states it by hand for a site wider than that.
+    #
+    # Symmetric, like `associated-with`, and not ratable: whether two points are one
+    # site is answered by confirming or dropping the edge, not by grading it.
+    RelationType(
+        SAME_SITE_AS, "is on the same site as",
+        inverse_label="is on the same site as",
+        hint="the two points belong to one site",
+        from_families=frozenset({entities.PLACE}),
+        to_families=frozenset({entities.PLACE}),
+        ratable=False,
     ),
     # The only verb the `class` family takes from below. It runs object → model,
     # because a named tank is one of a model and never the other way round, and it is

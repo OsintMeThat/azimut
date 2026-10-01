@@ -97,8 +97,25 @@ describe('choosing what the sheet is', () => {
     const target = open({ caseId: 'c1', onmake, onclose: vi.fn() });
     await settle();
     press(target, 'My geolocations');
-    expect(flat(target)).toContain('12 rows, one per proof');
-    expect(flat(target)).toContain('its source media, its place and its coordinates');
+    expect(flat(target)).toContain('One row per point of 12 proofs, POV or not');
+    expect(flat(target)).toContain('the date, the place, its coordinates, the source');
+  });
+
+  it('offers the files worklist with how many a proof already answers', async () => {
+    const fallback = get.getMockImplementation();
+    get.mockImplementation((path) =>
+      path.endsWith('/sheets/from-case/files')
+        ? Promise.resolve({ total: 21, answered: 8, sheet: null })
+        : fallback(path),
+    );
+    const target = open({ caseId: 'c1', onmake, onclose: vi.fn() });
+    await settle();
+    press(target, 'Files to geolocate');
+    expect(flat(target)).toContain('21 rows, one per imported picture or video, 8 already with a proof');
+    press(target, 'Build the sheet');
+    expect(onmake).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: 'Files to geolocate', shape: 'files' }),
+    );
   });
 
   it('names the sheet after the shape until the analyst says otherwise', async () => {

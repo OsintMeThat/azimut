@@ -1627,7 +1627,8 @@ def test_concurrent_downloads_dont_lose_entities(client, monkeypatch):
         t.join()
 
     assert errors == [], "\n\n".join(errors)
-    assert len(case.list_entities()) == n
+    # Media only: the link pass may have filed the account the address names.
+    assert len([e for e in case.list_entities() if e["type"] == "media"]) == n
     assert len(client.get(f"/api/cases/{cid}/media").json()) == n
 
 

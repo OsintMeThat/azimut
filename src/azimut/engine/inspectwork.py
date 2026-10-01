@@ -698,9 +698,9 @@ def _extract_collages(
             **body,
             "migrated_from": {"session": marker[0], "collage": marker[1]},
         })
-        attrs: dict[str, Any] = {"spec": target}
-        if folder:
-            attrs["folder"] = folder
+        # Explicit even when empty: a migration keeps where the work was filed,
+        # and the folder being worked in today is not where it was.
+        attrs: dict[str, Any] = {"spec": target, "folder": folder or ""}
         case.add_entity(COLLAGE_TYPE, title, attrs=attrs, by=PRODUCER)
         done.add(marker)
 
