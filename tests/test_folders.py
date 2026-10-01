@@ -4,6 +4,7 @@ items and files, removals that leave no copy behind, and the work folder."""
 import io
 import json
 import sqlite3
+from contextlib import closing
 
 import graph_read
 from PIL import Image
@@ -67,7 +68,9 @@ def test_a_folder_known_only_through_its_items_is_listed_and_outlives_them(clien
         f"/api/cases/{cid}/entities",
         json={"type": "place", "label": "Pier", "attrs": {"folder": "Port"}},
     ).json()
-    with sqlite3.connect(Case.open(cid).db_path) as conn:
+    # `closing`: a bare `with connect()` only commits, and Windows cannot delete a
+    # workspace whose case.db is still open.
+    with closing(sqlite3.connect(Case.open(cid).db_path)) as conn, conn:
         conn.execute("DELETE FROM folders")
     assert client.get(f"/api/cases/{cid}/folders").json() == ["Port"]
 

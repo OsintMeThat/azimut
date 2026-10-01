@@ -900,7 +900,14 @@ test('starts a media correction from the captured date', async ({ page }) => {
 });
 
 test('expands dense events in place and can collapse them again', async ({ page }) => {
-  await openTimeline(page);
+  // Lanes share the axis's height, so a crowd only folds into a `+n` once it outgrows
+  // what the axis can hold: a few more marks than the shared timelineItems carry.
+  const crowd = Array.from({ length: 40 }, (_, index) => ({
+    ...timelineItem('dense-0'),
+    id: `temporal:claim:crowd-${index}`, owner_id: `crowd-${index}`,
+    label: `Gate camera ${index + 1} records the same arrival window`,
+  }));
+  await openTimeline(page, { timelineItems: [...timelineItems, ...crowd] });
   const cluster = page.locator('.timeline-cluster').first();
   await expect(cluster).toBeVisible();
   const before = await page.locator('.timeline-event.statement').count();

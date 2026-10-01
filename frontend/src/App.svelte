@@ -168,7 +168,7 @@
       (uiState.tool === 'timeline' && Boolean(analysisSearch.timeline.snapshotId))
   );
   const noteTitle = $derived(
-    noteFrozen ? 'A frozen snapshot takes no new event. Leave it to add one.' : 'Add an event about what is on screen (Alt+N)'
+    noteFrozen ? 'A frozen snapshot takes no new event. Leave it to add one.' : 'Add event about what is on screen (Alt+N)'
   );
   function toggleNote() {
     if (!caseState.current || noteFrozen) return;
@@ -309,7 +309,7 @@
          since amber is kept for the main action and the selection. -->
     {#if caseState.current && !solo}
       <button
-        class="note-btn"
+        class="btn btn-ghost btn-sm note-btn"
         class:on={uiState.noting}
         title={noteTitle}
         aria-label="Add an event"
@@ -317,9 +317,7 @@
         disabled={noteFrozen}
         onclick={toggleNote}
       >
-        <Icon name="eventAdd" size={15} />
-        <span class="note-label">Add event</span>
-        <kbd>Alt N</kbd>
+        <Icon name="eventAdd" size={16} />
       </button>
     {/if}
     {#if uiState.tool !== 'guide'}
@@ -495,62 +493,10 @@
     color: var(--text-1);
     background: var(--bg-2);
   }
-  /* Add event: one outlined pill among the icon marks, since it is the one of them
-     that makes something; amber only while its bar is open. */
-  .note-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    height: 28px;
-    padding: 0 6px 0 9px;
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    background: transparent;
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    cursor: pointer;
-    transition: color 0.15s var(--ease), background 0.15s var(--ease), border-color 0.15s var(--ease);
-  }
-  .note-btn:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--text-1) 35%, transparent);
-    background: var(--bg-2);
-    color: var(--text-1);
-  }
+  /* Add event sits with the other icon marks; amber only while its bar is open. */
   .note-btn.on {
-    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    color: var(--accent);
     background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .note-btn:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-  .note-btn kbd {
-    padding: 1px 5px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--bg-2);
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 1.4;
-  }
-  .note-btn.on kbd {
-    border-color: transparent;
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-    color: var(--accent);
-  }
-  /* A narrow window keeps the mark and drops the words, which the tooltip says. */
-  @media (max-width: 1100px) {
-    .note-btn {
-      padding: 0 7px;
-    }
-    .note-label,
-    .note-btn kbd {
-      display: none;
-    }
   }
   .main {
     flex: 1;
