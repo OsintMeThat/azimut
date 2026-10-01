@@ -535,7 +535,8 @@ def _carry_thumb(case: "Case", old: str, new: str) -> dict[str, str]:
     if not source.is_file():
         return {}
     target = layout.collage_thumb_rel(new)
-    media_engine.rename_path(source, case.resolve_inside(target))
+    # Not resolved: on Windows a path resolves to the case on disk, which is the old one.
+    media_engine.rename_path(source, source.with_name(Path(target).name))
     return {"thumb": target}
 
 

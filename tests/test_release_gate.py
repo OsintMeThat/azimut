@@ -206,8 +206,8 @@ def test_storage_and_jobs_add_no_new_runtime_dependency():
     # than stopping at the file the class happens to live in.
     files = [src / "sqlite_backend.py", src / "engine" / "thumbnails.py"]
     files += sorted((src / "store").glob("*.py"))
-    text = "".join(path.read_text() for path in files)
-    assert "import sqlite3" in (src / "sqlite_backend.py").read_text()
+    text = "".join(path.read_text(encoding="utf-8") for path in files)
+    assert "import sqlite3" in (src / "sqlite_backend.py").read_text(encoding="utf-8")
     for banned in ("import numpy", "import pandas", "import redis", "import celery"):
         assert banned not in text  # no heavyweight queue/DB dependency slipped in
 
