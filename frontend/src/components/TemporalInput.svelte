@@ -12,6 +12,7 @@
   import { axisZone, learnAxisZone } from '../lib/caseAxis.svelte.js';
   import { caseState } from '../lib/state.svelte.js';
   import ClockField from './ClockField.svelte';
+  import DateField from './DateField.svelte';
 
   let {
     id,
@@ -199,24 +200,13 @@
     <div class="parts range-parts">
       <label class="field">
         <span>Start</span>
-        <input
-          {id}
-          class="input input-sm mono"
-          aria-label="Start date"
-          type="date"
-          value={state.start}
-          oninput={(event) => { typed = true; emit({ start: event.currentTarget.value }); }}
-        />
+        <DateField {id} day reading={false} label="Start date" value={state.start}
+                   onchange={(value) => { typed = true; emit({ start: value || '' }); }} />
       </label>
       <label class="field">
         <span>End</span>
-        <input
-          class="input input-sm mono"
-          aria-label="End date"
-          type="date"
-          value={state.end}
-          oninput={(event) => { typed = true; emit({ end: event.currentTarget.value }); }}
-        />
+        <DateField day reading={false} label="End date" value={state.end}
+                   onchange={(value) => { typed = true; emit({ end: value || '' }); }} />
       </label>
     </div>
   {:else if state.mode === 'time-range'}

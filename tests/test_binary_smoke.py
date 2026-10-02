@@ -25,6 +25,12 @@ def test_check_application_exercises_health_frontend_and_bundled_ffmpeg(monkeypa
             "application/json",
             json.dumps({"available": True, "source": "bundled"}),
         ),
+        "/api/settings/ffmpeg/notice": (200, "text/plain", "SHA-256: abc\nGNU GENERAL PUBLIC LICENSE"),
+        "/api/settings/bundled": (
+            200,
+            "application/json",
+            json.dumps({"zones": True, "pdf_fonts": True, "extension": True}),
+        ),
     }
     seen = []
 
@@ -36,7 +42,37 @@ def test_check_application_exercises_health_frontend_and_bundled_ffmpeg(monkeypa
     monkeypatch.setattr(smoke_binary, "_request", request)
     smoke_binary.check_application("http://127.0.0.1:8477")
 
-    assert seen == ["/api/health", "/", "/api/settings/ffmpeg"]
+    assert seen == [
+        "/api/health", "/", "/api/settings/ffmpeg", "/api/settings/ffmpeg/notice", "/api/settings/bundled",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "answer", "says"),
+    [
+        ("/api/settings/ffmpeg/notice", (404, "application/json", "{}"), "licence notice"),
+        (
+            "/api/settings/bundled",
+            (200, "application/json", json.dumps({"zones": False, "pdf_fonts": True, "extension": True})),
+            "zones",
+        ),
+    ],
+)
+def test_check_application_rejects_a_binary_missing_a_silent_part(monkeypatch, path, answer, says):
+    """A spec that forgets tzdata, the fonts, the extension or ffmpeg's notice still
+    builds a binary that starts. Only asking for them catches it."""
+    responses = {
+        "/api/health": (200, "application/json", json.dumps({"status": "ok"})),
+        "/": (200, "text/html", '<div id="app"></div>'),
+        "/api/settings/ffmpeg": (200, "application/json", json.dumps({"available": True, "source": "bundled"})),
+        "/api/settings/ffmpeg/notice": (200, "text/plain", "SHA-256: abc GNU"),
+        "/api/settings/bundled": (200, "application/json", json.dumps({"zones": True, "pdf_fonts": True, "extension": True})),
+    }
+    responses[path] = answer
+    monkeypatch.setattr(smoke_binary, "_request", lambda url: responses[url.removeprefix("http://127.0.0.1:8477")])
+
+    with pytest.raises(RuntimeError, match=says):
+        smoke_binary.check_application("http://127.0.0.1:8477")
 
 
 def test_check_application_rejects_path_ffmpeg(monkeypatch):

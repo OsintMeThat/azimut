@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from .. import config, layout
+from .. import config, errors, layout
 from ..workspace import ensure_dir
 from . import workspacelock
 from .bundles import disk_reserve
@@ -559,7 +559,7 @@ def _run(move: Move) -> None:
         move.done = True
     except Exception as exc:  # one failure surface: the analyst reads `error`
         logger.warning("workspace move failed at %s: %s", move.step, exc)
-        move.error = str(exc) or exc.__class__.__name__
+        move.error = errors.explain(exc)
         move.done = True
         shutil.rmtree(staging, ignore_errors=True)
     finally:

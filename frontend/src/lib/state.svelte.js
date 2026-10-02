@@ -384,9 +384,15 @@ let toastSeq = 0;
  * A timeout of 0 holds it up until `dismissToast` takes it down, which is how a
  * wait of unknown length is said: the message has to outlast the work rather
  * than a guess at how long the work takes. Returns the id either way.
+ *
+ * Without a timeout, a failure or a toast offering an action stays long enough to
+ * be read and pressed; a plain confirmation goes quickly. `error` is taken as
+ * `danger`, the one kind the toast styles as a failure.
  */
-export function toast(message, kind = 'info', timeout = 3800, action = null) {
+export function toast(message, kind = 'info', timeout = null, action = null) {
   const id = ++toastSeq;
+  if (kind === 'error') kind = 'danger';
+  if (timeout == null) timeout = kind === 'danger' || action ? 8000 : 3800;
   uiState.toasts.push({ id, message, kind, action });
   if (timeout > 0) setTimeout(() => dismissToast(id), timeout);
   return id;

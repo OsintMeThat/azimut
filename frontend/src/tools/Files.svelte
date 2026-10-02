@@ -72,6 +72,7 @@
   import FolderSelect from '../components/FolderSelect.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
   import SourceDialog from '../components/SourceDialog.svelte';
+  import NoCase from '../components/NoCase.svelte';
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
@@ -1126,11 +1127,7 @@
   </div>
 
   {#if !caseState.current}
-    <div class="empty" style="height: 100%">
-      <div class="empty-icon"><Icon name="folder" size={42} /></div>
-      <h3>No case open</h3>
-      <p>Create or open a case to organize its files.</p>
-    </div>
+    <NoCase icon="folder" what="organize its files" />
   {:else}
     <div class="workbench">
       <!-- left: folder tree (navigation + drop targets) -->

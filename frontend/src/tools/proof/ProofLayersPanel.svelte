@@ -3,6 +3,7 @@
   import ProofGlyph from '../../components/ProofGlyph.svelte';
   import { iconByName } from '../../lib/proofIcons.js';
   import { fileUrl } from '../../lib/fileUrl.js';
+  import { shortcut } from '../../lib/keys.js';
 
   let {
     proof,
@@ -299,7 +300,7 @@
 </div>
 {#if !collapsed.overlays}
   {#if !proof.pastes.length}
-    <div class="none">Paste a screenshot with Ctrl+V. It stays in this proof only.</div>
+    <div class="none">{shortcut('Paste a screenshot with Ctrl+V. It stays in this proof only.')}</div>
   {/if}
   {#each proof.pastes as paste, index (paste.id)}
     <div class="panel-row paste-row card" class:selected={selectionLive && selectedPasteId === paste.id}>
@@ -476,7 +477,7 @@
       {/if}
       <button
         class="btn btn-ghost btn-sm"
-        title="Duplicate (Ctrl+D)"
+        title={shortcut('Duplicate (Ctrl+D)')}
         onclick={(event) => { event.stopPropagation(); duplicateShape(shape.id); }}
       ><Icon name="copy" size={13} /></button>
       <button

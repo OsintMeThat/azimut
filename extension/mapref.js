@@ -623,7 +623,7 @@
       const total = answer.total ?? picker.items.length;
       picker.hint.textContent =
         total > picker.items.length
-          ? `${picker.items.length} of ${total} — search to narrow it down`
+          ? `${picker.items.length} of ${total}. Search to narrow it down`
           : `${total} file${total === 1 ? "" : "s"}`;
       paintThumbs();
     }

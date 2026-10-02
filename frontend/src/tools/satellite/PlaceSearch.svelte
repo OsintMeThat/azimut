@@ -186,7 +186,7 @@
       autocomplete="off"
       aria-label="Search a place or coordinates"
       placeholder={'A place, or 50.4501, 30.5234'}
-      title="A place name, or coordinates (decimal, DMS, MGRS, plus code)"
+      title="Place name or coordinates (decimal, DMS, MGRS, plus code)"
       {value}
       {oninput}
       {onkeydown}

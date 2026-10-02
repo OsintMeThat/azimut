@@ -137,3 +137,18 @@ describe('the proposed links', () => {
     expect(uiState.openGraphEntity).toBe('e_b');
   });
 });
+
+describe('closing the panel', () => {
+  it('closes on Escape like every other panel', async () => {
+    get.mockResolvedValue(SOME);
+    await open();
+    button('2 proposed').click();
+    flushSync();
+    expect(target.querySelector('[aria-label="Proposed links"]')).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+
+    expect(target.querySelector('[aria-label="Proposed links"]')).toBeNull();
+  });
+});

@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import layout
+from .. import errors, layout
 from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notes_pdf as pdf_engine
@@ -248,7 +248,7 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
             else:
                 path = exportdir.write_out(rendered.pdf, destination, filename)
         except (OSError, exportdir.ExportDirError) as exc:
-            raise HTTPException(status_code=409, detail=f"could not write the PDF: {exc}") from exc
+            raise HTTPException(status_code=409, detail=f"could not write the PDF: {errors.explain(exc)}") from exc
         written.append({"note": note_id, "title": title, "file": path.name})
         warnings.extend(f"{title}: {warning}" for warning in rendered.warnings)
 

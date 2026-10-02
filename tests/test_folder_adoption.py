@@ -166,3 +166,34 @@ def test_a_folder_is_not_adopted_without_being_asked(client):
 
     assert client.get("/api/cases").json() == []
     assert not layout.tool_root(config.cases_dir() / "Parked here").exists()
+
+
+def test_a_recovered_case_that_had_link_passes_does_not_propose_its_dropped_links_again(client, monkeypatch):
+    """The pass's mark lived in the lost manifest. Without one, the next pass would
+    read the whole case and bring back every proposal the analyst dropped."""
+    from azimut.engine import proposals, workqueue
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    case_id = client.post("/api/cases", json={"name": "Lost mark"}).json()["id"]
+    for label, lat in (("A", 45.0300), ("B", 45.0310)):
+        client.post(f"/api/cases/{case_id}/entities", json={"type": "place", "label": label, "attrs": {"lat": lat, "lon": 15.74}})
+    case = Case.open(case_id)
+    workqueue.drain(case)
+    [dropped] = [link for link in case.list_links() if proposals.unreviewed(link)]
+    case.remove_link(dropped["id"])
+    layout.manifest(config.cases_dir() / case_id).unlink()
+
+    assert client.post("/api/workspace/folders/recover", json={"name": case_id}).status_code == 200
+
+    assert Case.open(case_id).link_pass() is not None
+    assert proposals.propose(Case.open(case_id))["sites"] == 0
+
+
+def test_a_recovered_case_that_never_had_a_pass_keeps_no_mark(client):
+    case_id = client.post("/api/cases", json={"name": "No pass"}).json()["id"]
+    client.post(f"/api/cases/{case_id}/notes", json={"title": "Lead", "content": "Body"})
+    layout.manifest(config.cases_dir() / case_id).unlink()
+
+    client.post("/api/workspace/folders/recover", json={"name": case_id})
+
+    assert Case.open(case_id).link_pass() is None

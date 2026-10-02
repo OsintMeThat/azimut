@@ -15,6 +15,7 @@
    * which is the honest failure mode for a legend.
    */
   import Icon from './Icon.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   let { onclose } = $props();
 
@@ -62,7 +63,7 @@
     <section>
       <p class="what">Keys</p>
       {#each KEYS as [key, what] (key)}
-        <p class="line"><kbd>{key}</kbd><span>{what}</span></p>
+        <p class="line"><kbd>{shortcut(key)}</kbd><span>{what}</span></p>
       {/each}
     </section>
     <section>

@@ -349,6 +349,8 @@ CREATE INDEX idx_temporal_kind   ON temporal_items(kind);
 # cancel makes it `cancelled`. An interrupted `running` job (a crash mid-work) is
 # recovered on open back to `queued` or `failed` per its retry count.
 _JOB_TERMINAL = frozenset({"ready", "failed", "cancelled"})
+# Set in a running keyed job's payload by a second enqueue: run once more at the end.
+_RERUN = "_rerun"
 
 T = TypeVar("T")
 
@@ -785,6 +787,31 @@ class SqliteCase:
     def list_links(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             return [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
+
+    def suggestions(self, by: str, *, limit: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            links = {
+                r["type"]: r["n"]
+                for r in conn.execute(
+                    "SELECT type, COUNT(*) AS n FROM links"
+                    " WHERE prov_by = ? AND prov_status = 'suggested' GROUP BY type",
+                    (by,),
+                )
+            }
+            entities = {
+                r["type"]: r["n"]
+                for r in conn.execute(
+                    "SELECT type, COUNT(*) AS n FROM entities"
+                    " WHERE prov_by = ? AND prov_status = 'suggested' GROUP BY type",
+                    (by,),
+                )
+            }
+            rows = conn.execute(
+                "SELECT * FROM links WHERE prov_by = ? AND prov_status = 'suggested'"
+                " ORDER BY rowid LIMIT ?",
+                (by, limit),
+            ).fetchall()
+        return {"links": links, "entities": entities, "items": [self._link(r) for r in rows]}
 
     def get_link(self, link_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -3508,8 +3535,14 @@ class SqliteCase:
         self._write(op)
 
     def pending_merge_work(self) -> list[dict[str, Any]]:
+        # Every case open asks this, and merge records are kept for Undo, so their
+        # payloads only grow. SQLite skips the ones that never named the key; only the
+        # few that did are parsed here.
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM entity_merges ORDER BY rowid").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM entity_merges WHERE instr(payload_json, '\"pending_sheets\"') > 0"
+                " ORDER BY rowid"
+            ).fetchall()
         return [self._merge(row, payload=True) for row in rows if json.loads(row["payload_json"]).get("pending_sheets")]
 
     def finish_merge_work(self, merge_id: str) -> None:
@@ -3706,9 +3739,10 @@ class SqliteCase:
 
         Keyed jobs are idempotent: a second enqueue for the same ``(kind, key)``
         never stacks a duplicate. A job already ``running`` is left running (the
-        worker owns it); any other prior state — including a finished ``ready``
-        one, so a re-enqueue is how a thumbnail is regenerated — is reset to a
-        fresh ``queued`` attempt. The keyless form is a plain append.
+        worker owns it) and marked to run once more when it ends, since what it
+        read may predate this enqueue; any other prior state — including a
+        finished ``ready`` one, so a re-enqueue is how a thumbnail is regenerated
+        — is reset to a fresh ``queued`` attempt. The keyless form is a plain append.
         """
         now = _now()
 
@@ -3719,6 +3753,11 @@ class SqliteCase:
                 ).fetchone()
                 if row is not None:
                     if row["state"] == "running":
+                        again = {**(payload or {}), _RERUN: True}
+                        conn.execute(
+                            "UPDATE jobs SET payload_json = ?, updated_at = ? WHERE id = ?",
+                            (json.dumps(again, ensure_ascii=False), now, row["id"]),
+                        )
                         return self._job(row)
                     conn.execute(
                         "UPDATE jobs SET state = 'queued', attempts = 0, error = NULL,"
@@ -3771,18 +3810,38 @@ class SqliteCase:
         return self._write(op)
 
     def complete_job(self, job_id: str) -> None:
-        """Mark a finished job ``ready``."""
-        self._set_job_state(job_id, "ready", error=None)
+        """Mark a finished job ``ready``, or queue it again when it was enqueued
+        while it ran: the run that just ended may have missed what came in."""
+        def op(conn: sqlite3.Connection) -> None:
+            row = conn.execute("SELECT payload_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise CaseError(f"job '{job_id}' not found")
+            payload = json.loads(row["payload_json"] or "{}")
+            if payload.pop(_RERUN, False):
+                conn.execute(
+                    "UPDATE jobs SET state = 'queued', attempts = 0, error = NULL,"
+                    " payload_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(payload, ensure_ascii=False), _now(), job_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE jobs SET state = 'ready', error = NULL, updated_at = ? WHERE id = ?",
+                    (_now(), job_id),
+                )
 
-    def fail_job(self, job_id: str, error: str) -> dict[str, Any]:
+        self._write(op)
+
+    def fail_job(self, job_id: str, error: str, *, final: bool = False) -> dict[str, Any]:
         """Record a failure: back to ``queued`` while attempts remain, else
-        ``failed``. Returns the resulting job row so the worker can see whether a
-        retry is pending."""
+        ``failed``; straight to ``failed`` when ``final``, for a failure another
+        attempt would only repeat. Returns the resulting job row so the worker can
+        see whether a retry is pending."""
         def op(conn: sqlite3.Connection) -> dict[str, Any]:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if row is None:
                 raise CaseError(f"job '{job_id}' not found")
-            state = "queued" if row["attempts"] < row["max_attempts"] else "failed"
+            retry = not final and row["attempts"] < row["max_attempts"]
+            state = "queued" if retry else "failed"
             conn.execute(
                 "UPDATE jobs SET state = ?, error = ?, updated_at = ? WHERE id = ?",
                 (state, error[:2000], _now(), job_id),

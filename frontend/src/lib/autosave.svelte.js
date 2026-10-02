@@ -11,7 +11,9 @@
  * when nothing changed since the last save.
  *
  * `flush()` writes whatever is pending and waits for it. A tool calls it before it
- * lets go of the document: switching file, closing the case, leaving the tool.
+ * lets go of the document: switching file, closing the case, leaving the tool. After
+ * a failed write the document is still unsaved, so `flush()` tries it again: that is
+ * what a Retry button calls. `unsaved` says whether it is still unsaved afterwards.
  */
 export function createAutosave({ write, delay = 800 }) {
   const state = $state({ status: 'idle', error: '' });
@@ -57,7 +59,7 @@ export function createAutosave({ write, delay = 800 }) {
       timer = setTimeout(run, delay);
     },
     async flush() {
-      if (timer) await run();
+      if (timer || (state.status === 'error' && !running)) await run();
       else if (running) await running;
     },
     /** Forget a pending write, for a document that is being thrown away. */
@@ -68,9 +70,13 @@ export function createAutosave({ write, delay = 800 }) {
       state.status = 'idle';
       state.error = '';
     },
-    /** Whether a write is scheduled or running, so a page closing can send it. */
+    /** Whether a write is scheduled, running or failed, so a page closing can send it. */
     get pending() {
-      return timer !== null || running !== null;
+      return timer !== null || running !== null || state.status === 'error';
+    },
+    /** Whether the last write failed and the document holds edits no write has kept. */
+    get unsaved() {
+      return state.status === 'error';
     },
   };
 }

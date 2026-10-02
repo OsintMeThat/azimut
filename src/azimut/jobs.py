@@ -6,9 +6,14 @@ GET /api/jobs/{id}. Local single-user app — no persistence needed.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from typing import Any, Callable
+
+from . import errors
+
+logger = logging.getLogger(__name__)
 
 _jobs: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
@@ -53,8 +58,9 @@ def start(kind: str, work: Callable[..., Any], *, stoppable: bool = False) -> st
             with _lock:
                 _jobs[job_id].update(status="done", result=result)
         except Exception as exc:  # surfaced to the UI, not swallowed
+            logger.warning("job %s (%s) failed: %r", job_id, kind, exc)
             with _lock:
-                _jobs[job_id].update(status="error", error=str(exc))
+                _jobs[job_id].update(status="error", error=errors.explain(exc))
 
     threading.Thread(target=runner, daemon=True).start()
     return job_id

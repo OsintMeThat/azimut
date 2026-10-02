@@ -8,6 +8,7 @@
   // sky panel below is pure local computation and never goes out.
   import { api } from '../lib/api.js';
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { mapLinks } from '../lib/maplinks.js';
   import { bidiSafe } from '../lib/bidi.js';
   import Icon from '../components/Icon.svelte';
@@ -53,8 +54,7 @@
   }
 
   async function copy(value) {
-    await navigator.clipboard.writeText(bidiSafe(value));
-    toast('Copied', 'ok', 1400);
+    await copyText(bidiSafe(value));
   }
 
   async function lookupPlace() {

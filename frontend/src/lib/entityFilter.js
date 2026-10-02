@@ -367,7 +367,7 @@ export function chipsOf(filter, names = {}) {
   if (filter.attrKey) {
     // A field with no value yet is a term still being built, and it says so rather
     // than reading as a filter that matches everything.
-    const value = filter.attrValue ? ` = ${filter.attrValue}` : ' — pick a value';
+    const value = filter.attrValue ? ` = ${filter.attrValue}` : ': pick a value';
     chips.push({ axis: 'field', text: `${filter.attrKey}${value}` });
   }
   if (filter.linked) {

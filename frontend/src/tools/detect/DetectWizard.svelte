@@ -33,6 +33,10 @@
   import AnalyzerSettings from './AnalyzerSettings.svelte';
   import AnalyzerSize from './AnalyzerSize.svelte';
   import WhenStep from './WhenStep.svelte';
+
+  /** The areas one sweep holds, as the backend counts them (engine/analysis_models.py). */
+  const MAX_AREAS = 32;
+  const FULL = `At most ${MAX_AREAS} areas per sweep`;
   import FoldGroup from './FoldGroup.svelte';
   import Icon from '../../components/Icon.svelte';
 
@@ -270,7 +274,10 @@
       return;
     }
     const additions = additionsOf(members);
-    if (zones.length + additions.length > 32) return;
+    if (zones.length + additions.length > MAX_AREAS) {
+      toast(`That group would pass the ${MAX_AREAS} areas a sweep holds`, 'warn');
+      return;
+    }
     zones = [...zones, ...additions];
   }
 
@@ -373,7 +380,7 @@
                   <button type="button" role="checkbox" class="tick" aria-checked={state}
                     aria-label={`Use ${group.title}`}
                     title={state === 'true' ? `Leave out ${group.title}` : `Look in all of ${group.title}`}
-                    disabled={pending || !members.length || (state !== 'true' && zones.length + additionsOf(members).length > 32)}
+                    disabled={pending || !members.length || (state !== 'true' && zones.length + additionsOf(members).length > MAX_AREAS)}
                     onclick={() => toggleGroup(group)}>
                     {#if state === 'true'}<Icon name="check" size={11} />{:else if state === 'mixed'}<Icon name="minus" size={11} />{/if}
                   </button>
@@ -393,7 +400,7 @@
                       {@const area = areas.find((item) => item.id === zone.id)}
                       {@const on = isOn(zone.id)}
                       <button type="button" class="area-item" class:on aria-pressed={on}
-                        disabled={pending || (!on && zones.length >= 32)}
+                        disabled={pending || (!on && zones.length >= MAX_AREAS)}
                         onclick={() => (on ? removeZone(zone.id) : area ? useArea(area) : (zones = [...zones, zone]))}>
                         <span class="tick" aria-hidden="true">{#if on}<Icon name="check" size={11} />{/if}</span>
                         <span class="swatch" style={`--tint: ${area?.colour ?? AREA_COLOUR}`}></span>{zone.name}
@@ -411,7 +418,7 @@
                 {#each loose as area (area.id)}
                   {@const on = isOn(area.id)}
                   <button type="button" class="area-item" class:on aria-pressed={on}
-                    disabled={!on && zones.length >= 32}
+                    disabled={!on && zones.length >= MAX_AREAS}
                     onclick={() => (on ? removeZone(area.id) : useArea(area))}>
                     <span class="tick" aria-hidden="true">{#if on}<Icon name="check" size={11} />{/if}</span>
                     <span class="swatch" style={`--tint: ${area.colour}`}></span>{area.name}
@@ -427,12 +434,14 @@
         <div class="cmp-seg" role="group" aria-label="Draw an area">
           {#each [['rect', 'Rectangle'], ['polygon', 'Polygon'], ['ellipse', 'Circle']] as [shape, label]}
             <button type="button" class:on={drawing === shape} aria-pressed={drawing === shape}
-              disabled={zones.length >= 32}
+              disabled={zones.length >= MAX_AREAS} title={zones.length >= MAX_AREAS ? FULL : undefined}
               onclick={() => { drawing = drawing === shape ? 'select' : shape; showZones = true; }}>{label}</button>
           {/each}
         </div>
-        <button class="btn btn-sm" disabled={zones.length >= 32} onclick={onusecurrentview}>Use current view</button>
+        <button class="btn btn-sm" disabled={zones.length >= MAX_AREAS}
+          title={zones.length >= MAX_AREAS ? FULL : undefined} onclick={onusecurrentview}>Use current view</button>
       </div>
+      {#if zones.length >= MAX_AREAS}<p class="hint">{FULL}.</p>{/if}
       {#if drawing !== 'select'}
         <p class="hint">{drawing === 'polygon' ? 'Click corners on the map; Enter finishes, Escape cancels.' : 'Drag on the map. Escape cancels.'}</p>
       {:else if !zones.length}

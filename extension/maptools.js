@@ -1120,11 +1120,11 @@
         if (drawing === "polygon") {
           return vertices.length < 3
             ? `Click the corners of the area (${vertices.length})`
-            : `${vertices.length} corners — close the shape when it fits`;
+            : `${vertices.length} corners. Close the shape when it fits`;
         }
         if (!grid) return "No grid open";
         const seen = coverage(grid);
-        if (marking) return `${seen.percent}% swept — click cells to mark them`;
+        if (marking) return `${seen.percent}% swept. Click cells to mark them`;
         return `${seen.percent}% swept · ${seen.cleared} cleared · ${seen.flagged} flagged`;
       },
     };

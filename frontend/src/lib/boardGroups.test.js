@@ -7,7 +7,6 @@ import {
   groupCounts,
   groupOfType,
   groupOpen,
-  groupRequestTypes,
   holdsSubjects,
   loadLayout,
   normalizeLayout,
@@ -74,15 +73,6 @@ describe('board groups', () => {
       'person',
     ]);
     expect(typesOfGroup(boardGroup('asset'), caseTypes, familyOf)).toEqual([]);
-  });
-
-  it('narrows a group’s request by the types the question picked', () => {
-    const caseTypes = ['person', 'organization', 'media'];
-    const actor = boardGroup('actor');
-    expect(groupRequestTypes(actor, caseTypes, [], familyOf)).toEqual(['organization', 'person']);
-    expect(groupRequestTypes(actor, caseTypes, ['person'], familyOf)).toEqual(['person']);
-    // a question about media leaves the people group nothing to ask
-    expect(groupRequestTypes(actor, caseTypes, ['media'], familyOf)).toEqual([]);
   });
 
   it('adds a per-type count up per group', () => {

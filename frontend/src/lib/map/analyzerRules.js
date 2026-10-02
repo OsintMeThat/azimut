@@ -488,7 +488,7 @@ export function newRecipe(methods = [], { sensor = 'sentinel2', dates = 'two' } 
   const radar = sensor === 'sentinel1';
   const sizes = methods.find((entry) => entry.id === (radar ? 'sar-change' : 'rules'))?.sizes;
   const two = dates === 'two';
-  const first = radar ? newRule('radar', two ? 'change' : 'b') : newRule('index', two ? 'change' : 'b');
+  const first = newRule(radar ? 'radar' : 'brightness', two ? 'change' : 'b');
   return {
     id: 'custom', name: '', description: '', phenomenon: 'Candidate', method: 'rules', sensor, dates,
     parameters: { ...DEFAULT_PARAMETERS, ...(sizes?.all ?? {}) },
@@ -755,7 +755,7 @@ const firstOf = (wanted, ids) => wanted.find((id) => ids.includes(id));
  * the layers the configuration offers.
  */
 export function suggestedLayer(rule, layers = []) {
-  const ids = layers.map((layer) => layer.id);
+  const ids = layers.filter((layer) => layer.enabled !== false).map((layer) => layer.id);
   const fallback = ids.includes('TRUE_COLOR') ? 'TRUE_COLOR' : ids[0] ?? 'TRUE_COLOR';
   if (!rule) return fallback;
   const swir = ['B11', 'B12'];
@@ -763,13 +763,13 @@ export function suggestedLayer(rule, layers = []) {
   let wanted = ['TRUE_COLOR'];
   if (rule.measure === 'index') {
     wanted = {
-      ndvi: ['NDVI', 'FALSE_COLOR'], nbr: ['SWIR', 'MOISTURE_INDEX'], ndwi: ['NDWI', 'FALSE_COLOR'],
-      mndwi: ['NDWI', 'FALSE_COLOR'], ndbi: ['FALSE_COLOR_URBAN', 'SWIR'], bsi: ['SWIR', 'FALSE_COLOR_URBAN'],
+      ndvi: ['NDVI', 'VEGETATION_INDEX', 'FALSE_COLOR', 'COLOR_INFRARED'], nbr: ['SWIR', 'MOISTURE_INDEX'], ndwi: ['NDWI', 'FALSE_COLOR', 'COLOR_INFRARED'],
+      mndwi: ['NDWI', 'FALSE_COLOR', 'COLOR_INFRARED'], ndbi: ['FALSE_COLOR_URBAN', 'COLOR_INFRARED__URBAN_', 'SWIR'], bsi: ['SWIR', 'FALSE_COLOR_URBAN', 'COLOR_INFRARED__URBAN_'],
     }[rule.index] ?? wanted;
   } else if (rule.measure === 'nd' || rule.measure === 'band') {
     const bands = ruleBands(rule);
-    wanted = bands.some((band) => swir.includes(band)) ? ['SWIR', 'FALSE_COLOR']
-      : bands.some((band) => nir.includes(band)) ? ['FALSE_COLOR', 'NDVI'] : ['TRUE_COLOR'];
+    wanted = bands.some((band) => swir.includes(band)) ? ['SWIR', 'FALSE_COLOR', 'COLOR_INFRARED']
+      : bands.some((band) => nir.includes(band)) ? ['FALSE_COLOR', 'COLOR_INFRARED', 'NDVI', 'VEGETATION_INDEX'] : ['TRUE_COLOR'];
   } else if (rule.measure === 'class') {
     wanted = ['SCENE_CLASSIFICATION', 'TRUE_COLOR'];
   }

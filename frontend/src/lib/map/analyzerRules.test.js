@@ -4,7 +4,7 @@ import {
   describeWithout, directionOf, directionsFor, lineScale, shortRule, withAmount, withDirection,
   formatShare, formatValue, fromDifference, measuresFor, newRecipe, newRule, paintMask, passSource,
   pinTicks, productCount, readingRecipe, recipeBands, recipeCapability, recipeProblem, retarget, savingProblem,
-  scaleOf, sideOf, signalOf, toEngine, whensFor,
+  scaleOf, sideOf, signalOf, suggestedLayer, toEngine, whensFor,
   checkDated, checkKey, checkState, checksSummary, describeChecks, describeOutcome, marksBounds, markOutcomes,
   newCheck, signature, testedCheck, withFlippedMark, withMark, withoutMark,
 } from './analyzerRules.js';
@@ -174,6 +174,20 @@ describe('what a recipe reads', () => {
     expect(newRecipe(METHODS, { sensor: 'sentinel1' }).parameters.smoothing).toBe(0);
     const radarSizes = METHODS.map((method) => (method.id === 'sar-change' ? { ...method, sizes: { all: { smoothing: 2, min_area: 0 } } } : method));
     expect(newRecipe(radarSizes, { sensor: 'sentinel1' }).parameters.smoothing).toBe(2);
+  });
+
+  it('starts blank optical analyzers on brightness and true colour', () => {
+    const two = newRecipe(METHODS);
+    expect(two.rules[0]).toMatchObject({ measure: 'brightness', on: 'change', op: 'moved', value: 0.05 });
+    expect(newRecipe(METHODS, { dates: 'one' }).rules[0]).toMatchObject({ measure: 'brightness', on: 'b', op: 'ge', value: 0.2 });
+    expect(suggestedLayer(two.rules[0], [{ id: 'TRUE_COLOR' }, { id: 'NDVI' }])).toBe('TRUE_COLOR');
+  });
+
+  it('suggests actual configuration identifiers and skips disabled display products', () => {
+    expect(suggestedLayer(newRule('index'), [{ id: 'TRUE_COLOR' }, { id: 'NDVI', enabled: false },
+      { id: 'VEGETATION_INDEX' }])).toBe('VEGETATION_INDEX');
+    expect(suggestedLayer(newRule('index'), [{ id: 'TRUE_COLOR' }, { id: 'NDVI', enabled: false }])).toBe('TRUE_COLOR');
+    expect(suggestedLayer(newRule('index', 'b', { index: 'ndwi' }), [{ id: 'COLOR_INFRARED' }])).toBe('COLOR_INFRARED');
   });
 
   it('says why it cannot run before the engine has to', () => {

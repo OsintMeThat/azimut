@@ -17,6 +17,51 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 const APP_ORIGINS = ["http://127.0.0.1", "http://localhost"];
 const isAppUrl = (url) => APP_ORIGINS.some((o) => url === o || url?.startsWith(o + ":") || url?.startsWith(o + "/"));
 
+/**
+ * Whether a tab is the paired Azimut, not merely something on localhost.
+ *
+ * The bridge runs on every loopback port, so a dev server or any other local page
+ * can post to it. The routes that open tabs, capture the screen or stream case files
+ * answer only the page served from the port this extension is paired with.
+ * `localhost` and `127.0.0.1` are the same machine, so either name passes.
+ */
+async function isPairedApp(url) {
+  if (!isAppUrl(url)) return false;
+  const { backendUrl } = await settings();
+  try {
+    const tab = new URL(url);
+    const app = new URL(backendUrl);
+    return isAppUrl(app.origin) && tab.port === app.port && tab.protocol === app.protocol;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why a tab may not use the routes only the app may ask for, or null when it may.
+ *
+ * A loopback page on another port is most often this same Azimut, started while
+ * another program held its port and moved to the next free one. "Not the app" would
+ * leave the analyst nowhere, so the answer says what to change.
+ */
+async function notTheApp(tab) {
+  if (!tab || !isAppUrl(tab.url)) return "not the Azimut app";
+  if (await isPairedApp(tab.url)) return null;
+  return `this extension is paired with another address. In its options, set the Azimut URL to ${new URL(tab.url).origin}`;
+}
+
+// Where the app's hand-offs may take a tab: the posting sites and the reverse image
+// engines it offers. Anything else in a hand-off is refused, whoever asked.
+const HANDOFF_HOSTS = new Set(["x.com", "bsky.app", "lens.google.com", "yandex.com", "www.bing.com", "tineye.com"]);
+const handOffAllowed = (url) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && HANDOFF_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+
 function settings() {
   return api.storage.local
     .get({ backendUrl: "http://127.0.0.1:8477", token: "", lastCaseId: "" })
@@ -212,6 +257,7 @@ function tabLoaded(tabId, timeoutMs = 20000) {
 async function handOff(payload) {
   const { backendUrl, token } = await settings();
   if (!token) throw new Error("not paired");
+  if (!handOffAllowed(payload.url)) throw new Error("not a site Azimut posts to");
   fillComposer(payload, backendUrl, token).catch((e) =>
     notify("Azimut hand-off", `${e.message} The thread is on your clipboard.`)
   );
@@ -300,6 +346,7 @@ async function handOffReverse(payload) {
   if (!image.data) throw new Error("no image");
   if (image.data.length > MAX_REVERSE_DATA) throw new Error("that image is too large to hand over");
   if (!payload.url) throw new Error("no engine");
+  if (!handOffAllowed(payload.url)) throw new Error("not an engine Azimut searches with");
   fillEngine(payload.url, image).catch((e) => {
     if (!LEFT.test(e.message || "")) trouble(e.message);
   });
@@ -1101,7 +1148,8 @@ async function handle(msg, sender) {
   // frame — the app does its own registration, cropping and filing. Only the
   // app's localhost origin may ask for it.
   if (msg.type === "capture-tab") {
-    if (!sender.tab || !isAppUrl(sender.tab.url)) return { ok: false, error: "not the Azimut app" };
+    const refused = await notTheApp(sender.tab);
+    if (refused) return { ok: false, error: refused };
     try {
       const dataUrl = await withoutPanel(sender.tab.id, () => captureActiveTab(sender.tab.windowId));
       return { ok: true, dataUrl };
@@ -1148,7 +1196,8 @@ async function handle(msg, sender) {
   // The app's Publish button, relayed by bridge.js: open the composer and fill
   // the thread. Same origin check as the capture route — only the app may ask.
   if (msg.type === "post-handoff") {
-    if (!sender.tab || !isAppUrl(sender.tab.url)) return { ok: false, error: "not the Azimut app" };
+    const refused = await notTheApp(sender.tab);
+    if (refused) return { ok: false, error: refused };
     try {
       return await handOff(msg.payload ?? {});
     } catch (e) {
@@ -1159,7 +1208,8 @@ async function handle(msg, sender) {
   // The app's Reverse Search buttons, relayed by bridge.js: open the engine and
   // give it the image. Same origin check as every other app route.
   if (msg.type === "reverse-handoff") {
-    if (!sender.tab || !isAppUrl(sender.tab.url)) return { ok: false, error: "not the Azimut app" };
+    const refused = await notTheApp(sender.tab);
+    if (refused) return { ok: false, error: refused };
     try {
       return await handOffReverse(msg.payload ?? {});
     } catch (e) {
@@ -1207,13 +1257,16 @@ async function handle(msg, sender) {
     }
   }
 
-  // Settings asking what this copy is: the version the browser parsed, and the
-  // folder stamp this code was loaded from. Only the app's own origin may ask —
-  // same rule as every other route relayed by the bridge.
+  // Settings asking what this copy is: the version the browser parsed, the folder
+  // stamp this code was loaded from, and whether the asking tab is the address this
+  // copy is paired with. Identification only, so any loopback page may ask: an app
+  // that moved to a free port must still find its extension, and be told why it
+  // refuses to act for it.
   if (msg.type === "ext-state") {
     if (!sender.tab || !isAppUrl(sender.tab.url)) return { ok: false, error: "not the Azimut app" };
     return {
       ok: true,
+      paired: await isPairedApp(sender.tab.url),
       version: api.runtime.getManifest().version,
       // Not `id`: the bridge spreads this answer next to the message's own
       // correlation id, and a collision there would break the pairing silently.
@@ -1231,7 +1284,8 @@ async function handle(msg, sender) {
   // holding a rejected port. And the reply is only "taken", never "worked": what
   // proves the code moved is the stamp read back afterwards.
   if (msg.type === "ext-reload") {
-    if (!sender.tab || !isAppUrl(sender.tab.url)) return { ok: false, error: "not the Azimut app" };
+    const refused = await notTheApp(sender.tab);
+    if (refused) return { ok: false, error: refused };
     const stamp = await loadedStamp();
     // Two copies of this extension can be loaded at once on Chrome, which
     // derives the extension id from the folder path (see the app's Settings

@@ -49,6 +49,19 @@ def check_application(base_url: str) -> None:
     ffmpeg: dict[str, Any] = json.loads(body)
     if status != 200 or not ffmpeg.get("available") or ffmpeg.get("source") != "bundled":
         raise RuntimeError(f"bundled ffmpeg was not detected: {ffmpeg!r}")
+    status, content_type, body = _request(f"{base_url}/api/settings/ffmpeg/notice")
+    if status != 200 or "GNU" not in body or "SHA-256" not in body:
+        raise RuntimeError("the bundled ffmpeg shipped without its licence notice")
+
+    # What the frozen build drops without a word when the spec forgets it: the zone
+    # database (local times silently read as UTC on Windows), the PDF fonts, the
+    # capture extension the Settings install button and the zip route hand out, and
+    # the scrapers' metadata (a stale workspace copy would shadow the shipped one).
+    status, _content_type, body = _request(f"{base_url}/api/settings/bundled")
+    smoke: dict[str, Any] = json.loads(body)
+    missing = [name for name, ok in smoke.items() if not ok]
+    if status != 200 or missing:
+        raise RuntimeError(f"the binary is missing bundled parts: {missing or smoke!r}")
 
 
 def wait_until_ready(base_url: str, process: subprocess.Popen[bytes], timeout: float = 60) -> None:

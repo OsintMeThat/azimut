@@ -28,7 +28,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import layout
+from .. import errors, layout
 from ..engine import exportdir
 from ..engine import reveal as reveal_engine
 from .cases import get_case
@@ -137,7 +137,7 @@ def write_plate(case_id: str, body: PlateIn) -> dict[str, Any]:
         else:
             path = exportdir.write_out(data, destination, filename)
     except (OSError, exportdir.ExportDirError) as exc:
-        raise HTTPException(status_code=409, detail=f"could not write the plate: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not write the plate: {errors.explain(exc)}") from exc
     return {"file": path.name, "path": str(destination)}
 
 

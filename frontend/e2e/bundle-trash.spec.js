@@ -3,7 +3,7 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 test('keeps a failed export visible after its dialog closes', async ({ page }) => {
   const fixture = await installAppFixture(page, {
-    bundleJob: { state: 'failed', error: 'Export failed safely' },
+    bundleJob: { state: 'failed', error: 'the disk is full' },
   });
 
   await page.goto('/#files');
@@ -11,7 +11,8 @@ test('keeps a failed export visible after its dialog closes', async ({ page }) =
   await page.getByRole('button', { name: 'Export this case…' }).click();
   await page.getByRole('button', { name: 'Export', exact: true }).click();
 
-  await expect(page.getByText('Export failed safely', { exact: true })).toBeVisible();
+  // The job's error is a clause; the toast says what it stopped.
+  await expect(page.getByText('Could not export the case: the disk is full', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Export case' })).toHaveCount(0);
   expect(fixture.bundleCalls.map((call) => call.kind)).toEqual(['export', 'job']);
   fixture.expectNoUnexpectedRequests();

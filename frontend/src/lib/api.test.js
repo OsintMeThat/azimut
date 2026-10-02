@@ -63,3 +63,19 @@ describe('API errors', () => {
     });
   });
 });
+
+describe('a request that reaches no server', () => {
+  it('says the app is not running, not the browser’s “Failed to fetch”', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    const failure = await api.put('/api/cases/c/notes/n', { text: 'x' }).catch((error) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure.status).toBe(0);
+    expect(failure.message).toBe('Azimut is not running. Start it again, then reload this tab.');
+  });
+
+  it('lets a cancelled request stay a cancellation', async () => {
+    const aborted = Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(aborted));
+    await expect(api.get('/api/cases')).rejects.toBe(aborted);
+  });
+});

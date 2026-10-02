@@ -19,6 +19,7 @@
     toast,
     uiState,
   } from '../lib/state.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { openMapAt } from '../lib/navigate.js';
@@ -1691,12 +1692,7 @@
     const { side } = pointMenu;
     closePointMenu();
     if (id === 'copy') {
-      try {
-        await navigator.clipboard.writeText(value);
-        toast('Coordinates copied', 'ok', 1600);
-      } catch {
-        toast('The browser refused the clipboard', 'warn');
-      }
+      await copyText(value);
     } else if (id === 'place') {
       openNewPlaceAt(point);
     } else if (id === 'measure') {

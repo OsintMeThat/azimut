@@ -31,6 +31,7 @@
   import {
     caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
   import { startRectDrag, turnFromKey, turnFromPress } from '../lib/map/gestures.js';
   import { panelWidth } from '../lib/panelWidth.js';
@@ -943,12 +944,7 @@
     if (id === 'lookup') return lookUpPoint(point);
     closePointMenu();
     if (id === 'copy') {
-      try {
-        await navigator.clipboard.writeText(value);
-        toast('Coordinates copied', 'ok', 1600);
-      } catch {
-        toast('The browser refused the clipboard', 'warn');
-      }
+      await copyText(value);
     } else if (id === 'place') {
       openNewPlaceAt(point);
     } else if (id === 'centre') {
@@ -1948,8 +1944,7 @@
   const readout = $derived(fmtCoords(displayCoords.lat, displayCoords.lon));
 
   async function copyCoords() {
-    await navigator.clipboard.writeText(readout);
-    toast('Coordinates copied', 'ok', 1600);
+    await copyText(readout);
   }
 
   async function toggleCaptures() {

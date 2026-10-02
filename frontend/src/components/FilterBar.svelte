@@ -37,6 +37,7 @@
     toggleValue,
   } from '../lib/entityFilter.js';
   import Icon from './Icon.svelte';
+  import DateField from './DateField.svelte';
 
   let {
     filter = $bindable(),
@@ -287,7 +288,7 @@
         class="btn btn-sm add"
         aria-expanded={open === '+'}
         {disabled}
-        title="Narrow the case: a stored field such as kind = video, a type, a folder, a date"
+        title="Filter the case"
         onclick={() => (open = open === '+' ? '' : '+')}
       >
         <Icon name="plus" size={12} /> Filter
@@ -320,7 +321,7 @@
                      knowing what to click is the fault this menu exists to fix. -->
                 <button
                   disabled={state.off}
-                  title={state.off ? `${axis.hint} — ${state.note}` : axis.hint}
+                  title={state.off ? `${axis.hint} (${state.note})` : axis.hint}
                   onclick={() => chose(axis.key)}
                 >
                   <span class="what">
@@ -450,7 +451,7 @@
             <button
               class:on={filter.folder === row.path}
               style="padding-left: {8 + row.depth * 12}px"
-              title="{row.path} — {row.direct} here, {row.under} with everything under it"
+              title="{row.path}: {row.direct} here, {row.under} with everything under it"
               onclick={() => pickFolder(row)}
             >
               <span>{row.name}</span>
@@ -578,24 +579,16 @@
       <!-- A range typed by hand is absolute and stays where it is put, where a preset
            re-resolves against today on every request. Setting one drops the other. -->
       <div class="dates">
-        <label>
-          From
-          <input
-            type="date"
-            value={filter.since}
-            onchange={(event) =>
-              (filter = { ...filter, since: event.currentTarget.value, added: '' })}
-          />
-        </label>
-        <label>
-          To
-          <input
-            type="date"
-            value={filter.until}
-            onchange={(event) =>
-              (filter = { ...filter, until: event.currentTarget.value, added: '' })}
-          />
-        </label>
+        <div class="date-end">
+          <span>From</span>
+          <DateField day reading={false} label="From" value={filter.since}
+                     onchange={(value) => (filter = { ...filter, since: value || '', added: '' })} />
+        </div>
+        <div class="date-end">
+          <span>To</span>
+          <DateField day reading={false} label="To" value={filter.until}
+                     onchange={(value) => (filter = { ...filter, until: value || '', added: '' })} />
+        </div>
       </div>
     {:else if axis === 'by'}
       <ul class="scroll">
@@ -803,7 +796,7 @@
     cursor: default;
   }
   .check,
-  .dates label {
+  .dates .date-end {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -815,14 +808,7 @@
     display: flex;
     flex-direction: column;
   }
-  .dates input {
+  .dates .date-end :global(.date-field) {
     flex: 1;
-    padding: 2px 5px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-1);
-    color: var(--text-1);
-    font: inherit;
-    font-size: var(--fs-xs);
   }
 </style>

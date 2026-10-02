@@ -27,7 +27,6 @@ from azimut.engine.analysis_models import (
     Recipe,
     Rule,
     RunInput,
-    frames_for,
     is_radar,
     is_single,
     recipe_products,
@@ -206,12 +205,10 @@ def test_what_a_recipe_reads_follows_from_its_rules():
     change = recipe(LOSS, GREEN_BEFORE)
     assert not is_single(change) and not is_radar(change)
     assert recipe_products(change) == ["bands-B04-B08"]
-    assert frames_for(change) == 4           # picture and one product, on each date
     present = recipe({"measure": "band", "band": "B12", "on": "b", "op": "ge", "value": 0.3},
                      {"measure": "index", "index": "bsi", "on": "b", "op": "ge", "value": 0})
     assert is_single(present)
     assert recipe_products(present) == ["bands-B02-B04-B08", "bands-B11-B12"]
-    assert frames_for(present) == 3          # one date: its picture and two products
     classes = recipe({"measure": "class", "classes": ["water"], "on": "b", "op": "is"})
     assert recipe_products(classes) == ["bands-B08"]
     radar = recipe({"measure": "radar", "polarisation": "ratio", "on": "change", "op": "moved", "value": 3})

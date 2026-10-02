@@ -172,7 +172,7 @@
         triggerBundleDownload(current.id, started.job_id);
         toast('Download started', 'ok', 4000);
       } else {
-        toast(job.error || 'Could not export the case', 'danger', 7000);
+        toast(job.error ? `Could not export the case: ${job.error}` : 'Could not export the case', 'danger', 7000);
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
@@ -238,7 +238,7 @@
         signal: bundleJobController.signal,
       });
       if (job.state !== 'ready') {
-        toast(job.error || 'Could not import the case', 'danger', 7000);
+        toast(job.error ? `Could not import the case: ${job.error}` : 'Could not import the case', 'danger', 7000);
         return;
       }
       await refreshCaseList();

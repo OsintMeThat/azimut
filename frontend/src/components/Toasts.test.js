@@ -23,3 +23,16 @@ describe('Toasts', () => {
     expect(body).toContain('toast-action');
   });
 });
+
+describe('Toasts and a screen reader', () => {
+  it('announces toasts politely and a failure at once', () => {
+    uiState.toasts = [
+      { id: 1, message: 'Copied', kind: 'ok' },
+      { id: 2, message: 'Not saved', kind: 'danger' },
+    ];
+    const { body } = render(Toasts);
+    expect(body).toContain('role="status"');
+    expect(body).toContain('aria-live="polite"');
+    expect(body.match(/role="alert"/g)).toHaveLength(1);
+  });
+});

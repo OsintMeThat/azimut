@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { OVERLAY_IDS, rasterSource, sourceMaxZoom, tileTemplate, tileUrls } from './basemap.js';
+import { OVERLAY_IDS, imageryError, rasterSource, sourceMaxZoom, tileTemplate, tileUrls } from './basemap.js';
 
 /**
  * The provider shapes are the ones `/api/satellite/providers` really answers
@@ -49,6 +49,14 @@ const WIDGET = {
   max_zoom: 21,
   meter: 'google_js',
 };
+
+it('explains imagery failures without exposing the upstream URL or response', () => {
+  expect(imageryError({ status: 400, message: 'private upstream URL' })).toContain('display layer');
+  expect(imageryError({ status: 404 })).toContain('No imagery');
+  expect(imageryError({ status: 403 })).toContain('key');
+  expect(imageryError({ status: 429 })).toContain('allowance');
+  expect(imageryError(new Error('private upstream URL'))).toBe('The imagery could not be loaded; try again.');
+});
 
 describe('where a provider’s tiles are fetched from', () => {
   it('sends every provider it can through the backend proxy', () => {
@@ -431,6 +439,29 @@ describe('the layers on a map', () => {
       expect(trouble.mock.calls).toEqual([['firms']]);
       basemaps.dispose();
       expect(map.calls.off).toContainEqual(['error', onError]);
+    });
+  });
+
+  it('reports the failed imagery variant and rebuilds it only when Retry is pressed', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const trouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onImageryTrouble: trouble });
+      const id = 'sentinel2~TRUE_COLOR~2026-09-25~2026-09-25';
+      basemaps.show(SENTINEL, id, 512);
+      basemaps.setAlternate(SENTINEL, 'sentinel2~SWIR', 512);
+      const [, onError] = map.calls.on.find(([name]) => name === 'error');
+      const error = { status: 400 };
+      onError({ sourceId: 'basemap-imagery', error });
+      onError({ sourceId: 'basemap-alternate', error });
+      onError({ sourceId: 'basemap-roads', error });
+      expect(trouble.mock.calls).toEqual([[{ id, error }], [{ id: 'sentinel2~SWIR', error }]]);
+      const source = map.sources.get('basemap-imagery');
+      basemaps.show(SENTINEL, id, 512);
+      expect(map.sources.get('basemap-imagery')).toBe(source);
+      basemaps.retry(SENTINEL, id, 512);
+      expect(map.sources.get('basemap-imagery')).not.toBe(source);
+      expect(map.sources.get('basemap-imagery').tiles[0]).toContain(id);
     });
   });
 

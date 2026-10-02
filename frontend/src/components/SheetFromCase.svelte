@@ -174,10 +174,9 @@
   </p>
   <p class="note">
     {#if filesShape && files?.sheet}
-      This case already has this worklist. Its Refresh brings it level, and building here
-      makes a second one.
+      This case already has this worklist, so building here makes a second one.
     {:else if fixed}
-      The case writes those columns and Refresh keeps them level with it. Status, Notes and any
+      The case writes those columns and Refresh keeps them level, while Status, Notes and any
       column you add are yours.
     {:else}
       Each row points back at what it came from, so promoting it later updates that entity

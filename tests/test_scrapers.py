@@ -344,3 +344,31 @@ def test_activate_is_idempotent(monkeypatch, fake_dist):
         scrapers.activate()
     finders = [f for f in sys.meta_path if isinstance(f, scrapers._RuntimeFinder)]
     assert len(finders) == 1
+
+
+def _runtime_copy(version: str) -> None:
+    root = scrapers.dist_dir(DIST)
+    (root / MODULE).mkdir(parents=True)
+    (root / MODULE / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+    (root / f"{MODULE}-{version}.dist-info").mkdir()
+
+
+@pytest.mark.parametrize(
+    ("bundled", "source", "shadowed"),
+    [("2026.9.9", "bundled", {}), ("2025.12.31", "runtime", {MODULE: "2026.1.1"})],
+)
+def test_a_runtime_copy_wins_only_when_newer_than_the_build(monkeypatch, fake_dist, bundled, source, shadowed):
+    """An update pressed under an older build must not shadow the newer scraper the
+    next build ships: the workspace outlives the program."""
+    _runtime_copy("2026.1.1")
+    real = importlib.metadata.version
+    monkeypatch.setattr(
+        scrapers.importlib.metadata, "version", lambda dist: bundled if dist == DIST else real(dist)
+    )
+    assert scrapers.active_version(DIST) == ("2026.1.1" if source == "runtime" else bundled, source)
+    assert scrapers.activate() == shadowed
+
+
+def test_a_frozen_build_without_metadata_keeps_the_runtime_copy(fake_dist):
+    _runtime_copy("2026.1.1")
+    assert scrapers.active_version(DIST) == ("2026.1.1", "runtime")

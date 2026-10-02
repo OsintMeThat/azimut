@@ -668,7 +668,7 @@
             <Icon name="pushpin" size={13} />
             <button
               class="work-name"
-              title="New files and saved work land in this folder. Press to show it."
+              title="Show the folder new work lands in"
               onclick={revealWorkFolder}
             >
               {working}

@@ -252,15 +252,6 @@ def staged_pairs(case: Case, token: str, slot: str) -> list[tuple[Path, dict[str
     return [(path, staged) for path, staged in found if path is not None]
 
 
-def fill_slot(case: Case, token: str, slot: str, staged: dict[str, Any]) -> dict[str, Any]:
-    """Record what a download or a hand-attached file put in a slot, alone.
-
-    Filling replaces: retrying a failed source download does not leave the abandoned
-    attempt on disk, and re-picking a picture drops the one that was there.
-    """
-    return fill_files(case, token, slot, [staged])
-
-
 def fill_files(
     case: Case, token: str, slot: str, staged: list[dict[str, Any]], *, for_url: str = ""
 ) -> dict[str, Any]:
@@ -602,9 +593,9 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
                         {
                             "code": "gps-conflict",
                             "text": (
-                                f"The file states {own['lat']:.6f}, {own['lon']:.6f} — "
-                                f"{round(away):,} m from the coordinates entered."
-                            ).replace(",", " "),
+                                f"The file states {own['lat']:.6f}, {own['lon']:.6f}, "
+                                f"{f'{round(away):,}'.replace(',', ' ')} m from the coordinates entered."
+                            ),
                         }
                     )
 

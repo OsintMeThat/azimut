@@ -18,6 +18,7 @@
    */
   import { ID_COLUMN } from '../lib/sheet.js';
   import { parseWhen, whenShape } from '../lib/sheetRoles.js';
+  import DateField from './DateField.svelte';
 
   let { table, meta, subject = '', onchoices, onanchors } = $props();
 
@@ -162,8 +163,8 @@
     {#if needsDay}
       <label class="row">
         <span>The day it belongs to</span>
-        <input class="input" type="date" aria-label="The day these hours belong to"
-               bind:value={day} />
+        <DateField day reading={false} label="The day these hours belong to" value={day}
+                   onchange={(value) => (day = value || '')} />
       </label>
       <p class="note">These cells hold clocks with no day.</p>
     {/if}

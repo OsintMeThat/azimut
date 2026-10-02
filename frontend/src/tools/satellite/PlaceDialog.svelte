@@ -112,7 +112,7 @@
     {#if draft.id && ondetails}
       <button
         class="btn btn-ghost btn-sm"
-        title="Precision, the source's own wording, how the point was found"
+        title="Edit precision, wording and method"
         onclick={() => (touched ? (discarding = true) : ondetails())}
       >Edit more details</button>
     {/if}

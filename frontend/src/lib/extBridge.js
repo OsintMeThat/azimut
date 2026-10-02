@@ -303,6 +303,9 @@ export function extensionState({ timeoutMs = 700, win = window } = {}) {
           // "development" for a folder or a temporary add-on, "normal" for a
           // packaged copy the browser manages. Null from a copy predating it.
           installType: msg.installType ?? null,
+          // False when this tab is not the address the copy is paired with: it then
+          // refuses to capture or hand off for it. Null from a copy predating it.
+          paired: msg.paired ?? null,
         });
       }
     }

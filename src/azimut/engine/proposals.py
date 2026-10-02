@@ -176,9 +176,15 @@ class _Mark:
         self.at: str | None = stored.get("at") or None
         self.read: set[str] = set(stored.get("read") or [])
         self.newest, self.newest_ids = self.at, set(self.read)
+        # Filed before the mark, then edited into something worth reading.
+        self.again: set[str] = set(stored.get("again") or [])
+        self.revisited: set[str] = set()
 
     def fresh(self, entity: dict[str, Any]) -> bool:
         at, entity_id = _filed_at(entity), str(entity["id"])
+        if entity_id in self.again:
+            self.revisited.add(entity_id)
+            return True
         if self.at is not None and (at < self.at or (at == self.at and entity_id in self.read)):
             return False
         if at and (self.newest is None or at > self.newest):
@@ -202,7 +208,13 @@ def _propose_accounts(case: "Case", mark: _Mark, counts: dict[str, int]) -> None
     held: dict[str, str] = {}
     for account_id, label in case.labels_of_type("account"):
         held.setdefault(entity_engine.identity_key("account", label), account_id)
-    for entity in _page_all(case, list(URL_ATTRS), mark.at):
+    filed = _page_all(case, list(URL_ATTRS), mark.at)
+    seen = {entity["id"] for entity in filed}
+    for entity_id in sorted(mark.again - seen):
+        edited = case.get_entity(entity_id)
+        if edited is not None and edited.get("type") in URL_ATTRS:
+            filed.append(edited)
+    for entity in filed:
         if not mark.fresh(entity):
             continue
         account = account_from_url(_address(entity))
@@ -337,7 +349,13 @@ def propose(case: "Case") -> dict[str, int]:
         _propose_sites(case, mark, counts)
     stored = mark.stored()
     if stored is not None:
-        case.set_link_pass(stored)
+        with case._lock:
+            # An edit made while the pass ran names its entity for the next one.
+            current = case.link_pass() or {}
+            left = [i for i in current.get("again") or [] if i not in mark.revisited]
+            if left:
+                stored["again"] = left
+            case.set_link_pass(stored)
     return counts
 
 
@@ -348,6 +366,38 @@ TRIGGER_TYPES = frozenset({*URL_ATTRS, *SITE_TYPES})
 def on_filed(case: "Case", entity_type: str) -> None:
     """Queue a pass after something it reads was filed. One per case at a time."""
     if entity_type in TRIGGER_TYPES:
+        workqueue.enqueue(case, KIND, key="case")
+
+
+#: The attributes a pass reads, so an edit that names none of them costs no lookup.
+_READ_ATTRS = frozenset({"lat", "lon", *URL_ATTRS.values()})
+
+
+def may_change_reading(patch: dict[str, Any]) -> bool:
+    """Whether an edit names anything a pass reads."""
+    return not _READ_ATTRS.isdisjoint(patch.get("attrs") or {})
+
+
+def _reading(entity: dict[str, Any]) -> Any:
+    """What a pass reads off an entity: a place's point, a file's or a bookmark's address."""
+    if str(entity.get("type") or "") in SITE_TYPES:
+        return point_of(entity)
+    return str(_address(entity) or "").strip() or None
+
+
+def on_changed(case: "Case", before: dict[str, Any], after: dict[str, Any]) -> None:
+    """Queue a pass when an edit gives a filed entity something new to read: a place a
+    point or a new one, a file or a bookmark an address or a new one.
+
+    Passes read past a mark set by filing time, which an edit does not move, so a
+    place geolocated after it was filed would otherwise never be read again. The same
+    value sent back is not new: a Save in Details or a second Promote resends it, and
+    reading the entity again would bring back every proposal the analyst dropped.
+    """
+    reading = _reading(after)
+    if reading is None or reading == _reading(before):
+        return
+    if case.revisit_links(str(after["id"])):
         workqueue.enqueue(case, KIND, key="case")
 
 
@@ -369,23 +419,14 @@ def unreviewed(link: dict[str, Any]) -> bool:
     return provenance.get("by") == BY and provenance.get("status") == "suggested"
 
 
-def pending(case: "Case") -> dict[str, int]:
+def counted(suggestions: dict[str, Any]) -> dict[str, int]:
     """How many proposals still wait for the analyst, by what they say."""
-    waiting = {"accounts": 0, "posted": 0, "sites": 0}
-    for link in case.list_links():
-        if not unreviewed(link):
-            continue
-        if link["type"] == link_engine.POSTED:
-            waiting["posted"] += 1
-        elif link["type"] == link_engine.SAME_SITE_AS:
-            waiting["sites"] += 1
-    waiting["accounts"] = sum(
-        1
-        for entity in _page_all(case, ["account"])
-        if (entity.get("provenance") or {}).get("by") == BY
-        and (entity.get("provenance") or {}).get("status") == "suggested"
-    )
-    return waiting
+    links, entities = suggestions["links"], suggestions["entities"]
+    return {
+        "accounts": entities.get("account", 0),
+        "posted": links.get(link_engine.POSTED, 0),
+        "sites": links.get(link_engine.SAME_SITE_AS, 0),
+    }
 
 
 # -- what a proof shares with the rest of the case -----------------------------

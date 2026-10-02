@@ -562,8 +562,6 @@ def test_a_radar_variant_draws_one_pass_and_names_it(monkeypatch, tmp_path):
                 "sentinel1~../etc"):
         with pytest.raises(KeyError):
             tiles.get_provider(bad)
-    assert sentinel.radar_variant_id("2026-05-14", "05:42:10") == "sentinel1~2026-05-14~054210"
-    assert sentinel.radar_variant_id() == "sentinel1"
 
 
 def test_radar_difference_needs_two_passes_of_one_track(client):

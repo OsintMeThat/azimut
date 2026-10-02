@@ -8,6 +8,7 @@
   // backend again.
   import Icon from '../../components/Icon.svelte';
   import MoonGlyph from '../../components/MoonGlyph.svelte';
+  import DateField from '../../components/DateField.svelte';
 
   let {
     sky = null,
@@ -106,12 +107,12 @@
       title="Drag to move this panel"
       aria-label="Move panel"
     ><Icon name="grip" size={14} /></button>
-    <input
-      class="input input-sm"
-      type="date"
+    <DateField
+      day
+      reading={false}
+      label="Local date at the anchored point"
       value={day}
-      onchange={(e) => ondate(e.currentTarget.value)}
-      title="Local date at the anchored point"
+      onchange={(value) => value && ondate(value)}
     />
     <span class="zone">{sky?.zone?.abbreviation ?? ''}</span>
     <button class="btn btn-ghost btn-sm" onclick={onclose} title="Close (Esc)">
@@ -202,10 +203,8 @@
   .grip:active {
     cursor: grabbing;
   }
-  .line .input {
+  .line :global(.date-field) {
     flex: 1;
-    font-family: var(--font-mono);
-    font-size: var(--fs-sm);
   }
   .zone {
     font-size: var(--fs-xs);

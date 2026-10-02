@@ -33,7 +33,7 @@ export const BOARD_GROUPS = [
     label: 'Files',
     families: ['collected'],
     kind: 'material',
-    reads: { tool: 'media', label: 'Media Library' },
+    reads: { tool: 'media', label: 'Media' },
   },
   { id: 'document', label: 'Work', families: ['document'], kind: 'material' },
   // A free type the registry has never heard of has no family, and still belongs
@@ -57,16 +57,6 @@ export function groupOfType(type, familyOf) {
 /** The types of one group among the ones the case holds (`summary.by_type`). */
 export function typesOfGroup(group, caseTypes, familyOf) {
   return caseTypes.filter((type) => groupOfType(type, familyOf).id === group.id).sort();
-}
-
-/**
- * The types a group's own page asks for: its types, narrowed by the ones the question
- * already picked. Empty means the group cannot hold an answer, so it sends nothing.
- */
-export function groupRequestTypes(group, caseTypes, wantedTypes, familyOf) {
-  const own = typesOfGroup(group, caseTypes, familyOf);
-  if (!wantedTypes?.length) return own;
-  return own.filter((type) => wantedTypes.includes(type));
 }
 
 /** How many of the answer each group holds, from a per-type count. */

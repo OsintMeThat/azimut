@@ -163,6 +163,7 @@
   import SheetMove from '../components/SheetMove.svelte';
   import SheetRowMenu from '../components/SheetRowMenu.svelte';
   import SheetRowPanel from '../components/SheetRowPanel.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   const HEAD_H = 32;
   /** How long the two lines above the grid may be. Mirrors `engine/sheets.MAX_DESCRIPTION`,
@@ -518,12 +519,22 @@
     });
   });
 
-  /** Back to the home. Whatever is unsaved is written first, as on any other switch, so
-   *  closing never loses an edit. */
+  /** Back to the home. Whatever is unsaved is written first, as on any other switch, and
+   *  a grid that still holds what no write kept asks before it is dropped. */
   async function goHome() {
+    await release(async () => {
+      close();
+      await list(caseId);
+    });
+  }
+
+  /** Write what is pending, then let go of the sheet. A failed or conflicting save leaves
+   *  edits only the grid holds, and leaving drops them as surely as Reload does, so it asks
+   *  the same way. */
+  async function release(then) {
     await flush();
-    close();
-    await list(caseId);
+    if (!unsaved) return then();
+    confirming = { kind: 'leave', then };
   }
 
   /** Which sheet this case was last left on. Kept in the browser rather than in the case:
@@ -550,7 +561,10 @@
 
   async function open(id) {
     if (id === openId) return;
-    await flush();
+    await release(() => openNow(id));
+  }
+
+  async function openNow(id) {
     loading = true;
     picker = null;
     try {
@@ -558,7 +572,7 @@
       openId = id;
       rememberOpened(caseId, id);
     } catch (error) {
-      toast(error.message || 'This sheet could not be opened.', 'error');
+      toast(error.message || 'This sheet could not be opened.', 'danger');
     } finally {
       loading = false;
     }
@@ -790,6 +804,20 @@
     }
   }
 
+  // A tab closing runs no timer and no teardown, so an edit still waiting for its timer
+  // goes out from here with `keepalive`, which outlives the page. The browser caps such
+  // a request at 64 KB, so a big sheet's last edit cannot be sent this way.
+  const KEEPALIVE_BYTES = 60_000;
+  function onpagehide() {
+    if (saveState !== 'dirty' || conflict || !openId) return;
+    const [path, body] = pendingTable
+      ? [`/api/cases/${caseId}/sheets/${openId}`, { columns: table.columns, rows: table.rows, meta, stamp }]
+      : [`/api/cases/${caseId}/sheets/${openId}/meta`, { meta }];
+    // Bytes, not characters: Arabic or Cyrillic text takes two of them per character.
+    if (new TextEncoder().encode(JSON.stringify(body)).length > KEEPALIVE_BYTES) return;
+    api.put(path, body, { keepalive: true }).catch(() => {});
+  }
+
   /**
    * One write, down whichever of the two roads the change needs.
    *
@@ -847,7 +875,7 @@
         conflict = true;
         return;
       }
-      toast(error.message || 'This sheet could not be saved.', 'error');
+      toast(error.message || 'This sheet could not be saved.', 'danger');
     }
   }
 
@@ -866,13 +894,14 @@
     try {
       adopt(await api.get(`/api/cases/${caseId}/sheets/${openId}`), { reset: true });
     } catch (error) {
-      toast(error.message || 'This sheet could not be opened.', 'error');
+      toast(error.message || 'This sheet could not be opened.', 'danger');
     }
   }
 
-  /** Write anything pending before leaving the sheet, so switching never drops an edit. */
+  /** Write anything pending before leaving the sheet, so switching never drops an edit.
+   *  A save that failed is tried once more; a conflict is not, it needs the analyst. */
   async function flush() {
-    if (saveState === 'dirty') await save();
+    if (saveState === 'dirty' || (saveState === 'failed' && !conflict)) await save();
   }
 
   $effect(() => () => {
@@ -927,7 +956,7 @@
       if (conflict) conflict = true;
       stale = { diff };
     } catch (error) {
-      toast(error.message || 'That file could not be read.', 'error');
+      toast(error.message || 'That file could not be read.', 'danger');
     } finally {
       comparing = false;
     }
@@ -967,7 +996,7 @@
         await save();
       }
     } catch (error) {
-      toast(error.message || 'This sheet could not be created.', 'error');
+      toast(error.message || 'This sheet could not be created.', 'danger');
     }
   }
 
@@ -979,7 +1008,7 @@
       await api.patch(`/api/cases/${caseId}/entities/${openId}`, { label: name });
       await list(caseId);
     } catch (error) {
-      toast(error.message || 'This sheet could not be renamed.', 'error');
+      toast(error.message || 'This sheet could not be renamed.', 'danger');
       title = current?.title ?? title;
     }
   }
@@ -991,7 +1020,7 @@
       close();
       await list(caseId);
     } catch (error) {
-      toast(error.message || 'This sheet could not be deleted.', 'error');
+      toast(error.message || 'This sheet could not be deleted.', 'danger');
     }
   }
 
@@ -1029,7 +1058,7 @@
           : `“${made.label ?? 'Sheet'}” created, with the rows and everything the grid knows.`,
       );
     } catch (error) {
-      toast(error.message || 'This sheet could not be copied.', 'error');
+      toast(error.message || 'This sheet could not be copied.', 'danger');
     }
   }
 
@@ -1046,7 +1075,7 @@
     const grown = appendRows(table, incoming, mapping);
     appending = false;
     if (!grown.added) {
-      toast('No column of that table matches this sheet.', 'error');
+      toast('No column of that table matches this sheet.', 'danger');
       return;
     }
     structural(() => {
@@ -1087,7 +1116,7 @@
         onClick: () => showExports(),
       });
     } catch (error) {
-      toast(error.message || 'This sheet could not be exported.', 'error');
+      toast(error.message || 'This sheet could not be exported.', 'danger');
     } finally {
       exporting = false;
     }
@@ -1099,7 +1128,7 @@
     try {
       await revealSheetExports(caseId);
     } catch (error) {
-      toast(error.message || 'That folder could not be opened.', 'error');
+      toast(error.message || 'That folder could not be opened.', 'danger');
     }
   }
 
@@ -1176,7 +1205,7 @@
         dropped || cut ? 'warn' : 'info',
       );
     } catch (error) {
-      toast(error.message || 'This workbook could not be read.', 'error');
+      toast(error.message || 'This workbook could not be read.', 'danger');
     } finally {
       building = false;
     }
@@ -1219,7 +1248,7 @@
   async function bringIn(file, rowIndex, columnIndex) {
     const at = pictureColumn(columnIndex);
     if (at === -1) {
-      toast('Declare a column a picture first, then drop the image on it.', 'error');
+      toast('Declare a column a picture first, then drop the image on it.', 'danger');
       return;
     }
     try {
@@ -1238,7 +1267,7 @@
       await reloadCase();
       toast(made.duplicate ? 'Already in the case. The cell now cites it.' : 'Picture added to the case.');
     } catch (error) {
-      toast(error.message || 'That picture could not be brought in.', 'error');
+      toast(error.message || 'That picture could not be brought in.', 'danger');
     }
   }
 
@@ -2085,7 +2114,7 @@
       ]);
       toast(`${found.length} ${found.length === 1 ? 'file' : 'files'} attached to this row.`);
     } catch (error) {
-      toast(error.message || 'The library could not be searched.', 'error');
+      toast(error.message || 'The library could not be searched.', 'danger');
     }
   }
 
@@ -2170,7 +2199,7 @@
       await reloadCase();
     } catch (error) {
       if (error?.status === 409) conflict = true;
-      else toast(error.message || 'Those rows could not be moved.', 'error');
+      else toast(error.message || 'Those rows could not be moved.', 'danger');
     } finally {
       promoting = false;
     }
@@ -2207,7 +2236,7 @@
       await reloadCase();
     } catch (error) {
       if (error?.status === 409) conflict = true;
-      else toast(error.message || 'That move could not be put back.', 'error');
+      else toast(error.message || 'That move could not be put back.', 'danger');
     } finally {
       promoting = false;
     }
@@ -2253,7 +2282,7 @@
       await reloadCase();
     } catch (error) {
       if (error?.status === 409) conflict = true;
-      else toast(error.message || 'These rows could not be sent to the case.', 'error');
+      else toast(error.message || 'These rows could not be sent to the case.', 'danger');
     } finally {
       promoting = false;
     }
@@ -2304,7 +2333,7 @@
       ].filter(Boolean);
       toast(said.length ? `${said.join(', ')}.` : 'Already level with the case.');
     } catch (error) {
-      toast(error.message || 'This sheet could not be refreshed.', 'error');
+      toast(error.message || 'This sheet could not be refreshed.', 'danger');
     } finally {
       refreshing = false;
     }
@@ -2341,7 +2370,7 @@
       await watchBuild(job_id);
     } catch (error) {
       buildJob = null;
-      toast(error.message || 'That build could not be started.', 'error');
+      toast(error.message || 'That build could not be started.', 'danger');
     }
   }
 
@@ -2355,7 +2384,7 @@
       }
       buildJob = null;
       if (status.status !== 'done') {
-        toast(status.error || 'That build stopped.', 'error');
+        toast(status.error ? `That build stopped: ${status.error}.` : 'That build stopped.', 'danger');
         return;
       }
       buildReport = status.result ?? null;
@@ -2542,7 +2571,7 @@
    */
   function room(growth) {
     const full = tooBigBy(table, growth);
-    if (full) toast(full, 'error');
+    if (full) toast(full, 'danger');
     return !full;
   }
 
@@ -2754,7 +2783,7 @@
   function cleanTable(next, said) {
     const full = tooBigBy(next.table);
     if (full) {
-      toast(full, 'error');
+      toast(full, 'danger');
       return;
     }
     structural(() => {
@@ -2878,7 +2907,7 @@
       }
       reading = { kind: 'links', column: name, ...readVerdicts(entries, verdicts) };
     } catch (error) {
-      toast(error.message || 'Those links could not be checked.', 'error');
+      toast(error.message || 'Those links could not be checked.', 'danger');
     } finally {
       checking = null;
     }
@@ -2907,7 +2936,7 @@
           : `${sheet.taken} ${sheet.taken === 1 ? 'row' : 'rows'} taken into the sheet.`,
       );
     } catch (error) {
-      toast(error.message || 'This sheet could not be built.', 'error');
+      toast(error.message || 'This sheet could not be built.', 'danger');
     } finally {
       building = false;
     }
@@ -2939,9 +2968,9 @@
     );
     try {
       await navigator.clipboard.writeText(text);
-      toast(`${shown.length} ${shown.length === 1 ? 'row' : 'rows'} copied as a table.`);
+      toast(`${shown.length} ${shown.length === 1 ? 'row' : 'rows'} copied as a table`);
     } catch {
-      toast('Copying failed. Export the CSV instead.', 'error');
+      toast('Copying failed. Export the CSV instead.', 'danger');
     }
   }
 
@@ -3077,7 +3106,7 @@
     const at = table.columns.indexOf(name);
     const points = rows.map((index) => pointOf(index, at)).filter(Boolean);
     if (!points.length) {
-      toast('No coordinates could be read in this column.', 'error');
+      toast('No coordinates could be read in this column.', 'danger');
       return;
     }
     uiState.mapSheetPoints = { points, sheet: title, column: name };
@@ -3101,7 +3130,7 @@
   function batchToMap() {
     const name = firstOfKind('latlon');
     if (!name) {
-      toast('No column is set to coordinates.', 'error');
+      toast('No column is set to coordinates.', 'danger');
       return;
     }
     toMap(name, batchIndices);
@@ -3110,7 +3139,7 @@
   function batchToTimeline() {
     const name = firstOfKind('when');
     if (!name) {
-      toast('No column is set to dates.', 'error');
+      toast('No column is set to dates.', 'danger');
       return;
     }
     toTimeline(name, batchIndices);
@@ -3170,7 +3199,7 @@
       .filter((read) => read?.shape === 'moment')
       .map((read) => read.key);
     if (!moments.length) {
-      toast('No date in this column could be read.', 'error');
+      toast('No date in this column could be read.', 'danger');
       return;
     }
     const day = 86_400_000;
@@ -3651,7 +3680,7 @@
 <!-- The focus listener is what turns "the file moved on" from a refusal into a warning:
      the stamp is a stat, so asking on every return is cheap, and hearing it now beats
      hearing it at the save. -->
-<svelte:window onkeydown={onKey} oncopy={onCopy} onpaste={onPaste} onfocus={checkStamp} />
+<svelte:window onkeydown={onKey} oncopy={onCopy} onpaste={onPaste} onfocus={checkStamp} {onpagehide} />
 
 <div class="tool">
   <header class="tool-header">
@@ -3904,10 +3933,10 @@
         <strong>{shown.length}</strong> of {table.rows.length}
       </span>
       <div class="spacer"></div>
-      <button class="btn btn-ghost btn-sm" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}>
+      <button class="btn btn-ghost btn-sm" title={shortcut('Undo (Ctrl+Z)')} disabled={!canUndo} onclick={undo}>
         <Icon name="undo" size={13} />
       </button>
-      <button class="btn btn-ghost btn-sm" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}>
+      <button class="btn btn-ghost btn-sm" title={shortcut('Redo (Ctrl+Shift+Z)')} disabled={!canRedo} onclick={redo}>
         <Icon name="redo" size={13} />
       </button>
       <!-- Thirty pixels is right for a worklist and wrong for the column the reasoning is
@@ -4063,7 +4092,7 @@
           {#if reading.bad.length}
             <div class="found">
               {#each reading.bad.slice(0, 12) as entry (entry.url)}
-                <button class="chip" title="{entry.url} — {entry.state}{entry.code ? ` (${entry.code})` : ''}"
+                <button class="chip" title="{entry.url}: {entry.state}{entry.code ? ` (${entry.code})` : ''}"
                         onclick={() => paintReading(entry.rows, 'red')}>
                   {linkLabel(entry.url)} <small>×{entry.rows.length}</small>
                 </button>
@@ -5081,6 +5110,14 @@
     detail="Undo cannot bring them back afterwards."
     confirmLabel="Reload"
     onconfirm={() => { confirming = null; reload(); }}
+    oncancel={() => (confirming = null)} />
+{:else if confirming?.kind === 'leave'}
+  <ConfirmDialog
+    title="Leave and lose your edits"
+    message="This grid is holding changes that could not be written. Leaving drops them."
+    detail="Stay to save them again or copy them out."
+    confirmLabel="Leave"
+    onconfirm={() => { const then = confirming.then; confirming = null; then(); }}
     oncancel={() => (confirming = null)} />
 {:else if confirming?.kind === 'overwrite'}
   <ConfirmDialog

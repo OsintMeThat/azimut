@@ -4,6 +4,7 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
   import { caseState, uiState, toast, reloadCase, prefs, updatesState } from '../lib/state.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { templatesState, postDraftState } from '../lib/state.svelte.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
@@ -454,8 +455,7 @@
   // Copies go through bidiSafe so coordinates, plus codes, mentions and URLs
   // keep reading left-to-right in Arabic or Hebrew posts (see lib/bidi).
   async function copy(value) {
-    await navigator.clipboard.writeText(bidiSafe(value));
-    toast('Copied to clipboard', 'ok', 1600);
+    await copyText(bidiSafe(value));
   }
 
   function threadParts() {
@@ -471,8 +471,7 @@
 
   async function copyAll(showToast = true) {
     const parts = threadParts();
-    await navigator.clipboard.writeText(parts.map(bidiSafe).join('\n\n---\n\n'));
-    if (showToast) toast('All posts copied', 'ok', 1800);
+    return copyText(parts.map(bidiSafe).join('\n\n---\n\n'), { said: 'All posts copied', quiet: !showToast });
   }
 
   // ---- media picker -------------------------------------------------------
@@ -1118,13 +1117,26 @@
     }
   }
 
+  let publishing = $state(false);
+
   async function publish() {
-    // Social intents prefill the first post only. The rest is copied as replies.
-    await copyAll(false);
-    if (await tryHandOff()) return;
-    const url = postComposeUrl(target, bidiSafe(tweet1));
-    window.open(url, '_blank', 'noopener,noreferrer');
-    toast(`Opened ${targetInfo.label}. Posts copied for replies.`, 'info', 3200);
+    if (publishing) return;
+    publishing = true;
+    try {
+      // Social intents prefill the first post only. The rest is copied as replies, and a
+      // clipboard the browser keeps shut costs the replies, never the hand-off itself.
+      const copied = await copyAll(false);
+      if (await tryHandOff()) return;
+      const url = postComposeUrl(target, bidiSafe(tweet1));
+      window.open(url, '_blank', 'noopener,noreferrer');
+      toast(
+        copied ? `Opened ${targetInfo.label}. Posts copied for replies.` : `Opened ${targetInfo.label}. Copy the replies from here.`,
+        'info',
+        3200,
+      );
+    } finally {
+      publishing = false;
+    }
   }
 </script>
 
@@ -1150,7 +1162,7 @@
       <button class="btn btn-ok btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
         <Icon name="file" size={14} /> Save report
       </button>
-      <button class="btn btn-info btn-sm" onclick={publish} disabled={!tweet1.trim()} title={`Copy posts and open ${targetInfo.label}`}>
+      <button class="btn btn-info btn-sm" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
         <Icon name="post" size={14} /> Publish on {targetInfo.label}
       </button>
     </div>

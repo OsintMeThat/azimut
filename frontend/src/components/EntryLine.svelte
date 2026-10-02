@@ -77,6 +77,7 @@
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import TemporalClaimEditor from './TemporalClaimEditor.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   let {
     caseId,
@@ -296,21 +297,29 @@
     saving = true;
     error = '';
     refused = {};
+    let saved;
     try {
-      const saved = await api.post(`/api/cases/${caseId}/timeline/claims`, body());
-      clear();
-      if (announce) toast('Added', 'ok', 8000, { label: 'Undo', onClick: () => undo(saved) });
-      sentence?.focus();
-      await reloadCase();
-      onsaved?.(saved, { undo: () => undo(saved) });
+      saved = await api.post(`/api/cases/${caseId}/timeline/claims`, body());
     } catch (failure) {
       error = failure.message;
       // A mention the case lost since it was picked is marked where it sits.
       const gone = /entity '([^']+)' not found/.exec(failure.message)?.[1];
       if (gone) refused = { [gone]: 'no longer in the case' };
-    } finally {
       saving = false;
+      return;
     }
+    // Saved. What follows only redraws the case, so a failure there is not this line's:
+    // reported as one, a retry would file the claim twice.
+    clear();
+    if (announce) toast('Added', 'ok', 8000, { label: 'Undo', onClick: () => undo(saved) });
+    sentence?.focus();
+    saving = false;
+    try {
+      await reloadCase();
+    } catch {
+      // the case list catches up on its next reload
+    }
+    onsaved?.(saved, { undo: () => undo(saved) });
   }
 
   /** Put a date on the line, as a click on the axis does, and go to the sentence. */
@@ -695,13 +704,13 @@
       class:on={panel === 'sources'}
       aria-expanded={panel === 'sources'}
       aria-label="Cite a source"
-      title="Cite a source: a file, a capture, a proof, a page, a note. Or drop a file on the line"
+      title="Cite a source, or drop a file here"
       onclick={() => togglePanel('sources')}
     >
       <Icon name="paperclip" size={16} /><span class="attach-label">Source</span>
     </button>
     {#if oncancel}<button class="btn btn-ghost" onclick={oncancel}>Cancel</button>{/if}
-    <button class="btn btn-primary" disabled={!ready} title={refusal || 'Enter · Ctrl+Enter from any field'} onclick={save}>
+    <button class="btn btn-primary" disabled={!ready} title={refusal || shortcut('Enter · Ctrl+Enter from any field')} onclick={save}>
       {saving ? 'Adding…' : 'Add'}
     </button>
   </div>
@@ -846,7 +855,7 @@
           Rewrite from the mentions
         </button>
       {/if}
-      <button class="btn btn-ghost btn-sm" title="The role of the date, how it was worked out, and the source's own wording" onclick={openFull}>
+      <button class="btn btn-ghost btn-sm" title="Edit the date's role, method and wording" onclick={openFull}>
         <Icon name="edit" size={11} /> Full editor
       </button>
     </div>

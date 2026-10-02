@@ -97,6 +97,7 @@
   import { loadRelationTypes } from '../lib/relations.svelte.js';
   import { fetchEventRows } from '../lib/catalog.js';
   import { offerNote } from '../lib/noteHere.svelte.js';
+  import NoCase from '../components/NoCase.svelte';
   import {
     BOARD_GROUPS,
     GROUPINGS,
@@ -1388,7 +1389,7 @@
     />
     <button
       class="btn"
-      title="Take a file into the case: a document, a scan, a plan, an image"
+      title="Add a file to the case"
       disabled={!caseState.current || importing || snapshotReading}
       onclick={() => fileInput?.click()}
     >
@@ -1560,7 +1561,7 @@
       </div>
     {/if}
     {#if !caseState.current}
-      <p class="empty">Open a case to see what it holds.</p>
+      <NoCase icon="grid" what="see what it holds" />
     {:else if totalling}
       <!-- The addition. One row per subject the statements point at, and every number
            beside what it left out: a sum that hid its uncounted and its ruled-out

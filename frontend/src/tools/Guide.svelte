@@ -17,6 +17,7 @@
   import { ALL_WORKSPACES, TOOL_LABELS } from '../lib/workspaces.js';
   import { uiState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   /** Where the whole picture lives, for a reader who downloaded a binary and has no
    *  repository in front of them. */
@@ -203,7 +204,7 @@
                     <h3>{group.where}</h3>
                     <ul class="keys">
                       {#each group.keys as key (key.combo)}
-                        <li><kbd>{key.combo}</kbd><span>{key.does}</span></li>
+                        <li><kbd>{shortcut(key.combo)}</kbd><span>{shortcut(key.does)}</span></li>
                       {/each}
                     </ul>
                   </div>

@@ -112,7 +112,7 @@ test('takes a copied address as a bookmark', async ({ page }) => {
 test('a link in Media is refused, and told where it does work', async ({ page }) => {
   const fixture = await installAppFixture(page, { catalog });
   await page.goto('/#media');
-  await expect(page.getByRole('heading', { name: 'Media Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Media', exact: true })).toBeVisible();
 
   await paste(page, { text: 'https://leak.example.test/thread/1' });
 
@@ -133,7 +133,7 @@ test('one Ctrl+V opens one dialog, however many tabs have been visited', async (
   // ungated listeners would answer one paste four times over.
   const fixture = await installAppFixture(page, { catalog });
   await page.goto('/#media');
-  await expect(page.getByRole('heading', { name: 'Media Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Media', exact: true })).toBeVisible();
   // switched by the tabs, not by the hash: a deep link is read once, at mount, and
   // the point here is to leave three tools mounted at the same time
   await page.getByRole('button', { name: 'Files', exact: true }).click();
@@ -177,7 +177,7 @@ test('a paste in Proof stays the composer\'s own', async ({ page }) => {
   // the boundary between them is worth a test rather than an argument.
   const fixture = await installAppFixture(page, { catalog });
   await page.goto('/#media');
-  await expect(page.getByRole('heading', { name: 'Media Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Media', exact: true })).toBeVisible();
   await page.getByRole('navigation').first().getByRole('button', { name: 'Case' }).click();
   await page.locator('.tabstrip').getByRole('button', { name: 'Board', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Board' })).toBeVisible();

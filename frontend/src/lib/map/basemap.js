@@ -274,6 +274,15 @@ export function rasterSource(provider, providerId, cell) {
   };
 }
 
+export function imageryError(error) {
+  const status = error?.status;
+  if (status === 404) return 'No imagery is available here for this pass.';
+  if (status === 400 || status === 422) return 'The imagery service refused this display layer.';
+  if (status === 401 || status === 403) return 'The imagery service refused the key; check Settings → Imagery.';
+  if (status === 429) return 'The imagery allowance is exhausted; check Settings → Imagery.';
+  return 'The imagery could not be loaded; try again.';
+}
+
 /**
  * Own the layers of one map.
  *
@@ -297,6 +306,7 @@ export function createBasemaps(engine, hooks = {}) {
      *  it, so the tool that owns the layer can ask why (FIRMS: a spent
      *  allowance, a refused key). */
     onOverlayTrouble = () => {},
+    onImageryTrouble = () => {},
   } = hooks;
 
   const map = engine.impl;
@@ -353,6 +363,8 @@ export function createBasemaps(engine, hooks = {}) {
 
   function onError(event) {
     const source = event?.sourceId;
+    const key = source === IMAGERY ? live : source === ALTERNATE ? alternate : null;
+    if (key) onImageryTrouble({ id: key.slice(0, key.lastIndexOf('@')), error: event.error });
     const overlay = source && OVERLAYS.find((entry) => overlaySourceIds(entry).includes(source));
     if (overlay) onOverlayTrouble(overlay.id);
   }
@@ -484,6 +496,10 @@ export function createBasemaps(engine, hooks = {}) {
         return;
       }
       showTiles(provider, providerId, cell);
+    },
+
+    retry(provider, providerId, cell) {
+      if (provider && !provider.widget) showTiles(provider, providerId, cell);
     },
 
     /**

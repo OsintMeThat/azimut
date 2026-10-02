@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, config
+from . import __version__, config, errors
 from .engine import workspacelock, workspacemove
 
 logger = logging.getLogger(__name__)
@@ -302,8 +303,11 @@ def create_app() -> FastAPI:
         # handle, which is what lets Windows delete the folder afterwards.
         workspacelock.release()
 
+    # No /docs, /redoc or /openapi.json: the docs page pulls Swagger UI from a CDN,
+    # and that script would run on this origin with the whole API in reach.
     app = FastAPI(
-        title="Azimut", version=__version__, docs_url="/api/docs", lifespan=lifespan
+        title="Azimut", version=__version__, lifespan=lifespan,
+        docs_url=None, redoc_url=None, openapi_url=None,
     )
 
     from .api import (
@@ -347,6 +351,14 @@ def create_app() -> FastAPI:
     async def _sheet_unwritable(_: Request, exc: sheet_engine.SheetUnwritable) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
+    # A body the schema refused, said as a form would say it ("Name is too long (80
+    # characters at most)") rather than as pydantic's list of locations and types.
+    @app.exception_handler(RequestValidationError)
+    async def _refused(_: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422, content={"detail": errors.validation_sentence(list(exc.errors()))}
+        )
+
     # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
     ingest.install_cors(app)
     # Inside the local guard: a request that isn't allowed to reach the app at
@@ -360,6 +372,17 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
+
+    # Registered after every router, so it only catches an /api path nothing serves.
+    # Without it the SPA fallback below answers 200 with index.html, and a tab left
+    # open across an update that retired a route reads "Unexpected token '<'".
+    @app.api_route(
+        "/api/{rest:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        include_in_schema=False,
+    )
+    def unknown_api(rest: str) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
     # Built frontend (frontend/ builds into src/azimut/static/).
     if (STATIC_DIR / "index.html").exists():

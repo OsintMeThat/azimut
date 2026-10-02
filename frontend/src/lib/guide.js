@@ -56,7 +56,7 @@ export const GUIDE = [
       },
       {
         label: 'The network waits for you',
-        text: 'Network access follows an action that needs it, such as a map tile or a download. The one check made on its own asks GitHub and PyPI for new versions when the app opens, and Settings turns it off.',
+        text: 'Network access follows an action that needs it, such as a download. Two things reach out on their own: a check of GitHub and PyPI for new versions when the app opens, which Settings turns off, and the basemap tiles of the case map on the home page.',
       },
       {
         label: 'The rail is a sequence',
@@ -114,7 +114,7 @@ export const GUIDE = [
         steps: [
           { tool: 'media', text: 'Import the photo, or paste the URL of the post it came from to pull it down with its origin already written.' },
           { tool: 'inspect', text: 'Crop and adjust what is hard to read, and run the error-level view over anything that looks composited.' },
-          { tool: 'reverse', text: 'Prepare the image and press an engine. Nothing is sent until you do.' },
+          { tool: 'reverse', text: 'Prepare the image and press an engine.' },
           { tool: 'satellite', text: 'Search the area, switch providers and dates until the ground matches, and capture the view.' },
           { tool: 'proof', text: 'Put the photo beside the capture, mark what agrees, and name the point. It is filed as a place.' },
         ],
@@ -123,7 +123,7 @@ export const GUIDE = [
         title: 'Source a video from a post',
         lead: 'From a URL to a dated claim the case can argue with.',
         steps: [
-          { tool: 'media', text: 'Paste the post URL. The first attempt is made without cookies, and only an "unavailable" answer offers your saved browser session.' },
+          { tool: 'media', text: 'Paste the post URL, and pick your signed-in browser if it answers "This link needs a login".' },
           { tool: 'inspect', text: 'Step the video frame by frame and capture the stills the argument rests on, then save them to the case as media made here.' },
           { tool: 'board', text: 'Confirm what the import proposed, then link the frames to the place, the account and the people.' },
           { tool: 'timeline', text: 'Date the claim; the axis reads it in the local time of the place, UTC one pick away.' },
@@ -134,7 +134,7 @@ export const GUIDE = [
         lead: 'From work in the case to something somebody else can check.',
         steps: [
           { tool: 'proof', text: 'Export the panels as a PNG. The spec is saved beside it, so next week the same proof reopens and edits.' },
-          { tool: 'post', text: 'Build the sourced thread. With the extension it fills the composer on X or Bluesky box by box, and stops before Post.' },
+          { tool: 'post', text: 'Build the sourced thread. With the extension it fills the composer on X or Bluesky box by box.' },
           { tool: 'notebook', text: 'Write the note around it, embed the case media and a diagram, and export the PDF.' },
         ],
       },
@@ -148,7 +148,7 @@ export const GUIDE = [
     points: [
       {
         label: 'Import or download',
-        text: 'The Media Library takes files off your disk and pulls posts from a URL. The first attempt is always made without cookies, and only a download that answers "unavailable" is retried with the browser session you saved.',
+        text: 'Media takes files off your disk and pulls posts from a URL. The first attempt is always made without cookies, and only a link that answers "This link needs a login" is retried with your browser session.',
       },
       {
         label: 'State the origin once',
@@ -164,7 +164,7 @@ export const GUIDE = [
       },
       {
         label: 'Send a picture from where you are looking at it',
-        text: 'Open in… on a Media Library row sends the file, and a frame in Inspect goes as you cropped it, saved or not.',
+        text: 'Open in… on a Media row sends the file, and a frame in Inspect goes as you cropped it, saved or not.',
       },
     ],
   },
@@ -344,7 +344,7 @@ export const GUIDE = [
     id: 'shortcuts',
     title: 'Shortcuts',
     icon: 'keyboard',
-    lead: 'Every key the app listens for, by where it is pressed.',
+    lead: 'The keys worth knowing, by where they are pressed.',
     tools: [],
     keymap: [
       {
@@ -364,6 +364,31 @@ export const GUIDE = [
           { combo: 'Middle-click', does: 'puts north back up' },
           { combo: 'Shift+← / →', does: 'turns the map 15°' },
           { combo: 'Shift+↑', does: 'puts north back up' },
+        ],
+      },
+      {
+        where: 'Satellite',
+        keys: [
+          { combo: 'C or Space', does: 'clears the grid cell under review and flies to the next' },
+          { combo: 'F', does: 'flags the cell under review' },
+          { combo: 'S', does: 'skips to the next unchecked cell' },
+          { combo: 'P', does: 'flags the cell and saves it as a place' },
+          { combo: 'Enter', does: 'confirms a polygon grid area' },
+          { combo: 'Escape', does: 'stops the review, or the area being drawn' },
+        ],
+      },
+      {
+        where: 'Compare',
+        keys: [
+          { combo: '1 / 2 / 3 / 4', does: 'side by side, swipe, fade or blink' },
+          { combo: '5', does: 'lays Difference over the view, or lifts it' },
+          { combo: 'Space', does: 'pauses the blink, or resumes it' },
+          { combo: '[', does: 'folds the column to a rail and back' },
+          { combo: 'V A R E P M L D T N S', does: 'picks select, arrow, box, ellipse, area, measure, line, freehand, note, numbered marker and symbol' },
+          { combo: '← / →, Home / End', does: 'moves the focused swipe divider, or sends it to an edge' },
+          { combo: 'Delete', does: 'removes the selected mark' },
+          { combo: 'Ctrl+Z', does: 'undoes the last mark' },
+          { combo: 'Ctrl+Shift+Z or Ctrl+Y', does: 'redoes it' },
         ],
       },
       {
@@ -443,7 +468,7 @@ export const GUIDE = [
           { combo: 'H', does: 'hides the candidates and areas, or shows them again' },
           { combo: 'B', does: 'blinks A and B on the map, when the run read two passes' },
           { combo: 'M', does: 'picks up the ruler, or puts it down' },
-          { combo: 'Delete', does: 'removes the selected measure' },
+          { combo: 'Delete or Backspace', does: 'removes the selected measure' },
         ],
       },
       {
@@ -472,6 +497,13 @@ export const GUIDE = [
           { combo: '← / →', does: 'walks the preview through the folder' },
         ],
       },
+      {
+        where: 'Files',
+        keys: [
+          { combo: 'F2', does: 'renames the selected item' },
+          { combo: 'Delete', does: 'deletes the selected items, after asking' },
+        ],
+      },
     ],
   },
   {
@@ -482,8 +514,8 @@ export const GUIDE = [
     tools: [],
     fixes: [
       {
-        symptom: 'A download answers "unavailable"',
-        fix: 'The site wants a session. The Media Library offers your browser cookies at that point, and only at that point: the first attempt is always made without them.',
+        symptom: 'A download answers "This link needs a login"',
+        fix: 'The site wants a session. Pick a browser you are signed in to there, or give an exported cookies.txt.',
       },
       {
         symptom: 'A video has no thumbnail, and frames will not export',
@@ -498,8 +530,8 @@ export const GUIDE = [
         fix: 'Four providers need no key. The rest use yours, entered in Settings, Imagery, and the tab says which ones are missing one.',
       },
       {
-        symptom: 'The app opens on "this workspace is in use"',
-        fix: 'Another Azimut holds the folder. Close it, or take the lock from the screen offering it. Two copies writing one workspace is the one thing the app refuses.',
+        symptom: 'The app opens on "Another Azimut has this workspace"',
+        fix: 'Close the other Azimut and reload, or press "Take it anyway" if it is already gone.',
       },
       {
         symptom: 'The tab is closed and the app seems gone',

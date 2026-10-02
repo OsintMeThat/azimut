@@ -554,21 +554,6 @@ RADAR_ID = "sentinel1"
 _PASS_TIME_RE = re.compile(r"^([01]\d|2[0-3])([0-5]\d)([0-5]\d)$")
 
 
-def radar_variant_id(day: str | None = None, time: str = "") -> str:
-    """The radar basemap's id for one pass: ``sentinel1~2026-05-14~054210``.
-
-    A day alone mosaics every pass of that day, and no day at all is the most
-    recent pass, which is the layer's own default. The time rides without its
-    colons, because the id is also a folder name in the tile cache.
-    """
-    if not day:
-        return RADAR_ID
-    parts = [RADAR_ID, day]
-    if time:
-        parts.append(time.replace(":", ""))
-    return VARIANT_SEP.join(parts)
-
-
 def parse_radar_variant(spec: str) -> tuple[str, str]:
     """``"2026-05-14~054210"`` → ``("2026-05-14", "05:42:10")``; the time may be absent."""
     parts = spec.split(VARIANT_SEP)

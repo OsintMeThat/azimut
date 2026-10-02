@@ -151,7 +151,7 @@ describe('createAutosave', () => {
     saver.schedule();
     await saver.flush();
     expect(saver.state.status).toBe('error');
-    expect(saver.pending).toBe(false);
+    expect(saver.unsaved).toBe(true); // failed, not stuck: the next write goes out
 
     write.mockResolvedValue();
     saver.schedule();
@@ -172,6 +172,31 @@ describe('createAutosave', () => {
     await saver.flush();
     expect(saver.state.status).toBe('saved');
     expect(saver.state.error).toBe('');
+  });
+
+  it('retries a failed write when flushed alone, which is what Retry does', async () => {
+    const write = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValue();
+    const saver = createAutosave({ write, delay: 10 });
+
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(saver.unsaved).toBe(true);
+    expect(saver.pending).toBe(true); // a page closing now still has something to send
+
+    await saver.flush();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(saver.state.status).toBe('saved');
+    expect(saver.unsaved).toBe(false);
+  });
+
+  it('stays unsaved when the retry fails too, so the tool can refuse to let go', async () => {
+    const write = vi.fn().mockRejectedValue(new Error('too large'));
+    const saver = createAutosave({ write, delay: 10 });
+    saver.schedule();
+    await saver.flush();
+    await saver.flush();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(saver.unsaved).toBe(true);
   });
 
   it('forgets a pending write for a document being thrown away', async () => {

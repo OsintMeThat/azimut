@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import re
 import shutil
 import sqlite3
 import struct
@@ -36,7 +38,7 @@ from typing import Any, BinaryIO, Callable, Iterable, Iterator
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .. import __version__, config, layout
+from .. import __version__, config, errors, layout
 from ..sqlite_backend import SQLITE_SCHEMA, SqliteCase
 from ..workspace import Case, CaseError, _now, _replace_with_retry, ensure_dir
 from . import workqueue
@@ -123,6 +125,10 @@ _secret_lock = threading.Lock()
 _job_secrets: dict[str, str] = {}
 _removed_jobs: dict[str, dict[str, Any]] = {}
 _MAX_MEMORY_JOBS = 100
+#: The cases an import of this process is still building, which a sweep leaves alone.
+_building: set[str] = set()
+
+logger = logging.getLogger(__name__)
 UPLOAD_MAX_AGE = 24 * 60 * 60
 _WINDOWS_RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
@@ -1014,7 +1020,40 @@ def create_import_case(name: str) -> Case:
     while Case.name_taken(candidate):
         candidate = f"{base} {index}"
         index += 1
-    return Case.create(candidate)
+    case = Case.create(candidate)
+    # An empty shell until the import lands: out of the switcher meanwhile, and
+    # removed at the next start if the process dies before it does.
+    layout.mark_import_scaffold(case.path)
+    return case
+
+
+#: How the folders an import works in are named beside the case it builds.
+_SCAFFOLD_SUFFIX = re.compile(r"\.(?:incoming|import-shell-[0-9a-f]{32})$")
+
+
+def sweep_scaffolds() -> int:
+    """Remove what imports left behind when the process stopped under them: a
+    staging folder holding a half-extracted bundle, a shell set aside, an empty case
+    that never received its data. Each carries the import mark, and none holds work
+    of the analyst's: the bundle they came from is still wherever it was. An import
+    this process is running is left alone. Returns how many folders went."""
+    parent = config.cases_dir()
+    if not parent.is_dir():
+        return 0
+    with _secret_lock:
+        building = set(_building)
+    removed = 0
+    for path in list(parent.iterdir()):
+        if not path.is_dir() or not layout.is_import_scaffold(path):
+            continue
+        if _SCAFFOLD_SUFFIX.sub("", path.name) in building:
+            continue
+        try:
+            shutil.rmtree(path)
+            removed += 1
+        except OSError as exc:  # a file still open on Windows: the next start
+            logger.warning("could not remove an interrupted import: %s", exc)
+    return removed
 
 
 def _install_running_job(db_path: Path, job: dict[str, Any]) -> None:
@@ -1055,6 +1094,10 @@ def import_into(
     if staging.exists():
         raise BundleError(f"import staging path '{staging.name}' already exists")
     staging.mkdir()
+    layout.mark_import_scaffold(staging)
+    # A destination the caller made itself is marked only for the swap, then given
+    # back unmarked if the import fails.
+    shell_marked = layout.is_import_scaffold(case.path)
     # A format-1 bundle names its members relative to the tool root, so the
     # directory they extract into has to exist first. A format-2 bundle carries
     # `azimut/` itself and this is a no-op it does not mind.
@@ -1090,7 +1133,11 @@ def import_into(
         )
         if job is not None:
             _install_running_job(staged_db, job)
+        layout.mark_import_scaffold(case.path)
         case.path.rename(old)
+        # Unmarked before it takes the case's place, never after: a crash between the
+        # two must leave a staging folder to sweep, not a finished case marked.
+        layout.unmark_import_scaffold(staging)
         staging.rename(case.path)
         imported = Case.open(case.id)
         # After the open, because opening is what migrates a case from an older
@@ -1122,6 +1169,8 @@ def import_into(
         shutil.rmtree(staging, ignore_errors=True)
         if old.exists() and not case.path.exists():
             old.rename(case.path)
+        if not shell_marked:
+            layout.unmark_import_scaffold(case.path)
         raise
 
 
@@ -1162,6 +1211,8 @@ def queue_import(
     header = inspect_bundle(source, password=password)
     _require_import_space(Path(source), header)
     case = create_import_case(header["case_name"])
+    with _secret_lock:
+        _building.add(case.id)
     job = case.enqueue_job(
         IMPORT_JOB,
         payload={
@@ -1193,8 +1244,13 @@ def _handle_export(case: Case, job: dict[str, Any]) -> None:
     sealed = bool(job["payload"].get("sealed"))
     password = _take_secret(job["id"])
     if sealed and not password:
-        raise workqueue.JobFailed("Password expired; restart the export")
-    export_case(case, password=password, output=Path(job["payload"]["output"]))
+        raise workqueue.JobRefused("the password is no longer held, so start the export again")
+    try:
+        export_case(case, password=password, output=Path(job["payload"]["output"]))
+    except BundleError as exc:
+        # A refusal of the export itself (no room left on the disk, an output outside
+        # the bundles folder) is the same on every attempt.
+        raise workqueue.JobRefused(str(exc)) from exc
 
 
 def _handle_import(case: Case, job: dict[str, Any]) -> None:
@@ -1203,7 +1259,7 @@ def _handle_import(case: Case, job: dict[str, Any]) -> None:
     password = _take_secret(job["id"])
     try:
         if sealed and not password:
-            error = "Password expired; restart the import"
+            error = "the password is no longer held, so start the import again"
         else:
             import_into(
                 case,
@@ -1213,10 +1269,12 @@ def _handle_import(case: Case, job: dict[str, Any]) -> None:
             )
             return
     except Exception as exc:
-        error = str(exc)
+        error = errors.explain(exc)
     finally:
         if job["payload"].get("cleanup_source"):
             source.unlink(missing_ok=True)
+        with _secret_lock:
+            _building.discard(case.id)
     with _secret_lock:
         _removed_jobs[job["id"]] = {
             **job,

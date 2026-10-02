@@ -24,6 +24,7 @@
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
   import SourcePicker from '../components/SourcePicker.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   const PASTE = UPLOAD_PAGES.filter((e) => e.paste);
   const DRAG = UPLOAD_PAGES.filter((e) => !e.paste);
@@ -210,7 +211,7 @@
   }
 
   async function copySelection() {
-    await copyPng(pngBlob(), `Copied the ${frameLabel}. Paste it in the tab with Ctrl+V`);
+    await copyPng(pngBlob(), `Copied the ${frameLabel}. Paste it in the tab with ${shortcut('Ctrl+V')}`);
   }
 
   async function saveSelection() {
@@ -267,7 +268,7 @@
       }
     }
     window.open(engine.url, '_blank', 'noopener,noreferrer');
-    if (engine.paste) toast(`Opened ${engine.label}. Paste the ${frameLabel} with Ctrl+V`, 'info', 4500);
+    if (engine.paste) toast(`Opened ${engine.label}. Paste the ${frameLabel} with ${shortcut('Ctrl+V')}`, 'info', 4500);
     else savePng(blob, `Opened ${engine.label}. Drag the saved ${frameLabel} in`);
   }
 
@@ -336,7 +337,7 @@
       <div class="empty">
         <Icon name="search" size={40} />
         <p>Add an image or a video to the case to search it.</p>
-        <button class="btn" onclick={() => (uiState.tool = 'media')}>Go to Media Library</button>
+        <button class="btn" onclick={() => (uiState.tool = 'media')}>Go to Media</button>
         {@render engineLinks()}
       </div>
     {:else}
@@ -428,7 +429,7 @@
             {/if}
             {#if pasteLeft.length}
               <div class="eg-group">
-                <span class="eg-head">Copy, then paste (Ctrl+V) in the tab</span>
+                <span class="eg-head">{shortcut('Copy, then paste (Ctrl+V) in the tab')}</span>
                 <div class="eg-list">
                   {#each pasteLeft as e (e.id)}
                     <a

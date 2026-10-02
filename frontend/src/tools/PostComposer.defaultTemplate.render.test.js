@@ -236,3 +236,29 @@ describe('the draft the template editor previews with', () => {
     expect(postDraftState.fields).toBeNull();
   });
 });
+
+describe('Publish', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('still opens the site when the browser refuses the clipboard, and says what is left to do', async () => {
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    mountComposer();
+    await settle();
+    const first = target.querySelector('.tweet-block textarea');
+    first.value = 'Convoy on the coast road';
+    first.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const publish = [...target.querySelectorAll('button')].find((b) => b.title.startsWith('Copy posts and open'));
+    expect(publish.disabled).toBe(false);
+
+    publish.click();
+    publish.click(); // a second press while the first runs opens nothing more
+    await settle();
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(toasts()).toContain('The browser refused the clipboard');
+    expect(toasts().some((t) => t.endsWith('Copy the replies from here.'))).toBe(true);
+  });
+});

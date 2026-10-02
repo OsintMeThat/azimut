@@ -11,7 +11,7 @@
   import {
     BAND_NAMES, CLASS_NAMES, INDICES, L2A_BANDS, PAIRS, POLARISATIONS, amountOf, describeRule, directionOf,
     directionsFor, formatShare, lineScale, measuresFor, readsOneDate, retarget, ruleProblem, toEngine, whensFor,
-    withAmount, withDirection,
+    withAmount, withDirection, ruleBands,
   } from '../../lib/map/analyzerRules.js';
   import Icon from '../../components/Icon.svelte';
 
@@ -50,6 +50,9 @@
   const between = $derived(rule.op === 'between');
   const problem = $derived(ruleProblem(rule));
   const measures = $derived(measuresFor(recipe));
+  const dataLabel = $derived(rule.measure === 'class' ? 'Sentinel-2 scene classification (SCL)'
+    : rule.measure === 'radar' ? `Sentinel-1 · ${rule.polarisation === 'vv' ? 'VV' : rule.polarisation === 'vh' ? 'VH' : 'VV · VH'}`
+      : `Sentinel-2 bands · ${ruleBands(rule).join(' · ')}`);
   const whens = $derived(whensFor(recipe, rule));
   const pair = $derived(PAIRS.find((entry) => entry.bands[0] === rule.bands[0] && entry.bands[1] === rule.bands[1])?.id ?? '');
   const shownAmount = $derived(Number((amountOf(rule) * scale.factor).toFixed(4)));
@@ -157,6 +160,7 @@
           {/each}
         </div>
       {/if}
+      <span class="data-source" aria-label={`Rule ${n} data`}>{dataLabel}</span>
     </div>
   </div>
 
@@ -306,7 +310,7 @@
     .control :global(.cmp-seg.fill > button) { padding: 0 5px; }
   }
   .pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 5px; }
-  .note { color: var(--text-3); font-size: 10.5px; line-height: 1.4; }
+  .note, .data-source { color: var(--text-3); font-size: 10.5px; line-height: 1.4; }
   .value { display: flex; align-items: center; gap: 6px; }
   .value input[type='number'] { width: 84px; }
   .minus, .unit { color: var(--text-3); font-size: var(--fs-xs); }

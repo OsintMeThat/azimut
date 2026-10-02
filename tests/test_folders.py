@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import closing
 
 import graph_read
+import pytest
 from PIL import Image
 
 from azimut.engine import bundles
@@ -272,3 +273,20 @@ def test_a_bundle_carries_the_work_folder(client):
     destination = Case.create(bundles.imported_name("Travels"))
     result = bundles.import_into(destination, bundles.export_case(source))
     assert Case.open(result["case_id"]).work_folder() == "Airbase"
+
+
+@pytest.mark.parametrize("name", ["..", ".", "Airbase/..", "./North", "..."])
+def test_a_folder_name_made_only_of_dots_is_refused(client, name):
+    """`..` would mirror onto its parent's directory under a label that is not its
+    own, so it is refused wherever a new folder name comes in."""
+    cid = _case(client)
+    client.post(f"/api/cases/{cid}/folders", json={"name": "Airbase"})
+    assert client.post(f"/api/cases/{cid}/folders", json={"name": name}).status_code in (400, 409, 422)
+    res = client.post(f"/api/cases/{cid}/folders/rename", json={"source": "Airbase", "target": name})
+    assert res.status_code in (400, 409, 422)
+    assert client.get(f"/api/cases/{cid}/folders").json() == ["Airbase"]
+
+
+def test_a_folder_named_with_dots_and_letters_is_kept(client):
+    cid = _case(client)
+    assert client.post(f"/api/cases/{cid}/folders", json={"name": "v1.2"}).status_code == 200

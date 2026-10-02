@@ -32,6 +32,17 @@ it('says the rule as the sentence it is, with the number and colour it wears on 
   expect(query('.rule').getAttribute('style')).toContain('--tint: #facc15');
 });
 
+it('names the data each rule reads and follows a change of quantity', () => {
+  const props = open(newRule('index', 'change'));
+  expect(query('[aria-label="Rule 1 data"]').textContent).toBe('Sentinel-2 bands · B08 · B04');
+  props.rule = newRule('brightness', 'change'); flushSync();
+  expect(query('[aria-label="Rule 1 data"]').textContent).toBe('Sentinel-2 bands · B02 · B03 · B04');
+  props.rule = newRule('class', 'b'); flushSync();
+  expect(query('[aria-label="Rule 1 data"]').textContent).toContain('scene classification (SCL)');
+  props.rule = newRule('radar', 'change', { polarisation: 'vh' }); flushSync();
+  expect(query('[aria-label="Rule 1 data"]').textContent).toBe('Sentinel-1 · VH');
+});
+
 it('offers before, after and change on two dates, says where each is painted, and nothing on one date', () => {
   open(newRule('index', 'change'));
   expect([...query('[aria-label="Rule 1 reads"]').querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Before', 'After', 'Change']);

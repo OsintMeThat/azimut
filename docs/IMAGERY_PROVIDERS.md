@@ -54,7 +54,7 @@ is still the user's quota identity, so it lives in `api_keys` like any other key
 
 ⁴ A Maps JS key is client-side **by design** (referrer-restricted, not secret), so
 shipping it to the browser in the loader URL is intended. Every
-tile key, which stays server-side behind the proxy.
+other key is a tile key, and stays server-side behind the proxy.
 
 ## Google in the EEA since 2025-07-08
 
@@ -213,7 +213,7 @@ window and file under another. `tiles.get_provider()` parses the variant;
 
 | Choice | UI | Notes |
 |--------|----|-------|
-| Layer | picker populated from **GetCapabilities** on first open | `LAYERS` in `engine/sentinel.py` is a four-entry fallback; the instance is authoritative, so unsupported layers are not offered |
+| Layer | picker populated from **GetCapabilities** on a user request | `LAYERS` in `engine/sentinel.py` is a four-entry catalogue; the instance is authoritative. Analyzer checks keep missing products visible but disabled and use actual IDs such as `VEGETATION_INDEX`. An unverified catalogue cannot start check imagery. |
 | Date | a **calendar**: candidate pass days are coloured by cloud, then checked at the crosshair | one day, not a range. Sent as `TIME=day/day` |
 | Cloud | a **slider**, 0–100%, default 100 (no filter) | lower it and cloudier passes leave the tiles, the calendar and "most recent" together. Commits on release, so a drag is not a tile per step |
 

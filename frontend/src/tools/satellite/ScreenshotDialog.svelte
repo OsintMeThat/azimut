@@ -11,6 +11,7 @@
    */
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import { shortcut } from '../../lib/keys.js';
 
   let {
     /** `{ lat, lon, zoom }` the map is on, which is what a pasted image is filed at. */
@@ -93,15 +94,11 @@
 {#if !grabbing}
   <Modal title="File a screenshot" onclose={close} width="520px">
     <p class="shot-hint">
-      The <strong>Capture</strong> button already crops this basemap off the screen
-      through the usual frame. Use this when it can't:
-      grab the whole map view below, or paste
-      (<span class="mono">Ctrl+V</span>) / drop your own OS screenshot.
-      Unlike a framed capture, this is filed at the current <em>view</em>
-      (<span class="mono">{fmtCoords(view.lat, view.lon)}</span>, z{view.zoom}).
-      the coordinates describe the map, not a registered crop. The Google attribution
-      is burned into a footer either way; keep Google's on-screen credits inside the
-      frame too.
+      <strong>Capture</strong> already crops this basemap. Use this when it can't: grab
+      the whole view below, or paste (<span class="mono">{shortcut('Ctrl+V')}</span>) or drop your own
+      screenshot. It is filed at the current view
+      (<span class="mono">{fmtCoords(view.lat, view.lon)}</span>, z{view.zoom}), so the
+      coordinates describe the map, not a crop.
     </p>
     <div style="display:flex;justify-content:center;margin-bottom:10px">
       <button class="btn btn-primary" onclick={onGrab} disabled={grabbing}>
@@ -123,7 +120,7 @@
       {#if preview}
         <img src={preview} alt="screenshot to file" />
       {:else}
-        <span>Paste (Ctrl+V) or drop the screenshot here</span>
+        <span>{shortcut('Paste (Ctrl+V) or drop the screenshot here')}</span>
       {/if}
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">

@@ -95,6 +95,8 @@
   import TemporalClaimEditor from '../components/TemporalClaimEditor.svelte';
   import TimelineTrackEditor from '../components/TimelineTrackEditor.svelte';
   import ZonePicker from '../components/ZonePicker.svelte';
+  import NoCase from '../components/NoCase.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   const PAGE = 200;
   loadEntityTypes();
@@ -1899,7 +1901,7 @@
         : chronologyBlock(rows);
       await navigator.clipboard.writeText(text);
       const count = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`;
-      toast(read.truncated ? `The first ${count} copied.` : `${count} copied.`, 'ok', 1800);
+      toast(read.truncated ? `The first ${count} copied` : `${count} copied`, 'ok', 1800);
     } catch (error) {
       toast(error?.message || 'Copying failed.', 'danger');
     } finally {
@@ -2150,7 +2152,7 @@
         {/if}
       {/snippet}
       {#if !caseState.current}
-        <div class="blank-state"><Icon name="clock" size={24} /><h2>Open a case to build its timeline.</h2></div>
+        <NoCase icon="clock" what="build its timeline" />
       {:else if !extent?.from && !loading}
         <div class="blank-state">
           <Icon name="clock" size={24} />
@@ -2587,7 +2589,7 @@
               label={previewEntity?.label ?? selected.label}
             />
             {#if previewEntity && !snapshotReading}
-              <button class="btn btn-ghost btn-sm from-file" title="Write an event on the line that cites this file, its dates one press away" onclick={focusLine}>
+              <button class="btn btn-ghost btn-sm from-file" title="Cite this file in a new event" onclick={focusLine}>
                 <Icon name="plus" size={12} /> Add event from this file
               </button>
             {/if}
@@ -2654,7 +2656,7 @@
             <button
               class="btn btn-sm date-change"
               disabled={!inspectorChain?.entity}
-              title="The file keeps its own date; this files a sourced correction beside it"
+              title="File a sourced correction to this date"
               onclick={addMediaCorrection}
             >
               <Icon name="edit" size={12} /> Correct this date
@@ -2729,7 +2731,7 @@
               {#if selected.confidence}<div><dt>Confidence</dt><dd>{selected.confidence}</dd></div>{/if}
             </dl>
             {#if canDragTemporal(selected) && !snapshotReading}<p class="axis-edit-help">{selected.shape === 'interval' ? 'Drag it on the axis to move it, or either edge to resize.' : 'Drag it on the axis to move it.'}</p>{/if}
-            {#if !pairReading}<p class="measure-hint">Ctrl-click a second entry to measure between them.</p>{/if}
+            {#if !pairReading}<p class="measure-hint">{shortcut('Ctrl-click a second entry to measure between them.')}</p>{/if}
           </details>
 
           <!-- Both acts are about a lane: pinning keeps an entry out of that lane's

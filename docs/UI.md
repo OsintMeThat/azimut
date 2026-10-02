@@ -2206,7 +2206,7 @@ ground. Between two moves the field is yours — what you typed, or the point yo
 picked out of the case, stands.
 
 The saved-work layer answers two questions under its own switch: **what kind**
-(all, places, captures, proofs, media) and **which folder**, offered only where the
+(Media, Places or Captures) and **which folder**, offered only where the
 case has more than one to choose between. They are the Saved panel's own
 filter, so a map read here and the panel beside it can never disagree about
 what the case holds, and the layer's count is what is drawn rather than what is
@@ -2218,11 +2218,7 @@ files as white-ringed ones, items at the same spot collapse
 into one counted mark, and clicking a mark of saved work opens a card
 with its preview, provider, dates and note. A mark of files has no card: it plays
 them in the panel. A mark whose capture carries proofs
-wears a dot up-left; its card names the count and offers **Show proofs**, which
-switches the panel and the layer to the proofs view. In that view the card opens
-the proof in Geo Proof and lists the saved posts written from it. Two post titles
-fit directly in the card; additional posts expand in place, and selecting one
-opens its draft in Geo Report. Hovering a card, a tree row or a search result
+wears a dot up-left, and its card names the count. Hovering a card, a tree row or a search result
 lights the others.
 
 A card also holds the point's relations. The Saved index carries their count only,
@@ -2231,7 +2227,7 @@ straight away — clicking a place to see which photos claim it is the point of 
 gesture — and a stack waits to be asked. A point enrichment proposed from a file's
 metadata is marked `suggested` in both the card and the tree, so a camera's reading
 never passes for analyst work. The Save-place dialog carries the matching write:
-one **Relate to…** field says why the point is being saved while the analyst still
+one **Relations** field says why the point is being saved while the analyst still
 knows.
 
 **A place's card traces its footprint.** A pin dropped on a guess is what this
@@ -2249,7 +2245,7 @@ a radius typed back over a traced shape asks in Details before dropping it: the
 map draws one of the two, so a place states its precision once.
 
 **The place dialog hands over to the full editor.** Title, folder, note and
-*Relate to…* are what an analyst fills at the moment of saving; how precise the
+*Relations* are what an analyst fills at the moment of saving; how precise the
 point is, the source's own wording and how the point was found are edited in the
 panel every other surface opens. **Edit more details** on an existing place opens
 that panel — the same body as the case sidebar — and asks first if the short form
@@ -2677,8 +2673,8 @@ or **Two dates**. That is fixed for good, so its rules and checks always fit it:
 the builder shows it as a locked chip, offers only the measures and dates that
 fit, and another satellite or number of dates is a new analyzer. A saved one
 that never declared it gets it from its rules, once. The same screen offers
-**Blank**, with one rule to begin with, and the ready examples that read the
-same thing: a fresh burn (Lahaina, August 2023), a forest cleared (Grünheide,
+**Blank**, starting on brightness in True colour for optical data, and the ready
+examples that read the same thing: a fresh burn (Lahaina, August 2023), a forest cleared (Grünheide,
 2019 → 2020), water drained (the Kakhovka reservoir, June 2023) and a solar farm
 built (Dubai, 2019 → 2023) on two dates, ships at anchor (Fujairah, one pass) on
 one, each with its checks. A press copies an example into the library at once,
@@ -2697,7 +2693,8 @@ Over the rules a strip names the check on the map, says how it last came out and
 carries **Test**. A rule reads as the sentence it says (*NDVI dropped by 0.25 or
 more*); its dot carries its number and its map colour and hides or shows its
 pixels, and ★ ranks the candidates by it. A rule names a quantity, when it is
-read, and the line. The quantity is one of the six indices, **My index** (a
+read, and the line; its data label names the bands or classification it reads.
+The quantity is one of the six indices, **My index** (a
 normalised difference of any two Level-2A bands, with NDMI, NDSI, NDRE, NBR2 and
 GNDVI one pick away), one band's reflectance, brightness, a colour change,
 Sentinel-2's own ground class, or radar backscatter in VV, VH or VV − VH. On two
@@ -2724,8 +2721,16 @@ passes: the before pass on the left and the after pass on the right, each on its
 own map with the two cameras held together and a handle to drag the cut, and
 **Before**, **Split** and **After** switch between the whole map on one and the
 cut. A check of one date shows its pass on one map. An eye puts the basemap in
-the passes' place and back, and the layer menu picks the Copernicus layer they
-are shown in, with the one that reads rule ★ best marked.
+the passes' place and back. **Display** picks their Copernicus layer, with the
+one that reads rule ★ best marked; it changes the picture, not the rule's bands.
+Opening or selecting a check verifies the configuration's layers, without a
+network check on builder mount. The menu shows their actual IDs, including
+`VEGETATION_INDEX` where that is the configured NDVI display. Missing products
+stay grey with a reason. The menu offers **Refresh layers** and setup instructions;
+the same help appears in Settings → Imagery. A saved display resolves to its configured alias
+or an available display, with a notice. If verification fails, the basemap
+stays on. Tile errors on either pass name the layer and date and offer
+**Retry imagery** or **Use basemap**.
 
 **Checks** are how an analyzer is proved, and one is needed to save it, with a
 pin where something should be found; the others may be traps, where nothing may

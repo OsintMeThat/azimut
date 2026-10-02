@@ -21,7 +21,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function open({ dates = 'two', sensor = 'sentinel2', checks = [], layers } = {}) {
+function open({ dates = 'two', sensor = 'sentinel2', checks = [], layers, layerState = null } = {}) {
   const recipe = $state({ ...newRecipe(METHODS, { sensor, dates }), name: 'Mine', checks });
   const api = { post: vi.fn(async (url, body) => {
     calls.push([url, body]);
@@ -33,7 +33,8 @@ function open({ dates = 'two', sensor = 'sentinel2', checks = [], layers } = {})
     }
     return { dates: [{ date: '2026-05-11', cloud: 4, coverage: 1 }, { date: '2026-05-04', cloud: 2, coverage: 1 }], truncated: false };
   }) };
-  bench = new Bench({ api, recipe, limits: { max_checks: 12, max_marks: 20 }, layers: () => layers ?? [], viewBounds: () => VIEW });
+  bench = new Bench({ api, recipe, limits: { max_checks: 12, max_marks: 20 }, layers: () => layers ?? [],
+    layerState: () => layerState, viewBounds: () => VIEW });
   target = document.createElement('div');
   document.body.append(target);
   live = mount(CheckBench, { target, props: { bench } });
@@ -150,17 +151,18 @@ it('says the rules changed, in place of the outcome, and what went wrong in the 
 });
 
 it('shows the passes in the layer the rules read best, or the basemap in their place, from an eye', () => {
-  open({ checks: [made('The plot')], layers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'NDVI', label: 'NDVI (vegetation index)', hint: 'Greens' }] });
+  const { recipe } = open({ checks: [made('The plot')], layers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'NDVI', label: 'NDVI (vegetation index)', hint: 'Greens' }] });
+  recipe.rules = [newRule('index', 'change')];
   bench.select(bench.checks[0].id); flushSync();
   const look = query('[aria-label="Copernicus layer"][aria-haspopup]');
-  expect(look.textContent.trim()).toBe('True colour');           // the layer the check was saved in
+  expect(look.textContent.trim()).toBe('Display: True colour');
   click(look);
   const menu = query('[role="menu"][aria-label="Copernicus layer"]');
   const rows = [...menu.querySelectorAll('[role="menuitemradio"]')];
-  expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual(['True colour', 'NDVI (vegetation index) best for rule ★']);
+  expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual(['True colourTRUE_COLOR', 'NDVI (vegetation index)NDVI for rule ★']);
   click(rows[1]);
   expect(bench.layer).toBe('NDVI');
-  expect(look.textContent.trim()).toBe('NDVI');
+  expect(look.textContent.trim()).toBe('Display: NDVI');
   expect(query('[role="menu"]')).toBe(null);
 
   // the eye puts the basemap where the passes were, and back
@@ -188,6 +190,26 @@ it('has no layer to choose for radar, which has one picture, and still has the e
   bench.select(bench.checks[0].id); flushSync();
   expect(query('[aria-label="Copernicus layer"]')).toBe(null);
   expect(query('button[aria-label="Passes on the map"]')).not.toBe(null);
+});
+
+it('shows missing displays disabled with a reason and offers setup and refresh', () => {
+  const layerState = { layers: [{ id: 'TRUE_COLOR', label: 'True colour' },
+    { id: 'VEGETATION_INDEX', label: 'Vegetation Index - NDVI' }], layersSource: 'instance',
+    loadLayers: vi.fn(async () => true) };
+  open({ checks: [made('The plot')], layerState });
+  bench.select(bench.checks[0].id); flushSync();
+  click(query('[aria-label="Copernicus layer"][aria-haspopup]'));
+  const menu = query('[role="menu"][aria-label="Copernicus layer"]');
+  const rows = [...menu.querySelectorAll('[role="menuitemradio"]')];
+  expect(rows.find((row) => row.textContent.includes('VEGETATION_INDEX')).disabled).toBe(false);
+  const missing = rows.find((row) => row.textContent.includes('SWIR'));
+  expect(missing.disabled).toBe(true);
+  expect(missing.textContent).toContain('Not in your Copernicus configuration.');
+  click(missing);
+  expect(bench.layer).toBe('TRUE_COLOR');
+  expect(menu.querySelector('summary').textContent).toBe('Set up Copernicus layers');
+  click([...menu.querySelectorAll('button')].find((row) => row.textContent.trim() === 'Refresh layers'));
+  expect(layerState.loadLayers).toHaveBeenLastCalledWith(true, true, true);
 });
 
 it('makes a new check in three steps: its passes, its pins, and Finish', async () => {

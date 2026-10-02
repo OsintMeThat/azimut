@@ -56,6 +56,9 @@ export function createSentinelState({ place, onBilled, notify, api }) {
   let menuOpen = $state(false);
   let layers = $state([]); // [{id,label,hint}] — catalogue until the instance is asked
   let layersSource = $state('');
+  let layersBusy = $state(false);
+  let layersNote = $state('');
+  let layersPending = null;
   let layersAsked = false; // the instance is asked once per session, on first open
   // The month the calendar is showing, and the passes found in it:
   // { 'YYYY-MM-DD': {cloud, granules} }. A day with no entry has no imagery and
@@ -88,20 +91,40 @@ export function createSentinelState({ place, onBilled, notify, api }) {
    * from its own list); `check` asks the user's instance what it really serves,
    * which is the only authority — a configuration can rename or drop any layer.
    */
-  async function loadLayers(check = false, quiet = false) {
+  async function loadLayers(check = false, quiet = false, force = false) {
+    if (layersPending) {
+      await layersPending;
+      if (!check || layersSource === 'instance') return layersSource === 'instance';
+      return loadLayers(check, quiet, force);
+    }
+    if (check && !force && layersSource === 'instance') return true;
+    layersBusy = true;
+    layersNote = '';
+    layersPending = readLayers(check, quiet);
+    try { return await layersPending; }
+    finally { layersPending = null; layersBusy = false; }
+  }
+
+  async function readLayers(check, quiet) {
     try {
       const r = await api.get(`/api/satellite/sentinel/layers${check ? '?check=true' : ''}`);
       layers = r.layers ?? [];
       layersSource = r.source ?? '';
+      layersNote = check && layersSource !== 'instance'
+        ? 'Could not check your Copernicus layers; the basemap stays on.' : '';
       // a layer that vanished with the list can't stay selected
-      if (layers.length && !layers.some((l) => l.id === layer)) layer = layers[0].id;
-      if (quiet) return;
+      if (layersSource === 'instance' && layers.length && !layers.some((l) => l.id === layer)) layer = layers[0].id;
+      if (quiet) return layersSource === 'instance';
       if (check && r.detail) notify(r.detail, 'warn', 6000);
       else if (check && r.source === 'instance') {
         notify(`${r.layers.length} layers read from your instance`, 'ok');
       }
+      return layersSource === 'instance';
     } catch (e) {
+      layersSource = '';
+      layersNote = 'Could not check your Copernicus layers; the basemap stays on.';
       notify(`Sentinel-2 layers: ${e.message}`, 'danger');
+      return false;
     }
   }
 
@@ -333,6 +356,8 @@ export function createSentinelState({ place, onBilled, notify, api }) {
     get layersSource() {
       return layersSource;
     },
+    get layersBusy() { return layersBusy; },
+    get layersNote() { return layersNote; },
     get month() {
       return month;
     },

@@ -422,7 +422,8 @@ async function answerBuilder(page) {
     log.lookups.push(route.request().postDataJSON());
     return route.fulfill({ json: { dates: [{ date: '2026-09-10', cloud: 4, coverage: 1 }, { date: '2026-09-01', cloud: 2, coverage: 1 }], truncated: false } });
   });
-  await page.route('**/api/satellite/sentinel/layers', (route) => route.fulfill({ json: { source: 'catalogue', layers: [
+  await page.route('**/api/satellite/sentinel/layers**', (route) => route.fulfill({ json: {
+    source: new URL(route.request().url()).searchParams.get('check') === 'true' ? 'instance' : 'catalogue', layers: [
     { id: 'TRUE_COLOR', label: 'True colour' }, { id: 'FALSE_COLOR', label: 'False colour (infrared)' },
     { id: 'SWIR', label: 'SWIR (short-wave infrared)' }, { id: 'NDVI', label: 'NDVI (vegetation index)' }] } }));
   await page.route('**/api/compare/analyzers/check/plan', (route) => {
@@ -500,6 +501,8 @@ test('an analyzer of your own is proved on a check made on the map: two passes, 
   await page.getByRole('button', { name: /^Blank/ }).click();
   await expect(page.getByRole('heading', { name: 'Build an analyzer' })).toBeVisible();
   await expect(page.locator('.reads')).toHaveText('Sentinel-2 · two dates');
+  await expect(page.getByLabel('Rule 1 measures')).toHaveValue('brightness');
+  await page.getByLabel('Rule 1 measures').selectOption('index');
   await page.getByRole('button', { name: 'Add a rule', exact: true }).click();
   await expect(page.getByLabel('Rule 2 says')).toHaveText('NDVI before is at least 0.40');
   // nothing has been asked of Copernicus, and there is no check to test on
@@ -670,7 +673,8 @@ test('an analyzer of one date is tried on one map, with no split and no before o
   await page.getByRole('group', { name: 'Dates' }).getByRole('button', { name: 'One date' }).click();
   await page.getByRole('button', { name: /^Blank/ }).click();
   await expect(page.locator('.reads')).toHaveText('Sentinel-2 · one date');
-  await expect(page.getByLabel('Rule 1 says')).toHaveText('NDVI is at least 0.40');
+  await expect(page.getByLabel('Rule 1 measures')).toHaveValue('brightness');
+  await expect(page.getByLabel('Rule 1 says')).toContainText('brightness is at least');
   await expect(page.getByLabel('Rule 1 reads')).toHaveCount(0);
 
   const deck = page.locator('.console');
@@ -683,6 +687,125 @@ test('an analyzer of one date is tried on one map, with no split and no before o
   await expect(page.getByRole('slider', { name: 'Split between the before and after passes' })).toHaveCount(0);
   await expect(deck.getByRole('group', { name: 'Which pass to look at' })).toHaveCount(0);
   expect(log.lookups).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('check displays use verified configuration layers and grey missing products with setup help', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  await answerBuilder(page);
+  const checks = [], tiles = [];
+  await page.route('**/api/satellite/sentinel/layers**', (route) => {
+    const checked = new URL(route.request().url()).searchParams.get('check') === 'true';
+    if (checked) checks.push(route.request().url());
+    return route.fulfill({ json: { source: checked ? 'instance' : 'catalogue', layers: checked
+      ? [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'VEGETATION_INDEX', label: 'Vegetation Index - NDVI' }]
+      : [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'NDVI', label: 'NDVI' }] } });
+  });
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/tiles/sentinel2')) tiles.push(path);
+  });
+  await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
+  await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
+  await page.getByRole('button', { name: /^Blank/ }).click();
+  await expect(page.getByLabel('Rule 1 measures')).toHaveValue('brightness');
+  await expect(page.getByLabel('Rule 1 data')).toHaveText('Sentinel-2 bands · B02 · B03 · B04');
+  expect(checks).toHaveLength(0);
+  expect(tiles).toHaveLength(0);
+  const deck = page.getByRole('region', { name: 'Checks on the map' });
+  await deck.getByRole('button', { name: 'New check' }).click();
+  await expect.poll(() => checks.length).toBe(1);
+  await deck.getByRole('button', { name: 'Find passes', exact: true }).click();
+  await page.getByLabel('Use 2026-09-01').getByRole('button', { name: 'Before', exact: true }).click();
+  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'After', exact: true }).click();
+  await deck.getByRole('button', { name: 'Place the pins' }).click();
+  await expect.poll(() => tiles.some((path) => path.includes('~TRUE_COLOR~2026-09-01'))).toBe(true);
+  await expect.poll(() => tiles.some((path) => path.includes('~TRUE_COLOR~2026-09-10'))).toBe(true);
+  await deck.getByRole('button', { name: 'Copernicus layer', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Copernicus layer' });
+  const swir = menu.getByRole('menuitemradio', { name: /^SWIR/ });
+  await expect(swir).toBeDisabled();
+  await expect(swir).toContainText('Not in your Copernicus configuration.');
+  await menu.getByText('Set up Copernicus layers', { exact: true }).click();
+  await expect(menu.getByRole('link', { name: 'Configuration Utility', exact: true })).toBeVisible();
+  await menu.getByRole('menuitemradio', { name: /VEGETATION_INDEX/ }).click();
+  await expect.poll(() => tiles.some((path) => path.includes('~VEGETATION_INDEX~'))).toBe(true);
+  expect(tiles.some((path) => path.includes('~NDVI~'))).toBe(false);
+  await expect(page.getByLabel('Rule 1 measures')).toHaveValue('brightness');
+  await deck.getByRole('button', { name: 'Copernicus layer', exact: true }).click();
+  await page.getByRole('menu', { name: 'Copernicus layer' }).getByRole('button', { name: 'Refresh layers', exact: true }).click();
+  await expect.poll(() => checks.length).toBe(2);
+  for (const width of ['Home', 'End']) {
+    await page.getByRole('button', { name: 'Resize Detect panel' }).focus();
+    await page.keyboard.press(width);
+    await expect.poll(async () => {
+      const menuBox = await menu.boundingBox();
+      const mapBox = await page.locator('.detect-tool .map').first().boundingBox();
+      return menuBox.x >= mapBox.x && menuBox.x + menuBox.width <= mapBox.x + mapBox.width;
+    }).toBe(true);
+  }
+  await page.screenshot({ path: test.info().outputPath('verified-check-layers.png') });
+  expect(errors).toEqual([]);
+});
+
+test('a failed layer check keeps the basemap and explains how to recover', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  await answerBuilder(page);
+  await page.route('**/api/satellite/sentinel/layers**', (route) => route.fulfill({ json: {
+    source: 'catalogue', layers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'NDVI', label: 'NDVI' }],
+  } }));
+  const tiles = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/tiles/sentinel2')) tiles.push(path);
+  });
+  await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
+  await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
+  await page.getByRole('button', { name: /^Blank/ }).click();
+  const deck = page.getByRole('region', { name: 'Checks on the map' });
+  await deck.getByRole('button', { name: 'New check' }).click();
+  await deck.getByRole('button', { name: 'Find passes', exact: true }).click();
+  await page.getByLabel('Use 2026-09-01').getByRole('button', { name: 'Before', exact: true }).click();
+  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'After', exact: true }).click();
+  await deck.getByRole('button', { name: 'Place the pins' }).click();
+  await expect(deck.getByText('Could not check your Copernicus layers; the basemap stays on.')).toBeVisible();
+  await expect(page.locator('.detect-tool .map')).toHaveCount(1);
+  await expect(deck.getByRole('button', { name: 'Copernicus layer', exact: true })).toContainText('Choose a layer');
+  await expect(deck.getByRole('button', { name: 'Refresh layers', exact: true })).toBeEnabled();
+  expect(tiles).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('failed check imagery says why on both maps and can be retried or replaced by the basemap', async ({ page }) => {
+  const { errors } = await openDetect(page);
+  await answerBuilder(page);
+  let failing = true;
+  await page.route('**/api/tiles/sentinel2*/**', (route) => failing
+    ? route.fulfill({ status: 400, contentType: 'application/xml', body: '<ServiceException>Layer not found</ServiceException>' })
+    : route.fallback());
+  await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
+  await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
+  await page.getByRole('button', { name: /^Blank/ }).click();
+  const deck = page.getByRole('region', { name: 'Checks on the map' });
+  await deck.getByRole('button', { name: 'New check' }).click();
+  await deck.getByRole('button', { name: 'Find passes', exact: true }).click();
+  await page.getByLabel('Use 2026-09-01').getByRole('button', { name: 'Before', exact: true }).click();
+  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'After', exact: true }).click();
+  await deck.getByRole('button', { name: 'Place the pins' }).click();
+  const notices = page.getByRole('status', { name: 'Imagery loading error' });
+  await expect(notices).toHaveCount(2);
+  await expect(notices.first()).toContainText('The imagery service refused this display layer.');
+  await expect(notices.first()).toContainText('TRUE_COLOR');
+  await expect(notices.first()).toContainText('2026-09-01');
+  await expect(notices.last()).toContainText('2026-09-10');
+  await page.screenshot({ path: test.info().outputPath('check-imagery-error.png') });
+  failing = false;
+  await notices.first().getByRole('button', { name: 'Retry imagery' }).click();
+  await expect(notices).toHaveCount(1);
+  await notices.first().getByRole('button', { name: 'Use basemap' }).click();
+  await expect(notices).toHaveCount(0);
+  await expect(page.locator('.detect-tool .map')).toHaveCount(1);
+  await expect(deck.getByRole('button', { name: 'Passes on the map' })).toHaveAttribute('aria-pressed', 'false');
   expect(errors).toEqual([]);
 });
 

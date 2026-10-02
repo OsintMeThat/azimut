@@ -162,6 +162,7 @@
   import EntityDetails from '../components/EntityDetails.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   loadEntityTypes();
   loadRelationTypes();
@@ -2374,6 +2375,15 @@
     // without any reactive state changing, so the drag would go unseen. Once the hand
     // has stopped, so a drag is one entry rather than one per frame.
     record();
+  }
+
+  /** The page is going away and no timer will run: send the moves still waiting with
+   *  `keepalive`, which outlives the page. */
+  function onpagehide() {
+    if (!savingCase || !pending.size) return;
+    const pins = [...pending.entries()].map(([id, at]) => ({ id, x: at.x, y: at.y }));
+    api.put(`/api/cases/${savingCase}/graph/pins`, { lens: savingFor ?? lens, pins }, { keepalive: true })
+      .catch(() => {});
   }
 
   /**
@@ -4773,7 +4783,8 @@
   $effect(() => () => {
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
-    // A drag inside the debounce window would otherwise be lost to the tab closing.
+    // A drag inside the debounce window would otherwise be lost to the tool unmounting.
+    // The tab closing runs no teardown: `onpagehide` below sends it then.
     flushPins();
     stage?.destroy();
     stage = null;
@@ -4787,6 +4798,7 @@
   onpointermove={onPointerMove}
   onpointerup={onPointerUp}
   onpointercancel={onPointerUp}
+  {onpagehide}
 />
 
 <div class="graph-tool" bind:this={toolElement}>
@@ -4810,7 +4822,7 @@
       <!-- Named for what it decides rather than for what it does to the survivors:
            *Keep* read as a verb the analyst was pressing, and the drawing has a list
            of nodes kept by name that this control has nothing to do with. -->
-      <label class="control" title="Which nodes this view keeps, now that the case is too large to draw whole">
+      <label class="control" title="Which nodes to keep when the case is too large">
         Ranking
         <select class="select pick" bind:value={order}>
           {#each orders as entry (entry.value)}
@@ -4932,7 +4944,7 @@
              cases where this number matters it would always have read zero. -->
         <span
           class="count isolated"
-          title="Nothing in this lens connects to them, counted across the case"
+          title="Connected to nothing in this lens"
         >
           {payload.isolated} unconnected
         </span>
@@ -5011,7 +5023,7 @@
       <button
         class="btn btn-ghost btn-sm placed"
         onclick={undo}
-        title="Undo the last change to the drawing (Ctrl+Z)"
+        title={shortcut('Undo the last change to the drawing (Ctrl+Z)')}
       >
         <Icon name="undo" size={14} stroke={1.7} />
         Undo
@@ -5021,7 +5033,7 @@
       <button
         class="btn btn-ghost btn-sm placed"
         onclick={redo}
-        title="Do it again (Ctrl+Shift+Z)"
+        title={shortcut('Do it again (Ctrl+Shift+Z)')}
       >
         <Icon name="redo" size={14} stroke={1.7} />
         Redo
@@ -5349,14 +5361,14 @@
           class:set={onlyThis}
           aria-pressed={onlyThis}
           onclick={toggleOnly}
-          title="Take the rest of the case off the screen and frame what is left"
+          title="Hide the rest of the case"
         >
           Only this
         </button>
         <button
           class="step wide"
           onclick={() => askWayFrom(chosen.id)}
-          title="Find how this reaches another entity: click the other end, or name it"
+          title="Find a path to another entity"
         >
           Path to…
         </button>

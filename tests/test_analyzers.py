@@ -1407,3 +1407,24 @@ def test_band_products_are_padded_and_keyed_apart_from_older_layouts():
     assert analyzers.product_cache_id(body.b, "surface").endswith(f"~surface~v{analyzers.PRODUCT_VERSION}")
     assert EDGE == 512 + 2 * analyzers.PAD
     assert WATER == analyzers.SCL_WATER
+
+
+def test_a_deleted_area_leaves_its_groups_and_comes_back_with_a_restore(client, scenario):
+    """Groups are not guarded like routines: deleting an area they hold is allowed,
+    and the group stops counting it rather than listing a dead id."""
+    case, body = scenario
+    ring = Zone.model_validate(body["zones"][0]).ring()
+    shared = client.post(f"/api/cases/{case.id}/analysis/areas", json={
+        "name": "Port", "geometry": {"type": "Polygon", "coordinates": [ring + [ring[0]]]},
+    }).json()
+    client.post(f"/api/cases/{case.id}/analysis/zones", json={"title": "Coast", "area_ids": [shared["id"]]})
+
+    assert client.delete(f"/api/cases/{case.id}/analysis/areas/{shared['id']}").status_code == 200
+    [group] = client.get(f"/api/cases/{case.id}/analysis/zones").json()
+    assert (group["area_ids"], group["areas"]) == ([], 0)
+
+    trash = client.get(f"/api/cases/{case.id}/trash").json()
+    [entry] = trash["groups"]
+    assert client.post(f"/api/cases/{case.id}/trash/{entry['id']}/restore").status_code == 200
+    [group] = client.get(f"/api/cases/{case.id}/analysis/zones").json()
+    assert group["area_ids"] == [shared["id"]]

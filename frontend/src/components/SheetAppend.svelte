@@ -101,7 +101,7 @@
             <Icon name="arrowRight" size={11} />
             <select class="input" value={mapping[name] ?? ''} aria-label="Where {name} lands"
                     onchange={(event) => pick(name, event.currentTarget.value)}>
-              <option value="">— leave it out</option>
+              <option value="">Leave it out</option>
               {#each columns as onto (onto)}<option value={onto}>{onto}</option>{/each}
             </select>
           </label>

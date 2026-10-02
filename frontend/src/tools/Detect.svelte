@@ -18,6 +18,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { caseState, dismissToast, prefs, prefsReady, toast, uiState } from '../lib/state.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
   import { blinkable } from '../lib/map/detectReview.js';
   import { ADVISED_MAXCC } from '../lib/map/detectWhen.js';
@@ -411,12 +412,7 @@
     if (id === 'lookup') return lookUpPoint(point);
     closePointMenu();
     if (id === 'copy') {
-      try {
-        await navigator.clipboard.writeText(value);
-        toast('Coordinates copied', 'ok', 1600);
-      } catch {
-        toast('The browser refused the clipboard', 'warn');
-      }
+      await copyText(value);
     } else if (id === 'candidate') {
       await panel?.addCandidate(at.areaId, { type: 'Point', coordinates: [point.lon, point.lat] });
     } else if (id === 'measure') {
@@ -701,13 +697,14 @@
           onusage={() => imagery.refreshUsage()}
           onviewsettled={onSettled}
           oncontextmenu={onMapContextMenu}
+          onimageryfallback={() => builder ? builder.setBasemap(true) : leavePass()}
         />
         {#if builder?.split}
           <SecondPass {imagery} primary={engine} source={builder.imagery.b} {view} {bearing} {home} {overlays}
             imperial={prefs.units === 'imperial'} armed={measuring ? 'measuring' : builder.pinning ? 'selecting' : null}
             divider={builder.divider} bind:engine={secondEngine} bind:element={secondElement}
             onsplit={(percent) => builder.setDivider(percent)} onclick={onMapClick} oncontextmenu={onMapContextMenu}
-            onusage={() => imagery.refreshUsage()} />
+            onusage={() => imagery.refreshUsage()} onimageryfallback={() => builder.setBasemap(true)} />
         {/if}
         {#if builder}
           <RuleLayers {engine} {element} detail={builder.detail} rules={builder.recipe.rules} shown={paintedRules}
@@ -827,6 +824,7 @@
       bind:builder
       viewBounds={() => engine?.viewBounds?.() ?? null}
       passLayers={s2.layers}
+      passLayerState={s2}
       onfly={({ lon, lat, zoom, bounds }) => (bounds ? engine?.fitBounds(bounds, { padding: 40 }) : engine?.setView({ lon, lat }, zoom))}
     />
   </div>

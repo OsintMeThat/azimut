@@ -263,7 +263,7 @@
         toast('Folder written. Load it in your browser to finish', 'ok', 8000);
       }
     } catch (e) {
-      toast(e.message || 'Could not write the extension folder', 'error');
+      toast(e.message || 'Could not write the extension folder', 'danger');
     } finally {
       extBusy = '';
     }
@@ -304,7 +304,7 @@
       adoptExtState(classify(server, { bridges, managed }));
       toast('Folder updated. Reload the extension in your browser', 'warn', 8000);
     } catch (e) {
-      toast(e.message || 'Could not update the extension', 'error');
+      toast(e.message || 'Could not update the extension', 'danger');
     } finally {
       extBusy = '';
     }
@@ -324,7 +324,7 @@
     try {
       await api.post('/api/settings/extension/reveal');
     } catch (e) {
-      toast(e.message || 'Could not open the folder', 'error');
+      toast(e.message || 'Could not open the folder', 'danger');
     }
   }
   // Keep home-view fields as text until change so partial numbers remain editable.
@@ -671,8 +671,21 @@
     formatCoords(Number(home.lat) || 43, Number(home.lon) || 25, prefs.coordFormat)
   );
 
+  // Read once on open. A failure stays on the page with a way to try again: the panes
+  // underneath would otherwise read as "no key set" and an empty home view, which looks
+  // like settings that were lost rather than settings that were not read.
+  let loadError = $state('');
+  async function readSettings() {
+    loadError = '';
+    try {
+      await load();
+    } catch (e) {
+      loadError = e.message;
+    }
+  }
+
   onMount(() => {
-    load().catch((e) => toast(`Could not load settings: ${e.message}`, 'danger'));
+    readSettings();
     loadTemplates();
   });
 
@@ -858,6 +871,13 @@
     </nav>
 
     <div class="pane settings-pane">
+      {#if loadError}
+        <div class="load-error" role="alert">
+          <Icon name="alert" size={15} />
+          <span>Settings could not be read: {loadError}</span>
+          <button class="btn btn-sm" onclick={readSettings}>Reload</button>
+        </div>
+      {/if}
       {#if tab === 'general'}
         <GeneralTab
           {prefs}
@@ -1163,5 +1183,18 @@
     gap: 8px;
     padding: 12px 14px;
     border-top: 1px solid var(--border);
+  }
+  .load-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 9px 12px;
+    border: 1px solid var(--danger);
+    border-radius: var(--r-md);
+    color: var(--danger);
+  }
+  .load-error span {
+    flex: 1;
   }
 </style>

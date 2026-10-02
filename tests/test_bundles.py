@@ -234,6 +234,97 @@ def test_sealed_chunks_detect_truncation_before_any_case_swap(bundle_case):
     assert destination.list_entities() == []
 
 
+def test_an_export_with_no_room_fails_once_and_says_why(bundle_case, monkeypatch):
+    """It read "BundleError: not enough free space…" after three identical attempts."""
+    tries = []
+
+    def full(target, total):
+        tries.append(target)
+        raise bundles.BundleError("not enough free space to export this case while keeping a disk safety reserve")
+
+    monkeypatch.setattr(bundles, "_require_export_space", full)
+    job = bundles.queue_export(bundle_case)
+    workqueue.drain(bundle_case)
+
+    settled = bundle_case.get_job(job["id"])
+    assert settled["state"] == "failed"
+    assert settled["error"] == "not enough free space to export this case while keeping a disk safety reserve"
+    assert len(tries) == 1
+
+
+def _names():
+    return sorted(row["name"] for row in Case.list_all())
+
+
+def test_an_import_is_out_of_the_switcher_until_it_lands(bundle_case, monkeypatch):
+    """The shell and the staging folder both carry a manifest. Listed, they were two
+    cases named "Source case (imported)" for as long as the bundle took to unpack."""
+    exported = bundles.export_case(bundle_case)
+    seen = {}
+    real = bundles._prepare_import_database
+
+    def midway(*args, **kwargs):
+        seen["names"] = _names()
+        seen["scaffolds"] = sorted(
+            path.name for path in config.cases_dir().iterdir() if layout.is_import_scaffold(path)
+        )
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(bundles, "_prepare_import_database", midway)
+    imported, _ = bundles.queue_import(exported)
+    workqueue.drain(imported)
+
+    assert seen["names"] == ["Source case"]
+    assert seen["scaffolds"] == [imported.id, f"{imported.id}.incoming"]
+    assert _names() == ["Source case", "Source case (imported)"]
+    assert not layout.is_import_scaffold(imported.path)
+    assert [path.name for path in config.cases_dir().iterdir() if layout.is_import_scaffold(path)] == []
+
+
+def test_a_start_removes_what_an_interrupted_import_left(bundle_case):
+    """Killed mid-import (the console closed on a big bundle), the empty shell and
+    the half-extracted staging folder stayed, and the switcher listed both."""
+    shell = bundles.create_import_case("Kyiv strike")
+    staging = shell.path.with_name(f"{shell.id}.incoming")
+    shutil.copytree(bundle_case.path, staging)
+    layout.mark_import_scaffold(staging)
+    set_aside = shell.path.with_name(f"{shell.id}.import-shell-{'0' * 32}")
+    shutil.copytree(shell.path, set_aside)
+    assert _names() == ["Source case"]
+
+    assert bundles.sweep_scaffolds() == 3
+    assert sorted(path.name for path in config.cases_dir().iterdir() if path.is_dir()) == [
+        bundle_case.path.name
+    ]
+    assert Case.open(bundle_case.id).list_entities()
+
+
+def test_the_sweep_leaves_an_import_under_way_alone(bundle_case):
+    exported = bundles.export_case(bundle_case)
+    imported, _ = bundles.queue_import(exported)
+
+    assert bundles.sweep_scaffolds() == 0
+    assert imported.path.is_dir()
+
+    workqueue.drain(imported)
+    assert Case.open(imported.id).list_entities()
+
+
+def test_a_failed_import_gives_back_the_destination_its_caller_made(bundle_case, monkeypatch):
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create("Received")
+
+    def broken(*args, **kwargs):
+        raise bundles.BundleError("the bundle does not contain a complete case")
+
+    monkeypatch.setattr(bundles, "_prepare_import_database", broken)
+    with pytest.raises(bundles.BundleError):
+        bundles.import_into(destination, exported)
+
+    assert not layout.is_import_scaffold(destination.path)
+    assert "Received" in _names()
+
+
 def test_importing_the_same_bundle_twice_names_the_second_destination_apart(bundle_case):
     """`Case.create` numbers a taken folder by itself now, so the distinct name
     the switcher shows has to be asked for on the name, not fallen into."""

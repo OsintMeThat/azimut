@@ -31,6 +31,10 @@ pipx install azimut   # isolated app install; plain `pip install azimut` also wo
 azimut                # starts on http://127.0.0.1:8477 and opens a browser tab
 ```
 
+Starting Azimut a second time opens the one already running. If another program
+holds port 8477, Azimut takes the next free port, and the capture extension needs
+that address in its options. Settings → Capture extension shows which.
+
 No Python? Every release attaches a self-contained binary for Windows, macOS
 (Apple Silicon) and Linux on the
 [Releases page](https://github.com/OsintMeThat/azimut/releases). Download it, run
@@ -52,21 +56,21 @@ to fix a point on the map.*
 
 | Tool | What it does |
 |------|--------------|
-| **Timeline** | The case on a time axis, and where events are noted: one line with a date, a sentence and `@` mentions. A point is an instant, a bracket a date known to the day or month, a bar a period; the ruler reads in any zone or at a saved place, the list copies out as a table, and a picked file plays in place. |
-| **Board** | The case as an index: people, accounts, places and things first, each with how many events name it and when, then the files and work folded under. One filter bar whose values are all taken from the case, Details beside the list, and a ticked selection deleted as one recoverable act. |
-| **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. Graph and Timeline both export a reading as an SVG or PNG plate carrying its question, period and legend. |
-| **Sheet** | The case's own CSVs in a plain grid: a comparison table, a worklist with its own state, or the half-facts too soft to be entities. Columns can be typed, a workbook arrives one sheet per tab, and a declared sheet promotes into entities, places and dated statements. A worklist can also be built back out of what the case holds. |
-| **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
+| **Timeline** | The case on a time axis, where an event is one dated line with `@` mentions and the ruler reads in any zone or at a saved place. |
+| **Board** | The case as an index of people, accounts, places and things, each with how many events name it and when, filtered by values taken from the case. |
+| **Graph** | The same case drawn as clustered nodes and verb-labelled edges, exported with its question, period and legend as an SVG or PNG plate. |
+| **Sheet** | The case's CSVs in a plain grid, where typed columns, worklists and declared sheets promote into entities, places and dated statements. |
+| **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp and gallery-dl), each kept as a clean local file with metadata and a SHA-256. |
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
-| **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. With the capture extension, pressing an engine opens it with the picture already in it. Nothing leaves the machine until you press one. |
-| **Inspect** | Reads any photo or video closely: sharpest-frame capture onto a strip, frame adjustments, editable crop and ELA hints. Frames and edits are kept with the file as you make them; a frame or an adjusted video enters the Media Library only when you save it to the case. |
-| **Collage** | Lays out frames and images from any number of files on one canvas, with per-piece warp, scale, rotate and crop, and auto-stitch to solve a panorama's layout. Saved as you go; the picture it exports is case media. |
-| **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture with an optional scale bar and north arrow, map rotation, measurement tools, a right-click menu on any point, stacked overlays (borders, village names, roads, railways, power lines, fires, night lights), your own KML, KMZ, GeoJSON, GPX or My Maps layers, GeoConfirmed conflicts narrowed to a period, and editable AOI grids for area review. Esri/OSM by default, plus the Esri Wayback archive, Sentinel-2 with a date calendar and a cloud-ceiling slider, and Sentinel-1 radar passes; add a Mapbox or Google key for more basemaps. Open it in several tabs and they stay in sync. |
-| **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights laid over any of them. All dates lists every picture of a point, oldest first, to set on either side. Ground-anchored notes, shapes, numbered markers and measurements follow both maps. Editable sessions and rendered previews stay in the case; attributed PNG/GIF copies go to exports. |
-| **Detect** | Sweeps drawn areas of Sentinel-2 for vessels, fires, construction, burn scars and other changes, and of Sentinel-1 radar for vessels, razed buildings, new structures and floods through cloud, once or as a saved routine. Only a candidate you keep becomes a case pin, dated by the passes that found it. |
-| **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
-| **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, turn or crop them, annotate with colored shapes, fills, symbols, numbered markers, blur boxes, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
-| **Geo Report** | Turn a proof into a prepared thread for X or Bluesky: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
+| **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services, which the capture extension opens with the picture already in them. |
+| **Inspect** | Reads any photo or video closely with sharpest-frame capture, frame adjustments, editable crop and ELA hints, all kept with the file as you work. |
+| **Collage** | Lays out frames and images from any number of files on one canvas, with per-piece warp and crop and auto-stitch for panoramas. |
+| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measurement tools, stacked overlays, your own KML, GeoJSON or GPX layers, and AOI grids for area review. |
+| **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights and ground-anchored notes that follow both maps. |
+| **Detect** | Sweeps drawn areas of Sentinel-2 and Sentinel-1 radar for vessels, fires, construction, burn scars, floods and other changes, and only a candidate you keep becomes a case pin. |
+| **Coords & Sky** | Converts coordinate formats, opens map links, and reads the sun and moon at that point on a date, computed offline. |
+| **Geo Proof** | Composes annotated case panels into a proof, from a house style or a published post, and exports `proof.png` plus a re-editable spec. |
+| **Geo Report** | Turns a proof into a prepared thread for X or Bluesky, with coordinates, attribution, character counts, media and a Markdown case note. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
@@ -99,8 +103,8 @@ Detect sweeps an area for what appeared, and the map takes layers made elsewhere
   a GeoConfirmed conflict. A dated layer narrows to a period.
 - Proofs turn and crop their images, stamp numbered markers and blur boxes, and
   carry a sentence and the date their material was taken.
-- To-do lists on Home, one date field across the app, a claim filed from where
-  you are, and Reverse Search from a Media Library row or an Inspect frame.
+- To-do lists on Home, every date typed day-first in the same field, a claim filed
+  from where you are, and Reverse Search from a Media row or an Inspect frame.
 - Existing cases open as they are, with 0.3.0 Inspect sessions merged into one
   work per file, and older bundles still import.
 
@@ -170,8 +174,8 @@ The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
 audio+video streams work out of the box. If you `pip install azimut` instead,
 put ffmpeg on your `PATH` for those features. Everything else works without it.
-The bundled ffmpeg is redistributed under its own license; see
-[ffmpeg.org/legal.html](https://ffmpeg.org/legal.html).
+The binaries carry the bundled build's license notice and texts, readable from
+**Settings → System**; see also [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html).
 
 ### From source
 
@@ -234,12 +238,16 @@ Frontend development (hot reload, proxied API):
 cd frontend && npm run dev          # UI on :5173
 ```
 
-Checks (CI runs these on every push):
+Checks (CI fails a pull request on any of these). A fresh clone runs
+`uv sync --extra dev` first, which installs pytest, ruff and mypy:
 
 ```bash
-uv run ruff check src tests scripts packaging   # lint
-uv run mypy                    # type-check the package, scripts and packaging
-cd frontend && npm run check   # svelte-check (blocks on errors)
+uv run pytest -q -n auto                         # backend tests
+cd frontend && npx vitest run                    # frontend tests
+cd frontend && npm run check                     # svelte-check
+uv run ruff check src tests scripts packaging    # lint
+uv run mypy                                      # type-check
+cd frontend && npm run test:e2e                  # Playwright, for changes seen in the browser
 ```
 
 ### Capture extension (optional)
@@ -401,11 +409,10 @@ One-time setup: register the repo as a
 2. A case contains the investigation's files and SQLite graph. A closed case
    folder is complete and portable; bundle export carries both Azimut's files
    and anything kept beside them.
-3. One tab = one tool, useful in 30 seconds.
-4. Azimut integrates specialized services instead of recreating them.
-5. The analyst decides; tools do not produce automated verdicts.
-6. Every artifact records how it was produced.
-7. Free and open source. No paid key is ever required; bring your own for
+3. Azimut integrates specialized services instead of recreating them.
+4. The analyst decides; tools do not produce automated verdicts.
+5. Every artifact records how it was produced.
+6. Free and open source. No paid key is ever required; bring your own for
    more basemaps.
 
 Full spec: [docs/SPEC.md](docs/SPEC.md).

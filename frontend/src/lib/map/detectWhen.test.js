@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ADVISED_MAXCC, areaLine, canPickPass, ceilingWarning, newestLabel, newestLine, newestPick, passBefore, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform,
+  ADVISED_MAXCC, canPickPass, ceilingWarning, newestLabel, newestLine, newestPick, passBefore, setSide, shadowLength, shadowWarning, sharedSide, sideLine, uniform,
   whenNeed, whenSummary, withRule,
 } from './detectWhen.js';
 
@@ -95,16 +95,6 @@ describe('the When step of a detection', () => {
       .toBe('Choose A, the picture every run compares with.');
     // a routine names no B, whatever the switch last said
     expect(whenNeed({ ...base, single: true, against: 'previous', followupId: null })).toBe('');
-  });
-
-  it('lists one area\'s days when the areas differ', () => {
-    const once = { single: false, routine: false };
-    // "newest" is the newest the ceiling allows, and says so
-    expect(areaLine(pair('x', '2026-08-01'), once)).toBe('A 2026-08-01 → B newest pass under 30% cloud');
-    expect(areaLine(pair('x', '', '2026-09-06'), once)).toBe('A not chosen → B 2026-09-06');
-    expect(areaLine(pair('x', '', '2026-09-06'), { ...once, single: true })).toBe('2026-09-06');
-    expect(areaLine(pair('x', '2026-08-01'), { ...once, routine: true })).toBe('A 2026-08-01');
-    expect(areaLine(pair('x'), { single: true, routine: true })).toBe('newest pass under 30% cloud');
   });
 
   it('sums the step up in one line', () => {

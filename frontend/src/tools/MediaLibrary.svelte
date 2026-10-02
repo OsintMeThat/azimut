@@ -594,7 +594,7 @@
       uiState.openSheet = sheetId;
       uiState.tool = 'sheet';
     } catch (error) {
-      toast(error.message || 'The worklist could not be opened.', 'error');
+      toast(error.message || 'The worklist could not be opened.', 'danger');
     } finally {
       worklistBusy = false;
     }
@@ -903,7 +903,7 @@
 <div
   class="tool"
   role="region"
-  aria-label="Media Library"
+  aria-label="Media"
   ondragover={(e) => {
     e.preventDefault();
     dragOver = true;
@@ -914,7 +914,7 @@
   ondrop={onDrop}
 >
   <div class="tool-header">
-    <h2>Media Library</h2>
+    <h2>Media</h2>
     <div class="spacer"></div>
     <form
       class="dl-form"
@@ -937,7 +937,7 @@
     </button>
     <!-- The pictures and videos brought in here, as the sheet they are worked down in. -->
     <button class="btn" onclick={openWorklist} disabled={!items.length || worklistBusy}
-            title="The imported pictures and videos as a sheet, each marked done once a proof answers it">
+            title="Open as a worklist sheet">
       <Icon name="table" size={15} /> Worklist
     </button>
     <!-- The two upkeep sweeps, behind one door. The door stays put on an empty

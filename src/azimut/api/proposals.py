@@ -25,8 +25,8 @@ MAX_LISTED = 200
 
 def _waiting(case: Any) -> dict[str, Any]:
     """The proposals still waiting, with both ends named so a row reads as a sentence."""
-    waiting = [link for link in case.list_links() if proposal_engine.unreviewed(link)]
-    listed = waiting[:MAX_LISTED]
+    suggestions = case.suggestions(proposal_engine.BY, limit=MAX_LISTED)
+    listed = suggestions["items"]
     ends = {
         entity["id"]: entity
         for entity in case.entities_by_ids(
@@ -50,7 +50,7 @@ def _waiting(case: Any) -> dict[str, Any]:
                 item["metres"] = round(proposal_engine.metres(a, b))
         items.append(item)
     return {
-        "pending": proposal_engine.pending(case),
+        "pending": proposal_engine.counted(suggestions),
         "items": items,
         "listed": len(items),
         "through": (case.link_pass() or {}).get("at"),

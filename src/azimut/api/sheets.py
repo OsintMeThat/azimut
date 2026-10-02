@@ -39,7 +39,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from .. import layout
+from .. import errors, layout
 from ..engine import exportdir
 from ..engine import reveal as reveal_engine
 from ..engine import sheetfromcase as fromcase_engine
@@ -632,7 +632,7 @@ def export_sheet(case_id: str, sheet_id: str, body: SheetExportIn) -> dict[str, 
         else:
             path = exportdir.write_out(data, destination, written["filename"])
     except (OSError, exportdir.ExportDirError) as exc:
-        raise HTTPException(status_code=409, detail=f"could not write the CSV: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not write the CSV: {errors.explain(exc)}") from exc
     return {"file": path.name, "path": str(destination)}
 
 

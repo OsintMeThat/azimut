@@ -482,7 +482,7 @@
       </div>
       {#if job}
         <p class="import-progress">
-          Downloading{job.progress?.percent != null ? ` — ${job.progress.percent}%` : '…'}
+          Downloading{job.progress?.percent != null ? ` ${job.progress.percent}%` : '…'}
         </p>
       {/if}
     </div>
@@ -685,7 +685,7 @@
         {#if phase === 'source'}
           <p class="import-progress">
             {job?.progress?.percent != null
-              ? `Downloading the footage — ${job.progress.percent}%`
+              ? `Downloading the footage: ${job.progress.percent}%`
               : 'Reaching the footage…'}
           </p>
         {/if}

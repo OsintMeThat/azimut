@@ -1,5 +1,5 @@
 <script>
-  import { api } from '../lib/api.js';
+  import { api, detailLine } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
@@ -24,6 +24,8 @@
   import PiecePicker from './inspect/PiecePicker.svelte';
   import PieceCropModal from './inspect/PieceCropModal.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
+  import NoCase from '../components/NoCase.svelte';
+  import { shortcut } from '../lib/keys.js';
 
   // A collage lays out pieces from any number of files on one canvas: frames cut
   // in Inspect, or images already in the case. It is a document of its own, saved
@@ -365,9 +367,18 @@
     cropPieceNode = null;
   }
 
+  /** A collage whose save failed is held open, where the header says so and offers
+   *  Retry, rather than dropped by whatever was about to replace it. */
+  function heldUnsaved() {
+    if (!autosave.unsaved) return false;
+    toast('The collage could not be saved, so it stays open', 'warn');
+    return true;
+  }
+
   async function newCollage() {
     listOpen = false;
     await autosave.flush();
+    if (heldUnsaved()) return;
     await refreshList();
     closeDoc();
     doc.open = true;
@@ -380,6 +391,7 @@
   async function openCollage(name) {
     listOpen = false;
     await autosave.flush();
+    if (heldUnsaved()) return;
     await ensureOps();
     closeDoc();
     const run = docRun;
@@ -457,7 +469,7 @@
     if (!res.ok) {
       let detail = 'render failed';
       try {
-        detail = (await res.json()).detail;
+        detail = detailLine((await res.json()).detail) || detail;
       } catch {
         /* non-json */
       }
@@ -588,10 +600,7 @@
   async function closeCollage() {
     await renaming;
     await autosave.flush();
-    if (autosave.state.status === 'error') {
-      toast('The collage could not be saved, so it stays open', 'warn');
-      return;
-    }
+    if (heldUnsaved()) return;
     closeDoc();
     query = '';
     await refreshList();
@@ -722,10 +731,10 @@
         <button class="btn btn-ghost btn-xs" onclick={() => autosave.flush()}>Retry</button>
       {/if}
       <div class="spacer"></div>
-      <button class="btn btn-ghost btn-sm" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}>
+      <button class="btn btn-ghost btn-sm" title={shortcut('Undo (Ctrl+Z)')} disabled={!canUndo} onclick={undo}>
         <Icon name="undo" size={15} />
       </button>
-      <button class="btn btn-ghost btn-sm" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled={!canRedo} onclick={redo}>
+      <button class="btn btn-ghost btn-sm" title={shortcut('Redo (Ctrl+Shift+Z / Ctrl+Y)')} disabled={!canRedo} onclick={redo}>
         <Icon name="redo" size={15} />
       </button>
       <button class="btn btn-sm" onclick={() => { query = ''; refreshList(); listOpen = true; }} title="Open another collage">
@@ -741,10 +750,7 @@
   {/if}
 
   {#if !caseState.current}
-    <div class="empty">
-      <Icon name="grid" size={40} />
-      <p>Open a case to lay out a collage.</p>
-    </div>
+    <NoCase icon="grid" what="lay out a collage" />
   {:else if !doc.open}
     <div class="start">
       <div class="start-col">
@@ -828,7 +834,7 @@
     <ConfirmDialog
       title="Delete this collage?"
       message={`“${deleting.title}” goes to the Trash.`}
-      detail="A picture already saved from it stays in the Media Library."
+      detail="A picture already saved from it stays in Media."
       confirmLabel="Delete"
       tone="danger"
       icon="trash"
@@ -867,16 +873,6 @@
   }
   .spacer {
     flex: 1;
-  }
-  .empty {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    color: var(--text-3);
-    text-align: center;
   }
   /* The whole panel scrolls and the column sits centred in it, so the wheel works
      over the margins and the scrollbar stays on the edge. */

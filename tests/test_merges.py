@@ -313,3 +313,21 @@ def test_interrupted_undo_replays_once_on_reopen_and_blocks_bundle(client, case,
     assert case.get_merge(result['merge']) is None
     Case.open(case.id)
     assert json.loads(path.read_text()) == before
+
+
+def test_opening_a_case_parses_only_merges_with_work_left(client, case, monkeypatch):
+    """Merge records stay for Undo and every request opens the case, so finished
+    merges must cost the open nothing, however many there are."""
+    keep = subject(case, 'Keep')
+    for n in range(4):
+        post(client, case, keep, subject(case, f'Twin {n}'))
+    parsed = []
+    real = json.loads
+
+    def counting(text, *args, **kwargs):
+        parsed.append(text)
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(json, 'loads', counting)
+    assert case.pending_merge_work() == []
+    assert parsed == []

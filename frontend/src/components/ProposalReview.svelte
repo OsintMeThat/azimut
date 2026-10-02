@@ -15,6 +15,7 @@
   import Icon from './Icon.svelte';
   import { api } from '../lib/api.js';
   import { closeOnOutsidePointer } from '../lib/dismiss.js';
+  import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
   import { filedWords, proposalSentence, waitingCount } from '../lib/proposalReview.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
 
@@ -39,6 +40,13 @@
 
   $effect(() => (open && box ? closeOnOutsidePointer(box, () => (open = false)) : undefined));
 
+  // Escape closes it like every other panel, and only when nothing sits above it.
+  const self = {};
+  $effect(() => (open ? joinOverlays(self) : undefined));
+  function onkeydown(e) {
+    if (open && e.key === 'Escape' && isTopOverlay(self)) open = false;
+  }
+
   const waiting = $derived(waitingCount(data?.pending));
   /** Never read for links yet: a case filed before the pass existed. */
   const unread = $derived(Boolean(data) && !data.through);
@@ -53,7 +61,7 @@
       if (waitingCount(answer.pending)) open = true;
       await reloadCase();
     } catch (error) {
-      toast(error.message || 'The case could not be read for links.', 'error');
+      toast(error.message || 'The case could not be read for links.', 'danger');
     } finally {
       busy = false;
     }
@@ -67,7 +75,7 @@
       data = await api.get(`/api/cases/${caseId}/proposals`);
       await reloadCase();
     } catch (error) {
-      toast(error.message || 'This link could not be confirmed.', 'error');
+      toast(error.message || 'This link could not be confirmed.', 'danger');
     } finally {
       busy = false;
     }
@@ -80,7 +88,7 @@
       data = await api.del(`/api/cases/${caseId}/proposals/${item.id}`);
       await reloadCase();
     } catch (error) {
-      toast(error.message || 'This link could not be dropped.', 'error');
+      toast(error.message || 'This link could not be dropped.', 'danger');
     } finally {
       busy = false;
     }
@@ -90,6 +98,8 @@
     uiState.openGraphEntity = item.to.id;
   }
 </script>
+
+<svelte:window {onkeydown} />
 
 <div class="review" bind:this={box}>
   {#if waiting}

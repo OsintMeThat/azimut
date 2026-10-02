@@ -165,7 +165,7 @@
                    small caps and letterspaced, and it turned every basemap name
                    into a heading three lines tall -->
               <span class="name">{provider.label}</span>
-              {#if provider.needs_key}<span class="need">needs key</span>{/if}
+              {#if provider.needs_key}<span class="need">Needs a key</span>{/if}
             </button>
           </li>
         {/each}

@@ -17,6 +17,7 @@
   import AcquisitionPicker from './AcquisitionPicker.svelte';
   import PassDates from './PassDates.svelte';
   import Icon from '../../components/Icon.svelte';
+  import CopernicusLayersHelp from '../../components/CopernicusLayersHelp.svelte';
 
   let { bench } = $props();
 
@@ -37,7 +38,7 @@
   const side = $derived(bench.divider >= 99 ? 'before' : bench.divider <= 1 ? 'after' : 'split');
   const pinCount = $derived(bench.marks.length);
   /** The layer's name without its explanation: "NDVI (vegetation index)" is NDVI on a button. */
-  const layerLabel = $derived((bench.offered.find((entry) => entry.id === bench.layer)?.label ?? bench.layer).replace(/\s*\(.*$/, ''));
+  const layerLabel = $derived((bench.offered.find((entry) => entry.id === bench.layer && entry.enabled !== false)?.label ?? 'Choose a layer').replace(/\s*\(.*$/, ''));
   const suggestion = $derived(bench.suggestion);
 
   /** How every pin came out, from the last test, with the count of what it found. */
@@ -143,7 +144,7 @@
                 </button>
               {/each}
               <hr />
-              <button role="menuitem" disabled={bench.atMostChecks} onclick={startNew}><Icon name="plus" size={12} /><span class="grow">New check</span></button>
+              <button role="menuitem" disabled={bench.atMostChecks} title={bench.atMostChecks ? 'This analyzer holds all the checks it can' : undefined} onclick={startNew}><Icon name="plus" size={12} /><span class="grow">New check</span></button>
             </div>
           {/if}
         </div>
@@ -168,27 +169,38 @@
           title={bench.basemap ? 'Show the passes' : 'Show the basemap'} onclick={() => bench.setBasemap(!bench.basemap)}>
           <Icon name={bench.basemap ? 'eyeOff' : 'eye'} size={15} /></button>
         {#if !bench.radar}
-          <div class="pick">
+          <div class="pick look-pick">
             <button class="select look" class:off={bench.basemap} aria-haspopup="menu" aria-expanded={open === 'look'}
-              aria-label="Copernicus layer" title="How the passes are shown" onclick={() => (open = open === 'look' ? '' : 'look')}>
-              <Icon name="layers" size={14} /><span>{layerLabel}</span><Icon name="chevronDown" size={13} />
+              aria-label="Copernicus layer" title="Display layer" onclick={() => {
+                open = open === 'look' ? '' : 'look';
+                if (open === 'look') void bench.checkLayers();
+              }}>
+              <Icon name="layers" size={14} /><span>Display: {layerLabel}</span><Icon name="chevronDown" size={13} />
             </button>
             {#if open === 'look'}
               <div class="menu look-menu cmp-glass" role="menu" aria-label="Copernicus layer">
                 {#each bench.offered as entry (entry.id)}
-                  <button role="menuitemradio" aria-checked={bench.layer === entry.id} title={entry.hint ?? ''}
+                  <button role="menuitemradio" aria-checked={bench.layer === entry.id} disabled={entry.enabled === false}
+                    title={entry.reason || entry.hint || undefined}
                     onclick={() => { bench.setLayer(entry.id); open = ''; }}>
-                    <span class="grow">{entry.label}</span>
-                    {#if entry.id === suggestion}<small>best for rule ★</small>{/if}
+                    <span class="grow">{entry.label}<span class="layer-id cmp-mono">{entry.id}</span>
+                      {#if entry.reason}<span class="layer-reason">{entry.reason}</span>{/if}</span>
+                    {#if entry.enabled !== false && entry.id === suggestion}<small>for rule ★</small>{/if}
                   </button>
                 {/each}
+                <hr />
+                <div class="layer-setup">
+                  <button class="btn btn-sm" disabled={bench.layersBusy} onclick={() => bench.checkLayers(true)}>
+                    {bench.layersBusy ? 'Checking…' : 'Refresh layers'}</button>
+                  <CopernicusLayersHelp />
+                </div>
               </div>
             {/if}
           </div>
         {/if}
       {:else if !check}
         <span class="hint grow">Pick a check to try the rules on it.</span>
-        <button class="btn btn-sm" disabled={bench.atMostChecks} onclick={startNew}><Icon name="plus" size={12} /> New check</button>
+        <button class="btn btn-sm" disabled={bench.atMostChecks} title={bench.atMostChecks ? 'This analyzer holds all the checks it can' : undefined} onclick={startNew}><Icon name="plus" size={12} /> New check</button>
       {/if}
 
       {#if bench.draft && !bench.choosingPasses}
@@ -197,6 +209,16 @@
         <button class="btn btn-sm btn-primary" disabled={!bench.canFinish} onclick={() => bench.finishDraft()}>Finish</button>
       {/if}
     </div>
+
+    {#if !bench.radar && check && (bench.layersNote || bench.dataProblem)}
+      <div class="layer-status" role="status">
+        <span>{bench.layersNote || bench.dataProblem}</span>
+        {#if !bench.layersBusy}
+          <button class="btn btn-sm" onclick={() => bench.checkLayers(true)}>Refresh layers</button>
+          <CopernicusLayersHelp />
+        {/if}
+      </div>
+    {/if}
 
     {#if check && !bench.choosingPasses}
       <div class="tools">
@@ -259,6 +281,7 @@
   .console > .head, .console > .tools, .console > .result, .console > .note { padding: 7px 10px; }
   .console > * + * { border-top: 1px solid var(--glass-line); }
   .head, .tools, .result { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+  .head { position: relative; }
   .grow { flex: 1; }
 
   /* Which check is on the map, which pass of it, and how the passes are shown. */
@@ -309,7 +332,13 @@
     padding: 4px;
     box-shadow: var(--shadow-2);
   }
-  .look-menu { width: 280px; gap: 0; }
+  .look-pick { position: static; }
+  .look-menu { left: auto; right: 10px; width: 320px; max-width: calc(100% - 20px); gap: 0; }
+  .layer-id, .layer-reason { display: block; font-size: var(--fs-xs); color: var(--glass-muted); }
+  .layer-reason { white-space: normal; }
+  .layer-setup, .layer-status { display: grid; gap: 7px; padding: 8px 10px; font-size: var(--fs-xs); }
+  .layer-status { border-top: 1px solid var(--glass-line); color: var(--warn); }
+  .layer-setup > .btn, .layer-status > .btn { justify-self: start; }
   .menu button {
     display: flex;
     align-items: center;

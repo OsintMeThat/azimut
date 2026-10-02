@@ -14,10 +14,10 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .. import __version__, config
+from .. import __version__, config, errors
 from ..engine import (
     diagnostics,
     exportdir,
@@ -213,6 +213,25 @@ def ffmpeg_info() -> dict[str, Any]:
     return ffmpeg.info()
 
 
+@router.get("/settings/bundled")
+def bundled() -> dict[str, bool]:
+    """Which of the parts a frozen build can silently lose are present."""
+    return diagnostics.bundled_parts()
+
+
+@router.get("/settings/ffmpeg/notice")
+def ffmpeg_notice() -> PlainTextResponse:
+    """The bundled ffmpeg's notice and licence texts, as one page to read."""
+    notice = ffmpeg.notice_path()
+    if notice is None:
+        raise HTTPException(status_code=404, detail="this ffmpeg is not bundled with Azimut")
+    texts = [notice.read_text(encoding="utf-8")]
+    for text in sorted(notice.parent.glob("*.txt")):
+        if text != notice:
+            texts.append(f"\n\n===== {text.name} =====\n\n" + text.read_text(encoding="utf-8"))
+    return PlainTextResponse("".join(texts))
+
+
 @router.put("/settings/prefs")
 def put_prefs(body: PrefsIn) -> dict[str, Any]:
     # validate before taking the settings lock — a 422 must not hold it
@@ -389,7 +408,7 @@ def extension_install() -> dict[str, Any]:
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except OSError as exc:
-        raise HTTPException(status_code=409, detail=f"cannot write the extension folder: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"cannot write the extension folder: {errors.explain(exc)}") from exc
 
 
 @router.post("/settings/extension/reveal")
@@ -481,7 +500,7 @@ def discard_old_workspace() -> dict[str, str]:
     except workspacemove.MoveError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OSError as exc:
-        raise HTTPException(status_code=409, detail=f"could not remove it: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not remove it: {errors.explain(exc)}") from exc
 
 
 @router.post("/settings/ingest-token/rotate")
@@ -539,6 +558,10 @@ def export_settings() -> Response:
     """
     portable_settings = config.load_settings()
     portable_settings.pop("export_dirs", None)
+    # A machine that never paired has no token to carry, and an empty one would
+    # unpair the machine this backup is restored on.
+    if not portable_settings.get("ingest_token"):
+        portable_settings.pop("ingest_token", None)
     bundle = {
         "settings": portable_settings,
         "templates": config.load_templates(),
@@ -762,6 +785,10 @@ class ImportIn(BaseModel):
 @router.post("/settings/import")
 def import_settings(body: ImportIn) -> dict[str, Any]:
     canonical = body.settings.model_dump(exclude_unset=True, by_alias=True)
+    # Older backups wrote an empty token for a machine that never paired. Taking it
+    # would unpair this one, and its extension would stop with no word why.
+    if not canonical.get("ingest_token"):
+        canonical.pop("ingest_token", None)
     applied = sorted(canonical)
 
     def apply(settings: dict[str, Any]) -> None:
@@ -821,6 +848,9 @@ def test_key(provider: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"no {provider} key saved")
 
     def verdict(ok: bool, detail: str) -> dict[str, Any]:
+        # A provider may quote the credential back ("Invalid instance id: <id>"),
+        # and this sentence is shown, stored and carried by the settings backup.
+        detail = detail.replace(key, "<key>")
         config.record_provider_status(provider, ok, detail)
         return {"ok": ok, "detail": detail}
 
@@ -830,7 +860,7 @@ def test_key(provider: str) -> dict[str, Any]:
             google_tiles.session_token(key)
             return verdict(True, "session token created")
         except Exception as exc:
-            return verdict(False, str(exc))
+            return verdict(False, tiles.upstream_failure(exc))
     if provider == "google_js":
         # A JS-API key only proves itself in a browser (gm_authFailure); the
         # Settings tab runs that test and reports through /status above.
@@ -842,7 +872,7 @@ def test_key(provider: str) -> dict[str, Any]:
             response.raise_for_status()
             return verdict(True, "tile fetched")
         except Exception as exc:
-            return verdict(False, str(exc))
+            return verdict(False, tiles.upstream_failure(exc))
     if provider == "firms":
         # The key is *asked about*, not used. A GetMap proves nothing here:
         # FIRMS answers a key it rejects with 200 and a 28 KB picture saying so
@@ -860,7 +890,7 @@ def test_key(provider: str) -> dict[str, Any]:
                 return verdict(False, firms.status_error(response.text))
             return verdict(True, "key accepted")
         except Exception as exc:
-            return verdict(False, str(exc))
+            return verdict(False, tiles.upstream_failure(exc))
     if provider == "sentinelhub":
         # One real tile over Paris (grid level 13 → TILEMATRIX 14). This checks
         # the instance id *and* that the instance actually has a TRUE_COLOR
@@ -876,7 +906,7 @@ def test_key(provider: str) -> dict[str, Any]:
             response.raise_for_status()
             return verdict(True, "tile fetched")
         except Exception as exc:
-            return verdict(False, str(exc))
+            return verdict(False, tiles.upstream_failure(exc))
     raise HTTPException(status_code=404, detail=f"unknown keyed provider '{provider}'")
 
 

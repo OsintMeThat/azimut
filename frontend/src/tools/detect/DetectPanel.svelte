@@ -78,6 +78,7 @@
     viewBounds = () => null,
     /** The Copernicus layers on offer and a way to frame a place, which the builder uses. */
     passLayers = [],
+    passLayerState = null,
     onfly = () => {},
   } = $props();
 
@@ -815,7 +816,7 @@
       </div>
     {:else if view === 'library'}
       <AnalyzerLibrary bind:this={library} {catalogue} onchanged={loadCatalogue} bind:builder {viewBounds}
-        layers={passLayers} {onfly}
+        layers={passLayers} layerState={passLayerState} {onfly}
         onsaved={(recipe) => { if (draft) offer = recipe.id; }} />
     {/if}
   {/if}

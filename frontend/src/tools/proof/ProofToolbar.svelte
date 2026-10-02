@@ -3,6 +3,7 @@
   import ProofGlyph from '../../components/ProofGlyph.svelte';
   import { PROOF_ICONS } from '../../lib/proofIcons.js';
   import { canFill, fillPaint } from '../../lib/proofEdits.js';
+  import { shortcut } from '../../lib/keys.js';
 
   let {
     canUndo,
@@ -149,10 +150,10 @@
 </script>
 
 <div class="toolbar">
-  <button class="tb-btn" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}>
+  <button class="tb-btn" title={shortcut('Undo (Ctrl+Z)')} disabled={!canUndo} onclick={undo}>
     <Icon name="undo" size={18} />
   </button>
-  <button class="tb-btn" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled={!canRedo} onclick={redo}>
+  <button class="tb-btn" title={shortcut('Redo (Ctrl+Shift+Z / Ctrl+Y)')} disabled={!canRedo} onclick={redo}>
     <Icon name="redo" size={18} />
   </button>
   <div class="tb-sep"></div>

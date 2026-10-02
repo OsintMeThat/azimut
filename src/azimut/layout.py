@@ -651,6 +651,25 @@ def is_case(root: Path) -> bool:
     return manifest(root).is_file() or unwrapped_manifest(root).is_file()
 
 
+#: Left at the root of a folder a bundle import is building: the new case's shell, its
+#: staging folder, and the shell set aside at the swap. Such a folder is not a case
+#: yet, so the switcher and the folders to adopt leave it out, and a start that finds
+#: one left behind by a crash removes it (`engine/bundles.sweep_scaffolds`).
+IMPORT_SCAFFOLD = ".azimut-importing"
+
+
+def is_import_scaffold(root: Path) -> bool:
+    return (root / IMPORT_SCAFFOLD).is_file()
+
+
+def mark_import_scaffold(root: Path) -> None:
+    (root / IMPORT_SCAFFOLD).write_bytes(b"")
+
+
+def unmark_import_scaffold(root: Path) -> None:
+    (root / IMPORT_SCAFFOLD).unlink(missing_ok=True)
+
+
 def extracted_database(root: Path) -> Path:
     """The case database in a freshly extracted bundle, whatever its vintage.
 

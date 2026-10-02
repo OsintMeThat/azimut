@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FIRE_MARKS, HANDOVER, MARK_PX, POINT_LAYERS, POINTS_MAX_ZOOM, POINTS_MIN_ZOOM, SQUARE,
+  FIRE_MARKS, HANDOVER, MARK_PX, POINT_LAYERS, POINTS_MAX_ZOOM, SQUARE,
   markSize, marksUrl, squareImage, TILE_REVISION,
 } from './firePoints.js';
 
@@ -39,7 +39,7 @@ describe('FIRMS marks, drawn by the map', () => {
   });
 
   it('asks the zooms the backend serves', () => {
-    expect([POINTS_MIN_ZOOM, POINTS_MAX_ZOOM]).toEqual([8, 13]);
+    expect(POINTS_MAX_ZOOM).toBe(13);
   });
 
   it('keeps a mark the same size on screen until its footprint is bigger', () => {
