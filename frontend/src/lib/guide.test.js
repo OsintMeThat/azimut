@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { GUIDE, guideFor, guideSection, readingSection } from './guide.js';
 import { CASE_WORKSPACE, TOOL_LABELS, WORKSPACES } from './workspaces.js';
@@ -157,6 +160,30 @@ describe('the register the guide is written in', () => {
         const tools = group.where.split(', ');
         expect(group.where === 'Anywhere' || tools.every((tool) => labels.has(tool)), group.where).toBe(true);
       }
+    }
+  });
+
+  it('quotes only words the app puts on screen', () => {
+    // a quoted label is what the reader searches the screen for, so a renamed
+    // dialog or button has to fail here rather than send them looking for nothing
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const sources = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const at = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'node_modules') walk(at);
+        } else if (/\.(svelte|js)$/.test(entry.name) && !entry.name.endsWith('.test.js') && entry.name !== 'guide.js') {
+          sources.push(readFileSync(at, 'utf8'));
+        }
+      }
+    };
+    walk(root);
+    const app = sources.join('\n');
+    const quoted = prose().flatMap((line) => [...line.matchAll(/"([^"]+)"/g)].map((match) => match[1]));
+    expect(quoted.length).toBeGreaterThan(0);
+    for (const label of quoted) {
+      expect(app.includes(label), `the guide quotes "${label}", which no screen shows`).toBe(true);
     }
   });
 

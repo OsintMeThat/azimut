@@ -545,7 +545,7 @@ class Case(CaseStore):
             if not parent.is_dir():
                 continue
             for path in sorted(parent.iterdir(), key=lambda candidate: candidate.name):
-                if not layout.is_case(path):
+                if not layout.is_case(path) or layout.is_import_scaffold(path):
                     continue
                 case = cls(path)
                 try:
@@ -613,7 +613,9 @@ class Case(CaseStore):
         and two spellings of "already taken" would drift.
         """
         wanted = name.strip().casefold()
-        for case in cls.list_all():
+        # An import under way holds its name too, or a second import of the same
+        # bundle would take it while the first is still unpacking.
+        for case in cls.list_all(scaffolds=True):
             if case.get("scratch") or case["id"] == exclude_id:
                 continue
             if str(case.get("name", "")).strip().casefold() == wanted:
@@ -621,13 +623,18 @@ class Case(CaseStore):
         return False
 
     @classmethod
-    def list_all(cls, *, q: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+    def list_all(
+        cls, *, q: str | None = None, limit: int | None = None, scaffolds: bool = False
+    ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for parent, scratch in ((config.cases_dir(), False), (config.scratch_dir(), True)):
             if not parent.is_dir():
                 continue
             for path in sorted(parent.iterdir()):
                 if not layout.is_case(path):
+                    continue
+                # What a bundle import is building is not a case until it lands.
+                if not scaffolds and layout.is_import_scaffold(path):
                     continue
                 case = cls(path)
                 health = "ok"
@@ -972,10 +979,16 @@ class Case(CaseStore):
         return entity
 
     def update_entity(self, entity_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        from .engine import proposals
+
         with self._lock:
             self._follow_note_rename(entity_id, patch)
             self._follow_named_artifact_rename(entity_id, patch)
-            return self._graph().update_entity(entity_id, patch)
+            before = self.get_entity(entity_id) if proposals.may_change_reading(patch) else None
+            entity = self._graph().update_entity(entity_id, patch)
+        if before is not None:
+            proposals.on_changed(self, before, entity)
+        return entity
 
 
     def _follow_named_artifact_rename(self, entity_id: str, patch: dict[str, Any]) -> None:
@@ -1131,11 +1144,16 @@ class Case(CaseStore):
     # ancestor of every leaf, so the tree is well-formed on its own.
 
     @staticmethod
-    def _normalize_folder(name: str) -> str:
+    def _normalize_folder(name: str, *, existing: bool = False) -> str:
         parts = [p.strip() for p in str(name).split("/")]
         parts = [p for p in parts if p]
         if not parts:
             raise CaseError("folder name is required")
+        # "." and ".." mirror onto a slug that is not their label, and both land on
+        # the same directory as their parent. A folder made before this rule can
+        # still be renamed away, so only a new name is held to it.
+        if not existing and any(not p.strip(".") for p in parts):
+            raise CaseError("a folder name needs a letter or a digit")
         # Folders nest, so without a bound the deepest path in a case is
         # unbounded too — and note files will mirror this tree on disk.
         if len(parts) > layout.MAX_FOLDER_DEPTH:
@@ -1154,7 +1172,7 @@ class Case(CaseStore):
         """
         from .store import folders as folder_store
 
-        source = self._normalize_folder(old)
+        source = self._normalize_folder(old, existing=True)
         target = self._normalize_folder(new)
         with self._lock:
             existing = self.list_folders()
@@ -1169,7 +1187,7 @@ class Case(CaseStore):
                 raise CaseError("another folder already has that name")
             for path in existing:
                 if folder_store.in_subtree(path, source):
-                    self._normalize_folder(folder_store.moved(path, source, target))
+                    self._normalize_folder(folder_store.moved(path, source, target), existing=True)
             inside = self._graph().entities_in_folder(source)
             folders = self._graph().rename_folder(source, target)
             self._follow_refiled(inside)
@@ -1258,7 +1276,8 @@ class Case(CaseStore):
     # -- proposed links ------------------------------------------------------
     #
     # How far `engine/proposals` has read the case, kept in the manifest so it travels
-    # with a bundle: `{"at": <newest filing moment read>, "read": [ids filed then]}`.
+    # with a bundle: `{"at": <newest filing moment read>, "read": [ids filed then],
+    # "again": [ids an edit asked to be read again]}`.
     # A pass reads only past it, which is what keeps a dropped proposal from coming back.
 
     def link_pass(self) -> dict[str, Any] | None:
@@ -1270,6 +1289,21 @@ class Case(CaseStore):
             data = self.read()
             data["link_pass"] = mark
             self._write_json(data)
+
+    def revisit_links(self, entity_id: str) -> bool:
+        """Name an entity the next pass reads again although it was filed before the
+        mark, because an edit gave it something to read. False when no pass has run
+        yet: the first one reads everything anyway."""
+        with self._lock:
+            data = self.read()
+            mark = data.get("link_pass")
+            if not isinstance(mark, dict) or not isinstance(mark.get("at"), str):
+                return False
+            again = list(mark.get("again") or [])
+            if entity_id not in again:
+                data["link_pass"] = {**mark, "again": [*again, entity_id]}
+                self._write_json(data)
+            return True
 
 
 
@@ -1401,7 +1435,10 @@ def list_workspace_folders() -> list[dict[str, Any]]:
     return [
         {"name": path.name, "state": folder_state(path)}
         for path in sorted(parent.iterdir(), key=lambda item: item.name.casefold())
-        if path.is_dir() and not path.name.startswith(".") and not layout.is_case(path)
+        if path.is_dir()
+        and not path.name.startswith(".")
+        and not layout.is_case(path)
+        and not layout.is_import_scaffold(path)
     ]
 
 
@@ -1441,6 +1478,18 @@ def restore_manifest(name: str) -> "Case":
         }
     )
     write_readme(path)
+    # The link pass keeps its mark in the manifest that was lost, and its proposals in
+    # the database that was not. A case showing a pass ran gets a mark dated now, or
+    # the next pass would read it all again and bring back every proposal dropped.
+    from .engine import proposals
+
+    ran = bool(case.list_jobs(kind=proposals.KIND, state="ready")) or any(
+        (link.get("provenance") or {}).get("by") == proposals.BY for link in case.list_links()
+    )
+    if ran:
+        at = _now()
+        same_second = [e["id"] for e in case.list_entities() if (e.get("provenance") or {}).get("at") == at]
+        case.set_link_pass({"at": at, "read": sorted(same_second)})
     return case
 
 
@@ -1462,7 +1511,9 @@ def open_workspace() -> None:
     config.ensure_workspace()
     scrapers.activate()
     Case.migrate_all()
-    for housekeeping in (Case.cleanup_scratch, bundles.cleanup_uploads, workqueue.recover_all):
+    for housekeeping in (
+        bundles.sweep_scaffolds, Case.cleanup_scratch, bundles.cleanup_uploads, workqueue.recover_all
+    ):
         try:
             housekeeping()
         except Exception:  # noqa: BLE001 - see the docstring

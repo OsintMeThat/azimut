@@ -667,14 +667,6 @@ def recipe_products(recipe: Recipe | dict[str, Any]) -> list[str]:
     return [band_product(group) for group in groups]
 
 
-def frames_for(recipe: Recipe | dict[str, Any]) -> int:
-    """Requests one tile costs: for each date read, the picture and every product."""
-    recipe = _as_recipe(recipe)
-    if recipe.method != "rules":
-        return frames_per_tile(recipe.method)
-    return (1 if is_single(recipe) else 2) * (1 + len(recipe_products(recipe)))
-
-
 def _recipe(size: str = "all", **fields: Any) -> Recipe:
     parameters = {**SIZES[fields["method"]][size], **fields.pop("parameters", {})}
     return Recipe(parameters=Parameters(**parameters), **fields)

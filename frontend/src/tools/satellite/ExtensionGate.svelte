@@ -14,10 +14,9 @@
 
 <Modal title="Capture needs the browser extension" {onclose} width="460px">
   <p class="gate-hint">
-    Google's terms allow nothing programmatic out of this basemap. A capture
-    here is a <strong>screenshot of the tab</strong>, and the Azimut Capture
-    extension is what takes it (one grab per click, no screen-share prompt,
-    works in fullscreen). Other basemaps are not affected.
+    Google's terms allow nothing programmatic out of this basemap, so a capture
+    here is a <strong>screenshot of the tab</strong> taken by the Azimut Capture
+    extension.
   </p>
   <p class="gate-hint">
     Install it from <strong>Settings → Capture extension</strong>, then reload

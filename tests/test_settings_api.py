@@ -1,5 +1,7 @@
 """Settings API: API keys management, key tests, usage counters (all offline)."""
 
+import json
+
 import httpx
 import pytest
 
@@ -27,6 +29,7 @@ def test_ffmpeg_info_reports_bundled_copy(client, monkeypatch):
         "path": "/opt/azimut/ffmpeg",
         "source": "bundled",
         "version": "n7.1",
+        "notice": False,
     }
 
 
@@ -35,7 +38,7 @@ def test_ffmpeg_info_reports_missing(client, monkeypatch):
 
     monkeypatch.setattr(ffmpeg, "ffmpeg_path", lambda: None)
     body = client.get("/api/settings/ffmpeg").json()
-    assert body == {"available": False, "path": None, "source": None, "version": None}
+    assert body == {"available": False, "path": None, "source": None, "version": None, "notice": False}
 
 
 def test_put_keys_lights_up_keyed_providers(client):
@@ -390,7 +393,10 @@ def test_test_key_mapbox_ok_and_failure(client, monkeypatch):
     monkeypatch.setattr(httpx, "get", unauthorized)
     result = client.post("/api/settings/keys/mapbox/test").json()
     assert result["ok"] is False
-    assert result["detail"]
+    assert result["detail"] == "the provider answered 401"
+    # httpx puts the URL, token included, in its message: none of it may reach
+    # the page, settings.json or the backup that carries provider_status.
+    assert "pk.abc" not in json.dumps(client.get("/api/settings").json()["provider_status"])
 
 
 def test_test_key_google_mints_a_session(client, monkeypatch):
@@ -433,7 +439,14 @@ def test_test_key_sentinelhub_reports_the_services_own_words(client, monkeypatch
     monkeypatch.setattr(httpx, "get", bad)
     result = client.post("/api/settings/keys/sentinelhub/test").json()
     assert result["ok"] is False
-    assert result["detail"] == "Invalid instance id: inst-uuid"
+    assert result["detail"] == "Invalid instance id: <key>"
+
+    def forbidden(url, **kwargs):
+        return httpx.Response(403, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", forbidden)
+    result = client.post("/api/settings/keys/sentinelhub/test").json()
+    assert result == {"ok": False, "detail": "the provider answered 403"}
 
 
 def test_sentinel2_tile_proxy_offsets_the_matrix_and_counts_tiles(client, monkeypatch):
@@ -1151,3 +1164,49 @@ def test_detect_prefs_keep_the_place_names(client):
     saved = client.put("/api/settings/prefs", json={"detect_view": {"overlays": everything}})
     assert saved.status_code == 200, saved.text
     assert saved.json()["detect_view"]["overlays"] == everything
+
+
+def test_a_source_run_has_every_part_a_binary_can_lose(client):
+    """What the release smoke test asks a binary: zones, PDF faces, the extension,
+    the scrapers' metadata."""
+    assert client.get("/api/settings/bundled").json() == {
+        "zones": True, "pdf_fonts": True, "extension": True, "scrapers": True,
+    }
+
+
+def test_a_build_without_the_scrapers_metadata_is_reported(monkeypatch):
+    """PyInstaller collects the scraper modules but not their .dist-info. Without it
+    a stale workspace copy shadows the scraper the build ships, so the smoke test fails."""
+    import importlib.metadata
+
+    from azimut.engine import diagnostics
+
+    def missing(dist):
+        raise importlib.metadata.PackageNotFoundError(dist)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    assert diagnostics.bundled_parts()["scrapers"] is False
+
+
+def test_the_ffmpeg_notice_is_served_only_for_a_bundled_build(client, monkeypatch, tmp_path):
+    import sys
+
+    assert client.get("/api/settings/ffmpeg/notice").status_code == 404
+    licenses = tmp_path / "ffmpeg-licenses"
+    licenses.mkdir()
+    (licenses / "NOTICE.txt").write_text("Build: N-1\nSHA-256: abc\n", encoding="utf-8")
+    (licenses / "GPL-3.0.txt").write_text("GNU GENERAL PUBLIC LICENSE\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    r = client.get("/api/settings/ffmpeg/notice")
+    assert r.status_code == 200
+    assert r.text.startswith("Build: N-1") and "===== GPL-3.0.txt =====" in r.text
+
+
+def test_a_bug_report_names_a_missing_bundled_part(monkeypatch):
+    from azimut.engine import diagnostics
+
+    monkeypatch.setattr(diagnostics, "_environment", None)
+    monkeypatch.setattr(diagnostics, "bundled_parts", lambda: {"zones": False, "pdf_fonts": True, "extension": True})
+    assert diagnostics.environment()["Missing"] == "zones"
+    monkeypatch.setattr(diagnostics, "_environment", None)

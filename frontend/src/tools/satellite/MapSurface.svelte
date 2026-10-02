@@ -25,7 +25,7 @@
    */
   import { onMount, tick } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
-  import { createBasemaps, OVERLAY_IDS } from '../../lib/map/basemap.js';
+  import { createBasemaps, imageryError, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import { RADAR_ID, orbitMark } from '../../lib/radar.js';
   import { pictureDate } from '../../lib/map/pictureDate.js';
@@ -99,6 +99,8 @@
     onwidgetfailed = () => {},
     /** A tile of an overlay failed, by overlay id, for the tool that offers it. */
     onoverlaytrouble = () => {},
+    onimageryfallback = null,
+    errorSide = 'left',
     /** The settled camera and the turn, for a parent that shares them. */
     onviewsettled = () => {},
     onbearingchange = () => {},
@@ -109,6 +111,8 @@
 
   let mapEl = $state();
   let basemaps = null;
+  let tileFailure = $state(null);
+  let failureProvider = '';
   // Acquisition date of the imagery under the crosshair — Esri only.
   let imageryDate = $state(null); // { supported, date, source } | null
   let dateRequest = 0;
@@ -127,6 +131,7 @@
     })
   );
   const radarPass = $derived(shown.provider?.id === RADAR_ID ? s1?.pass ?? null : null);
+  const tileProblem = $derived(tileFailure?.id === shown.id ? tileFailure : null);
 
   /** A pinned Sentinel-2 day *is* the acquisition date — the one provider that
    *  can answer "when was this taken?" without being asked. */
@@ -198,6 +203,7 @@
       onWidgetAuthFailure: onwidgetauthfailure,
       onWidgetFailed: onwidgetfailed,
       onOverlayTrouble: (id) => onoverlaytrouble(id),
+      onImageryTrouble: (failure) => { tileFailure = { id: failure.id, message: imageryError(failure.error) }; },
     });
     basemaps.setZoomCeiling(zoomCeiling);
     showBasemap();
@@ -232,6 +238,22 @@
     if (!shown.provider || !basemaps) return;
     basemaps.show(shown.provider, shown.id, shown.cell);
   }
+
+  function retryImagery() {
+    tileFailure = null;
+    basemaps?.retry(shown.provider, shown.id, shown.cell);
+  }
+
+  function useBasemap() {
+    tileFailure = null;
+    if (onimageryfallback) onimageryfallback();
+    else providerId = 'esri-world-imagery';
+  }
+
+  $effect(() => {
+    const id = shown.id;
+    if (failureProvider !== id) { failureProvider = id; tileFailure = null; }
+  });
 
   $effect(() => {
     const value = zoomCeiling;
@@ -324,6 +346,20 @@
     <p class="map-refused">The map needs WebGL, which this browser does not have.</p>
   {/if}
 
+  {#if tileProblem && !grabbing}
+    <div class="tile-trouble" class:right={errorSide === 'right'} role="status" aria-label="Imagery loading error">
+      <strong>Could not load imagery</strong>
+      <span>{shown.provider?.label}{shown.provider?.id === SENTINEL_ID ? ` · ${s2?.layer ?? DEFAULT_LAYER}` : ''}{pinnedDay ? ` · ${pinnedDay}` : radarPass?.date ? ` · ${radarPass.date}` : ''}</span>
+      <p>{tileProblem.message}</p>
+      <div class="error-actions">
+        <button class="btn btn-sm" onclick={retryImagery}>Retry imagery</button>
+        {#if shown.provider?.id !== 'esri-world-imagery' && imagery.find('esri-world-imagery')}
+          <button class="btn btn-sm" onclick={useBasemap}>Use basemap</button>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   {@render children?.()}
 
   <!-- The picture this surface is showing, when it was taken, and the compass
@@ -401,6 +437,15 @@
 </div>
 
 <style>
+  .tile-trouble {
+    position: absolute; top: 154px; left: 12px; z-index: 600;
+    display: grid; gap: 6px; max-width: min(330px, calc(100% - 24px));
+    padding: 12px; border: 1px solid var(--warn); border-radius: var(--r-sm);
+    background: var(--bg-1); color: var(--text-1); font-size: var(--fs-xs);
+  }
+  .tile-trouble.right { left: auto; right: 12px; }
+  .tile-trouble span, .tile-trouble p { margin: 0; color: var(--text-2); }
+  .error-actions { display: flex; flex-wrap: wrap; gap: 7px; }
   .map-wrap {
     position: relative;
     flex: 1;

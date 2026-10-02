@@ -40,6 +40,17 @@ describe('Report an issue', () => {
     expect(shell).toContain('navigator.clipboard.writeText(report.report)');
   });
 
+  it('names both update hosts and the home map wherever the network is described', () => {
+    expect(system).toContain('(GitHub and PyPI)');
+    expect(system).toContain("home map's tiles");
+    expect(system).not.toContain('automatic GitHub update check');
+  });
+
+  it('links the bundled ffmpeg licence notice', () => {
+    expect(system).toContain('{#if ffmpeg.notice}');
+    expect(system).toContain('href="/api/settings/ffmpeg/notice"');
+  });
+
   it('warns that the tracker is public', () => {
     expect(system).toContain('public GitHub tracker; anyone can read it');
   });

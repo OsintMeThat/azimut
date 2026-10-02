@@ -66,6 +66,39 @@ def test_a_failing_handler_retries_until_the_attempt_budget_is_spent(case):
     assert len(attempts) == job["max_attempts"]
 
 
+def test_a_refused_job_fails_at_once(case):
+    """No room for an export is no room on the next two attempts either."""
+    attempts = []
+
+    def handler(c, job):
+        attempts.append(job["id"])
+        raise workqueue.JobRefused("not enough free space to export this case")
+
+    workqueue.register("alpha", handler)
+    workqueue.enqueue(case, "alpha", payload={})
+
+    workqueue.drain(case)
+    job = case.list_jobs(kind="alpha")[0]
+    assert (job["state"], job["error"], len(attempts)) == (
+        "failed", "not enough free space to export this case", 1,
+    )
+
+
+def test_an_unexpected_failure_is_recorded_as_a_sentence(case, tmp_path):
+    """The job's error is what the analyst reads: no class name, no errno, no path."""
+    target = tmp_path / "Operation Heron" / "bundle.zip"
+
+    def handler(c, job):
+        raise OSError(28, "No space left on device", str(target))
+
+    workqueue.register("alpha", handler)
+    workqueue.enqueue(case, "alpha", payload={})
+
+    workqueue.drain(case)
+    job = case.list_jobs(kind="alpha")[0]
+    assert job["error"] == "the disk is full"
+
+
 def test_a_job_of_an_unknown_kind_is_cancelled_not_left_running(case):
     workqueue.enqueue(case, "gamma", payload={})
 
@@ -200,3 +233,24 @@ def test_letting_others_through_with_nothing_else_registered_claims_nothing(case
     # would run inside the first
     assert workqueue.drain(case) == 2
     assert nested == [False, False]
+
+
+def test_a_keyed_job_enqueued_while_it_runs_runs_once_more(case):
+    """A pass that started before a filing may have missed it, so the second
+    enqueue is kept: one more run at the end, with the newer payload, never two."""
+    seen: list[str] = []
+
+    def handler(c, job):
+        seen.append(job["payload"]["n"])
+        if len(seen) == 1:
+            workqueue.enqueue(c, "pass", key="case", payload={"n": "2"})
+            workqueue.enqueue(c, "pass", key="case", payload={"n": "3"})
+
+    workqueue.register("pass", handler)
+    workqueue.enqueue(case, "pass", key="case", payload={"n": "1"})
+
+    assert workqueue.drain(case) == 2
+    assert seen == ["1", "3"]
+    [job] = case.list_jobs()
+    assert job["state"] == "ready"
+    assert job["payload"] == {"n": "3"}

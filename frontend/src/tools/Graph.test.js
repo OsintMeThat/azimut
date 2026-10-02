@@ -2153,3 +2153,10 @@ describe('Graph offers what is open to the Add event bar', () => {
     expect(source).toContain("onDestroy(() => withdrawNote('graph'))");
   });
 });
+
+describe('a drag and a closing tab', () => {
+  it('sends the moves still waiting with keepalive when the page goes', () => {
+    expect(source).toMatch(/<svelte:window[^>]*\{onpagehide\}/s);
+    expect(source).toContain('{ lens: savingFor ?? lens, pins }, { keepalive: true }');
+  });
+});

@@ -23,7 +23,7 @@ from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from .. import config
+from .. import config, errors
 from ..engine.analysis_models import Zone
 from ..engine import (
     cities,
@@ -1429,7 +1429,7 @@ async def capture_screenshot(
     try:
         img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
 
     # Only onto a registered crop. A pasted screenshot's coordinates describe
     # the map view at filing time rather than the picture itself, so nothing

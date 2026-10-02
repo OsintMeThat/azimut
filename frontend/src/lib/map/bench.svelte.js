@@ -22,17 +22,12 @@ import { acquisitionQuery, olderSpan, withOlder } from './acquisitions.js';
 import { clone, viewZone } from './analyzers.js';
 import { canPickPass } from './detectWhen.js';
 import { isoDay } from '../sentinel.js';
+import { availableDisplayLayer, displayLayers, DISPLAY_LAYERS } from '../sentinelLayers.js';
 import {
   RULE_COLOURS, checkDated, checkKey, datesOf, markOutcomes, marksBounds, newCheck, passSource, readingRecipe,
   readsOneDate, readsRadar, recipeBands, recipeProblem, sensorOf, signalOf, signature, suggestedLayer, testedCheck,
   withFlippedMark, withMark, withoutMark,
 } from './analyzerRules.js';
-
-/** What a configuration that has not answered yet still offers. */
-const STANDARD_LAYERS = Object.freeze([
-  { id: 'TRUE_COLOR', label: 'True colour' }, { id: 'FALSE_COLOR', label: 'False colour (infrared)' },
-  { id: 'SWIR', label: 'SWIR (short-wave infrared)' }, { id: 'NDVI', label: 'NDVI (vegetation index)' },
-]);
 
 /** A lookup looks at the ground round the middle of the map, never a whole country. */
 const LOOKUP_REACH = 0.15;
@@ -53,6 +48,8 @@ export class Bench {
   #recipe;
   #limits;
   #layers;
+  #layerState;
+  #radarLayer;
   #viewBounds;
   #fly;
   #say;
@@ -75,6 +72,7 @@ export class Bench {
   /** The basemap instead of the passes, for a check that has them. */
   basemap = $state(false);
   layer = $state('TRUE_COLOR');
+  displayNotice = $state('');
   /** Where the split sits, as a percentage of the map from its left edge. */
   divider = $state(50);
   /** What the map paints: each rule's pixels, or the detections alone. */
@@ -95,11 +93,14 @@ export class Bench {
   /** How much of the map's bottom edge the console covers, in pixels, for a card to keep clear of it. */
   reach = $state(0);
 
-  constructor({ api, recipe, limits = {}, layers = () => [], viewBounds = () => null, fly = () => {}, say = () => {} }) {
+  constructor({ api, recipe, limits = {}, layers = () => [], layerState = () => null, radarLayer = () => '',
+    viewBounds = () => null, fly = () => {}, say = () => {} }) {
     this.#api = api;
     this.#recipe = recipe;
     this.#limits = limits;
     this.#layers = layers;
+    this.#layerState = layerState;
+    this.#radarLayer = radarLayer;
     this.#viewBounds = viewBounds;
     this.#fly = fly;
     this.#say = say;
@@ -107,6 +108,17 @@ export class Bench {
     // The cost of the next test follows what it would read, and nothing else:
     // a line moved on a slider costs no request and asks no question.
     this.#dispose = $effect.root(() => {
+      $effect(() => {
+        const offered = this.offered;
+        const layer = this.layer;
+        if (this.radar || !offered.some((entry) => entry.enabled !== false)) return;
+        const next = availableDisplayLayer(layer, offered);
+        if (next === layer) return;
+        untrack(() => {
+          this.layer = next;
+          this.displayNotice = `${layer} is unavailable; showing ${next}.`;
+        });
+      });
       $effect(() => {
         const keys = this.planKeys;
         const timer = setTimeout(() => untrack(() => void this.#refreshPlans(keys)), 250);
@@ -128,10 +140,33 @@ export class Bench {
   get problem() { return recipeProblem(this.#recipe, this.#limits); }
   get current() { return signature(this.#recipe); }
   get colours() { return RULE_COLOURS; }
-  /** The Copernicus layers the configuration offers, or the standard four. */
+  /** Available display layers, with missing standard products kept disabled. */
   get offered() {
+    const state = this.#layerState();
+    if (state) return displayLayers(state.layers, state.layersSource === 'instance', this.#radarLayer());
     const layers = this.#layers();
-    return layers.length ? layers : STANDARD_LAYERS;
+    return layers.length ? layers : DISPLAY_LAYERS;
+  }
+  get layersBusy() { return this.#layerState()?.layersBusy ?? false; }
+  get layersNote() {
+    const state = this.#layerState();
+    if (!state || this.radar) return '';
+    if (state.layersBusy) return 'Checking your Copernicus layers…';
+    if (state.layersNote) return state.layersNote;
+    if (state.layersSource !== 'instance') return 'Check your Copernicus layers to show a pass.';
+    if (!this.offered.some((entry) => entry.enabled)) return 'No optical display layer is available; the basemap stays on.';
+    return this.displayNotice;
+  }
+  get dataProblem() {
+    const state = this.#layerState();
+    if (!state || this.radar) return '';
+    if (state.layersSource !== 'instance') return 'Check your Copernicus layers before testing.';
+    return state.layers.some((entry) => entry.id === 'TRUE_COLOR') ? ''
+      : 'Optical rules need a Sentinel-2 L2A layer named TRUE_COLOR.';
+  }
+  checkLayers(force = false) {
+    if (this.radar) return Promise.resolve(true);
+    return this.#layerState()?.loadLayers(true, true, force) ?? Promise.resolve(true);
   }
 
   /** The panel waits while a check is being made: nothing else is touched until it is valid. */
@@ -162,6 +197,7 @@ export class Bench {
     this.basemap = false;
     const check = this.#recipe.checks.find((entry) => entry.id === id);
     if (!check) return;
+    void this.checkLayers();
     this.#adoptLayer(check);
     if (frame) this.#frame(check);
   }
@@ -169,6 +205,7 @@ export class Bench {
   /** A new check, where the map is: passes first, then the pins. */
   startDraft() {
     if (this.draft || this.atMostChecks) return;
+    void this.checkLayers();
     this.#returnTo = this.selected;
     this.selected = null;
     this.pinning = null;
@@ -309,6 +346,7 @@ export class Bench {
   get imagery() {
     const check = this.check;
     if (!check || this.basemap || !check.b?.date) return { mode: 'basemap' };
+    if (!this.radar && !this.offered.some((entry) => entry.id === this.layer && entry.enabled !== false)) return { mode: 'basemap' };
     const after = { ...check.b, layer: this.layer };
     const before = this.single || !check.a?.date ? null : { ...check.a, layer: this.layer };
     const shape = (source) => (this.radar ? { provider: 'sentinel1', date: source.date, time: source.time ?? '' }
@@ -322,7 +360,9 @@ export class Bench {
   setBasemap(on) { this.basemap = on; }
 
   setLayer(id) {
+    if (!this.offered.some((entry) => entry.id === id && entry.enabled !== false)) return;
     this.layer = id;
+    this.displayNotice = '';
     this.basemap = false;
     if (this.radar) return;
     this.#patch((check) => ({ ...check, a: check.a?.date ? { ...check.a, layer: id } : check.a,
@@ -336,7 +376,8 @@ export class Bench {
 
   #adoptLayer(check) {
     const own = check.b?.layer;
-    this.layer = own && this.offered.some((entry) => entry.id === own) ? own : this.#suggested();
+    this.layer = availableDisplayLayer(own || this.#suggested(), this.offered) || own || this.#suggested();
+    this.displayNotice = own && own !== this.layer ? `${own} is unavailable; showing ${this.layer}.` : '';
   }
 
   get suggestion() { return this.#suggested(); }
@@ -438,6 +479,7 @@ export class Bench {
     if (!this.dated) return this.single ? 'Pick the pass this check is read on.' : 'Pick the before and after passes.';
     if (!check.marks.length) return 'Drop a pin to choose what this check reads.';
     if (this.problem) return this.problem;
+    if (this.dataProblem) return this.dataProblem;
     if (this.plan?.error) return this.plan.error;
     return '';
   }
@@ -479,8 +521,12 @@ export class Bench {
   /** Test every check that has its passes and a pin, one after the other. */
   async testAll() {
     if (this.running || this.problem) return;
-    const list = this.#recipe.checks.filter((check) => check.marks.length && checkDated(this.#recipe, check));
+    this.running = 'Checking layers…';
     try {
+      await this.checkLayers();
+      if (this.#gone) return;
+      if (this.dataProblem) { this.#say(this.dataProblem, 'warn'); return; }
+      const list = this.#recipe.checks.filter((check) => check.marks.length && checkDated(this.#recipe, check));
       for (const [i, check] of list.entries()) {
         this.running = `Testing ${i + 1} of ${list.length}…`;
         await this.#run(check, { detail: check.id === this.check?.id });

@@ -181,6 +181,39 @@ describe('handle: capture-tab (the app relay)', () => {
     expect(res.ok).toBe(false);
   });
 
+  it('refuses another program on localhost, answering only the paired port', async () => {
+    const chrome = makeChrome();
+    const { handle } = load({ chrome });
+    for (const url of ['http://127.0.0.1:9999/', 'http://localhost:3000/dev']) {
+      const res = await handle({ type: 'capture-tab' }, { tab: { id: 3, url, windowId: 7 } });
+      // Most often this same Azimut on the next free port: the refusal says what to change.
+      expect(res).toEqual({
+        ok: false,
+        error: `this extension is paired with another address. In its options, set the Azimut URL to ${new URL(url).origin}`,
+      });
+    }
+    expect(chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    // the same machine under its other name is still the app
+    const res = await handle({ type: 'capture-tab' }, { tab: { id: 3, url: 'http://localhost:8477/', windowId: 7 } });
+    expect(res.ok).toBe(true);
+    expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens no hand-off tab on a site the app does not post or search with', async () => {
+    const chrome = makeChrome();
+    chrome.tabs.create = vi.fn(async () => ({ id: 9 }));
+    const { handle } = load({ chrome });
+    const app = { tab: { id: 3, url: 'http://127.0.0.1:8477/' } };
+    const post = await handle({ type: 'post-handoff', payload: { url: 'https://evil.example/compose', posts: [] } }, app);
+    const reverse = await handle(
+      { type: 'reverse-handoff', payload: { url: 'http://lens.google.com/', image: { data: 'eA==' } } },
+      app,
+    );
+    expect(post.ok).toBe(false);
+    expect(reverse.ok).toBe(false);
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
   it('captures for the localhost app tab', async () => {
     const chrome = makeChrome();
     const { handle } = load({ chrome });
@@ -673,6 +706,7 @@ describe('handle: ext-state', () => {
     const res = await handle({ type: 'ext-state' }, APP_TAB);
     expect(res).toEqual({
       ok: true,
+      paired: true,
       version: '0.3.0',
       extensionId: 'theid',
       loaded: STAMP,
@@ -681,6 +715,16 @@ describe('handle: ext-state', () => {
     // Not `id`: the bridge spreads this answer next to the message's correlation
     // id, and a collision there would silently break every reply pairing.
     expect(res.id).toBeUndefined();
+  });
+
+  it('answers an app on another port, saying it is not the paired one', async () => {
+    // Started while another program held 8477, Azimut moved to the next free port.
+    // Settings must still find its extension, and say why it will not act.
+    const { chrome, fetchImpl } = stampChrome();
+    const { handle } = load({ chrome, fetchImpl });
+    const res = await handle({ type: 'ext-state' }, { tab: { url: 'http://127.0.0.1:8478/' } });
+    expect(res.ok).toBe(true);
+    expect(res.paired).toBe(false);
   });
 
   it('names a packaged copy as one the browser manages', async () => {

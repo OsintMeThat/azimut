@@ -252,7 +252,7 @@ def parse(
         raise LayerError("the file is empty")
     if len(data) > MAX_SOURCE_BYTES:
         raise LayerError(
-            f"the file is {_megabytes(len(data))} — the limit is "
+            f"the file is {_megabytes(len(data))}, and the limit is "
             f"{_megabytes(MAX_SOURCE_BYTES)}"
         )
     fmt = sniff(data, filename)
@@ -675,7 +675,7 @@ def _geometry(geometry: Any) -> dict[str, Any] | None:
     points = sum(1 for _ in _coordinates(geometry))
     if points > MAX_GEOMETRY_POINTS:
         raise LayerError(
-            f"one shape in this file has {points:,} points — the limit is "
+            f"one shape in this file has {points:,} points, and the limit is "
             f"{MAX_GEOMETRY_POINTS:,}"
         )
     return {"type": type_, "coordinates": coordinates}
@@ -684,8 +684,8 @@ def _geometry(geometry: Any) -> dict[str, Any] | None:
 def _bound(features: list[dict[str, Any]]) -> None:
     if len(features) >= MAX_FEATURES:
         raise LayerError(
-            f"this file holds more than {MAX_FEATURES:,} features — past that it "
-            "is a dataset, not a layer"
+            f"this file holds more than {MAX_FEATURES:,} features, which is a dataset "
+            "rather than a layer"
         )
 
 
@@ -2265,7 +2265,7 @@ def download(
             declared = response.headers.get("content-length")
             if declared and declared.isdigit() and int(declared) > limit:
                 raise LayerFetchError(
-                    f"that source is {_megabytes(int(declared))} — the limit is "
+                    f"that source is {_megabytes(int(declared))}, and the limit is "
                     f"{_megabytes(limit)}"
                 )
             chunks: list[bytes] = []
@@ -2293,7 +2293,7 @@ def _status_reason(exc: "httpx.HTTPStatusError", address: str) -> str:
     code = exc.response.status_code
     if MY_MAPS_FEED.split("?", 1)[0] in address and code in (401, 403, 404):
         return (
-            "Google would not serve that map. It has to be shared publicly — "
+            "Google would not serve that map. It has to be shared publicly: "
             "open it in My Maps, then Share, then anyone with the link."
         )
     return f"that source answered {code}"

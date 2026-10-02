@@ -236,7 +236,7 @@
   {/if}
 
   <div class="section">
-    <div class="section-head" title="Places the pieces from the imagery they share. You can still drag them after.">
+    <div class="section-head" title="Place the pieces by the imagery they share">
       <span>Auto panorama</span>
     </div>
     <div class="modes">

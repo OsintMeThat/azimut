@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 from PIL import Image
 from pydantic import BaseModel, Field, HttpUrl
 
-from .. import config, jobs
+from .. import config, errors, jobs
 from ..engine import enrich as enrich_engine
 from ..engine import exportdir
 from ..engine import media as media_engine
@@ -313,7 +313,7 @@ async def paste(
     except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
         raise HTTPException(status_code=413, detail="image exceeds the 100 MP limit") from exc
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
 
     return media_engine.import_paste(
         get_case(case_id),

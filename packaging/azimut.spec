@@ -12,7 +12,7 @@
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 hiddenimports = (
     collect_submodules("uvicorn")
@@ -46,6 +46,13 @@ if sys.platform == "linux":
 # faces or they are different documents.
 datas = collect_data_files("azimut")
 
+# The scrapers' .dist-info, which collect_submodules leaves behind. It is how
+# engine/scrapers.py reads the version this build ships without importing it, and
+# so whether an older copy updated into the workspace must give way to it. Without
+# the metadata the workspace copy always wins, and a release that ships a fixed
+# yt-dlp fixes nothing for anyone who once pressed Update.
+datas += copy_metadata("yt-dlp") + copy_metadata("gallery-dl")
+
 # The IANA timezone database, which `zoneinfo` falls back to when the OS has none
 # — that is Windows. Nothing imports `tzdata` by name, so PyInstaller cannot
 # discover it, and a missing database would not crash: engine/localtime.py would
@@ -71,6 +78,10 @@ binaries = [
     for p in [vendor / name]
     if p.is_file()
 ]
+# The bundled ffmpeg is a GPL build: its notice (build, source, stated licence) and the
+# licence texts travel inside the binary, and Settings → System opens the notice.
+if (vendor / "ffmpeg-licenses" / "NOTICE.txt").is_file():
+    datas += [(str(vendor / "ffmpeg-licenses"), "ffmpeg-licenses")]
 
 a = Analysis(
     ["entry.py"],

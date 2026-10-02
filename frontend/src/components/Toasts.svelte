@@ -15,9 +15,11 @@
   }
 </script>
 
-<div class="toasts" use:portal>
+<!-- Announced as they come: a failure interrupts a screen reader, anything else waits
+     for it to finish. -->
+<div class="toasts" use:portal role="status" aria-live="polite">
   {#each uiState.toasts as t (t.id)}
-    <div class="toast {t.kind}">
+    <div class="toast {t.kind}" role={t.kind === 'danger' ? 'alert' : undefined}>
       <Icon name={icons[t.kind] ?? 'compass'} size={15} />
       <span>{t.message}</span>
       {#if t.action}

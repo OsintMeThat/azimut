@@ -1053,6 +1053,10 @@ it('edits and removes an analyzer of its own', async () => {
   expect(button('Save changes')).toBeDefined();
   button('Cancel').click(); await settle();
   labelled('Delete Weekly harbour').click(); await settle();
+  // gone for every case, with no Trash to come back from: it asks first
+  expect(del).not.toHaveBeenCalled();
+  [...document.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent.trim() === 'Delete').click();
+  await settle();
   expect(del).toHaveBeenCalledWith('/api/compare/analyzers/custom-1');
 });
 
@@ -1164,7 +1168,7 @@ it('builds an analyzer from rules, proves it on a check made on the map, and kee
   const bench = await openBuilder();
   expect(heading()).toBe('Build an analyzer');
   expect(target.querySelector('.reads').textContent.trim()).toBe('Sentinel-2 · two dates');
-  expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more, outside cloud.');
+  expect(phrase()).toBe('Keeps ground where brightness moved by 5.0% or more either way, outside cloud.');
   expect(tab('Rules').getAttribute('aria-selected')).toBe('true');
   // building reads nothing, and with no check on the map there is nothing to test
   await debounce(); await settle();
@@ -1208,8 +1212,8 @@ it('builds an analyzer from rules, proves it on a check made on the map, and kee
   button('Add to my analyzers').click(); await settle();
   expect(post).toHaveBeenCalledWith('/api/compare/analyzers', expect.objectContaining({
     id: 'custom', method: 'rules', name: 'Cleared ground', match: 'all', sensor: 'sentinel2', dates: 'two',
-    description: 'Keeps ground where NDVI dropped by 0.25 or more, outside cloud.',
-    rules: [expect.objectContaining({ measure: 'index', index: 'ndvi', on: 'change', op: 'le', value: -0.25 })],
+    description: 'Keeps ground where brightness moved by 5.0% or more either way, outside cloud.',
+    rules: [expect.objectContaining({ measure: 'brightness', on: 'change', op: 'moved', value: 0.05 })],
     checks: [expect.objectContaining({ name: 'Check 1', marks: [{ point: [2.01, 48.01], expect: 'found' }],
       result: expect.objectContaining({ count: 1, covered: [true] }) })] }));
 });
@@ -1368,7 +1372,7 @@ it('reads a point on the map and drops a pin from it, and a stricter line turns 
   covered = false;
   const tests = () => post.mock.calls.filter(([path, body]) => path === '/api/compare/analyzers/check' && body.read).length;
   const before = tests();
-  type(target.querySelector('[aria-label="Rule 1 value"]'), '0.6', 'change'); await settle();
+  type(target.querySelector('[aria-label="Rule 1 value"]'), '60', 'change'); await settle();
   await debounce(); await settle();
   expect(tests()).toBe(before);
   expect(post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check/plan')).toHaveLength(2);
@@ -1376,7 +1380,7 @@ it('reads a point on the map and drops a pin from it, and a stricter line turns 
   expect(tests()).toBe(before + 1);
   expect(target.querySelector('.strip').textContent).toContain('0 of 1 found');
   expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks0/1');
-  expect(post.mock.calls.findLast(([path]) => path === '/api/compare/analyzers/check')[1].recipe.rules[0].value).toBe(-0.6);
+  expect(post.mock.calls.findLast(([path]) => path === '/api/compare/analyzers/check')[1].recipe.rules[0].value).toBe(0.6);
 });
 
 it('shows the detections alone on the map, and keeps each eye for the way back', async () => {
@@ -1404,11 +1408,11 @@ it('adds, ranks, rewrites and removes rules, and the sentence follows', async ()
   answer({ '/api/compare/analyzers': rulesCatalogue() });
   await openBuilder();
   button('Add a rule').click(); await settle();
-  expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more and NDVI before is at least 0.40, outside cloud.');
+  expect(phrase()).toBe('Keeps ground where brightness moved by 5.0% or more either way and NDVI before is at least 0.40, outside cloud.');
   button('any rule').click(); await settle();
   expect(phrase()).toContain('or NDVI before is at least 0.40');
   labelled('Rank candidates by rule 2').click(); await settle();
-  expect(phrase()).toMatch(/^Keeps ground where NDVI before is at least 0.40 or NDVI dropped/);
+  expect(phrase()).toMatch(/^Keeps ground where NDVI before is at least 0.40 or brightness moved/);
   const measure = target.querySelector('[aria-label="Rule 2 measures"]');
   measure.value = 'band'; measure.dispatchEvent(new Event('change', { bubbles: true })); await settle();
   expect(phrase()).toContain('B08 (near infrared) moved by 5.0% or more either way');

@@ -26,6 +26,7 @@
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import Modal from '../components/Modal.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
+  import NoCase from '../components/NoCase.svelte';
 
   let tabs = $state([]); // [{ id: 'case' | entity id, noteId }]
   let activeId = $state('case');
@@ -376,10 +377,19 @@
     // the ones captured here, not the live fields: by the time this is flushed
     // the analyst may be on another note.
     pendingSave = () => save(target, targetKey, contents, version);
+    unsent = targetKey ? { target, contents } : null;
     saveTimer = setTimeout(() => {
       pendingSave = null;
+      unsent = null;
       save(target, targetKey, contents, version);
     }, 700);
+  }
+
+  // The edit still waiting for its timer, as a body. A tab closing runs no timer and no
+  // teardown, so it is sent from here with `keepalive`, which outlives the page.
+  let unsent = null;
+  function onpagehide() {
+    if (unsent) api.put(unsent.target, { text: unsent.contents }, { keepalive: true }).catch(() => {});
   }
 
   /** Write a debounced edit immediately, if one is still waiting. */
@@ -388,6 +398,7 @@
     clearTimeout(saveTimer);
     saveTimer = undefined;
     pendingSave = null;
+    unsent = null;
     if (write) await write();
   }
 
@@ -642,10 +653,10 @@
   }
 </script>
 
-<svelte:window onkeydown={onWindowKeydown} />
+<svelte:window onkeydown={onWindowKeydown} {onpagehide} />
 
 {#if !caseState.current}
-  <div class="empty"><h2>No case open</h2><p>Open a case to write notes.</p></div>
+  <NoCase icon="note" what="write notes" />
 {:else}
   <section bind:this={notebookEl} class="notebook">
     <header class="notebook-bar">
@@ -1105,7 +1116,5 @@ flowchart LR
   .markdown :global(.mermaid-error) { margin: 0 0 8px; color: var(--warn); font-size: var(--fs-xs); text-align: left; }
   .preview-only { grid-template-columns: 1fr !important; }
   .preview-only .writer, .preview-only .splitter { display: none; }
-  .empty { padding: 28px; color: var(--text-2); }
-  .empty h2 { color: var(--text-1); }
   @media (max-width: 800px) { .panes { grid-template-columns: 1fr !important; } .splitter { display: none; } .writer { min-height: 52%; border-bottom: 1px solid var(--border); } .preview-only .writer { display: none; } }
 </style>

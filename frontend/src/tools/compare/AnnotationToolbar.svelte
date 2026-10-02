@@ -3,6 +3,7 @@
   import ProofGlyph from '../../components/ProofGlyph.svelte';
   import { PROOF_ICONS, isSolidIcon } from '../../lib/proofIcons.js';
   import { STAMPED, canFill, ANNOTATION_TOOLS } from '../../lib/map/compareAnnotations.js';
+  import { shortcut } from '../../lib/keys.js';
 
   let {
     tool = $bindable(),
@@ -107,8 +108,8 @@
   </button>
 {:else}
 <aside class="annotation-toolbar" aria-label="Comparison annotation tools">
-  <button class="tool-button" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}><Icon name="undo" size={18} /></button>
-  <button class="tool-button" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}><Icon name="redo" size={18} /></button>
+  <button class="tool-button" title={shortcut('Undo (Ctrl+Z)')} disabled={!canUndo} onclick={undo}><Icon name="undo" size={18} /></button>
+  <button class="tool-button" title={shortcut('Redo (Ctrl+Shift+Z)')} disabled={!canRedo} onclick={redo}><Icon name="redo" size={18} /></button>
   <div class="separator"></div>
   <!-- Pressing the tool in hand puts it down: the way out of a drawing tool was
        aiming at the cursor button, and the button you are already on is the

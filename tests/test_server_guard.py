@@ -110,3 +110,21 @@ def test_a_foreign_tile_request_spends_nothing_and_reaches_no_provider(client, m
     assert r.status_code == 403
     assert reached == []
     assert config.load_settings().get("usage") == before
+
+
+@pytest.mark.parametrize("path", ["/api/docs", "/api/redoc", "/openapi.json", "/api/openapi.json"])
+def test_the_api_docs_are_not_served(client, path):
+    """The docs page loads Swagger UI from a CDN onto this origin, where it could
+    read every route, keys included. Nothing in the app links to it."""
+    r = client.get(path)
+    assert r.status_code in (404, 200)
+    assert "swagger" not in r.text.lower()
+    assert "openapi" not in r.headers.get("content-type", "")
+
+
+@pytest.mark.parametrize("method", ["get", "post", "delete"])
+def test_an_unknown_api_path_is_a_json_404_not_the_page(client, method):
+    r = getattr(client, method)("/api/no-such-route/here")
+    assert r.status_code == 404
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json() == {"detail": "Not Found"}

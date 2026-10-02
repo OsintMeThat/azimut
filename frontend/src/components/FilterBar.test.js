@@ -23,7 +23,7 @@ describe('a bar that never changes shape', () => {
     // a control you can see and cannot use teaches something; one that is not there
     // teaches nothing, which is how the field filter stayed invisible
     expect(markup).toContain('disabled={state.off}');
-    expect(markup).toContain('title={state.off ? `${axis.hint} — ${state.note}` : axis.hint}');
+    expect(markup).toContain('title={state.off ? `${axis.hint} (${state.note})` : axis.hint}');
     expect(source).toContain("{ off: true, note: 'no stored fields here' }");
     expect(source).toContain("{ off: true, note: 'nothing is linked yet' }");
   });
@@ -128,9 +128,11 @@ describe('every term is chosen from what the case holds', () => {
   });
 
   it('lets a date range be typed when a preset is the wrong shape', () => {
-    expect(markup).toContain('type="date"');
+    // typed day-first like every other date, not in the browser's own order
+    expect(markup).toContain('<DateField day reading={false} label="From"');
+    expect(markup).not.toContain('type="date"');
     // and the two spellings of the same axis never both apply
-    expect(markup).toContain("since: event.currentTarget.value, added: ''");
+    expect(markup).toContain("since: value || '', added: ''");
   });
 });
 

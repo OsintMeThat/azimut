@@ -291,7 +291,7 @@ describe('choosing what to open', () => {
     mount({ search: () => Promise.resolve({ items: [PICTURE, PICTURE], total: 214 }) });
     layer.openPicker();
     await settle();
-    expect(picker().querySelector('.hint').textContent).toBe('2 of 214 — search to narrow it down');
+    expect(picker().querySelector('.hint').textContent).toBe('2 of 214. Search to narrow it down');
   });
 
   it('says when a case has nothing to offer', async () => {

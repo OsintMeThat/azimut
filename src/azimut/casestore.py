@@ -105,6 +105,9 @@ class CaseStore:
     def list_links(self) -> list[dict[str, Any]]:
         return self._graph().list_links()
 
+    def suggestions(self, by: str, *, limit: int) -> dict[str, Any]:
+        return self._graph().suggestions(by, limit=limit)
+
     def entity_images(self, entity_id: str) -> list[dict[str, Any]]:
         return self._graph().entity_images(entity_id)
 
@@ -562,8 +565,8 @@ class CaseStore:
     def complete_job(self, job_id: str) -> None:
         self._graph().complete_job(job_id)
 
-    def fail_job(self, job_id: str, error: str) -> dict[str, Any]:
-        return self._graph().fail_job(job_id, error)
+    def fail_job(self, job_id: str, error: str, *, final: bool = False) -> dict[str, Any]:
+        return self._graph().fail_job(job_id, error, final=final)
 
     def cancel_job(self, job_id: str) -> None:
         self._graph().cancel_job(job_id)

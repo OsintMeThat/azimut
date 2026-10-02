@@ -100,7 +100,7 @@
             class="chip-opt"
             class:on={wb.changesOnly}
             onclick={() => wb.setChangesOnly(true)}
-            title="Read which releases show a different picture at the crosshair"
+            title="Find the releases that differ at the crosshair"
           >Changes here</button>
         </div>
 

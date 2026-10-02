@@ -113,6 +113,13 @@
     </p>
   {/if}
 
+  {#if extState?.unpaired}
+    <p class="note warn">
+      The extension is paired with another address, so it won't capture or post for
+      this one. In its options, set the Azimut URL to <span class="mono">{location.origin}</span>.
+    </p>
+  {/if}
+
   {#if status === 'duplicate'}
     <p class="note warn">
       Two copies are loaded. Remove
@@ -156,7 +163,7 @@
       <li>{extState.folderCurrent ? 'The app copy is written (path below)' : 'Press Install to write the app copy'}</li>
       <li>Remove the current extension in your browser's extensions page</li>
       <li>Load the folder below unpacked</li>
-      <li>Paste the pairing token again — Chrome ties stored data to the folder</li>
+      <li>Paste the pairing token again, since Chrome ties stored data to the folder</li>
     </ol>
   {/if}
 

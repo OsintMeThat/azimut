@@ -49,7 +49,7 @@
   <div class="head">
     <span><Icon name="save" size={14} /> Save to case</span>
     {#if filedPath}
-      <button class="btn btn-ghost btn-xs filed" onclick={showInLibrary} title="Show it in the Media Library">
+      <button class="btn btn-ghost btn-xs filed" onclick={showInLibrary} title="Show it in Media">
         <Icon name="check" size={12} /> In the case
       </button>
     {/if}

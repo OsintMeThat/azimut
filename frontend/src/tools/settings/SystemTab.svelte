@@ -51,6 +51,9 @@
       {#if ffmpeg.available}
         {ffmpeg.version || 'installed'}
         <span class="sub">· {ffmpeg.source === 'bundled' ? 'bundled' : 'system PATH'}</span>
+        {#if ffmpeg.notice}
+          <a class="sub" href="/api/settings/ffmpeg/notice" target="_blank" rel="noreferrer">· licence</a>
+        {/if}
       {:else}
         not found <span class="sub">· install ffmpeg on your PATH</span>
       {/if}
@@ -59,8 +62,8 @@
     <dd>AGPL-3.0-only</dd>
   </dl>
   <p class="note">
-    Case data stays in the workspace; network access is limited to requested features
-    and the automatic GitHub update check.
+    Case data stays in the workspace. Besides what you ask for, only the update check
+    (GitHub and PyPI) and the home map's tiles reach the network.
   </p>
   <div class="links">
     <a class="btn btn-sm" href={REPO_URL} target="_blank" rel="noreferrer">

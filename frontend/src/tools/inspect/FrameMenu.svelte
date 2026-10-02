@@ -176,7 +176,7 @@
       class="btn btn-sm reverse"
       disabled={reversing}
       onclick={reverseActive}
-      title="Search the web for this image as it is adjusted and cropped here"
+      title="Search the web for this frame as shown"
     >
       <Icon name="search" size={14} /> {reversing ? 'Preparing…' : 'Reverse image search'}
     </button>

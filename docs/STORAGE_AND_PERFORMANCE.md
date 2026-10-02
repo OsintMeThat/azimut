@@ -511,7 +511,9 @@ after each hash matches. There is no small fixed case-size cap: preview and
 import compare the required temporary space with current filesystem capacity,
 keep a safety reserve, and warn for imports above 10 GiB. Work is staged under
 `<workspace>/<id>.incoming/`; the existing shell and completed staging directory are
-swapped by rename for Windows compatibility. Every import creates a new case and
+swapped by rename for Windows compatibility. Both carry an `.azimut-importing` mark
+until the swap, so the switcher leaves them out and the next start removes any a
+crash left behind. Every import creates a new case and
 records `origin_case_id` plus `imported_at` in database metadata.
 Entities, links and entity photo galleries keep their original ids and state.
 

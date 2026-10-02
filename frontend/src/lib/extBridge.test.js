@@ -254,6 +254,15 @@ describe('extensionState', () => {
     off();
   });
 
+  it('says whether this tab is the address the copy is paired with', async () => {
+    const off = fakeRelay('ext-state', 'ext-state-result', () => ({
+      ok: true, version: '0.3.1', extensionId: 'ext-a', loaded: null, paired: false,
+    }));
+    const [found] = await extensionState({ timeoutMs: 60 });
+    expect(found.paired).toBe(false);
+    off();
+  });
+
   it('drops a copy that refused', async () => {
     const off = fakeRelay('ext-state', 'ext-state-result', () => ({ ok: false, error: 'nope' }));
     await expect(extensionState({ timeoutMs: 60 })).resolves.toEqual([]);

@@ -483,6 +483,16 @@ def listing(case: Case, kind: str) -> list[dict[str, Any]]:
             rows.append(summary(kind, read(case, kind, path.stem.split("-", 1)[1])))
         except (OSError, ValueError, KeyError):
             continue
+    if kind == "zones":
+        # A deleted area stays named in its groups, so restoring it from the Trash
+        # puts it back where it was. The list shows only the areas that exist now.
+        live = {path.stem.split("-", 1)[1]
+                for path in case.subdir(layout.ANALYSIS_DIR).glob("areas-*.json")}
+        for row in rows:
+            row["area_ids"] = [area_id for area_id in row["area_ids"] if area_id in live]
+            row["areas"] = len(row["area_ids"])
+            row["pending_review"] = [item for item in row.get("pending_review", [])
+                                     if item.get("saved_area_id") in live]
     if kind in {"zones", "areas"}:
         ordered = sorted(rows, key=lambda row: (row.get("position") is None,
                                                  row.get("position") or 0,

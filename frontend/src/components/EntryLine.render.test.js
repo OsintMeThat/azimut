@@ -182,6 +182,22 @@ describe('filed from a model', () => {
     expect(onsaved).toHaveBeenCalled();
   });
 
+  it('stays saved when only the redraw after it fails, so a retry files nothing twice', async () => {
+    const onsaved = vi.fn();
+    await open(MODEL, { onsaved });
+    type(count(), '2');
+    choose(conditionSelect(), 'destroyed');
+    reloadCase.mockRejectedValueOnce(new Error('Azimut is not running. Start it again, then reload this tab.'));
+
+    addButton().click();
+    await settle();
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('.error, [role="alert"]')?.textContent ?? '').not.toContain('not running');
+    expect(onsaved).toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith('Added', 'ok', 8000, expect.objectContaining({ label: 'Undo' }));
+  });
+
   it('keeps a sentence the analyst wrote when a field changes under it', async () => {
     await open(MODEL);
     type(sentence(), 'Two tanks burning near the bridge');

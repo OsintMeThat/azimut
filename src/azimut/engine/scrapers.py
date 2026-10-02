@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import re
 import shutil
 import sys
 import tempfile
@@ -45,7 +46,7 @@ from typing import Any
 
 import httpx
 
-from .. import config
+from .. import config, errors
 from . import dirswap
 
 # distribution name on PyPI -> module name it imports as
@@ -101,9 +102,35 @@ def bundled_version(dist: str) -> str | None:
         return str(version) if version else None
 
 
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version))
+
+
+def live_runtime_version(dist: str) -> str | None:
+    """The workspace copy's version when it is the one to import, else None.
+
+    The workspace outlives the program: an update pressed under one build is
+    still there after the next build ships a newer scraper, and a stale copy
+    would shadow it until someone found Reset. So the copy wins only when it is
+    newer than the build's own. The build's version is read from its metadata,
+    never by importing, because importing the bundled module here would pin it in
+    sys.modules ahead of a copy that is newer. The binaries carry that metadata
+    (`copy_metadata` in packaging/azimut.spec, checked by the release smoke test);
+    a build without it cannot compare, and keeps the copy the analyst asked for.
+    """
+    runtime = runtime_version(dist)
+    if runtime is None:
+        return None
+    try:
+        bundled = importlib.metadata.version(dist)
+    except importlib.metadata.PackageNotFoundError:
+        return runtime
+    return runtime if _version_key(runtime) > _version_key(bundled) else None
+
+
 def active_version(dist: str) -> tuple[str | None, str]:
     """The version that import would actually get, and where it comes from."""
-    runtime = runtime_version(dist)
+    runtime = live_runtime_version(dist)
     if runtime is not None:
         return runtime, "runtime"
     return bundled_version(dist), "bundled"
@@ -155,7 +182,7 @@ def activate() -> dict[str, str]:
     roots: dict[str, Path] = {}
     shadowed: dict[str, str] = {}
     for dist, module in SCRAPERS.items():
-        version = runtime_version(dist)
+        version = live_runtime_version(dist)
         if version is None:
             continue
         roots[module] = dist_dir(dist)
@@ -243,7 +270,7 @@ def update(dist: str) -> dict[str, Any]:
     version, url, sha256 = _pypi_wheel(dist)
 
     with _lock:
-        if version == runtime_version(dist):
+        if version in (before, runtime_version(dist)):
             return {
                 "dist": dist,
                 "updated": False,
@@ -327,6 +354,6 @@ def status(check_pypi: bool = False) -> list[dict[str, Any]]:
             except Exception as exc:
                 # Offline is the normal case for this app, not an error state.
                 entry["latest"] = None
-                entry["check_error"] = str(exc)
+                entry["check_error"] = errors.explain(exc)
         out.append(entry)
     return out

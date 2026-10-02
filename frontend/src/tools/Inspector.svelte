@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { api } from '../lib/api.js';
+  import { api, detailLine } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import { workFolder } from '../lib/folders.js';
@@ -24,6 +24,7 @@
   import FrameMenu from './inspect/FrameMenu.svelte';
   import VideoMenu from './inspect/VideoMenu.svelte';
   import VideoPlayer from './inspect/VideoPlayer.svelte';
+  import NoCase from '../components/NoCase.svelte';
 
   // Inspect works on one file at a time: a video to cut frames from, or an image
   // to read closely. What is done to it is its work, one per file, kept as it is
@@ -245,9 +246,18 @@
     frameAspect = null;
   }
 
+  /** A work whose save failed is held open, where the header says so and offers Retry,
+   *  rather than dropped by whatever was about to replace it. */
+  function heldUnsaved() {
+    if (!autosave.unsaved) return false;
+    toast('The work could not be saved, so it stays open', 'warn');
+    return true;
+  }
+
   async function open(item) {
     pickerOpen = false;
     await autosave.flush();
+    if (heldUnsaved()) return;
     await ensureOps();
     closeFile();
     const run = openRun;
@@ -275,9 +285,11 @@
     }
   }
 
-  /** Back to the file list. Nothing is lost: what is pending is written first. */
+  /** Back to the file list. Nothing is lost: what is pending is written first, and a
+   *  work that cannot be saved stays open. */
   async function leave() {
     await autosave.flush();
+    if (heldUnsaved()) return;
     closeFile();
     refreshWorks();
   }
@@ -420,7 +432,7 @@
     if (!res.ok) {
       let detail = 'render failed';
       try {
-        detail = (await res.json()).detail;
+        detail = detailLine((await res.json()).detail) || detail;
       } catch {
         /* non-json */
       }
@@ -741,17 +753,13 @@
   {/if}
 
   {#if !caseState.current}
-    <div class="empty">
-      <Icon name="inspect" size={40} />
-      <p>Open a case and add media to start inspecting.</p>
-      <button class="btn" onclick={() => (uiState.tool = 'media')}>Go to Media Library</button>
-    </div>
+    <NoCase icon="inspect" what="inspect its pictures and videos" />
   {:else if !work.source}
     {#if inspectable.length === 0}
       <div class="empty">
         <Icon name="inspect" size={40} />
         <p>Add an image or a video to the case to inspect it.</p>
-        <button class="btn" onclick={() => (uiState.tool = 'media')}>Go to Media Library</button>
+        <button class="btn" onclick={() => (uiState.tool = 'media')}>Go to Media</button>
       </div>
     {:else}
       <div class="start">

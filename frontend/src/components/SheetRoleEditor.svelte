@@ -453,8 +453,8 @@
       </label>
     {/if}
     <p class="menu-note">
-      A name that reaches no single row is left as written. Sending the rows to the case
-      draws real <code>part-of</code> edges from this column.
+      Sending the rows to the case draws <code>part-of</code> edges from this column, and
+      a name that reaches no single row stays as written.
     </p>
   {/if}
 
@@ -474,21 +474,21 @@
       </button>
     {/if}
     <p class="menu-note">
-      A moment visible in several rows, used to line them up. <code>-00:01:50</code> is before
-      it, <code>00:04:04</code> after. Dating the sync point dates every row.
+      A moment seen in several rows that lines them up (<code>-00:01:50</code> is before it,
+      <code>00:04:04</code> after), so dating it dates every row.
     </p>
   {/if}
 
   {#if kind === 'stamped'}
     <p class="menu-note">
-      Every empty cell is dated on the next save, including rows already in the sheet, and never
-      rewritten after that. It goes into the file.
+      Every empty cell, old rows included, is dated in the file on the next save and never
+      rewritten after that.
     </p>
   {/if}
   {#if kind === 'locked'}
     <p class="menu-note">
-      The case holds this column. Refresh rewrites it, so typing here would be overwritten. The
-      cell still opens what it points at.
+      The case holds this column and Refresh rewrites it, but the cell still opens what it
+      points at.
     </p>
   {/if}
   {#if kind === 'computed'}
@@ -559,16 +559,16 @@
         {#if !role.from}
           Nothing is written until a column is chosen.
         {:else if role.of === 'point'}
-          The point the case holds for what <code>{role.from}</code> points at. Blank when
-          it has none, or when two different points reach it.
+          The point the case holds for what <code>{role.from}</code> points at, blank when
+          it has none or two different points reach it.
         {:else}
           What the case has joined <code>{role.from}</code>'s entity to, one hop out.
         {/if}
       </p>
     {:else if role.of === 'in_case'}
       <p class="menu-note">
-        NO once the case stops holding what the row was built from. Rows you typed yourself
-        stay blank: they were never built from anything.
+        NO once the case stops holding what the row was built from, and blank on rows you
+        typed yourself.
       </p>
     {:else}
       <p class="menu-note">YES when the row points at something with a place.</p>

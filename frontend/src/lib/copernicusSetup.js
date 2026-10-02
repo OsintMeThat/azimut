@@ -20,6 +20,20 @@ export const ACCOUNT_STEPS = Object.freeze([
   'Copy the ID under "Service endpoints" and paste it in Settings → Imagery → Sentinel Hub.',
 ]);
 
+export const DISPLAY_STEPS = Object.freeze([
+  'Open the configuration whose ID is saved in Azimut, then press Add new layer.',
+  'Fill the form below for each display product you need, then Save.',
+  'Back in the check, press Refresh layers.',
+]);
+
+export const DISPLAY_FORM = Object.freeze([
+  ['Layer name', 'TRUE_COLOR, FALSE_COLOR, SWIR or NDVI'],
+  ['Source', 'Sentinel-2 L2A'],
+  ['Data processing', 'Use the pencil to choose the matching predefined product.'],
+  ['Time range', 'Leave both boxes unticked.'],
+  ['Mosaic order', 'Most recent'],
+]);
+
 /** The Sentinel-1 layer, added to that same configuration. */
 export const RADAR_STEPS = Object.freeze([
   'In the Configuration Utility, open the configuration whose ID Azimut has, and press Add new layer.',

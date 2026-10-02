@@ -41,6 +41,7 @@
     viewBounds = () => null,
     /** The Copernicus layers this configuration offers, `[{ id, label, hint }]`. */
     layers = [],
+    layerState = null,
     /** Frame a place: `{ lon, lat, zoom }` or `{ bounds }`. */
     onfly = () => {},
     onsave = async () => {},
@@ -49,7 +50,8 @@
 
   const limits = $derived(catalogue?.rules ?? {});
   const bench = untrack(() => new Bench({
-    api, recipe, limits: catalogue?.rules ?? {}, layers: () => layers, viewBounds: () => viewBounds(),
+    api, recipe, limits: catalogue?.rules ?? {}, layers: () => layers, layerState: () => layerState,
+    radarLayer: () => catalogue?.radar_layer ?? '', viewBounds: () => viewBounds(),
     fly: (target) => onfly(target), say: toast,
   }));
   builder = bench;
@@ -172,7 +174,8 @@
             canRemove={recipe.rules.length > 1} onremove={() => remove(i)} onsignal={() => rank(i)}
             onhover={(index) => bench.hoverRule(index)} />
         {/each}
-        <button class="btn btn-sm" disabled={recipe.rules.length >= most} onclick={add}>
+        <button class="btn btn-sm" disabled={recipe.rules.length >= most}
+          title={recipe.rules.length >= most ? `At most ${most} rules per analyzer` : undefined} onclick={add}>
           <Icon name="plus" size={13} /> Add a rule
         </button>
       </section>

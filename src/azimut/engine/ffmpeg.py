@@ -94,13 +94,25 @@ def info() -> dict[str, str | bool | None]:
     """
     path = ffmpeg_path()
     if path is None:
-        return {"available": False, "path": None, "source": None, "version": None}
+        return {"available": False, "path": None, "source": None, "version": None, "notice": False}
     return {
         "available": True,
         "path": path,
         "source": "bundled" if path == _bundled("ffmpeg") else "path",
         "version": _version(path),
+        "notice": notice_path() is not None,
     }
+
+
+def notice_path() -> Path | None:
+    """The notice a binary carries for its bundled ffmpeg: which build, where its
+    source is, and its licence (scripts/vendor_ffmpeg.py writes it). None outside a
+    frozen build, where ffmpeg is the system's own."""
+    base = getattr(sys, "_MEIPASS", None)
+    if base is None:
+        return None
+    candidate = Path(base) / "ffmpeg-licenses" / "NOTICE.txt"
+    return candidate if candidate.is_file() else None
 
 
 def location_for_ytdlp() -> str | None:

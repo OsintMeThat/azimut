@@ -151,15 +151,6 @@ export function whenNeed({ single, routine, against, pairs, chooseB, lastPasses 
   return '';
 }
 
-/** One area's days, for the list shown when the areas differ. */
-export function areaLine(pair, { single, routine, radar = false }) {
-  const newest = newestLabel({ maxcc: pair?.b?.maxcc, radar });
-  const a = sideLine(pair?.a, radar) || 'not chosen';
-  const b = sideLine(pair?.b, radar) || newest;
-  if (single) return routine ? newest : b;
-  return routine ? `A ${a}` : `A ${a} → B ${b}`;
-}
-
 /** The step as one line, for the recap before the start. */
 export function whenSummary({ single, routine, against, pairs, radar = false, maxcc = 100 }) {
   if (pairs.length > 1 && !uniform(pairs)) return 'Its own days for each area';

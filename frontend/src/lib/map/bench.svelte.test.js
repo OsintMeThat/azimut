@@ -14,7 +14,8 @@ const settle = async () => {
 };
 
 /** A bench on a recipe of two dates, with an engine that answers what a real one would. */
-function make({ dates = 'two', sensor = 'sentinel2', checks = [], answers = {}, limits = { max_checks: 12, max_marks: 20 } } = {}) {
+function make({ dates = 'two', sensor = 'sentinel2', checks = [], answers = {}, layerState = null,
+  limits = { max_checks: 12, max_marks: 20 } } = {}) {
   const recipe = $state({ ...newRecipe(METHODS, { sensor, dates }), name: 'Mine', checks });
   const calls = [];
   const api = {
@@ -36,7 +37,7 @@ function make({ dates = 'two', sensor = 'sentinel2', checks = [], answers = {}, 
   };
   const fly = vi.fn();
   const say = vi.fn();
-  const bench = new Bench({ api, recipe, limits, layers: () => [], viewBounds: () => VIEW, fly, say });
+  const bench = new Bench({ api, recipe, limits, layers: () => [], layerState: () => layerState, viewBounds: () => VIEW, fly, say });
   return { recipe, api, calls, bench, fly, say };
 }
 
@@ -192,13 +193,53 @@ describe('choosing a check', () => {
 });
 
 describe('the imagery under the pins', () => {
+  it('checks layers only on a check action and keeps the basemap until availability is known', async () => {
+    const state = $state({ layers: [{ id: 'TRUE_COLOR' }], layersSource: 'catalogue', layersBusy: false, layersNote: '',
+      loadLayers: vi.fn(async () => {}) });
+    const { bench } = open({ layerState: state });
+    flushSync();
+    expect(state.loadLayers).not.toHaveBeenCalled();
+    bench.startDraft();
+    expect(state.loadLayers).toHaveBeenCalledWith(true, true, false);
+    bench.setPass('b', { date: '2023-08-13' });
+    expect(bench.imagery.mode).toBe('basemap');
+    state.layersSource = 'instance'; flushSync();
+    expect(bench.imagery.b.layer).toBe('TRUE_COLOR');
+  });
+
+  it('repairs an unavailable saved display using its actual alias, without changing the rules', () => {
+    const state = $state({ layers: [{ id: 'TRUE_COLOR' }, { id: 'VEGETATION_INDEX' }], layersSource: 'instance',
+      loadLayers: vi.fn(async () => true) });
+    const kept = made('Plot'); kept.b.layer = 'NDVI';
+    const { bench, recipe } = open({ checks: [kept], layerState: state });
+    bench.select(kept.id); flushSync();
+    expect(bench.imagery.b.layer).toBe('VEGETATION_INDEX');
+    expect(bench.layersNote).toContain('NDVI is unavailable; showing VEGETATION_INDEX');
+    expect(recipe.rules[0].measure).toBe('brightness');
+    bench.setLayer('SWIR');
+    expect(bench.layer).toBe('VEGETATION_INDEX');
+  });
+
+  it('keeps NDVI rules testable without an NDVI display, but blocks a missing optical data source', async () => {
+    const state = $state({ layers: [{ id: 'TRUE_COLOR' }], layersSource: 'instance', loadLayers: vi.fn(async () => true) });
+    const { bench, recipe, api } = open({ checks: [made('Plot')], layerState: state });
+    recipe.rules = [newRule('index', 'change')];
+    bench.select(bench.checks[0].id); await settle();
+    expect(bench.canTest).toBe(true);
+    expect(bench.offered.find((entry) => entry.id === 'NDVI').enabled).toBe(false);
+    state.layers = [{ id: 'SWIR' }]; flushSync();
+    expect(bench.canTest).toBe(false);
+    expect(bench.dataProblem).toContain('TRUE_COLOR');
+    await bench.testAll();
+    expect(api.post.mock.calls.some(([path]) => path.endsWith('/check'))).toBe(false);
+  });
   it('is the basemap until a check has a pass, then each pass as it is picked', () => {
     const { bench } = open();
     expect(bench.imagery).toEqual({ mode: 'basemap' });
     bench.startDraft();
     expect(bench.imagery).toEqual({ mode: 'basemap' });
     bench.setPass('b', { date: '2023-08-13' });
-    expect(bench.imagery).toEqual({ mode: 'single', b: { provider: 'sentinel2', date: '2023-08-13', layer: 'NDVI' } });
+    expect(bench.imagery).toEqual({ mode: 'single', b: { provider: 'sentinel2', date: '2023-08-13', layer: 'TRUE_COLOR' } });
     bench.setPass('a', { date: '2023-08-08' });
     expect(bench.imagery).toEqual({ mode: 'swipe', a: expect.objectContaining({ date: '2023-08-08' }),
       b: expect.objectContaining({ date: '2023-08-13' }) });
@@ -233,7 +274,7 @@ describe('the imagery under the pins', () => {
   it('starts on the layer that shows what the ranking rule reads, and the layer is not what is read', () => {
     const kept = made('Plot');
     const { bench, recipe } = open({ checks: [kept] });
-    expect(bench.layer).toBe('NDVI');                          // the first rule is NDVI
+    expect(bench.layer).toBe('TRUE_COLOR');
     bench.select(kept.id);
     bench.setLayer('SWIR');
     expect(recipe.checks[0].b.layer).toBe('SWIR');
@@ -270,7 +311,7 @@ describe('what a test would cost', () => {
     bench.dropPin({ lon: REEF[0], lat: REEF[1] });
     await settle();
     expect(calls).toHaveLength(2);
-    recipe.rules[0].index = 'nbr';
+    recipe.rules[0] = newRule('index', 'change', { index: 'nbr' });
     await settle();
     expect(calls).toHaveLength(3);
   });
@@ -411,6 +452,7 @@ describe('testing', () => {
     bench.select(one.id);
     await settle();
     const all = bench.testAll();
+    await Promise.resolve();
     expect(bench.running).toBe('Testing 1 of 2…');
     await all;
     expect(bench.running).toBe('');
@@ -418,6 +460,21 @@ describe('testing', () => {
     expect(tests.map(([, body]) => [body.check.id, body.detail])).toEqual([[one.id, true], [two.id, false]]);
     expect(recipe.checks.map((check) => check.result?.signature)).toEqual([signature(recipe), signature(recipe)]);
     expect(bench.detail).not.toBe(null);
+  });
+
+  it('holds Test all while layers are checked and explains a missing data source', async () => {
+    let release;
+    const state = $state({ layers: [{ id: 'SWIR' }], layersSource: 'instance',
+      loadLayers: vi.fn(() => new Promise((resolve) => { release = resolve; })) });
+    const { bench, calls, say } = open({ checks: [made('Plot')], layerState: state });
+    const pending = bench.testAll();
+    expect(bench.running).toBe('Checking layers…');
+    await bench.testAll();
+    expect(state.loadLayers).toHaveBeenCalledTimes(1);
+    release(true); await pending;
+    expect(bench.running).toBe('');
+    expect(say).toHaveBeenCalledWith(expect.stringContaining('TRUE_COLOR'), 'warn');
+    expect(calls.filter(([url]) => url.endsWith('/check'))).toHaveLength(0);
   });
 });
 

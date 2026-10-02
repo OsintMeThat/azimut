@@ -74,6 +74,21 @@ def test_vendor_verifies_and_extracts_exact_members(tmp_path, monkeypatch):
     assert provenance["target"] == "test"
     assert json.loads((output / "ffmpeg-provenance.json").read_text()) == provenance
 
+    # A GPL build travels with its licence and a way to its source, inside the binary.
+    licenses = output / "ffmpeg-licenses"
+    notice = (licenses / "NOTICE.txt").read_text(encoding="utf-8")
+    assert ffmpeg_archive.as_uri() in notice and ffmpeg_hash in notice
+    assert "https://ffmpeg.org/download.html#get-sources" in notice
+    assert "ffmpeg -L" in notice  # the fixture cannot run, so the notice says how to ask
+    assert {p.name for p in licenses.glob("*.txt")} >= {"GPL-2.0.txt", "GPL-3.0.txt", "LGPL-2.1.txt"}
+    assert "GNU GENERAL PUBLIC LICENSE" in (licenses / "GPL-3.0.txt").read_text(encoding="utf-8")
+
+
+def test_every_pinned_builder_names_where_its_build_scripts_live():
+    for archives in vendor_ffmpeg.ARTIFACTS.values():
+        for archive in archives:
+            assert vendor_ffmpeg.BUILD_SOURCES[archive.source].startswith("https://")
+
 
 def test_vendor_rejects_a_bad_digest_without_installing_tools(tmp_path, monkeypatch):
     archive_path = tmp_path / "ffmpeg.zip"

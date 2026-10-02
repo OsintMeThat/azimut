@@ -253,7 +253,7 @@ def area(box: list[float] | tuple[float, ...] | None) -> list[float] | None:
     west, south, east, north = (float(v) for v in box)
     if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
         raise maplayers.LayerError(
-            "that area is not a box on the map — it may cross the antimeridian"
+            "that area is not a box on the map, and may cross the antimeridian"
         )
     return [round(west, 6), round(south, 6), round(east, 6), round(north, 6)]
 

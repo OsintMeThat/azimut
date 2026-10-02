@@ -200,6 +200,17 @@ def test_pdf_font_licenses_are_complete_and_packaged():
     assert 'collect_data_files("azimut")' in spec
 
 
+def test_the_binary_carries_the_scrapers_metadata():
+    """`engine/scrapers.py` reads the version a build ships from its metadata, never by
+    importing it, to decide whether a copy updated into the workspace is newer.
+    collect_submodules ships the modules without it, so the spec copies it by name."""
+    from azimut.engine import scrapers
+
+    spec = (Path(__file__).resolve().parent.parent / "packaging" / "azimut.spec").read_text()
+    for dist in scrapers.SCRAPERS:
+        assert f'copy_metadata("{dist}")' in spec
+
+
 def test_storage_and_jobs_add_no_new_runtime_dependency():
     """The store, the durable queue and the thumbnail worker stay on the standard
     library plus deps already declared — nothing that would need a new wheel on

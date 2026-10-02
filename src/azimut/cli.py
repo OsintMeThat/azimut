@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import webbrowser
 
 from . import __version__
-from .launcher import serve
+from .launcher import choose_port, serve
 
 DEFAULT_PORT = 8477  # uncommon high port, clear of common dev ranges
 
@@ -17,9 +18,18 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"azimut {__version__}")
     args = parser.parse_args()
 
-    print(f"Azimut {__version__} · http://127.0.0.1:{args.port} (local only)")
+    port, running = choose_port(args.port)
+    url = f"http://127.0.0.1:{port}"
+    if running:
+        print(f"Azimut is already running at {url}.")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return
+    if port != args.port:
+        print(f"Port {args.port} is in use by another program, so Azimut takes {port}.")
+    print(f"Azimut {__version__} · {url} (local only)")
     print("Runs in your browser tab. Close this window to stop Azimut.")
-    serve(args.port, open_browser=not args.no_browser)
+    serve(port, open_browser=not args.no_browser)
 
 
 if __name__ == "__main__":

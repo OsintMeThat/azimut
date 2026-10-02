@@ -305,3 +305,28 @@ describe('post templates', () => {
     expect(prefs.postTemplate).toBe('po_2');
   });
 });
+
+describe('settings that could not be read', () => {
+  it('says so in the pane and reads them again on Reload', async () => {
+    unmount(live);
+    document.body.innerHTML = '';
+    const real = api.get.getMockImplementation();
+    api.get.mockImplementation(async (path) => {
+      if (path === '/api/settings') throw new Error('Azimut is not running. Start it again, then reload this tab.');
+      return real(path);
+    });
+    const target = document.createElement('div');
+    document.body.append(target);
+    live = mount(Settings, { target });
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    flushSync();
+
+    const alert = document.querySelector('.load-error');
+    expect(alert?.textContent).toContain('Settings could not be read');
+    api.get.mockImplementation(real);
+    [...alert.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Reload').click();
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    flushSync();
+    expect(document.querySelector('.load-error')).toBeNull();
+  });
+});

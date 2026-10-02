@@ -820,6 +820,18 @@ def refresh_files(
     )
 
 
+def _all_of_type(case: "Case", entity_type: str) -> list[dict[str, Any]]:
+    """Every entity of one type, paged, so the read never walks the rest of the case."""
+    out: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        page = case.page_entities(limit=500, cursor=cursor, types=[entity_type])
+        out.extend(page.get("items", []))
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return out
+
+
 def files_preview(case: "Case") -> dict[str, Any]:
     """What a files worklist would hold, and the one the case already has.
 
@@ -830,7 +842,7 @@ def files_preview(case: "Case") -> dict[str, Any]:
     files = imported_files(case)
     answered, _, _ = _file_graph(case) if files else ({}, {}, {})
     sheets = sorted(
-        (entity for entity in case.list_entities() if entity.get("type") == "sheet"),
+        _all_of_type(case, "sheet"),
         key=lambda entity: str((entity.get("provenance") or {}).get("at") or ""),
         reverse=True,
     )

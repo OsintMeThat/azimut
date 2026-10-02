@@ -53,7 +53,7 @@
           at: point,
           ...mark(coarse),
           title: coarse
-            ? `${point.label} — written to ${point.decimals} decimals, about ${metres} m`
+            ? `${point.label}, written to ${point.decimals} decimals (about ${metres} m)`
             : point.label,
           tip: { text: point.label, direction: 'top', offset: [0, -12] },
         };

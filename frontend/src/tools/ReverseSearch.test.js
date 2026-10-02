@@ -36,7 +36,7 @@ describe('Reverse Search case picker', () => {
     // one fallback, and it is the road that always worked.
     expect(source).toContain('blob.size <= MAX_HANDOFF_BYTES');
     expect(source).toContain("window.open(engine.url, '_blank', 'noopener,noreferrer');");
-    expect(source).toContain('if (engine.paste) toast(`Opened ${engine.label}. Paste the ${frameLabel} with Ctrl+V`');
+    expect(source).toContain("if (engine.paste) toast(`Opened ${engine.label}. Paste the ${frameLabel} with ${shortcut('Ctrl+V')}`");
     expect(source).toContain('else savePng(blob, `Opened ${engine.label}. Drag the saved ${frameLabel} in`);');
   });
 

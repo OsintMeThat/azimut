@@ -28,6 +28,32 @@ const numOrNull = (id) => {
   return Number.isFinite(v) ? v : null;
 };
 
+// The ranges the app accepts, checked here where the field can still be fixed: past
+// this the server answers with a list of objects no message can be made of.
+const RANGES = {
+  lat: [-90, 90, "Latitude runs from -90 to 90."],
+  lon: [-180, 180, "Longitude runs from -180 to 180."],
+  zoom: [0, 23, "Zoom runs from 0 to 23."],
+  bearing: [0, 359.999, "Bearing runs from 0 to 359."],
+};
+
+const outOfRange = () => {
+  for (const [id, [low, high, said]] of Object.entries(RANGES)) {
+    const v = numOrNull(id);
+    if (v !== null && (v < low || v > high)) return said;
+  }
+  return "";
+};
+
+// What the app said, as one line: a refusal is a sentence, a schema rejection was a
+// list of objects, and `new Error(list)` printed "[object Object]".
+const reason = async (r) => {
+  const detail = (await r.json().catch(() => ({}))).detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) return detail.map((item) => item?.msg || "").filter(Boolean).join("; ") || `HTTP ${r.status}`;
+  return `HTTP ${r.status}`;
+};
+
 const origin = (url) => {
   try {
     return new URL(url).origin;
@@ -169,7 +195,7 @@ async function init() {
           headers: { "X-Azimut-Token": stored.token },
           body,
         });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+        if (!r.ok) throw new Error(await reason(r));
         status("Bookmark saved.", "ok");
         setTimeout(() => window.close(), 700);
       } catch (e) {
@@ -220,6 +246,11 @@ async function init() {
   syncPlaceButton();
 
   placeBtn.addEventListener("click", async () => {
+    const wrong = outOfRange();
+    if (wrong) {
+      status(wrong, "error");
+      return;
+    }
     placeBtn.disabled = true;
     const body = new FormData();
     body.append("url", tab.url);
@@ -236,7 +267,7 @@ async function init() {
         headers: { "X-Azimut-Token": stored.token },
         body,
       });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(await reason(r));
       // reuse whatever case this landed in, including a freshly minted scratch
       const saved = await r.json().catch(() => ({}));
       if (saved.case_id) api.storage.local.set({ lastCaseId: saved.case_id });
@@ -255,6 +286,10 @@ async function init() {
     // half a coordinate would 422 server-side; catch it where it's fixable
     if ((numOrNull("lat") === null) !== (numOrNull("lon") === null)) {
       status("Latitude and longitude go together. Fill both or neither.", "error");
+      return;
+    }
+    if (outOfRange()) {
+      status(outOfRange(), "error");
       return;
     }
     const r = await api.runtime.sendMessage({

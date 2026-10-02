@@ -107,7 +107,7 @@
             <select bind:value={settings.index} onchange={chosen}>{#each CHANGE_INDICES as entry}<option value={entry.id}>{entry.label} · {entry.hint}</option>{/each}</select>
           </label>
         {:else}
-          <label title="Adapt the threshold to this view, or follow the sensitivity.">Threshold
+          <label title="Fit the threshold to this view, or set it by hand">Threshold
             <select bind:value={settings.threshold}><option value="auto">Automatic</option><option value="manual">Manual</option></select>
           </label>
         {/if}

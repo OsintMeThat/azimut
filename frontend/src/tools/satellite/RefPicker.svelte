@@ -98,7 +98,7 @@
     <div class="ref-empty">Loading…</div>
   {:else if !media.length}
     <div class="ref-empty">
-      No images or videos in this case yet. Import one in the Media Library first.
+      No images or videos in this case yet. Import one in Media first.
     </div>
   {:else}
     {#if narrowing}

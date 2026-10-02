@@ -7,7 +7,7 @@
  * with the validator's list of objects, and handing that straight to `Error`
  * stringified every validation failure in the app as "[object Object]".
  */
-function detailLine(detail) {
+export function detailLine(detail) {
   if (typeof detail === 'string') return detail;
   if (!Array.isArray(detail)) return '';
   return detail
@@ -20,6 +20,9 @@ function detailLine(detail) {
     .filter(Boolean)
     .join('; ');
 }
+
+/** What any request says when the app behind the tab is gone. */
+export const NOT_RUNNING = 'Azimut is not running. Start it again, then reload this tab.';
 
 /** What a failure says when its body gave no reason: a crash on the server
  *  answers with a bare "Internal Server Error". */
@@ -42,7 +45,17 @@ async function request(method, path, body, opts = {}) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(path, { ...init, ...opts });
+  let res;
+  try {
+    res = await fetch(path, { ...init, ...opts });
+  } catch (error) {
+    // A cancelled request is the caller's own doing and says nothing to anyone.
+    if (error?.name === 'AbortError') throw error;
+    // Otherwise the request never reached a server: the app was stopped, its window
+    // closed, or the machine went to sleep under it. The browser's own words for that
+    // ("Failed to fetch", "NetworkError when attempting…") name none of those.
+    throw new ApiError(0, NOT_RUNNING);
+  }
   if (!res.ok) {
     let detail = '';
     try {

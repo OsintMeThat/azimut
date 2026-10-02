@@ -226,3 +226,41 @@ describe('the scale bar and north arrow tick', () => {
     expect($('marks-note').hidden).toBe(true);
   });
 });
+
+describe('a place the app would refuse', () => {
+  const mapPage = (extra = {}) => ({
+    tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
+    answers: {
+      '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
+      '/cases': ok([{ id: 'c1', name: 'Case one' }]),
+      ...extra,
+    },
+  });
+  const posted = () => globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/ingest/place'));
+
+  it('says which field is out of range, before sending anything', async () => {
+    await runPopup(mapPage());
+    $('lat').value = '95';
+    $('lat').dispatchEvent(new Event('input'));
+    $('save-place').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect($('status').textContent).toBe('Latitude runs from -90 to 90.');
+    expect(posted()).toEqual([]);
+  });
+
+  it('reads a refusal the app sent as a list, never as [object Object]', async () => {
+    await runPopup(mapPage({
+      '/ingest/place': () => ({
+        ok: false,
+        status: 422,
+        json: async () => ({ detail: [{ loc: ['body', 'title'], msg: 'String should have at most 300 characters' }] }),
+      }),
+    }));
+    $('save-place').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect($('status').textContent).toBe('Could not save: String should have at most 300 characters');
+  });
+});

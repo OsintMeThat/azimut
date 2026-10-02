@@ -226,6 +226,20 @@ def test_the_preview_counts_and_finds_the_worklist_already_built(client):
     assert after["sheet"] == made["id"]
 
 
+def test_the_preview_finds_its_sheet_without_reading_the_whole_case(client, monkeypatch):
+    """The Sheet home asks for this on every visit, so it pages sheets by type."""
+    from azimut.sqlite_backend import SqliteCase
+
+    case_id, *_ = a_scene(client)
+    made = build(client, case_id)
+
+    def whole_case(*args, **kwargs):
+        raise AssertionError("files_preview read every entity")
+
+    monkeypatch.setattr(SqliteCase, "list_entities", whole_case)
+    assert client.get(f"/api/cases/{case_id}/sheets/from-case/files").json()["sheet"] == made["id"]
+
+
 def test_the_list_says_what_each_sheet_is_and_how_far_along(client):
     case_id, *_ = a_scene(client)
     built = build(client, case_id)

@@ -174,6 +174,15 @@ describe('classify', () => {
     expect(v.unnamed).toBe(1);
   });
 
+  it('names a copy paired with another address, which refuses to act for this one', () => {
+    // Azimut moved to the next free port, the extension still points at the old one.
+    const moved = { ...responder('mine', 'new'), paired: false };
+    expect(classify(server(), probes([moved])).unpaired).toBe(true);
+    expect(classify(server(), probes([{ ...moved, paired: true }])).unpaired).toBe(false);
+    // A copy too old to say is not accused of anything.
+    expect(classify(server(), probes([responder('mine', 'new')])).unpaired).toBe(false);
+  });
+
   it('survives a server read that failed and a probe that never ran', () => {
     expect(classify(null, {}).status).toBe('absent');
     expect(classify(null, {}).path).toBe('');

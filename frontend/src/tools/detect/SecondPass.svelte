@@ -40,6 +40,7 @@
     onclick = () => {},
     oncontextmenu = () => {},
     onusage = () => {},
+    onimageryfallback = () => {},
   } = $props();
 
   const place = () => ({ lat: view.lat, lon: view.lon });
@@ -111,7 +112,8 @@
 <div class="second" bind:this={stage} style:--divider={`${divider}%`}>
   <div class="clip">
     <MapSurface bind:engine bind:element bind:ready bind:providerId {imagery} s2={s2} s1={s1} {view} {bearing} {home}
-      resetToHome={false} {imperial} {overlays} {armed} chrome={false} controlsTop={108} {onclick} {oncontextmenu} {onusage} />
+      resetToHome={false} {imperial} {overlays} {armed} chrome={false} controlsTop={108} {onclick} {oncontextmenu} {onusage}
+      {onimageryfallback} errorSide="right" />
   </div>
   <button type="button" class="line" class:dragging class:armed={!!armed} role="slider" aria-label="Split between the before and after passes"
     aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(divider)} tabindex="0"

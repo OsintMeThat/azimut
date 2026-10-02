@@ -341,6 +341,42 @@ def install_kind() -> str:
 _environment: dict[str, str] | None = None
 
 
+def bundled_parts() -> dict[str, bool]:
+    """Whether the parts a frozen build drops without a word when its spec forgets
+    them are here: the zone database (Windows has none of its own, and local times
+    would quietly read as UTC), the PDF faces and the font subsetter, the capture
+    extension that Settings installs, and the scrapers' metadata, without which a
+    stale copy updated into the workspace shadows the newer one the build ships. The
+    release smoke test asks for all of them."""
+    import importlib.metadata
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    from . import extinstall, pdffonts, scrapers
+
+    try:
+        zones = ZoneInfo("Asia/Tokyo").utcoffset(datetime(2026, 1, 1)) == timedelta(hours=9)
+    except (ZoneInfoNotFoundError, ValueError):
+        zones = False
+    try:
+        import fontTools.subset  # noqa: F401  (fpdf2 subsets every face it embeds)
+
+        subsetter = True
+    except ImportError:
+        subsetter = False
+    faces = all((pdffonts.FONT_DIR / name).is_file() for name in pdffonts.CORE_FACES.values())
+    try:
+        versions = all(importlib.metadata.version(dist) for dist in scrapers.SCRAPERS)
+    except importlib.metadata.PackageNotFoundError:
+        versions = False
+    return {
+        "zones": zones,
+        "pdf_fonts": faces and subsetter,
+        "extension": bool(extinstall.bundled_version()) and bool(extinstall.payload_digest()),
+        "scrapers": versions,
+    }
+
+
 def environment() -> dict[str, str]:
     """The build and machine facts a maintainer needs to reproduce a bug.
 
@@ -367,6 +403,9 @@ def environment() -> dict[str, str]:
         "Python": platform.python_version(),
         "ffmpeg": ffmpeg_line,
     }
+    missing = [name for name, present in bundled_parts().items() if not present]
+    if missing:
+        _environment["Missing"] = ", ".join(missing)
     return dict(_environment)
 
 

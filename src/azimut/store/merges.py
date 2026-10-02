@@ -311,7 +311,6 @@ def merge_rows(
         "links_dropped": [
             *({"reason": "loop", "link": link} for link in loops),
             *({"reason": "twin", "link": link} for link in twins),
-            *({"reason": "cycle", "link": link} for link in refused),
         ],
         "images_moved": images_moved,
         "images_dropped": images_dropped,

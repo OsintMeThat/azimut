@@ -42,7 +42,7 @@ from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .. import config, layout
+from .. import config, errors, layout
 from ..engine import artifacts as artifact_engine
 from ..engine import comparisons, exportdir, sentinel, tiles
 from ..engine import links as link_engine
@@ -720,7 +720,7 @@ async def save_session_preview(
                 delete_by_path(case, current)
         case.update_entity(entity["id"], {"attrs": {"preview": rel}})
     except (OSError, ValueError, CaseError) as exc:
-        raise HTTPException(status_code=409, detail=f"could not save the image: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not save the image: {errors.explain(exc)}") from exc
     # the preview is the comparison's picture in the Saved panel
     saved_changed(case)
     return {"path": rel, "format": format_, "replaced": replaced}
@@ -798,7 +798,7 @@ async def keep_image(
             case, data, filename, suffix, source, by="compare", extra_attrs=attrs
         )
     except (OSError, ValueError, CaseError) as exc:
-        raise HTTPException(status_code=409, detail=f"could not keep the image: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not keep the image: {errors.explain(exc)}") from exc
     saved_changed(case)
     return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
 
@@ -899,7 +899,7 @@ async def export_gif(
         export_destination = exportdir.destination("views", case.path)
         path = exportdir.write_out(data, export_destination, name)
     except (OSError, exportdir.ExportDirError) as exc:
-        raise HTTPException(status_code=409, detail=f"could not write the GIF: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not write the GIF: {errors.explain(exc)}") from exc
     return {"file": path.name, "path": str(export_destination), "animation": animation}
 
 
@@ -960,7 +960,7 @@ async def export_sequence(
         export_destination = exportdir.destination("views", case.path)
         path = exportdir.write_out(data, export_destination, name)
     except (OSError, exportdir.ExportDirError) as exc:
-        raise HTTPException(status_code=409, detail=f"could not write the GIF: {exc}") from exc
+        raise HTTPException(status_code=409, detail=f"could not write the GIF: {errors.explain(exc)}") from exc
     return {"file": path.name, "path": str(export_destination), "frames": len(shown)}
 
 

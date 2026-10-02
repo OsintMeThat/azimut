@@ -23,6 +23,7 @@
   import AnalyzerSettings from './AnalyzerSettings.svelte';
   import FoldGroup from './FoldGroup.svelte';
   import Icon from '../../components/Icon.svelte';
+  import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 
   let {
     catalogue,
@@ -34,6 +35,7 @@
     /** The Copernicus layers on offer and a way to frame a place: what the
      *  builder needs of the map. */
     layers = [],
+    layerState = null,
     onfly = () => {},
   } = $props();
 
@@ -51,6 +53,9 @@
   /** Built-in categories opened by hand; all start folded. */
   let openKinds = $state({});
   let busy = $state(false);
+  // The analyzer whose deletion is being confirmed: its rules, checks and calibration
+  // are app-wide and have no Trash to come back from.
+  let deleting = $state(null);
   let error = $state('');
 
   // The map holds the builder's bench only while a builder is open, and this is what lets it go: on
@@ -165,7 +170,7 @@
             <Icon name="edit" size={13} />
           </button>
           <button class="cmp-icon" title="Delete" aria-label={`Delete ${entry.name}`} disabled={busy}
-            onclick={() => act(() => remove(entry))}><Icon name="trash" size={13} /></button>
+            onclick={() => (deleting = entry)}><Icon name="trash" size={13} /></button>
         </div>
       {/each}
     </section>
@@ -245,7 +250,7 @@
   <div class="cmp-dock-foot"><button class="btn btn-sm" onclick={back}>Cancel</button></div>
 {:else if mode === 'build' && recipe}
   {#key session}
-    <AnalyzerBuilder {catalogue} bind:recipe isNew={isNew} {start} bind:builder {viewBounds} {layers} {onfly}
+    <AnalyzerBuilder {catalogue} bind:recipe isNew={isNew} {start} bind:builder {viewBounds} {layers} {layerState} {onfly}
       onsave={(next) => save(next)} oncancel={back} />
   {/key}
 {:else if recipe}
@@ -281,6 +286,17 @@
     </div>
     {#if !readonly}<span class="reason">Shared by every case, and carried by Settings backup.</span>{/if}
   </div>
+{/if}
+
+{#if deleting}
+  <ConfirmDialog
+    title={`Delete ${deleting.name}`}
+    message="It leaves the library for every case, with its rules and checks."
+    detail="Nothing brings it back. A copy in a settings backup can."
+    confirmLabel="Delete"
+    tone="danger"
+    onconfirm={() => { const entry = deleting; deleting = null; act(() => remove(entry)); }}
+    oncancel={() => (deleting = null)} />
 {/if}
 
 <style>

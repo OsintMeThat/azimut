@@ -150,18 +150,18 @@ proof for publication.
 | ✅ **Timeline readings** | Builds coloured tracks from presets or Search+, then saves a changing Live view or a fixed Snapshot. |
 | ✅ **Shared analysis views** | Shares one filter, saved-view family and fact-time window between Board and Graph, while Timeline keeps readings built for tracks and the Map only exchanges a window with them. |
 | ✅ **Analysis view export** | Writes the Graph or the Timeline out as a vector plate carrying its lens, question, window, clock and legend, or copies it as an image. |
-| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, sorts, filters, row colour, clipboard both ways, bulk fill, undo, cells that point at case entities, and a reading handed out as CSV or Markdown. |
-| ✅ **Typed columns** | Types a column in the sidecar as a state, a list, a yes/no, a number, a point, a date or a picture, and lets the sort, the filters, the vocabulary, the map, the Timeline, the progress and the link check read it. |
+| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, sorts, filters, row colour, clipboard both ways, bulk fill, undo and cells that point at case entities. |
+| ✅ **Typed columns** | Types a column as a state, a list, a yes/no, a number, a point, a date or a picture, read by the sort, the filters, the map, the Timeline and the progress. |
 | ✅ **A family of sheets** | Files a workbook one sheet per tab, forks a sheet, moves ticked rows under a column mapping, and confirms a reload or an overwrite when the file changed on disk. |
-| ✅ **A sheet into the case, both ways** | Promotes a declared sheet into entities, places, bookmarks, vocabularies, row edges and dated Claims in one transaction, read as a plan first, and builds a worklist back out of what the case holds. |
+| ✅ **A sheet into the case, both ways** | Promotes a declared sheet into entities, places, vocabularies, row edges and dated Claims in one planned transaction, and builds a worklist back out of the case. |
 | ✅ **Geolocation index** | Lays the case's proofs out one per row with their media, place and coordinates, and builds one proof per row back out of two address columns and a coordinate column, as a stoppable job. |
-| ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the addresses it points at fetched as material, and nothing filed before the preview is approved. |
+| ✅ **Imported proofs** | Turns a published post into a composed proof, every picture a panel and its text read for a position, with nothing filed before the preview is approved. |
 | ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
 | ✅ **Proof image transforms** | Turns or crops a panel or proof-owned overlay without changing its source, while keeping attached annotations on the same pixels. |
-| ✅ **A proof of several points** | States every place a proof argues — each panel's own included, none of them overwritten — optionally named, one of them the camera's, any of them moved on a map rather than typed; files them as places under one title and carries them into the tweet and onto the exported picture. |
-| ✅ **What a proof says about itself** | Carries an optional sentence, which is its notes and what a post is written from, and an optional date for when its material was taken — never pre-filled, cleared in one press, and shown on the Timeline. |
-| ✅ **A date that reaches the footage** | A dated proof states that date for the sources it rests on — the original, never the frame cut from it or a capture — as one cited statement per proof, restated on every save and never written over the file's own clock. |
+| ✅ **A proof of several points** | States every place a proof argues, each optionally named and moved on a map, files them under one title and carries them into the post and the exported picture. |
+| ✅ **What a proof says about itself** | Carries an optional sentence, which is its notes and what a post is written from, and an optional date for its material, never pre-filled and shown on the Timeline. |
+| ✅ **A date that reaches the footage** | A dated proof states that date for the original sources it rests on, as one cited statement restated on every save and never written over the file's own clock. |
 
 ### v3 GEOINT expansion (shipped as GitHub `v0.3.0+`)
 
@@ -170,18 +170,18 @@ proof for publication.
 | ✅ **Map engine** | Draws the map on MapLibre GL behind the `lib/map` façade, with the same providers, captures and bearing. |
 | ✅ **Map chrome** | Puts modes in one rail, map layers in their tool panel or popup, imagery in the map corner and position in a status line, each tool declared once. |
 | ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, opens it in the other map tabs, and links it out. |
-| ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
-| ✅ **Map layers** | Stacks key-less overlays (borders, place names, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
-| ✅ **Added map layers** | Opens a KML, KMZ, GeoJSON or GPX file, or follows a public My Maps or map URL refreshed only while enabled, and draws it with its own colours, optionally its own icons composed once at import, a legend that filters and a search that goes to one feature — read, cited and never adopted into the case. |
+| ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links them and extension panels to one camera, and syncs saved points, grids and sweeps live. |
+| ✅ **Map layers** | Stacks key-less overlays (borders, place names, roads, railways, power lines, sea marks, GPS traces), FIRMS fires and VIIRS night lights, and filters pins by kind and folder. |
+| ✅ **Added map layers** | Draws a KML, KMZ, GeoJSON or GPX file or a public My Maps URL in its own colours and icons, with a legend that filters, cited but never adopted into the case. |
 | ✅ **Added layer rows** | Folds each row to one line with icon acts, drags the rows into the order the map stacks them and refreshes every followed layer at once. |
 | ✅ **Dates on a layer** | Narrows a dated added layer (GeoConfirmed, KML timestamps, GPX waypoints) to a period dragged on a strip of its events over time or picked on a calendar, kept with the legend. |
-| ✅ **GeoConfirmed layer** | Adds one GeoConfirmed conflict over a window of days or dates or its whole history, optionally only the view, in GeoConfirmed's own icons, grouped by faction with each event's sources and geolocation one click away. |
-| ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, opens the Map panel, the home map and the extension on them, and plays the stack in the panel beside the imagery. |
+| ✅ **GeoConfirmed layer** | Adds one GeoConfirmed conflict over a window of days or its whole history, in its own icons, grouped by faction with each event's sources one click away. |
+| ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, and plays the stack in the panel beside the imagery. |
 | ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed on request to the ones that changed the point, and dates the pixels apart from the release. |
 | ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
 | ✅ **Detect sweep** | Native Sentinel-2 detectors, mask footprints, manual candidates and Keep / Dismiss / Pin review with PNG evidence stamped with its dates and point. |
-| ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, up to a year back or between two days picked in a calendar, each with the share of them its swath reached, and reports what a finished run actually swept. |
-| ✅ **Cloud & shadow filter** | One click in Difference and Detect, both on Sentinel-2's scene classification: unsure edges taken, classified "clouds" too small to be one dropped, and shadows cast away from the sun, including the ones the classification read as water. |
+| ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, each with the share its swath reached, and reports what a finished run swept. |
+| ✅ **Cloud & shadow filter** | One click in Difference and Detect on Sentinel-2's scene classification, taking unsure edges, dropping cloud specks and masking shadows cast away from the sun. |
 | ✅ **Difference over any view** | A switch beside Compare's four views, offered on a matched pair only, laying its highlights on A, B or both (the default). |
 | ✅ **Detect** | Map-first tab, resizable dock, shared case areas in ordered groups, live A/B preview with per-area dates, one-off and routine runs grouped in Saved, repeat notices and explicit SAT layer snapshots. |
 | ✅ **Capture scale & north** | Adds a scale bar and true-north needle to app and extension captures when resolution and heading are known. |
@@ -194,32 +194,32 @@ proof for publication.
 | ✅ **Compare from the ground** | Right-clicking a point opens Compare on the last two Esri Wayback pictures of it, its last two Copernicus passes, or its last two radar passes of one track. |
 | ✅ **Marks that number and hide** | Stamps numbered markers counting a series per colour, and blur boxes that redraw the picture under them, on a proof's panels and on a comparison's ground alike. |
 | ✅ **A date in one field** | Reads a day, a month, a year, a time or a range from one line of text, or builds one from a calendar with its marks of doubt, and says what it understood. |
-| ✅ **Words that hold still** | One name for a Claim on every surface, a tooltip on every icon, a stated reason on a layer that cannot be switched on, the recent work first on Home, and Coords & Sky opening on the point the map is on. |
+| ✅ **Words that hold still** | One name for a Claim everywhere, a tooltip on every icon, a reason on a layer that cannot be switched on, and recent work first on Home. |
 | ✅ **A picture sent to Reverse Search** | Opens Reverse Search on a Media Library file, from a row's Open in… menu, or on an Inspect frame as it is cropped, saved or not. |
-| ✅ **Add event from anywhere** | One line for an event under the Timeline axis, atop Details and over any tool (Alt+N), with `@` mentions that can file a new subject, what the tool shows already cited, and a date only the analyst gives. |
+| ✅ **Add event from anywhere** | One line for an event under the Timeline axis, atop Details and over any tool (Alt+N), with `@` mentions, the tool's view already cited, and a date only the analyst gives. |
 | ✅ **Radar Detect** | Five Sentinel-1 analyzers (vessels, any change, razed buildings, new structures, floods) through the user's own radar layer, calibrated on real scenes, held to one track. |
 | ✅ **Sentinel-1 basemap** | Radar passes as a dated basemap in Satellite, Compare and Detect, named by day, UTC time and direction. |
 | ✅ **All dates** | Lists every dated picture of the point in Compare, oldest first, to set on either side. |
 | ✅ **Copernicus where it is needed** | Detect and Compare say in the middle of the tool what Copernicus still lacks, with the free account, the Sentinel-2 configuration and the Sentinel-1 layer form field by field. |
 | ✅ **A candidate in Compare** | Opens a Detect candidate in Compare on the passes that found it, or against high-resolution imagery for a thing present on one pass. |
-| ✅ **Sizes in Detect** | Right-clicks Detect's map for its own point menu, measures a hull with a ruler, sizes each candidate along its footprint, walks the largest first, and hides the drawing or blinks A against B from the review. |
-| ✅ **Analyzers of your own** | Builds a Detect analyzer for one satellite and one date or two, fixed when it is made, from up to six rules on any band, index, ground class or radar polarisation, read before, after or as the change; proved on checks made on the map (two passes on a split map and pins), tested on the ground under the pins with its cost said first, each rule painted and its effect on the pins read; five calibrated examples ship with theirs; also opened from a built-in or a Difference reading, with a shape filter for every analyzer. |
-| ✅ **Examine: Inspect and Collage** | Keeps one work per file, saved as it is made, with its frames on a strip; lays collages out of frames and images from any file, listed as cards with a preview and exported at full resolution; merges a case's 0.3.0 sessions on open. |
+| ✅ **Sizes in Detect** | Right-clicks Detect's map for its point menu, sizes each candidate along its footprint, walks the largest first, and blinks A against B from the review. |
+| ✅ **Analyzers of your own** | Builds a Detect analyzer for one satellite from up to six rules on any band, index, ground class or radar polarisation, proved on checks drawn on the map; five calibrated examples ship. |
+| ✅ **Examine: Inspect and Collage** | Keeps one autosaved work per file with its frames on a strip, lays collages out of any file's frames and images, and merges a case's 0.3.0 sessions on open. |
 | ✅ **One camera for the map tabs** | Satellite, Compare and Detect show the same ground, and the link carries it to other windows; a Detect review keeps its own, and Settings turns it off. |
-| ✅ **Comparisons in Saved work** | A saved comparison stands on the map with the captures, at its frame's centre with the frame outlined, dated A → B, and reopens in Compare; an export can also be kept in the case under it. |
-| ✅ **Dated pins and pictures** | A kept Detect candidate files a claim at its pin (a change between two passes, or a thing seen on one); comparisons and pinned evidence carry each picture's date, estimates marked; Detect layers filter a change by its span; exports are named by their pictures' dates. |
-| ✅ **An evolution of one point** | Exports Sentinel-2 passes or Wayback pictures ticked by hand on their previews, back to 2015, as one GIF or one sheet drawn from the tile proxy on the same ground, repeats and empty pictures left out and counted. |
+| ✅ **Comparisons in Saved work** | A saved comparison stands on the map with the captures, its frame outlined and dated A → B, and reopens in Compare; an export can be kept under it. |
+| ✅ **Dated pins and pictures** | A kept Detect candidate files a claim at its pin, comparisons and pinned evidence carry each picture's date, and exports are named by their pictures' dates. |
+| ✅ **An evolution of one point** | Exports hand-ticked Sentinel-2 passes or Wayback pictures, back to 2015, as one GIF or one sheet on the same ground, empty pictures left out and counted. |
 | ✅ **Signed exports, marks in their colours** | Compare exports close their credits line with the Azimut logo and name unless unticked, and a GIF keeps every mark's colour exact. |
-| ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame like a wheel about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back, Shift+← / → steps. |
+| ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back. |
 | ✅ **Checked proof points** | A proof point taken from a capture's centre reads greyed until checked; Save and To post show each one on the map first, and one saved for later stays off the case map. |
 | ✅ **Compare and Detect full screen** | Both take the whole screen with their bars and panel, as Satellite does, and any change of tab gives it back. |
-| ✅ **A Timeline that reads at a glance** | A point is an instant, a bracket a date known to the day, month or year, a bar a period; it opens on the files where the analyst dated them over the events, imagery on a lane of its own, on the clock of the case's places, under one bar; reads axis and list as one, copies out as a table, and shows the file an entry is about. |
-| ✅ **Names in any script** | Search folds case and accents in Latin, Greek and Cyrillic and vowel marks in Arabic and Hebrew, reads month names in the browser's languages, and keeps right-to-left text in its own direction. |
+| ✅ **A Timeline that reads at a glance** | A point is an instant, a bracket a date known to the day, month or year, a bar a period, with imagery on its own lane and axis and list read as one. |
+| ✅ **Names in any script** | Search folds case and accents in Latin, Greek and Cyrillic and vowel marks in Arabic and Hebrew, and keeps right-to-left text in its own direction. |
 | ✅ **Subjects corrected safely** | Changes a subject's type without losing a field or a link, and merges two duplicates with a preview, redirects for the absorbed id and an Undo. |
-| ✅ **The Board as an index** | Groups the case by family, people, places and things first with how many events name each and when, the files folded under; Most noted first, Details beside the list, walked with the arrow keys. |
+| ✅ **The Board as an index** | Groups the case by family, people, places and things first, with how many events name each and when, files folded under and Details beside the list. |
 | ✅ **Every date on a clock** | One Clock chip wherever a date is typed: a day or a time reads on its place's zone, UTC, this computer or any zone in the world, and the Timeline spans that zone's day. |
-| ✅ **Dates in posts, better templates** | A `#date` token carries the proof's date into a post only where a template asks; templates start from a layout, duplicate, preview on the open post with each platform's count, flag a misspelled token and set the default. |
-| ✅ **A work folder, and Files that acts** | New files and saved work land in the folder being worked in; folders rename with their items and files; Files and the sidebar act on a right-click, Files filters by type or by what is linked to nothing, and the sidebar also shows the case's to-do lists and recent work. |
+| ✅ **Dates in posts, better templates** | A `#date` token carries the proof's date into a post where a template asks; templates start from a layout, preview on the open post and flag a misspelled token. |
+| ✅ **A work folder, and Files that acts** | New files and saved work land in the folder being worked in, Files and the sidebar act on a right-click, and Files filters by type or by what is linked to nothing. |
 | ✅ **Links the case proposes** | Proposes the account a post's address names and joins points under 300 m apart as one site, reviewed in one list from the Graph; a dropped proposal does not come back. |
 | ✅ **A Sheet home** | The Sheet tab opens on the recent sheets and the ones the case could start, counted; Close saves and comes back to it; a status chip opens its words. |
 | ✅ **Files to geolocate** | One row per imported picture or video, done once a proof answers it, opened from the Sheet home or the Media Library and kept level by Refresh. |
@@ -381,8 +381,9 @@ stops making sense.
   decimal degrees + metres on disk.
 - **Distribution:** `pip install azimut` plus PyInstaller single-file binaries
   for Windows x86_64, Linux x86_64 and Apple Silicon macOS. Binaries bundle a
-  static ffmpeg/ffprobe; pip installs still want ffmpeg on `PATH`. Intel macOS
-  uses the Python package.
+  static ffmpeg/ffprobe with its licence notice and texts (Settings → System →
+  licence); pip installs still want ffmpeg on `PATH`. Intel macOS uses the Python
+  package.
 - **Dependencies:** ranges in `pyproject.toml`, exact pins in `uv.lock`; yt-dlp
   + gallery-dl unbounded on purpose; scraper self-update keeps an old binary useful.
 - **Storage:** per-case SQLite `case.db` is the authoritative graph (files for
@@ -421,7 +422,10 @@ stops making sense.
   one fixed workspace path and takes nothing off the request — no path, no
   payload — so it sits on the settings router rather than in the ingest island,
   where the extension-origin CORS would have reached it; the message that then
-  restarts the extension is only reachable from the app's own localhost page,
+  restarts the extension is only reachable from the page on the port the extension
+  is paired with (any other localhost port is refused, told which address to set,
+  and may only ask which copy is loaded; hand-offs open only the posting sites and
+  image engines the app offers),
   names the install it means, and its worst outcome is an extension that
   restarts. The map tools widen that island by five read routes and two writes,
   each trimmed to what a panel draws — one position's points without their

@@ -102,6 +102,10 @@ export function classify(server, { bridges, managed } = {}) {
     // distinguishable from one that never wrote anything.
     folderCurrent: Boolean(folder && bundledPayload && folder.payload === bundledPayload),
     installId: folder?.install_id ?? null,
+    // A copy answered but is paired with another address, most often this Azimut
+    // before it moved to a free port. It refuses to capture or hand off until its
+    // options name this one.
+    unpaired: answered.some((r) => r.paired === false),
   };
 }
 

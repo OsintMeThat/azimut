@@ -51,7 +51,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel
 
-from .. import __version__, config
+from .. import __version__, config, errors
 from ..engine import (
     extinstall,
     firms,
@@ -281,7 +281,7 @@ async def ingest_screenshot(
     except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
         raise HTTPException(status_code=413, detail="image exceeds the 100 MP limit") from exc
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
 
     site = parsed["site"]
     # Neither mark is invented for a map we did not draw: the bar needs the

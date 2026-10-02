@@ -188,7 +188,7 @@
   </p>
 
   {#if !targets.length}
-    <p class="note">This sheet has no other column to write into. Add one first.</p>
+    <p class="note">Add a column to write into first.</p>
   {:else}
     <label class="row">
       <span>Write the {forward ? 'coordinates' : 'place name'} into</span>
@@ -203,7 +203,7 @@
         <Icon name="pin" size={11} />
         <strong>{fromCase.length}</strong>
         {fromCase.length === 1 ? 'row is' : 'rows are'} answered by the case itself, from the
-        entity the cell points at. No lookup for those.
+        entity the cell points at.
         {#if linkable.length === MAX_CASE_POINTS}
           Only the first {MAX_CASE_POINTS} linked rows are read; run it again for the rest.
         {/if}
@@ -222,8 +222,8 @@
     {#if work.length}
       <p class="note">
         <Icon name="globe" size={11} />
-        Uses OpenStreetMap's geocoder, about one lookup a second, so its servers see what is
-        looked for. Nothing is written until you press again.
+        Pressing again asks OpenStreetMap's geocoder, about one lookup a second, and its
+        servers see what is looked for.
       </p>
     {/if}
 

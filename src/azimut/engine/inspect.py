@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import re
 import subprocess
 import tempfile
@@ -38,6 +39,8 @@ from . import ffmpeg as ffmpeg_engine
 from . import media as media_engine
 from . import stitch
 
+logger = logging.getLogger(__name__)
+
 SUGGEST_CAP = 60  # hard cap on how many "sharpest frame" suggestions we return
 
 # The sharpest-frame scan reads *every* frame in one ffmpeg pass, decoded to
@@ -46,6 +49,21 @@ SUGGEST_CAP = 60  # hard cap on how many "sharpest frame" suggestions we return
 # and large enough to tell a sharp frame from a soft one.
 SCAN_DIM = 480
 
+
+
+def ffmpeg_failed(what: str, stderr: bytes | None) -> RuntimeError:
+    """ffmpeg's last word, without the path it names, as the reason a step failed.
+
+    Its stderr runs to a screen of build flags and stream maps; the log keeps all of
+    it and the page gets one line: "ffmpeg could not scan this video (Invalid data
+    found when processing input)".
+    """
+    text = (stderr or b"").decode("utf-8", "replace").strip()
+    if text:
+        logger.warning("ffmpeg failed to %s a video:\n%s", what, text[-4000:])
+    last = text.splitlines()[-1].rsplit(": ", 1)[-1].strip() if text else ""
+    reason = f" ({last[:120]})" if last else ""
+    return RuntimeError(f"ffmpeg could not {what} this video{reason}")
 
 def _scan_timeout(duration: float) -> float:
     """Allow slow software decoding without letting a broken scan run forever."""
@@ -393,7 +411,7 @@ def extract_frame(video_path: Path, time_s: float) -> Image.Image:
         capture_output=True, timeout=60,
     )
     if proc.returncode != 0 or not proc.stdout:
-        raise RuntimeError((proc.stderr or b"").decode("utf-8", "replace").strip() or "frame decode failed")
+        raise ffmpeg_failed("read a frame of", proc.stderr)
     return Image.open(io.BytesIO(proc.stdout)).convert("RGB")
 
 
@@ -571,13 +589,9 @@ def scan_focus(
     if timed_out.is_set():
         raise RuntimeError("frame scan timed out")
     if proc.returncode not in (0, None):
-        raise RuntimeError(
-            (err or b"").decode("utf-8", "replace").strip() or "frame scan failed"
-        )
+        raise ffmpeg_failed("scan", err)
     if not out:
-        raise RuntimeError(
-            (err or b"").decode("utf-8", "replace").strip() or "frame scan decoded nothing"
-        )
+        raise ffmpeg_failed("decode any frame of", err)
     if set_progress:
         set_progress({"percent": 100.0})
     return out
@@ -919,9 +933,7 @@ def enhance_video(
             capture_output=True, timeout=600,
         )
         if proc.returncode != 0 or not tmp.exists():
-            raise RuntimeError(
-                (proc.stderr or b"").decode("utf-8", "replace").strip() or "video enhance failed"
-            )
+            raise ffmpeg_failed("enhance", proc.stderr)
         name = f"{stem}{'' if label else '_enhanced'}.mp4"
         source = _derivation(
             video_rel, _source_sha(case, video_rel), op="enhance-video",

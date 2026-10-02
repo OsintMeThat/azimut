@@ -19,6 +19,7 @@
   import { attribution, UNNAMED } from '../../lib/map/addedLayers.js';
   import { layerCard } from '../../lib/map/layerCard.js';
   import { fmtCoords, toast } from '../../lib/state.svelte.js';
+  import { copyText } from '../../lib/clipboard.js';
 
   let {
     engine = null,
@@ -33,12 +34,7 @@
   } = $props();
 
   async function copy(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast('Coordinates copied', 'ok', 1600);
-    } catch {
-      toast('The browser refused the clipboard', 'warn');
-    }
+    await copyText(text);
   }
 
   /** name → { layer, sha } so a refreshed snapshot redraws and nothing else does. */

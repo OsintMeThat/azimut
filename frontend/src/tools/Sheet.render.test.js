@@ -4070,6 +4070,78 @@ describe('the home the tab lands on', () => {
     expect(put.mock.calls[0][1].rows[0]).toEqual(['r1', 'Quai nord', 'ruled out']);
   });
 
+  it('asks before closing onto the home when the save keeps failing', async () => {
+    withHome();
+    await open();
+    put.mockClear();
+    put.mockRejectedValue(new Error('disk full'));
+    const cell = rows()[0].querySelectorAll('.cell:not(.gutter)')[1];
+    cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    flushSync();
+    const editor = target.querySelector('.editor');
+    editor.value = 'Quai nord';
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    editor.dispatchEvent(new Event('blur', { bubbles: true }));
+    flushSync();
+
+    button('Close').click();
+    await settle();
+
+    // Tried, failed: the grid stays, and leaving now would drop the edit, so it asks.
+    expect(put).toHaveBeenCalled();
+    expect(target.querySelector('.rows')).not.toBeNull();
+    expect(document.body.textContent).toContain('Leave and lose your edits');
+    inDialog('Cancel').click();
+    flushSync();
+    expect(target.querySelector('.rows')).not.toBeNull();
+    put.mockReset();
+    put.mockImplementation(async (_path, body) => ({ status: 'saved', stamp: '2000-64', ...body }));
+  });
+
+  it('sends an edit still waiting for its timer when the tab closes', async () => {
+    withHome();
+    await open();
+    put.mockClear();
+    const cell = rows()[0].querySelectorAll('.cell:not(.gutter)')[1];
+    cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    flushSync();
+    const editor = target.querySelector('.editor');
+    editor.value = 'Quai est';
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    editor.dispatchEvent(new Event('blur', { bubbles: true }));
+    flushSync();
+    await Promise.resolve();
+    expect(put).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(put).toHaveBeenCalledTimes(1);
+    const [, body, opts] = put.mock.calls[0];
+    expect(body.rows[0][1]).toBe('Quai est');
+    expect(opts).toEqual({ keepalive: true });
+  });
+
+  it('counts the keepalive cap in bytes, which Arabic text fills twice as fast', async () => {
+    // The browser refuses a keepalive body over 64 KB of bytes. 35 000 Arabic letters
+    // are 70 KB: under the cap counted in characters, over it on the wire.
+    withHome();
+    await open();
+    put.mockClear();
+    const cell = rows()[0].querySelectorAll('.cell:not(.gutter)')[1];
+    cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    flushSync();
+    const editor = target.querySelector('.editor');
+    editor.value = 'ع'.repeat(35_000);
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    editor.dispatchEvent(new Event('blur', { bubbles: true }));
+    flushSync();
+    await Promise.resolve();
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it('opens straight onto a sheet another tool asked for', async () => {
     uiState.openSheet = SHEET.id;
     withHome();

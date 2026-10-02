@@ -16,6 +16,11 @@ Settlement is central, so a handler only decides *what happened*:
   succeed
 - raises `JobFailed`, or anything unexpected -> the job is recorded failed and
   retried until its attempt budget is spent
+- raises `JobRefused` -> the job is recorded failed at once: what stopped it (no
+  room on the disk for an export) would stop every retry the same way
+
+What a failure records is what the analyst reads, so anything unexpected is put in
+a sentence (`errors.explain`) and its raw text goes to the log.
 
 Work only ever starts from a user action (an import, a regenerate, a backfill)
 or from crash recovery — never from merely opening a case or a tab.
@@ -23,12 +28,17 @@ or from crash recovery — never from merely opening a case or a tab.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
+from .. import errors
+
 if TYPE_CHECKING:
     from ..workspace import Case as CaseType
+
+logger = logging.getLogger(__name__)
 
 Handler = Callable[["CaseType", dict[str, Any]], None]
 
@@ -44,6 +54,10 @@ class JobCancelled(Exception):
 
 class JobFailed(Exception):
     """The job failed this time and deserves another attempt."""
+
+
+class JobRefused(Exception):
+    """The job cannot succeed as asked, and another attempt would fail the same way."""
 
 
 class JobRemoved(Exception):
@@ -88,8 +102,11 @@ def _settle(case: "CaseType", job: dict[str, Any]) -> bool:
         case.cancel_job(job["id"])
     except JobFailed as exc:
         case.fail_job(job["id"], str(exc))
+    except JobRefused as exc:
+        case.fail_job(job["id"], str(exc), final=True)
     except Exception as exc:  # a handler bug must not stall the queue
-        case.fail_job(job["id"], f"{type(exc).__name__}: {exc}")
+        logger.warning("job %s (%s) failed", job["id"], job["kind"], exc_info=True)
+        case.fail_job(job["id"], errors.explain(exc))
     else:
         case.complete_job(job["id"])
     return False

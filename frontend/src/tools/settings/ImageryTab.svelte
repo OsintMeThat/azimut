@@ -15,6 +15,7 @@
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import RadarLayer from './RadarLayer.svelte';
+  import CopernicusLayersHelp from '../../components/CopernicusLayersHelp.svelte';
   import { SENTINEL_ECO_MAX_ZOOM } from '../../lib/usage.js';
   import {
     monthCount,
@@ -191,6 +192,7 @@
             {/if}
 
             {#if k.id === 'sentinelhub' && keys[k.id]}
+              <CopernicusLayersHelp />
               <RadarLayer bind:layer={radarLayer} onchanged={load} />
             {/if}
 

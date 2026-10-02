@@ -171,7 +171,7 @@ describe('the landing', () => {
     await land([MEDIA[2]]);
 
     expect(target.textContent).toContain('Add an image or a video to the case to search it.');
-    buttonNamed('Go to Media Library').click();
+    buttonNamed('Go to Media').click();
     expect(uiState.tool).toBe('media');
     expect(target.querySelectorAll('.engine-link')).toHaveLength(4);
   });

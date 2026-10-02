@@ -134,6 +134,13 @@ class CaseRepository(Protocol):
     def list_links(self) -> list[dict[str, Any]]:
         ...
 
+    def suggestions(self, by: str, *, limit: int) -> dict[str, Any]:
+        """What one filer proposed and nobody has reviewed yet, counted in SQL:
+        ``{"links": {type: n}, "entities": {type: n}, "items": [first `limit` edges]}``.
+        The proposals panel reads it on every case revision, so it never walks the
+        whole graph."""
+        ...
+
     def get_link(self, link_id: str) -> dict[str, Any] | None:
         """One edge by id, or None. The single-row read behind editing a relation,
         so correcting one never walks the graph."""
@@ -698,7 +705,7 @@ class CaseRepository(Protocol):
     def complete_job(self, job_id: str) -> None:
         ...
 
-    def fail_job(self, job_id: str, error: str) -> dict[str, Any]:
+    def fail_job(self, job_id: str, error: str, *, final: bool = False) -> dict[str, Any]:
         ...
 
     def cancel_job(self, job_id: str) -> None:

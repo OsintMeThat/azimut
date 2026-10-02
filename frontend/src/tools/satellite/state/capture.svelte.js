@@ -124,7 +124,7 @@ export function createCaptureState({
     } catch {
       // The capture still carries what is ticked; only the remembering failed,
       // and saying so is worth one line rather than undoing their click.
-      notify('That tick applies to this session — it could not be saved', 'warn');
+      notify('That tick could not be saved, so it lasts this session only', 'warn');
     }
   }
 

@@ -59,9 +59,8 @@
     <div class="row-label">
       <span>Let the extension fill the composer</span>
       <span class="row-hint">
-        Publish types the thread and attaches the proof, then stops. Nothing is
-        ever posted. Needs the capture extension; without it, Publish opens the
-        page as usual.
+        Publish types the thread and attaches the proof with the capture extension,
+        and only opens the page without it.
       </span>
     </div>
     <input

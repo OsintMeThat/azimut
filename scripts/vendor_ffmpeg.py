@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import urllib.request
 import zipfile
@@ -229,7 +230,70 @@ def vendor(target: str, output_dir: Path) -> dict[str, object]:
         encoding="utf-8",
     )
     os.replace(temporary_path, provenance_path)
+    write_notice(output_dir, archives)
     return provenance
+
+
+#: Where the source of each build lives: FFmpeg's own, and the scripts that built it.
+BUILD_SOURCES = {
+    "BtbN FFmpeg Builds": "https://github.com/BtbN/FFmpeg-Builds",
+    "FFmpeg Build Server": "https://ffmpeg.martin-riedl.de",
+}
+
+LICENSE_TEXTS = Path(__file__).resolve().parent.parent / "packaging" / "licenses"
+
+
+def write_notice(output_dir: Path, archives: tuple[Archive, ...]) -> Path:
+    """Write the notice the binaries carry beside ffmpeg: which build it is, where
+    its source is, and the licence it states, with the licence texts beside it.
+
+    Redistributing a GPL build means handing its licence and a way to its source to
+    whoever gets the binary, and a link to ffmpeg.org/legal.html is neither. The
+    licence statement is the build's own (``ffmpeg -L``), so a build that changes
+    licence changes the notice with it.
+    """
+    licenses = output_dir / "ffmpeg-licenses"
+    licenses.mkdir(parents=True, exist_ok=True)
+    for text in sorted(LICENSE_TEXTS.glob("*.txt")):
+        shutil.copyfile(text, licenses / text.name)
+    lines = [
+        "ffmpeg and ffprobe ship inside this Azimut binary as separate programs.",
+        "Azimut runs them; it is not linked against them.",
+        "",
+    ]
+    for archive in archives:
+        lines += [
+            f"Build: {archive.version} ({archive.source})",
+            f"Downloaded from: {archive.url}",
+            f"SHA-256: {archive.sha256}",
+            f"Build scripts: {BUILD_SOURCES.get(archive.source, archive.source)}",
+            "",
+        ]
+    lines += [
+        "FFmpeg source code: https://ffmpeg.org/download.html#get-sources",
+        "(the version above names the release or the git commit it was built from)",
+        "",
+        "Licence, as this build states it (ffmpeg -L):",
+        "",
+        _stated_license(output_dir),
+        "",
+        "The full licence texts are in this folder.",
+    ]
+    notice = licenses / "NOTICE.txt"
+    notice.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return notice
+
+
+def _stated_license(output_dir: Path) -> str:
+    exe = next((output_dir / name for name in ("ffmpeg.exe", "ffmpeg") if (output_dir / name).is_file()), None)
+    if exe is None:
+        return "(ffmpeg missing)"
+    try:
+        answer = subprocess.run([str(exe), "-hide_banner", "-L"], capture_output=True, timeout=30, check=True)
+    except (OSError, subprocess.SubprocessError):
+        # Vendoring for another platform: the tool cannot run here.
+        return "Run `ffmpeg -L` to read it. GPL builds are covered by the GPL texts in this folder."
+    return answer.stdout.decode("utf-8", "replace").strip()
 
 
 def main() -> None:

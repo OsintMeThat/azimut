@@ -546,7 +546,7 @@ def test_a_video_cannot_be_the_proof_s_picture(client):
     staged = media_engine.stage_descriptor(
         _write(case_of(case_id), token, "clip.mp4", b"video-bytes"), {"type": "manual"}
     )
-    import_engine.fill_slot(case_of(case_id), token, "panel", staged)
+    import_engine.fill_files(case_of(case_id), token, "panel", [staged])
     report = preview(client, case_id, token)
     assert report["ready"] is False
     assert any("pictures" in line for line in report["blocking"])

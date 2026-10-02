@@ -8,6 +8,38 @@
   const self = {};
   $effect(() => joinOverlays(self));
 
+  let dialogEl = $state(null);
+
+  // Keyboard focus moves in when the dialog opens and goes back where it was when it
+  // closes; left behind the veil, Tab would walk a page nobody can see. A field the
+  // dialog autofocuses keeps the focus: that runs first, in the same microtask queue.
+  $effect(() => {
+    const returnTo = document.activeElement;
+    queueMicrotask(() => {
+      if (dialogEl && !dialogEl.contains(document.activeElement)) dialogEl.focus();
+    });
+    return () => {
+      if (returnTo?.isConnected) returnTo.focus?.();
+    };
+  });
+
+  const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  /** Tab wraps inside the dialog rather than leaving it for the page behind. */
+  function trap(e) {
+    if (e.key !== 'Tab' || !dialogEl) return;
+    const items = [...dialogEl.querySelectorAll(FOCUSABLE)];
+    if (!items.length) return;
+    const [first, last] = [items[0], items[items.length - 1]];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogEl)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   function onkeydown(e) {
     if (e.key === 'Escape' && isTopOverlay(self)) onclose?.();
   }
@@ -21,7 +53,8 @@
   onclick={(e) => e.target === e.currentTarget && onclose?.()}
   role="presentation"
 >
-  <div class="modal" style:width role="dialog" aria-label={title}>
+  <div class="modal" style:width role="dialog" aria-modal="true" aria-label={title} tabindex="-1"
+       bind:this={dialogEl} onkeydown={trap}>
     <header>
       <h3>{title}</h3>
       <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close" title="Close">

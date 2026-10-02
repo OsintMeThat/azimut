@@ -109,7 +109,7 @@ def resolve(raw: str) -> Path:
     if not target.is_dir():
         raise ExportDirError("that is a file, not a folder")
     if _is_machinery(target):
-        raise ExportDirError("that folder belongs to Azimut — pick another one")
+        raise ExportDirError("that folder belongs to Azimut, pick another one")
     if not _writable(target):
         raise ExportDirError("that folder is not writable")
     return target

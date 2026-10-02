@@ -16,9 +16,7 @@
  * close in gives each one a square of the sensor's footprint.
  */
 
-/** The shallowest zoom whose tiles carry the detections themselves, and the
- *  deepest tile there is, as the backend serves them. */
-export const POINTS_MIN_ZOOM = 8;
+/** The deepest tile the backend serves the detections in. */
 export const POINTS_MAX_ZOOM = 13;
 /** The smallest a detection is drawn, on screen: the size FIRMS's pictures use. */
 export const MARK_PX = 7;

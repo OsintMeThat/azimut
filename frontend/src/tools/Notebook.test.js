@@ -15,7 +15,7 @@ describe('Notebook notes menu', () => {
   it('closes on a click outside and on Escape', () => {
     expect(source).toContain('class="menu-backdrop" onclick={closeNotesMenu}');
     expect(source).toContain("if (event.key === 'Escape' && menuOpen) closeNotesMenu();");
-    expect(source).toContain('<svelte:window onkeydown={onWindowKeydown} />');
+    expect(source).toContain('<svelte:window onkeydown={onWindowKeydown} {onpagehide} />');
   });
 
   it('searches and browses note folders once the case has more than six notes', () => {
@@ -100,5 +100,15 @@ describe('Notebook offers what is open to the Add event bar', () => {
   it('publishes under its own tool id and withdraws on unmount', () => {
     expect(source).toMatch(/offerNote\(\s*'notebook',/);
     expect(source).toContain("onDestroy(() => withdrawNote('notebook'))");
+  });
+});
+
+describe('Notebook and a closing tab', () => {
+  it('sends the edit still waiting for its timer with keepalive when the page goes', () => {
+    // A tab closing runs no timer and no teardown, so only pagehide can still send it.
+    expect(source).toContain('<svelte:window onkeydown={onWindowKeydown} {onpagehide} />');
+    expect(source).toContain("api.put(unsent.target, { text: unsent.contents }, { keepalive: true })");
+    // Sent once: the timer and a flush both forget it when they write it.
+    expect(source.match(/(?<!let )unsent = null;/g)).toHaveLength(2);
   });
 });

@@ -37,7 +37,8 @@
 <section class="checks" aria-label="Checks">
   <p class="hint">A check is two passes and the pins that say where something should be found and where nothing may be.</p>
   <div class="row actions">
-    <button class="btn btn-sm" disabled={bench.atMostChecks} onclick={() => bench.startDraft()}>
+    <button class="btn btn-sm" disabled={bench.atMostChecks}
+      title={bench.atMostChecks ? 'This analyzer holds all the checks it can' : undefined} onclick={() => bench.startDraft()}>
       <Icon name="plus" size={12} /> New check
     </button>
     {#if bench.checks.length}

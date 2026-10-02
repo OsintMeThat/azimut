@@ -464,6 +464,53 @@ describe('finding and leaving a collage', () => {
     expect(target.querySelector('.tool-header')).not.toBeNull();
     expect(toast).toHaveBeenCalledWith('The collage could not be saved, so it stays open', 'warn');
   });
+
+  it('writes again on Retry after a failed save', async () => {
+    post.mockImplementationOnce(async () => {
+      throw new Error('disk full');
+    });
+    await start();
+    button('New collage').click();
+    await settle();
+    button('Images').click();
+    flushSync();
+    target.querySelector('.picker .thumb').click();
+    await settle(20);
+    button('Close').click(); // the save runs, and fails
+    await settle(20);
+    expect(target.querySelector('.status.error')).not.toBeNull();
+    const before = collagePosts().length;
+
+    button('Retry').click();
+    await settle(20);
+
+    expect(collagePosts().length).toBe(before + 1);
+    expect(target.querySelector('.status.error')).toBeNull();
+  });
+
+  it('keeps an unsaved collage open when another is asked for', async () => {
+    post.mockImplementation(async () => {
+      throw new Error('disk full');
+    });
+    await start();
+    button('New collage').click();
+    await settle();
+    button('Images').click();
+    flushSync();
+    target.querySelector('.picker .thumb').click();
+    await settle(20);
+    button('Close').click();
+    await settle(20);
+    toast.mockClear();
+
+    [...document.querySelectorAll('button')].find((el) => el.title === 'Start an empty canvas').click();
+    await settle(20);
+
+    expect(toast).toHaveBeenCalledWith('The collage could not be saved, so it stays open', 'warn');
+    expect(target.querySelector('.status.error')).not.toBeNull();
+    post.mockReset();
+    post.mockImplementation(async (path, body) => (path === '/api/cases/case-a/collages' ? { name: body.title, title: body.title } : {}));
+  });
 });
 
 describe('the piece picker', () => {

@@ -107,7 +107,7 @@ test("the pin's card states its point and copies it", async ({ page, context, br
   test.skip(browserName !== 'chromium', 'only Chromium lets a test grant the clipboard');
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await where.click();
-  await expect(page.getByText('Coordinates copied')).toBeVisible();
+  await expect(page.getByText('Copied', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('48.850000, 2.350000');
 });
 

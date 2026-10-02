@@ -239,6 +239,42 @@ describe('what the pill can claim', () => {
 });
 
 describe('which layers are on offer', () => {
+  it('does not mistake the local catalogue for a checked instance and shares concurrent checks', async () => {
+    get = vi.fn(async (path) => ({ source: path.includes('?check=true') ? 'instance' : 'catalogue',
+      layers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'VEGETATION_INDEX', label: 'Vegetation index' }] }));
+    const s2 = store();
+    expect(get).not.toHaveBeenCalled();
+    await s2.loadLayers();
+    expect(s2.layersSource).toBe('catalogue');
+    await Promise.all([s2.loadLayers(true, true), s2.loadLayers(true, true)]);
+    expect(get.mock.calls.filter(([path]) => path.includes('?check=true'))).toHaveLength(1);
+    expect(s2.layersSource).toBe('instance');
+    expect(s2.layersBusy).toBe(false);
+    await s2.loadLayers(true, true);
+    expect(get).toHaveBeenCalledTimes(2);
+    await s2.loadLayers(true, true, true);
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a failed capabilities lookup unverified and lets the user retry', async () => {
+    get = vi.fn(async () => ({ source: 'catalogue', layers: [{ id: 'NDVI' }], detail: 'offline' }));
+    const s2 = store();
+    expect(await s2.loadLayers(true, true)).toBe(false);
+    expect(s2.layersNote).toContain('Could not check');
+    expect(s2.layer).toBe('TRUE_COLOR');
+    get.mockResolvedValue({ source: 'instance', layers: [{ id: 'TRUE_COLOR' }] });
+    expect(await s2.loadLayers(true, true)).toBe(true);
+    expect(s2.layersNote).toBe('');
+  });
+
+  it('reports a refused request and finishes the loading state', async () => {
+    get = vi.fn(async () => { throw new Error('key refused'); });
+    const s2 = store();
+    expect(await s2.loadLayers(true, true)).toBe(false);
+    expect(s2.layersSource).toBe('');
+    expect(s2.layersBusy).toBe(false);
+    expect(s2.layersNote).toContain('basemap stays on');
+  });
   it('asks the instance once a session, quietly, and takes its answer', async () => {
     const s2 = store();
     s2.toggleMenu();

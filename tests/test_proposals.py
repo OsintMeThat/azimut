@@ -515,3 +515,127 @@ def test_the_graph_names_a_coordinate_point_and_leaves_a_named_one(client):
     assert nodes[coords]["caption"] == "Caracas"
     assert nodes[coords]["label"] == "10.490000, -66.880000"
     assert "caption" not in nodes[named]
+
+
+# -- edited after filing -----------------------------------------------------------------
+
+
+def test_a_place_geolocated_after_filing_is_read_again(client):
+    """Filed first, located later: the usual order. The pass reads past a mark set by
+    filing time, so the edit itself has to name the place for the next pass."""
+    case_id = make_case(client)
+    add(client, case_id, "place", "A", lat=NEAR[0][0], lon=NEAR[0][1])
+    unplaced = add(client, case_id, "place", "Hangar")["id"]
+    case = case_of(case_id)
+    assert proposals.propose(case)["sites"] == 0
+
+    response = client.patch(
+        f"/api/cases/{case_id}/entities/{unplaced}", json={"attrs": {"lat": NEAR[1][0], "lon": NEAR[1][1]}}
+    )
+    assert response.status_code == 200, response.text
+    assert case.list_jobs(kind=proposals.KIND, state="queued")
+
+    assert proposals.propose(case)["sites"] == 1
+    assert "again" not in case.link_pass()
+    # Read once more, then never again for that edit.
+    assert proposals.propose(case)["sites"] == 0
+
+
+def test_an_edit_that_gives_nothing_to_read_queues_no_pass(client):
+    case_id = make_case(client)
+    place = add(client, case_id, "place", "A", lat=NEAR[0][0], lon=NEAR[0][1])["id"]
+    case = case_of(case_id)
+    proposals.propose(case)
+    for job in case.list_jobs():
+        case.complete_job(job["id"])
+
+    client.patch(f"/api/cases/{case_id}/entities/{place}", json={"label": "Renamed"})
+
+    assert not case.list_jobs(kind=proposals.KIND, state="queued")
+    assert "again" not in case.link_pass()
+
+
+def test_a_bookmark_given_its_address_later_is_read_for_its_account(client):
+    case_id = make_case(client)
+    bookmark = add(client, case_id, "bookmark", "Post")["id"]
+    case = case_of(case_id)
+    proposals.propose(case)
+
+    client.patch(f"/api/cases/{case_id}/entities/{bookmark}", json={"attrs": {"url": "https://t.me/rybar/61234"}})
+    proposals.propose(case)
+
+    [link] = links_of_type(case, "posted")
+    assert link["to"] == bookmark
+
+
+def _settled(case):
+    for job in case.list_jobs(kind=proposals.KIND, state="queued"):
+        case.complete_job(job["id"])
+
+
+def test_a_point_sent_back_unchanged_does_not_bring_back_a_dropped_proposal(client):
+    """A second Promote of a places sheet resends every point it holds. Reading those
+    places again would propose once more what the analyst dropped; a real move is new."""
+    case_id = make_case(client)
+    add(client, case_id, "place", "A", lat=NEAR[0][0], lon=NEAR[0][1])
+    second = add(client, case_id, "place", "B", lat=NEAR[1][0], lon=NEAR[1][1])["id"]
+    case = case_of(case_id)
+    assert proposals.propose(case)["sites"] == 1
+    [link] = links_of_type(case, "same-site-as")
+    assert client.delete(f"/api/cases/{case_id}/proposals/{link['id']}").status_code == 200
+    _settled(case)
+
+    resent = {"attrs": {"lat": NEAR[1][0], "lon": NEAR[1][1], "notes": "checked"}}
+    assert client.patch(f"/api/cases/{case_id}/entities/{second}", json=resent).status_code == 200
+    assert not case.list_jobs(kind=proposals.KIND, state="queued")
+    assert "again" not in case.link_pass()
+    assert proposals.propose(case)["sites"] == 0
+
+    moved = {"attrs": {"lat": NEAR[2][0], "lon": NEAR[2][1]}}
+    assert client.patch(f"/api/cases/{case_id}/entities/{second}", json=moved).status_code == 200
+    assert case.list_jobs(kind=proposals.KIND, state="queued")
+    assert proposals.propose(case)["sites"] == 1
+
+
+def test_a_file_renamed_with_its_source_unchanged_keeps_a_dropped_proposal_dropped(client):
+    """Details saves a file's stated source with its title, changed or not."""
+    url = "https://x.com/BashaReport/status/1"
+    case_id = make_case(client)
+    item = client.post(
+        f"/api/cases/{case_id}/media/upload",
+        files={"file": ("shot.png", io.BytesIO(png(3)), "image/png")},
+        data={"source_url": url},
+    ).json()["item"]
+    case = case_of(case_id)
+    assert proposals.propose(case)["posted"] == 1
+    [posted] = links_of_type(case, "posted")
+    assert client.delete(f"/api/cases/{case_id}/proposals/{posted['id']}").status_code == 200
+    _settled(case)
+
+    saved = {"path": item["path"], "title": "Renamed", "notes": "", "source_url": url}
+    assert client.patch(f"/api/cases/{case_id}/media", json=saved).status_code == 200
+
+    assert not case.list_jobs(kind=proposals.KIND, state="queued")
+    assert proposals.propose(case) == {"accounts": 0, "posted": 0, "sites": 0}
+    assert not links_of_type(case, "posted")
+
+
+def test_the_waiting_proposals_are_read_without_walking_the_graph(client, monkeypatch):
+    """The panel reads this on every case revision while Graph is mounted, so it is
+    counted and listed in SQL, never by materialising every link."""
+    from azimut.sqlite_backend import SqliteCase
+
+    case_id = make_case(client)
+    for n, (lat, lon) in enumerate(NEAR):
+        add(client, case_id, "place", f"P{n}", lat=lat, lon=lon)
+    case = case_of(case_id)
+    download(case, "https://x.com/BashaReport/status/1", 1)
+    proposals.propose(case)
+
+    def whole_graph(*args, **kwargs):
+        raise AssertionError("the proposals read walked every link")
+
+    monkeypatch.setattr(SqliteCase, "list_links", whole_graph)
+    body = client.get(f"/api/cases/{case_id}/proposals").json()
+    assert body["pending"] == {"accounts": 1, "posted": 1, "sites": 2}
+    assert body["listed"] == 3

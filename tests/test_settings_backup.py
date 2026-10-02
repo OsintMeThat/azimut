@@ -400,3 +400,19 @@ def test_a_backup_naming_the_retired_labels_layer_still_imports(client):
     )
     assert res.status_code == 200, res.text
     assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["roads"]
+
+
+def test_a_backup_from_an_unpaired_machine_keeps_this_ones_pairing(client):
+    """The machine the backup came from never revealed its token. Restoring it on a
+    paired machine must leave that pairing alone, or the extension silently stops."""
+    token = client.post("/api/settings/ingest-token").json()["ingest_token"]
+    r = client.post("/api/settings/import", json={"settings": {"ingest_token": "", "units": "imperial"}})
+    assert r.status_code == 200, r.text
+    assert "ingest_token" not in r.json()["imported"]
+    assert client.get("/api/settings").json()["ingest_token"] == token
+
+
+def test_an_unpaired_machine_exports_no_empty_token(client):
+    assert "ingest_token" not in client.get("/api/settings/export").json()["settings"]
+    token = client.post("/api/settings/ingest-token").json()["ingest_token"]
+    assert client.get("/api/settings/export").json()["settings"]["ingest_token"] == token
