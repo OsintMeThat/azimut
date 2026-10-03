@@ -1,11 +1,12 @@
 <script>
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
   import { caseState, uiState, toast, reloadCase, prefs, updatesState } from '../lib/state.svelte.js';
   import { copyText } from '../lib/clipboard.js';
   import { templatesState, postDraftState } from '../lib/state.svelte.js';
+  import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
@@ -257,7 +258,7 @@
     if (uiState.tool === 'post' && uiState.openDraft && caseState.current) {
       const name = uiState.openDraft;
       uiState.openDraft = null;
-      loadDraft(name);
+      requestLoadDraft(name);
     }
   });
 
@@ -789,6 +790,9 @@
 
   async function performDraftSave(message = 'Draft saved') {
     saving = true;
+    // What was sent is what is saved: an edit typed while the save is on its way
+    // still counts as unsaved.
+    const sent = contentState();
     try {
       const r = await api.post(`/api/cases/${caseState.current.id}/drafts`, {
         rename_from: draftName,
@@ -797,6 +801,7 @@
       });
       draftName = r.name;
       postName = r.title;
+      savedKey = contentKey(sent, r.title);
       await reloadCase(); // surface the post entity in the sidebar
       toast(message, 'ok', 1600);
       return true;
@@ -874,6 +879,7 @@
         };
       });
       draftName = name;
+      settlePlace('post', where(), { navigate: true });
       postName = doc.title || name;
       appliedPostTemplate = null;
       // restore geo facts from the coordinates, then honor any manual tweet edits
@@ -890,6 +896,7 @@
       tweet1Edited = s.tweet1Edited ?? false;
       target = normalizePostTarget(s.target);
       openList = null;
+      savedKey = contentKey();
       toast('Draft loaded', 'ok', 1400);
     } catch (e) {
       toast(`Could not load draft: ${e.message}`, 'danger');
@@ -921,7 +928,63 @@
     defaultDeclined = false;
     discardConfirm = false;
     startFromDefaultTemplate();
+    savedKey = contentKey();
   }
+
+  // ---- what is not saved yet ------------------------------------------------
+  // What a save would keep, to tell work from the composer as it was opened, reset
+  // or last saved. The platform follows Settings on a blank post, an untouched first
+  // tweet is rebuilt from the fields and a numbered name is renumbered once the case's
+  // drafts are known, so none of them counts as work on its own.
+  function contentState() {
+    const state = snapshot();
+    delete state.target;
+    delete state.tweet1;
+    return { ...state, tweet1: tweet1Edited ? tweet1 : null };
+  }
+  function contentKey(state = contentState(), title = postName) {
+    const named = String(title ?? '').trim();
+    return JSON.stringify({ ...state, title: isDefaultName(named, 'draft') ? '' : named });
+  }
+  let savedKey = $state(null);
+  const unsaved = $derived(savedKey !== null && contentKey() !== savedKey);
+  $effect(() => {
+    if (savedKey === null) untrack(() => (savedKey = contentKey()));
+  });
+
+  // Opening another draft, from the list, the sidebar or Back, asks first when this
+  // post has changes not saved, so nothing is dropped without the analyst saying so.
+  let leaving = $state(null); // { answer(ok) }
+  function mayLeave() {
+    if (!unsaved) return Promise.resolve(true);
+    leaving?.answer(false);
+    return new Promise((resolve) => {
+      leaving = {
+        answer: (ok) => {
+          leaving = null;
+          resolve(ok);
+        },
+      };
+    });
+  }
+  async function requestLoadDraft(name) {
+    if (await mayLeave()) await loadDraft(name);
+  }
+
+  // Where the composer is, in the address: the saved draft open, or none. Opening a
+  // draft is the step Back retraces; a save naming it, a rename or a discard only
+  // rewrite the step it is on.
+  const where = () => ({ draft: draftName });
+  $effect(() => settlePlace('post', where()));
+  onDestroy(onBackForward('post', async (to) => {
+    const target = to.draft ?? null;
+    if (target === draftName) return true;
+    if (!(await mayLeave())) return false;
+    if (target) await loadDraft(target);
+    else resetDraft();
+    return true;
+  }));
+  onDestroy(holdsUnsaved('post', () => unsaved));
 
   const hasContent = $derived(
     !!(draftName || description.trim() || coordsText.trim() || date.trim() || mediaPaths.length ||
@@ -939,7 +1002,12 @@
   $effect(() => {
     if (hasContent || appliedPostTemplate || defaultDeclined) return;
     const t = defaultTemplate();
-    if (t) untrack(() => applyPostTemplate(t, { quiet: true }));
+    if (t) {
+      untrack(() => {
+        applyPostTemplate(t, { quiet: true });
+        savedKey = contentKey();
+      });
+    }
   });
 
   // The live draft, mirrored for Settings → Templates so a layout can be tried on
@@ -1588,8 +1656,8 @@
     <label class="modal-label" for="report-note-title">Title</label>
     <input id="report-note-title" class="input" placeholder="Report title…" bind:value={reportModal.title} />
 
-    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={reportModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="My work (root)" fresh />
+    <span class="modal-label" style="margin-top:10px">Folder</span>
+    <FolderSelect bind:value={reportModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="Unfiled" fresh />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -1609,7 +1677,7 @@
       <div class="open-list">
         {#each openList as entry (entry.name)}
           <div class="open-row-wrap">
-            <button class="open-row" onclick={() => loadDraft(entry.name)}>
+            <button class="open-row" onclick={() => requestLoadDraft(entry.name)}>
               <div class="open-meta">
                 <span class="open-title">{entry.title}</span>
                 <span class="open-sub">{entry.updated_at?.slice(0, 10)}</span>
@@ -1636,6 +1704,19 @@
     icon="trash"
     onconfirm={deleteSavedDraft}
     oncancel={() => (deleteEntry = null)}
+  />
+{/if}
+
+{#if leaving}
+  <ConfirmDialog
+    title="Leave this post?"
+    message="Its changes are not saved."
+    confirmLabel="Leave without saving"
+    cancelLabel="Keep editing"
+    tone="danger"
+    icon="reset"
+    onconfirm={() => leaving.answer(true)}
+    oncancel={() => leaving.answer(false)}
   />
 {/if}
 

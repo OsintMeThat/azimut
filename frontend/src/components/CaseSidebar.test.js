@@ -29,6 +29,12 @@ describe('sidebar shell', () => {
     );
   });
 
+  it('counts a folder by the accepted rows it opens on', () => {
+    // a suggestion filed in a folder is counted once, under Suggestions
+    expect(shell).toContain('const filedByFolder = $derived(summary?.confirmed?.by_folder ?? {})');
+    expect(shell).toContain('byFolder={filedByFolder}');
+  });
+
   it('keeps bounded per-section loading and the stale-response guard', () => {
     expect(shell).toContain('const CATALOG_PAGE = 200');
     expect(shell).toContain('if (mySeq !== seq) return;');

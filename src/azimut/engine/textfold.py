@@ -50,3 +50,17 @@ def fold_text(text: str) -> str:
         base = code
         out.append(char)
     return unicodedata.normalize("NFC", "".join(out))
+
+
+def search_rank(label: str, query: str) -> int:
+    """Rank exact labels, phrase prefixes, word prefixes, then other matches."""
+    text = fold_text(label)
+    phrase = " ".join(fold_text(query).split())
+    if text == phrase:
+        return 0
+    if text.startswith(phrase):
+        return 1
+    words = text.split()
+    if all(any(word.startswith(term) for word in words) for term in phrase.split()):
+        return 2
+    return 3

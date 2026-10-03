@@ -108,7 +108,8 @@ class CaseRepository(Protocol):
         Feeds the catalog's badges and its filter menus without shipping entities to
         the caller — ``{"total": int, "by_type": {type: n}, "by_status": {status: n},
         "by_folder": {path: n}, "by_source": {who: n}, "linked_to": {type: n},
-        "unlinked": int}``.
+        "unlinked": int, "confirmed": {"by_type", "by_folder", "unfiled"}}``, the last
+        over accepted rows only, as Files and the sidebar list them.
 
         ``linked_to`` counts entities that **have a neighbour** of each type, which is
         not how many of that type the case holds: it is what the "linked to" filter

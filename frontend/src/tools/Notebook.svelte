@@ -1,8 +1,9 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fetchAllEntities } from '../lib/catalog.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { onBackForward, settlePlace } from '../lib/backButton.js';
   import { foldText } from '../lib/textFold.js';
   import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
   import { entityReference, markdownHtml, remoteImageUrls } from '../lib/markdown.js';
@@ -188,6 +189,9 @@
     ({ tabs, activeId } = openNotebookTab(tabs, noteId));
   }
 
+  // A note asked for from elsewhere (a sidebar row, Details) is a step Back retraces,
+  // unless the case just changed under the tab, which starts it over.
+  let requestedIn = null;
   $effect(() => {
     const caseId = caseState.current?.id ?? null;
     if (caseId !== tabsCaseId) {
@@ -197,8 +201,26 @@
         tabs = [];
       }
     }
-    if (caseId) openRequestedNote(uiState.openNotebook?.noteId ?? null);
+    if (caseId) {
+      openRequestedNote(uiState.openNotebook?.noteId ?? null);
+      const sameCase = requestedIn === caseId;
+      requestedIn = caseId;
+      untrack(() => settlePlace('notebook', place(), { navigate: sameCase }));
+    }
   });
+
+  // Where the tab is, in the address: the note on screen. Choosing a note is a step
+  // Back retraces; closing a tab or deleting its note only rewrites the step it is on.
+  // Notes write themselves as they are typed, so going back costs nothing.
+  const place = () => ({ note: noteId });
+  $effect(() => settlePlace('notebook', place()));
+  onDestroy(onBackForward('notebook', (to) => {
+    const id = to.note ?? null;
+    // A note deleted since is not there to go back to.
+    if (id && graphEntities.length && !noteEntities.some((entity) => entity.id === id)) return true;
+    selectNote(id);
+    return true;
+  }));
 
   $effect(() => {
     if (!key || key === loadedKey) return;
@@ -269,12 +291,14 @@
     activeId = tab.id;
     uiState.openNotebook = { noteId: tab.noteId };
     closeNotesMenu();
+    settlePlace('notebook', place(), { navigate: true });
   }
 
   function selectNote(noteId = null) {
     openRequestedNote(noteId);
     uiState.openNotebook = { noteId };
     closeNotesMenu();
+    settlePlace('notebook', place(), { navigate: true });
   }
 
   function openNewNote() {
@@ -295,6 +319,7 @@
       noteModal = null;
       openRequestedNote(note.id);
       uiState.openNotebook = { noteId: note.id };
+      settlePlace('notebook', place(), { navigate: true });
     } catch (error) {
       toast(error.message, 'danger');
     } finally {
@@ -326,6 +351,7 @@
     activeId = next.activeId;
     const active = tabs.find((tab) => tab.id === activeId);
     uiState.openNotebook = { noteId: active?.noteId ?? null };
+    settlePlace('notebook', place());
   }
 
   async function confirmNoteAction() {
@@ -363,6 +389,7 @@
     if (activeId === tab.id) return;
     const active = tabs.find((item) => item.id === activeId);
     if (active) uiState.openNotebook = { noteId: active.noteId };
+    settlePlace('notebook', place());
   }
 
   function saveSoon() {
@@ -882,8 +909,8 @@ flowchart LR
       <label class="modal-label" for="notebook-note-title">Title</label>
       <input id="notebook-note-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
-      <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-      <FolderSelect bind:value={noteModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="My work (root)" fresh />
+      <span class="modal-label" style="margin-top:10px">Folder</span>
+      <FolderSelect bind:value={noteModal.folder} folders={caseState.current?.folders ?? []} emptyLabel="Unfiled" fresh />
 
       <div class="modal-row">
         <div style="flex:1"></div>

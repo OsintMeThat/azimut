@@ -58,8 +58,8 @@ export function tooBigBy(table, { rows = 0, columns = 0 } = {}) {
   if (willRows > MAX_ROWS) {
     const room = Math.max(0, MAX_ROWS - (table?.rows?.length ?? 0));
     return room
-      ? `A sheet holds ${MAX_ROWS.toLocaleString()} rows, so there is room for ${room.toLocaleString()} more.`
-      : `This sheet is full at ${MAX_ROWS.toLocaleString()} rows.`;
+      ? `A sheet holds ${MAX_ROWS.toLocaleString('en-US')} rows, so there is room for ${room.toLocaleString('en-US')} more.`
+      : `This sheet is full at ${MAX_ROWS.toLocaleString('en-US')} rows.`;
   }
   return null;
 }

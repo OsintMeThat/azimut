@@ -43,6 +43,23 @@ which is the one affordance that needs no label and costs no seat, and it is whe
 app opens (`#overview`). Its sidebar starts closed too: the page is read rather than
 worked in, and its whole subject is the case the sidebar would be listing again.
 
+**The browser's Back and Forward walk the work** (`lib/backButton.js`). Each change of
+tool is a step, and so is each place the analyst goes to inside one: a folder in Files,
+a sheet opened from the Sheet home, a proof, a draft or a note. The address carries it
+(`#files?folder=Sources%2FTelegram`, `#proof?proof=convoy`). A change that only renames
+a place, such as a save naming a document, a rename or a case switch, rewrites the step
+it is on. A document opened from another tool is one step with the switch that brought
+it, so one Back returns to where the press was made. Tools stay loaded, so Back to a
+tool finds it as it was left.
+
+**Back never drops work.** Back away from a proof or a post with unsaved changes asks
+first, and **Keep editing** leaves the address on the document; opening another one
+from its list asks the same. Back on an open dialog closes that dialog, as Escape
+would, and goes nowhere else. Leaving Azimut with unsaved work in a proof, a post, a
+comparison or a sheet whose edits could not be written is a question the browser asks.
+A step made in another case changes the tool and nothing inside it, since Back does not
+switch cases.
+
 ## Home
 
 Two tabs, chosen by who is looking. **Overview** is for somebody who has been here
@@ -145,6 +162,20 @@ before; **Guide** is for somebody who has not.
 
 Rules:
 
+- **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS). It starts with
+  recently added documents, then searches tools, workspace cases and documents
+  in the current case. Arrow keys select a result, Enter opens it and Escape
+  returns focus. Changing case through `openCase` asks before discarding unsaved
+  work; document handoffs retain their existing save and confirmation paths.
+  Reads start only when the palette opens; document search uses bounded catalog
+  queries and case search returns at most eight matches. Results from a closed
+  palette, an earlier query or a previous case are discarded.
+  Results stay visible while the next search runs; Enter waits for that search,
+  and new words select the best match again. The palette hangs from the top of
+  the window, so the field stays put while the list grows and shrinks, and the
+  part of each name a search matched is drawn bold.
+  Case names use the same accent and word normalization as other searches;
+  document results rank name matches before incidental matches.
 - Use at most two levels: workspace → tab.
 - `uiState.tool` is authoritative. The active workspace is derived from it, so
   cross-tool handoffs do not need workspace logic. Each workspace remembers its
@@ -1776,7 +1807,7 @@ Satellite or Detect. The rows Satellite offers for its own rails are left out
 rather than shown dead.
 
 **Save** writes the editable version-2 session under `.compare/` and
-updates its rendered media preview in My work (PNG, or GIF for blink). The preview
+updates its rendered media preview in the case (PNG, or GIF for blink). The preview
 records the date of each picture, one Esri or Wayback only estimated marked `~` on
 its Time tab, where **Date a change** offers a claim that something changed between
 them. A preview used by a derived proof is preserved when a later save creates new pixels.

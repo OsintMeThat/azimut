@@ -14,6 +14,7 @@
   import { deletedToast } from '../lib/trash.js';
   import { renderCollageThumb } from '../lib/collageThumb.js';
   import { foldTerms, foldText } from '../lib/textFold.js';
+  import { timeAgo } from '../lib/analysisViews.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -649,12 +650,6 @@
       toast(e.message, 'danger');
     }
   }
-
-  function when(stamp) {
-    if (!stamp) return '';
-    const d = new Date(stamp);
-    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-  }
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} {onpagehide} />
@@ -669,7 +664,7 @@
   {#if collages.length}
     <div class={grid ? 'cards' : 'rows'}>
       {#each shownCollages as row (row.name)}
-        {@const meta = `${row.pieces} piece${row.pieces === 1 ? '' : 's'}${when(row.updated_at) ? ` · ${when(row.updated_at)}` : ''}`}
+        {@const meta = `${row.pieces} piece${row.pieces === 1 ? '' : 's'}${timeAgo(row.updated_at) ? ` · ${timeAgo(row.updated_at)}` : ''}`}
         {#if grid}
           <div class="card" class:current={row.name === doc.name}>
             <button class="card-open" onclick={() => openCollage(row.name)}>

@@ -78,13 +78,13 @@ describe('a pasted image', () => {
 
   it('offers a folder in Files and nowhere else', () => {
     const filed = open(resolvePaste('files', payload()), { folders: ['Sources'] });
-    expect(labels(filed)).toContain('Folder (in My work)');
+    expect(labels(filed)).toContain('Folder');
     unmount(live);
     live = null;
     document.body.innerHTML = '';
 
     const drawn = open(resolvePaste('graph', payload()));
-    expect(labels(drawn)).not.toContain('Folder (in My work)');
+    expect(labels(drawn)).not.toContain('Folder');
   });
 
   it('files with no title, since a stamped name is the honest default', () => {
@@ -128,7 +128,7 @@ describe('a pasted link', () => {
   it('shows the address and asks what a bookmark needs', () => {
     const root = open(resolvePaste('files', payload));
     expect(root.querySelector('.target')?.textContent).toContain('leak.example.com/thread/1');
-    expect(labels(root)).toEqual(['Title', 'Folder (in My work)', 'Notes']);
+    expect(labels(root)).toEqual(['Title', 'Folder', 'Notes']);
     // no source field: the link is the source
     expect(root.querySelector('#paste-source')).toBeNull();
   });

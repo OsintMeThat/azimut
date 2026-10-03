@@ -42,7 +42,7 @@
 
   // Escape closes it like every other panel, and only when nothing sits above it.
   const self = {};
-  $effect(() => (open ? joinOverlays(self) : undefined));
+  $effect(() => (open ? joinOverlays(self, () => (open = false)) : undefined));
   function onkeydown(e) {
     if (open && e.key === 'Escape' && isTopOverlay(self)) open = false;
   }

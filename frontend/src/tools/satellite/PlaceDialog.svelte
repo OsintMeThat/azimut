@@ -73,7 +73,7 @@
     id="place-folder"
     bind:value={draft.folder}
     {folders}
-    emptyLabel="My work (root)"
+    emptyLabel="Unfiled"
   />
   <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
   <div class="sat-info-rows">

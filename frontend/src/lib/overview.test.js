@@ -46,7 +46,7 @@ describe('what the case is waiting on', () => {
 
   it('reads each count off the payload that already holds it', () => {
     const rows = waitingRows({
-      summary: summary({ total: 30, by_status: { suggested: 4 }, unlinked: 7, by_folder: { a: 10, b: 8 } }),
+      summary: summary({ total: 30, by_status: { suggested: 4 }, unlinked: 7, confirmed: { unfiled: 12 } }),
       timeline: { undated: 2 },
     });
     expect(Object.fromEntries(rows.map((row) => [row.id, row.count]))).toEqual({
@@ -70,17 +70,14 @@ describe('what the case is waiting on', () => {
 });
 
 describe('what sits in none of the folders', () => {
-  it('is the case less what the folders hold', () => {
-    expect(unfiledCount(summary({ total: 12, by_folder: { work: 5, old: 2 } }))).toBe(5);
+  it('counts accepted rows only, as the sidebar lists them', () => {
+    // three suggestions out of a folder are To review, not Unfiled as well
+    const read = summary({ total: 49, by_folder: { a: 31 }, by_status: { suggested: 3 }, confirmed: { unfiled: 15 } });
+    expect(unfiledCount(read)).toBe(15);
   });
 
-  it('is the whole case when no folder exists yet', () => {
-    expect(unfiledCount(summary({ total: 12 }))).toBe(12);
-  });
-
-  it('never goes negative on a summary read mid-write', () => {
-    // the two counts are separate scans; a folder count can briefly outrun the total
-    expect(unfiledCount(summary({ total: 2, by_folder: { a: 5 } }))).toBe(0);
+  it('is zero before the server says', () => {
+    expect(unfiledCount(summary({ total: 12 }))).toBe(0);
   });
 
   it('is zero on nothing at all', () => {

@@ -94,6 +94,17 @@ def test_geocode_empty_query_is_422(client):
     assert response.status_code == 422
 
 
+def test_geocode_reads_a_coordinate_without_the_network(client, monkeypatch):
+    """A Sheet cell already holding coordinates is a point, not a place name to send out."""
+    calls = []
+    monkeypatch.setattr(geo.httpx, "get", lambda *a, **k: calls.append(k) or _FakeResponse([]))
+
+    body = client.get("/api/geo/geocode", params={"q": "50.4501, 30.5234"}).json()
+
+    assert body == {"lat": 50.4501, "lon": 30.5234, "display_name": None, "attribution": None}
+    assert calls == []
+
+
 def test_geocode_network_failure_is_404(client, monkeypatch):
     def boom(*args, **kwargs):
         raise OSError("network down")
@@ -505,3 +516,14 @@ def test_places_reports_a_throttled_geocoder_instead_of_an_empty_list(client, mo
 
 def test_places_empty_query_is_422(client):
     assert client.get("/api/geo/places", params={"q": "   "}).status_code == 422
+
+
+def test_places_never_sends_a_typed_coordinate_to_the_geocoder(client, monkeypatch):
+    """A search bar left alone past its debounce asked Nominatim for "50.4501, 30.5234"."""
+    calls = []
+    monkeypatch.setattr(geo.httpx, "get", lambda *a, **k: calls.append(k) or _FakeResponse([]))
+
+    for typed in ("50.4501, 30.5234", "50°27'00.4\"N 30°31'24.2\"E", "36SYC8418406297"):
+        body = client.get("/api/geo/places", params={"q": typed}).json()
+        assert body == {"places": [], "busy": False, "throttled": False, "attribution": None}
+    assert calls == []

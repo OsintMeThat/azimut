@@ -94,3 +94,37 @@ describe('Enter with nothing highlighted', () => {
     expect(get).not.toHaveBeenCalled();
   });
 });
+
+describe('a typed coordinate', () => {
+  it('never reaches the geocoder, however long the analyst waits to pick it', async () => {
+    get.mockImplementation(async (path) =>
+      path.startsWith('/api/geo/suggest')
+        ? { coords: { lat: 50.4501, lon: 30.5234 }, cities: [] }
+        : { places: [] }
+    );
+    const { input } = open();
+
+    type(input, '50.4501, 30.5234');
+    // well past the geocoder's debounce, with the Coordinates row still unpicked
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+
+    expect(get.mock.calls.map(([path]) => path.split('?')[0])).toEqual(['/api/geo/suggest']);
+    expect(target.querySelector('[role="listbox"]').textContent).toContain('Coordinates');
+  });
+
+  it('still asks the geocoder for a place name', async () => {
+    get.mockImplementation(async (path) =>
+      path.startsWith('/api/geo/suggest') ? { coords: null, cities: [] } : { places: [] }
+    );
+    const { input } = open();
+
+    type(input, 'Kyiv centre');
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(get.mock.calls.map(([path]) => path.split('?')[0])).toEqual([
+      '/api/geo/suggest',
+      '/api/geo/places',
+    ]);
+  });
+});

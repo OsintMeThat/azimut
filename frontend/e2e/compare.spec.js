@@ -90,7 +90,7 @@ test('linked maps keep annotations on the ground through pan, modes and save', a
   expect(saved[0].spec.blink.interval).toBe(1600);
   expect(saved[0].spec.annotations[0].points[0][0]).toBeCloseTo(2.2945, 2);
   expect(saved[0].spec.annotations[0].points[0][1]).toBeCloseTo(48.8584, 2);
-  await expect(page.getByText('Comparison and animated preview saved to My work', { exact: true })).toBeVisible();
+  await expect(page.getByText('Comparison and animated preview saved to the case', { exact: true })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath('compare.png') });
   expect(errors).toEqual([]);
 });

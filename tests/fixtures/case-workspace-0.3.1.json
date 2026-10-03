@@ -1731,6 +1731,38 @@
    "structure": 1,
    "vessel": 1
   },
+  "confirmed": {
+   "by_folder": {
+    "Sources/Telegram": 1
+   },
+   "by_type": {
+    "account": 1,
+    "analysis-area": 2,
+    "analysis-follow-up": 1,
+    "analysis-run": 1,
+    "analysis-zones": 1,
+    "bookmark": 1,
+    "capture": 1,
+    "claim": 12,
+    "collage": 1,
+    "compare-session": 1,
+    "equipment-type": 1,
+    "inspect-session": 1,
+    "map-layer": 1,
+    "media": 6,
+    "network": 1,
+    "note": 1,
+    "organization": 2,
+    "person": 1,
+    "place": 2,
+    "post": 1,
+    "proof": 2,
+    "sheet": 2,
+    "structure": 1,
+    "vessel": 1
+   },
+   "unfiled": 44
+  },
   "countable": 1,
   "lacks": {
    "assessment": 6,

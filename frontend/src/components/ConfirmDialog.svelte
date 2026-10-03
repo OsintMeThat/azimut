@@ -21,6 +21,7 @@
     consequences = null,
     restorable = '',
     confirmLabel = 'Confirm',
+    cancelLabel = 'Cancel',
     tone = 'default', // 'danger' | 'default'
     icon = tone === 'danger' ? 'trash' : 'folderMinus',
     busy = false,
@@ -34,7 +35,7 @@
   const self = {};
   let cancelBtn = $state(null);
 
-  $effect(() => joinOverlays(self));
+  $effect(() => joinOverlays(self, () => oncancel?.()));
 
   // An alertdialog that leaves the focus behind the veil is unreachable by keyboard, so
   // move it in. Cancel and not the confirm button: this dialog exists to be read before
@@ -122,7 +123,7 @@
       </div>
     {/if}
     <div class="actions">
-      <button class="btn" bind:this={cancelBtn} onclick={oncancel} disabled={busy}>Cancel</button>
+      <button class="btn" bind:this={cancelBtn} onclick={oncancel} disabled={busy}>{cancelLabel}</button>
       <button
         class="btn {tone === 'danger' ? 'btn-danger' : 'btn-primary'}"
         onclick={onconfirm}

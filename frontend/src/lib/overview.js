@@ -16,19 +16,14 @@
 import { QUESTIONS } from './entityFilter.js';
 
 /**
- * How many entities sit in none of the analyst's folders.
+ * How many accepted entities sit in none of the analyst's folders.
  *
- * Derived rather than asked for: `by_folder` counts the rows that *have* a folder, so
- * the rest of the case is the remainder. Clamped at zero, since a summary read while a
- * write lands can briefly count more folders than it counts rows.
+ * Accepted only, as the sidebar's and Files' Unfiled list them: a suggestion is
+ * counted once, under To review. Counted over every row, a case with three
+ * suggestions said 18 here and 15 in the sidebar beside it.
  */
 export function unfiledCount(summary) {
-  const total = Number(summary?.total ?? 0);
-  const filed = Object.values(summary?.by_folder ?? {}).reduce(
-    (sum, n) => sum + Number(n || 0),
-    0
-  );
-  return Math.max(0, total - filed);
+  return Math.max(0, Number(summary?.confirmed?.unfiled ?? 0));
 }
 
 /** A Board question by id, carrying its own label, hint and terms. */

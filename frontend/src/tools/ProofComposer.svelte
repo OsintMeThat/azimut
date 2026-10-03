@@ -1,6 +1,7 @@
 <script>
   import { onDestroy, onMount, untrack } from 'svelte';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import Konva from 'konva';
   import { api } from '../lib/api.js';
@@ -648,9 +649,51 @@
     if (uiState.tool === 'proof' && uiState.openProof && caseState.current) {
       const name = uiState.openProof;
       uiState.openProof = null;
-      openProof({ name });
+      requestOpenProof({ name });
     }
   });
+
+  // ---- leaving a proof that holds unsaved changes --------------------------
+  // Opening another proof, from the list, the sidebar or Back, asks first when this
+  // one has changes not saved, so nothing is dropped without the analyst saying so.
+  let leaving = $state(null); // { answer(ok) }
+  function mayLeave() {
+    if (!proofStarted || !dirty) return Promise.resolve(true);
+    leaving?.answer(false);
+    return new Promise((resolve) => {
+      leaving = {
+        answer: (ok) => {
+          leaving = null;
+          resolve(ok);
+        },
+      };
+    });
+  }
+  async function requestOpenProof(entry) {
+    if (await mayLeave()) await openProof(entry);
+  }
+
+  // Where the composer is, in the address: the saved proof open, or none. Opening a
+  // proof and starting a new one are the steps Back retraces; a save naming the proof,
+  // a rename or a discard only rewrite the step it is on.
+  const place = () => ({ proof: savedName });
+  $effect(() => settlePlace('proof', place()));
+  onDestroy(onBackForward('proof', async (to) => {
+    const target = to.proof ?? null;
+    if (target === savedName) return true;
+    if (!(await mayLeave())) return false;
+    if (!target) {
+      resetDoc();
+      return true;
+    }
+    try {
+      await openProof({ name: target });
+    } catch (error) {
+      toast(`This proof cannot be opened: ${error.message}`, 'warn');
+    }
+    return true;
+  }));
+  onDestroy(holdsUnsaved('proof', () => proofStarted && dirty));
 
   // leaving the curve tool abandons an unfinished draft
   $effect(() => {
@@ -1022,6 +1065,7 @@
     try {
       resetDoc();
       proofStarted = true;
+      settlePlace('proof', place(), { navigate: true });
       if (template) applyTemplate(template, { notify: false });
       for (const item of selectedItems) await addPanel(item);
       dirty = true;
@@ -3976,12 +4020,12 @@
 
   function selectProofBrowser(entry, confirm = false) {
     proofBrowseSelection = entry.name;
-    if (confirm) openProof(entry);
+    if (confirm) requestOpenProof(entry);
   }
 
   function confirmProofBrowser() {
     const entry = proofBrowserEntries.find((item) => item.name === proofBrowseSelection);
-    if (entry) openProof(entry);
+    if (entry) requestOpenProof(entry);
   }
 
   let deleteEntry = $state(null); // open-list entry pending deletion
@@ -4015,6 +4059,7 @@
     // stream in one by one and enable the Save button as they arrive, so a Save
     // during the load has to write back over this proof, not file a new one.
     savedName = entry.name;
+    settlePlace('proof', place(), { navigate: true });
     proof.title = spec.title;
     proof.points = editablePoints(spec);
     proof.footerCoords = spec.footerCoords === true;
@@ -4123,7 +4168,7 @@
     picker || newProofOpen || importOpen || openList !== null || discardConfirm
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
       || placeOffer !== null || orphanOffer !== null || deleteEntry !== null
-      || sourcePick !== null || pointMap !== null || checking !== null
+      || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
   );
   const editableShape = $derived(editableShapes.length === 1 ? editableShapes[0] : null);
   const fillableSelection = $derived(editableShapes.some((s) => canFill(s.kind)));
@@ -5131,7 +5176,7 @@
     onclose={() => (importOpen = false)}
     oncreated={async (created) => {
       await reloadCase();
-      openProof({ name: created.proof.name });
+      requestOpenProof({ name: created.proof.name });
     }}
   />
 {/if}
@@ -5159,6 +5204,19 @@
       exportAfterPick = false;
     }}
     onchosen={useExportFolder}
+  />
+{/if}
+
+{#if leaving}
+  <ConfirmDialog
+    title="Leave this proof?"
+    message="Its changes are not saved."
+    confirmLabel="Leave without saving"
+    cancelLabel="Keep editing"
+    tone="danger"
+    icon="reset"
+    onconfirm={() => leaving.answer(true)}
+    oncancel={() => leaving.answer(false)}
   />
 {/if}
 
@@ -5376,7 +5434,7 @@
           <div class="open-list">
             {#each visibleProofs as entry (entry.name)}
               <div class="open-row-wrap">
-                <button class="open-row" onclick={() => openProof(entry)}>
+                <button class="open-row" onclick={() => requestOpenProof(entry)}>
                   {#if entry.thumb || entry.png}
                     <!-- the thumbnail of the export, or the export itself when
                          it could not be rendered; decoded off the main thread -->

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   copyName,
@@ -107,6 +110,26 @@ describe('dating a saved reading', () => {
   it('states the date once the distance stops meaning anything', () => {
     expect(timeAgo('2026-08-01T12:00:00Z', now)).toBe('1 Aug 2026');
     expect(timeAgo('2025-12-24T23:00:00Z', now)).toBe('24 Dec 2025');
+  });
+
+  // The UI is English. A date or a number formatted in the browser's own language
+  // read "14 juil. 2026" on a Collage card and "10 000 rows" in a Sheet warning,
+  // amid English words.
+  it('is the only kind of date the UI writes: none follows the system language', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const offenders = [];
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.(svelte|js)$/.test(name) && !name.endsWith('.test.js')) {
+          const source = readFileSync(path, 'utf8');
+          if (/\.toLocale(Date|Time)?String\((\)|undefined)/.test(source)) offenders.push(path.slice(root.length));
+        }
+      }
+    };
+    walk(root);
+    expect(offenders).toEqual([]);
   });
 
   it('says nothing about a stamp it cannot read', () => {

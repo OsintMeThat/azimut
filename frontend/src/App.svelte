@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy, untrack } from 'svelte';
   import {
     uiState,
     initSession,
@@ -24,6 +25,7 @@
     toolFromHash,
   } from './lib/workspaces.js';
   import { readSolo, splitHash } from './lib/hash.js';
+  import { caseShown, installBackButton, showTool } from './lib/backButton.js';
   import { guideFor } from './lib/guide.js';
   import { openGuide } from './lib/navigate.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
@@ -40,6 +42,9 @@
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import NoteBar from './components/NoteBar.svelte';
   import MoveDialog from './components/MoveDialog.svelte';
+  import CommandPalette from './components/CommandPalette.svelte';
+  import CaseChangeGuard from './components/CaseChangeGuard.svelte';
+  import { isPaletteKey } from './lib/commandPalette.js';
   import { filedToast, workFolder } from './lib/folders.js';
   import { isNoteKey } from './lib/noteHere.svelte.js';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
@@ -92,13 +97,20 @@
   // (#compose, #compose/post) — see lib/workspaces.js
   const fromHash = toolFromHash(location.hash, TOOL_IDS);
   if (fromHash) uiState.tool = fromHash;
-  // The app owns the route; a tool may keep its own state in the query after it
-  // (the map writes the view its window is on, lib/map/view.js). So this writes
-  // only when the route is not already the open tool — otherwise switching back
-  // and forth would wipe what that tool had put there.
+  // The app owns the route; a tool may keep its own place in the query after it
+  // (the map's view, the folder Files is in). Each switch of tool is an entry, so the
+  // browser's Back and Forward walk the tools, and inside them the places the
+  // analyst went to (lib/backButton.js).
+  onDestroy(installBackButton(TOOL_IDS));
+  let firstShow = true;
   $effect(() => {
-    if (splitHash(location.hash).route === uiState.tool) return;
-    history.replaceState(null, '', `#${uiState.tool}`);
+    const tool = uiState.tool;
+    untrack(() => showTool(tool, { first: firstShow, solo }));
+    firstShow = false;
+  });
+  $effect(() => {
+    caseState.current?.id;
+    untrack(caseShown);
   });
   /**
    * A tab opened to hold one tool and nothing else (`lib/hash.js`).
@@ -181,6 +193,12 @@
     uiState.noting = !uiState.noting;
   }
   function onGlobalKey(event) {
+    if (isPaletteKey(event)) {
+      event.preventDefault();
+      if (event.target?.closest?.('[role="alertdialog"]')) return;
+      if (paletteOpen || !event.target?.closest?.('[role="dialog"]')) paletteOpen = !paletteOpen;
+      return;
+    }
     if (!isNoteKey(event)) return;
     event.preventDefault();
     toggleNote();
@@ -191,6 +209,8 @@
     if (ws) sidebarOpenByWorkspace[ws.id] = open;
     uiState.sidebarOpen = open;
   }
+
+  let paletteOpen = $state(false);
 
   // Tools mount lazily on first visit, then stay mounted (hidden via CSS) so
   // unsaved editor state — a half-composed proof, a collage in progress —
@@ -301,6 +321,10 @@
     </div>
     <div class="spacer"></div>
     <DetectActivity />
+    <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to"
+            aria-keyshortcuts="Control+k Meta+k" onclick={() => (paletteOpen = true)}>
+      <Icon name="search" size={16} />
+    </button>
     <!-- The one mark that answers "what is this tab I am standing in". It sits beside
          the gear rather than in each toolbar so there is one of it, and it opens the
          Guide on the section written about the current tool. Silent on the Guide
@@ -435,6 +459,8 @@
 
 <NoteBar />
 <MoveDialog />
+<CommandPalette bind:open={paletteOpen} tools={ALL_TOOLS} />
+<CaseChangeGuard />
 <Toasts />
 
 {#if workspaceStopped}
