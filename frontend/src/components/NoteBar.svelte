@@ -72,7 +72,7 @@
   // Over the tool's own overlays too (a file's Details, the lightbox), since that is
   // where a file is watched; so it takes its turn in the Escape order like a modal.
   const self = {};
-  $effect(() => (uiState.noting ? joinOverlays(self) : undefined));
+  $effect(() => (uiState.noting ? joinOverlays(self, close) : undefined));
 
   function onkeydown(event) {
     if (event.key !== 'Escape' || event.defaultPrevented || !isTopOverlay(self)) return;

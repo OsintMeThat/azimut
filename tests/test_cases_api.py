@@ -51,6 +51,42 @@ def test_list_cases_respects_limit(client):
     assert len(client.get("/api/cases", params={"limit": 2}).json()) == 2
 
 
+def test_case_search_folds_accents_and_matches_each_word(client, monkeypatch):
+    for name in ("Étude du port", "Proof geo", "Other work"):
+        client.post("/api/cases", json={"name": name})
+    opened = []
+    original = Case.entity_count
+
+    def count(case):
+        opened.append(case.id)
+        return original(case)
+
+    monkeypatch.setattr(Case, "entity_count", count)
+    hits = client.get("/api/cases", params={"q": "  PORT etude "}).json()
+    assert [case["name"] for case in hits] == ["Étude du port"]
+    assert opened == ["Étude du port"]
+    hits = client.get("/api/cases", params={"q": "geo proof"}).json()
+    assert [case["name"] for case in hits] == ["Proof geo"]
+
+
+def test_catalog_relevance_ranks_across_pages_with_folded_names(client):
+    cid = client.post("/api/cases", json={"name": "Harbour"}).json()["id"]
+    case = Case.open(cid)
+    for label in ("Airport", "Notes from Port", "Pórt Sudan", "Port"):
+        case.add_entity("note", label, {}, by="user")
+    params = {"q": "port", "order": "relevance", "limit": 2}
+    first = client.get(f"/api/cases/{cid}/catalog/entities", params=params)
+    assert first.status_code == 200
+    page = first.json()
+    assert page["total"] == 4
+    assert [item["label"] for item in page["items"]] == ["Port", "Pórt Sudan"]
+    second = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={**params, "cursor": page["next_cursor"]}
+    ).json()
+    assert [item["label"] for item in second["items"]] == ["Notes from Port", "Airport"]
+    assert second["next_cursor"] is None
+
+
 def test_case_lifecycle(client):
     created = client.post("/api/cases", json={"name": "Kharkiv Strike"}).json()
     # The folder is the name the analyst typed, the way every other saved thing
@@ -423,6 +459,34 @@ def test_catalog_filters_by_folder(client):
     assert [e["label"] for e in unfiled["items"]] == ["loose"]
 
     assert client.get(f"/api/cases/{cid}/catalog/summary").json()["by_folder"] == {"Alpha": 1}
+
+
+def test_catalog_summary_counts_accepted_rows_apart(client):
+    """Files, the sidebar and Home's Unfiled list accepted rows only, with suggestions
+    under review. Counted over every row, Home said 18 unfiled where the sidebar
+    beside it said 15."""
+    cid = client.post("/api/cases", json={"name": "Review"}).json()["id"]
+    client.post(f"/api/cases/{cid}/folders", json={"name": "Alpha"})
+    for label, folder, status in (
+        ("kept", "Alpha", "confirmed"),
+        ("loose", None, "confirmed"),
+        ("proposed", None, "suggested"),
+        ("proposed here", "Alpha", "suggested"),
+    ):
+        attrs = {"folder": folder} if folder else {}
+        client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": "person", "label": label, "attrs": attrs, "status": status},
+        )
+
+    summary = client.get(f"/api/cases/{cid}/catalog/summary").json()
+
+    assert summary["by_folder"] == {"Alpha": 2}
+    assert summary["confirmed"] == {"by_type": {"person": 2}, "by_folder": {"Alpha": 1}, "unfiled": 1}
+    sidebar = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"unfiled": "true", "status": "confirmed"}
+    ).json()
+    assert sidebar["total"] == summary["confirmed"]["unfiled"]
 
 
 def test_catalog_searches_notes_and_descendant_folders(client):

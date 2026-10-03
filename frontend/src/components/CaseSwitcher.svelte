@@ -24,6 +24,7 @@
   import { checkCase, repairCase } from '../lib/doctor.js';
   import { revealCaseFolder } from '../lib/reveal.js';
   import { formatSize } from '../lib/trash.js';
+  import { foldTerms, foldText } from '../lib/textFold.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import SearchInput from './SearchInput.svelte';
@@ -301,7 +302,7 @@
   // and debounce a server query so it still finds a case in a long list the
   // first page didn't hold. Both paths key on the case name.
   const matchesSearch = (c) =>
-    (c.name ?? c.id ?? '').toLowerCase().includes(search.trim().toLowerCase());
+    foldTerms(search).every((term) => foldText(c.name ?? c.id ?? '').includes(term));
   let searchTimer;
   $effect(() => {
     const q = search;
@@ -322,8 +323,7 @@
     busy = true;
     try {
       if (modal === 'create') {
-        await createCase(name);
-        toast(`Case “${name}” created`, 'ok');
+        if (await createCase(name)) toast(`Case “${name}” created`, 'ok');
       } else if (modal === 'promote') {
         await promoteCase(name);
       } else if (modal === 'rename') {
@@ -370,7 +370,7 @@
       } else {
         open = false;
         const adopted = await adoptFolder(folder.name);
-        toast(`Case “${adopted.name ?? folder.name}” created`, 'ok');
+        if (adopted) toast(`Case “${adopted.name ?? folder.name}” created`, 'ok');
       }
     } catch (error) {
       toast(error.message || 'Could not use this folder', 'danger', 7000);

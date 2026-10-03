@@ -73,8 +73,9 @@ def catalog_entities(
     coordinates", and ``total`` is how many.
 
     ``order`` sorts the whole filtered set rather than the page — ``created`` and
-    ``label``, each with a ``-`` prefix for the other direction. Empty is the insertion
-    order that has always been the default.
+    ``label``, each with a ``-`` prefix for the other direction; ``relevance`` ranks
+    exact labels, phrase prefixes and word prefixes before other matches. Empty
+    is the insertion order that has always been the default.
 
     ``attr`` without ``value`` is not a term — it is the analyst having chosen which
     field they are about to ask about, and answering it as "holds nothing" would empty

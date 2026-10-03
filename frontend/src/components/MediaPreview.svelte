@@ -32,7 +32,7 @@
 
   let large = $state(false);
   const self = {};
-  $effect(() => (large ? joinOverlays(self) : undefined));
+  $effect(() => (large ? joinOverlays(self, () => (large = false)) : undefined));
   function onkeydown(event) {
     if (large && event.key === 'Escape' && isTopOverlay(self)) {
       event.preventDefault();

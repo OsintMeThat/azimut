@@ -1,6 +1,6 @@
 <script>
   /**
-   * Files — the desktop view of My work. The case sidebar's folder tree, opened
+   * Files — the desktop view of the case's folders. The case sidebar's folder tree, opened
    * up into a Finder-style surface: navigate folders, rubber-band-select several
    * items at once, and drag the lot into a folder. Reads every saved artifact
    * (media, captures, notes, proofs, posts, places, sessions), not just media.
@@ -64,6 +64,7 @@
   } from '../lib/trash.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { onBackForward, settlePlace } from '../lib/backButton.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
@@ -103,7 +104,7 @@
       ),
   });
   const confirmed = $derived(pl.items);
-  let summary = $state(null); // { total, by_type, by_status, by_folder }
+  let summary = $state(null); // { total, by_type, by_status, by_folder, confirmed }
   const emptyTrashState = () => ({ groups: [], items: 0, size_bytes: 0 });
   let trashData = $state(emptyTrashState());
   let trashRun = 0;
@@ -150,8 +151,11 @@
   const allFolders = $derived(flattenPaths(tree));
   const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
   // Counts from the summary, which covers the whole case; the loaded page alone
-  // undercounted every folder of a case past its first 200 items.
-  const countOf = (node) => (summary?.by_folder ? subtreeCountFrom(node, summary.by_folder) : subtreeCount(node));
+  // undercounted every folder of a case past its first 200 items. Accepted rows only,
+  // as Files lists them: a suggestion waits in the sidebar, under review.
+  const filedCounts = $derived(summary?.confirmed?.by_folder ?? null);
+  const countOf = (node) => (filedCounts ? subtreeCountFrom(node, filedCounts) : subtreeCount(node));
+  const unfiledTotal = $derived(summary?.confirmed?.unfiled ?? unfiled.length);
   const working = $derived(caseState.current?.work_folder ?? null);
 
   // ── filters ─────────────────────────────────────────────────────────────────
@@ -162,7 +166,7 @@
   let typeFilter = $state(null);
   let unlinkedOnly = $state(false);
   const filtering = $derived(Boolean(typeFilter || unlinkedOnly));
-  const chips = $derived(typeChips(summary));
+  const chips = $derived(typeChips(summary?.confirmed));
   const fl = createPagedList({
     fetchPage: ({ query: serverQuery, cursor }) =>
       api.get(
@@ -236,7 +240,7 @@
   }
 
   // Search stays inside the open folder and its subfolders. The root is the
-  // one intentional exception: it represents all of My work.
+  // one intentional exception: it represents every file.
   let query = $state('');
   const searching = $derived(!!query.trim());
   const total = $derived(
@@ -381,11 +385,13 @@
     showUnfiled = false;
     cwd = path;
     if (searching && pl.serverMode) pl.reload();
+    settlePlace('files', place(), { navigate: true });
   }
   function openUnfiled() {
     showTrash = false;
     showUnfiled = true;
     if (searching && pl.serverMode) pl.reload();
+    settlePlace('files', place(), { navigate: true });
   }
 
   function openTrash() {
@@ -393,7 +399,29 @@
     showUnfiled = false;
     cwd = '';
     query = '';
+    settlePlace('files', place(), { navigate: true });
   }
+
+  // Where Files is, in the address: each folder opened is a step Back retraces. A
+  // folder renamed or removed under it only rewrites the step it is on.
+  function place() {
+    if (showTrash) return { view: 'trash' };
+    if (showUnfiled) return { view: 'unfiled' };
+    return { folder: cwd };
+  }
+  $effect(() => settlePlace('files', place()));
+  // A folder renamed or removed since is not there to go back to; its nearest
+  // surviving parent is.
+  onDestroy(onBackForward('files', (to) => {
+    if (to.view === 'trash') openTrash();
+    else if (to.view === 'unfiled') openUnfiled();
+    else {
+      let folder = to.folder ?? '';
+      while (folder && !allFolders.includes(folder)) folder = folder.split('/').slice(0, -1).join('/');
+      openFolder(folder);
+    }
+    return true;
+  }));
 
   // ── selection ────────────────────────────────────────────────────────────────
   let selected = $state([]);
@@ -1081,8 +1109,7 @@
 
 <div class="tool">
   <div class="tool-header">
-    <h2>Files</h2>
-    <span class="sub">Organize My work</span>
+    <span class="sub">Organize your folders</span>
     <div class="spacer"></div>
     {#if showTrash}
       {#if trashData.groups.length}
@@ -1093,7 +1120,7 @@
     {:else}
       <SearchInput
         bind:value={query}
-        placeholder={cwd ? 'Search this folder…' : 'Search My work…'}
+        placeholder={cwd ? 'Search this folder…' : 'Search all files…'}
         width="160px"
       />
       {#if view !== 'list'}
@@ -1169,7 +1196,7 @@
           >
             <Icon name="file" size={14} />
             <span class="tname">Unfiled</span>
-            <span class="tcount">{unfiled.length}</span>
+            <span class="tcount">{unfiledTotal}</span>
           </div>
 
         <div
@@ -1364,7 +1391,7 @@
                   <span class="lcol-name"><Icon name="file" size={15} /><span class="ltext">Unfiled</span></span>
                   <span class="lcol-type">—</span>
                   <span class="lcol-size">—</span>
-                  <span class="lcol-added">{unfiled.length} item{unfiled.length === 1 ? '' : 's'}</span>
+                  <span class="lcol-added">{unfiledTotal} item{unfiledTotal === 1 ? '' : 's'}</span>
                 </div>
               {/if}
             {/if}
@@ -1465,7 +1492,7 @@
               >
                 <div class="thumb folder-thumb unfiled"><Icon name="file" size={dense ? 26 : 38} /></div>
                 <span class="tile-name">Unfiled</span>
-                <span class="tile-sub">{unfiled.length} item{unfiled.length === 1 ? '' : 's'}</span>
+                <span class="tile-sub">{unfiledTotal} item{unfiledTotal === 1 ? '' : 's'}</span>
               </div>
             {/if}
           {/if}
@@ -1769,8 +1796,8 @@
     <label class="modal-label" for="fnote-title">Title</label>
     <input id="fnote-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
-    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" fresh />
+    <span class="modal-label" style="margin-top:10px">Folder</span>
+    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="Unfiled" fresh />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -1791,8 +1818,8 @@
     <label class="modal-label" for="fbm-title" style="margin-top:10px">Title</label>
     <input id="fbm-title" class="input" placeholder="Bookmark title…" bind:value={bookmarkModal.title} />
 
-    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={bookmarkModal.folder} folders={allFolders} emptyLabel="My work (root)" fresh />
+    <span class="modal-label" style="margin-top:10px">Folder</span>
+    <FolderSelect bind:value={bookmarkModal.folder} folders={allFolders} emptyLabel="Unfiled" fresh />
 
     <label class="modal-label" for="fbm-notes" style="margin-top:10px">Notes</label>
     <textarea id="fbm-notes" class="textarea" rows="3" placeholder="Why this page matters…" bind:value={bookmarkModal.notes}></textarea>

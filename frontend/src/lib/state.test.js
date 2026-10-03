@@ -429,6 +429,57 @@ describe('case request ownership', () => {
     unregister();
   });
 
+  // Promoting moves the scratch folder on the server. A guard asked afterwards,
+  // answered "Keep editing", left the app on a session id that no longer existed.
+  it('asks before promoting a session, and moves nothing when it is kept', async () => {
+    const guard = vi.fn().mockResolvedValue(false);
+    const unregister = state.registerCaseChangeGuard(guard);
+    state.caseState.current = { id: 'scratch_a', name: 'Scratch session', scratch: true };
+    api.post.mockReset();
+
+    expect(await state.promoteCase('Harbour')).toBeNull();
+
+    expect(guard).toHaveBeenCalledWith({ fromId: 'scratch_a', toId: null, reason: 'promote' });
+    expect(api.post).not.toHaveBeenCalled();
+    expect(state.caseState.current.id).toBe('scratch_a');
+    unregister();
+  });
+
+  it('promotes once the guards agree, without asking them twice', async () => {
+    const order = [];
+    const guard = vi.fn(async () => { order.push('guard'); return true; });
+    const unregister = state.registerCaseChangeGuard(guard);
+    state.caseState.current = { id: 'scratch_a', name: 'Scratch session', scratch: true };
+    api.post.mockReset();
+    api.post.mockImplementation(async (path) => {
+      order.push(path);
+      return { id: 'harbour' };
+    });
+    api.get.mockImplementation(async (path) =>
+      path === '/api/cases/harbour' ? { id: 'harbour', name: 'Harbour' } : []
+    );
+
+    expect(await state.promoteCase('Harbour')).toEqual({ id: 'harbour' });
+
+    expect(order).toEqual(['guard', '/api/cases/scratch_a/promote']);
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(state.caseState.current.id).toBe('harbour');
+    unregister();
+  });
+
+  it('creates no case when the analyst keeps the open one', async () => {
+    const unregister = state.registerCaseChangeGuard(async () => false);
+    state.caseState.current = { id: 'case-a', name: 'Case A' };
+    api.post.mockReset();
+
+    expect(await state.createCase('Harbour')).toBeNull();
+    expect(await state.adoptFolder('Harbour')).toBeNull();
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(state.caseState.current.id).toBe('case-a');
+    unregister();
+  });
+
   it('does not let a late refresh reopen the case it started in', async () => {
     const refresh = deferred();
     api.get.mockReturnValue(refresh.promise);

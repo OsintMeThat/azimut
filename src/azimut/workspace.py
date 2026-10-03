@@ -32,6 +32,7 @@ from .caselayout import (
     write_readme,
 )
 from .casestore import CaseStore
+from .engine.textfold import fold_text
 from .layout import MAX_CASE_SLUG
 from .repository import EntityStatus
 
@@ -627,6 +628,7 @@ class Case(CaseStore):
         cls, *, q: str | None = None, limit: int | None = None, scaffolds: bool = False
     ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
+        terms = fold_text(q or "").split()
         for parent, scratch in ((config.cases_dir(), False), (config.scratch_dir(), True)):
             if not parent.is_dir():
                 continue
@@ -650,6 +652,9 @@ class Case(CaseStore):
                 if not isinstance(data, dict):
                     data = {}
                     health = "needs-attention"
+                name = data.get("name", case.id)
+                if terms and not all(term in fold_text(str(name)) for term in terms):
+                    continue
                 updated_at = data.get("updated_at")
                 try:
                     if case._sqlite is not None:
@@ -664,7 +669,7 @@ class Case(CaseStore):
                 out.append(
                     {
                         "id": case.id,
-                        "name": data.get("name", case.id),
+                        "name": name,
                         "scratch": scratch,
                         "created_at": data.get("created_at"),
                         "updated_at": updated_at,
@@ -673,9 +678,6 @@ class Case(CaseStore):
                     }
                 )
         out.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
-        if q:
-            needle = q.strip().lower()
-            out = [c for c in out if needle in str(c.get("name", "")).lower()]
         if limit is not None:
             out = out[: max(0, limit)]
         return out

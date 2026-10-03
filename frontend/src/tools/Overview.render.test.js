@@ -20,6 +20,7 @@ const SUMMARY = {
   linked_to: {},
   unlinked: 7,
   countable: 0,
+  confirmed: { by_type: {}, by_folder: { work: 14 }, unfiled: 12 },
 };
 
 const RECENT = [
@@ -211,7 +212,7 @@ describe('with a case open', () => {
   it('says a clear case in one line rather than four zeros', async () => {
     get.mockImplementation(async (url) => {
       if (url.includes('/catalog/summary')) {
-        return { ...SUMMARY, total: 18, by_status: {}, by_folder: { work: 18 }, unlinked: 0 };
+        return { ...SUMMARY, total: 18, by_status: {}, by_folder: { work: 18 }, unlinked: 0, confirmed: { unfiled: 0 } };
       }
       if (url.includes('/timeline')) return { undated: 0 };
       if (url.includes('/satellite/media')) return [];
@@ -226,7 +227,7 @@ describe('with a case open', () => {
 
   it('offers a way in rather than a reading of nothing, on a case holding nothing', async () => {
     get.mockImplementation(async (url) => {
-      if (url.includes('/catalog/summary')) return { ...SUMMARY, total: 0, by_type: {}, by_status: {}, by_folder: {}, unlinked: 0 };
+      if (url.includes('/catalog/summary')) return { ...SUMMARY, total: 0, by_type: {}, by_status: {}, by_folder: {}, unlinked: 0, confirmed: { unfiled: 0 } };
       if (url.includes('/timeline')) return { undated: 0 };
       if (url.includes('/satellite/media')) return [];
       return { items: [], total: 0, next_cursor: null };
@@ -425,5 +426,32 @@ describe('with no case open', () => {
     chips[1].click();
     flushSync();
     expect(openCase).toHaveBeenCalledWith('case-b');
+  });
+
+  it('asks for a new case, not a first one, above the cases already there', async () => {
+    caseState.list = [{ id: 'case-a', name: 'Kharkiv strike' }];
+    await open();
+    expect(target.querySelector('label[for="home-case-name"]').textContent).toBe('Name a new case');
+  });
+
+  it('opens a stage from its button, as the rail does', async () => {
+    await open();
+    const stages = [...target.querySelectorAll('button.stage')];
+    expect(stages.map((stage) => stage.textContent.trim())).toEqual(['Sources', 'Examine', 'Map', 'Compose']);
+    stages[2].click();
+    flushSync();
+    expect(uiState.tool).toBe('satellite');
+  });
+
+  it('keeps the typed name when the analyst stays in the open case', async () => {
+    createCase.mockResolvedValueOnce(null);
+    await open();
+    const field = target.querySelector('#home-case-name');
+    field.value = 'Kharkiv strike';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    [...target.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Create').click();
+    await settle();
+    expect(field.value).toBe('Kharkiv strike');
   });
 });

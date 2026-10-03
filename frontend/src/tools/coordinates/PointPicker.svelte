@@ -76,7 +76,7 @@
     <FolderBrowser
       {entries}
       {path}
-      rootLabel="My work"
+      rootLabel="Saved points"
       icon={glyph}
       {label}
       emptyText="No saved point is filed here."

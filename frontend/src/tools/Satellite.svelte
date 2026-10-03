@@ -48,6 +48,7 @@
   import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
+  import { settlePlace } from '../lib/backButton.js';
   import { readView, readWindowLabel, viewParams } from '../lib/map/view.js';
   import { createViewLink } from '../lib/map/link.js';
   import { shareView } from '../lib/map/sharedView.js';
@@ -797,8 +798,8 @@
   /**
    * This window's view, kept in its own address.
    *
-   * `replaceState`, never push: panning a map is not navigating, and a back
-   * button holding four hundred camera positions is worse than useless.
+   * Settled, never navigated to: panning a map is not going somewhere, and a
+   * back button holding four hundred camera positions is worse than useless.
    */
   $effect(() => {
     if (uiState.tool !== 'satellite' || !mapReady) return;
@@ -814,7 +815,7 @@
     // without it, the first pan would turn a detached map back into the whole
     // app on the next reload.
     if (solo) params.solo = '1';
-    history.replaceState(null, '', buildHash('satellite', params));
+    settlePlace('satellite', params);
   });
 
   /**

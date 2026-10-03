@@ -79,6 +79,11 @@ describe('openInReverseSearch', () => {
 });
 
 describe('openEntity', () => {
+  it('reopens a sheet by its entity id in Sheet', () => {
+    openEntity({ id: 'sheet-1', type: 'sheet', label: 'Index', attrs: { path: 'sheets/index.csv' } });
+    expect(uiState.tool).toBe('sheet');
+    expect(uiState.openSheet).toBe('sheet-1');
+  });
   it('opens a merged place at the survivor coordinates instead of frozen coordinates', async () => {
     get.mockResolvedValue({ entity: { id: 'kept', type: 'place', label: 'Kept place', attrs: { lat: 3, lon: 4 } }, merged_from: { id: 'old', label: 'Old place' } });
     openEntity({ id: 'old', type: 'place', attrs: { lat: 1, lon: 2 } });

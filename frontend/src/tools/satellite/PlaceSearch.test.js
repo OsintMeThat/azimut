@@ -45,7 +45,7 @@ describe('what typing costs', () => {
   });
 
   it('drops an answer to a query that is no longer what is typed', () => {
-    expect(source).toContain('if (localFor !== query) return');
+    expect(source).toContain('if (localFor !== query || !body) return');
     expect(source).toContain('if (remoteFor !== query) return');
   });
 

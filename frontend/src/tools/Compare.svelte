@@ -101,6 +101,7 @@
   import { WAYBACK_ID, releaseYearBefore, waybackId } from '../lib/wayback.js';
   import { RADAR_ID, radarId } from '../lib/radar.js';
   import { offerNote, pairOffers, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { holdsUnsaved } from '../lib/backButton.js';
   import { changeInterval, formatTemporalValue } from '../lib/timeline.js';
   import Icon from '../components/Icon.svelte';
   import Compass from '../components/Compass.svelte';
@@ -368,6 +369,8 @@
   // Panning is looking, not work, so leaving asks nothing; Save still takes it.
   let pristineSignature = $state(null);
   const discardable = $derived(sessionDirty && pairSignature() !== pristineSignature);
+  // Leaving Azimut with them asks first, as leaving the comparison here does.
+  onDestroy(holdsUnsaved('compare', () => discardable));
   let firmsSensors = $state([]);
 
   function changeSide(target, sentinel, wayback, shown, radar) {
@@ -1009,8 +1012,8 @@
         toast(`Comparison saved, but its preview could not update: ${previewError.message}`, 'warn', 7000);
       } else {
         toast(mode === 'blink'
-          ? 'Comparison and animated preview saved to My work'
-          : 'Comparison and preview saved to My work', 'ok');
+          ? 'Comparison and animated preview saved to the case'
+          : 'Comparison and preview saved to the case', 'ok');
       }
       if (exportAfterSave) {
         exportAfterSave = false;
@@ -2363,7 +2366,7 @@
       class="btn btn-primary btn-sm"
       onclick={requestSaveSession}
       disabled={!both || sessionBusy || !sessionDirty}
-      title="Keep this editable comparison in My work"
+      title="Keep this editable comparison in the case"
     >
       <Icon name="save" size={13} /> {sessionBusy ? 'Saving…' : 'Save'}
     </button>

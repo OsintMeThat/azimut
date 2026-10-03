@@ -6,7 +6,7 @@
    * Two groupings over one set. **Geography** (lib/geoTree.js) is the default:
    * a case that sits in one country opens straight on its regions, one that
    * spans the world opens on continents. **Folders** (lib/folderView.js) shows
-   * the same items through My work, and only there can a row be dragged onto a
+   * the same items through the case folders, and only there can a row be dragged onto a
    * folder to file it. Typing filters before grouping, so the counts always
    * describe what is on screen, and every branch opens while a search is
    * running — a filter that hides its own matches behind chevrons is no filter.

@@ -161,6 +161,8 @@
     // press means "what is this tab", not "open a document".
     help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM9.1 9.6a2.9 2.9 0 1 1 4.2 2.6c-.8.4-1.3 1-1.3 1.9v.4M12 16.3a.8.8 0 1 0 0 1.6.8.8 0 1 0 0-1.6Z',
     keyboard: 'M3 7h18a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm3.5 3.2h.01m3.2 0h.01m3.2 0h.01m3.2 0h.01M8 13.8h8',
+    // The Enter key drawn on a keycap: the arrow every keyboard prints on it.
+    enter: 'M19 5v6a3 3 0 0 1-3 3H5m0 0 4-4m-4 4 4 4',
   };
 </script>
 

@@ -865,8 +865,8 @@
     <label class="modal-label" for="ed-notes">Notes</label>
     <textarea id="ed-notes" class="textarea" rows="3" dir="auto" bind:value={infoNotes} placeholder="Add observations, links, context…"></textarea>
 
-    <span class="modal-label">Folder (My work)</span>
-    <FolderSelect bind:value={infoFolder} folders={allFolders} emptyLabel="None" />
+    <span class="modal-label">Folder</span>
+    <FolderSelect bind:value={infoFolder} folders={allFolders} emptyLabel="Unfiled" />
     {/if}
 
     {#if tab === 'connections'}

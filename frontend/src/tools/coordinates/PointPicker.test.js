@@ -16,7 +16,7 @@ describe('saved-point picker', () => {
     expect(picker).toContain("import FolderBrowser from '../../components/FolderBrowser.svelte'");
     expect(picker).toContain("import SearchInput from '../../components/SearchInput.svelte'");
     expect(picker).toContain('class="btn btn-ghost btn-sm browse-btn"');
-    expect(picker).toContain('rootLabel="My work"');
+    expect(picker).toContain('rootLabel="Saved points"');
   });
 
   it('lists only what carries a position', () => {

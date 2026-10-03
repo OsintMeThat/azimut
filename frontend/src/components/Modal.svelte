@@ -3,10 +3,13 @@
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
 
-  let { title, onclose, width = '440px', children } = $props();
+  // `align="top"` hangs the dialog from the top so a list that grows and shrinks
+  // under a field does not move the field; `bare` drops the header for a dialog
+  // whose own first row says what it is, and the title stays its accessible name.
+  let { title, onclose, width = '440px', align = 'center', bare = false, children } = $props();
 
   const self = {};
-  $effect(() => joinOverlays(self));
+  $effect(() => joinOverlays(self, () => onclose?.()));
 
   let dialogEl = $state(null);
 
@@ -49,19 +52,22 @@
 
 <div
   class="overlay"
+  class:top={align === 'top'}
   use:portal
   onclick={(e) => e.target === e.currentTarget && onclose?.()}
   role="presentation"
 >
   <div class="modal" style:width role="dialog" aria-modal="true" aria-label={title} tabindex="-1"
        bind:this={dialogEl} onkeydown={trap}>
-    <header>
-      <h3>{title}</h3>
-      <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close" title="Close">
-        <Icon name="x" size={15} />
-      </button>
-    </header>
-    <div class="content">
+    {#if !bare}
+      <header>
+        <h3>{title}</h3>
+        <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close" title="Close">
+          <Icon name="x" size={15} />
+        </button>
+      </header>
+    {/if}
+    <div class="content" class:bare>
       {@render children?.()}
     </div>
   </div>
@@ -103,5 +109,27 @@
   .content {
     padding: 4px 18px 18px;
     overflow: auto;
+  }
+  .content.bare {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .overlay.top {
+    align-items: flex-start;
+    padding-top: min(14vh, 120px);
+  }
+  .overlay.top .modal {
+    max-height: calc(100dvh - min(14vh, 120px) - 24px);
+    overflow: hidden;
+    animation: drop 140ms var(--ease);
+  }
+  @keyframes drop {
+    from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .overlay.top .modal { animation: none; }
   }
 </style>

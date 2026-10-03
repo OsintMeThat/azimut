@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
 from .engine import links as link_engine
 from .engine import timeline as timeline_engine
-from .engine.textfold import fold_text
+from .engine.textfold import fold_text, search_rank
 from . import layout
 from .repository import EntityStatus
 from .store.cursors import (
@@ -1363,6 +1363,7 @@ class SqliteCase:
         the answer each of its groups holds without asking once per group.
         """
         orders = {**_PAGE_ORDERS, **_COUNTED_ORDERS}
+        orders["relevance"] = ("azimut_search_rank(label)", "_sort", False)
         if order and order not in orders:
             raise CaseError(f"'{order}' is not an ordering")
         if order in _COUNTED_ORDERS and not types:
@@ -1387,7 +1388,7 @@ class SqliteCase:
             if cursor is not None:
                 seat, raw_key = _page_cursor(cursor)
                 key: Any = raw_key
-                if order in _COUNTED_ORDERS:
+                if order in _COUNTED_ORDERS or order == "relevance":
                     try:
                         key = int(raw_key)
                     except ValueError:
@@ -1408,6 +1409,12 @@ class SqliteCase:
             ordering = "rowid"
         params.append(limit + 1)
         with self._connect() as conn:
+            if order == "relevance":
+                conn.create_function(
+                    "azimut_search_rank", 1,
+                    lambda label: search_rank(str(label), query or ""),
+                    deterministic=True,
+                )
             total = int(
                 conn.execute(
                     f"SELECT COUNT(*) FROM entities{filter_clause}",
@@ -1572,6 +1579,22 @@ class SqliteCase:
                     " WHERE folder IS NOT NULL GROUP BY folder"
                 )
             }
+            # The same counts over accepted rows only, which is what Files, the
+            # sidebar and Home's "Unfiled" show: a suggestion waits under review and
+            # is neither filed nor unfiled until somebody accepts it.
+            confirmed_by_type: dict[str, int] = {}
+            confirmed_by_folder: dict[str, int] = {}
+            confirmed_unfiled = 0
+            for r in conn.execute(
+                "SELECT type, folder, COUNT(*) AS n FROM entities"
+                " WHERE prov_status = 'confirmed' GROUP BY type, folder"
+            ):
+                n = int(r["n"])
+                confirmed_by_type[r["type"]] = confirmed_by_type.get(r["type"], 0) + n
+                if r["folder"] is None:
+                    confirmed_unfiled += n
+                else:
+                    confirmed_by_folder[r["folder"]] = confirmed_by_folder.get(r["folder"], 0) + n
             by_source = {
                 r["prov_by"]: r["n"]
                 for r in conn.execute(
@@ -1643,6 +1666,11 @@ class SqliteCase:
             "unlinked": unlinked,
             "countable": countable,
             "lacks": lacks,
+            "confirmed": {
+                "by_type": confirmed_by_type,
+                "by_folder": confirmed_by_folder,
+                "unfiled": confirmed_unfiled,
+            },
         }
 
     def attr_facets(

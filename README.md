@@ -80,33 +80,33 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-## New in v0.3.1
+## New in v0.3.2
 
-Detect sweeps an area for what appeared, and the map takes layers made elsewhere.
+No new tool this time: the tools you already have read faster, ask less and say
+more clearly what went wrong.
 
-- **Detect**, a tab of its own, sweeps drawn areas of Sentinel-2 for vessels, fires and
-  flares, construction, small spots, surface change, burn scars, vegetation loss,
-  new water or burned buildings. Candidates come strongest first, and only one you keep becomes a
-  case pin.
-- Difference and Detect share one Sentinel-2 cloud and shadow mask.
-- Radar: five Sentinel-1 analyzers (vessels, any change, razed buildings, new
-  structures, floods) see through cloud and at night, and Sentinel-1 passes are a
-  basemap in Satellite, Compare and Detect.
-- Build your own analyzer from rules on bands, indices, ground classes or radar,
-  with checks that turn red when a rule stops holding. Five examples ship with
-  theirs.
-- A candidate opens in Compare with one press, and All dates in Compare lists
-  every picture of a point to set on either side.
-- Satellite, Compare and Detect share one camera, and a middle-drag turns any map.
-- Inspect keeps one work per file, saved as you go, and Collage is a tab of its own.
-- Open KML, KMZ, GeoJSON and GPX files or a public My Maps as map layers, and add
-  a GeoConfirmed conflict. A dated layer narrows to a period.
-- Proofs turn and crop their images, stamp numbered markers and blur boxes, and
-  carry a sentence and the date their material was taken.
-- To-do lists on Home, every date typed day-first in the same field, a claim filed
-  from where you are, and Reverse Search from a Media row or an Inspect frame.
-- Existing cases open as they are, with 0.3.0 Inspect sessions merged into one
-  work per file, and older bundles still import.
+- The browser's Back and Forward walk the tools and what you opened in them, and
+  ask before leaving unsaved work. **Ctrl+K** opens Go to, for a tool, a case or a
+  document.
+- An event is one line under the Timeline axis, with `@` mentions, and **Add
+  event** (Alt+N) opens it over any tool with that tool's view cited.
+- The Timeline draws each date as the instant, day, month or period it is, and
+  every date field reads on one Clock: the place's zone, UTC or any other.
+- The Board reads as an index of people, places and things. A subject's type can
+  be corrected, and two duplicates merged with an Undo.
+- The Graph proposes the links the case already implies, reviewed before they are
+  filed.
+- The Sheet opens on a home, with worklists of the files still to geolocate and of
+  your geolocations by point.
+- Files and the sidebar act on a right-click, and new work lands in the folder you
+  are working in.
+- FIRMS fires keep their size through a zoom, place names sit over the imagery,
+  and Compare and Detect take the whole screen.
+- The Detect analyzer builder works on the map, with checks made from pins and a
+  Test button.
+- A failure reads as one sentence saying what to do, and a second start opens
+  the Azimut already running.
+- Existing cases open as they are, and older bundles still import.
 
 ## Cases on disk
 
@@ -328,7 +328,7 @@ history keeps it.
 ```bash
 source ~/.config/azimut/amo.env   # AMO_JWT_ISSUER + AMO_JWT_SECRET, 0600 file outside the repo
 python3 scripts/sign_extension.py                    # signs, writes packaging/updates.json
-gh release upload v0.3.1 dist-xpi/azimut-capture-0.3.1.xpi
+gh release upload v0.3.2 dist-xpi/azimut-capture-0.3.2.xpi
 ```
 
 Then commit `packaging/updates.json`. That file is what
@@ -395,7 +395,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.3.1 && git push origin v0.3.1
+git tag v0.3.2 && git push origin v0.3.2
 ```
 
 One-time setup: register the repo as a

@@ -54,6 +54,9 @@
   let loadedCaseId = null;
 
   const byFolder = $derived(summary?.by_folder ?? {});
+  // A folder opens on its accepted rows, so it counts those; a suggestion filed in it
+  // is counted under Suggestions.
+  const filedByFolder = $derived(summary?.confirmed?.by_folder ?? {});
   const suggestedCount = $derived(summary?.by_status?.suggested ?? 0);
 
   async function loadSection(sec, params, { id, mySeq, more = false } = {}) {
@@ -255,7 +258,7 @@
     openEntity(entity);
   }
 
-  // ── My work: the analyst's own nested folder tree ('/'-separated paths) ────
+  // ── Folders: the analyst's own nested folder tree ('/'-separated paths) ────
   let newFolderOpen = $state(false);
   let newFolder = $state('');
   let expanded = $state({}); // path -> bool (absent = collapsed)
@@ -372,13 +375,12 @@
     }
   }
 
-  // Remove from My work: just clears the filing. The item stays in its tool.
+  // Move to Unfiled: just clears the filing. The item stays in its tool.
   function askRemoveFromMyWork(entity) {
     confirmState = {
-      title: 'Remove from My work?',
-      message: `“${entity.label}” is unfiled. Nothing is deleted.`,
-      detail: 'It stays available in the case and its tool. Only your filing here is cleared.',
-      confirmLabel: 'Remove from My work',
+      title: 'Move to Unfiled?',
+      message: `“${entity.label}” leaves its folder. Nothing is deleted.`,
+      confirmLabel: 'Move to Unfiled',
       tone: 'default',
       icon: 'folderMinus',
       action: () => assignFolder(entity, ''),
@@ -708,7 +710,7 @@
 
         <SidebarTree
           {tree}
-          {byFolder}
+          byFolder={filedByFolder}
           {expanded}
           {folderData}
           unfiled={unfiledData}
@@ -830,8 +832,8 @@
     <label class="modal-label" for="note-title">Title</label>
     <input id="note-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
-    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" fresh />
+    <span class="modal-label" style="margin-top:10px">Folder</span>
+    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="Unfiled" fresh />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -843,7 +845,7 @@
   </Modal>
 {/if}
 
-<!-- Confirmation dialog (remove from My work / remove folder) -->
+<!-- Confirmation dialog (move to Unfiled / remove folder) -->
 {#if confirmState}
   <ConfirmDialog
     title={confirmState.title}

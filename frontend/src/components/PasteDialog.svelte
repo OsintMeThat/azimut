@@ -97,8 +97,8 @@
     {/if}
 
     {#if asks('folder')}
-      <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
-      <FolderSelect bind:value={values.folder} {folders} emptyLabel="My work (root)" fresh />
+      <span class="modal-label" style="margin-top:10px">Folder</span>
+      <FolderSelect bind:value={values.folder} {folders} emptyLabel="Unfiled" fresh />
     {/if}
 
     {#if asks('source')}

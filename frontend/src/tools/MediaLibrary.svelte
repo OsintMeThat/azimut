@@ -914,7 +914,6 @@
   ondrop={onDrop}
 >
   <div class="tool-header">
-    <h2>Media</h2>
     <div class="spacer"></div>
     <form
       class="dl-form"

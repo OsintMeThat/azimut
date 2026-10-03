@@ -143,14 +143,14 @@ describe('filing saved work from its details dialog', () => {
   it('offers the same folder picker the rest of the app uses, in both dialogs', () => {
     expect(captureDialog).toContain("import FolderSelect from '../../components/FolderSelect.svelte'");
     expect(captureDialog).toContain('bind:value={folder}');
-    expect(captureDialog).toContain('emptyLabel="My work (root)"');
+    expect(captureDialog).toContain('emptyLabel="Unfiled"');
     const placeDialog = readFileSync(
       new URL('./satellite/PlaceDialog.svelte', import.meta.url),
       'utf8'
     );
     expect(placeDialog).toContain("import FolderSelect from '../../components/FolderSelect.svelte'");
     expect(placeDialog).toContain('bind:value={draft.folder}');
-    expect(placeDialog).toContain('emptyLabel="My work (root)"');
+    expect(placeDialog).toContain('emptyLabel="Unfiled"');
   });
 
   it('opens each dialog on the folder the item is already in', () => {
@@ -680,10 +680,11 @@ describe('a map in more than one window', () => {
   });
 
   it('keeps this window\'s view in this window\'s address', () => {
-    expect(source).toContain("history.replaceState(null, '', buildHash('satellite', params))");
+    expect(source).toContain("settlePlace('satellite', params);");
     // panning is not navigating: a back button full of camera positions is worse
     // than no history at all
     expect(source).not.toContain('history.pushState');
+    expect(source).not.toContain('navigate: true');
   });
 
   it('writes nothing while another tool is open', () => {

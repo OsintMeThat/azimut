@@ -80,8 +80,14 @@ describe('the questions every case is asked', () => {
     for (const question of QUESTIONS) {
       const asked = askQuestion(emptyFilter(), question.id);
       expect(isFiltering(asked)).toBe(true);
-      expect(chipsOf(asked).length).toBe(1);
+      expect(chipsOf(asked).length).toBe(Object.keys(question.terms).length);
     }
+  });
+
+  it('asks Unfiled of accepted rows, as the sidebar lists them', () => {
+    const unfiled = askQuestion(emptyFilter(), 'unfiled');
+    expect(toQuery(unfiled)).toMatchObject({ unfiled: true, status: 'confirmed' });
+    expect(chipsOf(unfiled).map((chip) => chip.text)).toEqual(['Unfiled', 'Status: Confirmed']);
   });
 
   it('asks the case for what nothing connects to, which no column reports', () => {

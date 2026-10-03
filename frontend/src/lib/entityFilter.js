@@ -104,7 +104,8 @@ export const QUESTIONS = [
     id: 'unfiled',
     label: 'Unfiled',
     hint: 'in none of your folders',
-    terms: { unfiled: true },
+    // Accepted rows, as the sidebar's Unfiled lists them: a suggestion is To review.
+    terms: { unfiled: true, status: 'confirmed' },
   },
   {
     id: 'unsourced',

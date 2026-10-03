@@ -158,6 +158,11 @@ export function openEntity(entity, resolved = false) {
     uiState.tool = 'notebook';
     return;
   }
+  if (entity.type === 'sheet' && entity.id) {
+    uiState.openSheet = entity.id;
+    uiState.tool = 'sheet';
+    return;
+  }
   if (entity.type === 'proof') {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openProof = name;

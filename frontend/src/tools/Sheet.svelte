@@ -40,12 +40,13 @@
    * No rules live in this file. The table, the selection, the clipboard, the cleaning passes
    * and the undo stack are all pure modules; what is here is the screen.
    */
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { closeOnOutsidePointer } from '../lib/dismiss.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { CASE_FOLDER_LABEL, destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import {
     DEFAULT_WIDTH,
     GUTTER_WIDTH,
@@ -522,20 +523,55 @@
   /** Back to the home. Whatever is unsaved is written first, as on any other switch, and
    *  a grid that still holds what no write kept asks before it is dropped. */
   async function goHome() {
-    await release(async () => {
+    return release(async () => {
       close();
+      settlePlace('sheet', place(), { navigate: true });
       await list(caseId);
     });
   }
 
   /** Write what is pending, then let go of the sheet. A failed or conflicting save leaves
    *  edits only the grid holds, and leaving drops them as surely as Reload does, so it asks
-   *  the same way. */
+   *  the same way. Answers whether it let go. */
   async function release(then) {
     await flush();
-    if (!unsaved) return then();
-    confirming = { kind: 'leave', then };
+    if (!unsaved) {
+      await then();
+      return true;
+    }
+    return new Promise((resolve) => {
+      staying?.();
+      staying = () => resolve(false);
+      confirming = {
+        kind: 'leave',
+        then: async () => {
+          staying = null;
+          await then();
+          resolve(true);
+        },
+      };
+    });
   }
+  // The question closed any way but Leave (Cancel, Escape, another question in its
+  // place) is an answer too: the tab stays where it is.
+  let staying = null;
+  $effect(() => {
+    if (confirming?.kind === 'leave' || !staying) return;
+    staying();
+    staying = null;
+  });
+
+  // Where the tab is, in the address: the home, or one sheet. Opening a sheet and
+  // coming home are the steps Back retraces; a sheet deleted under it only rewrites
+  // the step it is on. Back past a sheet whose edits could not be written asks as
+  // leaving it any other way does.
+  const place = () => ({ sheet: openId });
+  $effect(() => settlePlace('sheet', place()));
+  onDestroy(onBackForward('sheet', (to) => {
+    if (to.sheet) return open(to.sheet);
+    return openId ? goHome() : true;
+  }));
+  onDestroy(holdsUnsaved('sheet', () => unsaved));
 
   /** Which sheet this case was last left on. Kept in the browser rather than in the case:
    *  it is where *this* analyst was reading, not something the case believes, and a bundle
@@ -560,8 +596,8 @@
   }
 
   async function open(id) {
-    if (id === openId) return;
-    await release(() => openNow(id));
+    if (id === openId) return true;
+    return release(() => openNow(id));
   }
 
   async function openNow(id) {
@@ -570,6 +606,7 @@
     try {
       adopt(await api.get(`/api/cases/${caseId}/sheets/${id}`), { reset: true });
       openId = id;
+      settlePlace('sheet', place(), { navigate: true });
       rememberOpened(caseId, id);
     } catch (error) {
       toast(error.message || 'This sheet could not be opened.', 'danger');

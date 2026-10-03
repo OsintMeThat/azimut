@@ -350,6 +350,7 @@ export const GUIDE = [
       {
         where: 'Anywhere',
         keys: [
+          { combo: 'Ctrl+K / ⌘K', does: 'opens Go to for tools, cases and documents' },
           { combo: 'Ctrl+V', does: 'files a screenshot or a copied address, on Media, Files, Board and Graph' },
           { combo: 'Escape', does: 'closes whatever is open, shallowest first' },
           { combo: 'Ctrl+Enter', does: 'adds the entry line, from any of its fields' },

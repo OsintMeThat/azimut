@@ -13,14 +13,19 @@
 // re-runs itself for good.
 const stack = [];
 
+/** Each overlay's way out, the one Escape takes. */
+const closers = new WeakMap();
+
 /**
  * Join the stack, and leave it when the caller is torn down.
  *
  * `self` is any stable object identity; the caller keeps it and passes it back to
- * `isTopOverlay`. Returns the cleanup, so it reads as the body of an `$effect`.
+ * `isTopOverlay`. `close` is what Escape does to it, so the browser's Back can do the
+ * same (lib/backButton.js). Returns the cleanup, so it reads as the body of an `$effect`.
  */
-export function joinOverlays(self) {
+export function joinOverlays(self, close = null) {
   stack.push(self);
+  if (close) closers.set(self, close);
   return () => {
     const at = stack.indexOf(self);
     if (at !== -1) stack.splice(at, 1);
@@ -30,4 +35,15 @@ export function joinOverlays(self) {
 /** True when `self` is the overlay a key press belongs to. */
 export function isTopOverlay(self) {
   return stack.at(-1) === self;
+}
+
+/**
+ * Close the overlay on top, as Escape would. Answers whether one was open: one that
+ * cannot be closed this way still holds the screen, and is left as it is.
+ */
+export function closeTopOverlay() {
+  const top = stack.at(-1);
+  if (!top) return false;
+  closers.get(top)?.();
+  return true;
 }

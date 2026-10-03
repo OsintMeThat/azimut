@@ -182,7 +182,7 @@ describe('Ctrl+V on the desktop', () => {
   });
 
   it('moves a new image out of the work folder when the dialog named another', () => {
-    // registration filed it in the work folder; "My work (root)" has to be applied too
+    // registration filed it in the work folder; "Unfiled" has to be applied too
     expect(source).toContain("(values.folder ?? '') !== (folderOf(result.entity) ?? '')");
   });
 
@@ -211,10 +211,18 @@ describe('Files offers what is open to the Add event bar', () => {
 
 describe('Files counts folders across the whole case', () => {
   it('reads folder counts from the summary, not the loaded page', () => {
-    expect(source).toContain('subtreeCountFrom(node, summary.by_folder)');
+    // accepted rows only, as Files lists them: a suggestion is counted under review
+    expect(source).toContain('summary?.confirmed?.by_folder');
+    expect(source).toContain('subtreeCountFrom(node, filedCounts)');
     expect(source).toContain('{countOf(node)}');
     expect(source).not.toContain('{subtreeCount(node)}');
     expect(source).toContain('summary?.by_status?.confirmed ?? confirmed.length');
+  });
+
+  it('counts Unfiled across the whole case, not the loaded page', () => {
+    expect(source).toContain('summary?.confirmed?.unfiled ?? unfiled.length');
+    expect(source).toContain('<span class="tcount">{unfiledTotal}</span>');
+    expect(source).not.toContain('{unfiled.length} item');
   });
 
   it('removes a folder through the server, which unfiles items past the first page too', () => {
@@ -300,7 +308,7 @@ describe('Files filters', () => {
   it('narrows by type and by what nothing points at, on the server past one page', () => {
     expect(source).toContain('types: typeFilter ? [typeFilter] : null');
     expect(source).toContain('unlinked: unlinkedOnly');
-    expect(source).toContain('const chips = $derived(typeChips(summary))');
+    expect(source).toContain('const chips = $derived(typeChips(summary?.confirmed))');
     expect(source).toContain('Nothing linked yet');
   });
 

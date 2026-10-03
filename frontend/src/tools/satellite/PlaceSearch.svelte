@@ -54,6 +54,8 @@
   // query is dropped rather than shown under a newer one.
   let localFor = '';
   let remoteFor = '';
+  // The local layer's answer for `localFor`, which the geocoder waits on.
+  let localAnswer = Promise.resolve(null);
 
   const groups = $derived(
     buildGroups({
@@ -92,17 +94,22 @@
 
   async function askLocal(query) {
     localFor = query;
-    try {
-      const body = await api.get(`/api/geo/suggest?q=${encodeURIComponent(query)}`);
-      if (localFor !== query) return;
-      coords = body.coords;
-      cities = body.cities ?? [];
-    } catch {
-      /* the bar still works without suggestions */
-    }
+    // the bar still works without suggestions
+    localAnswer = api.get(`/api/geo/suggest?q=${encodeURIComponent(query)}`).catch(() => null);
+    const body = await localAnswer;
+    if (localFor !== query || !body) return;
+    coords = body.coords;
+    cities = body.cities ?? [];
   }
 
   async function askRemote(query) {
+    // A coordinate is nobody's place name. The local layer was asked first, so its
+    // reading of the same text decides whether the geocoder hears it at all, however
+    // long the analyst waits before picking the row.
+    if (localFor === query) {
+      const local = await localAnswer;
+      if (local?.coords || localFor !== query) return;
+    }
     remoteFor = query;
     try {
       const body = await api.get(`/api/geo/places?q=${encodeURIComponent(query)}&limit=5`);

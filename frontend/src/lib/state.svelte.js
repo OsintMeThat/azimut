@@ -421,9 +421,10 @@ export async function refreshCaseList({ q } = {}) {
  * the files stay in the analyst's half of the case folder.
  */
 export async function adoptFolder(name) {
+  if (!(await leaveCurrentCase('create'))) return null;
   const adopted = await api.post('/api/workspace/folders/adopt', { name });
   await refreshCaseList();
-  await openCase(adopted.id);
+  await openCase(adopted.id, { asked: true });
   return adopted;
 }
 
@@ -457,32 +458,47 @@ export function registerCaseChangeGuard(guard) {
   return () => caseChangeGuards.delete(guard);
 }
 
-async function prepareCaseChange(fromId, toId) {
+async function prepareCaseChange(fromId, toId, reason = null) {
+  const change = reason ? { fromId, toId, reason } : { fromId, toId };
   for (const guard of [...caseChangeGuards]) {
-    if ((await guard({ fromId, toId })) === false) return false;
+    if ((await guard(change)) === false) return false;
   }
   return true;
 }
 
-export async function openCase(id) {
+/**
+ * Ask the guards before a server write that ends on another case: a new case, an
+ * adopted folder, a promoted session. Asked after, a "Keep editing" would leave the
+ * write done anyway, and a promoted session would stay open on a folder that moved.
+ */
+async function leaveCurrentCase(reason) {
+  const fromId = caseState.current?.id ?? null;
+  if (!fromId) return true;
+  return (await prepareCaseChange(fromId, null, reason)) && caseState.current?.id === fromId;
+}
+
+/** Open a case. `asked` skips the guards, for a caller that already ran them.
+ *  Answers whether the case is now current. */
+export async function openCase(id, { asked = false } = {}) {
   const run = ++openingCase;
   caseState.loading = true;
   try {
     const currentId = caseState.current?.id ?? null;
     if (
-      currentId && currentId !== id &&
+      currentId && currentId !== id && !asked &&
       !(await prepareCaseChange(currentId, id))
-    ) return;
-    if (run !== openingCase) return;
+    ) return false;
+    if (run !== openingCase) return false;
     // Everything queued names something in the case being left behind —
     // reference viewers point at its media, `openProof` at one of its files.
     if (caseState.current?.id !== id) clearCaseHandoffs();
     const opened = await api.get(`/api/cases/${id}`);
     // Case reads can finish out of order. Only the latest choice may become current,
     // or a slow first click can put its case back after a faster second one opened.
-    if (run !== openingCase) return;
+    if (run !== openingCase) return false;
     caseState.current = opened;
     rememberCase(id);
+    return true;
   } finally {
     if (run === openingCase) caseState.loading = false;
   }
@@ -543,10 +559,12 @@ export async function reloadCase() {
   caseState.rev++;
 }
 
+/** Create a case and open it. Answers null when the analyst kept the open one. */
 export async function createCase(name) {
+  if (!(await leaveCurrentCase('create'))) return null;
   const created = await api.post('/api/cases', { name });
   await refreshCaseList();
-  await openCase(created.id);
+  await openCase(created.id, { asked: true });
   return created;
 }
 
@@ -573,12 +591,17 @@ export async function renameCase(id, name) {
   if (caseState.current?.id === id) await openCase(id);
 }
 
+/** Keep the open scratch session as a case. Answers null when the analyst kept
+ *  editing: the session is then left where it is. */
 export async function promoteCase(name) {
-  if (!caseState.current?.scratch) return;
-  const promoted = await api.post(`/api/cases/${caseState.current.id}/promote`, { name });
+  const scratch = caseState.current;
+  if (!scratch?.scratch) return null;
+  if (!(await leaveCurrentCase('promote'))) return null;
+  const promoted = await api.post(`/api/cases/${scratch.id}/promote`, { name });
   await refreshCaseList();
-  await openCase(promoted.id);
+  await openCase(promoted.id, { asked: true });
   toast(`Promoted to case “${name}”`, 'ok');
+  return promoted;
 }
 
 /**

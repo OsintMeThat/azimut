@@ -207,7 +207,7 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     try {
       await assignFolder(caseId, entity, folder);
       await reloadCase();
-      notify(folder ? `Filed in ${folder}` : 'Removed from My work', 'ok', 1600);
+      notify(folder ? `Filed in ${folder}` : 'Moved to Unfiled', 'ok', 1600);
     } catch (e) {
       notify(e.message, 'danger');
     }

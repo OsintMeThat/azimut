@@ -1049,6 +1049,10 @@ def geocode(q: str) -> dict[str, Any]:
     query = q.strip()
     if not query:
         raise HTTPException(status_code=422, detail="empty query")
+    # Already a point (a Sheet cell holding coordinates, say): read here, never sent.
+    parsed = geo.parse_coords(query)
+    if parsed:
+        return {"lat": parsed[0], "lon": parsed[1], "display_name": None, "attribution": None}
     result = geo.geocode(query)
     if not result:
         raise HTTPException(status_code=404, detail="no match for that place name")
@@ -1085,6 +1089,10 @@ def suggest_places(q: str, limit: int = Query(default=5, ge=1, le=10)) -> dict[s
     query = q.strip()
     if not query:
         raise HTTPException(status_code=422, detail="empty query")
+    # A coordinate is nobody's place name, and sending the analyst's point to an
+    # outside geocoder is a leak with nothing to gain: `/geo/suggest` reads it.
+    if geo.parse_coords(query):
+        return {"places": [], "busy": False, "throttled": False, "attribution": None}
     found = geo.suggest(query, limit)
     if found is None:
         return {"places": [], "busy": True, "throttled": geo.throttled(), "attribution": None}

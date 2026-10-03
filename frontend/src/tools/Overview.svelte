@@ -172,8 +172,7 @@
     if (!name || creating) return;
     creating = true;
     try {
-      await createCase(name);
-      naming = '';
+      if (await createCase(name)) naming = '';
     } catch (error) {
       toast(error.message, 'warn', 5000);
     } finally {
@@ -376,15 +375,18 @@
           <ol class="pipeline">
             {#each WORKSPACES as ws, i (ws.id)}
               {#if i > 0}<li class="arrow" aria-hidden="true"><Icon name="chevronRight" size={13} /></li>{/if}
-              <li class="stage">
-                <Icon name={ws.icon} size={17} />
-                <span>{ws.label}</span>
+              <!-- Each stage opens its first tool, as the rail does. -->
+              <li>
+                <button class="stage" title="Open {ws.label}" onclick={() => (uiState.tool = ws.tools[0])}>
+                  <Icon name={ws.icon} size={17} />
+                  <span>{ws.label}</span>
+                </button>
               </li>
             {/each}
           </ol>
 
           <div class="start">
-            <label class="label" for="home-case-name">Name your first case</label>
+            <label class="label" for="home-case-name">{others.length ? 'Name a new case' : 'Name your first case'}</label>
             <div class="start-row">
               <input
                 id="home-case-name"
@@ -950,9 +952,19 @@
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--bg-1);
+    font: inherit;
     font-size: var(--fs-sm);
     font-weight: 500;
     color: var(--text-2);
+    cursor: pointer;
+  }
+  .stage:hover {
+    border-color: var(--border-strong);
+    color: var(--text-1);
+  }
+  .stage:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .arrow {
     display: flex;
