@@ -13,13 +13,12 @@ import pytest
 
 from azimut.engine import analyzers, media, workqueue
 from azimut.engine.analysis_models import BUILTINS
-from analyzerfixture import seed_images
-from test_analyzers import run, scenario as analyzer_scenario
+from analyzerfixture import analyzer_case, run, seed_images
 
 
 @pytest.fixture
 def scenario(client, monkeypatch):
-    return analyzer_scenario.__wrapped__(client, monkeypatch)
+    return analyzer_case(client, monkeypatch)
 
 
 def rewrite(case, kind, ident, change):

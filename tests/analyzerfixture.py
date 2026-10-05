@@ -11,8 +11,9 @@ import io
 import numpy as np
 from PIL import Image
 
-from azimut.engine import analyzers, sentinel, tilecache
+from azimut.engine import analyzers, sentinel, tilecache, workqueue
 from azimut.engine.analysis_models import BUILTINS, RunInput, Source, product_for
+from azimut.workspace import Case
 
 # One native Sentinel tile: level 13 of the 512px grid, 6.5 m a pixel at this latitude.
 SENTINEL_TILE = (13, 4230, 2930)
@@ -23,6 +24,43 @@ EDGE = 512 + 2 * PAD
 # Scene classes and the dark flag, as the fourth channel carries them.
 VEGETATION, BARE, WATER, UNSURE, CLOUD, SHADOW = 4, 5, 6, 7, 9, 3
 DARK = sentinel.DARK_FLAG
+# Sentinel-1: the radar layer and the hour of its pass.
+SAR_LAYER = "SAR_IW"
+SAR_TIME = "05:42:10"
+
+
+def sar_level(db):
+    """Decibels as the radar evalscript writes them: fifths of a dB above the floor."""
+    return np.clip(np.round((np.asarray(db, float) - sentinel.SAR_DB_FLOOR) / sentinel.SAR_DB_STEP),
+                   1, 255).astype(np.uint8)
+
+
+def analyzer_case(client, monkeypatch):
+    """A fresh case and a seeded sweep over it, with every network road shut."""
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    ident = client.post("/api/cases", json={"name": "Analyzer tests"}).json()["id"]
+    case = Case.open(ident)
+    body = sample_input()
+    seed_images(body)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unexpected network")
+
+    monkeypatch.setattr(analyzers.httpx, "stream", forbidden)
+    monkeypatch.setattr(analyzers.sentinel, "band_frame", forbidden)
+    monkeypatch.setattr(analyzers.sentinel, "acquisitions", forbidden)
+    return case, body
+
+
+def run(client, case, body):
+    """Start a sweep, drain the queue, and read the finished run back."""
+    result = client.post(f"/api/cases/{case.id}/analysis/runs", json=body)
+    assert result.status_code == 200, result.text
+    if result.json().get("duplicates"):
+        result = client.post(f"/api/cases/{case.id}/analysis/runs", json={**result.json()["input"], "run_anyway": True})
+        assert result.status_code == 200, result.text
+    workqueue.drain(case)
+    return client.get(f"/api/cases/{case.id}/analysis/runs/{result.json()['id']}").json()
 
 
 def zone(x0=.1, y0=.1, x1=.9, y1=.9, tile=SENTINEL_TILE, ident="patch"):

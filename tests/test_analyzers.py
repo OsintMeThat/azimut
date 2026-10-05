@@ -31,6 +31,7 @@ from analyzerfixture import (
     UNSURE,
     VEGETATION,
     WATER,
+    analyzer_case,
     at,
     code,
     fire_frame,
@@ -39,6 +40,7 @@ from analyzerfixture import (
     hull,
     index_byte,
     index_frame,
+    run,
     sample_input,
     sea,
     seed,
@@ -51,29 +53,7 @@ from analyzerfixture import (
 
 @pytest.fixture
 def scenario(client, monkeypatch):
-    monkeypatch.setattr(workqueue, "start_workers", False)
-    ident = client.post("/api/cases", json={"name": "Analyzer tests"}).json()["id"]
-    case = Case.open(ident)
-    body = sample_input()
-    seed_images(body)
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("unexpected network")
-
-    monkeypatch.setattr(analyzers.httpx, "stream", forbidden)
-    monkeypatch.setattr(analyzers.sentinel, "band_frame", forbidden)
-    monkeypatch.setattr(analyzers.sentinel, "acquisitions", forbidden)
-    return case, body
-
-
-def run(client, case, body):
-    result = client.post(f"/api/cases/{case.id}/analysis/runs", json=body)
-    assert result.status_code == 200, result.text
-    if result.json().get("duplicates"):
-        result = client.post(f"/api/cases/{case.id}/analysis/runs", json={**result.json()["input"], "run_anyway": True})
-        assert result.status_code == 200, result.text
-    workqueue.drain(case)
-    return client.get(f"/api/cases/{case.id}/analysis/runs/{result.json()['id']}").json()
+    return analyzer_case(client, monkeypatch)
 
 
 # -- runs, review and evidence ------------------------------------------------------

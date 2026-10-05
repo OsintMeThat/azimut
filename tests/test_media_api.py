@@ -9,16 +9,11 @@ import graph_read
 import pytest
 import time
 
+from fakeydl import install_fake_ydl, png_bytes
 from jobwait import WAIT, job_result, wait_for_job
 from PIL import Image
 
 from azimut.engine.media import safe_filename
-
-
-def _png_bytes(color=(200, 30, 30), size=(64, 48)) -> bytes:
-    buf = io.BytesIO()
-    Image.new("RGB", size, color).save(buf, "PNG")
-    return buf.getvalue()
 
 
 def _upload(client, cid, name, data, source_url=None):
@@ -47,7 +42,7 @@ def test_safe_filename_sidesteps_the_windows_device_names():
 def test_upload_and_list(client):
     cid = client.post("/api/cases", json={"name": "Media"}).json()["id"]
 
-    res = _upload(client, cid, "frame one.png", _png_bytes()).json()
+    res = _upload(client, cid, "frame one.png", png_bytes()).json()
     assert res["duplicate"] is False
     item = res["item"]
     assert item["kind"] == "image"
@@ -72,7 +67,7 @@ def test_upload_and_list(client):
 
 def test_media_list_reports_thumb_state(client):
     cid = client.post("/api/cases", json={"name": "Thumbs"}).json()["id"]
-    _upload(client, cid, "shot.png", _png_bytes())
+    _upload(client, cid, "shot.png", png_bytes())
 
     item = client.get(f"/api/cases/{cid}/media").json()[0]
     assert item["thumb_state"] == "ready"  # image thumbnails render inline
@@ -84,7 +79,7 @@ def test_media_list_reports_enrichment_state(client, monkeypatch):
 
     monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Enrichment state"}).json()["id"]
-    _upload(client, cid, "shot.png", _png_bytes())
+    _upload(client, cid, "shot.png", png_bytes())
 
     assert client.get(f"/api/cases/{cid}/media").json()[0]["enrich_state"] == "queued"
     workqueue.drain(Case.open(cid))
@@ -121,7 +116,7 @@ def test_regenerate_queues_missing_thumbnails(client, monkeypatch):
     monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Regen"}).json()["id"]
     # an image whose cached thumbnail is then removed (as budget eviction would)
-    item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "shot.png", png_bytes()).json()["item"]
     from azimut.workspace import Case
 
     Case.open(cid).resolve_inside(item["thumbnail"]).unlink()
@@ -139,7 +134,7 @@ def test_enrich_backfill_queues_only_items_below_the_current_version(client, mon
 
     monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Enrich backfill"}).json()["id"]
-    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    rel = _upload(client, cid, "shot.png", png_bytes()).json()["item"]["path"]
     case = Case.open(cid)
 
     workqueue.drain(case)
@@ -159,7 +154,7 @@ def test_enrich_backfill_can_force_one_known_path(client, monkeypatch):
 
     monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Enrich one"}).json()["id"]
-    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    rel = _upload(client, cid, "shot.png", png_bytes()).json()["item"]["path"]
     case = Case.open(cid)
     workqueue.drain(case)
 
@@ -173,7 +168,7 @@ def test_listing_carries_category_fields(client):
     """The Media Library groups items into facets (Images/Videos/Imports/…) purely
     from ``kind`` and ``source`` — guard that both survive upload + listing."""
     cid = client.post("/api/cases", json={"name": "Facets"}).json()["id"]
-    _upload(client, cid, "shot.png", _png_bytes())
+    _upload(client, cid, "shot.png", png_bytes())
 
     item = client.get(f"/api/cases/{cid}/media").json()[0]
     assert item["kind"] == "image"  # drives the Images facet
@@ -208,7 +203,7 @@ def _set(client, cid, path, **patch):
 def test_media_page_paginates(client):
     cid = client.post("/api/cases", json={"name": "Page"}).json()["id"]
     for i in range(5):
-        _upload(client, cid, f"shot{i}.png", _png_bytes(color=(i, 0, 0)))
+        _upload(client, cid, f"shot{i}.png", png_bytes(color=(i, 0, 0)))
 
     first = client.get(f"/api/cases/{cid}/media/page", params={"limit": 2}).json()
     assert len(first["items"]) == 2
@@ -230,8 +225,8 @@ def test_media_page_paginates(client):
 
 def test_media_page_query_matches_title_notes_folder(client):
     cid = client.post("/api/cases", json={"name": "Q"}).json()["id"]
-    a = _upload(client, cid, "alpha.png", _png_bytes(color=(1, 0, 0))).json()["item"]
-    b = _upload(client, cid, "beta.png", _png_bytes(color=(2, 0, 0))).json()["item"]
+    a = _upload(client, cid, "alpha.png", png_bytes(color=(1, 0, 0))).json()["item"]
+    b = _upload(client, cid, "beta.png", png_bytes(color=(2, 0, 0))).json()["item"]
     _set(client, cid, a["path"], notes="bridge over the river", folder="ukraine")
     _set(client, cid, b["path"], title="Harbour view")
 
@@ -252,8 +247,8 @@ def test_media_page_query_matches_title_notes_folder(client):
 
 def test_media_page_kind_and_folder_filters(client):
     cid = client.post("/api/cases", json={"name": "Filt"}).json()["id"]
-    a = _upload(client, cid, "a.png", _png_bytes(color=(3, 0, 0))).json()["item"]
-    _upload(client, cid, "b.png", _png_bytes(color=(4, 0, 0)))
+    a = _upload(client, cid, "a.png", png_bytes(color=(3, 0, 0))).json()["item"]
+    _upload(client, cid, "b.png", png_bytes(color=(4, 0, 0)))
     _set(client, cid, a["path"], folder="kyiv")
 
     assert client.get(f"/api/cases/{cid}/media/page", params={"kind": "image"}).json()["total"] == 2
@@ -264,8 +259,8 @@ def test_media_page_kind_and_folder_filters(client):
 
 def test_media_page_sort_name_and_size(client):
     cid = client.post("/api/cases", json={"name": "Sort"}).json()["id"]
-    small = _upload(client, cid, "s.png", _png_bytes(color=(5, 0, 0), size=(16, 16))).json()["item"]
-    big = _upload(client, cid, "b.png", _png_bytes(color=(6, 0, 0), size=(256, 256))).json()["item"]
+    small = _upload(client, cid, "s.png", png_bytes(color=(5, 0, 0), size=(16, 16))).json()["item"]
+    big = _upload(client, cid, "b.png", png_bytes(color=(6, 0, 0), size=(256, 256))).json()["item"]
     small = _set(client, cid, small["path"], title="Zebra")
     big = _set(client, cid, big["path"], title="Alpha")
 
@@ -288,8 +283,8 @@ def test_media_page_sort_name_and_size(client):
 
 def test_media_page_facets_count_full_set(client):
     cid = client.post("/api/cases", json={"name": "Facets2"}).json()["id"]
-    a = _upload(client, cid, "a.png", _png_bytes(color=(7, 0, 0))).json()["item"]
-    _upload(client, cid, "b.png", _png_bytes(color=(8, 0, 0)))
+    a = _upload(client, cid, "a.png", png_bytes(color=(7, 0, 0))).json()["item"]
+    _upload(client, cid, "b.png", png_bytes(color=(8, 0, 0)))
     _set(client, cid, a["path"], folder="kyiv")
 
     # facets reflect the whole filtered set even when a page slices it
@@ -306,7 +301,7 @@ def test_media_page_filters_categories_without_page_local_counts(client):
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Categories"}).json()["id"]
-    generic = _upload(client, cid, "generic.png", _png_bytes()).json()["item"]
+    generic = _upload(client, cid, "generic.png", png_bytes()).json()["item"]
     satellite = media_engine.import_image(
         Case.open(cid),
         Image.new("RGB", (32, 24)),
@@ -333,7 +328,7 @@ def test_media_page_does_not_scan_sidecars_for_each_request(client, monkeypatch)
     from azimut.engine import media as media_engine
 
     cid = client.post("/api/cases", json={"name": "Indexed page"}).json()["id"]
-    _upload(client, cid, "shot.png", _png_bytes())
+    _upload(client, cid, "shot.png", png_bytes())
     monkeypatch.setattr(
         media_engine,
         "list_media",
@@ -380,7 +375,7 @@ def _made_here(client, cid, source_path, *, name=None):
 
 def test_media_page_can_leave_out_what_the_case_made(client):
     cid = client.post("/api/cases", json={"name": "Collected"}).json()["id"]
-    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    original = _upload(client, cid, "orig.png", png_bytes()).json()["item"]
     made = _made_here(client, cid, original["path"])
 
     everything = client.get(f"/api/cases/{cid}/media/page").json()
@@ -400,7 +395,7 @@ def test_media_page_can_leave_out_what_the_case_made(client):
 def test_leaving_them_out_scopes_the_counts_too(client):
     """Otherwise the Collages chip offers thirty rows and clicking it shows none."""
     cid = client.post("/api/cases", json={"name": "Scoped counts"}).json()["id"]
-    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    original = _upload(client, cid, "orig.png", png_bytes()).json()["item"]
     _made_here(client, cid, original["path"])
 
     page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
@@ -418,7 +413,7 @@ def test_a_capture_is_a_file_the_case_produced_itself(client):
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Untouched"}).json()["id"]
-    upload = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    upload = _upload(client, cid, "orig.png", png_bytes()).json()["item"]
     case = Case.open(cid)
     media_engine.import_image(
         case, Image.new("RGB", (32, 24)), "map.png",
@@ -440,7 +435,7 @@ def test_the_switch_reads_how_a_file_entered_not_everything_true_about_it(client
     that arrived as an upload stay on the collected side even once Inspect produces
     the same picture, because that is how they entered the case."""
     cid = client.post("/api/cases", json={"name": "Entered by"}).json()["id"]
-    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    original = _upload(client, cid, "orig.png", png_bytes()).json()["item"]
     made = _made_here(client, cid, original["path"])
     same_bytes = client.get(f"/files/{cid}/{made['path']}").content
 
@@ -458,7 +453,7 @@ def test_leaving_them_out_pages_and_counts_together(client):
     have produced a right-looking first page and a wrong count under it."""
     cid = client.post("/api/cases", json={"name": "Paged"}).json()["id"]
     originals = [
-        _upload(client, cid, f"orig{i}.png", _png_bytes(color=(40 + i * 40, 20, 20))).json()["item"]
+        _upload(client, cid, f"orig{i}.png", png_bytes(color=(40 + i * 40, 20, 20))).json()["item"]
         for i in range(3)
     ]
     for original in originals:
@@ -483,8 +478,8 @@ def test_leaving_them_out_pages_and_counts_together(client):
 
 def test_media_metadata_returns_only_requested_paths(client):
     cid = client.post("/api/cases", json={"name": "Metadata"}).json()["id"]
-    first = _upload(client, cid, "first.png", _png_bytes(color=(10, 0, 0))).json()["item"]
-    second = _upload(client, cid, "second.png", _png_bytes(color=(20, 0, 0))).json()["item"]
+    first = _upload(client, cid, "first.png", png_bytes(color=(10, 0, 0))).json()["item"]
+    second = _upload(client, cid, "second.png", png_bytes(color=(20, 0, 0))).json()["item"]
 
     items = client.post(
         f"/api/cases/{cid}/media/metadata",
@@ -496,7 +491,7 @@ def test_media_metadata_returns_only_requested_paths(client):
 
 def test_media_page_items_carry_thumb_state(client):
     cid = client.post("/api/cases", json={"name": "PageThumb"}).json()["id"]
-    _upload(client, cid, "shot.png", _png_bytes())
+    _upload(client, cid, "shot.png", png_bytes())
     page = client.get(f"/api/cases/{cid}/media/page").json()
     assert page["items"][0]["thumb_state"] == "ready"
 
@@ -520,7 +515,7 @@ def test_media_page_reports_pending_thumbnails_beyond_the_loaded_page(client, mo
 
 def test_duplicate_detection(client):
     cid = client.post("/api/cases", json={"name": "Dup"}).json()["id"]
-    data = _png_bytes(color=(1, 2, 3))
+    data = png_bytes(color=(1, 2, 3))
     first = _upload(client, cid, "a.png", data).json()
     second = _upload(client, cid, "b.png", data).json()
     assert second["duplicate"] is True
@@ -530,7 +525,7 @@ def test_duplicate_detection(client):
 
 def test_delete_media_removes_entity(client):
     cid = client.post("/api/cases", json={"name": "Del"}).json()["id"]
-    item = _upload(client, cid, "x.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "x.png", png_bytes()).json()["item"]
     client.delete(f"/api/cases/{cid}/media", params={"path": item["path"]})
     assert client.get(f"/api/cases/{cid}/media").json() == []
     assert graph_read.entities(cid) == []
@@ -548,7 +543,7 @@ def test_path_traversal_refused(client):
 
 def test_update_media_notes_and_folder(client):
     cid = client.post("/api/cases", json={"name": "Update"}).json()["id"]
-    item = _upload(client, cid, "clip.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "clip.png", png_bytes()).json()["item"]
 
     updated = client.patch(
         f"/api/cases/{cid}/media",
@@ -578,7 +573,7 @@ def test_update_media_title(client):
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Title"}).json()["id"]
-    item = _upload(client, cid, "img.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "img.png", png_bytes()).json()["item"]
 
     updated = client.patch(
         f"/api/cases/{cid}/media",
@@ -618,8 +613,8 @@ def test_media_rename_rewrites_exact_references_everywhere(client):
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Rename references"}).json()["id"]
-    source = _upload(client, cid, "source.png", _png_bytes()).json()["item"]
-    derived = _upload(client, cid, "derived.png", _png_bytes(color=(20, 40, 60))).json()["item"]
+    source = _upload(client, cid, "source.png", png_bytes()).json()["item"]
+    derived = _upload(client, cid, "derived.png", png_bytes(color=(20, 40, 60))).json()["item"]
     case = Case.open(cid)
     old = source["path"]
     sentence = f"Analyst prose mentions {old} but is not a path field."
@@ -700,7 +695,7 @@ def test_media_rename_recovers_after_files_moved_before_database_update(client, 
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Rename recovery"}).json()["id"]
-    item = _upload(client, cid, "before.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "before.png", png_bytes()).json()["item"]
     case = Case.open(cid)
     real_replace = Case.replace_path_references
 
@@ -730,12 +725,12 @@ def test_media_rename_takes_the_name_of_a_deleted_file(client):
     # second rename onto "Shared" used to fail on the jobs' (kind, key) uniqueness
     # after the file had already moved, leaving the entity on the old path.
     cid = client.post("/api/cases", json={"name": "Rename over deleted"}).json()["id"]
-    first = _upload(client, cid, "one.png", _png_bytes()).json()["item"]
+    first = _upload(client, cid, "one.png", png_bytes()).json()["item"]
     renamed = client.patch(f"/api/cases/{cid}/media", json={"path": first["path"], "title": "Shared"})
     assert renamed.status_code == 200
     client.delete(f"/api/cases/{cid}/media", params={"path": "media/Shared.png"})
 
-    second = _upload(client, cid, "two.png", _png_bytes(color=(90, 10, 10))).json()["item"]
+    second = _upload(client, cid, "two.png", png_bytes(color=(90, 10, 10))).json()["item"]
     again = client.patch(f"/api/cases/{cid}/media", json={"path": second["path"], "title": "Shared"})
 
     assert again.status_code == 200
@@ -746,8 +741,8 @@ def test_media_rename_takes_the_name_of_a_deleted_file(client):
 
 def test_media_rename_uses_portable_case_insensitive_collisions(client):
     cid = client.post("/api/cases", json={"name": "Portable names"}).json()["id"]
-    _upload(client, cid, "Clip.png", _png_bytes()).json()["item"]
-    other = _upload(client, cid, "other.png", _png_bytes(color=(90, 80, 70))).json()["item"]
+    _upload(client, cid, "Clip.png", png_bytes()).json()["item"]
+    other = _upload(client, cid, "other.png", png_bytes(color=(90, 80, 70))).json()["item"]
 
     renamed = _set(client, cid, other["path"], title="clip")
 
@@ -757,7 +752,7 @@ def test_media_rename_uses_portable_case_insensitive_collisions(client):
 
 def test_update_media_clear_notes(client):
     cid = client.post("/api/cases", json={"name": "Clear"}).json()["id"]
-    item = _upload(client, cid, "img.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "img.png", png_bytes()).json()["item"]
 
     client.patch(f"/api/cases/{cid}/media", json={"path": item["path"], "notes": "initial"})
     updated = client.patch(
@@ -776,7 +771,7 @@ def test_import_states_where_the_file_came_from(client):
     """
     cid = client.post("/api/cases", json={"name": "Stated"}).json()["id"]
     item = _upload(
-        client, cid, "shot.png", _png_bytes(), source_url="https://t.me/channel/42"
+        client, cid, "shot.png", png_bytes(), source_url="https://t.me/channel/42"
     ).json()["item"]
 
     assert item["source"] == {
@@ -800,7 +795,7 @@ def test_import_states_where_the_file_came_from(client):
 
 def test_a_stated_source_must_be_a_link(client):
     cid = client.post("/api/cases", json={"name": "Not a link"}).json()["id"]
-    res = _upload(client, cid, "shot.png", _png_bytes(), source_url="a friend sent it")
+    res = _upload(client, cid, "shot.png", png_bytes(), source_url="a friend sent it")
     assert res.status_code == 422
     assert client.get(f"/api/cases/{cid}/media").json() == []
 
@@ -809,7 +804,7 @@ def test_a_source_can_be_stated_after_the_import(client):
     """The origin is often remembered after the files have landed — and for a batch
     dropped in one go, stated once for all of them."""
     cid = client.post("/api/cases", json={"name": "Later"}).json()["id"]
-    item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "shot.png", png_bytes()).json()["item"]
 
     updated = _set(client, cid, item["path"], source_url="https://example.org/post/7")
     assert updated["source"]["url"] == "https://example.org/post/7"
@@ -908,7 +903,7 @@ def test_download_captures_description(client, monkeypatch):
 
             path = os.path.join(os.path.dirname(self._tmpl), f"{info['title']} [{info['id']}].png")
             with open(path, "wb") as fh:
-                fh.write(_png_bytes())
+                fh.write(png_bytes())
             return path
 
         def process_ie_result(self, info, download=True):
@@ -924,51 +919,6 @@ def test_download_captures_description(client, monkeypatch):
     result = media_engine.download_url(case, "https://example.com/watch?v=abc123")
     assert result["item"]["source"]["description"] == info["description"]
     assert result["item"]["source"]["title"] == "A clip"
-
-
-def _install_fake_ydl(monkeypatch, extract_info_fn, content_fn=None):
-    """Patch a fake ``yt_dlp`` module. ``extract_info_fn(ydl, url, download)``
-    returns the info dict from the (single) ``extract_info`` call; ``prepare_filename``
-    writes a placeholder PNG next to the resolved name so ``download_url`` finds it
-    — ``content_fn(info)`` picks its bytes (default: identical for every call;
-    pass a per-``info`` variant to avoid sha256-dedup collisions across items
-    that are supposed to be distinct, e.g. in a concurrency test).
-    ``process_ie_result`` is a passthrough, matching the real "download from
-    already-extracted info, no second extraction" call ``download_url`` makes."""
-    import sys
-    import types
-
-    content_fn = content_fn or (lambda info: _png_bytes())
-
-    class FakeYDL:
-        def __init__(self, opts):
-            self.opts = opts
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def prepare_filename(self, info):
-            import os
-
-            path = os.path.join(
-                os.path.dirname(self.opts["outtmpl"]), f"{info['title']} [{info['id']}].png"
-            )
-            with open(path, "wb") as fh:
-                fh.write(content_fn(info))
-            return path
-
-        def process_ie_result(self, info, download=True):
-            return info
-
-        def extract_info(self, url, download=False):
-            return extract_info_fn(self, url, download)
-
-    fake = types.ModuleType("yt_dlp")
-    fake.YoutubeDL = FakeYDL
-    monkeypatch.setitem(sys.modules, "yt_dlp", fake)
 
 
 def test_download_reports_multi_without_downloading(client, monkeypatch):
@@ -994,7 +944,7 @@ def test_download_reports_multi_without_downloading(client, monkeypatch):
         },
         {"id": "p3", "title": None, "ext": "mp4"},
     ]
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"_type": "playlist", "entries": entries}
     )
 
@@ -1055,7 +1005,7 @@ def test_download_with_index_picks_entry_and_keeps_custom_title(client, monkeypa
         assert ydl.opts["playlist_items"] == "2"
         return {"_type": "playlist", "entries": [entries[int(ydl.opts["playlist_items"]) - 1]]}
 
-    _install_fake_ydl(monkeypatch, extract_info)
+    install_fake_ydl(monkeypatch, extract_info)
 
     result = media_engine.download_url(
         case, "https://x.com/user/status/123", index=2, title="My custom title"
@@ -1074,7 +1024,7 @@ def test_download_autofills_title_from_extraction(client, monkeypatch):
     cid = client.post("/api/cases", json={"name": "AutoTitle"}).json()["id"]
     case = Case.open(cid)
 
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"id": "abc123", "title": "Strike footage"}
     )
 
@@ -1134,7 +1084,7 @@ class _FakeGalleryExtractor:
 
     def request(self, url):
         class Resp:
-            content = _png_bytes()
+            content = png_bytes()
 
         return Resp()
 
@@ -1470,7 +1420,7 @@ def test_download_reports_large_telegram_video_without_fallback(client, monkeypa
     case = Case.open(cid)
     url = "https://t.me/warhistoryalconafter/104333"
 
-    _install_fake_ydl(monkeypatch, lambda ydl, target, download: None)
+    install_fake_ydl(monkeypatch, lambda ydl, target, download: None)
     monkeypatch.setattr(media_engine, "_telegram_embed_media", lambda target: ([], True))
     monkeypatch.setattr(
         gdl_extractor,
@@ -1496,7 +1446,7 @@ def test_download_merges_telegram_video_and_photos(client, monkeypatch):
         {"id": "v1", "title": "clip one", "ext": "mp4"},
         {"id": "v2", "title": "clip two", "ext": "mp4"},
     ]
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"_type": "playlist", "entries": entries}
     )
     monkeypatch.setattr(
@@ -1529,7 +1479,7 @@ def test_download_picks_telegram_photo_from_mixed_post(client, monkeypatch):
         {"id": "v1", "title": "clip one", "ext": "mp4"},
         {"id": "v2", "title": "clip two", "ext": "mp4"},
     ]
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"_type": "playlist", "entries": entries}
     )
     monkeypatch.setattr(
@@ -1567,7 +1517,7 @@ def test_download_picks_yt_dlp_video_from_mixed_post(client, monkeypatch):
         {"id": "v1", "title": "clip one", "ext": "mp4"},
         {"id": "v2", "title": "clip two", "ext": "mp4"},
     ]
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"_type": "playlist", "entries": entries}
     )
     monkeypatch.setattr(
@@ -1604,10 +1554,10 @@ def test_concurrent_downloads_dont_lose_entities(client, monkeypatch):
     # distinct bytes per item — identical content would legitimately dedup
     # via sha256 and mask what this test is actually checking (entity loss,
     # not the separate dedup-check race)
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch,
         extract_info,
-        content_fn=lambda info: _png_bytes(color=(int(info["id"][4:]), 0, 0)),
+        content_fn=lambda info: png_bytes(color=(int(info["id"][4:]), 0, 0)),
     )
 
     errors = []
@@ -1662,7 +1612,7 @@ def test_public_download_never_passes_cookies(client, monkeypatch):
         assert "cookiefile" not in ydl.opts
         return {"id": "abc123", "title": "Public clip"}
 
-    _install_fake_ydl(monkeypatch, extract_info)
+    install_fake_ydl(monkeypatch, extract_info)
     result = media_engine.download_url(case, "https://example.com/watch?v=abc123")
     assert result["item"]["title"] == "Public clip"
 
@@ -1748,7 +1698,7 @@ def test_retry_with_browser_threads_cookiesfrombrowser(client, monkeypatch):
         assert ydl.opts["cookiesfrombrowser"] == ("firefox",)
         return {"id": "abc123", "title": "Gated clip"}
 
-    _install_fake_ydl(monkeypatch, extract_info)
+    install_fake_ydl(monkeypatch, extract_info)
     result = media_engine.download_url(
         case, "https://youtube.com/watch?v=priv", cookies={"browser": "firefox"}
     )
@@ -1769,7 +1719,7 @@ def test_windows_chromium_returns_guidance(client, monkeypatch):
 
     monkeypatch.setattr(sys, "platform", "win32")
     called = []
-    _install_fake_ydl(monkeypatch, lambda ydl, url, download: called.append(1) or {"id": "x"})
+    install_fake_ydl(monkeypatch, lambda ydl, url, download: called.append(1) or {"id": "x"})
 
     result = media_engine.download_url(
         case, "https://youtube.com/watch?v=priv", cookies={"browser": "chrome"}
@@ -1794,7 +1744,7 @@ def test_cookies_file_threads_absolute_cookiefile(client, monkeypatch):
         assert ydl.opts["cookiefile"] == str(config.cookies_file_path())
         return {"id": "abc123", "title": "Gated via file"}
 
-    _install_fake_ydl(monkeypatch, extract_info)
+    install_fake_ydl(monkeypatch, extract_info)
     result = media_engine.download_url(
         case, "https://youtube.com/watch?v=priv", cookies={"file": "cookies.txt"}
     )
@@ -1936,7 +1886,7 @@ def test_concurrent_sidecar_merges_do_not_drop_each_other(client, monkeypatch):
 
     monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Merge"}).json()["id"]
-    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    rel = _upload(client, cid, "shot.png", png_bytes()).json()["item"]["path"]
     case = Case.open(cid)
 
     start = threading.Barrier(2)
@@ -1981,7 +1931,7 @@ def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monk
 
     monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Naming"}).json()["id"]
-    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    rel = _upload(client, cid, "shot.png", png_bytes()).json()["item"]["path"]
     case = Case.open(cid)
 
     enrichment_started = threading.Event()
@@ -2033,9 +1983,9 @@ def test_media_page_filters_and_counts_the_files_that_state_a_position(client):
 
     cid = client.post("/api/cases", json={"name": "Positions"}).json()["id"]
     case = Case.open(cid)
-    photo = _upload(client, cid, "photo.png", _png_bytes(color=(9, 0, 0))).json()["item"]
-    clip = _upload(client, cid, "clip.png", _png_bytes(color=(10, 0, 0))).json()["item"]
-    _upload(client, cid, "plain.png", _png_bytes(color=(11, 0, 0)))
+    photo = _upload(client, cid, "photo.png", png_bytes(color=(9, 0, 0))).json()["item"]
+    clip = _upload(client, cid, "clip.png", png_bytes(color=(10, 0, 0))).json()["item"]
+    _upload(client, cid, "plain.png", png_bytes(color=(11, 0, 0)))
 
     media_engine.merge_item(case, photo["path"], {"gps": {"lat": 48.8583, "lon": 2.2945}})
     # a video states its position in the container tags, not in EXIF
@@ -2071,7 +2021,7 @@ def test_media_page_ignores_a_half_written_position(client):
 
     cid = client.post("/api/cases", json={"name": "Half position"}).json()["id"]
     case = Case.open(cid)
-    item = _upload(client, cid, "odd.png", _png_bytes(color=(12, 0, 0))).json()["item"]
+    item = _upload(client, cid, "odd.png", png_bytes(color=(12, 0, 0))).json()["item"]
 
     for broken in ({"lat": 48.0}, {"lat": 48.0, "lon": None}, {"lat": "north", "lon": "east"}):
         media_engine.merge_item(case, item["path"], {"gps": broken})
@@ -2089,7 +2039,7 @@ def test_the_browse_index_leaves_the_metadata_dumps_to_the_per_item_read(client)
 
     cid = client.post("/api/cases", json={"name": "Fat metadata"}).json()["id"]
     case = Case.open(cid)
-    item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    item = _upload(client, cid, "shot.png", png_bytes()).json()["item"]
     exif = {f"Tag{n:03d}": "v" * 64 for n in range(120)}
     media_engine.merge_item(case, item["path"], {"exif": exif, "gps": {"lat": 1.0, "lon": 2.0}})
 
@@ -2129,7 +2079,7 @@ def test_enrich_counts_the_jobs_the_queue_took(client):
     from azimut.engine import workqueue
 
     cid = client.post("/api/cases", json={"name": "Enrich count"}).json()["id"]
-    image = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    image = _upload(client, cid, "shot.png", png_bytes()).json()["item"]
     audio = client.post(
         f"/api/cases/{cid}/media/upload",
         files={"file": ("note.mp3", io.BytesIO(b"ID3\x04\x00\x00\x00\x00\x00\x00"), "audio/mpeg")},
@@ -2155,7 +2105,7 @@ def test_enrich_counts_the_jobs_the_queue_took(client):
 def _paste(client, cid, data=None, name="image.png", **fields):
     return client.post(
         f"/api/cases/{cid}/media/paste",
-        files={"file": (name, io.BytesIO(_png_bytes() if data is None else data), "image/png")},
+        files={"file": (name, io.BytesIO(png_bytes() if data is None else data), "image/png")},
         data=fields,
     )
 
@@ -2202,7 +2152,7 @@ def test_pasting_the_same_crop_twice_is_one_file(client):
     """Deduped like any import: the bytes are the identity, whatever gesture
     brought them in, and a second Ctrl+V is usually a doubt about the first."""
     cid = client.post("/api/cases", json={"name": "Twice"}).json()["id"]
-    pixels = _png_bytes(color=(3, 9, 27))
+    pixels = png_bytes(color=(3, 9, 27))
 
     first = _paste(client, cid, pixels, title="Gate").json()
     again = _paste(client, cid, pixels, title="Gate again").json()
@@ -2216,8 +2166,8 @@ def test_a_paste_and_a_drop_count_as_one_facet(client):
     Imports filter asks. They stay two source types because only one of them can
     say where it came from."""
     cid = client.post("/api/cases", json={"name": "Facet"}).json()["id"]
-    _upload(client, cid, "dropped.png", _png_bytes(color=(1, 2, 3)))
-    _paste(client, cid, _png_bytes(color=(4, 5, 6)), title="Pasted")
+    _upload(client, cid, "dropped.png", png_bytes(color=(1, 2, 3)))
+    _paste(client, cid, png_bytes(color=(4, 5, 6)), title="Pasted")
 
     facets = client.get(f"/api/cases/{cid}/media/page").json()["facets"]
     assert facets["category_counts"]["upload"] == 2
@@ -2305,14 +2255,14 @@ def test_a_slot_that_needs_a_picture_is_not_handed_the_quoted_video(client, monk
 
     cid = client.post("/api/cases", json={"name": "QuotedVideo"}).json()["id"]
     case = Case.open(cid)
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch,
         lambda ydl, url, download=False: {
             "id": "v1", "title": "the quoted clip", "ext": "mp4", "extractor": "twitter",
         },
         # Distinct bytes from the picture below, or the library would dedupe the two and
         # the test would be reading the first download back twice.
-        content_fn=lambda info: _png_bytes(color=(10, 90, 200)),
+        content_fn=lambda info: png_bytes(color=(10, 90, 200)),
     )
     monkeypatch.setattr(
         gdl_extractor,

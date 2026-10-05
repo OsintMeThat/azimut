@@ -42,25 +42,32 @@ jobs:
         #
         # Then measured again, because the box itself is not a constant: the same
         # range ran 11 minutes one hour and 24 the next, and `test_repository.py`
-        # alone is half of it. That range is split rather than trusted, since a
-        # slow hour on the 30-minute timeout is a red run for no reason.
+        # holds a single test of four minutes. Its piece is kept lighter than the
+        # rest, since a slow hour on the 30-minute timeout is a red run for no reason.
         #
-        # These ranges look unbalanced by CPU seconds, and re-cutting them by that
-        # number made the run worse rather than better: a split that put
-        # `test_media_api.py` and `test_links_api.py` in one piece — even weight on
-        # paper — failed the shard, because those two are where the suite contends
-        # on locks and threads, and contention does not add up the way CPU seconds
-        # do. `test_concurrent_sidecar_merges_do_not_drop_each_other` alone went to
-        # two minutes there and the thread joins under it ran out. So the weight to
-        # balance is Windows wall clock under `-n auto`, measured on Windows; a
-        # Linux profile is not a stand-in for it, and cheap parallelism is not worth
-        # a red run. Anyone re-cutting these should keep the lock-heavy files apart
-        # and prove it on the box itself.
+        # Re-cutting by CPU seconds alone made the run worse rather than better: a
+        # split that put `test_media_api.py` and `test_links_api.py` in one piece —
+        # even weight on paper — failed the shard, because those two are where the
+        # suite contends on locks and threads, and contention does not add up the
+        # way CPU seconds do. `test_concurrent_sidecar_merges_do_not_drop_each_other`
+        # alone went to two minutes there and the thread joins under it ran out. So
+        # the weight to balance is Windows wall clock under `-n auto`, measured on
+        # Windows, and the lock-heavy files stay apart.
+        #
+        # The current cut comes from six runs of the previous one, where piece 1
+        # took 17 minutes and piece 4 took 7: each piece's wall clock, the slowest
+        # tests' own Windows times, and the rest from a Linux profile scaled by what
+        # its old piece measured. A piece holds several ranges, so a heavy letter
+        # no longer decides a job's length. Anyone re-cutting these should start
+        # from the `--durations` lines the Windows jobs print and prove it there.
         #
         # The ranges have to leave no gap: one stopping at test_sc* beside one
         # starting at test_se* runs everything except the test_sd* somebody adds
-        # next year, and says nothing. `tests/test_ci_shards.py` reads them back
-        # out of this file and fails if they stop covering the directory.
+        # next year, and says nothing. A piece also stands on its own: a test file
+        # it imports is one it runs, and helpers two ranges share live in a helper
+        # module such as `tests/analyzerfixture.py`. `tests/test_ci_shards.py` reads
+        # the ranges back out of this file and fails on a gap, an overlap or a
+        # piece that imports another piece's test file.
         include:
           - name: Backend (ubuntu-latest, py3.12)
             os: ubuntu-latest
@@ -73,31 +80,31 @@ jobs:
           - name: Backend (windows-latest, py3.12, 1/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[a-d]*.py tests/test_e[a-n]*.py
+            tests: tests/test_[a-b]*.py tests/test_[j-l]*.py tests/test_m[a-d]*.py
           - name: Backend (windows-latest, py3.12, 2/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_e[o-z]*.py tests/test_[f-i]*.py
+            tests: tests/test_[c-f]*.py
           - name: Backend (windows-latest, py3.12, 3/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[j-o]*.py tests/test_p[a-l]*.py
+            tests: tests/test_[g-h]*.py tests/test_me*.py
           - name: Backend (windows-latest, py3.12, 4/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_p[m-z]*.py
+            tests: tests/test_i*.py tests/test_t[i-z]*.py tests/test_[u-z]*.py
           - name: Backend (windows-latest, py3.12, 5/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[q-r]*.py tests/test_s[a-d]*.py
+            tests: tests/test_m[f-z]*.py tests/test_[n-p]*.py
           - name: Backend (windows-latest, py3.12, 6/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_s[e-h]*.py
+            tests: tests/test_[q-r]*.py tests/test_s[a-g]*.py tests/test_t[a-h]*.py
           - name: Backend (windows-latest, py3.12, 7/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_s[i-z]*.py tests/test_[t-z]*.py
+            tests: tests/test_s[h-z]*.py
           - name: Backend (ubuntu-latest, py3.11)
             os: ubuntu-latest
             python: "3.11"  # the floor in requires-python

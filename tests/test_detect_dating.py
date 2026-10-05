@@ -7,13 +7,12 @@ import pytest
 from azimut import workspace
 from azimut.engine import analysis_dating, maplayers, media
 from azimut.workspace import Case
-from analyzerfixture import DAY_A, DAY_B, hull, sea, seed, sentinel_input
-from test_analyzers import run, scenario as analyzer_scenario
+from analyzerfixture import DAY_A, DAY_B, analyzer_case, hull, run, sea, seed, sentinel_input
 
 
 @pytest.fixture
 def scenario(client, monkeypatch):
-    return analyzer_scenario.__wrapped__(client, monkeypatch)
+    return analyzer_case(client, monkeypatch)
 
 
 def kept(client, case, saved, **pin):

@@ -31,6 +31,9 @@ TESTS = ROOT / "tests"
 #: or more globs, which is what makes it a shard.
 _TESTS_LINE = re.compile(r"^\s*tests:\s*(\S.*?)\s*$", re.MULTILINE)
 
+#: A test file reaching into another test file, at the top or inside a function.
+_TEST_IMPORT = re.compile(r"^\s*(?:from|import)\s+(test_\w+)", re.MULTILINE)
+
 
 def _shards() -> list[list[str]]:
     """Every sharded `tests:` value in the workflow, as its list of globs."""
@@ -70,6 +73,26 @@ def test_no_test_file_runs_twice_on_windows(shards: list[list[str]]) -> None:
             seen[path.name] = seen.get(path.name, 0) + 1
     twice = sorted(name for name, times in seen.items() if times > 1)
     assert not twice, "these test files are in more than one Windows shard: " + ", ".join(twice)
+
+
+def test_no_shard_needs_a_test_file_another_shard_runs(shards: list[list[str]]) -> None:
+    """A shard stands on its own: the test files it imports are ones it runs itself.
+
+    The import works either way, so nothing fails when a cut separates two files that
+    share helpers. But the shard then loads a module some other job owns, and the cut
+    can no longer be moved without reading every file first. Helpers shared across
+    ranges belong in a helper module beside `conftest.py`, the way `analyzerfixture.py`
+    serves both the analyzer and the Detect tests.
+    """
+    home = {path.stem: i for i, globs in enumerate(shards) for glob in globs for path in ROOT.glob(glob)}
+    crossings = []
+    for path in sorted(TESTS.glob("test_*.py")):
+        for name in sorted(set(_TEST_IMPORT.findall(path.read_text(encoding="utf-8")))):
+            if name in home and home[name] != home.get(path.stem):
+                crossings.append(f"{path.name} imports {name}.py")
+    assert not crossings, (
+        "these Windows shards import a test file another shard runs: " + ", ".join(crossings)
+    )
 
 
 def test_the_shards_stay_within_reach_of_each_other(shards: list[list[str]]) -> None:

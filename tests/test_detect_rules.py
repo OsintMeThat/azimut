@@ -33,8 +33,22 @@ from azimut.engine.analysis_models import (
     stored,
 )
 from azimut.workspace import Case
-from analyzerfixture import BARE, CLOUD, DARK, EDGE, SENTINEL_TILE, UNSURE, VEGETATION, WATER, at, put_picture, zone
-from test_radar_detect import LAYER, TIME, level
+from analyzerfixture import (
+    BARE,
+    CLOUD,
+    DARK,
+    EDGE,
+    SAR_LAYER,
+    SAR_TIME,
+    SENTINEL_TILE,
+    UNSURE,
+    VEGETATION,
+    WATER,
+    at,
+    put_picture,
+    sar_level,
+    zone,
+)
 
 DAY_A, DAY_B = "2026-05-04", "2026-05-11"
 LAT = 20.0
@@ -350,8 +364,8 @@ def test_radar_rules_average_speckle_as_power_and_read_both_passes():
 
     def pass_(vv, vh):
         frame = np.zeros((EDGE, EDGE, 4), np.uint8)
-        frame[..., 0] = level(vv + rng.normal(0, 1.5, shape))
-        frame[..., 1] = level(vh + rng.normal(0, 1.5, shape))
+        frame[..., 0] = sar_level(vv + rng.normal(0, 1.5, shape))
+        frame[..., 1] = sar_level(vh + rng.normal(0, 1.5, shape))
         frame[..., 3] = 255
         return frame
 
@@ -799,20 +813,20 @@ def test_a_check_needs_its_passes_and_the_track_they_share(client, offline):
     body = {"recipe": built.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}], a={"date": ""})}
     unpaired = client.post("/api/compare/analyzers/check", json=body)
     assert unpaired.status_code == 422 and "before date" in unpaired.text
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     radar = recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3})
     source = lambda day, time: {"provider": "sentinel1", "date": day, "time": time}  # noqa: E731
     marks = [{"point": PLOT, "expect": "found"}]
-    crossed = check_body(marks, a=source(DAY_A, TIME), b=source(DAY_B, "17:40:00"))
+    crossed = check_body(marks, a=source(DAY_A, SAR_TIME), b=source(DAY_B, "17:40:00"))
     refused = client.post("/api/compare/analyzers/check/plan", json={"recipe": radar.model_dump(), "check": crossed})
     assert refused.status_code == 422 and "track" in refused.text
-    same = check_body(marks, a=source(DAY_A, TIME), b=source(DAY_B, TIME))
+    same = check_body(marks, a=source(DAY_A, SAR_TIME), b=source(DAY_B, SAR_TIME))
     assert client.post("/api/compare/analyzers/check/plan",
                        json={"recipe": radar.model_dump(), "check": same}).json() == {"tiles": 1, "missing": 2}
 
 
 def test_a_check_saved_on_other_passes_asks_to_be_saved_again(client, offline):
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     radar = recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3})
     answer = client.post("/api/compare/analyzers/check",
                          json={"recipe": radar.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}])})

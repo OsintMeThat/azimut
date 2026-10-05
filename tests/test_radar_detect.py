@@ -16,16 +16,9 @@ from azimut import config
 from azimut.engine import analyzers, sentinel, tilecache, workqueue
 from azimut.engine.analysis_models import BUILTINS, RunInput, Source
 from azimut.workspace import Case
-from analyzerfixture import EDGE, PAD, SENTINEL_TILE, zone
+from analyzerfixture import EDGE, PAD, SAR_LAYER, SAR_TIME, SENTINEL_TILE, sar_level, zone
 
-LAYER = "SAR_IW"
 DAY_A, DAY_B = "2026-05-02", "2026-05-14"
-TIME = "05:42:10"
-
-
-def level(db):
-    return np.clip(np.round((np.asarray(db, float) - sentinel.SAR_DB_FLOOR) / sentinel.SAR_DB_STEP),
-                   1, 255).astype(np.uint8)
 
 
 def speckled(mean_db, seed, size=EDGE, looks=4.4):
@@ -50,8 +43,8 @@ def recipe(rid, **parameters):
 def body(rid, **parameters):
     return RunInput.model_validate({
         "title": rid, "zones": [zone()], "recipe": recipe(rid, **parameters).model_dump(),
-        "a": {"provider": "sentinel1", "date": DAY_A, "layer": LAYER, "maxcc": 100, "time": TIME},
-        "b": {"provider": "sentinel1", "date": DAY_B, "layer": LAYER, "maxcc": 100, "time": TIME},
+        "a": {"provider": "sentinel1", "date": DAY_A, "layer": SAR_LAYER, "maxcc": 100, "time": SAR_TIME},
+        "b": {"provider": "sentinel1", "date": DAY_B, "layer": SAR_LAYER, "maxcc": 100, "time": SAR_TIME},
         "offline": True,
     })
 
@@ -80,8 +73,8 @@ def test_radar_products_carry_decibels_in_fifths_and_are_never_zero_where_seen()
     picture = base64.b64decode(sentinel._evalscript("sar-picture")).decode("ascii")
     assert "stretch(db(p.VV) - db(p.VH)" in picture
     # the byte goes back to decibels exactly on the grid it was rounded to
-    assert sentinel.sar_decibels(level(-22.0).astype(float)) == pytest.approx(-22.0)
-    assert sentinel.sar_decibels(level(3.4).astype(float)) == pytest.approx(3.4)
+    assert sentinel.sar_decibels(sar_level(-22.0).astype(float)) == pytest.approx(-22.0)
+    assert sentinel.sar_decibels(sar_level(3.4).astype(float)) == pytest.approx(3.4)
 
 
 def test_a_pass_window_holds_one_pass_and_crosses_midnight():
@@ -115,10 +108,10 @@ def test_band_frame_reads_the_pass_and_the_water_reads_the_clearest_year(monkeyp
         return Answer((int(params["WIDTH"]), int(params["HEIGHT"])))
 
     box = (0.0, 0.0, 1000.0, 1000.0)
-    sentinel.band_frame("inst", box, 8, 8, "2026-05-14", "sar", 100, layer=LAYER, time=TIME, get=get)
+    sentinel.band_frame("inst", box, 8, 8, "2026-05-14", "sar", 100, layer=SAR_LAYER, time=SAR_TIME, get=get)
     sentinel.band_frame("inst", box, 8, 8, "2026-05-01", "water", 100, get=get)
     radar_request, water_request = sent
-    assert radar_request["LAYERS"] == LAYER
+    assert radar_request["LAYERS"] == SAR_LAYER
     assert radar_request["TIME"] == "2026-05-14T05:22:10Z/2026-05-14T06:02:10Z"
     assert water_request["LAYERS"] == "TRUE_COLOR"
     assert water_request["TIME"] == "2025-05-01/2026-05-01"
@@ -216,7 +209,7 @@ def test_the_sentinel1_probe_tells_a_radar_layer_from_an_optical_one():
         def raise_for_status(self):
             return None
 
-    assert sentinel.probe_sar_layer("inst", LAYER, get=lambda *a, **k: Rendered())["ok"]
+    assert sentinel.probe_sar_layer("inst", SAR_LAYER, get=lambda *a, **k: Rendered())["ok"]
     with pytest.raises(ValueError):
         sentinel.probe_sar_layer("inst", "../etc", get=lambda *a, **k: Rendered())
 
@@ -230,7 +223,7 @@ def _sea_with(targets, seed=1, sea_vv=-22.0, sea_vh=-28.0):
         vv[y:y + h, x:x + w] = target_vv
         vh[y:y + h, x:x + w] = target_vh
     product = np.zeros((EDGE, EDGE, 4), np.uint8)
-    product[..., 0], product[..., 1], product[..., 3] = level(vv), level(vh), 255
+    product[..., 0], product[..., 1], product[..., 3] = sar_level(vv), sar_level(vh), 255
     return product
 
 
@@ -302,7 +295,7 @@ def test_radar_change_gates_bright_loss_bright_gain_and_new_water():
             vv[field] += field_db[0] + 10
             vh[field] += field_db[1] + 16
         product = np.zeros((EDGE, EDGE, 4), np.uint8)
-        product[..., 0], product[..., 1], product[..., 3] = level(vv), level(vh), 255
+        product[..., 0], product[..., 1], product[..., 3] = sar_level(vv), sar_level(vh), 255
         return product
 
     standing = scene(town_db=(0.0, -8.0))
@@ -344,7 +337,7 @@ def test_ground_that_did_not_change_stays_quiet_between_two_passes():
 
     def scene(seed, vv_db, vh_db):
         product = np.zeros((EDGE, EDGE, 4), np.uint8)
-        product[..., 0], product[..., 1] = level(correlated(vv_db, seed)), level(correlated(vh_db, seed + 100))
+        product[..., 0], product[..., 1] = sar_level(correlated(vv_db, seed)), sar_level(correlated(vh_db, seed + 100))
         product[..., 3] = 255
         return product
 
@@ -370,7 +363,7 @@ def test_every_radar_built_in_names_its_method_and_the_old_ones_stay():
 def radar_case(client, monkeypatch):
     monkeypatch.setattr(workqueue, "start_workers", False)
     ident = client.post("/api/cases", json={"name": "Radar tests"}).json()["id"]
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
 
     def forbidden(*args, **kwargs):
         raise AssertionError("unexpected network")
@@ -413,14 +406,14 @@ def test_an_offline_radar_sweep_reads_the_pass_it_names_and_keeps_its_water(clie
     for letter in "ab":
         payload[letter] = {**payload[letter], "provider": "sentinel2", "layer": "TRUE_COLOR", "maxcc": 30}
     sea = _sea_with([((300, 300, 8, 3), (5.0, -8.0))])
-    _seed({"provider": "sentinel1", "date": DAY_B, "layer": LAYER, "maxcc": 100, "time": TIME},
+    _seed({"provider": "sentinel1", "date": DAY_B, "layer": SAR_LAYER, "maxcc": 100, "time": SAR_TIME},
           sea, water(sentinel.WATER_WATER))
     saved = _run(client, case, payload)
     assert saved["status"] == "ready", saved
     assert saved["count"] == 1
     row = saved["results"][0]
-    assert row["sources"]["b"] == {"provider": "sentinel1", "date": DAY_B, "layer": LAYER,
-                                   "maxcc": 100, "time": TIME}
+    assert row["sources"]["b"] == {"provider": "sentinel1", "date": DAY_B, "layer": SAR_LAYER,
+                                   "maxcc": 100, "time": SAR_TIME}
     assert "dB" not in row["measure"] and row["measure"]["value"] > 9
     # the water it was judged against is kept beside the picture and the product
     assert sorted(frame["index"] or "picture" for frame in saved["frames"].values()) == [
@@ -449,7 +442,7 @@ def test_a_typed_day_is_pinned_to_the_pass_on_the_other_sides_track(client, rada
 
     monkeypatch.setattr(analyzers.sentinel, "acquisitions", acquisitions)
     client.put("/api/settings/keys", json={"sentinelhub": "test-instance"})
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     typed = body("radar-change").model_copy(update={"offline": False})
     typed = typed.model_copy(update={"b": typed.b.model_copy(update={"time": ""})})
     settled = analyzers.resolve_dates(radar_case, typed)
@@ -467,12 +460,12 @@ def test_an_automatic_radar_pass_stays_on_the_reference_track(client, radar_case
         {"date": "2026-05-30", "time": "05:42:30", "cloud": None, "coverage": 1.0},
     ]})
     client.put("/api/settings/keys", json={"sentinelhub": "test-instance"})
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     routine = body("radar-razed").model_copy(update={"offline": False, "date_rule": "latest_reference"})
     routine = routine.model_copy(update={"b": routine.b.model_copy(update={"date": "", "time": ""})})
     settled = analyzers.resolve_dates(radar_case, routine)
     assert (settled.b.date, settled.b.time) == ("2026-05-30", "05:42:30")
-    assert settled.a.time == TIME
+    assert settled.a.time == SAR_TIME
 
 
 def test_optical_sources_dump_as_they_always_did():
@@ -480,7 +473,7 @@ def test_optical_sources_dump_as_they_always_did():
     not grow a field because radar sources carry a time."""
     optical = Source(date=DAY_B)
     assert "time" not in optical.model_dump()
-    assert Source(provider="sentinel1", date=DAY_B, layer=LAYER, time=TIME).model_dump()["time"] == TIME
+    assert Source(provider="sentinel1", date=DAY_B, layer=SAR_LAYER, time=SAR_TIME).model_dump()["time"] == SAR_TIME
     old = deepcopy(optical.model_dump())
     assert analyzers._key(Source.model_validate(old), 13, 1, 2, None) == \
         analyzers._key(optical, 13, 1, 2, None)
@@ -496,19 +489,19 @@ def test_finding_the_radar_layer_skips_template_layers_and_keeps_the_first_that_
     probed = []
     monkeypatch.setattr(satellite.sentinel, "serves_sentinel1", lambda instance: True)
     monkeypatch.setattr(satellite.sentinel, "capabilities_layers", lambda instance: [
-        {"id": "TRUE_COLOR"}, {"id": "SWIR"}, {"id": "MY_NOTES"}, {"id": LAYER}, {"id": "LATER"}])
+        {"id": "TRUE_COLOR"}, {"id": "SWIR"}, {"id": "MY_NOTES"}, {"id": SAR_LAYER}, {"id": "LATER"}])
 
     def probe(instance, layer):
         probed.append(layer)
-        return {"ok": layer == LAYER, "layer": layer, "detail": "reads Sentinel-1 VV and VH"}
+        return {"ok": layer == SAR_LAYER, "layer": layer, "detail": "reads Sentinel-1 VV and VH"}
 
     monkeypatch.setattr(satellite.sentinel, "probe_sar_layer", probe)
     before = config.month_usage("sentinelhub")
     answer = client.post("/api/satellite/sentinel1/layer", json={}).json()
-    assert answer["ok"] and answer["layer"] == LAYER
-    assert probed == ["MY_NOTES", LAYER]
+    assert answer["ok"] and answer["layer"] == SAR_LAYER
+    assert probed == ["MY_NOTES", SAR_LAYER]
     assert config.month_usage("sentinelhub") == before + 2
-    assert client.get("/api/settings").json()["sentinel1_layer"] == LAYER
+    assert client.get("/api/settings").json()["sentinel1_layer"] == SAR_LAYER
     # a new instance is another configuration: its radar layer is found again
     client.put("/api/settings/keys", json={"sentinelhub": "other-instance"})
     assert client.get("/api/settings").json()["sentinel1_layer"] == ""
@@ -530,7 +523,7 @@ def test_an_instance_without_sentinel1_is_told_before_any_probe(client, monkeypa
 # -- the radar basemap ----------------------------------------------------------------------
 
 
-def _radar_settings(monkeypatch, tmp_path, layer=LAYER):
+def _radar_settings(monkeypatch, tmp_path, layer=SAR_LAYER):
     from azimut.engine import tiles
 
     monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
@@ -544,7 +537,7 @@ def test_the_radar_basemap_is_offered_once_its_layer_is_known(monkeypatch, tmp_p
     assert "sentinel1" not in {p.id for p in tiles.all_providers()}
     tiles = _radar_settings(monkeypatch, tmp_path)
     radar_map = next(p for p in tiles.all_providers() if p.id == "sentinel1")
-    assert f"LAYER={LAYER}" in radar_map.url and "inst-uuid" in radar_map.url
+    assert f"LAYER={SAR_LAYER}" in radar_map.url and "inst-uuid" in radar_map.url
     assert "EVALSCRIPT=" in radar_map.url and "TIME=" not in radar_map.url
     # the same quota and the same native ceiling as the optical basemap
     assert (radar_map.meter, radar_map.tile_size, radar_map.max_native_zoom) == ("sentinelhub", 512, 14)
@@ -579,26 +572,26 @@ def test_radar_difference_needs_two_passes_of_one_track(client):
 
 def test_a_radar_comparison_saves_its_passes(client):
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     cid = client.post("/api/cases", json={"name": "Radar compare"}).json()["id"]
     side = {"present": True, "provider": "sentinel1", "overlays": [],
             "sentinel": {"layer": "TRUE_COLOR", "date": "", "maxcc": 100}, "wayback_release": None}
     spec = {"version": 2, "camera": {"lat": 51.9, "lon": 4.0, "zoom": 13}, "mode": "side",
-            "a": {**side, "radar": {"date": DAY_A, "time": TIME}},
-            "b": {**side, "radar": {"date": DAY_B, "time": TIME}}}
+            "a": {**side, "radar": {"date": DAY_A, "time": SAR_TIME}},
+            "b": {**side, "radar": {"date": DAY_B, "time": SAR_TIME}}}
     saved = client.post(f"/api/cases/{cid}/compare/sessions", json={"title": "Radar pair", "spec": spec})
     assert saved.status_code == 200, saved.text
     reopened = client.get(f"/api/cases/{cid}/compare/sessions/{saved.json()['name']}").json()
-    assert (reopened.get("spec") or reopened)["b"]["radar"] == {"date": DAY_B, "time": TIME}
+    assert (reopened.get("spec") or reopened)["b"]["radar"] == {"date": DAY_B, "time": SAR_TIME}
 
 
 def test_the_radar_layer_travels_with_the_backup(client):
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     bundle = client.get("/api/settings/export").json()
-    assert bundle["settings"]["sentinel1_layer"] == LAYER
+    assert bundle["settings"]["sentinel1_layer"] == SAR_LAYER
     client.put("/api/settings/prefs", json={"sentinel1_layer": ""})
     assert client.post("/api/settings/import", json=bundle).status_code == 200
-    assert client.get("/api/settings").json()["sentinel1_layer"] == LAYER
+    assert client.get("/api/settings").json()["sentinel1_layer"] == SAR_LAYER
     bad = {**bundle, "settings": {**bundle["settings"], "sentinel1_layer": "../x"}}
     assert client.post("/api/settings/import", json=bad).status_code == 422
 
@@ -609,9 +602,9 @@ def test_a_radar_routine_stays_on_the_track_it_has_run_on(client, radar_case, mo
     and read the change in angle as change on the ground."""
     case = radar_case
     client.put("/api/settings/keys", json={"sentinelhub": "test-instance"})
-    client.put("/api/settings/prefs", json={"sentinel1_layer": LAYER})
+    client.put("/api/settings/prefs", json={"sentinel1_layer": SAR_LAYER})
     monkeypatch.setattr(analyzers, "previous_pass", lambda case, body: Source(
-        provider="sentinel1", date=DAY_B, layer=LAYER, maxcc=100, time="05:42:10"))
+        provider="sentinel1", date=DAY_B, layer=SAR_LAYER, maxcc=100, time="05:42:10"))
     monkeypatch.setattr(analyzers.sentinel, "acquisitions", lambda *a, **k: {"dates": [
         {"date": "2026-05-28", "time": "17:33:02", "cloud": None, "coverage": 1.0},
         {"date": "2026-05-26", "time": "05:42:30", "cloud": None, "coverage": 1.0},
