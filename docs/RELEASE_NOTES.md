@@ -25,7 +25,8 @@ clearly what went wrong.
   mentions, and its sources. **Add event** (Alt+N) opens the same line over any
   tool, with that tool's view already cited.
 - The Timeline draws each date as what it is: a point for an instant, a bracket
-  for a day, a month or a year, a bar for a period. The axis and the list read as
+  for a day, a month or a year, a dashed line for something that happened once
+  between two dates, a bar for a period. The axis and the list read as
   one, and a picked entry shows its media without opening it.
 - Every date field has the same **Clock** chip: the place's zone, UTC, this
   computer or any zone. A plain day can carry its zone too, and a new date reads

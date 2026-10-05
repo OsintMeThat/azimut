@@ -1223,13 +1223,17 @@ answers a window wider than a month as cut rather than drawing stripes a few pix
 wide.
 Category tracks stack vertically. A mark is drawn where its date is, to the pixel, and
 its shape says what kind of date it is: **a point is an instant, a bracket is a
-reduced date, a bar is a period**, and a box is never an instant. A reduced date is a
-thin line with a stop at each end, across the whole year, month or day it covers; once
-that period is narrower than a few pixels it is drawn as a point in its middle. A bar
-is as long as its period, down to two pixels, and a span running past the window has
+reduced date, a window is a moment known only between two dates, a bar is a period**,
+and a box is never an instant. A reduced date is a thin line with a stop at each end,
+across the whole year, month or day it covers; once that period is narrower than a few
+pixels it is drawn as a point in its middle. A window is the same line dashed: a range
+that occurred or was observed happened once, somewhere in it, so a video filmed between
+two dates never reads as lasting that long, and its date reads "between A and B". Only
+a range that held (Valid during) or one with no role is a bar. A bar is as long as its
+period, down to two pixels, and a span running past the window has
 no stop on that side. Approximate dates have dashed ends, uncertain ones a broken or
 hatched fill, a suggestion is hollow and a refuted statement is faded with its name
-struck. The legend names the three shapes and keeps date quality apart from assessment
+struck. The legend names the four shapes and keeps date quality apart from assessment
 confidence, because the two are independent.
 
 A mark never moves sideways for its neighbours or for what is selected. Marks that

@@ -354,7 +354,7 @@
    * wide one half empty.
    */
   const overviewTicks = $derived(densityTicks(overview, extent, overviewWidth));
-  const selectedReading = $derived(formatTemporalValue(selected?.raw ?? '', selected?.tz));
+  const selectedReading = $derived(formatTemporalValue(selected?.raw ?? '', selected?.tz, selected?.time_role));
   /** Whether an entry names an instant, which can be read on the axis's clock. A day
    *  has no hour, and printing 00:00 in another zone would invent one. */
   function instantOnClock(item) {
@@ -1717,7 +1717,7 @@
   }
 
   function showItemTooltip(event, item) {
-    const reading = formatTemporalValue(item.raw ?? '', item.tz);
+    const reading = formatTemporalValue(item.raw ?? '', item.tz, item.time_role);
     tooltip = {
       x: Math.min(window.innerWidth - 286, event.clientX + 12),
       y: Math.min(window.innerHeight - 132, event.clientY + 12),
@@ -1758,7 +1758,7 @@
       top: ruler.bottom - card.top + down,
       height: Math.max(0, mark.top + mark.height / 2 - ruler.bottom),
       at: Math.min(Math.max(middle, ruler.left + 90), ruler.right - 90) - card.left + across,
-      label: formatTemporalValue(item.raw ?? '', item.tz).label,
+      label: formatTemporalValue(item.raw ?? '', item.tz, item.time_role).label,
     };
   }
 
@@ -2080,6 +2080,7 @@
                 <strong>Shape</strong>
                 <span><i class="sample shape-point"></i>Instant</span>
                 <span><i class="sample shape-bracket"></i>Reduced date, across what it covers</span>
+                <span><i class="sample shape-window"></i>Happened once, somewhere between two dates</span>
                 <span><i class="sample shape-bar"></i>Period</span>
                 <strong>Date quality</strong>
                 <span><i class="sample approximate"></i>Approximate date</span>
@@ -2309,8 +2310,9 @@
                     {@const editable = canDragTemporal(item) && !snapshotReading}
                     {@const markTop = MARKS.top + item.row * MARKS.row}
                     <!-- A point is an instant, a bracket a reduced date across what it
-                         covers, a bar a period at its true length. The caption and the
-                         card are the mark's own button, so reading one is clicking it. -->
+                         covers, a dashed window a moment known only between two dates, a
+                         bar a period at its true length. The caption and the card are the
+                         mark's own button, so reading one is clicking it. -->
                     <div
                       class={`timeline-event ${item.category} ${item.mark}`}
                       class:as-file={item.asFile}
@@ -2337,7 +2339,7 @@
                       <button
                         class="event-select"
                         data-mark={item.id}
-                        aria-label={`${item.label}, ${formatTemporalValue(item.raw, item.tz).label}`}
+                        aria-label={`${item.label}, ${formatTemporalValue(item.raw, item.tz, item.time_role).label}`}
                         onpointerdown={(event) => {
                           // Ctrl is the measure gesture, so it must not also start a drag
                           if (event.ctrlKey || event.metaKey) return;
@@ -2370,7 +2372,7 @@
                             {/if}
                             <span class="card-copy">
                               <strong dir="auto">{item.label}</strong>
-                              <small>{formatTemporalValue(item.raw, item.tz).label}</small>
+                              <small>{formatTemporalValue(item.raw, item.tz, item.time_role).label}</small>
                             </span>
                           </span>
                         {/if}
@@ -2546,7 +2548,7 @@
                       >
                         <!-- An instant on the axis's clock, so the list and the ruler agree
                              about the hour; a day as it was stated, in its own zone. -->
-                        <span role="gridcell" class="list-date" title={`${formatTemporalValue(item.raw, item.tz).label} · ${item.raw}`}>{instantOnClock(item) ? clockReading(item.earliest, zone, { named: false }) : formatTemporalValue(item.raw, item.tz).label}</span>
+                        <span role="gridcell" class="list-date" title={`${formatTemporalValue(item.raw, item.tz, item.time_role).label} · ${item.raw}`}>{instantOnClock(item) ? clockReading(item.earliest, zone, { named: false }) : formatTemporalValue(item.raw, item.tz, item.time_role).label}</span>
                         <span role="gridcell" class="list-copy"><span class={`category-dot ${item.category}`}></span><strong dir="auto">{item.label}</strong></span>
                         {#if listColumns.subjects}<span role="gridcell" class="list-links" dir="auto">{names(item.subject_entities)}</span>{/if}
                         {#if listColumns.places}<span role="gridcell" class="list-links" dir="auto">{names(item.place_entities)}</span>{/if}
@@ -2838,7 +2840,7 @@
   <ConfirmDialog
     title={!pendingEdit.item.raw ? 'Date this entry?' : pendingEdit.item.shape === 'interval' ? 'Change this period?' : 'Move this date?'}
     message={pendingEdit.item.label}
-    detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw, pendingEdit.item.tz).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw, pendingEdit.zone === undefined ? pendingEdit.item.tz : pendingEdit.zone).label}`}
+    detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw, pendingEdit.item.tz, pendingEdit.item.time_role).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw, pendingEdit.zone === undefined ? pendingEdit.item.tz : pendingEdit.zone, pendingEdit.item.time_role).label}`}
     confirmLabel="Update date"
     icon="clock"
     busy={directSaving}
@@ -2948,6 +2950,7 @@
   .sample.refuted::after { content: ''; position: absolute; left: 2px; right: 2px; top: 4px; border-top: 1px solid var(--text-2); transform: rotate(-8deg); }
   .sample.shape-point { width: 8px; height: 8px; margin-inline: 10px; border: 0; border-radius: 50%; background: var(--track-statement); }
   .sample.shape-bracket { height: 8px; border: 0; border-inline: 2px solid var(--track-statement); border-radius: 0; background: linear-gradient(to bottom, transparent 3px, var(--track-statement) 3px, var(--track-statement) 5px, transparent 5px); }
+  .sample.shape-window { height: 8px; border: 0; border-inline: 1.5px solid var(--track-statement); border-radius: 0; background: repeating-linear-gradient(90deg, var(--track-statement) 0 4px, transparent 4px 7px) center / 100% 1.5px no-repeat; }
   .sample.shape-bar { height: 8px; border-radius: 2px; background: color-mix(in srgb, var(--track-statement) 32%, var(--bg-1)); }
   .timeline-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .timeline-grid.inspecting { grid-template-columns: minmax(0, 1fr) 330px; }
@@ -3034,8 +3037,8 @@
   .folded-note { position: absolute; top: 13px; left: 14px; color: var(--text-3); font-size: 9px; }
   .draw-range { position: absolute; inset-block: 12px; z-index: 6; border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
   /* One row of marks is 18px: a point is an 8px dot centred on its instant, a bracket a
-     2px line with a stop at each end of the period a reduced date covers, a bar an 8px
-     band as long as its period. Nothing is nudged sideways, so a mark sits exactly on
+     2px line with a stop at each end of the period a reduced date covers, a window the
+     same line dashed, a bar an 8px band as long as its period. Nothing is nudged sideways, so a mark sits exactly on
      its date whichever way the axis is scrolled. */
   .timeline-event { --event-color: var(--track-tint, var(--track-statement)); position: absolute; z-index: 2; height: 18px; color: var(--text-1); }
   .timeline-event.media, .timeline-event.as-file { --event-color: var(--track-tint, var(--track-media)); }
@@ -3048,20 +3051,24 @@
   .point .event-shape { top: 5px; left: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--event-color); box-shadow: 0 0 0 1.5px var(--bg-1); }
   .bracket .event-shape { inset: 5px 0; border-inline: 2px solid var(--event-color); background: linear-gradient(to bottom, transparent 3px, var(--event-color) 3px, var(--event-color) 5px, transparent 5px); }
   .bar .event-shape { inset: 5px 0; border: 1px solid var(--event-color); border-radius: 2px; background: color-mix(in srgb, var(--event-color) 32%, var(--bg-1)); }
+  /* A window: one moment, somewhere between its stops. Dashed so it never reads as a period. */
+  .window .event-shape { inset: 5px 0; border-inline: 1.5px solid var(--event-color); background: repeating-linear-gradient(90deg, var(--event-color) 0 4px, transparent 4px 7px) center / 100% 1.5px no-repeat; }
   /* A span running past the window has no stop on that side: it goes on. */
   .bracket.open-start .event-shape { border-left-width: 0; }
   .bracket.open-end .event-shape { border-right-width: 0; }
+  .window.open-start .event-shape { border-left-width: 0; }
+  .window.open-end .event-shape { border-right-width: 0; }
   .bar.open-start .event-shape { border-left-style: dotted; border-top-left-radius: 0; border-bottom-left-radius: 0; }
   .bar.open-end .event-shape { border-right-style: dotted; border-top-right-radius: 0; border-bottom-right-radius: 0; }
   .timeline-event.approximate.point .event-shape { box-shadow: none; outline: 1.5px dashed var(--event-color); outline-offset: 1px; }
-  .timeline-event.approximate.bracket .event-shape { border-inline-style: dashed; }
+  .timeline-event.approximate.bracket .event-shape, .timeline-event.approximate.window .event-shape { border-inline-style: dashed; }
   .timeline-event.approximate.bar .event-shape { border-style: dashed; }
   .timeline-event.uncertain.point .event-shape { background: repeating-linear-gradient(135deg, var(--event-color) 0 2px, var(--bg-1) 2px 3px); }
   .timeline-event.uncertain.bracket .event-shape { background: repeating-linear-gradient(90deg, var(--event-color) 0 3px, transparent 3px 5px) center / 100% 2px no-repeat; }
   .timeline-event.uncertain.bar .event-shape { background-image: repeating-linear-gradient(135deg, transparent, transparent 3px, color-mix(in srgb, var(--text-2) 22%, transparent) 3px, color-mix(in srgb, var(--text-2) 22%, transparent) 5px); }
   /* A proposal is hollow, the way every surface draws one. */
   .timeline-event.suggested.point .event-shape { border: 2px solid var(--event-color); background: var(--bg-1); }
-  .timeline-event.suggested.bracket .event-shape { border-inline-style: dotted; opacity: .75; }
+  .timeline-event.suggested.bracket .event-shape, .timeline-event.suggested.window .event-shape { border-inline-style: dotted; opacity: .75; }
   .timeline-event.suggested.bar .event-shape { border-style: dotted; background: color-mix(in srgb, var(--event-color) 10%, var(--bg-1)); }
   .timeline-event.refuted { opacity: .55; }
   .timeline-event.refuted .event-caption, .timeline-event.refuted .card-copy strong { text-decoration: line-through; text-decoration-thickness: 1px; }
@@ -3073,7 +3080,7 @@
   .timeline-event.against .event-shape { outline: 1px dashed var(--text-2); outline-offset: 3px; }
   .event-caption { position: absolute; top: 3px; height: 12px; box-sizing: content-box; overflow: hidden; color: var(--text-1); font-size: 10px; font-weight: 600; line-height: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
   .event-caption.left { text-align: right; }
-  .bracket .event-caption.inside { padding: 0 3px; background: var(--bg-1); }
+  .bracket .event-caption.inside, .window .event-caption.inside { padding: 0 3px; background: var(--bg-1); }
   /* A name inside a span interrupts its line rather than sitting on it, so it reads on
      any tint. */
   .bar .event-caption.inside { padding: 0 4px; border-radius: 3px; background: var(--bg-1); }

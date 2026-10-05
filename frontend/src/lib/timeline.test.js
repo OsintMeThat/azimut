@@ -141,6 +141,14 @@ describe('temporal reading', () => {
       .toBe('11 Aug 2026, 18:40:00 UTC+02:00');
     expect(formatTemporalValue('2026-08-11/2026-08-14').label)
       .toBe('11 Aug 2026 to 14 Aug 2026');
+    // What occurred or was seen happened once, between the two: never "for that long".
+    expect(formatTemporalValue('2022-03-24/2026-09-08', null, 'occurred').label)
+      .toBe('between 24 Mar 2022 and 8 Sep 2026');
+    expect(formatTemporalValue('2026-08-11/2026-08-14', null, 'observed').label)
+      .toBe('between 11 Aug 2026 and 14 Aug 2026');
+    expect(formatTemporalValue('2026-08-11/2026-08-14', null, 'valid').label)
+      .toBe('11 Aug 2026 to 14 Aug 2026');
+    expect(formatTemporalValue('2026-08-11', null, 'occurred').label).toBe('11 Aug 2026');
   });
 
   it('reads a camera clock to the millisecond at most, and not at all when it is zeros', () => {
@@ -228,6 +236,21 @@ describe('timeline layout', () => {
     expect(day.mark).toBe('point');
     expect(day.left).toBeCloseTo(((Date.parse('2026-03-10T12:00:00Z') - Date.parse('2026-01-01'))
       / (Date.parse('2027-01-01') - Date.parse('2026-01-01'))) * 100, 5);
+  });
+
+  it('draws a moment known only between two dates as a window, never as a period', () => {
+    // A video filmed somewhere between the two dates did not last that long.
+    const range = (id, time_role) => ({ ...point(id, '2026-08-02T00:00:00Z', '2026-08-06T00:00:00Z', 'interval'), time_role });
+    const marks = Object.fromEntries(one([range('o', 'occurred'), range('s', 'observed'), range('v', 'valid'), range('n', null)])
+      .items.map((item) => [item.id, item]));
+    expect(Object.fromEntries(Object.entries(marks).map(([id, item]) => [id, item.mark])))
+      .toEqual({ o: 'window', s: 'window', v: 'bar', n: 'bar' });
+    expect(marks.o.left).toBeCloseTo(marks.v.left, 5);
+    expect(marks.o.width).toBeCloseTo(marks.v.width, 5);
+    // Narrower than a few pixels, a window is as good as an instant, like a reduced date.
+    const [narrow] = one([{ ...point('w', '2026-03-10T00:00:00Z', '2026-03-11T00:00:00Z', 'interval'), time_role: 'occurred' }],
+      '2026-01-01', '2026-12-31').items;
+    expect(narrow.mark).toBe('point');
   });
 
   it('draws a short period at its true length, never widened to a box', () => {

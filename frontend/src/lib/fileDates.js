@@ -52,7 +52,7 @@ function statedOffers(items, fileId) {
       return {
         kind,
         value,
-        words: `${kind} ${formatTemporalValue(value, item.tz).label}`,
+        words: `${kind} ${formatTemporalValue(value, item.tz, item.time_role).label}`,
         hint: proof ? 'Use the date its proof gives' : 'Use the date already stated for this file',
       };
     })
