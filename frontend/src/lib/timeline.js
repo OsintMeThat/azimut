@@ -606,18 +606,34 @@ export function temporalZoneWords(item) {
 }
 
 /**
+ * The time roles whose range is a window, not a duration: what occurred, or was seen,
+ * happened once, somewhere between the two dates. Only `valid` (a state that held)
+ * and a range with no role, such as a recording's own start and end, last.
+ */
+export const WINDOW_ROLES = new Set(['occurred', 'observed']);
+
+/** Whether a row's range is a window around one moment rather than a period. */
+export function isWindow(item) {
+  return item?.shape === 'interval' && WINDOW_ROLES.has(item?.time_role);
+}
+
+/**
  * A stored value in words. `tz` is the zone it was stated in, when it was: a day
  * then names that zone, since the 12th in Kyiv is not UTC's 12th, and a time with
  * no offset of its own reads on that zone's clock. A value stated in no zone reads
- * as it always has.
+ * as it always has. `role` is the statement's time role: a range that occurred or
+ * was observed reads "between A and B", since it happened once, not for that long.
  */
-export function formatTemporalValue(raw, tz = null) {
+export function formatTemporalValue(raw, tz = null, role = null) {
   const check = validateTemporalValue(raw ?? '');
   if (!raw) return { ...check, label: 'Undated', qualifiers: [] };
   if (!check.valid) return { ...check, label: raw, qualifiers: [] };
   const parts = raw.split('/');
   const words = (part) => (DATE_TOKEN.test(part) ? dateLabel(part) : timestampLabel(part, tz));
-  const base = parts.length === 2 ? `${words(parts[0])} to ${words(parts[1])}` : words(raw);
+  const range = WINDOW_ROLES.has(role)
+    ? `between ${words(parts[0])} and ${words(parts[1])}`
+    : `${words(parts[0])} to ${words(parts[1])}`;
+  const base = parts.length === 2 ? range : words(raw);
   const label = tz && parts.some((part) => DATE_TOKEN.test(part)) ? `${base} (${tz})` : base;
   return { ...check, label, qualifiers: qualifierLabels(raw) };
 }
@@ -740,11 +756,14 @@ export function nudgeTemporalRaw(item, mode, direction) {
  * How an entry is drawn on a track, in screen pixels.
  *
  * One rule decides the shape: **a point is an instant, a bracket is a reduced date, a
- * bar is a period, and a box is never an instant.** A date stated to the day, the month
- * or the year covers that whole period, so once the period is wide enough to see it is
- * drawn across it; narrower than `bracket` pixels it is as good as an instant and drawn
- * as one, in the middle of what it covers. A mark never moves because of its neighbours
- * or of what is selected: only its row does, and only when two marks would overlap.
+ * window is a moment known only between two dates, a bar is a period, and a box is
+ * never an instant.** A date stated to the day, the month or the year covers that whole
+ * period, so once the period is wide enough to see it is drawn across it; narrower than
+ * `bracket` pixels it is as good as an instant and drawn as one, in the middle of what
+ * it covers. A window is read the same way: a video filmed somewhere between two dates
+ * did not last that long, so it is never a bar. A mark never moves because of its
+ * neighbours or of what is selected: only its row does, and only when two marks would
+ * overlap.
  */
 export const MARKS = {
   top: 14,
@@ -785,10 +804,12 @@ function markOf(item, window, width) {
   if (b <= 0 && a < 0) return null;
   if (a >= width) return null;
   const clipped = { openStart: a < 0, openEnd: b > width };
-  if (item.shape === 'interval' || b - a >= MARKS.bracket) {
+  const period = item.shape === 'interval' && !isWindow(item);
+  if (period || b - a >= MARKS.bracket) {
     const left = clamp(a, 0, width);
     const right = Math.max(clamp(b, 0, width), left + MARKS.bar);
-    return { mark: item.shape === 'interval' ? 'bar' : 'bracket', left, right, x: left, ...clipped };
+    const mark = period ? 'bar' : isWindow(item) ? 'window' : 'bracket';
+    return { mark, left, right, x: left, ...clipped };
   }
   const x = clamp((a + b) / 2, 0, width);
   return { mark: 'point', left: x, right: x, x, openStart: false, openEnd: false };
@@ -861,7 +882,7 @@ function placeCards(placed, rowsTaken, width) {
     }
     const thumb = item.category === 'media' && item.thumb;
     // The card holds the name and, under it, the date as written in the 9px mono face.
-    const said = Math.ceil(formatTemporalValue(item.raw ?? '').label.length * 5.5);
+    const said = Math.ceil(formatTemporalValue(item.raw ?? '', null, item.time_role).label.length * 5.5);
     const wide = clamp(
       Math.max(captionWidth(item.label), said) + 20 + (thumb ? 38 : 0),
       MARKS.cardMin,

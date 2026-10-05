@@ -12,13 +12,24 @@ from azimut import config, layout
 from azimut.engine import analysis_geometry, analyzers, bundles, maplayers, media, workqueue
 from azimut.engine.analysis_models import RunInput, Zone
 from azimut.workspace import Case
-from analyzerfixture import SENTINEL_TILE, fire_frame, flame, hull, sea, seed, seed_images, sentinel_input, zone
-from test_analyzers import run, scenario as analyzer_scenario
+from analyzerfixture import (
+    SENTINEL_TILE,
+    analyzer_case,
+    fire_frame,
+    flame,
+    hull,
+    run,
+    sea,
+    seed,
+    seed_images,
+    sentinel_input,
+    zone,
+)
 
 
 @pytest.fixture
 def scenario(client, monkeypatch):
-    return analyzer_scenario.__wrapped__(client, monkeypatch)
+    return analyzer_case(client, monkeypatch)
 
 
 def area_body(raw):

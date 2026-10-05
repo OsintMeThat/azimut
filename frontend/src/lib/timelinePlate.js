@@ -220,6 +220,13 @@ export function timelineDrawing({
             fill: colour, opacity: hollow ? 0.08 : 0.3, stroke: colour, strokeWidth: 1,
             dash: item.approximate ? '4 3' : (hollow ? '1.5 2' : undefined),
           }));
+        } else if (item.mark === 'window') {
+          // A moment known only between two dates, dashed as on screen: it happened
+          // once in here, and the plate must not draw it as a period.
+          parts.push(svgLine({ x1: x, y1: middle, x2: x + span, y2: middle, stroke: colour, width: 1.5, dash: '4 3' }));
+          const stop = item.approximate ? '2 2' : undefined;
+          if (!item.openStart) parts.push(svgLine({ x1: x, y1: middle - 4, x2: x, y2: middle + 4, stroke: colour, width: 1.5, dash: stop }));
+          if (!item.openEnd) parts.push(svgLine({ x1: x + span, y1: middle - 4, x2: x + span, y2: middle + 4, stroke: colour, width: 1.5, dash: stop }));
         } else if (item.mark === 'bracket') {
           // The whole period a reduced date covers, as the thin line it is on screen:
           // the entry is somewhere in here, and the plate must not claim a point.
@@ -262,7 +269,7 @@ export function timelineDrawing({
           parts.push(svgText(fitLabel(item.label, item.card.width - 16), {
             x: plotLeft + item.card.left + 8, y: cardY + 16, size: geometry.labelSize, weight: '600', fill: ink,
           }));
-          parts.push(svgText(fitLabel(formatTemporalValue(item.raw, item.tz).label, item.card.width - 16), {
+          parts.push(svgText(fitLabel(formatTemporalValue(item.raw, item.tz, item.time_role).label, item.card.width - 16), {
             x: plotLeft + item.card.left + 8, y: cardY + 30, size: 9, fill: PLATE_COLOURS.hint,
           }));
         }
@@ -301,7 +308,7 @@ export function timelineDrawing({
     const statement = width - geometry.right - (8 + geometry.listDate) - geometry.names;
     for (const { item, track } of rows) {
       bottom += geometry.listRow;
-      parts.push(svgText(fitLabel(formatTemporalValue(item.raw, item.tz).label, geometry.listDate - 10), {
+      parts.push(svgText(fitLabel(formatTemporalValue(item.raw, item.tz, item.time_role).label, geometry.listDate - 10), {
         x: 8, y: bottom, size: 9, fill: PLATE_COLOURS.label,
       }));
       parts.push(svgText(fitLabel(item.label, statement), {

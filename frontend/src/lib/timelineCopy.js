@@ -40,7 +40,7 @@ export function chronologyRows(items = []) {
       // The zone the date was stated in: without it a day written as the 12th
       // cannot be told from UTC's 12th by someone reading the sheet alone.
       zone: item.tz ?? '',
-      reading: formatTemporalValue(item.raw ?? '', item.tz).label,
+      reading: formatTemporalValue(item.raw ?? '', item.tz, item.time_role).label,
       earliest: item.earliest ?? '',
       latest: item.latest ?? '',
       statement: item.label ?? '',

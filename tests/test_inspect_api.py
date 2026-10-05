@@ -563,7 +563,7 @@ def test_auto_stitch_rejects_unrelated_imagery(client):
 
 def _pan_pngs(angles=(-20, 0, 20)):
     """Views of one world through a camera yawed by each angle, as PNG bytes."""
-    from test_stitch import _pan
+    from stitchscene import _pan
 
     out = []
     for view in _pan(list(angles)):

@@ -332,7 +332,7 @@ export const GUIDE = [
       },
       {
         label: 'Timeline puts your files where you dated them',
-        text: 'Media draws a video or a picture at the date you gave it, on its proof or in an event about it; Events is every sentence you dated. Imagery and File dates wait under ⋯. A point is an instant, a bracket a date known to the day, month or year, a bar a period.',
+        text: 'Media draws a video or a picture at the date you gave it, on its proof or in an event about it; Events is every sentence you dated. Imagery and File dates wait under ⋯. A point is an instant, a bracket a date known to the day, month or year, a dashed line a moment known only between two dates, a bar a period.',
       },
       {
         label: 'Sheet works on real CSV files',

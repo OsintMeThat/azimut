@@ -130,6 +130,17 @@ describe('serialising the timeline', () => {
     ]);
   });
 
+  it('draws a moment known only between two dates dashed, never as a period', () => {
+    const filmed = [{ ...ITEMS[1], id: 'w1', label: 'Filmed after the warehouse went up', approximate: false, time_role: 'occurred' }];
+    const layout = track({ items: filmed }).layout;
+    const { body } = timelineDrawing(scene({ tracks: [track({ items: filmed })] }));
+
+    expect(layout.items.map((item) => item.mark)).toEqual(['window']);
+    expect(body).toMatch(/<line[^>]*stroke-dasharray="4 3"/);
+    expect(body).not.toMatch(/<rect[^>]*height="8"/);
+    expect(body).toContain('between 10 Mar 2026 and 18 Mar 2026');
+  });
+
   it('marks a proposal hollow, the way every surface draws one', () => {
     const suggested = [{ ...ITEMS[0], status: 'suggested' }];
     const { body } = timelineDrawing(scene({ tracks: [track({ items: suggested })] }));

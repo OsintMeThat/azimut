@@ -138,7 +138,7 @@ describe('Timeline workspace', () => {
 
   it('offers readable events, a list view and an inspector while an entry is picked', () => {
     expect(source).toContain("viewMode === 'list'");
-    expect(source).toContain('formatTemporalValue(item.raw, item.tz).label');
+    expect(source).toContain('formatTemporalValue(item.raw, item.tz, item.time_role).label');
     expect(source).toContain('class="timeline-tooltip"');
     // one shape per kind of date, decided by the layout rather than by the zone
     expect(source).toContain('class={`timeline-event ${item.category} ${item.mark}`}');
@@ -358,7 +358,7 @@ describe('one reading, the axis over the list', () => {
     expect(source).toContain('grid-template-columns: var(--list-columns');
     // an instant on the axis's clock, named in the heading, and a day as stated
     expect(source).toContain("{zone === UTC ? 'Date' : `Date · ${zoneWords(zone).place} time`}");
-    expect(source).toContain('instantOnClock(item) ? clockReading(item.earliest, zone, { named: false }) : formatTemporalValue(item.raw, item.tz).label');
+    expect(source).toContain('instantOnClock(item) ? clockReading(item.earliest, zone, { named: false }) : formatTemporalValue(item.raw, item.tz, item.time_role).label');
     expect(source).toContain("flags.push({ id: 'unsourced', label: 'no source' })");
     expect(source).toContain("flags.push({ id: 'unassessed', label: 'not assessed' })");
     // only a Claim is asked for a source and an assessment
@@ -419,7 +419,7 @@ describe('reading a mark', () => {
   it('draws a line up to the ruler with the date as written, for one end or both', () => {
     expect(source).toContain("const lines = item.mark === 'point' ? [middle] : [mark.left, mark.right];");
     expect(source).toContain('class="time-guide" aria-hidden="true"');
-    expect(source).toContain("label: formatTemporalValue(item.raw ?? '', item.tz).label");
+    expect(source).toContain("label: formatTemporalValue(item.raw ?? '', item.tz, item.time_role).label");
     expect(source).toContain('showGuide(event.currentTarget, item)');
   });
 
@@ -514,7 +514,7 @@ describe('changing a picked entry’s date', () => {
   });
 
   it('says both dates in words, each on its clock, when it asks', () => {
-    expect(source).toContain("detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw, pendingEdit.item.tz).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw, pendingEdit.zone === undefined ? pendingEdit.item.tz : pendingEdit.zone).label}`}");
+    expect(source).toContain("detail={`${pendingEdit.item.raw ? formatTemporalValue(pendingEdit.item.raw, pendingEdit.item.tz, pendingEdit.item.time_role).label : 'Undated'} → ${formatTemporalValue(pendingEdit.raw, pendingEdit.zone === undefined ? pendingEdit.item.tz : pendingEdit.zone, pendingEdit.item.time_role).label}`}");
   });
 });
 

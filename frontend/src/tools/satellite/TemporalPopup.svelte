@@ -60,7 +60,7 @@
    */
   function when(item) {
     if (!item.raw) return '';
-    if (!item.raw.includes('T')) return formatTemporalValue(item.raw, item.tz).label;
+    if (!item.raw.includes('T')) return formatTemporalValue(item.raw, item.tz, item.time_role).label;
     const stamp = zonedStamp(item.earliest);
     return stamp ? `${stamp.slice(8, 10)} ${stamp.slice(5, 7)} · ${stamp.slice(11, 16)}` : '';
   }

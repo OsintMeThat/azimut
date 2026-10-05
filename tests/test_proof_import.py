@@ -13,6 +13,7 @@ Three promises are what these tests hold to:
 
 import io
 
+from fakeydl import install_fake_ydl
 from jobwait import job_result
 from PIL import Image
 
@@ -246,9 +247,7 @@ def test_the_fetch_holds_the_download_and_reads_the_post(client, monkeypatch):
     """The one path the hand-attached tests cannot reach: a real download, with
     the extractor faked. The file must land in staging and nowhere else, and the
     post's text must come back scanned."""
-    from test_media_api import _install_fake_ydl
-
-    _install_fake_ydl(
+    install_fake_ydl(
         monkeypatch,
         lambda ydl, url, download: {
             "id": "p1",

@@ -22,7 +22,13 @@
   <a href="https://github.com/OsintMeThat/azimut/releases/latest"><img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-6b7280"></a>
 </p>
 
-![A tour of Azimut: a clip downloaded into a case, examined and stitched, placed on satellite imagery, compared across dates, swept by Detect, then turned into a proof, a report and a note](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif"
+    alt="A tour of Azimut's sixteen tools on one case: a clip downloaded, examined and stitched, placed on satellite imagery, compared across dates, swept by Detect, turned into a proof, a report and a note, then read on the Board, Timeline, Graph and Sheet"
+    width="800"
+  >
+</p>
 
 ## Install & run
 
