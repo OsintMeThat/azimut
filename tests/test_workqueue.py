@@ -142,7 +142,10 @@ def test_moving_a_case_directory_waits_for_the_background_worker(
     workqueue.register("slow", slow)
     workqueue.enqueue(case, "slow", payload={})
     workqueue.wake(case)
-    assert started.wait(2), "the worker never picked the job up"
+    # A liveness budget, not the measurement: on an idle machine the worker is in
+    # the handler within milliseconds, and what is under test is the drain below.
+    # Two seconds is a scheduling guess, and a loaded Windows runner missed it.
+    assert started.wait(30), "the worker never picked the job up"
 
     if operation == "delete":
         case.delete()

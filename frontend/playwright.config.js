@@ -10,6 +10,12 @@ export default defineConfig({
   // MapLibre/Konva startup into a timeout; CI stays fully deterministic.
   workers: process.env.CI ? 1 : 4,
   reporter: process.env.CI ? 'github' : 'list',
+  // A web-first assertion polls, so a longer ceiling costs a passing run nothing
+  // and only lengthens a genuine failure. The default five seconds is a guess
+  // about how fast the machine is, and a contended CI runner spends that much
+  // just getting the app to react. Local runs keep the short one, where a real
+  // failure should come back quickly.
+  expect: { timeout: process.env.CI ? 20_000 : 5_000 },
   use: {
     baseURL: 'http://127.0.0.1:18477',
     screenshot: 'only-on-failure',
