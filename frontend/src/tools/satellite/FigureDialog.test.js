@@ -101,6 +101,20 @@ it('will not build an undated figure, and says why', () => {
   expect(button('Build the figure')).toBeUndefined();
 });
 
+it('opens on a thin configuration and says where another layer comes from', () => {
+  // The menu offers the figure whatever the map is set to, so this is where an
+  // analyst with one layer learns what a figure wants and how to get there.
+  const said = () => document.body.textContent.replace(/\s+/g, ' ');
+  open({ layers: [LAYERS[0]] });
+  expect(said()).toContain('there is one layer here');
+  expect(said()).toContain('Settings → Imagery');
+  expect(said()).not.toContain('numbered down the list');
+
+  unmount(live);
+  open({ layers: [] });
+  expect(said()).toContain('there is none here');
+});
+
 it('builds nothing until a layer is picked and the figure is named', () => {
   open();
   expect(button('Build the figure').disabled).toBe(true);

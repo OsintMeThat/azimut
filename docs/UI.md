@@ -2032,12 +2032,17 @@ screenshot gets neither, since its coordinates describe the map view at filing
 time rather than the picture itself. What was drawn is written into the
 capture's provenance.
 
-**Build a figure** sits in the same menu while Sentinel-2 is on: the same ground
-on the day already chosen, through the layers you pick, each panel captioned and
-filed as its own capture. It opens in Geo Proof with its credit line written —
-the day, the point and Copernicus Sentinel-2 L2A — ready to annotate. Up to
-eight panels, one to four per row, each layer once, at the capture size the menu
-is set to. Every panel is the same acquisition by design: panels of different
+**Figure** sits in the same menu while Sentinel-2 is on, in its first row beside
+Capture and Select area, since it is a third thing to take off this map rather
+than a setting for the other two: the same ground on the day already chosen,
+through the layers you pick, each panel captioned and filed as its own capture.
+It opens in Geo Proof with its credit line written — the day, the point and
+Copernicus Sentinel-2 L2A — ready to annotate. Up to eight panels, one to four
+per row, each layer once, at the capture size the menu is set to. The chip is
+never greyed: what a figure still needs is said in the dialog, where it can be
+read and acted on — an undated map has nothing to build from and says so instead
+of the panels, and a configuration with fewer than two layers says where another
+one comes from. Every panel is the same acquisition by design: panels of different
 dates compare two things at once, which is what Compare is for, so an undated
 map says to pick a date first.
 

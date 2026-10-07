@@ -424,14 +424,20 @@
     api,
   });
   const isSentinel = $derived(currentProvider?.id === SENTINEL_ID);
-  /** Why a figure cannot be built from what is on screen, or '' when it can. */
-  const figureProblem = $derived(
-    !s2.day
-      ? 'A figure needs a dated pass: every panel is the same acquisition.'
-      : s2.layers.length < 2
-        ? 'A figure needs more than one layer. Check your Copernicus layers, or write one.'
-        : ''
-  );
+
+  /**
+   * Open the figure with the layers it is made of.
+   *
+   * The list is read when the date chip is first opened, and a figure can be
+   * the first thing asked of a session: without this it opens offering nothing
+   * and says the configuration is empty, which is a lie about the instance.
+   * Asked the way the chip asks it, so whichever comes first pays for it and
+   * the other finds it read (`state/sentinel.svelte.js`).
+   */
+  async function openFigure() {
+    if (!s2.layers.length) await s2.loadLayers(true, true);
+    figureOpen = true;
+  }
 
   // --- Esri Wayback: which release of World Imagery ---
   // The release rides on the provider id like a Sentinel-2 window, and both
@@ -2525,8 +2531,7 @@
           bind:scaleNorth={capture.scaleNorth}
           openScreenshot={() => (capture.shotOpen = true)}
           openExtensionGate={() => (capture.extGate = true)}
-          openFigure={isSentinel ? () => (figureOpen = true) : null}
-          figureBlocked={figureProblem}
+          openFigure={isSentinel ? openFigure : null}
         />
       </MapStatusBar>
       {#if figureOpen && caseState.current}
