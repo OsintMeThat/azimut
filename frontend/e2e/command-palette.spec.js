@@ -39,6 +39,16 @@ async function find(page, term) {
   await page.keyboard.press('Control+k');
   await expect(search(page)).toBeFocused();
   await search(page).fill(term);
+  // Recently added rows may already match the words, before the search answers.
+  await expect(dialog(page).locator('.search')).not.toHaveClass(/busy/);
+}
+
+async function chooseProof(page, name) {
+  await find(page, name);
+  await expect(dialog(page).getByRole('option', { name: new RegExp(name) }))
+    .toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(dialog(page)).toBeHidden();
 }
 
 test('Ctrl+K reads only on opening and reaches a tool with the keyboard', async ({ page }) => {
@@ -102,6 +112,8 @@ test('a case result changes the case and opens its overview', async ({ page }) =
 });
 
 async function proofCase(page) {
+  // This path includes the composer's first import and two navigation guards.
+  test.setTimeout(60_000);
   const proofs = { 'proof-a': 'Proof A', 'proof-b': 'Proof B' };
   const catalog = Object.entries(proofs).map(([name, label]) => ({
     id: `${name}-entity`, type: 'proof', label, attrs: { spec: `proofs/.meta/${name}.json` },
@@ -115,10 +127,9 @@ async function proofCase(page) {
     if (route.request().method() !== 'GET' || !proofs[name]) return route.fallback();
     return route.fulfill({ json: { title: proofs[name], panels: [], pastes: [], shapes: [] } });
   });
-  await find(page, 'Proof A');
-  await dialog(page).getByRole('option', { name: /Proof A/ }).click();
+  await chooseProof(page, 'Proof A');
   const title = page.getByRole('textbox', { name: 'Proof name' });
-  await expect(title).toHaveValue('Proof A', { timeout: 15_000 });
+  await expect(title).toHaveValue('Proof A');
   await title.fill('Proof A revised');
   await expect(page.locator('.tool-header .badge', { hasText: 'unsaved' })).toBeVisible();
   return { fixture, title };
@@ -126,8 +137,7 @@ async function proofCase(page) {
 
 test('opening another proof retains its existing unsaved-work confirmation', async ({ page }) => {
   const { fixture, title } = await proofCase(page);
-  await find(page, 'Proof B');
-  await dialog(page).getByRole('option', { name: /Proof B/ }).click();
+  await chooseProof(page, 'Proof B');
   const ask = page.getByRole('alertdialog', { name: 'Leave this proof?' });
   await expect(ask).toBeVisible();
   await ask.getByRole('button', { name: 'Keep editing' }).click();

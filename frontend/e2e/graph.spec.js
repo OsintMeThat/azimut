@@ -116,6 +116,11 @@ async function inkLost(page) {
  */
 async function drawn(page) {
   await expect.poll(() => ink(page), { timeout: 5000 }).toBeGreaterThan(0.001);
+  // Existing pixels can belong to the previous camera or selection. Let Konva
+  // paint its queued frame before reading pixels or using its canvas hit regions.
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
 }
 
 /**
@@ -962,6 +967,7 @@ test('the walk narrows the drawing to itself and what it can reach', async ({ pa
 
   await page.getByRole('button', { name: 'Path to…' }).click();
   await page.locator('.panel .link-row', { hasText: '3rd Battalion' }).click();
+  await expect(steps(page)).toHaveCount(2);
   await expect.poll(() => ink(page)).not.toBeCloseTo(before, 4);
 
   // And the case comes back whole when the walk is given up.
@@ -1632,7 +1638,7 @@ test('opening a node leaves everything already drawn exactly where it is', async
   // Not "roughly the same picture": every node is where it was, so every pixel that
   // was drawn is still drawn. What the arrival adds is deliberately not counted.
   // Without the drawing being held, this reads 0.96 — the whole case moves.
-  expect(await inkLost(page)).toBeLessThan(0.05);
+  await expect.poll(() => inkLost(page)).toBeLessThan(0.05);
 });
 
 test('the whole picture is put back by one control, not one per list', async ({ page }) => {
