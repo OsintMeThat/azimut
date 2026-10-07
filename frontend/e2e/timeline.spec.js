@@ -165,6 +165,21 @@ async function setWindow(page, from, to) {
 const axisWindowText = async (page) =>
   (await page.locator('.range-face').getAttribute('title')).split(' · ')[0];
 
+/** Where a handle is, read once it has stopped moving. The overview window reflows
+ *  as a drag lands, and a box measured mid-reflow aims the next press beside the
+ *  handle rather than on it — the drag then does nothing and the window never
+ *  changes. Costs one extra frame on a machine that was already still. */
+async function restingBox(locator) {
+  let last = await locator.boundingBox();
+  for (let look = 0; look < 20; look += 1) {
+    await locator.page().waitForTimeout(50);
+    const box = await locator.boundingBox();
+    if (last && box && box.x === last.x && box.width === last.width) return box;
+    last = box;
+  }
+  return last;
+}
+
 /** A preset put on the axis from `⋯`, where tracks are added. */
 async function addTrack(page, name) {
   await page.locator('.timeline-bar').getByRole('button', { name: 'More', exact: true }).click();
@@ -924,7 +939,7 @@ test('moves and resizes the overview window', async ({ page }) => {
   await zoomIn(page);
   const before = await axisWindowText(page);
   const start = page.getByRole('button', { name: 'Change range start' });
-  const startBox = await start.boundingBox();
+  const startBox = await restingBox(start);
   await page.mouse.move(startBox.x + startBox.width / 2, startBox.y + startBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(startBox.x + 90, startBox.y + startBox.height / 2, { steps: 5 });
@@ -933,7 +948,7 @@ test('moves and resizes the overview window', async ({ page }) => {
 
   const narrowed = await axisWindowText(page);
   const drag = page.getByRole('button', { name: 'Move visible range' });
-  const dragBox = await drag.boundingBox();
+  const dragBox = await restingBox(drag);
   await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(dragBox.x + dragBox.width / 2 - 45, dragBox.y + dragBox.height / 2, { steps: 4 });
