@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
-from azimut import config
+from azimut import __version__, config
 from azimut.engine import analysis_examples, analysis_geometry, analyzers, detect_rules, sentinel, tilecache, workqueue
 from azimut.engine.analysis_models import (
     BUILTINS,
@@ -958,6 +958,137 @@ def test_an_example_copied_into_the_library_keeps_its_checks_and_the_backup_carr
     assert listed[0]["checks"][0]["name"] == example["recipe"]["checks"][0]["name"]
     exported = client.get("/api/settings/export").json()
     assert example["recipe"]["checks"][0]["name"] in str(exported)
+
+
+# -- an analyzer as a file, handed to another analyst ----------------------------------
+
+
+def shared(client, ident, **params):
+    """The file the Share button downloads."""
+    answer = client.get(f"/api/compare/analyzers/{ident}/share", params=params)
+    assert answer.status_code == 200, answer.text
+    return answer
+
+
+def put_recipe(client, built, **fields):
+    saved = client.post("/api/compare/analyzers", json={**built.model_dump(), **fields})
+    assert saved.status_code == 200, saved.text
+    return saved.json()
+
+
+def file_of(built, **fields):
+    """An analyzer file as another machine would have written it."""
+    return {"azimut": "azimut-analyzer", "version": 1, "app": __version__,
+            "recipe": {**built.model_dump(), **fields}}
+
+
+def test_a_shared_analyzer_carries_its_checks_and_no_verdict_of_this_machine(client):
+    result = {"signature": "abc", "count": 2, "covered": [True]}
+    marks = [{"point": PLOT, "expect": "found"}]
+    saved = put_recipe(client, recipe(LOSS, name="Fresh burn"), checks=[check_body(marks, result=result)])
+
+    answer = shared(client, saved["id"])
+    assert answer.headers["content-disposition"] == 'attachment; filename="azimut-analyzer-fresh-burn.json"'
+    file = answer.json()
+    assert (file["azimut"], file["version"], file["app"]) == ("azimut-analyzer", 1, __version__)
+    check = file["recipe"]["checks"][0]
+    assert check["marks"] == marks and (check["a"]["date"], check["b"]["date"]) == (DAY_A, DAY_B)
+    # The ticks were read on this machine's images, so the analyzer arrives
+    # having proved nothing yet and the other analyst presses Test.
+    assert check["result"] is None
+    # No key of the sender's goes with it, which is what a settings backup can't promise.
+    assert "sentinelhub" not in str(file)
+
+    without = shared(client, saved["id"], checks="false").json()
+    assert without["recipe"]["checks"] == []
+    assert without["recipe"]["rules"] == file["recipe"]["rules"]
+
+    assert client.get("/api/compare/analyzers/large-change/share").status_code == 404
+
+
+def test_importing_the_same_analyzer_twice_never_writes_over_the_first(client):
+    saved = put_recipe(client, recipe(LOSS, name="Fresh burn"))
+    file = shared(client, saved["id"]).json()
+
+    first = client.post("/api/compare/analyzers/import", json=file)
+    assert first.status_code == 200, first.text
+    again = client.post("/api/compare/analyzers/import", json=file).json()
+    assert again["analyzer"]["id"] not in {saved["id"], first.json()["analyzer"]["id"]}
+    assert (again["analyzer"]["name"], again["renamed_from"]) == ("Fresh burn 3", "Fresh burn")
+    assert [row["name"] for row in client.get("/api/compare/analyzers").json()["custom"]] == [
+        "Fresh burn", "Fresh burn 2", "Fresh burn 3"]
+    # The rules of the one that was already here are untouched by either import.
+    assert client.get("/api/compare/analyzers").json()["custom"][0]["rules"] == file["recipe"]["rules"]
+
+
+def test_a_file_that_is_not_an_analyzer_is_named_back_rather_than_blankly_refused(client):
+    backup = client.post("/api/compare/analyzers/import", json=client.get("/api/settings/export").json())
+    assert backup.status_code == 422 and "settings backup" in backup.text
+    assert "not an Azimut analyzer" in client.post("/api/compare/analyzers/import", json={"a": 1}).text
+    newer = client.post("/api/compare/analyzers/import",
+                        json={"azimut": "azimut-analyzer", "version": 2, "recipe": {}})
+    assert newer.status_code == 422 and "newer format" in newer.text
+    unreadable = client.post("/api/compare/analyzers/import", json=file_of(recipe(LOSS), rules=[]))
+    assert unreadable.status_code == 422 and "could not be read" in unreadable.text
+
+
+def test_an_analyzer_from_a_newer_build_arrives_and_says_what_went_unread(client):
+    file = file_of(recipe(LOSS, name="From the future"), mood="brave",
+                   rules=[{**LOSS, "certainty": 0.9}],
+                   checks=[{**check_body([{"point": PLOT, "expect": "found"}]), "weather": "clear"}])
+    file["app"] = "9.9.9"
+    answer = client.post("/api/compare/analyzers/import", json=file)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    # Dropping a field in silence is right for the app's own history and wrong
+    # for a file from elsewhere: it changes what the analyzer finds.
+    assert body["ignored_fields"] == ["certainty", "mood", "weather"]
+    assert body["written_by"] == "9.9.9"
+    assert body["analyzer"]["rules"][0]["value"] == LOSS["value"]
+    assert len(body["analyzer"]["checks"]) == 1
+
+
+def test_an_imported_analyzer_names_the_copernicus_layer_this_machine_lacks(client):
+    read_on = lambda layer: {"a": {"date": DAY_A, "layer": layer}, "b": {"date": DAY_B, "layer": layer}}  # noqa: E731
+    marks = [{"point": PLOT, "expect": "found"}]
+    written = file_of(recipe(LOSS, name="Burn scar"), checks=[check_body(marks, **read_on("BURN_NBR"))])
+    assert client.post("/api/compare/analyzers/import", json=written).json()["missing_layers"] == ["BURN_NBR"]
+    # A layer the standard template ships is taken as served: LAYERS is a
+    # fallback list, not the instance's catalogue, so flagging it would cry wolf.
+    standard = file_of(recipe(LOSS, name="Clearing"), checks=[check_body(marks, **read_on("NDWI"))])
+    assert client.post("/api/compare/analyzers/import", json=standard).json()["missing_layers"] == []
+
+    written_here = client.put("/api/satellite/sentinel/custom-layers", json={
+        "id": "BURN_NBR", "label": "Burn", "base": "TRUE_COLOR", "script": "return [B08, B12, B04];"})
+    assert written_here.status_code == 200, written_here.text
+    assert client.post("/api/compare/analyzers/import", json=written).json()["missing_layers"] == []
+
+
+def test_a_shared_radar_analyzer_reads_through_this_machines_own_radar_layer(client):
+    client.put("/api/settings/prefs", json={"sentinel1_layer": "S1_GRD_HERE"})
+    pass_of = lambda day: {"provider": "sentinel1", "date": day, "time": SAR_TIME, "layer": SAR_LAYER}  # noqa: E731
+    radar = recipe({"measure": "radar", "on": "change", "op": "moved", "value": 3}, name="Razed")
+    file = file_of(radar, checks=[check_body([{"point": PLOT, "expect": "found"}],
+                                             a=pass_of(DAY_A), b=pass_of(DAY_B))])
+
+    body = client.post("/api/compare/analyzers/import", json=file)
+    assert body.status_code == 200, body.text
+    check = body.json()["analyzer"]["checks"][0]
+    # Two instances rarely name their Sentinel-1 layer alike, and the pass the
+    # check is about is the date and the time of day, which travel untouched.
+    assert check["a"]["layer"] == check["b"]["layer"] == "S1_GRD_HERE"
+    assert (check["a"]["date"], check["b"]["time"]) == (DAY_A, SAR_TIME)
+    assert body.json()["missing_layers"] == []
+
+
+def test_a_full_library_refuses_an_import_instead_of_dropping_one(client):
+    def fill(settings):
+        settings["analyzers"] = [{**recipe(LOSS, name=f"Rule {n}").model_dump(), "id": f"custom-{n:012d}"}
+                                 for n in range(100)]
+    config.update_settings(fill)
+    refused = client.post("/api/compare/analyzers/import", json=file_of(recipe(LOSS, name="One more")))
+    assert refused.status_code == 409 and "full" in refused.text
+    assert len(client.get("/api/compare/analyzers").json()["custom"]) == 100
 
 
 # -- a rule's reading, for moving its line without asking again ------------------------

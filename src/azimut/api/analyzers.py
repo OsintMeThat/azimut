@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import math
 import secrets
 from typing import Any, Literal, get_args
@@ -12,13 +13,13 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from PIL import Image, ImageDraw, ImageFont
-from pydantic import Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .. import config
 from ..engine import analyzers as engine
 from ..engine import (
-    analysis_dating, analysis_examples, analysis_export, analysis_geometry, detect_rules, links, media, sentinel,
-    workqueue,
+    analysis_dating, analysis_examples, analysis_export, analysis_geometry, analyzershare, areashare, detect_rules,
+    links, media, sentinel, workqueue,
 )
 from ..engine.analysis_models import (
     BUILTINS, GROUPS, MAX_AROUND, MAX_BANDS, MAX_CHECKS, MAX_MARKS, MAX_RULES, METHODS, RELIABILITY, Area, AreaDates,
@@ -83,6 +84,100 @@ def delete_recipe(ident: str) -> dict[str, bool]:
         settings["analyzers"] = [r for r in settings.get("analyzers", []) if r.get("id") != ident]
     config.update_settings(update)
     return {"deleted": True}
+
+
+@router.get("/compare/analyzers/{ident}/share")
+def export_recipe(ident: str, checks: bool = True) -> Response:
+    """Download one of the analyst's own analyzers, to hand to someone else.
+
+    Built-ins are not offered: every install already has them, and a tuned copy
+    of one is an analyzer of your own like any other.
+    """
+    for raw in config.load_settings().get("analyzers", []):
+        if raw.get("id") != ident:
+            continue
+        try:
+            recipe = stored(Recipe, raw)
+        except ValueError as exc:
+            raise HTTPException(422, "this analyzer can no longer be read") from exc
+        return Response(
+            content=json.dumps(analyzershare.envelope(recipe, checks=checks), indent=2, ensure_ascii=False),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{analyzershare.filename(recipe)}"'},
+        )
+    raise HTTPException(404, "no analyzer of yours has that name")
+
+
+class SharedAnalyzer(BaseModel):
+    """An analyzer file as another Azimut wrote it.
+
+    Loosely typed on purpose. This is the one thing the app is handed from
+    outside the machine, so it has to say what is wrong with a file in words
+    rather than through a validator's field list, and a key a later build adds
+    to the envelope must not make the file unreadable here. The recipe inside is
+    read afterwards, as history rather than as a request.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    azimut: str = Field(default="", max_length=64)
+    version: int = Field(default=0, ge=0, le=10_000)
+    app: str = Field(default="", max_length=64)
+    recipe: dict[str, Any] = Field(default_factory=dict)
+    #: Not ours. Declared only so the other Azimut JSON a user is likely to grab
+    #: by mistake gets named back to them instead of a flat refusal.
+    settings: Any = None
+
+
+@router.post("/compare/analyzers/import")
+def import_recipe(body: SharedAnalyzer) -> dict[str, Any]:
+    """Take an analyzer someone else exported into this library.
+
+    It never writes over what is here: an id already in use is re-minted and a
+    name already taken is numbered, so importing the same file twice leaves a
+    visible duplicate rather than silently replacing an analyzer this analyst
+    had tuned.
+    """
+    if body.azimut != analyzershare.KIND:
+        if body.settings is not None:
+            raise HTTPException(422, "this is a settings backup; restore it in Settings → Storage")
+        raise HTTPException(422, "this file is not an Azimut analyzer")
+    if body.version > analyzershare.VERSION:
+        raise HTTPException(422, "this analyzer was written in a newer format than this version reads; "
+                                 "update Azimut and import it again")
+    try:
+        recipe = stored(Recipe, body.recipe)
+    except ValidationError as exc:
+        raise HTTPException(422, f"this analyzer could not be read: {exc.errors()[0]['msg']}") from exc
+
+    settings = config.load_settings()
+    recipe = analyzershare.for_this_machine(recipe, settings)
+    saved = [r for r in settings.get("analyzers", []) if isinstance(r, dict)]
+    if len(saved) >= 100:
+        raise HTTPException(409, "the analyzer library is full; remove an unused recipe")
+    taken = {str(r.get("id")) for r in saved} | {r.id for r in BUILTINS} | {"custom"}
+    sent = recipe.name
+    named = analyzershare.free_name(sent, {str(r.get("name")) for r in saved})
+    recipe = recipe.model_copy(update={
+        "id": recipe.id if recipe.id not in taken else f"custom-{secrets.token_hex(6)}",
+        "name": named,
+    })
+
+    def update(current: dict[str, Any]) -> None:
+        current["analyzers"] = [*current.get("analyzers", []), recipe.model_dump()]
+
+    config.update_settings(update)
+    return {
+        "analyzer": recipe.model_dump(),
+        # What the analyst has to know before trusting it here: the layers their
+        # configuration can't read, and anything a newer build wrote that this
+        # one dropped on the way in.
+        "missing_layers": analyzershare.missing_layers(recipe, settings),
+        "ignored_fields": analyzershare.unknown_fields(body.recipe),
+        #: The name it was sent under, when the library already held that name.
+        "renamed_from": sent if named != sent else "",
+        "written_by": body.app,
+    }
 
 
 class CheckInput(Model):
@@ -223,6 +318,139 @@ def update_zones(case_id: str, ident: str, body: AreaGroup) -> dict[str, Any]:
             read(case, "areas", area_id)
     position = old.get("position") if body.position is None else body.position
     return engine.save(case, "zones", body.model_copy(update={"position": position}).model_dump(), ident)
+
+
+def _areas_file(shared: dict[str, Any], label: str) -> Response:
+    return Response(
+        content=json.dumps(shared, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{areashare.filename(label)}"'},
+    )
+
+
+def _ground_of(case: Any, group: dict[str, Any]) -> list[dict[str, Any]]:
+    """The areas a group names and this case still has.
+
+    A deleted area stays named in its groups so the Trash can put it back, and
+    it has no ground to send in the meantime.
+    """
+    found = []
+    for area_id in group.get("area_ids") or []:
+        try:
+            found.append(engine.read(case, "areas", area_id))
+        except (FileNotFoundError, ValueError, OSError):
+            continue
+    return found
+
+
+@router.get("/cases/{case_id}/analysis/areas/{ident}/share")
+def share_area(case_id: str, ident: str) -> Response:
+    """Download one area as a file, to hand to another analyst."""
+    area = read(get_case(case_id), "areas", ident)
+    return _areas_file(areashare.envelope([area]), area["name"])
+
+
+@router.get("/cases/{case_id}/analysis/zones/{ident}/share")
+def share_group(case_id: str, ident: str) -> Response:
+    """Download a group and the ground in it, folder and names kept."""
+    case = get_case(case_id)
+    group = read(case, "zones", ident)
+    return _areas_file(areashare.envelope(_ground_of(case, group), group), group["title"])
+
+
+class SharedAreas(BaseModel):
+    """Areas as another Azimut wrote them.
+
+    Loosely typed for the same reason `SharedAnalyzer` is: a file handed to the
+    app from outside has to be told what is wrong with it in words. `settings`
+    and `recipe` are not ours — they are declared so the other two Azimut JSON
+    files a user might drop here get named back to them.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    azimut: str = Field(default="", max_length=64)
+    version: int = Field(default=0, ge=0, le=10_000)
+    app: str = Field(default="", max_length=64)
+    areas: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    groups: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    settings: Any = None
+    recipe: Any = None
+
+
+@router.post("/cases/{case_id}/analysis/areas/import")
+def import_areas(case_id: str, body: SharedAreas) -> dict[str, Any]:
+    """Take areas another analyst shared into this case.
+
+    Nothing here is written over: every area is filed under a new id and a name
+    already taken is numbered, group included. The ids in the file join a group
+    to its areas and nothing else, so they are remapped to the ones this case
+    mints.
+    """
+    if body.azimut == analyzershare.KIND:
+        raise HTTPException(422, "this is an analyzer; import it from the analyzer library")
+    if body.azimut != areashare.KIND:
+        if body.settings is not None:
+            raise HTTPException(422, "this is a settings backup; restore it in Settings → Storage")
+        raise HTTPException(422, "this file is not Azimut areas")
+    if body.version > areashare.VERSION:
+        raise HTTPException(422, "these areas were written in a newer format than this version reads; "
+                                 "update Azimut and import them again")
+    if not body.areas:
+        raise HTTPException(422, "this file carries no area")
+
+    # Read every shape before writing any, so a file this build cannot make
+    # sense of leaves the case exactly as it was.
+    parsed: list[tuple[str, Area]] = []
+    for raw in body.areas:
+        try:
+            parsed.append((str(raw.get("id") or ""), stored(Area, raw)))
+        except ValidationError as exc:
+            raise HTTPException(422, f"an area in this file could not be read: {exc.errors()[0]['msg']}") from exc
+
+    case = get_case(case_id)
+    rows = engine.listing(case, "areas")
+    names = {str(row.get("name")) for row in rows}
+    spot = max([row["position"] for row in rows if row.get("position") is not None], default=-1) + 1
+    renamed: list[str] = []
+    minted: dict[str, str] = {}
+    filed = []
+    for key, area in parsed:
+        name = areashare.free_name(area.name, names)
+        if name != area.name:
+            renamed.append(area.name)
+        names.add(name)
+        saved = engine.save(case, "areas", area.model_copy(update={"name": name, "position": spot}).model_dump())
+        spot += 1
+        filed.append(saved)
+        if key:
+            minted[key] = saved["id"]
+
+    folders = engine.listing(case, "zones")
+    titles = {str(row.get("title")) for row in folders}
+    shelf = max([row["position"] for row in folders if row.get("position") is not None], default=-1) + 1
+    made = []
+    for raw in body.groups:
+        members = [minted[key] for key in (raw.get("area_ids") or []) if key in minted]
+        if not members:
+            continue  # a folder whose ground did not come with it is not a folder
+        try:
+            group = stored(AreaGroup, {**raw, "area_ids": members, "pending_review": []})
+        except ValidationError:
+            continue
+        title = areashare.free_name(group.title, titles)
+        if title != group.title:
+            renamed.append(group.title)
+        titles.add(title)
+        made.append(engine.save(case, "zones", group.model_copy(
+            update={"title": title, "position": shelf}).model_dump()))
+        shelf += 1
+
+    return {"areas": filed, "groups": made,
+            #: Names the case already held, so the arrival says what it renamed.
+            "renamed": renamed,
+            "ignored_fields": areashare.unknown_fields(body.model_dump()),
+            "written_by": body.app}
 
 
 @router.post("/cases/{case_id}/analysis/followups")

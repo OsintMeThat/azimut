@@ -2526,7 +2526,21 @@ that membership. The dragged row fades, a rule marks its insertion point, and
 the destination group lights up. Its menu can add the same area to another
 group, move it or change the order without dragging. Folding a group does not
 hide map outlines.
-Removing a group leaves its areas in the case. Older saved area sets become
+Removing a group leaves its areas in the case.
+
+**Share area** and **Share group** in those menus download the ground as a file
+to hand to another analyst: the shapes with their names, their colours and the
+folder they sit in, which no generic map format keeps. **Import**, beside
+**Draw an area**, takes one into the open case. It reads Azimut's own area files
+and nothing else, so nothing arrives that has to be triaged; a KML or a GeoJSON
+from elsewhere is still added as a followed layer in Layers, which is a
+different question. Nothing is written over: every shape is filed under a new
+id, a name already in the case is numbered, group included, and the ids inside
+the file only join a group to its areas. A group whose area was deleted sends
+what it still has. A file a newer Azimut wrote still imports, with a line naming
+the fields that went unread. What does not travel is the dates: the passes an
+area is read on belong to the detection, so the analyst who receives the ground
+picks their own. Older saved area sets become
 groups on first read: shared outlines are reused, while temporary drawings and
 outlines that have changed since the set was saved become shared areas with
 their saved shapes. If a shared area's current outline differs from the saved
@@ -2734,9 +2748,19 @@ checks and all, under a free name, and opens it with its first check on the
 map. A built-in opens read-only with **Copy to tune** (and **Open as rules**
 where it has them, which is burn scars, vegetation loss and new water): the copy
 keeps its calibrated method while its name, sizes, thresholds, candidate label
-and colour become yours. Your own can be edited or removed from the list. A
-detection being built keeps its place while the library is open, and an analyzer
-saved from there comes back picked.
+and colour become yours. Your own can be edited, shared or removed from the
+list. **Share** downloads the analyzer as a file to hand on: it carries the
+rules and none of your keys, which is what a settings backup cannot promise. One
+with checks asks first whether they go too, since they let the other analyst
+rerun the calibration and they carry the places and dates it was run on. Their
+last result stays behind, so the analyzer arrives having proved nothing yet.
+**Import**, beside **New analyzer**, takes one in and never writes over what is
+here: an id already in use is re-minted and a name already taken is numbered. A
+file a newer Azimut wrote still imports, with a line naming the fields that went
+unread. A check reading a Copernicus layer this machine has no script for is
+named the same way, and a radar check is retuned to the Sentinel-1 layer
+Settings found here. A detection being built keeps its place while the library
+is open, and an analyzer saved from there comes back picked.
 
 The builder keeps the name, the locked chip and the sentence the analyzer reads
 as at the top, and three tabs: **Rules**, **Checks** and **Settings** (sizes,

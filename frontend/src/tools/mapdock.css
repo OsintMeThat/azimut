@@ -159,6 +159,10 @@
 .cmp-dock > header strong { flex: 1; font-size: var(--fs-sm); }
 .cmp-dock-body {
   display: grid;
+  /* A grid item's automatic minimum is its content, so one long name used to
+     widen the whole column past the dock and carry the row's own count, eye and
+     menu out of reach. Bounding the track makes the name ellipsize instead. */
+  grid-template-columns: minmax(0, 1fr);
   flex: 1;
   align-content: start;
   gap: 14px;

@@ -25,6 +25,9 @@
     tone = 'default', // 'danger' | 'default'
     icon = tone === 'danger' ? 'trash' : 'folderMinus',
     busy = false,
+    // An optional choice the dialog is asking along with the confirmation, such
+    // as what an export should carry. Sits under the message, above the buttons.
+    children = null,
     onconfirm,
     oncancel,
   } = $props();
@@ -121,6 +124,9 @@
           <span>{restorable}</span>
         </div>
       </div>
+    {/if}
+    {#if children}
+      <div class="extra">{@render children()}</div>
     {/if}
     <div class="actions">
       <button class="btn" bind:this={cancelBtn} onclick={oncancel} disabled={busy}>{cancelLabel}</button>
@@ -237,6 +243,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .extra {
+    margin-top: 12px;
+    padding: 9px 10px;
+    background: var(--bg-2);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-xs);
   }
   .actions {
     display: flex;

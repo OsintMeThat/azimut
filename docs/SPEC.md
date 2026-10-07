@@ -182,6 +182,7 @@ proof for publication.
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
 | ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
+| ✅ **Shared analyzers & areas** | Exports an analyzer of your own as a file, checks included or left behind, and an area or a group as the ground it is, names, colours and folder kept. Imports either without overwriting what is here, so the work travels without the settings backup and its keys. |
 | ✅ **Copernicus layers & figures** | Writes composite, index and script layers with a preview on the map, offers them in every map tab, reads an index or single-band layer as a Detect rule, draws a rule back as a layer and moves its line live on the last test's readings, and lays several renderings of one pass out as a captioned figure. |
 
 ---
@@ -238,9 +239,7 @@ GPS-tagged clips promotable to places.
 Toward v3: GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
 time; sun and moon times read against the terrain horizon the 3D map's DEM
-supplies, since a ridge ends the day well before the flat horizon does; export
-and import an analyzer as a file, checks included, so one can be shared without
-handing over the settings backup and its keys.
+supplies, since a ridge ends the day well before the flat horizon does.
 
 ### v4: investigation layer
 

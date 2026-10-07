@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from azimut import config, layout
+from azimut import __version__, config, layout
 from azimut.api import analyzers as analyzers_api
 from azimut.engine import analyzers, sentinel, tilecache, workqueue
 from azimut.engine.analysis_models import (
@@ -1408,3 +1408,124 @@ def test_a_deleted_area_leaves_its_groups_and_comes_back_with_a_restore(client, 
     assert client.post(f"/api/cases/{case.id}/trash/{entry['id']}/restore").status_code == 200
     [group] = client.get(f"/api/cases/{case.id}/analysis/zones").json()
     assert group["area_ids"] == [shared["id"]]
+
+
+# -- areas as a file, handed to another analyst ---------------------------------------
+
+RING = [[2.29, 48.855], [2.3, 48.855], [2.3, 48.862], [2.29, 48.862], [2.29, 48.855]]
+GROUND = {"type": "Polygon", "coordinates": [RING]}
+
+
+def ground_case(client, name="Ground"):
+    return client.post("/api/cases", json={"name": name}).json()["id"]
+
+
+def put_area(client, case_id, name, colour="#38bdf8"):
+    saved = client.post(f"/api/cases/{case_id}/analysis/areas",
+                        json={"name": name, "colour": colour, "geometry": GROUND})
+    assert saved.status_code == 200, saved.text
+    return saved.json()
+
+
+def put_group(client, case_id, title, areas):
+    saved = client.post(f"/api/cases/{case_id}/analysis/zones",
+                        json={"title": title, "area_ids": [area["id"] for area in areas]})
+    assert saved.status_code == 200, saved.text
+    return saved.json()
+
+
+def test_a_shared_group_carries_its_ground_its_colours_and_its_folder(client):
+    case_id = ground_case(client)
+    first, second = put_area(client, case_id, "Pump 1"), put_area(client, case_id, "Pump 2", "#f6a81a")
+    group = put_group(client, case_id, "Pumping stations", [first, second])
+
+    answer = client.get(f"/api/cases/{case_id}/analysis/zones/{group['id']}/share")
+    assert answer.status_code == 200, answer.text
+    assert answer.headers["content-disposition"] == 'attachment; filename="azimut-areas-pumping-stations.json"'
+    file = answer.json()
+    assert (file["azimut"], file["version"], file["app"]) == ("azimut-areas", 1, __version__)
+    assert [area["name"] for area in file["areas"]] == ["Pump 1", "Pump 2"]
+    # what no generic map format keeps: the colours and the folder they sit in
+    assert [area["colour"] for area in file["areas"]] == ["#38bdf8", "#f6a81a"]
+    assert file["groups"] == [{"title": "Pumping stations", "area_ids": [first["id"], second["id"]]}]
+    # this case's own bookkeeping about redrawn shapes stays behind
+    assert "pending_review" not in str(file)
+
+    alone = client.get(f"/api/cases/{case_id}/analysis/areas/{first['id']}/share").json()
+    assert [area["name"] for area in alone["areas"]] == ["Pump 1"] and alone["groups"] == []
+
+
+def test_imported_ground_is_filed_afresh_and_never_over_what_is_here(client):
+    case_id = ground_case(client)
+    first, second = put_area(client, case_id, "Pump 1"), put_area(client, case_id, "Pump 2")
+    group = put_group(client, case_id, "Pumping stations", [first, second])
+    file = client.get(f"/api/cases/{case_id}/analysis/zones/{group['id']}/share").json()
+
+    answer = client.post(f"/api/cases/{case_id}/analysis/areas/import", json=file)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert [area["name"] for area in body["areas"]] == ["Pump 1 2", "Pump 2 2"]
+    assert body["groups"][0]["title"] == "Pumping stations 2"
+    assert body["renamed"] == ["Pump 1", "Pump 2", "Pumping stations"]
+    # The ids in a file only join a group to its ground; the case mints its own.
+    assert body["groups"][0]["area_ids"] == [area["id"] for area in body["areas"]]
+    assert not {area["id"] for area in body["areas"]} & {first["id"], second["id"]}
+    assert client.get(f"/api/cases/{case_id}/analysis/zones/{group['id']}").json()["area_ids"] == [
+        first["id"], second["id"]]
+
+    # The point of the file: the same ground in somebody else's case.
+    other = ground_case(client, "Second case")
+    landed = client.post(f"/api/cases/{other}/analysis/areas/import", json=file).json()
+    assert [area["name"] for area in landed["areas"]] == ["Pump 1", "Pump 2"]
+    assert landed["renamed"] == [] and landed["groups"][0]["title"] == "Pumping stations"
+    assert landed["groups"][0]["area_ids"] == [area["id"] for area in landed["areas"]]
+
+
+def test_a_file_that_is_not_areas_is_named_back_rather_than_blankly_refused(client):
+    case_id = ground_case(client)
+    url = f"/api/cases/{case_id}/analysis/areas/import"
+    backup = client.post(url, json=client.get("/api/settings/export").json())
+    assert backup.status_code == 422 and "settings backup" in backup.text
+    analyzer = client.post(url, json={"azimut": "azimut-analyzer", "version": 1, "recipe": {}})
+    assert analyzer.status_code == 422 and "analyzer library" in analyzer.text
+    assert "not Azimut areas" in client.post(url, json={"a": 1}).text
+    newer = client.post(url, json={"azimut": "azimut-areas", "version": 2, "areas": [{}]})
+    assert newer.status_code == 422 and "newer format" in newer.text
+    empty = client.post(url, json={"azimut": "azimut-areas", "version": 1, "areas": []})
+    assert empty.status_code == 422 and "no area" in empty.text
+    torn = client.post(url, json={"azimut": "azimut-areas", "version": 1,
+                                  "areas": [{"name": "Open", "geometry": {"type": "Polygon",
+                                                                          "coordinates": [RING[:2]]}}]})
+    assert torn.status_code == 422 and "could not be read" in torn.text
+    # A file this build cannot make sense of leaves the case exactly as it was.
+    assert client.get(f"/api/cases/{case_id}/analysis/areas").json() == []
+
+
+def test_areas_from_a_newer_build_land_and_say_what_went_unread(client):
+    case_id = ground_case(client)
+    file = {"azimut": "azimut-areas", "version": 1, "app": "9.9.9",
+            "areas": [{"id": "aaaaaaaaaaaa", "name": "Pump 1", "colour": "#38bdf8",
+                       "geometry": GROUND, "elevation": 42}],
+            "groups": [{"title": "Stations", "area_ids": ["aaaaaaaaaaaa"], "legend": "by depth"}]}
+    answer = client.post(f"/api/cases/{case_id}/analysis/areas/import", json=file)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert body["ignored_fields"] == ["elevation", "legend"]
+    assert body["written_by"] == "9.9.9"
+    assert body["areas"][0]["geometry"] == GROUND
+    assert body["groups"][0]["area_ids"] == [body["areas"][0]["id"]]
+
+
+def test_a_group_shares_the_ground_it_still_has(client):
+    case_id = ground_case(client)
+    first, second = put_area(client, case_id, "Pump 1"), put_area(client, case_id, "Pump 2")
+    group = put_group(client, case_id, "Pumping stations", [first, second])
+    assert client.delete(f"/api/cases/{case_id}/analysis/areas/{second['id']}").status_code == 200
+
+    file = client.get(f"/api/cases/{case_id}/analysis/zones/{group['id']}/share").json()
+    # A deleted area stays named in its group so the Trash can put it back, and
+    # has no ground to send in the meantime.
+    assert [area["name"] for area in file["areas"]] == ["Pump 1"]
+    assert file["groups"][0]["area_ids"] == [first["id"]]
+    landed = client.post(f"/api/cases/{ground_case(client, 'Third')}/analysis/areas/import", json=file).json()
+    assert len(landed["areas"]) == 1 and landed["groups"][0]["area_ids"] == [landed["areas"][0]["id"]]
