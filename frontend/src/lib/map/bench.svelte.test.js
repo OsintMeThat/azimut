@@ -242,6 +242,36 @@ describe('the imagery under the pins', () => {
     expect(bench.imagery.b.layer).toBe('TRUE_COLOR');
   });
 
+  it('holds the display through an unproven configuration rather than falling to a layer written here', () => {
+    // A layer written here needs no confirmation, a configured one does. Until
+    // the instance answers, picking over the unconfirmed leaves only the
+    // analyst's own standing — and the display never came back from them.
+    const state = $state({ layers: [{ id: 'TRUE_COLOR' }, { id: 'SWIR' }, { id: 'B12', custom: true }],
+      layersSource: 'catalogue', loadLayers: vi.fn(async () => true) });
+    const kept = made('Plot');
+    const { bench } = open({ checks: [kept], layerState: state });
+    flushSync();
+    expect(bench.layer).toBe('TRUE_COLOR');
+    expect(bench.suggestion).toBe('TRUE_COLOR');
+    bench.select(kept.id); flushSync();
+    expect(bench.layer).toBe('TRUE_COLOR');
+    expect(bench.layersNote).not.toContain('unavailable');
+    // Unproven costs the basemap, which the note explains, and nothing else.
+    expect(bench.imagery.mode).toBe('basemap');
+    state.layersSource = 'instance'; flushSync();
+    expect(bench.layer).toBe('TRUE_COLOR');
+    expect(bench.imagery.b.layer).toBe('TRUE_COLOR');
+  });
+
+  it('still repairs a display no configuration holds, to TRUE_COLOR over a layer written here', () => {
+    const state = $state({ layers: [{ id: 'TRUE_COLOR' }, { id: 'B12', custom: true }], layersSource: 'catalogue',
+      loadLayers: vi.fn(async () => true) });
+    const kept = made('Plot'); kept.b.layer = 'NDVI';
+    const { bench } = open({ checks: [kept], layerState: state });
+    bench.select(kept.id); flushSync();
+    expect(bench.layer).toBe('TRUE_COLOR');
+  });
+
   it('repairs an unavailable saved display using its actual alias, without changing the rules', () => {
     const state = $state({ layers: [{ id: 'TRUE_COLOR' }, { id: 'VEGETATION_INDEX' }], layersSource: 'instance',
       loadLayers: vi.fn(async () => true) });

@@ -17,6 +17,7 @@
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { analyzerGroups, analyzerLock, clone } from '../../lib/map/analyzers.js';
+  import { downloadAnalyzer, importAnalyzerFile, importNotes } from '../../lib/analyzerFile.js';
   import { describeChecks, describeReads, newRecipe } from '../../lib/map/analyzerRules.js';
   import AnalyzerBuilder from './AnalyzerBuilder.svelte';
   import AnalyzerLabel from './AnalyzerLabel.svelte';
@@ -56,6 +57,14 @@
   // The analyzer whose deletion is being confirmed: its rules, checks and calibration
   // are app-wide and have no Trash to come back from.
   let deleting = $state(null);
+  // The analyzer being handed on, and whether its checks go with it. Checks are
+  // what lets the other analyst rerun the calibration, and they carry the
+  // coordinates it was calibrated on, so the choice is made in the open.
+  let sharing = $state(null);
+  let withChecks = $state(true);
+  let fileInput = $state(null);
+  /** What an analyzer that just arrived may not do here. Stays until the next move. */
+  let notice = $state([]);
   let error = $state('');
 
   // The map holds the builder's bench only while a builder is open, and this is what lets it go: on
@@ -82,7 +91,31 @@
     finally { busy = false; }
   }
 
+  /**
+   * Hand this analyzer on as a file. Only checks are a decision, so an analyzer
+   * without any downloads on the press and the rest ask first.
+   */
+  function share(entry) {
+    if (!entry.checks?.length) { downloadAnalyzer(entry.id); return; }
+    withChecks = true;
+    sharing = entry;
+  }
+
+  async function importFile(event) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = ''; // so the same file picked twice fires again
+    if (!file) return;
+    notice = [];
+    await act(async () => {
+      const result = await importAnalyzerFile(file);
+      await onchanged();
+      notice = importNotes(result);
+      toast(`${result.analyzer.name} is in your analyzers`, 'ok');
+    });
+  }
+
   function view(entry, opening = null) {
+    notice = [];
     recipe = entry.method === 'rules' ? { checks: [], ...clone(entry) } : clone(entry);
     readonly = builtins.some((r) => r.id === entry.id);
     start = opening;
@@ -91,6 +124,7 @@
   }
 
   function build(from = newRecipe(catalogue?.methods ?? [], reads)) {
+    notice = [];
     recipe = { checks: [], ...clone(from), id: 'custom' };
     readonly = false;
     start = null;
@@ -155,10 +189,20 @@
   <div class="cmp-dock-body">
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
     <p class="hint">Start from an example, build your own from rules you prove on the map, or copy a calibrated built-in to tune it.</p>
-    <button class="btn btn-primary" onclick={() => (mode = 'base')}><Icon name="plus" size={14} /> New analyzer</button>
+    <div class="row">
+      <button class="btn btn-primary grow" onclick={() => (mode = 'base')}><Icon name="plus" size={14} /> New analyzer</button>
+      <button class="btn" title="Open an analyzer file someone shared with you" disabled={busy}
+        onclick={() => fileInput?.click()}><Icon name="upload" size={13} /> Import</button>
+    </div>
+    <input type="file" accept="application/json,.json" bind:this={fileInput} onchange={importFile} hidden />
 
     <section aria-label="My analyzers">
       <strong>Mine</strong>
+      {#if notice.length}
+        <ul class="notice" aria-label="About the analyzer you imported">
+          {#each notice as line (line)}<li>{line}</li>{/each}
+        </ul>
+      {/if}
       {#if !custom.length}<p class="hint">None yet.</p>{/if}
       {#each custom as entry (entry.id)}
         <div class="row entry">
@@ -169,6 +213,8 @@
           <button class="cmp-icon" title="Edit" aria-label={`Edit ${entry.name}`} disabled={busy} onclick={() => view(entry)}>
             <Icon name="edit" size={13} />
           </button>
+          <button class="cmp-icon" title="Share" aria-label={`Share ${entry.name}`} disabled={busy}
+            onclick={() => share(entry)}><Icon name="download" size={13} /></button>
           <button class="cmp-icon" title="Delete" aria-label={`Delete ${entry.name}`} disabled={busy}
             onclick={() => (deleting = entry)}><Icon name="trash" size={13} /></button>
         </div>
@@ -288,6 +334,23 @@
   </div>
 {/if}
 
+{#if sharing}
+  <ConfirmDialog
+    title={`Share ${sharing.name}`}
+    message="Downloads a file to hand on. It carries the rules and none of your keys."
+    confirmLabel="Download"
+    icon="download"
+    onconfirm={() => { const entry = sharing; sharing = null; downloadAnalyzer(entry.id, { checks: withChecks }); }}
+    oncancel={() => (sharing = null)}>
+    <label class="opt">
+      <input type="checkbox" bind:checked={withChecks} />
+      <span>Include its {sharing.checks.length} check{sharing.checks.length === 1 ? '' : 's'}
+        <small>They let the other analyst rerun your calibration, and they carry the places and dates you ran it on.</small>
+      </span>
+    </label>
+  </ConfirmDialog>
+{/if}
+
 {#if deleting}
   <ConfirmDialog
     title={`Delete ${deleting.name}`}
@@ -324,6 +387,10 @@
   .base { border: 1px solid var(--border); background: var(--bg-2); }
   .base:hover { border-color: var(--accent); }
   .ask { color: var(--text-2); font-size: var(--fs-xs); font-weight: 700; }
+  .notice { margin: 0 0 2px; padding-left: 15px; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.45; }
+  .opt { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+  .opt span { display: grid; gap: 3px; color: var(--text-1); font-weight: 600; }
+  .opt small { color: var(--text-3); font-weight: 400; line-height: 1.4; }
   .name small.checked { color: var(--text-2); }
   .swatch { flex: 0 0 auto; width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: var(--tint); }
   .name { display: grid; gap: 2px; min-width: 0; color: var(--text-1); font-size: var(--fs-xs); font-weight: 600; }

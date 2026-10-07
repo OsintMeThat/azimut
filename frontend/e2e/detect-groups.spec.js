@@ -112,3 +112,42 @@ test('dragging an area between groups and into Ungrouped moves its membership', 
   await expect(ungrouped.getByRole('group', { name: 'Harbor' })).toHaveCount(1);
   expect(groups.map((group) => group.area_ids)).toEqual([[], []]);
 });
+
+test('a long group name gives way at the dock’s narrowest, so its count, eye and menu stay reachable', async ({ page }) => {
+  await installAppFixture(page);
+  await page.route('**/api/compare/analyzers', (route) => route.fulfill({ json: catalogue }));
+  const ring = [[2.29, 48.855], [2.3, 48.855], [2.3, 48.862], [2.29, 48.862], [2.29, 48.855]];
+  const areas = Array.from({ length: 5 }, (_, n) => ({
+    id: `${n}`.repeat(12), name: `Pumping station ${n + 1}`, colour: '#38bdf8',
+    geometry: { type: 'Polygon', coordinates: [ring] },
+  }));
+  const groups = [{ id: '111111111111', title: 'Pumping stations SAUDI ARABIA (E-W)',
+    area_ids: areas.map((area) => area.id), position: 0 }];
+  await page.route('**/api/cases/*/analysis/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    route.fulfill({ json: path.endsWith('/analysis/areas') ? areas
+      : path.endsWith('/analysis/zones') ? groups : [] });
+  });
+  await page.goto('/#detect');
+  await awaitMapReady(page);
+  const dock = page.getByRole('complementary', { name: 'Detect' });
+  await dock.getByRole('button', { name: 'Areas', exact: true }).click();
+  const group = dock.getByRole('region', { name: 'Pumping stations SAUDI ARABIA (E-W)' });
+  await expect(group).toBeVisible();
+
+  await dock.getByRole('button', { name: 'Resize Detect panel' }).focus();
+  await page.keyboard.press('Home'); // the narrowest the dock goes
+  await expect(dock).toHaveCSS('width', '300px');
+
+  // Nothing in the row may be pushed past the panel's own edge.
+  const edge = (await dock.boundingBox()).x + (await dock.boundingBox()).width;
+  for (const part of ['.group-count', '.group-head > .cmp-icon', '.group-head > .item-menu']) {
+    const box = await group.locator(part).first().boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(edge + 1);
+  }
+  // The name is what gives way, and the swatches keep their place beside it.
+  const title = group.locator('.group-title');
+  await expect(title).toHaveCSS('text-overflow', 'ellipsis');
+  expect(await title.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+  expect((await group.locator('.group-tints').boundingBox()).width).toBeGreaterThan(0);
+});

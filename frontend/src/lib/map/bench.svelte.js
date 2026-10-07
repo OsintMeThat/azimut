@@ -138,7 +138,7 @@ export class Bench {
     // a line moved on a slider costs no request and asks no question.
     this.#dispose = $effect.root(() => {
       $effect(() => {
-        const offered = this.offered;
+        const offered = this.#choosable;
         const layer = this.layer;
         if (this.radar || !offered.some((entry) => entry.enabled !== false)) return;
         const next = availableDisplayLayer(layer, offered);
@@ -178,6 +178,21 @@ export class Bench {
     if (state) return displayLayers(state.layers, state.layersSource === 'instance', this.#radarLayer());
     const layers = this.#layers();
     return layers.length ? layers : DISPLAY_LAYERS;
+  }
+  /**
+   * The layers a display may be *moved to*, which is not the list on offer.
+   *
+   * A configured layer the instance has not confirmed yet is unproven, not
+   * missing, while a layer written here needs no confirmation at all. Pick over
+   * the unproven and the only candidates standing are the analyst's own, so the
+   * first of those takes the display and keeps it: confirmation arriving later
+   * makes TRUE_COLOR available again, it never asks for it back. An unproven
+   * display costs nothing — the map holds the basemap and `layersNote` says so.
+   */
+  get #choosable() {
+    const state = this.#layerState();
+    if (!state || state.layersSource === 'instance') return this.offered;
+    return displayLayers(state.layers, true, this.#radarLayer());
   }
   get layersBusy() { return this.#layerState()?.layersBusy ?? false; }
   get layersNote() {
@@ -447,16 +462,16 @@ export class Bench {
     void clearPreview(this.#api).catch(() => {});
   }
 
-  /** The layer that shows best what the ranking rule reads, among those offered. */
+  /** The layer that shows best what the ranking rule reads, among those it may land on. */
   #suggested() {
-    return suggestedLayer(this.#recipe.rules[Math.max(0, signalOf(this.#recipe))], this.offered);
+    return suggestedLayer(this.#recipe.rules[Math.max(0, signalOf(this.#recipe))], this.#choosable);
   }
 
   #adoptLayer(check) {
     // Another check, another ground: a rule drawn over the last one is let go of.
     this.ruleLayer = null;
     const own = check.b?.layer;
-    this.layer = availableDisplayLayer(own || this.#suggested(), this.offered) || own || this.#suggested();
+    this.layer = availableDisplayLayer(own || this.#suggested(), this.#choosable) || own || this.#suggested();
     this.displayNotice = own && own !== this.layer ? `${own} is unavailable; showing ${this.layer}.` : '';
   }
 

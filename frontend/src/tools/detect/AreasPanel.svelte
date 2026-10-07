@@ -16,6 +16,7 @@
   import { api } from '../../lib/api.js';
   import { ensureCase, prefs, reloadCase } from '../../lib/state.svelte.js';
   import { zoneRing } from '../../lib/map/analyzers.js';
+  import { downloadAreas, importAreasFile, importAreaNotes, importedGround } from '../../lib/areaFile.js';
   import { formatArea, polygonArea } from '../../lib/measure.js';
   import { plural } from '../../lib/map/detections.js';
   import { closeOnOutsidePointer } from '../../lib/dismiss.js';
@@ -46,6 +47,9 @@
   let landing = $state(null);
   /** The area whose corners are on the map, and whether it was drawn before. */
   let reshaping = $state(null);
+  let fileInput = $state(null);
+  /** What ground that just arrived may not do here. Stays until the next import. */
+  let notice = $state([]);
 
   const users = $derived(removing ? routines.filter((routine) => routine.zones?.some((z) => z.id === removing.id)) : []);
   const usedBy = (area) => routines.filter((routine) => routine.zones?.some((z) => z.id === area.id)).length;
@@ -72,6 +76,18 @@
     catch (e) { error = e.message; }
     finally { busy = false; }
   }
+  async function importFile(event) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = ''; // so the same file picked twice fires again
+    if (!file) return;
+    notice = [];
+    await act(async () => {
+      const owner = await ensureCase();
+      const result = await importAreasFile(owner.id, file);
+      notice = [`${importedGround(result)} added.`, ...importAreaNotes(result)];
+    });
+  }
+
   async function save(zone) {
     const owner = await ensureCase();
     const ring = zoneRing(zone);
@@ -328,7 +344,16 @@
   {#if areas.length > 1}
     <button class="btn btn-sm" onclick={() => onframe(areas.flatMap(ringOf))}>Show all</button>
   {/if}
+  <!-- a third way ground enters the case, beside drawing it and framing it -->
+  <button class="btn btn-sm" title="Open areas another analyst shared with you" disabled={busy}
+    onclick={() => fileInput?.click()}><Icon name="upload" size={13} /> Import</button>
+  <input type="file" accept="application/json,.json" bind:this={fileInput} onchange={importFile} hidden />
 </div>
+{#if notice.length}
+  <ul class="notice" aria-label="About the areas you imported">
+    {#each notice as line (line)}<li>{line}</li>{/each}
+  </ul>
+{/if}
 <div class="area-actions list-tools">
   <input aria-label="Search areas or groups" placeholder="Search areas or groups…" bind:value={search} />
   <button class="btn btn-sm" onclick={() => (creatingGroup = !creatingGroup)}>New group</button>
@@ -421,6 +446,7 @@
         {#if groupId}
           <button disabled={busy} onclick={() => removeFromGroup(area.id, groups.find((group) => group.id === groupId))}>Remove from this group</button>
         {/if}
+        <button onclick={() => downloadAreas(caseId, 'areas', area.id)}>Share area</button>
         <button disabled={busy} onclick={() => (removing = area)}>Delete area</button>
       </div>
     </details>
@@ -476,6 +502,7 @@
             <button disabled={busy || index === 0} onclick={() => reorderGroups(group.id, groups[index - 1].id)}>Move up</button>
             <button disabled={busy || index === groups.length - 1} onclick={() => reorderGroups(group.id, groups[index + 1].id)}>Move down</button>
             <button onclick={() => (editingGroup = editingGroup === group.id ? null : group.id)}>Rename group</button>
+            <button onclick={() => downloadAreas(caseId, 'zones', group.id)}>Share group</button>
             <button disabled={busy} onclick={() => (removingGroup = group)}>Delete group</button>
           </div>
         </details>
@@ -549,10 +576,14 @@
 <style>
   .area-actions, .draft, .edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .primary-tools { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .notice { margin: 0 0 6px; padding-left: 15px; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.45; }
   .list-tools { flex-wrap: nowrap; padding: 4px 0 10px; }
   .list-tools input { min-width: 0; }
   .draft, .edit { padding: 7px 0; }
-  .area-group { display: grid; gap: 0; margin-top: 8px; }
+  /* bounded like the dock body above it, which the nested grid would otherwise
+     undo by taking its own content's width: a long group name ellipsizes rather
+     than pushing its count, eye and menu out of the panel */
+  .area-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: 8px; }
   /* A group is a band and its areas hang off a rail under it, so a folder
      never reads as one more area in the list. */
   .group-members { margin: 2px 0 4px 12px; padding-left: 6px; border-left: 2px solid var(--border-strong); }
@@ -573,9 +604,14 @@
   .ungrouped-head small { color: var(--text-3); font-size: 10px; }
   .fold { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; text-align: left; font-size: var(--fs-xs); }
   .group-icon { display: grid; place-items: center; flex: 0 0 auto; color: var(--accent); }
-  .group-title { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: var(--fs-sm); font-weight: 650;
+  /* grows into the leftover so the count keeps the right edge whatever the
+     name's length, and shrinks to an ellipsis when there is none */
+  .group-title { flex: 1 1 auto; min-width: 2.5em; overflow: hidden; font-size: var(--fs-sm); font-weight: 650;
     text-overflow: ellipsis; white-space: nowrap; }
-  .group-tints { display: flex; flex: 1; gap: 2px; min-width: 0; }
+  /* The swatches keep their size and their place: the name gives way first and
+     ellipsizes, and a group of many areas shows the ones that fit rather than
+     riding over the count beside it. */
+  .group-tints { display: flex; flex: 0 0 auto; gap: 2px; max-width: 72px; overflow: hidden; }
   .group-tints .swatch { width: 7px; height: 7px; }
   .group-count { flex: 0 0 auto; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--bg-1);
     color: var(--text-2); font-size: 10.5px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
