@@ -170,6 +170,117 @@ def test_tile_proxy_unknown_provider_404(client):
     assert client.get("/api/tiles/nope/14/0/0").status_code == 404
 
 
+def _flaky_upstream(monkeypatch, failures, content=b"JPEGDATA"):
+    """An upstream that fails *failures* times (a status, or an exception to
+    raise) before serving a tile. Returns the list of urls it was asked for."""
+    from azimut.engine import tiles
+
+    monkeypatch.setattr(tiles, "RETRY_PAUSE", 0)  # the wait is real, not the test's
+    asked: list[str] = []
+
+    def get(url, **kwargs):
+        asked.append(url)
+        if len(asked) <= len(failures):
+            trouble = failures[len(asked) - 1]
+            if isinstance(trouble, Exception):
+                raise trouble
+            return httpx.Response(
+                trouble, content=b"", headers={"content-type": "text/plain"},
+                request=httpx.Request("GET", url),
+            )
+        return httpx.Response(
+            200, content=content, headers={"content-type": "image/jpeg"},
+            request=httpx.Request("GET", url),
+        )
+
+    _use_tile_upstream(monkeypatch, get)
+    return asked
+
+
+def test_tile_proxy_asks_again_for_a_tile_that_timed_out(client, monkeypatch):
+    """A renderer that misses its window usually answers the moment after. The
+    tile the analyst asked for beats the hole they would have to notice."""
+    client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
+    asked = _flaky_upstream(monkeypatch, [httpx.ReadTimeout("too slow")])
+
+    r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
+    assert r.status_code == 200
+    assert r.content == b"JPEGDATA"
+    assert len(asked) == 2
+    # the lost attempt was never served, so it is not on the meter
+    body = client.get("/api/settings").json()
+    assert body["usage"]["mapbox"][body["month"]] == 1
+
+
+def test_tile_proxy_asks_again_after_a_gateway_answer(client, monkeypatch):
+    client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
+    asked = _flaky_upstream(monkeypatch, [503, 502])
+
+    r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
+    assert r.status_code == 200
+    assert len(asked) == 3  # tiles.MAX_TILE_TRIES, all of them used
+    body = client.get("/api/settings").json()
+    assert body["usage"]["mapbox"][body["month"]] == 1
+
+
+def test_tile_proxy_gives_up_rather_than_asking_forever(client, monkeypatch):
+    from azimut.engine import tiles
+
+    client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
+    asked = _flaky_upstream(monkeypatch, [503] * 5)
+
+    r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
+    assert r.status_code == 503  # the provider's own answer, passed through
+    assert len(asked) == tiles.MAX_TILE_TRIES
+    assert client.get("/api/settings").json()["usage"] == {}
+
+
+def test_tile_proxy_hands_on_what_the_provider_said_about_the_refusal(client, monkeypatch):
+    """The day Copernicus' elevation service was down, every radar tile failed
+    with a perfectly clear sentence and the map said "try again"."""
+    from azimut.engine import tiles
+
+    client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
+    body = (
+        b"<ows:ExceptionReport><ows:Exception><ows:ExceptionText>"
+        b"java.lang.RuntimeException: Could not load necessary digital elevation "
+        b"model for orthorectification! Please try again later."
+        b"</ows:ExceptionText></ows:Exception></ows:ExceptionReport>"
+    )
+    asked: list[str] = []
+
+    def refuse(url, **kwargs):
+        asked.append(url)
+        return httpx.Response(
+            500, content=body, headers={"content-type": "application/xml"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(tiles, "RETRY_PAUSE", 0)
+    _use_tile_upstream(monkeypatch, refuse)
+
+    r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
+    assert r.status_code == 500
+    assert r.text == (
+        "Could not load necessary digital elevation model for orthorectification! "
+        "Please try again later."
+    )
+    assert r.headers["content-type"].startswith("text/plain")
+    # a 500 is the service's verdict on this render, not a hiccup to sit through
+    assert len(asked) == 1
+    assert client.get("/api/settings").json()["usage"] == {}
+
+
+def test_tile_proxy_never_asks_again_for_a_refusal(client, monkeypatch):
+    """A 4xx is a verdict about the request: asking again changes nothing and
+    spends the allowance twice."""
+    client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
+    asked = _flaky_upstream(monkeypatch, [400] * 5)
+
+    assert client.get("/api/tiles/mapbox-satellite/14/8298/5639").status_code == 400
+    assert len(asked) == 1
+
+
 def test_tile_proxy_google_remints_session_on_403(client, monkeypatch):
     client.put("/api/settings/keys", json={"google": "AIza.x"})
     tokens = iter(["tok-stale", "tok-fresh"])

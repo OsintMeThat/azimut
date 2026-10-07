@@ -207,7 +207,16 @@
       onWidgetAuthFailure: onwidgetauthfailure,
       onWidgetFailed: onwidgetfailed,
       onOverlayTrouble: (id) => onoverlaytrouble(id),
-      onImageryTrouble: (failure) => { tileFailure = { id: failure.id, message: imageryError(failure.error) }; },
+      // One report per settle: tiles that came through clear the panel the
+      // ones before them raised, so it never outlives the trouble it named.
+      onImageryTrouble: (failure) => {
+        tileFailure = failure.failed
+          ? {
+              id: failure.id,
+              message: imageryError(failure.error, failure.failed, failure.reason),
+            }
+          : null;
+      },
     });
     basemaps.setZoomCeiling(zoomCeiling);
     showBasemap();
@@ -450,13 +459,20 @@
 </div>
 
 <style>
+  /* Clear of the left column, not over it and not under it: the zoom buttons
+     (12px in, 29px wide) and a tool's own rail live there, and whichever wins
+     the stack the analyst loses — either the panel is unreadable or the
+     buttons are unpressable. Reading why the imagery failed and zooming out of
+     it are the same gesture, so both stay available. */
   .tile-trouble {
-    position: absolute; top: 154px; left: 12px; z-index: 600;
-    display: grid; gap: 6px; max-width: min(330px, calc(100% - 24px));
+    position: absolute; top: 154px; left: 53px; z-index: 600;
+    display: grid; gap: 6px; max-width: min(330px, calc(100% - 65px));
     padding: 12px; border: 1px solid var(--warn); border-radius: var(--r-sm);
     background: var(--bg-1); color: var(--text-1); font-size: var(--fs-xs);
   }
-  .tile-trouble.right { left: auto; right: 12px; }
+  .tile-trouble.right {
+    left: auto; right: 12px; max-width: min(330px, calc(100% - 24px));
+  }
   .tile-trouble span, .tile-trouble p { margin: 0; color: var(--text-2); }
   .error-actions { display: flex; flex-wrap: wrap; gap: 7px; }
   .map-wrap {

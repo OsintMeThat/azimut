@@ -160,6 +160,32 @@ withheld from `all_providers()`, so the basemap vanishes from the selector (the
 live map falls back to Esri) until the key changes (verdict cleared) or a test
 passes. Settings shows the stored reason inline.
 
+## Tile retries and failure messages
+
+Three rules, shared by the live proxy and `fetch_crop` so a provider that is
+slow on the map is not quietly fast on the evidence.
+
+**A ceiling per provider.** `TILE_TIMEOUT` is 20s; `Provider.timeout` overrides
+it, and only Sentinel-1 does (45s). Radar is drawn from the GRD through our
+evalscript at request time where the optical layer is served already baked, so
+a cold 512px tile regularly outran the shared ceiling.
+
+**One more try, twice.** `MAX_TILE_TRIES` is 3, for a transport error or a 502
+/503/504, never for a 4xx (a verdict about the request) and never for a 500
+(the service's verdict on this render — on 2026-10-07 every Sentinel-1 tile
+answered 500 for hours, identically). Retries cost nothing on the meter, which
+only ever counts a 2xx. Before this, one slow tile left a hole in the live map
+and took a whole *capture* down with it.
+
+**The provider's own sentence reaches the panel.** Sentinel Hub answers a
+render it could not do with an OGC `ExceptionReport`; `upstream_reason()`
+unwraps it from its Java trace, strips addresses and credentials, caps it at
+240 characters and the proxy returns *that* as the failed tile's body, as
+`text/plain`. The engine hands it to the map as a Blob, so the reason arrives a
+tick after the trouble. Without it, a Copernicus outage is indistinguishable
+from a bug in Azimut — the DEM outage above read as "try again" for an hour.
+Our own sentences still win for 401/403 and 429, which name what to go and do.
+
 ## Per-provider eco thresholds
 
 `eco_max_zooms` in settings.json lets each tile basemap carry its own eco
@@ -474,6 +500,14 @@ Sea off Rotterdam: a Sentinel-2 layer answers 400 and the service's sentence say
 why. One request per probe, on the meter. The first layer that answers is kept as
 `sentinel1_layer` in settings.json, carried by the backup, and forgotten when the
 instance id changes. It can also be named and checked by hand.
+
+**Once it is known, it leaves the display list.** The same silence in
+GetCapabilities that makes Find necessary means the instance hands the radar
+layer back among the optical ones, often first, so
+`/api/satellite/sentinel/layers` drops `sentinel1_layer` from what it offers —
+picked as a Sentinel-2 display it would render radar dated and cloud-filtered by
+a calendar that is not its own. Radar is reached through `sentinel1_layer`
+alone; nothing of its road reads that list.
 
 - **A pass is a day and a time.** Sentinel-1 passes a place at dawn flying south
   and at dusk flying north, so one day can hold two looks from opposite sides.
