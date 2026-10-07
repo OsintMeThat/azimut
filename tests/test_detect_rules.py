@@ -517,6 +517,8 @@ def test_the_catalogue_offers_the_rules_vocabulary_and_the_convertible_built_ins
     catalogue = client.get("/api/compare/analyzers").json()
     assert catalogue["rules"]["bands"] == list(sentinel.L2A_BANDS)
     assert "water" in catalogue["rules"]["classes"]
+    assert catalogue["rules"]["max_marks"] == 60
+    assert catalogue["rules"]["max_check_tiles"] == 20
     assert catalogue["rules"]["max_check_tiles"] == detect_rules.MAX_CHECK_TILES
     assert set(catalogue["as_rules"]) == {"burn-scars", "vegetation-loss", "new-water"}
     assert any(method["id"] == "rules" and method["rules"] for method in catalogue["methods"])
@@ -595,10 +597,10 @@ def test_a_check_reads_the_tiles_under_its_marks_and_beside_a_mark_near_an_edge(
         detect_rules.check_tiles(Check.model_validate(check_body([])))
 
 
-def test_a_check_may_not_reach_more_tiles_than_a_handful():
+def test_a_check_may_not_reach_more_than_twenty_tiles():
     z, x, y = SENTINEL_TILE
     wide = [{"point": pixel_point(256, 256, (z, x + 2 * i, y)), "expect": "found"} for i in range(detect_rules.MAX_CHECK_TILES + 1)]
-    with pytest.raises(ValueError, match="at most 12"):
+    with pytest.raises(ValueError, match="at most 20"):
         detect_rules.check_tiles(Check.model_validate(check_body(wide)))
 
 
@@ -617,11 +619,70 @@ def test_a_check_asks_what_testing_it_costs_before_anything_is_fetched(client, o
     empty = client.post("/api/compare/analyzers/check/plan", json={**body, "check": check_body([])})
     assert empty.status_code == 422 and "drop a pin" in empty.text
     z, x, y = SENTINEL_TILE
-    wide = [{"point": pixel_point(256, 256, (z, x + 2 * i, y)), "expect": "found"} for i in range(13)]
+    wide = [{"point": pixel_point(256, 256, (z, x + 2 * i, y)), "expect": "found"} for i in range(21)]
     refused = client.post("/api/compare/analyzers/check/plan", json={**body, "check": check_body(wide)})
-    assert refused.status_code == 422 and "at most 12" in refused.text
+    assert refused.status_code == 422 and "at most 20" in refused.text
     builtin = next(r for r in BUILTINS if r.id == "large-change").model_dump()
     assert client.post("/api/compare/analyzers/check/plan", json={**body, "recipe": builtin}).status_code == 422
+
+
+def test_sixty_pins_share_their_tile_and_keep_all_results_when_saved(client, offline):
+    built = recipe(LOSS, GREEN_BEFORE)
+    marks = [{"point": pixel_point(155 + i % 10, 155 + i // 10), "expect": "found"} for i in range(30)]
+    marks += [{"point": pixel_point(300 + i % 10, 300 + i // 10), "expect": "empty"} for i in range(30)]
+    seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+    body = {"recipe": built.model_dump(), "check": check_body(marks)}
+    assert client.post("/api/compare/analyzers/check/plan", json=body).json() == {"tiles": 1, "missing": 0}
+    tested = client.post("/api/compare/analyzers/check", json={**body, "detail": True})
+    assert tested.status_code == 200, tested.text
+    answer = tested.json()
+    assert answer["covered"] == [True] * 30 + [False] * 30
+    assert len(answer["readings"]) == 60
+    assert all(len(row["covered"]) == 60 for row in answer["without"])
+    result = {"signature": "abc", "count": answer["count"], "covered": answer["covered"]}
+    saved = client.post("/api/compare/analyzers", json={**body["recipe"], "checks": [check_body(marks, result=result)]})
+    assert saved.status_code == 200, saved.text
+    loaded = next(row for row in client.get("/api/compare/analyzers").json()["custom"] if row["id"] == saved.json()["id"])
+    assert loaded["checks"][0]["marks"] == marks
+    assert loaded["checks"][0]["result"] == result
+    overflow = {**body, "check": check_body(marks + [marks[0]])}
+    assert client.post("/api/compare/analyzers/check/plan", json=overflow).status_code == 422
+    with pytest.raises(ValidationError):
+        Check.model_validate(check_body(marks, result={**result, "covered": [True] * 61}))
+
+
+def test_a_check_can_plan_and_test_twenty_cached_tiles(client, offline):
+    built = recipe(LOSS)
+    z, x, y = SENTINEL_TILE
+    tiles = [(z, x + 2 * i, y) for i in range(20)]
+    before, after = cleared()
+    for tile in tiles:
+        seed_frames(sweep_body(built, maxcc=100), before, after, tile=tile, pictures=False)
+    marks = [{"point": pixel_point(165, 165, tile), "expect": "found"} for tile in tiles]
+    body = {"recipe": built.model_dump(), "check": check_body(marks)}
+    assert client.post("/api/compare/analyzers/check/plan", json=body).json() == {"tiles": 20, "missing": 0}
+    tested = client.post("/api/compare/analyzers/check", json={**body, "detail": True})
+    assert tested.status_code == 200, tested.text
+    answer = tested.json()
+    assert answer["ready"] and answer["count"] == 20
+    assert answer["covered"] == [True] * 20
+    assert len(answer["tiles"]) == len(answer["readings"]) == 20
+
+
+def test_a_twenty_first_tile_is_refused_before_fetching_with_an_actionable_error(client, offline, monkeypatch):
+    asked = []
+    monkeypatch.setattr(detect_rules, "fetch", lambda frames: asked.extend(frames))
+    z, x, y = SENTINEL_TILE
+    marks = [{"point": pixel_point(256, 256, (z, x + 2 * i, y)), "expect": "found"} for i in range(21)]
+    body = {"recipe": recipe(LOSS).model_dump(), "check": check_body(marks)}
+    for endpoint, options in (("/check/plan", {}), ("/check", {"read": True})):
+        refused = client.post(f"/api/compare/analyzers{endpoint}", json={**body, **options})
+        assert refused.status_code == 422
+        assert refused.json()["detail"] == (
+            "these pins reach 21 tiles and a check reads at most 20: "
+            "keep the pins of one place in a check and start another for ground further away"
+        )
+    assert asked == []
 
 
 def test_a_check_reads_the_cache_then_what_it_lacks_and_says_what_came_out_on_each_mark(client, offline, monkeypatch):
@@ -897,3 +958,90 @@ def test_an_example_copied_into_the_library_keeps_its_checks_and_the_backup_carr
     assert listed[0]["checks"][0]["name"] == example["recipe"]["checks"][0]["name"]
     exported = client.get("/api/settings/export").json()
     assert example["recipe"]["checks"][0]["name"] in str(exported)
+
+
+# -- a rule's reading, for moving its line without asking again ------------------------
+
+
+def decode_values(answer, at=0):
+    """One tile's reading back out of the PNG, as the browser reads it."""
+    tile = answer["tiles"][at]
+    raw = np.frombuffer(base64.b64decode(tile["values"]), np.uint8)
+    bgr = cv2.imdecode(raw, cv2.IMREAD_COLOR)
+    steps = bgr[..., 2].astype(np.float64) * 256 + bgr[..., 1].astype(np.float64)
+    return answer["low"] + steps / answer["steps"] * (answer["high"] - answer["low"])
+
+
+def test_a_rule_sends_its_reading_so_its_line_can_move_without_another_test(client, offline):
+    built = recipe(LOSS, GREEN_BEFORE)
+    marks = [{"point": PLOT, "expect": "found"}, {"point": STANDING, "expect": "empty"}]
+    body = {"recipe": built.model_dump(), "check": check_body(marks)}
+    seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+
+    answer = client.post("/api/compare/analyzers/check/values", json={**body, "rule": 0})
+    assert answer.status_code == 200, answer.text
+    got = answer.json()
+    assert got["ready"] is True and got["rule"] == 0 and got["size"] == 512
+    assert len(got["tiles"]) == 1
+
+    # the reading is the one the probe gives at the same pixel, to the step
+    probed = client.post("/api/compare/analyzers/probe", json={**body, "point": PLOT}).json()
+    values = decode_values(got)
+    assert values[165, 165] == pytest.approx(probed["rules"][0]["value"], abs=1e-3)
+    standing = client.post("/api/compare/analyzers/probe", json={**body, "point": STANDING}).json()
+    assert values[400, 400] == pytest.approx(standing["rules"][0]["value"], abs=1e-3)
+
+
+def test_the_browser_can_redraw_a_rule_from_it_exactly_as_a_test_would(client, offline):
+    """The point of the whole thing: the same comparison on the same numbers.
+
+    If this drifts, the ground painted while the slider moves is not the ground
+    the next test keeps, and the line gets set against a picture that lies.
+    """
+    built = recipe(LOSS, GREEN_BEFORE)
+    body = {"recipe": built.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}])}
+    # Two clearings, not one: a plot taken to bare soil, and a patch only half
+    # cleared. Without the second, every line between them keeps the same ground
+    # and the test would pass on a picture that never moved.
+    before, after = cleared()
+    after = paint(after, 300, 300, 24, 24, B04=0.08, B08=0.30)
+    seed_frames(sweep_body(built, maxcc=100), before, after, pictures=False)
+
+    def rule_mask(at_line):
+        """What a test says rule 0 keeps with its line set there."""
+        moved = {**body, "recipe": recipe({**LOSS, "value": at_line}, GREEN_BEFORE).model_dump()}
+        answer = client.post("/api/compare/analyzers/check", json={**moved, "detail": True}).json()
+        mask = cv2.imdecode(np.frombuffer(base64.b64decode(answer["tiles"][0]["mask"]), np.uint8),
+                            cv2.IMREAD_UNCHANGED)
+        return (mask & 1) > 0, (mask & (1 << detect_rules.MEASURED_BIT)) > 0
+
+    _, seen = rule_mask(LOSS["value"])
+    values = decode_values(client.post("/api/compare/analyzers/check/values",
+                                       json={**body, "rule": 0}).json())
+
+    # Rule 0 is `ndvi dropped by so much`: op "le" against a negative line. Three
+    # lines, each keeping different ground: the cleared plot alone, both patches,
+    # and nothing at all.
+    for line in (-0.2, -0.5, -0.75):
+        redrawn = seen & (values <= line)
+        kept, _ = rule_mask(line)
+        assert (redrawn == kept).all(), f"the slider and the engine disagree at {line}"
+    assert (seen & (values <= -0.2)).sum() > (seen & (values <= -0.5)).sum() > 0
+    assert (seen & (values <= -0.75)).sum() == 0
+
+
+def test_a_reading_is_never_fetched_and_a_ground_class_has_no_line(client, offline):
+    built = recipe(LOSS)
+    body = {"recipe": built.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}])}
+    # nothing cached: it says so rather than reaching for Copernicus
+    waiting = client.post("/api/compare/analyzers/check/values", json={**body, "rule": 0}).json()
+    assert waiting == {"ready": False, "missing": 2}
+
+    seed_frames(sweep_body(built, maxcc=100), *cleared(), pictures=False)
+    classes = recipe({"measure": "class", "classes": ["water"], "on": "b", "op": "is"})
+    refused = client.post("/api/compare/analyzers/check/values",
+                          json={"recipe": classes.model_dump(), "check": check_body([{"point": PLOT, "expect": "found"}]),
+                                "rule": 0})
+    assert refused.status_code == 422 and "classification" in refused.json()["detail"]
+    # and a rule that is not there at all
+    assert client.post("/api/compare/analyzers/check/values", json={**body, "rule": 3}).status_code == 422

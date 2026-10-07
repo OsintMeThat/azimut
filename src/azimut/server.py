@@ -311,9 +311,9 @@ def create_app() -> FastAPI:
     )
 
     from .api import (
-        analysis_views, analyzers, cases, compare, drafts, events, files, folders, ingest, inspect,
-        maplayers, media, notes, plates, proofimports, proofs, proposals, satellite, settings,
-        sheetproofs, sheets, templates,
+        analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, ingest,
+        inspect, maplayers, media, notes, plates, proofimports, proofs, proposals, satellite,
+        settings, sheetproofs, sheets, templates,
     )
     from .engine import sheets as sheet_engine
 
@@ -322,6 +322,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
     app.include_router(plates.router)
+    app.include_router(figures.router)
     app.include_router(sheets.router)
     # The one sheet road that fetches bytes, so its own module and its own job.
     app.include_router(sheetproofs.router)

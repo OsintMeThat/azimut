@@ -8,9 +8,15 @@ describe('the date a map picture was taken', () => {
     });
   });
 
-  it('takes a pinned Sentinel-2 day as the acquisition itself', () => {
-    expect(pictureDate({ pinnedDay: '2026-08-30', estimated: '2020-01-01' })).toEqual({
+  it('takes the Sentinel-2 day the window named as the acquisition itself', () => {
+    expect(pictureDate({ day: '2026-08-30', estimated: '2020-01-01' })).toEqual({
       imageryDate: '2026-08-30', imageryExact: true, imageryWhen: '2026-08-30',
+    });
+  });
+
+  it('files no date for a Sentinel-2 view with no day, which blends the archive', () => {
+    expect(pictureDate({ day: null })).toEqual({
+      imageryDate: null, imageryExact: true, imageryWhen: null,
     });
   });
 

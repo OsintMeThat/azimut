@@ -15,6 +15,7 @@
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import RadarLayer from './RadarLayer.svelte';
+  import CustomLayers from './CustomLayers.svelte';
   import CopernicusLayersHelp from '../../components/CopernicusLayersHelp.svelte';
   import { SENTINEL_ECO_MAX_ZOOM } from '../../lib/usage.js';
   import {
@@ -194,6 +195,9 @@
             {#if k.id === 'sentinelhub' && keys[k.id]}
               <CopernicusLayersHelp />
               <RadarLayer bind:layer={radarLayer} onchanged={load} />
+            {/if}
+            {#if k.id === 'sentinelhub'}
+              <CustomLayers keyed={!!keys[k.id]} />
             {/if}
 
             <p class="overage">{k.cost}. {k.overage}</p>

@@ -18,6 +18,7 @@
   import PassDates from './PassDates.svelte';
   import Icon from '../../components/Icon.svelte';
   import CopernicusLayersHelp from '../../components/CopernicusLayersHelp.svelte';
+  import OverlayDisplay from './OverlayDisplay.svelte';
 
   let { bench } = $props();
 
@@ -39,7 +40,10 @@
   const pinCount = $derived(bench.marks.length);
   /** The layer's name without its explanation: "NDVI (vegetation index)" is NDVI on a button. */
   const layerLabel = $derived((bench.offered.find((entry) => entry.id === bench.layer && entry.enabled !== false)?.label ?? 'Choose a layer').replace(/\s*\(.*$/, ''));
+  /** A rule's own arithmetic is the imagery, so the chip says that rather than a layer nobody chose. */
+  const drawnRule = $derived(bench.ruleLayer ? bench.ruleLayer.index + 1 : 0);
   const suggestion = $derived(bench.suggestion);
+  const suggestionWords = $derived(bench.suggestionWords);
 
   /** How every pin came out, from the last test, with the count of what it found. */
   const outcome = $derived.by(() => {
@@ -165,9 +169,11 @@
         {/if}
         <button class="cmp-icon" aria-label="Change the passes" title="Change the passes" onclick={() => bench.changePasses()}>
           <Icon name="calendar" size={14} /></button>
+        <!-- Not an eye: this one swaps the imagery, while the eye below takes the
+             drawings off it. Two eyes a few inches apart read as the same switch. -->
         <button class="cmp-icon eye" class:on={!bench.basemap} aria-pressed={!bench.basemap} aria-label="Passes on the map"
           title={bench.basemap ? 'Show the passes' : 'Show the basemap'} onclick={() => bench.setBasemap(!bench.basemap)}>
-          <Icon name={bench.basemap ? 'eyeOff' : 'eye'} size={15} /></button>
+          <Icon name="satellite" size={15} /></button>
         {#if !bench.radar}
           <div class="pick look-pick">
             <button class="select look" class:off={bench.basemap} aria-haspopup="menu" aria-expanded={open === 'look'}
@@ -175,17 +181,27 @@
                 open = open === 'look' ? '' : 'look';
                 if (open === 'look') void bench.checkLayers();
               }}>
-              <Icon name="layers" size={14} /><span>Display: {layerLabel}</span><Icon name="chevronDown" size={13} />
+              <Icon name="layers" size={14} /><span>Display: {drawnRule ? `rule ${drawnRule}` : layerLabel}</span><Icon
+                name="chevronDown" size={13} />
             </button>
             {#if open === 'look'}
               <div class="menu look-menu cmp-glass" role="menu" aria-label="Copernicus layer">
+                <p class="layer-aside">What you look at. Rules read the bands themselves.</p>
+                {#if drawnRule}
+                  <button class="layer-drawn" role="menuitem" onclick={() => { bench.hideRule(); open = ''; }}>
+                    Rule {drawnRule} is drawn on the map. Put this display back.
+                  </button>
+                {/if}
                 {#each bench.offered as entry (entry.id)}
                   <button role="menuitemradio" aria-checked={bench.layer === entry.id} disabled={entry.enabled === false}
                     title={entry.reason || entry.hint || undefined}
                     onclick={() => { bench.setLayer(entry.id); open = ''; }}>
-                    <span class="grow">{entry.label}<span class="layer-id cmp-mono">{entry.id}</span>
+                    <span class="grow">{entry.label}{#if entry.custom}<span class="layer-mine">yours</span>{/if}<span
+                        class="layer-id cmp-mono">{entry.id}</span>
                       {#if entry.reason}<span class="layer-reason">{entry.reason}</span>{/if}</span>
-                    {#if entry.enabled !== false && entry.id === suggestion}<small>for rule ★</small>{/if}
+                    {#if entry.enabled !== false && entry.id === suggestion && suggestionWords}
+                      <small>{suggestionWords}</small>
+                    {/if}
                   </button>
                 {/each}
                 <hr />
@@ -229,13 +245,17 @@
             onclick={() => bench.arm('empty')}><i class="shape shape-empty" aria-hidden="true"></i>Should stay empty</button>
           <span class="count cmp-mono">{pinCount} pin{pinCount === 1 ? '' : 's'}</span>
         </div>
+        <span class="overlay-acts">
+          <OverlayDisplay bind:markers={bench.markers} bind:outlines={bench.outlines} bind:checkPins={bench.checkPins}
+            bind:hidden={bench.hideOverlays} what="the check overlays" upward />
+        </span>
         <button class="btn test" class:btn-primary={!bench.tested} class:done={bench.tested} disabled={!bench.canTest}
           title={bench.blocked || undefined} onclick={() => bench.test()}>{bench.testLabel}</button>
       </div>
-      {#if bench.pinning}
-        <p class="note" role="status">Click the ground where {bench.pinning === 'found' ? 'a candidate should be found' : 'none should be'} (Esc stops).</p>
-      {:else if bench.blocked && bench.dated}
+      {#if bench.blocked && bench.dated && (!bench.pinning || bench.plan?.error)}
         <p class="note" class:warn={!!bench.plan?.error} role="status">{bench.blocked}</p>
+      {:else if bench.pinning}
+        <p class="note" role="status">Click the ground where {bench.pinning === 'found' ? 'a candidate should be found' : 'none should be'} (Esc stops).</p>
       {/if}
     {/if}
 
@@ -283,6 +303,7 @@
   .head, .tools, .result { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
   .head { position: relative; }
   .grow { flex: 1; }
+  .overlay-acts { display: inline-flex; margin-left: auto; }
 
   /* Which check is on the map, which pass of it, and how the passes are shown. */
   .pick { position: relative; min-width: 0; }
@@ -335,6 +356,28 @@
   .look-pick { position: static; }
   .look-menu { left: auto; right: 10px; width: 320px; max-width: calc(100% - 20px); gap: 0; }
   .layer-id, .layer-reason { display: block; font-size: var(--fs-xs); color: var(--glass-muted); }
+  /* Said where the two are confused: the display is what the eye reads, never
+     what a rule measures. A rule reads the bands straight from the archive. */
+  .layer-aside {
+    margin: 0; padding: 7px 10px 8px; font-size: var(--fs-xs);
+    color: var(--glass-muted); border-bottom: 1px solid var(--glass-line);
+  }
+  .layer-drawn {
+    width: 100%; padding: 7px 10px; border: 0; border-bottom: 1px solid var(--glass-line);
+    background: none; color: var(--accent); font-size: var(--fs-xs); text-align: left; cursor: pointer;
+  }
+  /* A layer written in Azimut, so the list says which ones are the analyst's own
+     rather than the configuration's. */
+  .layer-mine {
+    margin-left: 6px;
+    padding: 0 4px;
+    border: 1px solid var(--glass-line);
+    border-radius: 3px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--glass-muted);
+  }
   .layer-reason { white-space: normal; }
   .layer-setup, .layer-status { display: grid; gap: 7px; padding: 8px 10px; font-size: var(--fs-xs); }
   .layer-status { border-top: 1px solid var(--glass-line); color: var(--warn); }

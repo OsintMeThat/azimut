@@ -27,10 +27,18 @@ def _response(url, payload=None, text=None, status=200):
 def test_wmts_url_omits_time_by_default():
     url = sentinel.wmts_url()
     assert "LAYER=TRUE_COLOR" in url
-    # no TIME = the layer's own default window (most recent), which is the
-    # honest answer to "just show me it"
+    # No TIME is the undated fallback, not "most recent": Sentinel Hub applies
+    # the mosaicking order per pixel over the whole archive, so a swath edge in
+    # the newest scene comes back filled from an older one. Callers send a day.
     assert "TIME=" not in url
     assert "{key}" in url and "{z}" in url and "{x}" in url and "{y}" in url
+
+
+def test_wmts_url_dates_one_acquisition_when_both_ends_are_the_same_day():
+    # the shape every caller asks for: one pass, which can be pointed at and
+    # dated, with holes where that pass has no pixels
+    url = sentinel.wmts_url("TRUE_COLOR", "2026-05-11", "2026-05-11")
+    assert "TIME=2026-05-11/2026-05-11" in url
 
 
 def test_wmts_url_carries_the_layer_and_the_window():
@@ -131,7 +139,9 @@ def test_parse_variant_refuses_an_impossible_ceiling(spec):
 
 
 def test_variant_label_reads_like_a_human_wrote_it():
-    assert sentinel.variant_label("SWIR", None, None).endswith("most recent")
+    # no window sends no TIME, which blends the archive per pixel rather than
+    # rendering the newest pass — the label must not promise a date
+    assert sentinel.variant_label("SWIR", None, None).endswith("undated mosaic")
     assert "2026-05-01 → 2026-05-31" in sentinel.variant_label("SWIR", "2026-05-01", "2026-05-31")
     # a single-day window is a day, not a range from a day to itself
     assert sentinel.variant_label("SWIR", "2026-05-01", "2026-05-01").endswith("2026-05-01")
@@ -731,3 +741,18 @@ def test_band_frame_refuses_a_product_it_has_no_evalscript_for():
         *(f"index-{name}" for name in ("ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi")),
         *(f"change-{name}" for name in ("ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi")),
     }
+
+
+def test_radar_label_names_a_pass_and_says_so_when_there_is_none():
+    assert sentinel.radar_label("2026-05-14", "05:42:10") == "2026-05-14 05:42 UTC"
+    assert sentinel.radar_label("2026-05-14", "") == "2026-05-14"
+    # same defect as the optical label: without a day the tiles blend every pass
+    # over the point, which mixes looks from opposite sides of the track
+    assert sentinel.radar_label("", "") == "undated mosaic"
+
+
+def test_radar_wmts_url_sends_no_time_only_when_it_has_no_pass():
+    dated = sentinel.radar_wmts_url("S1_VV", "2026-05-14", "05:42:10")
+    assert "TIME=" in dated
+    assert "EVALSCRIPT=" in dated
+    assert "TIME=" not in sentinel.radar_wmts_url("S1_VV")

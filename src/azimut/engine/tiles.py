@@ -94,8 +94,10 @@ GOOGLE_JS_LOADER_URL = "https://maps.googleapis.com/maps/api/js?key={key}&v=week
 # configuration-instance UUID, which is the whole credential — no token to mint.
 # The layer, the mosaicking window and the cloud ceiling are choices, not
 # constants, so the template is built per variant in engine/sentinel.py; this is
-# the plain one (TRUE_COLOR, the layer's own default window = most recent, and
-# no cloud filter — the instance's own would silently drop cloudy passes).
+# the plain one: TRUE_COLOR, no cloud filter (the instance's own would silently
+# drop cloudy passes) and no window, which blends the whole archive per pixel
+# rather than showing the newest pass. It is the undated fallback the UI falls
+# to when it cannot resolve a pass, and it says so on screen when it does.
 SENTINELHUB_WMTS_URL = sentinel.wmts_url()
 # Default eco threshold for both Sentinel layers; Settings can override it.
 SENTINEL_ECO_MAX_ZOOM = 7
@@ -333,11 +335,18 @@ def get_provider(provider_id: str) -> Provider:
                 layer, start, end, maxcc = sentinel.parse_variant(spec)
             except ValueError as exc:
                 raise KeyError(str(exc)) from exc
+            # A layer written in Azimut is its base layer plus a script; one the
+            # configuration serves answers for itself. Either way the id keeps
+            # the name the analyst chose, so the cache and provenance are keyed
+            # on what they asked for, not on how it was rendered.
+            asked, script = sentinel.resolve_layer(
+                layer, sentinel.renderable_layers(config.load_settings())
+            )
             return replace(
                 provider,
                 id=provider_id,
                 label=f"{provider.label} · {sentinel.variant_label(layer, start, end, maxcc)}",
-                url=sentinel.wmts_url(layer, start, end, maxcc).replace(
+                url=sentinel.wmts_url(asked, start, end, maxcc, script=script).replace(
                     "{key}", _sentinel_key_from(provider.url)
                 ),
             )

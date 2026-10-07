@@ -1,5 +1,16 @@
 <script>
   import Icon from '../../components/Icon.svelte';
+  import CustomLayerForm from '../../components/CustomLayerForm.svelte';
+  import { api } from '../../lib/api.js';
+  import { toast } from '../../lib/state.svelte.js';
+  import {
+    clearPreview,
+    dataSources,
+    previewLayer,
+    readCustomLayers,
+    saveCustomLayer,
+    startForm,
+  } from '../../lib/customLayers.js';
 
   /** `s2` is the store from `state/sentinel.svelte.js`: what has been asked,
    *  what came back, and what is still in flight. The label helpers are pure
@@ -16,13 +27,112 @@
 
   // What the tiles are dated: the pinned pass, or the one "most recent" resolved
   // to. Blank only while that lookup is out, or where no pass came back at all.
-  const chipDate = $derived(s2.date || s2.latest || '');
+  const chipDate = $derived(s2.day);
 
   // The readout tracks the drag; the ceiling only moves on release. Every step
   // in between would be a provider id of its own, and Sentinel-2 tiles are
   // billed — you pay for the number you stopped on, not the ones you passed.
   let dragging = $state(null);
   const shown = $derived(dragging ?? s2.maxcc);
+
+  /**
+   * Writing a layer happens here rather than only in Settings because a script
+   * is judged on pixels: Preview renders it on this very map, over the date and
+   * the ceiling already chosen, before anything is saved. Settings keeps the
+   * list; this is where one is made. Both use the same form.
+   *
+   * **The draft outlives the panel.** Previewing is the reason to close the
+   * form — you close it to look at the map — so closing it must not throw away
+   * what was typed. The draft is held here until it is saved or discarded, and
+   * reopening the panel hands the same one back.
+   */
+  let open = $state(false); // is the form showing
+  let held = $state(null); // the draft, kept while the form is closed
+  let writingBusy = $state(false);
+  let writingNote = $state('');
+  let mine = $state([]); // the saved scripts, read when the form opens
+  let scriptMax = $state(4000);
+  let bands = $state([]);
+  let radarLayer = $state('');
+  let before = ''; // the layer to come back to if nothing is kept
+
+  // A script reads the data of a layer the configuration serves — never another
+  // script, and never the radar layer, through which Sentinel-2 bands render
+  // nothing at all.
+  const bases = $derived(dataSources(s2.layers, radarLayer));
+  const resuming = $derived(!!held && !held.editing);
+
+  async function openWriting(ident) {
+    try {
+      const found = await readCustomLayers(api);
+      mine = found.layers;
+      scriptMax = found.scriptMax;
+      bands = found.bands;
+      radarLayer = found.radarLayer;
+    } catch (error) {
+      toast(`Could not read your layers: ${error.message}`, 'danger');
+      return;
+    }
+    // The draft already in hand is handed back, unless this press is about a
+    // different layer — then it is that layer's turn and the old draft is gone.
+    if (!held || held.editing !== ident) {
+      held = startForm({
+        layer: ident ? mine.find((row) => row.id === ident) ?? null : null,
+        bases: dataSources(s2.layers, radarLayer),
+        bands,
+        radarLayer,
+      });
+      writingNote = '';
+    }
+    before = s2.draft ? before : s2.layer;
+    open = true;
+  }
+
+  async function preview(draft) {
+    writingBusy = true;
+    try {
+      s2.layer = await previewLayer(api, draft);
+      writingNote = 'Drawn on the map. Nothing is saved yet.';
+    } catch (error) {
+      writingNote = '';
+      toast(error.message, 'danger');
+    } finally {
+      writingBusy = false;
+    }
+  }
+
+  async function keep(draft) {
+    writingBusy = true;
+    try {
+      const saved = await saveCustomLayer(api, draft);
+      await clearPreview(api).catch(() => {});
+      s2.rememberLayer(saved);
+      s2.layer = saved.id;
+      open = false;
+      held = null;
+      writingNote = '';
+      toast(`${draft.id} saved`, 'ok');
+    } catch (error) {
+      toast(error.message, 'danger');
+    } finally {
+      writingBusy = false;
+    }
+  }
+
+  /** Put the form away, keeping the draft and the preview on the map. */
+  function setAside() {
+    open = false;
+  }
+
+  async function discard() {
+    open = false;
+    held = null;
+    writingNote = '';
+    // A preview is a layer only this machine knows; dropping the draft forgets
+    // it and the map goes back to what was on it.
+    if (before) s2.layer = before;
+    await clearPreview(api).catch(() => {});
+  }
 </script>
 
 <div class="s2-wrap" bind:this={menuEl}>
@@ -40,16 +150,50 @@
     <span class="mono">{chipDate || 'Most recent'}</span>
   </button>
   {#if s2.menuOpen}
-    <div class="s2-menu card">
+    <div class="s2-menu card" class:writing={open}>
       <div class="menu-row">
         <span class="menu-label">Layer</span>
-        <select class="select" bind:value={s2.layer}>
+        <select class="select" bind:value={s2.layer} disabled={open}>
           {#each s2.layers as entry (entry.id)}
             <option value={entry.id}>{entry.label}</option>
           {/each}
+          {#if s2.draft}
+            <option value={s2.layer}>Draft (not saved)</option>
+          {/if}
         </select>
       </div>
       {#if s2.layerHint}<div class="menu-hint">{s2.layerHint}</div>{/if}
+
+      {#if !open}
+        <div class="menu-hint dim write-row">
+          <button class="linkish" onclick={() => openWriting('')}>
+            {resuming ? 'Keep writing…' : 'Write a layer…'}
+          </button>
+          {#if s2.layers.some((entry) => entry.custom && entry.id === s2.layer)}
+            <button class="linkish" onclick={() => openWriting(s2.layer)}>Edit this one</button>
+          {/if}
+          {#if resuming}
+            <button class="linkish dismiss" onclick={discard} title="Throw the draft away">
+              Discard
+            </button>
+          {/if}
+        </div>
+      {:else}
+        <CustomLayerForm
+          form={held}
+          {bases}
+          {bands}
+          taken={s2.layers
+            .filter((entry) => !entry.custom && entry.id !== held.editing)
+            .map((entry) => entry.id)}
+          {scriptMax}
+          busy={writingBusy}
+          note={writingNote}
+          onpreview={preview}
+          onsave={keep}
+          oncancel={setAside}
+        />
+      {/if}
       <!-- Silent when the layers are the configured ones, which is the normal
            case and was a line of panel saying so on every open. -->
       {#if s2.layersSource !== 'instance'}
@@ -87,7 +231,14 @@
       <div class="menu-row">
         <span class="menu-label">Date</span>
         <div class="chips">
-          <button class="chip-opt" class:on={!s2.date} onclick={s2.clearDate}>Most recent</button>
+          <button
+            class="chip-opt"
+            class:on={!s2.date}
+            onclick={s2.clearDate}
+            title={s2.undated
+              ? 'No pass could be dated here; the tiles blend several dates'
+              : 'Show the newest pass over the crosshair'}
+          >Most recent{#if !s2.date && s2.latest}<span class="opt-day mono">{s2.latest}</span>{/if}</button>
         </div>
       </div>
 
@@ -118,6 +269,7 @@
                 class="cal-day {pass ? cloudClass(pass.cloud) : ''}"
                 class:has={!!pass}
                 class:on={s2.date === day}
+                class:showing={!s2.date && s2.latest === day}
                 class:unavailable
                 class:verifying
                 disabled={s2.date !== day &&
@@ -198,7 +350,12 @@
     box-shadow: var(--shadow-2);
     z-index: 700;
   }
+  /* A script needs room to be read; a date picker does not. The menu widens
+     only while one is open, and never past the viewport on a narrow screen. */
+  .s2-menu.writing { width: min(620px, calc(100vw - 32px)); }
   .s2-menu .select { max-width: 150px; padding: 4px 6px; font-size: var(--fs-xs); }
+  .write-row { display: flex; gap: 10px; }
+  .write-row .dismiss { margin-left: auto; color: var(--text-3); }
   .menu-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
   .menu-label { font-size: var(--fs-xs); color: var(--text-3); font-weight: 600; }
   .chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
@@ -247,6 +404,7 @@
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
   .cal-grid.busy { opacity: 0.5; pointer-events: none; }
   .cal-dow { text-align: center; font-size: 9px; color: var(--text-3); padding-bottom: 1px; }
+  .opt-day { margin-left: 6px; font-size: var(--fs-xs); opacity: 0.7; }
   .cal-day {
     /* a square cell grew with the panel; a stated height keeps the month the
        size of a month whatever else is in here */
@@ -271,5 +429,7 @@
   .cal-day.verifying { opacity: 0.55; animation: pulse 0.8s ease-in-out infinite alternate; }
   .cal-day.has:hover { border-color: var(--text-1); }
   .cal-day.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+  /* the pass "most recent" resolved to: being rendered, but not chosen */
+  .cal-day.showing { box-shadow: inset 0 0 0 1px var(--accent); font-weight: 700; }
   @keyframes pulse { to { opacity: 1; } }
 </style>

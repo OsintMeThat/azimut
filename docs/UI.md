@@ -1658,7 +1658,15 @@ version. Each
 side keeps its provider, Wayback release, Sentinel-2 day and reference layers.
 The source cards and mode controls use the application's shared theme, buttons
 and spacing. The date is a chip beside the provider, reading the same for
-Wayback and for Sentinel-2 on every map tab, so the card's layers icon means one thing. A
+Wayback and for Sentinel-2 on every map tab, so the card's layers icon means one thing.
+The Sentinel-2 chip's menu also writes layers of your own — **Composite** puts
+three bands on red, green and blue, **Index** measures `(A − B) / (A + B)` on a
+colour ramp and **Custom script** is the evalscript itself, with each form
+writing the script the next tab shows. **Preview on the map** draws it over the
+date already chosen without saving it; closing the panel keeps the draft and the
+preview, and **Discard** is what throws them away. Saved, a layer joins the
+picker in Satellite, Compare and Detect. Settings → Imagery → Copernicus keeps
+the list. A
 Wayback chip names the release, so the day its pixels were taken sits beside it,
 as it does under the chip on Satellite. The
 cards float over the maps they describe, one per pane, so no bar takes the maps'
@@ -2023,6 +2031,15 @@ crop's own resolution, the needle the bearing it was filed with, and a pasted
 screenshot gets neither, since its coordinates describe the map view at filing
 time rather than the picture itself. What was drawn is written into the
 capture's provenance.
+
+**Build a figure** sits in the same menu while Sentinel-2 is on: the same ground
+on the day already chosen, through the layers you pick, each panel captioned and
+filed as its own capture. It opens in Geo Proof with its credit line written —
+the day, the point and Copernicus Sentinel-2 L2A — ready to annotate. Up to
+eight panels, one to four per row, each layer once, at the capture size the menu
+is set to. Every panel is the same acquisition by design: panels of different
+dates compare two things at once, which is what Compare is for, so an undated
+map says to pick a date first.
 
 Underneath, the **status line** reads where you are (coordinates, zoom, and the
 armed tool's own measurement) on the left, and carries the two acts that take
@@ -2755,9 +2772,13 @@ basemap alone, or **New check**. A check of two dates splits the map between its
 passes: the before pass on the left and the after pass on the right, each on its
 own map with the two cameras held together and a handle to drag the cut, and
 **Before**, **Split** and **After** switch between the whole map on one and the
-cut. A check of one date shows its pass on one map. An eye puts the basemap in
-the passes' place and back. **Display** picks their Copernicus layer, with the
-one that reads rule ★ best marked; it changes the picture, not the rule's bands.
+cut. A check of one date shows its pass on one map. A satellite button puts the
+basemap in the passes' place and back; it is not an eye, because the eye further
+along takes the drawings off the imagery and two eyes would read as one switch.
+**Display** picks their Copernicus layer, with the one that shows the ★ rule's
+data best tagged by the bands it shows (“shows B08 · B04”) and the ones you
+wrote tagged *yours*. The menu opens on one line saying what it is for: what you
+look at, while rules read the bands themselves.
 Opening or selecting a check verifies the configuration's layers, without a
 network check on builder mount. The menu shows their actual IDs, including
 `VEGETATION_INDEX` where that is the configured NDVI display. Missing products
@@ -2767,11 +2788,51 @@ or an available display, with a notice. If verification fails, the basemap
 stays on. Tile errors on either pass name the layer and date and offer
 **Retry imagery** or **Use basemap**.
 
+**Reuse a formula** sits beside **Add a rule** once you have written a layer of your
+own (Satellite → the date chip → Write a layer). A rule reads one number per
+pixel, so a layer comes over when what it paints is a number: an index paints
+`(A − B) / (A + B)` and darkens below a line, which is the `nd` measure with its
+threshold; a composite that puts one band in all three channels is grey, not
+colour, which is that band's reflectance, the `band` measure. The menu lists
+every layer you have written — the ones that come over with their arithmetic, the
+ones that do not with the reason, greyed. A colour composite is three channels
+and no single number, and nobody can read a quantity out of a hand-written
+script. Which dates the rule reads is the analyzer's question, not the layer's,
+and a grey band brings no line: the gain it is drawn with says how bright it is,
+never where the ground stops passing.
+
+Each rule carries a coloured dot with its number, which shows or hides that
+rule's pixels on the map. Until a test has run there are no pixels, so the dot is
+drawn hollow and says what it is waiting for rather than answering nothing.
+
+Moving a rule's line repaints its ground as you drag it. The first touch of the
+slider fetches what that rule read over the whole frame — the same readings the
+last test made, never new imagery, so it costs no Copernicus request — and from
+then on the browser crosses the line itself. Only that rule's pixels move: the
+pins, the candidates and the shares still answer for the last test, and the
+button still reads **Test again**. A rule whose reading is in hand no longer dims
+the picture when only its line moved, since the ground drawn is the ground the
+next test will keep. Changing what a rule *reads* — its bands, its dates, its
+context — drops the reading, and a ground class has no line to move.
+
+**See it** beside what a rule reads draws the rule's own arithmetic on the map as
+a Copernicus layer, so the quantity can be looked at continuously instead of as a
+verdict. An index renders as `(A − B) / (A + B)` on a ramp, a band as that band
+in grey, brightness as the visible bands averaged; a published index does the
+same from its own two bands. No threshold is drawn into it, so moving the rule's
+line costs no tiles — the ramp already shows where every value falls. A colour
+change needs two dates, ground classes are a classification and radar is another
+collection, so those say why instead of offering a press. While a rule is drawn
+the Display chip reads *rule N* and the menu offers the display back; choosing
+any display, or removing the rule, ends the drawing.
+
 **Checks** are how an analyzer is proved, and one is needed to save it, with a
 pin where something should be found; the others may be traps, where nothing may
 be. A check is two passes (one, for one date) and the pins laid on them. It has
 no frame: it reads the ground under its pins, the tile under each and the tile
-across an edge when a pin is within 48 pixels of it, at most twelve tiles.
+across an edge when a pin is within 48 pixels of it. A check holds up to 60 pins
+and reads at most 20 tiles. Exceeding the tile limit shows the count and limit
+in the console, even while placing pins, and disables **Test** before fetching.
 **New check** opens a drawer over the console that takes its passes: a look-up
 for the ground at the middle of the map over 30 days, 90 days or a year, one
 Copernicus request, or **Dates**, which picks each side from a calendar of the
@@ -2795,7 +2856,13 @@ would return there, since it runs the engine's own evaluation, cleanup, sizes,
 shape and grouping. Each pin turns green or red as it comes out, and the row
 under the console says **2 of 2 found** or **1 of 1 flagged**, keeps a chip for
 every rule, to hide its pixels and see which ones help, and switches the map
-between **Rules** and **Detections**. Each rule's card gives the share of the
+between **Rules** and **Detections**. One control holds the overlays: an eye and
+the chevron beside it, joined, because the eye is the switch and the chevron says
+what it switches. The chevron lists **Markers**, **Outlines** and **Check pins**
+independently; the eye takes all of them off at once, which greys the list and
+says the eye has them all off, and restores the choices when pressed again. The
+satellite button is the separate one: it switches the imagery to the basemap.
+Display choices do not rerun a test or change the saved analyzer. Each rule's card gives the share of the
 measured ground it keeps, lays the pins along its slider where they were read
 (filled where they should be found, struck where none should), so the line can be
 set between them, and says what the pins would have come to without it (**Without
@@ -2882,8 +2949,13 @@ candidate under review wears a ring on the map. **Add candidate**, or the map's 
 with `origin: manual`, the same pass pair, preview and verdicts. Manual candidates
 have dashed map outlines and a Manual label.
 
-Beside **Export as layer**, the eye (`H`) takes the candidates and areas off the
-map, so the pass shows bare; leaving the review puts them back. When the run
+Beside **Export as layer**, the same joined control as the bench's: the eye (`H`)
+takes the candidates and areas off the map, so the pass shows bare, and the
+chevron beside it switches **Markers** (including numbered groups) and
+**Outlines** independently without rerunning the analysis. Leaving the review
+puts them back. With markers hidden, an outline still opens its candidate and the
+candidate under review has a highlighted outline. The eye restores the display
+choices when pressed again. When the run
 read two passes, the blink (`B`) flips A against B on the map at Compare's
 normal speed, and a chip over the map says which is showing, in Compare's
 letters. Both passes are laid in the one map and kept loaded, so the blink

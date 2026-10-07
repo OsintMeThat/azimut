@@ -24,3 +24,24 @@ it('keeps a custom configured display and handles an empty configuration', () =>
   expect(availableDisplayLayer('NDVI', options)).toBe('MY_GROUND');
   expect(displayLayers([], true).every((entry) => !entry.enabled)).toBe(true);
 });
+
+it('offers a layer written in Azimut whether or not the instance has been asked', () => {
+  const mine = { id: 'PLUME_SWIR', label: 'SWIR plume', custom: true };
+  for (const verified of [true, false]) {
+    const row = displayLayers([mine], verified).find((entry) => entry.id === 'PLUME_SWIR');
+    // the script is on this machine; GetCapabilities has no say in it
+    expect(row.enabled).toBe(true);
+    expect(row.reason).toBe('');
+  }
+});
+
+it('still withholds a configured layer until the instance confirms it', () => {
+  const row = displayLayers([{ id: 'SWIR', label: 'SWIR' }], false).find((e) => e.id === 'SWIR');
+  expect(row.enabled).toBe(false);
+  expect(row.reason).toBe('Check your Copernicus layers first.');
+});
+
+it('lets a layer written in Azimut be the display layer', () => {
+  const offered = displayLayers([{ id: 'PLUME_SWIR', label: 'Plume', custom: true }], false);
+  expect(availableDisplayLayer('PLUME_SWIR', offered)).toBe('PLUME_SWIR');
+});

@@ -776,6 +776,95 @@ export function suggestedLayer(rule, layers = []) {
   return firstOf(wanted, ids) ?? fallback;
 }
 
+/**
+ * Whether a reading crosses a rule's line.
+ *
+ * The mirror of `detect_rules._passes`, and it has to stay the mirror: it is
+ * what repaints the ground while the slider moves, against the very readings
+ * the last test made. `tests/test_detect_rules.py` proves the two agree pixel
+ * for pixel at several lines; if this drifts, the line gets set against a
+ * picture that lies.
+ */
+export function passesValue(rule, value) {
+  if (rule.op === 'ge') return value >= rule.value;
+  if (rule.op === 'le') return value <= rule.value;
+  if (rule.op === 'between') return value >= rule.value && value <= rule.upper;
+  return Math.abs(value) >= rule.value;
+}
+
+/**
+ * One rule's bit redrawn through the mask, from the reading the engine sent.
+ *
+ * Every other rule's bit, the measured bit and the kept bit are left exactly as
+ * the test wrote them: only the line of this rule moved, so only its own ground
+ * may change. Unmeasured ground carries no reading and stays out.
+ *
+ * @param {Uint8Array} bits the tile's mask, one byte a pixel
+ * @param {number} index which rule's bit to redraw
+ * @param {Float64Array|number[]} values that rule's reading, pixel for pixel
+ */
+export function redrawRule(bits, index, values, rule) {
+  const out = new Uint8Array(bits);
+  const bit = 1 << index;
+  const seen = 1 << MEASURED_BIT;
+  for (let p = 0; p < out.length; p++) {
+    if (!(out[p] & seen)) continue;
+    if (passesValue(rule, values[p])) out[p] |= bit;
+    else out[p] &= ~bit;
+  }
+  return out;
+}
+
+/** The share of the measured ground a redrawn rule keeps, 0 to 1. */
+export function shareOf(masks, index) {
+  let seen = 0;
+  let kept = 0;
+  const bit = 1 << index;
+  const measured = 1 << MEASURED_BIT;
+  for (const bits of masks) {
+    for (let p = 0; p < bits.length; p++) {
+      if (!(bits[p] & measured)) continue;
+      seen++;
+      if (bits[p] & bit) kept++;
+    }
+  }
+  return seen ? kept / seen : 0;
+}
+
+/**
+ * What a rule reads, apart from where its line sits.
+ *
+ * The reading the engine sends answers for the bands, the dates and the context
+ * — never for the threshold, which is the point. Two recipes with the same
+ * reading key can share one download; a change to this key drops it.
+ */
+export function readingKey(rule) {
+  return [rule.measure, rule.index, ...rule.bands, rule.band, rule.polarisation,
+    [...(rule.classes ?? [])].sort().join('+'), rule.on, rule.around].join('|');
+}
+
+/** Each rule as what it reads and where its line sits, kept apart. */
+export function linesOf(recipe) {
+  return (recipe?.rules ?? []).map((rule) => ({
+    key: readingKey(rule),
+    line: [rule.op, rule.value, rule.upper].join('|'),
+  }));
+}
+
+/**
+ * What the suggested display layer lets you see, in the words of the data the
+ * ranking rule reads — "shows B11 · B12".
+ *
+ * Not "for rule ★": the star is at the other end of the screen, so naming it
+ * sends the reader hunting for what it means. The bands say it on the spot.
+ */
+export function suggestedWords(rule) {
+  const bands = ruleBands(rule);
+  if (bands.length) return `shows ${bands.join(' · ')}`;
+  if (rule?.measure === 'class') return 'shows the ground classes';
+  return '';
+}
+
 // -- pins on a rule's line -----------------------------------------------------------
 
 const unit = (value) => Math.max(0, Math.min(1, value));

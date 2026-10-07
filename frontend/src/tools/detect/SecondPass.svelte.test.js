@@ -1,4 +1,7 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
@@ -92,10 +95,16 @@ it('hands the cursor mode on to its own map, so a pin can be dropped on either h
   expect(target.querySelector('.stub').dataset.armed).toBe('selecting');
 });
 
-it('lets a click through the line while a pin is armed, and takes it otherwise', () => {
-  open({ armed: 'selecting' });
-  expect(slider().classList.contains('armed')).toBe(true);
-  unmount(live); target.remove();
-  open();
-  expect(slider().classList.contains('armed')).toBe(false);
+it('lets every click through the line, and grabs only on the handle', () => {
+  // The line rides beside the engine's controls (`mapStacking.test.js`), well over
+  // the ground the tool paints, and the map is centred on what is being checked —
+  // so a line that took clicks took them from the pins sitting under it. The drag
+  // lives on the handle, which is why letting the line through costs nothing.
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'SecondPass.svelte'), 'utf8');
+  const line = source.slice(source.indexOf('.line {'), source.indexOf('.handle::before'));
+  expect(line).toMatch(/pointer-events:\s*none/);
+  expect(source.slice(source.indexOf('.handle {'))).toMatch(/pointer-events:\s*auto/);
+  // and nothing is left behind saying the line ever behaved differently while armed
+  expect(source).not.toMatch(/\.line\.armed/);
+  expect(source).not.toMatch(/class:armed/);
 });

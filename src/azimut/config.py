@@ -58,6 +58,17 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.
     "schema": SETTINGS_SCHEMA,
+    # Copernicus layers written here rather than in the Copernicus dashboard, in
+    # the order they were saved. Each: {"id" (the name every variant id, cache
+    # directory and capture carries), "label", "base" (a layer the instance
+    # serves, which supplies the data collection), "script" (the evalscript),
+    # "hint"}. engine/sentinel.py owns the shape; they reach every map tab
+    # through /api/satellite/sentinel/layers.
+    "sentinel_layers": [],
+    # The layer being written on this machine right now, so the map can render
+    # it before it is saved: {"id" (AZIMUT_DRAFT_<digest>), "base", "script"}.
+    # Replaced by the next preview, and never offered in a picker.
+    "sentinel_draft_layer": None,
     # Extra XYZ tile providers added by the user (spec §6 v1 notes).
     # Each: {"id", "label", "url" ({x}/{y}/{z} template), "attribution", "max_zoom"}
     "tile_providers": [],

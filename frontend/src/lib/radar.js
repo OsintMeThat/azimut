@@ -46,7 +46,7 @@ export function sameTrack(one, other) {
 
 /** How a pass reads: "2026-05-14 · 05:42 UTC". */
 export function passLabel(pass) {
-  if (!validPass(pass)) return 'Most recent';
+  if (!validPass(pass)) return 'Several passes';
   return `${pass.date} · ${pass.time.slice(0, 5)} UTC`;
 }
 

@@ -84,3 +84,78 @@ describe('radar passes', () => {
     expect(s1.peer.time).toBe('05:42:40');
   });
 });
+
+/**
+ * With no pass chosen the tiles used to go out without a mosaicking window,
+ * which makes Sentinel Hub blend the whole archive pixel by pixel — for radar
+ * that mixes looks from opposite sides of the track, which cannot be read. So
+ * "most recent" resolves to one pass and that pass is the window.
+ */
+describe('never showing a blend of passes', () => {
+  it('resolves the newest pass and renders that one', async () => {
+    const s1 = store();
+    expect(s1.shownPass).toBe(null);
+    await s1.resolveLatest('2026-05-20');
+    // two passes that day, from opposite sides: the later one is the newest
+    expect(s1.shownPass).toEqual({ date: '2026-05-14', time: '17:33:02', orbit: 'ascending' });
+    expect(s1.variant).toEqual({ pass: s1.shownPass });
+  });
+
+  it('prefers a chosen pass over the resolved one', async () => {
+    const s1 = store();
+    await s1.resolveLatest('2026-05-20');
+    s1.pick(PASSES[1]);
+    expect(s1.shownPass.time).toBe('05:42:10');
+  });
+
+  it('ignores a pass later than the day asked about', async () => {
+    get = vi.fn(async () => ({ dates: PASSES }));
+    const s1 = store();
+    await s1.resolveLatest('2026-05-13');
+    // nothing on or before that day in either month, so there is no window
+    expect(s1.shownPass).toBe(null);
+    expect(s1.undated).toBe(true);
+  });
+
+  it('separates "not asked yet" from "there is no pass here"', async () => {
+    const s1 = store();
+    expect(s1.resolved).toBe(false);
+    expect(s1.undated).toBe(false);
+    await s1.resolveLatest('2026-05-20');
+    expect(s1.resolved).toBe(true);
+    expect(s1.undated).toBe(false);
+  });
+
+  it('stays silent rather than declaring a blend when the lookup failed', async () => {
+    get = vi.fn(async () => { throw new Error('offline'); });
+    const s1 = store();
+    await s1.resolveLatest('2026-05-20');
+    expect(s1.undated).toBe(false);
+    expect(s1.resolved).toBe(false);
+  });
+
+  it('steps back a month rather than claiming there was no pass', async () => {
+    get = vi.fn(async (path) => (
+      path.includes('start=2026-05')
+        ? { dates: [] }
+        : { dates: [{ date: '2026-04-28', time: '05:42:10', orbit: 'descending' }] }
+    ));
+    const s1 = store();
+    await s1.resolveLatest('2026-05-02');
+    expect(s1.shownPass.date).toBe('2026-04-28');
+  });
+
+  it('resolves once per place, and asks again where the map went', async () => {
+    const s1 = store();
+    await s1.resolveLatest('2026-05-20');
+    const before = get.mock.calls.length;
+    await s1.resolveLatest('2026-05-20');
+    expect(get).toHaveBeenCalledTimes(before);
+    at = { lat: 26.3833, lon: 56.4383 };
+    expect(s1.resolved).toBe(false);
+    // the pass it resolved holds while the new place is being looked up, so the
+    // tiles never fall back to a blend in between
+    expect(s1.shownPass.date).toBe('2026-05-14');
+    expect(s1.undated).toBe(false);
+  });
+});

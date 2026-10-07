@@ -41,6 +41,7 @@ import {
   validMaxcc,
   cloudLabel,
 } from '../../../lib/sentinel.js';
+import { isDraftLayer } from '../../../lib/customLayers.js';
 
 export function createSentinelState({ place, onBilled, notify, api }) {
   let layer = $state(DEFAULT_LAYER);
@@ -70,11 +71,15 @@ export function createSentinelState({ place, onBilled, notify, api }) {
   let passesNote = $state('');
   let verifyingDate = $state('');
   let coverageRev = $state(0);
-  // The newest pass over this point — what "most recent" is actually showing.
-  // The layer's default window renders the latest acquisition, so naming it is
-  // the difference between a dated image and an undated one.
+  // The newest pass over this point. "Most recent" is a lookup, not a layer
+  // default: sending no window makes Sentinel Hub apply the mosaicking order
+  // per pixel over the whole archive, which fills a swath edge or a granule gap
+  // from an older scene and hands back a picture of several dates. So the
+  // resolved day is sent as the window, and where that pass has no pixels the
+  // map shows a hole — a hole can be read, a blend of dates cannot.
   let latest = $state('');
-  let latestFor = $state(''); // the place `latest` was resolved for
+  let latestFor = $state(''); // the place+ceiling `latest` was resolved for
+  let latestBusy = $state(false);
 
   const passCache = new Map();
   const passPending = new Map();
@@ -83,6 +88,9 @@ export function createSentinelState({ place, onBilled, notify, api }) {
   let pickRequestId = 0;
 
   const placeKey = () => sentinelPlaceKey(place().lat, place().lon);
+  // What a resolved "most recent" answers for: move the crosshair or change the
+  // ceiling and the newest allowed pass is a different question.
+  const latestKey = () => `${placeKey()}@${maxcc}`;
   const coverageKey = (day, at = placeKey(), forLayer = layer, ceiling = maxcc) =>
     `${forLayer}@${ceiling}@${day}@${at}`;
 
@@ -211,6 +219,24 @@ export function createSentinelState({ place, onBilled, notify, api }) {
   }
 
   /**
+   * A layer just written here, offered from now on.
+   *
+   * The list is re-read from the backend nowhere: asking the instance again
+   * would spend a request to learn something this machine already knows, and
+   * re-reading the catalogue instead would throw away a verified instance list
+   * and grey out every configured layer.
+   */
+  function rememberLayer(entry) {
+    const row = {
+      id: entry.id,
+      label: entry.label || entry.id,
+      hint: entry.hint ?? '',
+      custom: true,
+    };
+    layers = [...layers.filter((known) => known.id !== row.id), row];
+  }
+
+  /**
    * Which pass "most recent" is showing. Sentinel-2 revisits every ~5 days, so
    * this month usually answers it; early in a month it may not, and one step
    * back does. Two requests at worst, once per place — the alternative is a
@@ -222,22 +248,28 @@ export function createSentinelState({ place, onBilled, notify, api }) {
     const ceiling = maxcc;
     const key = `${at}@${ceiling}`;
     if (latestFor === key) return;
-    for (const forMonth of [monthOf(today), addMonths(monthOf(today), -1)]) {
-      const days = await fetchMonth(forMonth, at);
-      if (days === null) return; // lookup failed — say nothing rather than guess
-      // the ceiling drops cloudy passes from the tiles, so "most recent" is the
-      // newest pass it still allows, not the newest pass there is
-      const found = latestAllowedPass(days, today, ceiling);
-      if (found) {
-        latest = found;
-        latestFor = key;
-        return;
+    latestBusy = true;
+    try {
+      for (const forMonth of [monthOf(today), addMonths(monthOf(today), -1)]) {
+        const days = await fetchMonth(forMonth, at);
+        if (days === null) return; // lookup failed — say nothing rather than guess
+        // the ceiling drops cloudy passes from the tiles, so "most recent" is the
+        // newest pass it still allows, not the newest pass there is
+        const found = latestAllowedPass(days, today, ceiling);
+        if (found) {
+          latest = found;
+          latestFor = key;
+          return;
+        }
       }
+      // No pass in ~2 months: real (deep polar winter, persistent gaps). There
+      // is no date to send, so the tiles are the archive blend and the map says
+      // so rather than naming a day it is not showing.
+      latest = '';
+      latestFor = key;
+    } finally {
+      if (at === placeKey() && ceiling === maxcc) latestBusy = false;
     }
-    // no pass in ~2 months: real (deep polar winter, persistent gaps) — the
-    // pill falls back to "most recent" rather than inventing a date
-    latest = '';
-    latestFor = key;
   }
 
   function clearDate() {
@@ -380,19 +412,47 @@ export function createSentinelState({ place, onBilled, notify, api }) {
       return layers.find((l) => l.id === layer)?.hint ?? '';
     },
     get layerLabel() {
+      if (isDraftLayer(layer)) return 'draft layer';
       return (
         layers.find((l) => l.id === layer)?.label ?? layer.replace(/_/g, ' ').toLowerCase()
       );
     },
     /** The pill is small: "false colour (infrared)" doesn't fit, "FALSE COLOR" does. */
     get layerShort() {
-      return layer.replace(/_/g, ' ');
+      // A draft's name is a digest of its script, which says nothing to anyone
+      return isDraftLayer(layer) ? 'draft' : layer.replace(/_/g, ' ');
+    },
+    /** Showing a script that has not been saved. */
+    get draft() {
+      return isDraftLayer(layer);
     },
 
-    /** A half-typed date is not a date: it stays "most recent" rather than
-     *  becoming a request the backend would refuse. */
+    get latestBusy() {
+      return latestBusy;
+    },
+    /** The day the tiles are rendered from: the pinned one, else the pass
+     *  "most recent" resolved to. Empty only while that lookup has not answered
+     *  or found nothing, which is the one case the map draws undated. */
+    get day() {
+      const pinned = validDay(date) ? date : '';
+      return pinned || (validDay(latest) ? latest : '');
+    },
+    /** Has "most recent" been answered for the place and ceiling on screen?
+     *  Unanswered and answered-with-nothing both leave `latest` empty, and only
+     *  the second is a reason to draw a mosaic. */
+    get resolved() {
+      return validDay(date) || latestFor === latestKey();
+    },
+    /** The tiles would blend every date in the archive: no pass could be put
+     *  under the crosshair. Declared on screen and left out of provenance. */
+    get undated() {
+      return !this.day && latestFor === latestKey();
+    },
+    /** One day on both ends — one acquisition. Empty until a day is known, so
+     *  the undated template is never asked for by accident. */
     get window() {
-      return validDay(date) ? { from: date, to: date } : { from: '', to: '' };
+      const day = this.day;
+      return day ? { from: day, to: day } : { from: '', to: '' };
     },
     /** What rides on the provider id, so the tiles, the capture and the cache
      *  all key on the same choices. */
@@ -417,6 +477,7 @@ export function createSentinelState({ place, onBilled, notify, api }) {
     stepMonth,
     toggleMenu,
     resolveLatest,
+    rememberLayer,
     clearDate,
     setMaxcc,
     pickDate,

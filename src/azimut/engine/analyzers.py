@@ -755,18 +755,26 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
         # A day is read whole, whatever its tile's cloud cover: the ceiling
         # chose the day, and passed on as MAXCC it would blank a day the analyst
         # picked over it. The sky byte masks the clouds pixel by pixel.
+        # A layer written in Azimut is a script over a base layer; the instance
+        # has never heard of the name. A band product reads through the base and
+        # ignores the script (our evalscript replaces it), while the review
+        # picture is what the analyst wrote, so it carries it.
+        asked, script = sentinel.resolve_layer(
+            source.layer, sentinel.renderable_layers(config.load_settings())
+        )
         if product or radar:
             # A radar picture is ours too: there is no true colour to borrow,
             # so the review composite is rendered like a product, unpadded.
             try:
                 raw = sentinel.band_frame(instance, _box(z, x, y, PAD if product else 0), edge, edge,
                                           source.date, product or "sar-picture",
-                                          sentinel.DEFAULT_MAXCC, layer=source.layer,
+                                          sentinel.DEFAULT_MAXCC, layer=asked,
                                           time=source.time)
             finally:
                 config.record_usage("sentinelhub", 1)
         else:
-            url = sentinel.wmts_url(source.layer, source.date, source.date, sentinel.DEFAULT_MAXCC)
+            url = sentinel.wmts_url(asked, source.date, source.date, sentinel.DEFAULT_MAXCC,
+                                    script=script)
             url = url.replace("{key}", instance)
             with httpx.stream("GET", tiles.tile_url(url, z, x, y, 1), timeout=30) as response:
                 if response.status_code == 404:

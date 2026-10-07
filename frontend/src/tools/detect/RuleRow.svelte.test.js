@@ -180,3 +180,44 @@ it('names what is wrong with a rule in place of its share', () => {
   expect(query('.warn').textContent).toBe('Pick two different bands.');
   expect(query('.share')).toBe(null);
 });
+
+it('the dot says what it is waiting for while no test has painted anything', () => {
+  // it looks live and answers nothing until a test has run, so it says so
+  const props = open(newRule('index', 'change'));
+  expect(query('.dot').title).toBe('Test to paint what this rule keeps');
+  expect(query('.dot').classList.contains('waiting')).toBe(true);
+  props.tested = true; flushSync();
+  expect(query('.dot').title).toBe('Hide its pixels on the map');
+  expect(query('.dot').classList.contains('waiting')).toBe(false);
+});
+
+it('offers to draw the rule’s own arithmetic, and says what it would show', () => {
+  const props = open(newRule('nd', 'b', { bands: ['B12', 'B11'] }), { onsee: vi.fn() });
+  const see = query('.see');
+  expect(see.disabled).toBe(false);
+  expect(see.title).toContain('(B12 − B11) / (B12 + B11)');
+  see.click();
+  expect(props.onsee).toHaveBeenCalled();
+  props.drawn = true; flushSync();
+  expect(query('.see').textContent.trim()).toBe('Stop drawing');
+});
+
+it('says why a rule cannot be drawn instead of offering a press that does nothing', () => {
+  open(newRule('colour', 'change'));
+  expect(query('.see').disabled).toBe(true);
+  expect(query('.see').title).toContain('between two dates');
+});
+
+it('asks for the reading the moment the slider is touched, not before', () => {
+  // nobody wants a megabyte of readings for a rule they never adjust; once it
+  // is in hand every further nudge of the line is free
+  const props = open(newRule('band', 'b'), { onlive: vi.fn() });
+  expect(props.onlive).not.toHaveBeenCalled();
+  const slider = query('[aria-label="Rule 1 line"]');
+  slider.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  flushSync();
+  expect(props.onlive).toHaveBeenCalled();
+  // and the keyboard route asks too
+  slider.dispatchEvent(new Event('focus', { bubbles: true }));
+  expect(props.onlive.mock.calls.length).toBeGreaterThan(1);
+});

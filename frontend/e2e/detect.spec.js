@@ -92,7 +92,7 @@ async function openDetect(page, withRun = false, withRoutine = false, twoRuns = 
   });
   await page.goto('/#detect');
   await awaitMapReady(page);
-  return { errors, calls, prefs };
+  return { errors, calls, prefs, run };
 }
 
 /** What starts with nothing picked and every category folded: open the first, take its first analyzer. */
@@ -151,6 +151,59 @@ test('review isolates one result layer and restores the saved eye states on Back
   await expect(orange.first()).toBeVisible();
   await expect(cyan).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Show Second site pass on the map' })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('Results can hide markers while keeping selectable outlines and restore the display after the eye', async ({ page }) => {
+  const { errors, run } = await openDetect(page, true);
+  run.results[2].geometry = { type: 'Polygon', coordinates: [
+    [[2.296, 48.859], [2.299, 48.859], [2.299, 48.861], [2.296, 48.861], [2.296, 48.859]],
+  ] };
+  const writes = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/analysis/') && request.method() !== 'GET') writes.push(request.url());
+  });
+  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.getByRole('button', { name: /^North site pass/ }).click();
+  const overlay = page.locator('.analysis-overlay');
+  await expect(overlay.locator('.outline')).toHaveCount(3);
+  await expect(overlay.locator('g')).toHaveCount(1);
+  await expect(overlay.locator('text')).toHaveText('3');
+  await page.getByRole('button', { name: 'Which overlays', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Overlay display' });
+  await expect(menu.getByRole('menuitemcheckbox')).toHaveCount(2);
+  // Review shortcuts must not write a verdict while the display menu owns the keyboard.
+  await page.keyboard.press('d');
+  await expect(overlay.locator('.outline')).toHaveCount(3);
+  await menu.getByRole('menuitemcheckbox', { name: 'Markers', exact: true }).click();
+  await expect(overlay.locator('circle, g, text')).toHaveCount(0);
+  await expect(overlay.locator('.outline')).toHaveCount(3);
+  await expect(overlay.locator('.outline.selected')).toHaveCount(1);
+  await menu.getByRole('menuitemcheckbox', { name: 'Outlines', exact: true }).click();
+  await expect(overlay.locator('.outline')).toHaveCount(0);
+  await menu.getByRole('menuitemcheckbox', { name: 'Outlines', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  // A contour selects its candidate while its interior leaves room to pan the map.
+  const outline = overlay.locator('.outline').last();
+  const edge = await outline.evaluate((node) => {
+    const point = node.getPointAtLength(node.getTotalLength() / 8).matrixTransform(node.getScreenCTM());
+    return { x: point.x, y: point.y };
+  });
+  await page.mouse.click(edge.x, edge.y);
+  await expect(page.locator('.review-body').getByText('Third candidate', { exact: true })).toBeVisible();
+  await expect(overlay.locator('.outline.selected')).toHaveAttribute('stroke-width', '3');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.review-body').getByText(/^A longer candidate name/)).toBeVisible();
+  await page.getByRole('button', { name: 'Hide the candidates and areas', exact: true }).click();
+  await expect(overlay).toHaveCount(0);
+  await page.keyboard.press('h');
+  await expect(overlay.locator('.outline')).toHaveCount(3);
+  await expect(overlay.locator('g')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Which overlays', exact: true }).click();
+  await expect(menu.getByRole('menuitemcheckbox', { name: 'Markers', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await page.screenshot({ path: test.info().outputPath('results-outlines-only.png') });
+  expect(writes).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -404,7 +457,7 @@ const rulesCatalogue = {
   methods: [{ id: 'surface', single: false, sizes: {} }, { id: 'rules', single: false, clouds: true, sensor: 'sentinel2', frames: 4,
     sizes: { all: size(0, 0, 0, 0, 0), medium: size(2000, 0, 1, 0, 30) }, rules: true, measure: '' }],
   rules: { bands: ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'], classes: ['vegetation', 'bare', 'water'],
-    max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, max_check_tiles: 12 },
+    max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 60, max_check_tiles: 20 },
   examples: [],
 };
 
@@ -577,6 +630,42 @@ test('an analyzer of your own is proved on a check made on the map: two passes, 
   await expect(page.locator('.mark.pass')).toHaveCount(2);
   await page.screenshot({ path: test.info().outputPath('detect-builder-tested.png') });
 
+  // Display choices leave the test, its pins and its imagery alone.
+  const testsBeforeDisplay = log.tests.length;
+  const overlay = page.locator('.analysis-overlay');
+  await deck.getByRole('button', { name: 'Which overlays', exact: true }).click();
+  const display = deck.getByRole('menu', { name: 'Overlay display' });
+  await display.getByRole('menuitemcheckbox', { name: 'Markers', exact: true }).click();
+  await expect(overlay.locator('g')).toHaveCount(0);
+  await expect(overlay.locator('.outline')).toHaveCount(1);
+  await expect(page.locator('.mark.pass')).toHaveCount(2);
+  await display.getByRole('menuitemcheckbox', { name: 'Check pins', exact: true }).click();
+  await expect(page.locator('.mark')).toHaveCount(0);
+  await expect(overlay.locator('.outline')).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath('builder-outlines-only.png') });
+  await display.getByRole('menuitemcheckbox', { name: 'Outlines', exact: true }).click();
+  await expect(overlay.locator('.outline')).toHaveCount(0);
+  await display.getByRole('menuitemcheckbox', { name: 'Outlines', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await deck.getByRole('button', { name: 'Should be found', exact: true }).click();
+  await expect(overlay.locator('.outline')).toHaveCSS('pointer-events', 'none');
+  await page.keyboard.press('Escape');
+  await expect(overlay.locator('.outline')).toHaveCSS('pointer-events', 'stroke');
+  await deck.getByRole('button', { name: 'Hide the check overlays', exact: true }).click();
+  await expect(overlay).toHaveCount(0);
+  await expect(page.locator('.rule-layers')).toHaveCount(0);
+  await expect(page.locator('.detect-tool .map')).toHaveCount(2);
+  await deck.getByRole('button', { name: 'Hide the check overlays', exact: true }).click();
+  await expect(overlay.locator('.outline')).toHaveCount(1);
+  await expect(overlay.locator('g')).toHaveCount(0);
+  await expect(page.locator('.mark')).toHaveCount(0);
+  await deck.getByRole('button', { name: 'Which overlays', exact: true }).click();
+  await display.getByRole('menuitemcheckbox', { name: 'Markers', exact: true }).click();
+  await display.getByRole('menuitemcheckbox', { name: 'Check pins', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.mark.pass')).toHaveCount(2);
+  expect(log.tests).toHaveLength(testsBeforeDisplay);
+
   // the rules are on the ground: a change across both halves, a before-state on the before half, the tested ground tinted
   await expect(page.locator('.rule-layers .part')).toHaveCount(3);
   await expect.poll(async () => near([250, 204, 21, 110])(await painted(page, 'shared', [log.center.x, log.center.y]))).toBe(true);
@@ -687,6 +776,44 @@ test('an analyzer of one date is tried on one map, with no split and no before o
   await expect(page.getByRole('slider', { name: 'Split between the before and after passes' })).toHaveCount(0);
   await expect(deck.getByRole('group', { name: 'Which pass to look at' })).toHaveCount(0);
   expect(log.lookups).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('a check holds sixty pins and shows a tile overflow while pins are still being placed', async ({ page }) => {
+  test.setTimeout(60_000);
+  const { errors } = await openDetect(page);
+  const log = await answerBuilder(page);
+  const overflow = 'these pins reach 21 tiles and a check reads at most 20: keep the pins of one place in a check and start another for ground further away';
+  await page.route('**/api/compare/analyzers/check/plan', (route) => {
+    const body = route.request().postDataJSON();
+    log.plans.push(body);
+    return body.check.marks.length === 60
+      ? route.fulfill({ status: 422, json: { detail: overflow } })
+      : route.fulfill({ json: { tiles: 20, missing: 40 } });
+  });
+  await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
+  await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
+  await page.getByRole('group', { name: 'Dates' }).getByRole('button', { name: 'One date' }).click();
+  await page.getByRole('button', { name: /^Blank/ }).click();
+  const deck = page.locator('.console');
+  await deck.getByRole('button', { name: 'New check' }).click();
+  await deck.getByRole('button', { name: 'Find passes', exact: true }).click();
+  await page.getByLabel('Use 2026-09-10').getByRole('button', { name: 'Use', exact: true }).click();
+  await deck.getByRole('button', { name: 'Place the pins' }).click();
+  const box = await page.locator('.detect-tool .map').boundingBox();
+  for (let i = 0; i < 60; i++) {
+    await page.mouse.click(box.x + box.width * (0.3 + (i % 10) * 0.03), box.y + box.height * (0.2 + Math.floor(i / 10) * 0.03));
+  }
+  await expect(deck.locator('.count')).toHaveText('60 pins');
+  await expect(deck.getByRole('button', { name: 'Should be found' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(deck.locator('.note.warn')).toHaveText(overflow);
+  await expect(deck.locator('.test')).toBeDisabled();
+  expect(log.plans.at(-1).check.marks).toHaveLength(60);
+  expect(log.tests).toHaveLength(0);
+  await page.mouse.click(box.x + box.width * 0.65, box.y + box.height * 0.25);
+  await expect(page.getByText('A check holds at most 60 pins.', { exact: true })).toBeVisible();
+  await expect(deck.locator('.count')).toHaveText('60 pins');
+  await page.screenshot({ path: test.info().outputPath('detect-check-limit.png') });
   expect(errors).toEqual([]);
 });
 

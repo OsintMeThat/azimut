@@ -44,6 +44,7 @@
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
   import { SENTINEL_ID } from '../lib/sentinel.js';
+  import { RADAR_ID } from '../lib/radar.js';
   import { WAYBACK_ID } from '../lib/wayback.js';
   import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
@@ -110,6 +111,7 @@
   import CaptureDetails from './satellite/CaptureDetails.svelte';
   import PlaceDialog from './satellite/PlaceDialog.svelte';
   import CaptureOptions from './satellite/CaptureOptions.svelte';
+  import FigureDialog from './satellite/FigureDialog.svelte';
   import SavedTree from './satellite/SavedTree.svelte';
   import SavedSearch from './satellite/SavedSearch.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
@@ -160,6 +162,9 @@
   let rotating = $state(false);
   let rotatePivot = $state({ x: 0, y: 0 }); // grabbed point, map-wrap-local px
   let captureHover = $state(false); // previewing the crop frame (capture group hover)
+  // A figure is several renderings of *one* Copernicus acquisition, so it needs
+  // a dated pass and more than one layer to render it through.
+  let figureOpen = $state(false);
   // The case's saved work — both indexes, the panel's filter and the Locate
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
@@ -419,6 +424,14 @@
     api,
   });
   const isSentinel = $derived(currentProvider?.id === SENTINEL_ID);
+  /** Why a figure cannot be built from what is on screen, or '' when it can. */
+  const figureProblem = $derived(
+    !s2.day
+      ? 'A figure needs a dated pass: every panel is the same acquisition.'
+      : s2.layers.length < 2
+        ? 'A figure needs more than one layer. Check your Copernicus layers, or write one.'
+        : ''
+  );
 
   // --- Esri Wayback: which release of World Imagery ---
   // The release rides on the provider id like a Sentinel-2 window, and both
@@ -443,7 +456,7 @@
   // or zoomed out (eco). The capture follows the display, so provenance always
   // matches the pixels.
   const shown = $derived(
-    imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release, pass: s1.pass })
+    imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release, pass: s1.shownPass })
   );
 
   // Fullscreen: the tool covers the whole viewport; SAVED stays collapsible (item 4).
@@ -680,20 +693,39 @@
   });
   let s2PassTimer;
 
-  // Naming the date of what's on screen is why you'd pick this basemap, so the
-  // latest pass is resolved as soon as Sentinel-2 is actually being displayed —
-  // one metadata request, on the user's own action (choosing the basemap), and
-  // only once per place. Not on mount: no tab may phone out by being opened.
+  // The date of what's on screen is why you'd pick this basemap, and it is also
+  // what the tiles are rendered from: "most recent" is resolved to a day and
+  // that day becomes the mosaicking window, so the picture is one acquisition
+  // instead of a per-pixel blend of the archive. One metadata request, on the
+  // user's own action (choosing the basemap), and only once per place and
+  // ceiling. Not on mount: no tab may phone out by being opened.
   $effect(() => {
     if (!mapReady || shown.provider?.id !== SENTINEL_ID) return;
     center.lat;
     center.lon;
     s2.maxcc; // a new ceiling can make a different pass the most recent one
     clearTimeout(s2LatestTimer);
-    // debounced: panning must not spend a request per frame
-    s2LatestTimer = setTimeout(() => s2.resolveLatest().catch(() => {}), 900);
+    // With nothing resolved yet the tiles have no window and blend dates, so
+    // that lookup goes out at once; afterwards the resolved day holds while a
+    // new one is found, and the debounce keeps a pan from spending a request
+    // per frame.
+    const wait = s2.resolved ? 900 : 0;
+    s2LatestTimer = setTimeout(() => s2.resolveLatest().catch(() => {}), wait);
   });
   let s2LatestTimer;
+
+  // The radar basemap carries the same rule: no window blends every pass in the
+  // archive, which mixes looks from opposite sides of the track. One lookup, on
+  // the user's own action, once per place.
+  $effect(() => {
+    if (!mapReady || shown.provider?.id !== RADAR_ID) return;
+    center.lat;
+    center.lon;
+    clearTimeout(s1LatestTimer);
+    s1LatestTimer = setTimeout(() => s1.resolveLatest().catch(() => {}), s1.resolved ? 900 : 0);
+    return () => clearTimeout(s1LatestTimer);
+  });
+  let s1LatestTimer;
 
   // Wayback names its releases once it is on screen: the chip reads a date
   // rather than "Newest", and the picker opens on a list already read.
@@ -2493,8 +2525,30 @@
           bind:scaleNorth={capture.scaleNorth}
           openScreenshot={() => (capture.shotOpen = true)}
           openExtensionGate={() => (capture.extGate = true)}
+          openFigure={isSentinel ? () => (figureOpen = true) : null}
+          figureBlocked={figureProblem}
         />
       </MapStatusBar>
+      {#if figureOpen && caseState.current}
+        <FigureDialog
+          caseId={caseState.current.id}
+          day={s2.day}
+          maxcc={s2.maxcc}
+          view={{ lat: center.lat, lon: center.lon, zoom: center.zoom, bearing }}
+          width={capture.size[0]}
+          height={capture.size[1]}
+          layers={s2.layers}
+          scaleNorth={capture.scaleNorth}
+          onclose={() => (figureOpen = false)}
+          onbuilt={(built) => {
+            figureOpen = false;
+            // Straight into the composer: a figure is made to be annotated, and
+            // its panels are already filed whether or not it is opened now.
+            uiState.openProof = built.proof.name;
+            uiState.tool = 'proof';
+          }}
+        />
+      {/if}
       {#if pointMenu}
         <MapContextMenu
           at={pointMenu}

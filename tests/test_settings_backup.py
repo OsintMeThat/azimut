@@ -27,6 +27,8 @@ def bundle_of(client) -> dict:
 # the gate below is an oversight, not a policy.
 NOT_EXPORTED: dict[str, str] = {
     "export_dirs": "absolute export paths belong to the machine that selected them",
+    "sentinel_draft_layer": "a layer half-written in the picker, replaced by the next "
+    "preview; the saved ones travel in sentinel_layers",
 }
 
 

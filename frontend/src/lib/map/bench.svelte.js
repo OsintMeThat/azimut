@@ -23,10 +23,12 @@ import { clone, viewZone } from './analyzers.js';
 import { canPickPass } from './detectWhen.js';
 import { isoDay } from '../sentinel.js';
 import { availableDisplayLayer, displayLayers, DISPLAY_LAYERS } from '../sentinelLayers.js';
+import { clearPreview, dataSources, isDraftLayer, preferredBase, previewLayer } from '../customLayers.js';
+import { ruleLayerScript } from './ruleLayer.js';
 import {
   RULE_COLOURS, checkDated, checkKey, datesOf, markOutcomes, marksBounds, newCheck, passSource, readingRecipe,
-  readsOneDate, readsRadar, recipeBands, recipeProblem, sensorOf, signalOf, signature, suggestedLayer, testedCheck,
-  withFlippedMark, withMark, withoutMark,
+  readsOneDate, readsRadar, recipeBands, recipeProblem, sensorOf, signalOf, signature, suggestedLayer,
+  linesOf, readingKey, suggestedWords, testedCheck, withFlippedMark, withMark, withoutMark,
 } from './analyzerRules.js';
 
 /** A lookup looks at the ground round the middle of the map, never a whole country. */
@@ -73,10 +75,37 @@ export class Bench {
   basemap = $state(false);
   layer = $state('TRUE_COLOR');
   displayNotice = $state('');
+  /**
+   * A rule drawn as imagery: `{ index, id, back }`, or null.
+   *
+   * `id` is a draft layer, which is deliberately never in `offered` — it is
+   * scratch, kept out of every picker and out of the settings backup. So it is
+   * held here rather than in `layer`, which stays the display the analyst chose
+   * and comes back when the rule is let go of.
+   */
+  ruleLayer = $state(null);
+  ruleLayerBusy = $state(false);
+  /**
+   * Per rule index, what that rule read over the whole ground, as the engine
+   * sent it: `{ key, low, high, steps, size, tiles }`.
+   *
+   * A test sends a verdict, which answers whether the line is crossed and never
+   * where it should be. With the reading in hand the browser applies the same
+   * comparison itself, so the ground repaints as the slider moves and nothing
+   * is asked again. One rule at a time, and only once its slider is touched:
+   * every rule of every tile would be tens of megabytes on a press nobody made.
+   */
+  readings = $state({});
+  readingBusy = $state(null);
   /** Where the split sits, as a percentage of the map from its left edge. */
   divider = $state(50);
   /** What the map paints: each rule's pixels, or the detections alone. */
   view = $state('rules');
+  /** Display choices for this builder session, independent of the recipe and its tests. */
+  hideOverlays = $state(false);
+  markers = $state(true);
+  outlines = $state(true);
+  checkPins = $state(true);
   /** Per rule, whether its pixels are painted. One added since the last toggle is shown. */
   shown = $state([]);
   hover = $state(null);
@@ -130,6 +159,9 @@ export class Bench {
   destroy() {
     this.#gone = true;
     this.#dispose?.();
+    // The draft is this machine's scratch work and only one is kept, so leaving
+    // it behind would have the next preview serve it from the tile cache.
+    if (this.ruleLayer) void clearPreview(this.#api).catch(() => {});
   }
 
   // -- what is being built ---------------------------------------------------------
@@ -161,7 +193,10 @@ export class Bench {
     const state = this.#layerState();
     if (!state || this.radar) return '';
     if (state.layersSource !== 'instance') return 'Check your Copernicus layers before testing.';
-    return state.layers.some((entry) => entry.id === 'TRUE_COLOR') ? ''
+    // A rule reads band products, not the display layer, so what it needs is a
+    // layer the *instance* serves to read them through. One written here is a
+    // script over a base layer and cannot stand in for it.
+    return state.layers.some((entry) => entry.id === 'TRUE_COLOR' && !entry.custom) ? ''
       : 'Optical rules need a Sentinel-2 L2A layer named TRUE_COLOR.';
   }
   checkLayers(force = false) {
@@ -323,7 +358,7 @@ export class Bench {
 
   dropPin({ lon: x, lat: y }) {
     if (!this.check || !this.pinning || this.choosingPasses) return;
-    const most = this.#limits.max_marks ?? 20;
+    const most = this.#limits.max_marks ?? 60;
     if (this.marks.length >= most) {
       this.#say(`A check holds at most ${most} pins.`, 'warn');
       return;
@@ -345,14 +380,20 @@ export class Bench {
    */
   get imagery() {
     const check = this.check;
+    const shown = this.shownLayer;
     if (!check || this.basemap || !check.b?.date) return { mode: 'basemap' };
-    if (!this.radar && !this.offered.some((entry) => entry.id === this.layer && entry.enabled !== false)) return { mode: 'basemap' };
-    const after = { ...check.b, layer: this.layer };
-    const before = this.single || !check.a?.date ? null : { ...check.a, layer: this.layer };
+    // A drawn rule is a draft, which is never offered: it is checked for by name.
+    if (!this.radar && !isDraftLayer(shown)
+      && !this.offered.some((entry) => entry.id === shown && entry.enabled !== false)) return { mode: 'basemap' };
+    const after = { ...check.b, layer: shown };
+    const before = this.single || !check.a?.date ? null : { ...check.a, layer: shown };
     const shape = (source) => (this.radar ? { provider: 'sentinel1', date: source.date, time: source.time ?? '' }
-      : { provider: 'sentinel2', date: source.date, layer: this.layer });
+      : { provider: 'sentinel2', date: source.date, layer: shown });
     return before ? { mode: 'swipe', a: shape(before), b: shape(after) } : { mode: 'single', b: shape(after) };
   }
+
+  /** The layer on the map: a rule being drawn, else the display that was chosen. */
+  get shownLayer() { return this.ruleLayer?.id ?? this.layer; }
 
   /** Whether the map is split between the two passes. */
   get split() { return this.imagery.mode === 'swipe'; }
@@ -361,6 +402,8 @@ export class Bench {
 
   setLayer(id) {
     if (!this.offered.some((entry) => entry.id === id && entry.enabled !== false)) return;
+    // Choosing a display is choosing what the map draws, so it ends a drawn rule.
+    this.hideRule();
     this.layer = id;
     this.displayNotice = '';
     this.basemap = false;
@@ -369,18 +412,60 @@ export class Bench {
       b: check.b?.date ? { ...check.b, layer: id } : check.b }));
   }
 
+  /**
+   * Draw a rule's own arithmetic on the map, instead of a layer that merely
+   * shows its bands well.
+   *
+   * It renders through the ordinary draft-preview path, so the tiles cache and
+   * resolve exactly as a layer written by hand does. It costs what any unseen
+   * display layer costs: the tiles the viewport asks for.
+   */
+  async showRule(index) {
+    const script = ruleLayerScript(this.#recipe.rules[index]);
+    if (!script || this.radar || this.ruleLayerBusy) return;
+    if (this.ruleLayer?.index === index) return this.hideRule();
+    this.ruleLayerBusy = true;
+    try {
+      const bases = dataSources(this.offered, this.#radarLayer());
+      const id = await previewLayer(this.#api, {
+        base: preferredBase(bases, this.#radarLayer()), script,
+      });
+      if (this.#gone) return;
+      this.ruleLayer = { index, id, back: this.ruleLayer?.back ?? this.layer };
+      this.basemap = false;
+    } catch (error) {
+      if (!this.#gone) this.#say(error.message || 'That rule could not be drawn', 'bad');
+    } finally {
+      this.ruleLayerBusy = false;
+    }
+  }
+
+  /** Let the drawn rule go, and put the chosen display back. */
+  hideRule() {
+    if (!this.ruleLayer) return;
+    this.ruleLayer = null;
+    void clearPreview(this.#api).catch(() => {});
+  }
+
   /** The layer that shows best what the ranking rule reads, among those offered. */
   #suggested() {
     return suggestedLayer(this.#recipe.rules[Math.max(0, signalOf(this.#recipe))], this.offered);
   }
 
   #adoptLayer(check) {
+    // Another check, another ground: a rule drawn over the last one is let go of.
+    this.ruleLayer = null;
     const own = check.b?.layer;
     this.layer = availableDisplayLayer(own || this.#suggested(), this.offered) || own || this.#suggested();
     this.displayNotice = own && own !== this.layer ? `${own} is unavailable; showing ${this.layer}.` : '';
   }
 
   get suggestion() { return this.#suggested(); }
+
+  /** What that layer shows, said as the bands the ranking rule reads. */
+  get suggestionWords() {
+    return suggestedWords(this.#recipe.rules[Math.max(0, signalOf(this.#recipe))]);
+  }
 
   // -- what each rule paints -------------------------------------------------------
 
@@ -389,6 +474,49 @@ export class Bench {
   /** Whether a rule's pixels are on the map now: the eye is open and the map shows rules. */
   painted(index) { return this.view === 'rules' && this.isShown(index); }
 
+  /** What a reading answers for: the check it was read on, and what the rule
+   *  reads — never where its line sits, which is the whole point. */
+  #readingKey(index) {
+    const rule = this.#recipe.rules[index];
+    return rule ? `${checkKey(this.check)}|${readingKey(rule)}` : '';
+  }
+
+  /** Whether a rule's line can move without asking the engine again. */
+  isLive(index) {
+    return this.readings[index]?.key === this.#readingKey(index);
+  }
+
+  /**
+   * Fetch one rule's reading, so its line can be moved live.
+   *
+   * Never fetches imagery: the engine reads the same cached frames the test
+   * read and refuses otherwise, so this costs no Copernicus request.
+   */
+  async loadReading(index) {
+    const key = this.#readingKey(index);
+    if (!key || this.isLive(index) || this.readingBusy !== null) return;
+    if (!this.detail || this.#recipe.rules[index]?.measure === 'class') return;
+    this.readingBusy = index;
+    try {
+      const answer = await this.#api.post('/api/compare/analyzers/check/values',
+        { recipe: readingRecipe(this.#recipe), check: this.check, rule: index });
+      if (this.#gone) return;
+      if (answer?.ready) this.readings = { ...this.readings, [index]: { ...answer, key } };
+    } catch {
+      // A reading is a convenience: without it the line still moves, it just
+      // waits for Test. Nothing is said, because nothing was asked out loud.
+    } finally {
+      if (!this.#gone) this.readingBusy = null;
+    }
+  }
+
+  /** The readings that still answer for the rules as they stand. */
+  get live() {
+    return Object.entries(this.readings)
+      .filter(([index]) => this.isLive(Number(index)))
+      .map(([index, reading]) => ({ index: Number(index), reading }));
+  }
+
   /** A rule's eye; with the detections alone on the map every eye reads closed, so one pressed opens its rule. */
   toggleRule(index) {
     const opening = this.view === 'detections';
@@ -396,15 +524,17 @@ export class Bench {
     this.shown = this.#recipe.rules.map((_, i) => (i === index ? opening || !this.isShown(i) : this.isShown(i)));
   }
 
-  /** A rule was removed: its eye goes with it. */
+  /** A rule was removed: its eye goes with it, and so does what it was drawing. */
   ruleRemoved(index) {
     this.shown = this.#recipe.rules.map((_, i) => this.isShown(i)).filter((_, i) => i !== index);
     this.hover = null;
+    if (this.ruleLayer) this.hideRule();
   }
 
   /** The ranking rule was moved to the top: the eyes follow it. */
   rulesReordered(order) {
     this.shown = order.map((i) => this.isShown(i));
+    if (this.ruleLayer) this.ruleLayer = { ...this.ruleLayer, index: order.indexOf(this.ruleLayer.index) };
   }
 
   hoverRule(index) { this.hover = index; }
@@ -470,6 +600,26 @@ export class Bench {
   get stale() {
     const last = this.last;
     return !!last?.detail && (last.signature !== this.current || last.key !== checkKey(this.check));
+  }
+
+  /**
+   * Whether the picture is older than the rules in a way a reading cannot cover.
+   *
+   * A line that moved on a rule whose reading is in hand is not stale at all:
+   * the ground is redrawn from the very numbers the test measured, so dimming it
+   * would call a live picture old. Anything else — another rule, the pins, the
+   * passes, what a rule reads — still waits for Test.
+   */
+  get staleToDraw() {
+    if (!this.stale) return false;
+    const last = this.last;
+    const live = new Set(this.live.map((row) => row.index));
+    if (!live.size || !last?.lines || last.key !== checkKey(this.check)) return true;
+    const now = linesOf(this.#recipe);
+    if (now.length !== last.lines.length) return true;
+    // every rule either reads what it read, or is one whose line can move live
+    return !now.every((line, i) => line.key === last.lines[i].key
+      && (line.line === last.lines[i].line || live.has(i)));
   }
 
   /** Why the check on the bench cannot be tested yet, or ''. */
@@ -556,8 +706,9 @@ export class Bench {
         this.tests[id] = { ...before, busy: false, error: 'Copernicus returned nothing for this check.' };
         return;
       }
-      const next = { busy: false, error: '', detail: before?.detail ?? null, signature: before?.signature ?? '', key: before?.key ?? '' };
-      if (detail) Object.assign(next, { detail: answer, signature: signed, key });
+      const next = { busy: false, error: '', detail: before?.detail ?? null, signature: before?.signature ?? '',
+        key: before?.key ?? '', lines: before?.lines ?? [] };
+      if (detail) Object.assign(next, { detail: answer, signature: signed, key, lines: linesOf(this.#recipe) });
       this.tests[id] = next;
       // The answer belongs to the rules and pins it was asked with; if either moved meanwhile it is only shown.
       const latest = this.#find(id);
@@ -678,8 +829,8 @@ export class Bench {
   markProbe(expect) {
     if (!this.probe || !this.check) return;
     const { point } = this.probe;
-    if (this.marks.length >= (this.#limits.max_marks ?? 20)) {
-      this.#say(`A check holds at most ${this.#limits.max_marks ?? 20} pins.`, 'warn');
+    if (this.marks.length >= (this.#limits.max_marks ?? 60)) {
+      this.#say(`A check holds at most ${this.#limits.max_marks ?? 60} pins.`, 'warn');
       return;
     }
     this.#patch((check) => withMark(check, [point.lon, point.lat], expect));

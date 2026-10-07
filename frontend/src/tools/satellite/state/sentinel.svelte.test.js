@@ -238,6 +238,85 @@ describe('what the pill can claim', () => {
   });
 });
 
+/**
+ * Sending no window does not render the most recent pass: Sentinel Hub applies
+ * the mosaicking order per pixel over the whole archive, so a swath edge or a
+ * granule gap in the newest scene comes back filled from an older one and the
+ * tile is a blend of dates. "Most recent" therefore resolves to a day, and that
+ * day is the window — holes where the pass has no pixels, which can be read.
+ */
+describe('never showing a blend of dates', () => {
+  it('renders the resolved pass as a one-day window, not an open one', async () => {
+    const s2 = store();
+    expect(s2.window).toEqual({ from: '', to: '' }); // nothing resolved yet
+    await s2.resolveLatest('2026-05-20');
+    expect(s2.day).toBe('2026-05-16');
+    expect(s2.window).toEqual({ from: '2026-05-16', to: '2026-05-16' });
+    expect(s2.variant.from).toBe('2026-05-16');
+  });
+
+  it('prefers a pinned day over the resolved one', async () => {
+    const s2 = store();
+    await s2.resolveLatest('2026-05-20');
+    await s2.loadPasses();
+    await s2.pickDate('2026-05-11');
+    expect(s2.day).toBe('2026-05-11');
+    expect(s2.window).toEqual({ from: '2026-05-11', to: '2026-05-11' });
+  });
+
+  it('separates "not asked yet" from "there is no pass here"', async () => {
+    const s2 = store();
+    // before the lookup the map must not call itself undated: it has not asked
+    expect(s2.resolved).toBe(false);
+    expect(s2.undated).toBe(false);
+    await s2.resolveLatest('2026-05-20');
+    expect(s2.resolved).toBe(true);
+    expect(s2.undated).toBe(false);
+  });
+
+  it('declares the blend when no pass could be dated at all', async () => {
+    get = vi.fn(async (path) => (path.includes('/sentinel/dates') ? answer([]) : { available: true }));
+    const s2 = store();
+    await s2.resolveLatest('2026-05-20');
+    expect(s2.day).toBe('');
+    expect(s2.window).toEqual({ from: '', to: '' });
+    // deep polar winter, a persistent gap: real, and said rather than papered over
+    expect(s2.undated).toBe(true);
+  });
+
+  it('stays silent rather than declaring a blend when the lookup failed', async () => {
+    get = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    const s2 = store();
+    await s2.resolveLatest('2026-05-20');
+    // a failed lookup proves nothing about the place, so it claims nothing
+    expect(s2.undated).toBe(false);
+    expect(s2.resolved).toBe(false);
+  });
+
+  it('answers again for a new ceiling, since a different pass may be newest', async () => {
+    const s2 = store();
+    await s2.resolveLatest('2026-05-20');
+    expect(s2.day).toBe('2026-05-16');
+    s2.setMaxcc(20);
+    expect(s2.resolved).toBe(false); // the old answer was for the old ceiling
+    await s2.resolveLatest('2026-05-20');
+    expect(s2.day).toBe('2026-05-11');
+  });
+
+  it('holds the day it resolved while a new place is being looked up', async () => {
+    const s2 = store();
+    await s2.resolveLatest('2026-05-20');
+    at = { lat: 26.3833, lon: 56.4383 };
+    // the map has moved and nothing is resolved here yet, but the tiles must
+    // not fall back to a blend in the meantime
+    expect(s2.resolved).toBe(false);
+    expect(s2.day).toBe('2026-05-16');
+    expect(s2.undated).toBe(false);
+  });
+});
+
 describe('which layers are on offer', () => {
   it('does not mistake the local catalogue for a checked instance and shares concurrent checks', async () => {
     get = vi.fn(async (path) => ({ source: path.includes('?check=true') ? 'instance' : 'catalogue',
@@ -296,5 +375,51 @@ describe('which layers are on offer', () => {
     const s2 = store();
     await s2.loadLayers(true, true);
     expect(s2.layer).toBe('SWIR');
+  });
+});
+
+/**
+ * A layer written here is a name like any other, plus a script. The store's
+ * part is small and worth pinning: it must offer a new one without spending a
+ * request to learn what this machine just wrote, and it must never read a
+ * preview's digest out loud as though it were a layer name.
+ */
+describe('layers written here', () => {
+  it('offers a layer just saved, without asking the instance again', async () => {
+    const s2 = store();
+    await s2.loadLayers(true, true);
+    const asked = get.mock.calls.length;
+    s2.rememberLayer({ id: 'PLUME_SWIR', label: 'SWIR plume', hint: 'hot spots' });
+    expect(get).toHaveBeenCalledTimes(asked);
+    const row = s2.layers.find((entry) => entry.id === 'PLUME_SWIR');
+    expect(row).toMatchObject({ label: 'SWIR plume', hint: 'hot spots', custom: true });
+    // and the verified instance list is not thrown away to learn it
+    expect(s2.layersSource).toBe('instance');
+  });
+
+  it('replaces a layer of the same name rather than listing it twice', () => {
+    const s2 = store();
+    s2.rememberLayer({ id: 'PLUME', label: 'First' });
+    s2.rememberLayer({ id: 'PLUME', label: 'Second' });
+    const rows = s2.layers.filter((entry) => entry.id === 'PLUME');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].label).toBe('Second');
+  });
+
+  it('reads a layer with no label as its own name', () => {
+    const s2 = store();
+    s2.rememberLayer({ id: 'NDWI_MINE' });
+    expect(s2.layers.at(-1).label).toBe('NDWI_MINE');
+  });
+
+  it('calls a script being previewed a draft, not its digest', () => {
+    const s2 = store();
+    s2.layer = 'AZIMUT_DRAFT_A1B2C3D4E5F6';
+    expect(s2.draft).toBe(true);
+    expect(s2.layerShort).toBe('draft');
+    expect(s2.layerLabel).toBe('draft layer');
+    s2.layer = 'PLUME_SWIR';
+    expect(s2.draft).toBe(false);
+    expect(s2.layerShort).toBe('PLUME SWIR');
   });
 });

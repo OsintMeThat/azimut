@@ -1068,7 +1068,7 @@ const rulesMethods = [...methods, { id: 'rules', label: 'Your own rules', single
   sizes, measure: '', smoothing_m: 45 }];
 const rulesCatalogue = (extra = {}) => catalogue({ methods: rulesMethods, rules: {
   bands: ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'], classes: ['vegetation', 'bare', 'water'],
-  max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, max_check_tiles: 12 }, ...extra });
+  max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 60, max_check_tiles: 20 }, ...extra });
 const VIEW = { west: 2, south: 48, east: 2.05, north: 48.03 };
 const debounce = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms));
 const phrase = () => [...target.querySelectorAll('.phrase')].map((p) => p.textContent.trim())[0];

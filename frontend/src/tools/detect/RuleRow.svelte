@@ -13,6 +13,7 @@
     directionsFor, formatShare, lineScale, measuresFor, readsOneDate, retarget, ruleProblem, toEngine, whensFor,
     withAmount, withDirection, ruleBands,
   } from '../../lib/map/analyzerRules.js';
+  import { ruleLayerWords, whyNoLayer } from '../../lib/map/ruleLayer.js';
   import Icon from '../../components/Icon.svelte';
 
   let {
@@ -29,6 +30,16 @@
     ticks = [],
     /** The last test no longer matches the rules, so what it said of this one is dimmed. */
     stale = false,
+    /** This rule's own arithmetic is the imagery on the map. */
+    drawn = false,
+    /** Its layer is being fetched. */
+    drawing = false,
+    onsee = () => {},
+    /** Its line is about to move: ask for the reading that lets it move live. */
+    onlive = () => {},
+    /** A test has run, so there are pixels for the dot to show. Without one the
+     *  dot is a button that looks live and answers nothing, so it says what it waits for. */
+    tested = false,
     /** What the last test said taking this rule out would change, in a few words, or ''. */
     effect = '',
     match = 'all',
@@ -66,6 +77,9 @@
     : rule.on === 'b' ? 'Read on the after pass and painted on the right of the split.'
       : 'Read as after minus before and painted on both sides.');
   const sentence = $derived(describeRule(rule, { single }));
+  /** Why this rule cannot be drawn as imagery, or ''. */
+  const noLayer = $derived(whyNoLayer(rule));
+  const layerWords = $derived(ruleLayerWords(rule));
   /** Its own share of the measured ground, then what is left once the rules above it have had theirs. */
   const shareText = $derived(!reading ? '' : [
     `${formatShare(reading.share)} of the ground`,
@@ -96,8 +110,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="rule" class:off={!shown} style={`--tint: ${colour}`} onpointerenter={() => onhover(index)} onpointerleave={() => onhover(null)}>
   <div class="head">
-    <button class="dot" class:off={!shown} aria-pressed={shown} aria-label={`${shown ? 'Hide' : 'Show'} rule ${n} on the map`}
-      title={shown ? 'Hide its pixels on the map' : 'Show its pixels on the map'} onclick={ontoggle}>{n}</button>
+    <button class="dot" class:off={!shown} class:waiting={!tested} aria-pressed={shown}
+      aria-label={`${shown ? 'Hide' : 'Show'} rule ${n} on the map`}
+      title={!tested ? 'Test to paint what this rule keeps'
+        : shown ? 'Hide its pixels on the map' : 'Show its pixels on the map'}
+      onclick={ontoggle}>{n}</button>
     <p class="sentence" aria-label={`Rule ${n} says`}>{sentence}</p>
     <button class="star" class:on={signal} disabled={signal || rule.measure === 'class'}
       aria-label={signal ? `Rule ${n} ranks the candidates` : `Rank candidates by rule ${n}`}
@@ -160,7 +177,18 @@
           {/each}
         </div>
       {/if}
-      <span class="data-source" aria-label={`Rule ${n} data`}>{dataLabel}</span>
+      <div class="data-row">
+        <span class="data-source" aria-label={`Rule ${n} data`}>{dataLabel}</span>
+        <button class="see" class:on={drawn} disabled={!!noLayer || drawing}
+          aria-pressed={drawn}
+          aria-label={`See rule ${n} as a layer`}
+          title={noLayer ? `Cannot be drawn: ${noLayer}`
+            : drawn ? 'Put the display layer back'
+              : `Draw it on the map: ${layerWords}`}
+          onclick={onsee}>
+          <Icon name="layers" size={11} /> {drawing ? 'Drawing…' : drawn ? 'Stop drawing' : 'See it'}
+        </button>
+      </div>
     </div>
   </div>
 
@@ -203,8 +231,11 @@
         </div>
         {#if !between}
           <div class="line" class:stale>
+            <!-- Touching the slider is what asks for the reading: before that nobody
+                 wants it, and after it every nudge is free. -->
             <input class="range" class:above type="range" aria-label={`Rule ${n} line`} min={scale.min} max={scale.max} step={scale.step}
               style={`--fraction: ${fraction}`} value={Math.min(scale.max, Math.max(scale.min, shownAmount))}
+              onpointerdown={() => onlive()} onfocus={() => onlive()}
               oninput={(event) => setAmount(event.currentTarget.value)} />
             {#each ticks as tick (tick.pin)}
               <i class="tick tick-{tick.expect}" class:passes={tick.passes} class:clipped={tick.clipped}
@@ -281,6 +312,9 @@
     box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3);
   }
   .dot.off { background: transparent; color: var(--text-2); box-shadow: inset 0 0 0 2px var(--tint); }
+  /* Nothing has been painted yet, so the dot is drawn hollow and dashed: it is
+     armed for the next test rather than showing anything now. */
+  .dot.waiting { background: transparent; color: var(--text-3); box-shadow: inset 0 0 0 1px var(--tint); opacity: 0.7; }
   .sentence {
     flex: 1;
     min-width: 0;
@@ -311,6 +345,18 @@
   }
   .pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 5px; }
   .note, .data-source { color: var(--text-3); font-size: 10.5px; line-height: 1.4; }
+  /* What the rule reads, and the press that draws that quantity on the map.
+     Side by side because the second is the answer to "what does that look like". */
+  .data-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .data-row .data-source { flex: 1 1 auto; min-width: 0; }
+  .see {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 7px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: none; color: var(--text-2); font-size: 10.5px; cursor: pointer;
+  }
+  .see:hover:not(:disabled) { border-color: var(--tint); color: var(--text-1); }
+  .see.on { border-color: var(--tint); color: var(--tint); }
+  .see:disabled { opacity: 0.4; cursor: default; }
   .value { display: flex; align-items: center; gap: 6px; }
   .value input[type='number'] { width: 84px; }
   .minus, .unit { color: var(--text-3); font-size: var(--fs-xs); }
