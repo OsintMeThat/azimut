@@ -330,6 +330,14 @@ describe('the capture button', () => {
     expect(source).toContain('if (measure.setMode(mode)) capture.disarm()');
   });
 
+  it('offers a figure on Sentinel-2 only, with the layers it is made of read first', () => {
+    // The layer list is read when the date chip is first opened. A figure can be
+    // the first thing asked of a session, and one opened before that list came
+    // would say the configuration is empty.
+    expect(source).toContain('openFigure={isSentinel ? openFigure : null}');
+    expect(source).toContain('if (!s2.layers.length) await s2.loadLayers(true, true);');
+  });
+
   it('gives the store the map element rather than reaching for one itself', () => {
     expect(source).toContain('element: () => mapEl');
     expect(source).toContain('function onSelectDrag(e)');

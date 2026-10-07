@@ -160,7 +160,13 @@
       <p class="help">
         <Icon name="info" size={12} />
         <span>
-          Panels are numbered down the list, so a caption can be referred to as panel 2.
+          {#if layers.length < 2}
+            A figure reads one acquisition several ways, and there {layers.length ? 'is one layer' : 'is none'}
+            here. Write another from the date chip, or add it to your Copernicus configuration from
+            Settings → Imagery.
+          {:else}
+            Panels are numbered down the list, so a caption can be referred to as panel 2.
+          {/if}
         </span>
       </p>
     </div>

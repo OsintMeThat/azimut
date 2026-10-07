@@ -24,10 +24,9 @@
     openScreenshot,
     openExtensionGate,
     /** Build a figure instead of one picture. Absent where there is none to
-     *  build: a figure is several renderings of one Copernicus acquisition. */
+     *  build: a figure is several renderings of one Copernicus acquisition.
+     *  What is missing for this one is the dialog's to say, not the menu's. */
     openFigure = null,
-    /** Why a figure cannot be built here, for the row that says so. */
-    figureBlocked = '',
   } = $props();
 </script>
 
@@ -73,6 +72,15 @@
           <div class="chips">
             <button class="chip" class:on={mode === 'center'} onclick={() => (mode = 'center')}>Capture</button>
             <button class="chip" class:on={mode === 'select'} onclick={() => (mode = 'select')}>Select area</button>
+            {#if openFigure}
+              <button
+                class="chip"
+                onclick={() => { menuOpen = false; openFigure(); }}
+                title="Several renderings of this acquisition, laid out and captioned"
+              >
+                Figure…
+              </button>
+            {/if}
           </div>
         </div>
         <div class="menu-hint">
@@ -125,26 +133,6 @@
               />
             </div>
           {/if}
-        {/if}
-
-        {#if openFigure}
-          <div class="menu-row">
-            <span class="menu-label">Figure</span>
-            <div class="chips">
-              <button
-                class="chip"
-                disabled={!!figureBlocked}
-                onclick={() => { menuOpen = false; openFigure(); }}
-                title={figureBlocked || 'Several renderings of this acquisition, laid out and captioned'}
-              >
-                Build a figure…
-              </button>
-            </div>
-          </div>
-          <div class="menu-hint">
-            {figureBlocked ||
-              'The same ground through the layers you pick, filed as a Geo Proof ready to annotate.'}
-          </div>
         {/if}
 
         {#if widgetBase}
@@ -260,8 +248,6 @@
   }
   .chip:hover { border-color: var(--border-strong); color: var(--text-1); }
   .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-  .chip:disabled { opacity: 0.45; cursor: default; }
-  .chip:disabled:hover { border-color: var(--border); color: var(--text-2); }
   .menu-hint { font-size: 10px; color: var(--text-3); margin: -1px 0 5px; }
   .menu-hint.last { margin-bottom: 0; }
   /* The one setting here that outlives the session, so it reads as a switch
