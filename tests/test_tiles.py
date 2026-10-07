@@ -1,6 +1,7 @@
 """Tile math and crop stitching (offline: injected fake tile fetcher)."""
 
 import dataclasses
+import io
 import math
 
 import httpx
@@ -822,3 +823,126 @@ def test_a_turned_crop_records_the_heading_its_needle_points_at():
         bearing=42.0, scale_north=True, fetch_tile=fake_fetch,
     )
     assert prov["marks"]["north"] == 42.0
+
+
+# -- slow providers, and tiles that come late ---------------------------------
+
+
+class _Flaky:
+    """A client whose tiles fail a few times before arriving."""
+
+    def __init__(self, failures):
+        self.failures = list(failures)
+        self.asked = []
+
+    def get(self, url, **kwargs):
+        self.asked.append(url)
+        if self.failures:
+            trouble = self.failures.pop(0)
+            if isinstance(trouble, Exception):
+                raise trouble
+            return httpx.Response(trouble, content=b"", request=httpx.Request("GET", url))
+        buf = io.BytesIO()
+        Image.new("RGB", (16, 16), (10, 120, 10)).save(buf, format="PNG")
+        return httpx.Response(
+            200, content=buf.getvalue(), request=httpx.Request("GET", url)
+        )
+
+
+def test_a_tile_that_timed_out_is_asked_for_again(monkeypatch):
+    """One slow tile used to take a whole capture down with it, which is the
+    worst way to lose a scene that is only available for this pass."""
+    monkeypatch.setattr(tiles, "RETRY_PAUSE", 0)
+    client = _Flaky([httpx.ReadTimeout("too slow"), 503])
+
+    tile = tiles._default_fetch(client, "https://example.test/t.png")
+
+    assert tile is not None
+    assert len(client.asked) == 3
+
+
+def test_a_tile_that_never_comes_still_raises(monkeypatch):
+    monkeypatch.setattr(tiles, "RETRY_PAUSE", 0)
+    client = _Flaky([httpx.ReadTimeout("too slow")] * tiles.MAX_TILE_TRIES)
+
+    with pytest.raises(httpx.ReadTimeout):
+        tiles._default_fetch(client, "https://example.test/t.png")
+    assert len(client.asked) == tiles.MAX_TILE_TRIES
+
+
+def test_a_refused_tile_is_not_asked_for_again(monkeypatch):
+    monkeypatch.setattr(tiles, "RETRY_PAUSE", 0)
+    client = _Flaky([400] * 5)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        tiles._default_fetch(client, "https://example.test/t.png")
+    assert len(client.asked) == 1
+
+
+def test_radar_is_given_longer_than_the_shared_ceiling(monkeypatch, tmp_path):
+    """Sentinel-1 is drawn from the GRD per request where the optical layer is
+    served already baked, so it is the one that outruns the default."""
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings(
+        {
+            **config.DEFAULT_SETTINGS,
+            "api_keys": {"sentinelhub": "inst-uuid"},
+            "sentinel1_layer": "RADAR",
+        }
+    )
+    radar = tiles.get_provider("sentinel1")
+    optical = tiles.get_provider("sentinel2")
+
+    assert radar.timeout == tiles.RADAR_TILE_TIMEOUT > tiles.TILE_TIMEOUT
+    assert optical.timeout is None  # the shared ceiling is enough for a baked tile
+    # and one pass of it inherits the ceiling the basemap declared
+    assert tiles.get_provider("sentinel1~2026-10-06~151800").timeout == tiles.RADAR_TILE_TIMEOUT
+
+
+# -- what a provider says when it refuses -------------------------------------
+
+
+# Exactly what Sentinel Hub answered on 2026-10-07, when its elevation service
+# was down and every Sentinel-1 render failed with it.
+DEM_OUTAGE = b"""<?xml version='1.0' encoding="UTF-8"?>
+<ows:ExceptionReport xmlns:ows="http://www.opengis.net/ows/1.1" version="1.0.0" xml:lang="en">
+\t<ows:Exception>
+\t\t<ows:ExceptionText>java.util.concurrent.ExecutionException: java.util.concurrent.ExecutionException: java.lang.RuntimeException: Could not load necessary digital elevation model for orthorectification! Please try again later or without orthorectification.</ows:ExceptionText>
+\t</ows:Exception>
+</ows:ExceptionReport>"""
+
+
+def test_the_provider_s_own_account_of_a_refusal_is_kept():
+    """Without it a Copernicus outage is indistinguishable from a bug here,
+    and the analyst goes looking at their own connection."""
+    assert tiles.upstream_reason(DEM_OUTAGE) == (
+        "Could not load necessary digital elevation model for orthorectification! "
+        "Please try again later or without orthorectification."
+    )
+
+
+def test_a_refusal_that_explains_nothing_says_nothing():
+    assert tiles.upstream_reason(b"") == ""
+    assert tiles.upstream_reason(b"<html><body>502 Bad Gateway</body></html>") == ""
+    assert tiles.upstream_reason(b"\x89PNG\r\n\x1a\n" + b"\xff" * 64) == ""
+
+
+def test_a_refusal_never_quotes_back_what_it_was_sent():
+    """A message lands in the page, the network log and the screenshot attached
+    to a bug report, so the instance id must not travel in one."""
+    echoed = (
+        "<ows:ExceptionText>java.lang.RuntimeException: Layer not found at "
+        "https://services.sentinel-hub.com/ogc/wmts/0f7f2d1e-3c4b-4a5d-8e9f-1a2b3c4d5e6f"
+        " for instance 0f7f2d1e-3c4b-4a5d-8e9f-1a2b3c4d5e6f with key pk.eyJhbGciOi"
+        "</ows:ExceptionText>"
+    ).encode()
+    reason = tiles.upstream_reason(echoed)
+
+    assert reason.startswith("Layer not found")
+    for secret in ("https://", "0f7f2d1e", "pk.eyJ", "sentinel-hub.com"):
+        assert secret not in reason
+
+
+def test_a_refusal_is_capped_at_a_sentence():
+    flood = ("<ows:ExceptionText>" + "no. " * 500 + "</ows:ExceptionText>").encode()
+    assert len(tiles.upstream_reason(flood)) == tiles.REASON_MAX

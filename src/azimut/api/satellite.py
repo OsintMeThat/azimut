@@ -67,7 +67,7 @@ def _client() -> httpx.Client:
     if _tile_client is None:
         _tile_client = httpx.Client(
             follow_redirects=True,
-            timeout=20,
+            timeout=tiles.TILE_TIMEOUT,
             limits=httpx.Limits(max_keepalive_connections=16, max_connections=32),
             headers={"User-Agent": tiles.USER_AGENT},
         )
@@ -245,13 +245,24 @@ def _offered_layers(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
     back to. They carry ``custom`` so a picker can offer them even where the
     instance has not been asked — a script on this machine needs no permission
     from GetCapabilities to exist — and so the editor knows which rows it owns.
+
+    The Sentinel-1 layer is dropped. Radar lives in the same configuration as
+    the optical layers and GetCapabilities never says which collection a layer
+    reads, so the instance hands it back among the rest; offered here it would
+    be picked as a Sentinel-2 display, dated and cloud-filtered by a calendar
+    that is not its own. Radar is reached through ``sentinel1_layer``, never
+    through this list.
     """
-    customs = sentinel.custom_layers(config.load_settings())
+    settings = config.load_settings()
+    customs = sentinel.custom_layers(settings)
+    radar = str(settings.get("sentinel1_layer") or "")
     names = {entry["id"] for entry in customs}
     kept = [
         entry
         for entry in found
-        if entry.get("id") not in names and not sentinel.is_draft_layer(entry.get("id", ""))
+        if entry.get("id") not in names
+        and entry.get("id") != radar
+        and not sentinel.is_draft_layer(entry.get("id", ""))
     ]
     return kept + [
         {"id": entry["id"], "label": entry["label"], "hint": entry["hint"], "custom": True}
@@ -673,7 +684,8 @@ def _serve_tile(
             return cached[0], cached[1], {"Cache-Control": "private, max-age=86400"}
 
     upstream: httpx.Response | None = None
-    for attempt in (1, 2):
+    for attempt in range(1, tiles.MAX_TILE_TRIES + 1):
+        last = attempt == tiles.MAX_TILE_TRIES
         try:
             url = tiles.tile_url(tiles.resolve_url(provider), z, x, y, provider.zoom_offset)
         except tiles.TileFetchError as exc:
@@ -686,12 +698,20 @@ def _serve_tile(
                 config.record_provider_status(provider.meter, False, str(exc.__cause__))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         try:
-            upstream = _client().get(url)
+            upstream = _client().get(url, timeout=provider.timeout or tiles.TILE_TIMEOUT)
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"tile fetch failed: {tiles.upstream_failure(exc)}") from exc
+            # A renderer that misses its window on a cold tile usually answers
+            # the moment after, with its own cache now warm. Asking again beats
+            # a hole the viewer has to notice and press Retry on.
+            if last:
+                raise HTTPException(status_code=502, detail=f"tile fetch failed: {tiles.upstream_failure(exc)}") from exc
+            continue
         # a stale Google session token answers 401/403 — re-mint once, transparently
         if attempt == 1 and provider.session and upstream.status_code in (401, 403):
             google_tiles.invalidate(google_tiles.key_from_url(provider.url))
+            continue
+        if upstream.status_code in tiles.TRANSIENT_STATUSES and not last:
+            time.sleep(tiles.RETRY_PAUSE)
             continue
         break
 
@@ -706,10 +726,13 @@ def _serve_tile(
             config.record_provider_status(
                 provider.meter, False, google_tiles.error_message(upstream)
             )
+        # The provider's own sentence, not the bytes it came in: a failed tile
+        # is never drawn, so the body is only ever read as an explanation, and
+        # the raw one carries its address and our credentials with it.
         return Response(
-            content=upstream.content,
+            content=tiles.upstream_reason(upstream.content).encode("utf-8"),
             status_code=upstream.status_code,
-            media_type=upstream.headers.get("content-type", "image/png"),
+            media_type="text/plain; charset=utf-8",
         )
     if provider.meter:
         config.record_usage(provider.meter, 1)

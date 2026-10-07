@@ -29,6 +29,8 @@ const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
 const IMAGERY = 'basemap-imagery';
 /** A second picture of the same ground, laid just over the first (`setAlternate`). */
 const ALTERNATE = 'basemap-alternate';
+/** Failed tiles after which trouble is reported without waiting for the settle. */
+const TROUBLE_SPEAKS_UP = 4;
 
 /**
  * What can be laid over the imagery, in the order they stack — first is
@@ -274,13 +276,33 @@ export function rasterSource(provider, providerId, cell) {
   };
 }
 
-export function imageryError(error) {
+/**
+ * A provider's sentence, shown only if it still looks like one.
+ *
+ * The proxy strips addresses and credentials before it sends this on, so the
+ * checks here are the second pair of eyes rather than the first: a page is
+ * where a leaked instance id would end up in a screenshot.
+ */
+export function readableReason(text) {
+  const reason = (text ?? '').trim();
+  if (!reason || reason.length > 240) return '';
+  return /https?:\/\//i.test(reason) ? '' : reason;
+}
+
+export function imageryError(error, failed = 1, reason = '') {
   const status = error?.status;
   if (status === 404) return 'No imagery is available here for this pass.';
-  if (status === 400 || status === 422) return 'The imagery service refused this display layer.';
+  // Ours name what to go and do about it, which the service cannot know. Its
+  // own sentence wins everywhere else, including a refused layer, where what
+  // it objected to is the whole answer.
   if (status === 401 || status === 403) return 'The imagery service refused the key; check Settings → Imagery.';
   if (status === 429) return 'The imagery allowance is exhausted; check Settings → Imagery.';
-  return 'The imagery could not be loaded; try again.';
+  if (reason) return reason;
+  if (status === 400 || status === 422) return 'The imagery service refused this display layer.';
+  // How much of the view is missing is the difference between a hole to pan
+  // past and a picture that never came, so the count is the message.
+  if (failed > 1) return `${failed} tiles could not be loaded; try again.`;
+  return 'A tile could not be loaded; try again.';
 }
 
 /**
@@ -353,8 +375,40 @@ export function createBasemaps(engine, hooks = {}) {
     return above ? overlayLayers(above)[0] : ceiling();
   }
 
+  // Tiles that failed since the imagery source last settled, by source id.
+  // The report is a verdict on a whole settle rather than on one tile: a lone
+  // hole in a full screen is overzoomed away and worth no panel, and a panel
+  // that outlives the trouble it named is worse than no panel at all.
+  const troubles = new Map();
+
+  function report(source, key) {
+    const trouble = troubles.get(source);
+    troubles.delete(source);
+    const tell = (reason) =>
+      onImageryTrouble({
+        id: key.slice(0, key.lastIndexOf('@')),
+        error: trouble?.error ?? null,
+        failed: trouble?.failed ?? 0,
+        reason,
+      });
+    // The proxy puts the provider's own account of a refusal in the body of
+    // the failed tile, and the engine hands that over as a Blob — so when
+    // there is one to read, the reason arrives a tick after the trouble.
+    const body = trouble?.error?.body;
+    if (body && typeof body.text === 'function') {
+      body.text().then(
+        (text) => tell(readableReason(text)),
+        () => tell(''),
+      );
+    } else {
+      tell('');
+    }
+  }
+
   function onSourceData(event) {
     if (!event.isSourceLoaded) return;
+    const key = event.sourceId === IMAGERY ? live : event.sourceId === ALTERNATE ? alternate : null;
+    if (key) report(event.sourceId, key);
     // every visible tile is in, so what the proxy counted is now final
     const billed = event.sourceId === IMAGERY ? metered : event.sourceId === ALTERNATE ? alternateMetered : null;
     if (billed) onMeteredTiles(billed);
@@ -364,7 +418,14 @@ export function createBasemaps(engine, hooks = {}) {
   function onError(event) {
     const source = event?.sourceId;
     const key = source === IMAGERY ? live : source === ALTERNATE ? alternate : null;
-    if (key) onImageryTrouble({ id: key.slice(0, key.lastIndexOf('@')), error: event.error });
+    if (key) {
+      const trouble = troubles.get(source) ?? { error: null, failed: 0 };
+      troubles.set(source, { error: event.error, failed: trouble.failed + 1 });
+      // A source with nothing left to show may never report itself loaded, so
+      // the settle that would speak for it never comes. Past this many the
+      // trouble is the picture, not a gap in it: say so without waiting.
+      if (trouble.failed + 1 >= TROUBLE_SPEAKS_UP) report(source, key);
+    }
     const overlay = source && OVERLAYS.find((entry) => overlaySourceIds(entry).includes(source));
     if (overlay) onOverlayTrouble(overlay.id);
   }

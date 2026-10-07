@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -31,6 +32,18 @@ SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
 # realistic preset/resolution combinations stay comfortably under it.
 MAX_TILES_PER_CROP = (SIZE_MAX // TILE_SIZE) ** 2
 USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
+
+# How long one tile may take, and how many times it may be asked for. Both the
+# live proxy and the capture stitcher work to these, so a provider that is slow
+# on the map is not quietly fast on the evidence.
+TILE_TIMEOUT = 20.0
+MAX_TILE_TRIES = 3
+# Upstream answers worth asking again: a gateway hiccup, or a renderer that ran
+# out of time. A 4xx is a verdict about the request and is never retried. A
+# retry costs nothing on the meter — only a 2xx is ever counted.
+TRANSIENT_STATUSES = frozenset({502, 503, 504})
+RETRY_PAUSE = 0.5  # before asking an overloaded service again, in seconds
+RADAR_TILE_TIMEOUT = 45.0  # Sentinel-1, rendered from the GRD per request
 
 
 @dataclass(frozen=True)
@@ -73,6 +86,11 @@ class Provider:
     widget: str | None = None
     # Provider-specific eco threshold; None uses the global setting.
     eco_max_zoom: int | None = None
+    # Seconds one tile may take, when this provider needs longer than
+    # TILE_TIMEOUT. A service that renders on demand rather than serving a tile
+    # it already baked answers in its own time, and the viewer is waiting
+    # either way: a tile that arrives late beats a hole that arrives on time.
+    timeout: float | None = None
 
 
 # Built-in keyed providers (docs/IMAGERY_PROVIDERS.md): only surfaced from
@@ -279,6 +297,11 @@ def all_providers() -> list[Provider]:
                 tile_size=512,
                 zoom_offset=1,
                 eco_max_zoom=SENTINEL_ECO_MAX_ZOOM,
+                # Radar is drawn from the GRD through our evalscript at request
+                # time, where the optical layer is served from one Sentinel Hub
+                # already baked. A cold 512px tile regularly outruns the shared
+                # ceiling, which is what left holes in the map it was asked for.
+                timeout=RADAR_TILE_TIMEOUT,
             )
         )
 
@@ -475,6 +498,42 @@ def is_placeholder_tile(content: bytes) -> bool:
 
 
 _ADDRESS = re.compile(r"https?://\S+")
+# An instance id, a Mapbox token, a Google key: the three shapes a credential
+# takes in this app, in case one is ever quoted back outside a URL.
+_SECRET = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\bpk\.[\w.-]+|\bAIza[\w-]+",
+    re.I,
+)
+_EXCEPTION_TEXT = re.compile(r"<(?:\w+:)?ExceptionText>(.*?)</(?:\w+:)?ExceptionText>", re.S)
+# "java.lang.RuntimeException: " and the chain of wrappers in front of it: the
+# service's plumbing, never the analyst's business.
+_THROWN = re.compile(r"^[\w.$]+(?:Exception|Error):\s*")
+REASON_MAX = 240  # one sentence in a panel, not a stack trace
+
+
+def upstream_reason(content: bytes) -> str:
+    """The provider's own account of a refusal, fit to put in front of someone.
+
+    A service that says why is worth more than any sentence we could write for
+    it: Sentinel Hub answers a render it could not do with an OGC
+    ExceptionReport naming what was missing, and without it a Copernicus outage
+    is indistinguishable from a bug in Azimut. Quoted raw it would be a Java
+    trace, and anything a provider echoes may carry what we sent it, so it is
+    unwrapped, stripped of addresses and credentials, and capped.
+
+    Empty when the body holds no such report — the caller then says what it
+    can from the status alone.
+    """
+    found = _EXCEPTION_TEXT.search(content[:4096].decode("utf-8", "replace"))
+    if not found:
+        return ""
+    reason = " ".join(found.group(1).split())
+    while True:
+        unwrapped = _THROWN.sub("", reason)
+        if unwrapped == reason:
+            break
+        reason = unwrapped
+    return _SECRET.sub("<id>", _ADDRESS.sub("<address>", reason))[:REASON_MAX]
 
 
 def upstream_failure(exc: BaseException) -> str:
@@ -518,8 +577,24 @@ def tile_url(url_template: str, z: int, x: int, y: int, zoom_offset: int = 0) ->
 
 def _default_fetch(client: httpx.Client, url: str) -> Image.Image | None:
     """Fetch one tile; None for 'no imagery here' (404 or a known placeholder
-    tile), raise on other errors."""
-    response = client.get(url)
+    tile), raise on other errors.
+
+    A timeout or a gateway answer is asked again rather than raised: one slow
+    tile used to take the whole capture down with it, which is the worst way
+    to lose a scene that was only ever going to be available for this pass.
+    """
+    for attempt in range(1, MAX_TILE_TRIES + 1):
+        last = attempt == MAX_TILE_TRIES
+        try:
+            response = client.get(url)
+        except httpx.HTTPError:
+            if last:
+                raise
+            continue
+        if response.status_code in TRANSIENT_STATUSES and not last:
+            time.sleep(RETRY_PAUSE)
+            continue
+        break
     if response.status_code == 404:
         return None
     response.raise_for_status()
@@ -642,7 +717,9 @@ def fetch_crop(
             return tx, ty, fetch(client, url)
 
         with httpx.Client(
-            headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True
+            headers={"User-Agent": USER_AGENT},
+            timeout=provider.timeout or TILE_TIMEOUT,
+            follow_redirects=True,
         ) as client:
             with ThreadPoolExecutor(max_workers=6) as pool:
                 return list(pool.map(lambda xy: grab(*xy), coords))
@@ -683,7 +760,7 @@ def fetch_crop(
         try:
             filled, parent_served = _overzoom_fill(
                 resolve_url(provider), gaps, tile_z, native_ts, fetch,
-                provider.zoom_offset, out_size=ts,
+                provider.zoom_offset, out_size=ts, timeout=provider.timeout,
             )
         except TileFetchError:
             filled, parent_served = {}, 0
@@ -789,6 +866,7 @@ def _overzoom_fill(
     fetch: Callable[[httpx.Client, str], Image.Image | None],
     zoom_offset: int = 0,
     out_size: int | None = None,
+    timeout: float | None = None,
 ) -> tuple[dict[tuple[int, int], Image.Image], int]:
     """Best-effort fill for missing tiles from parent-level imagery.
 
@@ -807,7 +885,9 @@ def _overzoom_fill(
     unresolved = list(gaps)
     served = 0
     with httpx.Client(
-        headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True
+        headers={"User-Agent": USER_AGENT},
+        timeout=timeout or TILE_TIMEOUT,
+        follow_redirects=True,
     ) as client:
         for up in range(1, OVERZOOM_LEVELS + 1):
             sub = ts >> up  # the child's footprint inside its parent, in px

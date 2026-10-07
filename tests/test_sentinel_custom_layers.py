@@ -348,6 +348,36 @@ def test_the_editor_is_told_which_layer_is_the_radar_one(client):
     assert client.get("/api/satellite/sentinel/custom-layers").json()["radar_layer"] == "RADAR"
 
 
+def test_the_radar_layer_is_never_offered_as_a_display(client, monkeypatch):
+    """Radar lives in the same configuration as the optical layers and
+    GetCapabilities does not say which collection a layer reads, so the
+    instance hands it back among the rest — often first. Offered as a display
+    it would be picked, dated and cloud-filtered by a calendar that is not its
+    own; the radar road reads ``sentinel1_layer``, never this list.
+    """
+    config.update_settings(
+        lambda settings: settings.update(
+            api_keys={"sentinelhub": "inst-uuid"}, sentinel1_layer="RADAR"
+        )
+    )
+    monkeypatch.setattr(
+        sentinel,
+        "capabilities_layers",
+        lambda *args, **kw: [
+            {"id": "RADAR", "label": "RADAR", "hint": ""},
+            {"id": "TRUE_COLOR", "label": "True colour", "hint": ""},
+        ],
+    )
+
+    body = client.get("/api/satellite/sentinel/layers?check=true").json()
+    assert body["source"] == "instance"
+    assert [entry["id"] for entry in body["layers"]] == ["TRUE_COLOR"]
+    # so the first entry every picker falls back to is an optical layer again
+    assert body["layers"][0]["id"] == sentinel.DEFAULT_LAYER
+    # and nothing was taken away from radar: it is reached from settings
+    assert config.load_settings()["sentinel1_layer"] == "RADAR"
+
+
 def test_the_route_takes_exactly_the_body_the_editor_sends(client):
     """The editor's draft holds more than a layer, and this route forbids what
     it does not know. The two lists are written out separately, so they are

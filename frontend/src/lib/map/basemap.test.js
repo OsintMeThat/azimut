@@ -1,6 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { OVERLAY_IDS, imageryError, rasterSource, sourceMaxZoom, tileTemplate, tileUrls } from './basemap.js';
+import {
+  OVERLAY_IDS,
+  imageryError,
+  rasterSource,
+  readableReason,
+  sourceMaxZoom,
+  tileTemplate,
+  tileUrls,
+} from './basemap.js';
 
 /**
  * The provider shapes are the ones `/api/satellite/providers` really answers
@@ -55,7 +63,32 @@ it('explains imagery failures without exposing the upstream URL or response', ()
   expect(imageryError({ status: 404 })).toContain('No imagery');
   expect(imageryError({ status: 403 })).toContain('key');
   expect(imageryError({ status: 429 })).toContain('allowance');
-  expect(imageryError(new Error('private upstream URL'))).toBe('The imagery could not be loaded; try again.');
+  expect(imageryError(new Error('private upstream URL'))).toBe('A tile could not be loaded; try again.');
+  // how much of the view is missing is the difference between a hole and a blank
+  expect(imageryError(new Error('private upstream URL'), 7)).toBe(
+    '7 tiles could not be loaded; try again.'
+  );
+  // a named failure says why, whatever it took down with it
+  expect(imageryError({ status: 429 }, 12)).toContain('allowance');
+});
+
+it('prefers what the service said to anything we could write for it', () => {
+  const said = 'Could not load necessary digital elevation model.';
+  // without it a Copernicus outage is indistinguishable from a bug in Azimut
+  expect(imageryError({ status: 500 }, 9, said)).toBe(said);
+  expect(imageryError({ status: 400 }, 1, said)).toBe(said);
+  // except where ours names what to go and do, which the service cannot know
+  expect(imageryError({ status: 403 }, 1, said)).toContain('Settings');
+  expect(imageryError({ status: 429 }, 1, said)).toContain('Settings');
+});
+
+it('shows a provider sentence only while it still looks like one', () => {
+  expect(readableReason('  Orthorectification failed.  ')).toBe('Orthorectification failed.');
+  expect(readableReason('')).toBe('');
+  expect(readableReason(null)).toBe('');
+  // a second pair of eyes on what the proxy already stripped
+  expect(readableReason('failed for https://services.sentinel-hub.com/ogc/wmts/abc')).toBe('');
+  expect(readableReason('x'.repeat(241))).toBe('');
 });
 
 describe('where a provider’s tiles are fetched from', () => {
@@ -451,17 +484,81 @@ describe('the layers on a map', () => {
       basemaps.show(SENTINEL, id, 512);
       basemaps.setAlternate(SENTINEL, 'sentinel2~SWIR', 512);
       const [, onError] = map.calls.on.find(([name]) => name === 'error');
+      const settle = map.calls.on.find(([name]) => name === 'sourcedata')[1];
       const error = { status: 400 };
       onError({ sourceId: 'basemap-imagery', error });
       onError({ sourceId: 'basemap-alternate', error });
       onError({ sourceId: 'basemap-roads', error });
-      expect(trouble.mock.calls).toEqual([[{ id, error }], [{ id: 'sentinel2~SWIR', error }]]);
+      // one tile is a gap, not a verdict: the view it belongs to speaks first
+      expect(trouble).not.toHaveBeenCalled();
+      settle({ sourceId: 'basemap-imagery', isSourceLoaded: true });
+      settle({ sourceId: 'basemap-alternate', isSourceLoaded: true });
+      expect(trouble.mock.calls).toEqual([
+        [{ id, error, failed: 1, reason: '' }],
+        [{ id: 'sentinel2~SWIR', error, failed: 1, reason: '' }],
+      ]);
       const source = map.sources.get('basemap-imagery');
       basemaps.show(SENTINEL, id, 512);
       expect(map.sources.get('basemap-imagery')).toBe(source);
       basemaps.retry(SENTINEL, id, 512);
       expect(map.sources.get('basemap-imagery')).not.toBe(source);
       expect(map.sources.get('basemap-imagery').tiles[0]).toContain(id);
+    });
+  });
+
+  it('takes back the trouble it reported once a settle comes through clean', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const trouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onImageryTrouble: trouble });
+      const id = 'sentinel2~TRUE_COLOR~2026-09-25~2026-09-25';
+      basemaps.show(SENTINEL, id, 512);
+      const [, onError] = map.calls.on.find(([name]) => name === 'error');
+      const settle = map.calls.on.find(([name]) => name === 'sourcedata')[1];
+      onError({ sourceId: 'basemap-imagery', error: { status: 500 } });
+      settle({ sourceId: 'basemap-imagery', isSourceLoaded: true });
+      expect(trouble).toHaveBeenLastCalledWith({ id, error: { status: 500 }, failed: 1, reason: '' });
+      // the analyst pans, the tiles come through: nothing is wrong any more
+      settle({ sourceId: 'basemap-imagery', isSourceLoaded: true });
+      expect(trouble).toHaveBeenLastCalledWith({ id, error: null, failed: 0, reason: '' });
+    });
+  });
+
+  it('passes on what the provider said about the tile it refused', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const trouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onImageryTrouble: trouble });
+      const id = 'sentinel1~2026-10-06~151800';
+      basemaps.show(SENTINEL, id, 512);
+      const [, onError] = map.calls.on.find(([name]) => name === 'error');
+      const settle = map.calls.on.find(([name]) => name === 'sourcedata')[1];
+      // what the proxy hands over: the service's own sentence, already stripped
+      const said = 'Could not load necessary digital elevation model.';
+      const error = { status: 500, body: { text: () => Promise.resolve(said) } };
+
+      onError({ sourceId: 'basemap-imagery', error });
+      settle({ sourceId: 'basemap-imagery', isSourceLoaded: true });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trouble).toHaveBeenLastCalledWith({ id, error, failed: 1, reason: said });
+    });
+  });
+
+  it('says so without waiting when enough tiles fail that nothing will settle', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const trouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onImageryTrouble: trouble });
+      const id = 'sentinel2~TRUE_COLOR~2026-09-25~2026-09-25';
+      basemaps.show(SENTINEL, id, 512);
+      const [, onError] = map.calls.on.find(([name]) => name === 'error');
+      const error = { status: 502 };
+      for (const _ of [1, 2, 3]) onError({ sourceId: 'basemap-imagery', error });
+      expect(trouble).not.toHaveBeenCalled();
+      onError({ sourceId: 'basemap-imagery', error });
+      expect(trouble.mock.calls).toEqual([[{ id, error, failed: 4, reason: '' }]]);
     });
   });
 

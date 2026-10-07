@@ -908,7 +908,7 @@ test('failed check imagery says why on both maps and can be retried or replaced 
   await answerBuilder(page);
   let failing = true;
   await page.route('**/api/tiles/sentinel2*/**', (route) => failing
-    ? route.fulfill({ status: 400, contentType: 'application/xml', body: '<ServiceException>Layer not found</ServiceException>' })
+    ? route.fulfill({ status: 400, contentType: 'text/plain', body: 'Layer not found' })
     : route.fallback());
   await page.getByRole('button', { name: 'Analyzers', exact: true }).click();
   await page.getByRole('button', { name: 'New analyzer', exact: true }).click();
@@ -921,7 +921,7 @@ test('failed check imagery says why on both maps and can be retried or replaced 
   await deck.getByRole('button', { name: 'Place the pins' }).click();
   const notices = page.getByRole('status', { name: 'Imagery loading error' });
   await expect(notices).toHaveCount(2);
-  await expect(notices.first()).toContainText('The imagery service refused this display layer.');
+  await expect(notices.first()).toContainText('Layer not found');
   await expect(notices.first()).toContainText('TRUE_COLOR');
   await expect(notices.first()).toContainText('2026-09-01');
   await expect(notices.last()).toContainText('2026-09-10');
