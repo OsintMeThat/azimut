@@ -61,6 +61,13 @@ clearly what went wrong.
 
 ## Maps
 
+- A Copernicus layer no longer has to be made in the Copernicus dashboard. The
+  date chip writes one here — three bands on red, green and blue, a normalised
+  difference on a ramp, or the evalscript itself — previews it on the chosen
+  date, and once saved it joins the picker in Satellite, Compare and Detect.
+- **Figure** lays one pass out through several layers, each panel captioned and
+  filed as its own capture, opened as a Geo Proof with its credit line written.
+  It sits beside Capture and Select area in the capture menu.
 - FIRMS fires are drawn as marks that keep their size through a zoom.
 - Town and village names sit over the imagery in Satellite, Detect and the point
   dialog, on by default beside Borders.
@@ -77,6 +84,12 @@ clearly what went wrong.
 
 - The analyzer builder works on the map: one satellite, one or two dates,
   checks made with pins, and **Test** says what the rules find before you save.
+- An analyzer of your own downloads as a file, its checks included or left
+  behind, carrying nothing of this machine: a rule set travels without the
+  settings backup and its API keys. Areas and area groups go the same way, names,
+  colours and folder kept. An import never writes over what is already here.
+- A layer written for the map becomes a rule with its arithmetic, and a rule
+  draws back as a layer. Moving a rule's line repaints its ground as you drag it.
 - Areas sit in ordered groups, and the dock can be resized.
 - **What** starts with nothing picked and lists the analyzers by what they look
   for.
