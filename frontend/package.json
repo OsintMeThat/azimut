@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@fontsource/oxanium": "^5.2.8",
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.16",
     "konva": "^9.3.0",
     "maplibre-gl": "^6.8.0",
     "marked": "^17.0.6",
