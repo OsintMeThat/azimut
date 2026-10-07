@@ -367,7 +367,7 @@ def ordered_pair(a: Source, b: Source) -> bool:
 
 #: How many checks one analyzer keeps, and how many marks one check holds.
 MAX_CHECKS = 12
-MAX_MARKS = 20
+MAX_MARKS = 60
 Longitude = Annotated[float, Field(ge=-180, le=180)]
 Latitude = Annotated[float, Field(ge=-85, le=85)]
 

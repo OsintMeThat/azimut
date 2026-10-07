@@ -115,7 +115,9 @@
       resetToHome={false} {imperial} {overlays} {armed} chrome={false} controlsTop={108} {onclick} {oncontextmenu} {onusage}
       {onimageryfallback} errorSide="right" />
   </div>
-  <button type="button" class="line" class:dragging class:armed={!!armed} role="slider" aria-label="Split between the before and after passes"
+</div>
+<div class="split-rail" style:--divider={`${divider}%`}>
+  <button type="button" class="line" class:dragging role="slider" aria-label="Split between the before and after passes"
     aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(divider)} tabindex="0"
     onpointerdown={press} onpointermove={drag} onpointerup={release} onpointercancel={release} onkeydown={key}>
     <span class="handle" aria-hidden="true">
@@ -127,6 +129,10 @@
 <style>
   /* Over the first map and under everything the tool draws on the ground. */
   .second { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  /* The handle is a control, not ground. Inside `.second` it was trapped in that
+     layer's stacking context and every overlay painted over it, so it rides in
+     its own rail above them, level with the engine's zoom buttons. */
+  .split-rail { position: absolute; inset: 0; z-index: 580; pointer-events: none; }
   .clip { position: absolute; inset: 0; display: flex; clip-path: inset(0 0 0 var(--divider)); pointer-events: none; }
   .clip :global(.map-wrap) { pointer-events: auto; }
   .line {
@@ -134,7 +140,6 @@
     top: 0;
     bottom: 0;
     left: var(--divider);
-    z-index: 2;
     width: 2px;
     padding: 0;
     border: 0;
@@ -142,14 +147,16 @@
     background: rgb(255 255 255 / 0.92);
     box-shadow: 0 0 5px rgb(0 0 0 / 0.75);
     cursor: ew-resize;
-    pointer-events: auto;
+    /* The line draws, the handle grabs. From up here beside the engine's controls the line ran a
+       column of its own over the ground, and the map is centred on what is being checked, so that
+       column fell on the pins: they stayed visible and stopped answering. Letting it through is the
+       rule arming a pin already followed — the handle took the drag then too, and nothing was
+       missed — so the line follows it all the time rather than only while a pin is armed. */
+    pointer-events: none;
     touch-action: none;
   }
-  .line::before { position: absolute; inset: 0 -6px; content: ''; }
-  /* With a pin armed the line lets the click through, so a pin can be dropped on the ground it runs
-     over, which is the middle of the map when the map is centred on what is being checked. The
-     handle still takes the drag. */
-  .line.armed { pointer-events: none; }
+  /* The grab, widened past what it draws so it is easy to catch. */
+  .handle::before { position: absolute; inset: -6px; content: ''; }
   .line:focus-visible { outline: none; }
   .line:focus-visible .handle { box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgb(0 0 0 / 0.45); }
   /* Off the middle of the map, where a click aimed at the place being checked would land on it. */

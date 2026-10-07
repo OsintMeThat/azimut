@@ -81,7 +81,7 @@
   let prefsLoaded = $state(false);
   const wayback = createWaybackState({ api, place: () => view });
   const s1 = createRadarState({ api, place: () => view, onBilled: () => imagery.refreshUsage() });
-  const shown = $derived(imagery.displayed(providerId, view.zoom, { ...s2.variant, release: wayback.release, pass: s1.pass }));
+  const shown = $derived(imagery.displayed(providerId, view.zoom, { ...s2.variant, release: wayback.release, pass: s1.shownPass }));
   /** The metered archives. Any of them can be put on the map from its chip, with
    *  its Copernicus layer and day, but none is remembered as the basemap: Detect
    *  opens on free imagery every time. */
@@ -122,6 +122,8 @@
     : layers);
   let showZones = $state(true);
   let selectedResult = $state(null);
+  let resultMarkers = $state(true);
+  let resultOutlines = $state(true);
   let areaGroups = $state([]);
   let highlight = $state([]);
   let manual = $state(null);
@@ -139,6 +141,30 @@
     layersAsked = true;
     untrack(() => s2.loadLayers(false, true));
   });
+  // A basemap with no date sends no mosaicking window, and Sentinel Hub then
+  // blends the whole archive pixel by pixel. Detect pins a date whenever it
+  // shows a pass; this covers the map before a run, so the ground an analyst
+  // draws a zone on is one acquisition like everything that follows it.
+  $effect(() => {
+    if (!engine || shown.provider?.id !== SENTINEL) return;
+    view.lat;
+    view.lon;
+    s2.maxcc;
+    clearTimeout(s2LatestTimer);
+    s2LatestTimer = setTimeout(() => s2.resolveLatest().catch(() => {}), s2.resolved ? 900 : 0);
+    return () => clearTimeout(s2LatestTimer);
+  });
+  $effect(() => {
+    if (!engine || shown.provider?.id !== RADAR_ID) return;
+    view.lat;
+    view.lon;
+    clearTimeout(s1LatestTimer);
+    s1LatestTimer = setTimeout(() => s1.resolveLatest().catch(() => {}), s1.resolved ? 900 : 0);
+    return () => clearTimeout(s1LatestTimer);
+  });
+  let s2LatestTimer;
+  let s1LatestTimer;
+
   // What the last test found, outlined and pinned on the ground it judged.
   const previewLayer = $derived(builder?.detail ? [{
     id: 'builder-preview', visible: true,
@@ -216,8 +242,8 @@
   });
 
   const marks = $derived(zoneMarks(zones));
-  const mapDate = $derived(s2.date || '');
-  const passChip = $derived(providerId === RADAR_ID ? passLabel(s1.pass) : mapDate);
+  const mapDate = $derived(s2.day);
+  const passChip = $derived(providerId === RADAR_ID ? passLabel(s1.shownPass) : mapDate);
   let passCloud = $state(null);
   let passContext = $state(null);
   const cloudyPass = $derived(providerId !== RADAR_ID && passCloud > ADVISED_MAXCC);
@@ -707,16 +733,22 @@
             onusage={() => imagery.refreshUsage()} onimageryfallback={() => builder.setBasemap(true)} />
         {/if}
         {#if builder}
-          <RuleLayers {engine} {element} detail={builder.detail} rules={builder.recipe.rules} shown={paintedRules}
-            hover={builder.hovered} colours={builder.colours} split={builder.split} divider={builder.divider} stale={builder.stale} />
-          {#if previewLayer.length}
-            <AnalysisOverlay {engine} layers={previewLayer} onpick={(_, id) => {
+          {#if !builder.hideOverlays}
+            <RuleLayers {engine} {element} detail={builder.detail} rules={builder.recipe.rules} shown={paintedRules}
+              hover={builder.hovered} colours={builder.colours} split={builder.split} divider={builder.divider}
+              live={builder.live} stale={builder.staleToDraw} />
+          {/if}
+          {#if previewLayer.length && !builder.hideOverlays}
+            <AnalysisOverlay {engine} layers={previewLayer} markers={builder.markers} outlines={builder.outlines}
+              interactive={!builder.pinning && !measuring} onpick={(_, id) => {
               const row = builder.detail.candidates.find((candidate) => candidate.id === id);
               if (row) void builder.probeAt({ lon: row.coordinates[0], lat: row.coordinates[1] });
             }} />
           {/if}
-          <CheckMarks {engine} pins={builder.pins} armed={!!builder.pinning} selected={builder.probe?.pin ?? null}
-            onpick={(index) => builder.probePin(index)} />
+          {#if builder.checkPins && !builder.hideOverlays}
+            <CheckMarks {engine} pins={builder.pins} armed={!!builder.pinning} selected={builder.probe?.pin ?? null}
+              onpick={(index) => builder.probePin(index)} />
+          {/if}
           {#if builder.probe}
             <RuleProbe {engine} probe={builder.probe} rules={builder.recipe.rules} colours={builder.colours} single={builder.single}
               width={element?.clientWidth ?? 0} height={(element?.clientHeight ?? 0) - builder.reach} onclose={() => builder.closeProbe()}
@@ -726,6 +758,8 @@
           {/if}
         {:else if !bare && (focusedRunId || savedVisible) && visibleRunLayers.some((layer) => layer.visible)}
           <AnalysisOverlay {engine} layers={visibleRunLayers} selected={selectedResult} active={!manual}
+            markers={resultMarkers} outlines={resultOutlines}
+            interactive={!measuring && drawing === 'select'}
             onpick={(run, result) => panel?.pick(run, result)} />
         {/if}
         {#if areaGroups.length && !manual && !bare && !builder}
@@ -808,6 +842,8 @@
       bind:focusedRunId
       bind:showZones
       bind:selectedResult
+      bind:markers={resultMarkers}
+      bind:outlines={resultOutlines}
       bind:areaGroups
       bind:highlight
       bind:bare

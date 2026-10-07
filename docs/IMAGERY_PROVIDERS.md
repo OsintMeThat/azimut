@@ -187,7 +187,17 @@ templates are unsuitable as basemaps. Turn off **Show logo** and **Show warnings
 because the server burns both into every tile.
 
 `TIME` is a **mosaicking window**, so this layer is "mosaic over range X", not "the
-imagery". Omitted, the layer's own default applies (the most recent pass).
+imagery". Omitting it is **not** "the most recent pass": the mosaicking order is
+applied per pixel over the whole archive, so wherever the newest scene has nodata
+— a swath edge, a granule gap — the pixel comes from an older one and the tile is
+a blend of dates that cannot be dated. Azimut therefore resolves the newest pass
+over the crosshair and sends it as `TIME=day/day`, which leaves holes where that
+pass has no pixels. A hole can be read; a blend cannot. The undated template is
+kept for one case only: no pass could be resolved at all (deep polar winter, a
+persistent gap), and then the map says "several dates" and the capture files no
+date rather than naming the newest pass it mostly is not showing. The radar
+basemap follows the same rule, where a blend would mix looks from opposite sides
+of the track.
 
 **`MAXCC` is always sent, and defaults to 100.** A configuration instance carries
 a cloud-coverage data filter of its own — the standard template ships 20% — and a
@@ -214,8 +224,82 @@ window and file under another. `tiles.get_provider()` parses the variant;
 | Choice | UI | Notes |
 |--------|----|-------|
 | Layer | picker populated from **GetCapabilities** on a user request | `LAYERS` in `engine/sentinel.py` is a four-entry catalogue; the instance is authoritative. Analyzer checks keep missing products visible but disabled and use actual IDs such as `VEGETATION_INDEX`. An unverified catalogue cannot start check imagery. |
-| Date | a **calendar**: candidate pass days are coloured by cloud, then checked at the crosshair | one day, not a range. Sent as `TIME=day/day` |
+| Date | a **calendar**: candidate pass days are coloured by cloud, then checked at the crosshair | one day, not a range. Sent as `TIME=day/day`. "Most recent" is a WFS lookup that resolves to a day and sends it the same way, never an open window |
 | Cloud | a **slider**, 0–100%, default 100 (no filter) | lower it and cloudier passes leave the tiles, the calendar and "most recent" together. Commits on release, so a drag is not a tile per step |
+
+### Layers written in Azimut
+
+A layer is a *name* the whole app already carries — the provider id, the tile
+cache, a capture's provenance — plus a rendering. Normally the rendering is a
+layer in the Copernicus dashboard; it can also be a script saved here
+(`settings.json` → `sentinel_layers`, `engine/sentinel.py`). Nothing downstream
+learns a new idea: `resolve_layer` turns the name into the request.
+
+| | |
+|---|---|
+| Stored | `{"id", "label", "base", "script", "hint", "form"?}`, up to 40, script ≤ 4000 chars |
+| `id` | the allowlisted layer-name shape, because it is a URL path segment *and* a directory name |
+| `base` | a layer the **instance** serves, which supplies the data collection — an evalscript replaces a layer's style, never its source (the same arrangement the radar basemap uses). Never the Sentinel-1 layer: Sentinel-2 bands read through it render nothing |
+| `script` | sent as `EVALSCRIPT=`, base64 then URL-escaped, with `LAYER=<base>` |
+| `form` | how a form wrote it (`composite`/`index`), a memo and not the truth — the script renders. Unreadable, it is dropped and the layer reopens as its script |
+| Offered | merged into `/api/satellite/sentinel/layers`, marked `custom`, so **every** map tab gets them: Satellite, both Compare sides, Detect and the analyzer builder all read that one route |
+| Enabled | always, unlike a configured layer: a script on this machine needs no confirmation from GetCapabilities |
+| Collision | a name written here wins over a configured one, so a layer later added to the dashboard cannot quietly change what a saved capture renders |
+| Backup | carried in the settings bundle (the analyst's own work, and no credential) |
+
+**A preview is a layer too.** A script is judged on pixels, so the picker renders
+one before it is saved, under `AZIMUT_DRAFT_<digest of the script>`. The digest is
+in the name because the name is what the disk cache keys on: change two numbers,
+press Preview again, and the tiles have to be fetched rather than served from the
+last attempt. Only one draft is kept, it is never offered in a picker, and it is
+left out of the settings backup (this machine's scratch work).
+
+**A layer that paints one quantity is also a Detect rule.** `(A − B) / (A + B)`
+is `measure="nd"` and one band painted into all three channels — grey, not colour
+— is `measure="band"` (`analysis_models.Rule`), so the builder offers each as the
+rule it already is, an index with its threshold and a band on the line a band
+rule starts at (`lib/customLayers.layerAsRule`). A colour composite does not come
+over — three channels are not one number — and neither does a hand-written
+script. The menu lists those too, greyed, with the reason
+(`lib/customLayers.whyNotARule`): a layer silently missing from it reads as
+"rules cannot be built from my layers at all".
+
+**A rule's line moves on the readings, not on new imagery.**
+`POST /compare/analyzers/check/values` sends what one rule read over the whole
+ground a check was tested on (`detect_rules.rule_values`), quantised to sixteen
+bits across the span actually measured and split over a PNG's red and green
+channels — a canvas hands back eight-bit RGBA whatever the file held, so a 16-bit
+greyscale would be truncated and the line would land in the wrong place. The
+browser applies the same comparison the engine applies (`analyzerRules.passesValue`
+mirrors `detect_rules._passes`), and `tests/test_detect_rules.py` proves the two
+agree pixel for pixel at several lines. One rule at a time, only once its slider
+is touched, and never a fetch: every rule of every tile would be tens of
+megabytes on a press nobody made.
+
+**A rule can be drawn as a layer, too.** The reverse direction
+(`lib/map/ruleLayer.js`): a rule names the bands it reads, so the same
+generators write the script that paints what it measures — `nd` and the
+two-band published indices as `indexScript`, a `band` rule as a grey composite,
+`brightness` as the visible bands averaged. It renders through the ordinary
+draft-preview path, so it caches and resolves exactly as a hand-written layer
+does. No threshold is baked in: the script's digest is the draft's name and so
+the tile cache's key, and a threshold in it would refetch the frame at every
+nudge of the slider.
+
+### Figures: one place, one day, several renderings
+
+`POST /api/cases/{case}/satellite/figure` renders the same ground through several
+layers and lays the panels out as a Geo Proof (`engine/figures.py`,
+`api/figures.py`). Each panel goes through the ordinary provider variant, so a
+layer written here resolves and caches exactly as it does on the map, and is filed
+as a real **capture** with its own provenance. The composer already lays panels
+out, captions them, draws the footer and takes annotations, so a figure opens as a
+composition that can be arrowed rather than a picture to accept or redo.
+
+One day for every panel, by design: a figure is one acquisition seen several ways.
+Panels of different dates would compare two things at once, which is Compare's job.
+Up to 8 panels, 1–4 per row, each layer once. The footer states the day, the point
+and `Copernicus Sentinel-2 L2A`.
 
 ### Dates come from WFS, and cost one request
 

@@ -104,6 +104,11 @@ class ProbeInput(CheckInput):
     point: tuple[Longitude, Latitude]
 
 
+class ValuesInput(CheckInput):
+    #: Which rule of the recipe to send the reading of, by position.
+    rule: int = Field(ge=0, lt=MAX_RULES)
+
+
 def _rules_only(body: CheckInput) -> None:
     if body.recipe.method != "rules":
         raise HTTPException(422, "only an analyzer of your own rules has checks to test")
@@ -148,6 +153,18 @@ def probe_rules(body: ProbeInput) -> dict[str, Any]:
     """Every rule's reading at one point of a tested check. Never fetches."""
     _rules_only(body)
     return _testing(lambda: detect_rules.probe(body.recipe, body.check, body.point))
+
+
+@router.post("/compare/analyzers/check/values")
+def rule_values(body: ValuesInput) -> dict[str, Any]:
+    """One rule's reading over the whole ground a check was tested on.
+
+    What the browser needs to move that rule's line and repaint without asking
+    again. One rule at a time, and never fetches: a check whose frames are not
+    cached is tested first.
+    """
+    _rules_only(body)
+    return _testing(lambda: detect_rules.rule_values(body.recipe, body.check, body.rule))
 
 
 Kind = Literal["areas", "zones", "followups", "runs"]

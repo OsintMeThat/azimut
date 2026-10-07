@@ -16,7 +16,9 @@ describe('a Sentinel-1 pass on the provider id', () => {
 
   it('reads as a day, a UTC time and a direction', () => {
     expect(passLabel({ date: '2026-05-14', time: '05:42:10' })).toBe('2026-05-14 · 05:42 UTC');
-    expect(passLabel(null)).toBe('Most recent');
+    // no pass means no window was sent, so the tiles blend the archive: the
+    // label says that rather than naming a pass that is mostly not there
+    expect(passLabel(null)).toBe('Several passes');
     expect(orbitMark('descending')).toBe('↓');
     expect(orbitMark('ascending')).toBe('↑');
   });

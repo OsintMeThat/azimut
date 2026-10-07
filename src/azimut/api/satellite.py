@@ -21,7 +21,7 @@ import httpx
 from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .. import config, errors
 from ..engine.analysis_models import Zone
@@ -150,11 +150,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _units() -> str:
+def units_preference() -> str:
     """The analyst's measurement system, for anything drawn with a number on it.
 
     Presentation only, as every display preference is: the capture's own
-    provenance keeps metres whatever the bar says.
+    provenance keeps metres whatever the bar says. Shared, because a figure's
+    panels carry the same bar as a capture does (``api/figures.py``).
     """
     return config.load_settings().get("units", "metric")
 
@@ -232,20 +233,45 @@ def _sentinel_instance() -> str:
     return key
 
 
+def _catalogue_layers() -> list[dict[str, Any]]:
+    return [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS]
+
+
+def _offered_layers(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The configuration's layers, then the ones written here.
+
+    Layers written in Azimut are appended rather than merged in: the standard
+    true-colour layer stays the first entry, which is what every picker falls
+    back to. They carry ``custom`` so a picker can offer them even where the
+    instance has not been asked — a script on this machine needs no permission
+    from GetCapabilities to exist — and so the editor knows which rows it owns.
+    """
+    customs = sentinel.custom_layers(config.load_settings())
+    names = {entry["id"] for entry in customs}
+    kept = [
+        entry
+        for entry in found
+        if entry.get("id") not in names and not sentinel.is_draft_layer(entry.get("id", ""))
+    ]
+    return kept + [
+        {"id": entry["id"], "label": entry["label"], "hint": entry["hint"], "custom": True}
+        for entry in customs
+    ]
+
+
 @router.get("/satellite/sentinel/layers")
 def sentinel_layers(check: bool = False) -> dict[str, Any]:
-    """The Sentinel-2 layers on offer.
+    """The Sentinel-2 layers on offer, wherever they were written.
 
     Without ``check`` this is the built-in catalogue and touches nothing —
     opening the Satellite tab must never phone out (local-first). ``check=true``
     asks the user's own instance what it really serves (GetCapabilities), which
-    is the only authority: a configuration can rename or drop any of them.
+    is the only authority for the layers *it* holds: a configuration can rename
+    or drop any of them. Layers written here are read from settings either way,
+    so every map tab offers them without a request.
     """
     if not check:
-        return {
-            "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
-            "source": "catalogue",
-        }
+        return {"layers": _offered_layers(_catalogue_layers()), "source": "catalogue"}
     try:
         found = sentinel.capabilities_layers(_sentinel_instance())
     except HTTPException:
@@ -253,17 +279,160 @@ def sentinel_layers(check: bool = False) -> dict[str, Any]:
     except Exception as exc:
         # the catalogue still works — say why the real list is missing, don't fail
         return {
-            "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
+            "layers": _offered_layers(_catalogue_layers()),
             "source": "catalogue",
             "detail": f"could not read the instance's layers: {tiles.upstream_failure(exc)}",
         }
     if not found:
         return {
-            "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
+            "layers": _offered_layers(_catalogue_layers()),
             "source": "catalogue",
             "detail": "the instance listed no layers",
         }
-    return {"layers": found, "source": "instance"}
+    return {"layers": _offered_layers(found), "source": "instance"}
+
+
+# -- layers written here -------------------------------------------------------
+
+#: How many a user may keep. A picker is a list you read, not a database.
+MAX_CUSTOM_LAYERS = 40
+
+
+class CustomLayerForm(BaseModel):
+    """How a layer was written, when a form wrote it rather than a person.
+
+    Kept so reopening the layer shows that form instead of its output, and so
+    an index can be offered to Detect as the rule it already is. The script
+    stays the truth: a memo this build cannot read is dropped, not refused
+    (``sentinel.parse_form``).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    way: Literal["composite", "index"]
+    red: str = ""
+    green: str = ""
+    blue: str = ""
+    gain: float = Field(default=1.0, gt=0, le=20)
+    high: str = ""
+    low: str = ""
+    ramp: str = Field(default="", max_length=32)
+    threshold: float | None = Field(default=None, ge=-1, le=1)
+
+
+class CustomLayerIn(BaseModel):
+    """A Copernicus layer written in Azimut, as the editor sends it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[A-Z0-9_]{1,40}$")
+    label: str = Field(default="", max_length=60)
+    #: A layer the instance serves, which supplies the data collection the
+    #: script reads. An evalscript replaces a layer's style, never its source.
+    base: str = Field(default=sentinel.DEFAULT_LAYER, pattern=r"^[A-Z0-9_]{1,40}$")
+    script: str = Field(min_length=1, max_length=sentinel.CUSTOM_SCRIPT_MAX)
+    hint: str = Field(default="", max_length=160)
+    form: CustomLayerForm | None = None
+
+
+@router.get("/satellite/sentinel/custom-layers")
+def custom_layers() -> dict[str, Any]:
+    """The layers written here, with their scripts, for the editor."""
+    settings = config.load_settings()
+    return {
+        "layers": sentinel.custom_layers(settings),
+        "max": MAX_CUSTOM_LAYERS,
+        "max_script": sentinel.CUSTOM_SCRIPT_MAX,
+        # The bands the Composite and Index forms offer. Sent from here rather
+        # than held in the frontend so one list stays the authority.
+        "bands": list(sentinel.L2A_BANDS),
+        # The configuration's radar layer, if it has one. A script reading
+        # Sentinel-2 bands through it would render nothing, so the editor keeps
+        # it out of what a layer can read its data from.
+        "radar_layer": str(settings.get("sentinel1_layer") or ""),
+    }
+
+
+@router.put("/satellite/sentinel/custom-layers")
+def save_custom_layer(body: CustomLayerIn) -> dict[str, Any]:
+    """Save a layer under its name, replacing any layer of that name.
+
+    The name is the identity: it is what a variant id, a tile-cache directory
+    and a capture's provenance carry, so saving over a name deliberately
+    changes what everything already filed under it renders.
+    """
+    try:
+        entry = sentinel.parse_custom_layer(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def update(settings: dict[str, Any]) -> None:
+        kept = [
+            row
+            for row in settings.get("sentinel_layers", []) or []
+            if not (isinstance(row, dict) and row.get("id") == entry["id"])
+        ]
+        if len(kept) >= MAX_CUSTOM_LAYERS:
+            raise HTTPException(
+                status_code=409,
+                detail=f"you can keep {MAX_CUSTOM_LAYERS} layers; remove one first",
+            )
+        settings["sentinel_layers"] = [*kept, entry]
+
+    config.update_settings(update)
+    return entry
+
+
+class DraftLayerIn(BaseModel):
+    """A layer being written, as the picker's Preview sends it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base: str = Field(default=sentinel.DEFAULT_LAYER, pattern=r"^[A-Z0-9_]{1,40}$")
+    script: str = Field(min_length=1, max_length=sentinel.CUSTOM_SCRIPT_MAX)
+
+
+@router.put("/satellite/sentinel/draft-layer")
+def save_draft_layer(body: DraftLayerIn) -> dict[str, str]:
+    """Render a script before it is saved, under a name of its own.
+
+    The name carries a digest of the script, because the name is what the disk
+    cache keys on: change two numbers, press Preview again, and the tiles have
+    to be fetched rather than served from the first attempt. Only one draft is
+    kept — the previous one is dropped, not accumulated.
+    """
+    ident = sentinel.draft_layer_id(body.script)
+    try:
+        entry = sentinel.parse_custom_layer(
+            {"id": ident, "label": "Draft", "base": body.base, "script": body.script}
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    config.update_settings(lambda settings: settings.update(sentinel_draft_layer=entry))
+    return {"id": ident}
+
+
+@router.delete("/satellite/sentinel/draft-layer")
+def clear_draft_layer() -> dict[str, bool]:
+    """Forget the draft, when the editor closes."""
+    config.update_settings(lambda settings: settings.update(sentinel_draft_layer=None))
+    return {"cleared": True}
+
+
+@router.delete("/satellite/sentinel/custom-layers/{ident}")
+def delete_custom_layer(ident: str) -> dict[str, bool]:
+    """Forget a layer. Work already saved keeps its name in provenance, and that
+    name no longer renders — the same as a layer dropped from a configuration."""
+
+    def update(settings: dict[str, Any]) -> None:
+        settings["sentinel_layers"] = [
+            row
+            for row in settings.get("sentinel_layers", []) or []
+            if not (isinstance(row, dict) and row.get("id") == ident)
+        ]
+
+    config.update_settings(update)
+    return {"deleted": True}
 
 
 @router.get("/satellite/sentinel/dates")
@@ -398,13 +567,19 @@ def sentinel1_layer(body: RadarLayerQuery) -> dict[str, Any]:
 def sentinel_coverage(
     lat: float, lon: float, layer: str, date: str, maxcc: int = sentinel.DEFAULT_MAXCC
 ) -> dict[str, Any]:
-    """Verify a candidate date against the configured layer at the crosshair.
+    """Verify a candidate date against the layer at the crosshair.
 
     ``maxcc`` is the cloud ceiling the map will render with: above it Sentinel
     Hub returns nothing, so a probe run at a different ceiling would answer a
     question the user didn't ask.
+
+    The probe asks for whichever layer carries the data — a layer written here
+    is asked for through its base, since the instance has never heard of the
+    name. The probe draws its own dataMask script either way, so what the
+    analyst's script would paint makes no difference to the answer.
     """
     instance = _sentinel_instance()
+    layer, _ = sentinel.resolve_layer(layer, sentinel.renderable_layers(config.load_settings()))
     if config.usage_blocked("sentinelhub"):
         raise HTTPException(
             status_code=429,
@@ -1337,7 +1512,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
             provider, bearing=body.bearing, marker_style=body.marker_style,
             marker_x=body.marker_x, marker_y=body.marker_y,
             marker_lat=body.marker_lat, marker_lon=body.marker_lon,
-            scale_north=body.scale_north, units=_units(),
+            scale_north=body.scale_north, units=units_preference(),
         )
     except tiles.TileFetchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1448,7 +1623,7 @@ async def capture_screenshot(
             img,
             meters_per_pixel=tiles.meters_per_pixel(lat, zoom) / device_scale,
             bearing=bearing,
-            units=_units(),
+            units=units_preference(),
         )
         if scale_north and framed
         else None

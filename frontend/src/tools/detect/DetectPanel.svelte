@@ -50,6 +50,8 @@
     selectedResult = $bindable(null),
     /** The review's eye and blink (DetectReview), which only a review holds. */
     bare = $bindable(false),
+    markers = $bindable(true),
+    outlines = $bindable(true),
     blinking = $bindable(false),
     /** Whether a run's results are open, which holds the map on them. */
     reviewing = $bindable(false),
@@ -801,7 +803,7 @@
         {#if error}<p class="warn" role="alert">{error}</p>{/if}
         {#if current}
           <DetectReview {caseId} run={current} methods={catalogue.methods} active={!collapsed} bind:candidateId
-            bind:bare bind:blinking {onpair}
+            bind:bare bind:markers bind:outlines bind:blinking {onpair}
             onaccept={afterVerdict} {onfocus} {onshow} onedit={editRun}
             onadd={(areaId, kind) => {
               manual = { areaId, kind };

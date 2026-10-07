@@ -15,7 +15,11 @@
   let { menuEl = $bindable(), s1 } = $props();
 
   const peer = $derived(s1.peer);
-  const shown = $derived(s1.pass);
+  /** The pass "most recent" resolved to: being rendered, but not chosen. */
+  const resolved = $derived(s1.pass ? null : s1.latest);
+  // What the tiles are rendered from: the chosen pass, or the one "most recent"
+  // resolved to. The chip reads that pass either way.
+  const shown = $derived(s1.shownPass);
 </script>
 
 <div class="s1-wrap" bind:this={menuEl}>
@@ -64,9 +68,11 @@
       {#if s1.passes.length}
         <ul class="passes" aria-label="Sentinel-1 passes">
           {#each s1.passes as entry (`${entry.date}T${entry.time}`)}
-            {@const on = shown?.date === entry.date && shown?.time === entry.time}
+            {@const on = s1.pass?.date === entry.date && s1.pass?.time === entry.time}
+            {@const showing = !s1.pass
+              && resolved?.date === entry.date && resolved?.time === entry.time}
             <li>
-              <button class="row mono" class:on onclick={() => s1.pick(entry)}
+              <button class="row mono" class:on class:showing onclick={() => s1.pick(entry)}
                 title={entry.orbit ? `Flying ${entry.orbit === 'descending' ? 'south' : 'north'}` : undefined}>
                 <span>{entry.date} · {entry.time.slice(0, 5)} UTC</span>
                 <span class="side">
@@ -184,6 +190,11 @@
   .row.on {
     color: var(--accent);
     background: var(--accent-soft);
+  }
+  /* the pass "most recent" landed on: being rendered, but not chosen */
+  .row.showing {
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .side {
     display: inline-flex;

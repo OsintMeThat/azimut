@@ -182,6 +182,7 @@ proof for publication.
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
 | ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
+| ✅ **Copernicus layers & figures** | Writes composite, index and script layers with a preview on the map, offers them in every map tab, reads an index or single-band layer as a Detect rule, draws a rule back as a layer and moves its line live on the last test's readings, and lays several renderings of one pass out as a captioned figure. |
 
 ---
 
@@ -237,7 +238,9 @@ GPS-tagged clips promotable to places.
 Toward v3: GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
 time; sun and moon times read against the terrain horizon the 3D map's DEM
-supplies, since a ridge ends the day well before the flat horizon does.
+supplies, since a ridge ends the day well before the flat horizon does; export
+and import an analyzer as a file, checks included, so one can be shared without
+handing over the settings backup and its keys.
 
 ### v4: investigation layer
 
@@ -305,6 +308,7 @@ stops making sense.
 - **Map files out of the case:** export pins, claims and Detect findings as KML or GeoJSON, with TimeStamp and TimeSpan so another viewer's time slider reads them.
 - **Update ffmpeg from the app:** download a static build into the workspace and prefer it at runtime, like the scraper update, if the bundled copy ever lags in a way users hit.
 - **Place names in their own script:** the Arabic or Cyrillic name under the Latin one, for searching local sources. Needs the engine's right-to-left text plugin, bundled rather than fetched.
+- **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 - **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.

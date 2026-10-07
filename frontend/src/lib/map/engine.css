@@ -49,6 +49,18 @@
   color: var(--text-2);
 }
 
+/* The engine parks its control corners at z-index 2, which is under the ground
+   overlays every tool paints in the 500s (rules, detections, marks). The zoom
+   buttons and the attribution ended up behind a translucent layer: still there,
+   still clickable, and looking broken. They climb over the overlays and stay
+   under the tool's own chrome, which starts at 600. */
+.maplibregl-ctrl-top-left,
+.maplibregl-ctrl-top-right,
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+  z-index: 580;
+}
+
 /* zoom +/- (topleft) sits directly under the tool cluster instead of the
    engine's default corner margin, which used to land it on top of that cluster.
    How far down is the tool's own business — a map with no cluster over it says

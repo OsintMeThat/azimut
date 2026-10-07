@@ -19,6 +19,7 @@ instance itself, which is the only authority (user-triggered — local-first).
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import math
 import re
@@ -120,13 +121,25 @@ def wmts_url(
     start: str | None = None,
     end: str | None = None,
     maxcc: int = DEFAULT_MAXCC,
+    *,
+    script: str = "",
 ) -> str:
     """The WMTS GetTile template for one layer and window: ``{key}``/``{z}``/``{x}``/``{y}``.
 
     ``start``/``end`` (YYYY-MM-DD) become the ``TIME`` mosaicking window, which
-    is inclusive of both days. Omitted, no TIME is sent and the layer's own
-    default applies — "most recent", the honest default for "just show me it".
+    is inclusive of both days. The same day on both ends is one acquisition,
+    which is what callers ask for: a picture an analyst can point at and date.
     ``maxcc`` is the cloud ceiling in percent; scenes above it are not rendered.
+    ``script`` renders the layer's *data* through an evalscript of ours or the
+    analyst's instead of the layer's own style (see ``resolve_layer``).
+
+    Omitted, no TIME is sent, and that is *not* "the most recent pass": the
+    mosaicking order runs per pixel over the whole archive, so wherever the
+    newest scene has nodata — a swath edge, a granule gap — the pixel comes
+    from an older one and the tile is a blend of dates that cannot be dated.
+    A dated window leaves holes there instead, which is the trade this tool
+    makes. The undated template stands only for the declared fallback, where
+    no pass could be resolved at all.
     """
     url = (
         f"{BASE}/wmts/{{key}}"
@@ -135,9 +148,20 @@ def wmts_url(
         "&TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/jpeg"
         f"&MAXCC={int(maxcc)}"
     )
+    if script:
+        url += f"&EVALSCRIPT={evalscript_param(script)}"
     if start and end:
         url += f"&TIME={start}/{end}"
     return url
+
+
+def evalscript_param(script: str) -> str:
+    """An evalscript as the ``EVALSCRIPT`` query value: base64, then URL-escaped.
+
+    The radar basemap has sent ours this way since it shipped; a layer written
+    in Azimut is the same request with the analyst's script instead of ours.
+    """
+    return quote(base64.b64encode(script.encode("utf-8")).decode("ascii"), safe="")
 
 
 def variant_id(base_id: str, layer: str | None = None, start: str | None = None,
@@ -212,10 +236,199 @@ def variant_label(
         window = start if start == end else f"{start} → {end}"
         label = f"{known} · {window}"
     else:
-        label = f"{known} · most recent"
+        label = f"{known} · undated mosaic"
     if maxcc != DEFAULT_MAXCC:
         label += f" · ≤{int(maxcc)}% cloud"
     return label
+
+
+# -- layers written here -------------------------------------------------------
+
+# How much JavaScript a layer may carry. EVALSCRIPT rides on the GET as base64,
+# a third longer than its source, and a proxy refuses a long URL well before
+# Sentinel Hub does. 4 kB holds a generous composite or index and keeps the
+# whole request inside the 8 kB every server in the way accepts.
+CUSTOM_SCRIPT_MAX = 4000
+_CUSTOM_LABEL_MAX = 60
+_CUSTOM_HINT_MAX = 160
+
+
+#: The forms that write a script, as opposed to a script written by hand.
+FORM_WAYS = ("composite", "index")
+_RAMP_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+def parse_form(raw: Any) -> dict[str, Any] | None:
+    """How a layer was written, when a form wrote it, or None.
+
+    A memo, not the truth: the script is what renders, and a layer whose memo is
+    unreadable still works. It is kept for two things the script cannot answer.
+
+    Reopening the layer shows the form that wrote it rather than its output —
+    without this, every saved layer opens as JavaScript, including the ones
+    nobody typed.
+
+    And an index *is* a quantity Detect already measures: a normalised
+    difference of two bands (``analysis_models.Rule``, ``measure="nd"``), so the
+    same arithmetic the layer paints can be read as a rule. A composite is three
+    channels and no single quantity, which is why only one of the two carries
+    over.
+    """
+    if not isinstance(raw, dict):
+        return None
+    way = str(raw.get("way", ""))
+    if way not in FORM_WAYS:
+        return None
+
+    def band(name: str) -> str | None:
+        value = str(raw.get(name, ""))
+        return value if value in L2A_BANDS else None
+
+    if way == "composite":
+        red, green, blue = band("red"), band("green"), band("blue")
+        if not (red and green and blue):
+            return None
+        try:
+            gain = float(raw.get("gain", 1))
+        except (TypeError, ValueError):
+            return None
+        if not 0 < gain <= 20:
+            return None
+        return {"way": way, "red": red, "green": green, "blue": blue, "gain": gain}
+
+    high, low = band("high"), band("low")
+    if not (high and low):
+        return None
+    ramp = str(raw.get("ramp", "") or "")
+    if ramp and not _RAMP_RE.match(ramp):
+        return None
+    threshold: float | None = None
+    stated = raw.get("threshold")
+    if stated not in (None, ""):
+        try:
+            threshold = float(stated)
+        except (TypeError, ValueError):
+            return None
+        if not -1 <= threshold <= 1:
+            return None
+    return {"way": way, "high": high, "low": low, "ramp": ramp, "threshold": threshold}
+
+
+def parse_custom_layer(entry: Any) -> dict[str, Any]:
+    """One layer written in Azimut, validated. Raises ValueError on anything else.
+
+    ``id`` is the name everything downstream sees — a variant id, a URL path
+    segment, a cache directory, a capture's provenance — so it is held to the
+    same allowlist as a configured layer's (``_LAYER_RE``).
+
+    ``base`` is a layer the *instance* serves. An evalscript replaces a layer's
+    style, never its data collection, so a script needs an existing layer to
+    read through: the same arrangement the radar basemap has always used, where
+    our picture is drawn from the user's own Sentinel-1 layer.
+    """
+    if not isinstance(entry, dict):
+        raise ValueError("a custom layer is an object")
+    ident = str(entry.get("id", "")).strip()
+    if not _LAYER_RE.match(ident):
+        raise ValueError(
+            f"malformed custom layer name '{ident}' "
+            "(capitals, digits and underscores, up to 40)"
+        )
+    base = str(entry.get("base", "") or DEFAULT_LAYER).strip()
+    if not _LAYER_RE.match(base):
+        raise ValueError(f"malformed base layer '{base}'")
+    script = str(entry.get("script", ""))
+    if not script.strip():
+        raise ValueError("a custom layer needs a script")
+    if len(script) > CUSTOM_SCRIPT_MAX:
+        raise ValueError(f"a script is at most {CUSTOM_SCRIPT_MAX} characters")
+    label = str(entry.get("label", "") or ident).strip()[:_CUSTOM_LABEL_MAX]
+    hint = str(entry.get("hint", "")).strip()[:_CUSTOM_HINT_MAX]
+    kept: dict[str, Any] = {
+        "id": ident, "label": label, "base": base, "script": script, "hint": hint,
+    }
+    form = parse_form(entry.get("form"))
+    if form:
+        kept["form"] = form
+    return kept
+
+
+def custom_layers(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """The layers written here, in the order they were saved.
+
+    A malformed entry is skipped rather than allowed to break the layer list:
+    the app must still open on a settings file an older or newer build wrote.
+    """
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in settings.get("sentinel_layers", []) or []:
+        try:
+            parsed = parse_custom_layer(entry)
+        except ValueError:
+            continue
+        if parsed["id"] in seen:
+            continue  # a name means one layer, and the first one saved keeps it
+        seen.add(parsed["id"])
+        found.append(parsed)
+    return found
+
+
+# A layer being written, as opposed to one that was saved. Its name carries a
+# digest of the script because the name is the cache key: an analyst presses
+# Preview, changes two numbers and presses it again, and the second press has to
+# fetch tiles rather than serve the first one's.
+DRAFT_PREFIX = "AZIMUT_DRAFT_"
+
+
+def draft_layer_id(script: str) -> str:
+    """The name a draft of this script renders under."""
+    digest = hashlib.sha256(script.encode("utf-8")).hexdigest()[:12].upper()
+    return f"{DRAFT_PREFIX}{digest}"
+
+
+def is_draft_layer(layer: str) -> bool:
+    return layer.startswith(DRAFT_PREFIX)
+
+
+def draft_layer(settings: dict[str, Any]) -> dict[str, Any] | None:
+    """The layer being written on this machine, if there is one."""
+    raw = settings.get("sentinel_draft_layer") or None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return parse_custom_layer(raw)
+    except ValueError:
+        return None
+
+
+def renderable_layers(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every layer a request may be asked for: the saved ones and the draft.
+
+    The pickers and the editor read ``custom_layers``, which is the saved list.
+    Anything that turns a name into a request reads this one, so a draft renders
+    exactly like a saved layer without being offered as one.
+    """
+    draft = draft_layer(settings)
+    return [*custom_layers(settings), *([draft] if draft else [])]
+
+
+def resolve_layer(
+    layer: str, customs: list[dict[str, Any]] | None = None
+) -> tuple[str, str]:
+    """``layer`` as a request can carry it: the layer to ask for, and the script.
+
+    A configured layer answers for itself and needs no script. A layer written
+    here answers through its base layer, which supplies the data collection,
+    with the analyst's script in place of that layer's style.
+
+    A name written here wins over a configured one, so a layer later added to
+    the configuration under the same name cannot quietly change what a saved
+    capture renders.
+    """
+    for entry in customs or []:
+        if entry["id"] == layer:
+            return str(entry["base"]), str(entry["script"])
+    return layer, ""
 
 
 # -- date discovery (WFS) ------------------------------------------------------
@@ -575,6 +788,10 @@ def radar_wmts_url(layer: str, day: str = "", time: str = "") -> str:
     The layer is the user's Sentinel-1 layer; its own style is replaced by the
     picture Detect reviews radar candidates on, so the map and the evidence
     read alike. JPEG like the optical basemap: speckle costs PNG a fortune.
+
+    ``day`` names one pass and is what callers send. Without it no TIME goes
+    out and the tile blends every pass in the archive, exactly as the optical
+    template does (see ``wmts_url``) — kept for the declared fallback only.
     """
     if not _LAYER_RE.match(layer or ""):
         raise ValueError(f"malformed layer '{layer}'")
@@ -591,9 +808,9 @@ def radar_wmts_url(layer: str, day: str = "", time: str = "") -> str:
 
 
 def radar_label(day: str, time: str) -> str:
-    """How a radar variant reads: "2026-05-14 05:42 UTC", a day, or the latest."""
+    """How a radar variant reads: "2026-05-14 05:42 UTC", a day, or undated."""
     if not day:
-        return "most recent pass"
+        return "undated mosaic"
     return f"{day} {time[:5]} UTC" if time else day
 
 

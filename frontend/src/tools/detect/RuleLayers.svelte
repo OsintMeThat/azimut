@@ -13,7 +13,7 @@
    * After the rules or the pins change the picture is dimmed: it answers for
    * what they were.
    */
-  import { RULE_COLOURS, sideOf } from '../../lib/map/analyzerRules.js';
+  import { RULE_COLOURS, redrawRule, sideOf } from '../../lib/map/analyzerRules.js';
   import { compose, cssMatrix, imageToMercator, invert, screenToMercator } from '../../lib/map/groundFrame.js';
   import RuleTile from './RuleTile.svelte';
 
@@ -30,6 +30,12 @@
     /** Where the split sits, as a percentage of the map from its left edge. */
     divider = 50,
     stale = false,
+    /**
+     * Rules whose reading the engine has sent: `[{ index, reading }]`. Their
+     * ground is drawn from the reading rather than from the test's verdict, so
+     * their line can move and the picture follows without asking again.
+     */
+    live = [],
   } = $props();
 
   /** The tint over ground the test measured, out of 255. */
@@ -59,6 +65,29 @@
     return out;
   }
 
+  /**
+   * One rule's reading out of its PNG: sixteen bits split over two channels.
+   *
+   * A canvas hands back eight-bit RGBA whatever the file held, so the engine
+   * writes the high byte on red and the low byte on green rather than a 16-bit
+   * greyscale that would be truncated on the way in (`detect_rules._value_png`).
+   */
+  async function decodeValues(base64, size, { low, high, steps }) {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const scratch = document.createElement('canvas');
+    scratch.width = size;
+    scratch.height = size;
+    const context = scratch.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0);
+    const rgba = context.getImageData(0, 0, size, size).data;
+    const out = new Float64Array(size * size);
+    const step = (high - low) / steps;
+    for (let i = 0; i < out.length; i++) out[i] = low + (rgba[i * 4] * 256 + rgba[i * 4 + 1]) * step;
+    return out;
+  }
+
   $effect(() => {
     const tiles = detail?.tiles ?? [];
     const size = detail?.size ?? 0;
@@ -69,6 +98,46 @@
     return () => { cancelled = true; };
   });
 
+  /** Per rule index, its reading per tile. Decoded once; the line moves, this does not. */
+  let readings = $state({});
+
+  $effect(() => {
+    const wanted = live;
+    let cancelled = false;
+    Promise.all(wanted.map(async ({ index, reading }) => [index, Object.fromEntries(
+      await Promise.all((reading.tiles ?? []).map(async (tile) => [
+        `${tile.x},${tile.y}`, await decodeValues(tile.values, reading.size, reading),
+      ])),
+    )]))
+      .then((pairs) => { if (!cancelled) readings = Object.fromEntries(pairs); })
+      .catch(() => { if (!cancelled) readings = {}; });
+    return () => { cancelled = true; };
+  });
+
+  /**
+   * The mask each tile is painted from: the test's, with every live rule's own
+   * bit redrawn at the line it sits on now.
+   *
+   * Its own derivation rather than part of `placed`, which also follows the
+   * camera: panning the map must not redraw five million pixels.
+   */
+  const painted = $derived.by(() => {
+    const base = decoded;
+    const held = readings;
+    const rows = live.filter(({ index }) => held[index] && rules[index]);
+    if (!rows.length) return base;
+    const out = {};
+    for (const [key, bits] of Object.entries(base)) {
+      let next = bits;
+      for (const { index } of rows) {
+        const values = held[index][key];
+        if (values) next = redrawRule(next, index, values, rules[index]);
+      }
+      out[key] = next;
+    }
+    return out;
+  });
+
   const placed = $derived.by(() => {
     revision;
     const tiles = detail?.tiles ?? [];
@@ -76,9 +145,9 @@
     const box = element.getBoundingClientRect();
     const frame = { ...engine.frame(), width: box.width || 1, height: box.height || 1 };
     const toScreen = invert(screenToMercator(frame));
-    return tiles.filter((tile) => decoded[`${tile.x},${tile.y}`]).map((tile) => ({
+    return tiles.filter((tile) => painted[`${tile.x},${tile.y}`]).map((tile) => ({
       key: `${tile.x},${tile.y}`,
-      bits: decoded[`${tile.x},${tile.y}`],
+      bits: painted[`${tile.x},${tile.y}`],
       transform: cssMatrix(compose(toScreen, imageToMercator(tile.box, detail.size, detail.size))),
     }));
   });

@@ -14,6 +14,7 @@
   import { isActive, plural } from '../../lib/map/detections.js';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import OverlayDisplay from './OverlayDisplay.svelte';
   import {
     blinkable, candidatePair, candidateSize, comparePairFor, orderCandidates, pinDefaults,
   } from '../../lib/map/detectReview.js';
@@ -29,6 +30,8 @@
     candidateId = $bindable(null),
     /** The detection's drawing taken off the map, so the imagery shows bare. */
     bare = $bindable(false),
+    markers = $bindable(true),
+    outlines = $bindable(true),
     /** Pass A flipped against pass B on the map, while the pair has two dates. */
     blinking = $bindable(false),
     onaccept = () => {},
@@ -146,7 +149,7 @@
    */
   function shortcut(event) {
     if (!active || !run || run.status !== 'ready' || busy || pin || enlarged || event.ctrlKey || event.metaKey || event.altKey
-      || event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      || event.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="menu"]')) return;
     const key = event.key.toLowerCase();
     // Shift and an arrow turn the map, so the queue takes the bare arrows only
     if (event.shiftKey && event.key.startsWith('Arrow')) return;
@@ -268,8 +271,8 @@
     }}>Add candidate</button>
       <button class="btn btn-sm" onclick={onexport}>Export as layer</button>
       <span class="map-acts">
-        <button class="cmp-icon" class:on={bare} aria-pressed={bare} aria-label="Hide the candidates and areas"
-          title="Hide the candidates and areas (H)" onclick={() => (bare = !bare)}><Icon name={bare ? 'eyeOff' : 'eye'} size={14} /></button>
+        <OverlayDisplay bind:markers bind:outlines bind:hidden={bare}
+          what="the candidates and areas" shortcut="H" />
         {#if canBlink}
           <button class="cmp-icon" class:on={blinking} aria-pressed={blinking} aria-label="Blink A and B"
             title="Blink A and B on the map (B)" onclick={() => (blinking = !blinking)}><Icon name="blink" size={14} /></button>

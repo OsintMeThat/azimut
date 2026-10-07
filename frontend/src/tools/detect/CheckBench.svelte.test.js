@@ -21,19 +21,25 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function open({ dates = 'two', sensor = 'sentinel2', checks = [], layers, layerState = null } = {}) {
+function open({ dates = 'two', sensor = 'sentinel2', checks = [], layers, layerState = null, planError = '' } = {}) {
   const recipe = $state({ ...newRecipe(METHODS, { sensor, dates }), name: 'Mine', checks });
   const api = { post: vi.fn(async (url, body) => {
     calls.push([url, body]);
-    if (url.endsWith('/check/plan')) return { tiles: 1, missing: 4 };
+    if (url.endsWith('/check/plan')) {
+      if (planError) throw new Error(planError);
+      return { tiles: 1, missing: 4 };
+    }
     if (url.endsWith('/check')) {
       const covered = body.check.marks.map((mark) => mark.expect === 'found');
       return { ready: true, missing: 0, count: 1, covered, size: 512, tiles: [], rules: body.recipe.rules.map(() => ({ share: 0.1, kept: 0.1 })),
         candidates: [], readings: [] };
     }
     return { dates: [{ date: '2026-05-11', cloud: 4, coverage: 1 }, { date: '2026-05-04', cloud: 2, coverage: 1 }], truncated: false };
-  }) };
-  bench = new Bench({ api, recipe, limits: { max_checks: 12, max_marks: 20 }, layers: () => layers ?? [],
+  }),
+  // Letting a drawn rule go clears the draft it was rendered under.
+  put: vi.fn(async () => ({ id: 'AZIMUT_DRAFT_ABC123' })),
+  del: vi.fn(async () => ({})) };
+  bench = new Bench({ api, recipe, limits: { max_checks: 12, max_marks: 60 }, layers: () => layers ?? [],
     layerState: () => layerState, viewBounds: () => VIEW });
   target = document.createElement('div');
   document.body.append(target);
@@ -113,6 +119,43 @@ it('arms a pin, says what a click will do, and says how many are down', () => {
   expect(bench.pinning).toBe(null);
 });
 
+it('changes only the check display and restores its choices after hiding all overlays', async () => {
+  const { recipe } = open({ checks: [made('The plot')] });
+  bench.select(bench.checks[0].id); flushSync(); await settle();
+  const savedRecipe = JSON.stringify(recipe), before = calls.length;
+  click(query('[aria-label="Which overlays"]'));
+  await Promise.resolve(); flushSync();
+  const rows = [...query('[role="menu"]').querySelectorAll('[role="menuitemcheckbox"]')];
+  expect(rows.map((row) => row.textContent.trim())).toEqual(['Markers', 'Outlines', 'Check pins']);
+  click(rows[0]); click(rows[2]);
+  expect([bench.markers, bench.outlines, bench.checkPins]).toEqual([false, true, false]);
+  document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
+  click(query('[aria-label="Hide the check overlays"]'));
+  expect(bench.hideOverlays).toBe(true);
+  click(query('[aria-label="Hide the check overlays"]'));
+  expect(bench.hideOverlays).toBe(false);
+  expect([bench.markers, bench.outlines, bench.checkPins]).toEqual([false, true, false]);
+  await settle();
+  expect(JSON.stringify(recipe)).toBe(savedRecipe);
+  expect(calls).toHaveLength(before);
+});
+
+it('shows the tile limit error while a pin is armed and blocks Test before fetching', async () => {
+  const error = 'these pins reach 21 tiles and a check reads at most 20: start another check';
+  open({ checks: [made('The plot')], planError: error });
+  bench.select(bench.checks[0].id);
+  bench.arm('found'); flushSync();
+  await settle();
+  expect(bench.pinning).toBe('found');
+  expect(query('.note.warn[role="status"]').textContent).toBe(error);
+  expect(query('.test').title).toBe(error);
+  expect(query('.test').disabled).toBe(true);
+  click(query('.test')); await settle();
+  expect(calls.some(([url]) => url.endsWith('/check'))).toBe(false);
+  bench.arm('found'); flushSync();
+  expect(query('.note.warn').textContent).toBe(error);
+});
+
 it('says what a test costs before it reads, then that it is done, and draws a chip for each rule', async () => {
   const { recipe } = open({ checks: [made('The plot')] });
   recipe.rules = [newRule('index', 'change'), newRule('index', 'a')];
@@ -159,7 +202,8 @@ it('shows the passes in the layer the rules read best, or the basemap in their p
   click(look);
   const menu = query('[role="menu"][aria-label="Copernicus layer"]');
   const rows = [...menu.querySelectorAll('[role="menuitemradio"]')];
-  expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual(['True colourTRUE_COLOR', 'NDVI (vegetation index)NDVI for rule ★']);
+  // the tag names the bands rather than a star that lives at the other end of the screen
+  expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual(['True colourTRUE_COLOR', 'NDVI (vegetation index)NDVI shows B08 · B04']);
   click(rows[1]);
   expect(bench.layer).toBe('NDVI');
   expect(look.textContent.trim()).toBe('Display: NDVI');
@@ -256,4 +300,30 @@ it('closes the drawer of a check being made by giving the check up, and Escape d
   query('.bench-root').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); flushSync();
   expect(bench.draft).toBe(null);
   expect(query('.drawer')).toBe(null);
+});
+
+it('separates what the map shows from what the rules read, where the two are confused', () => {
+  open({ checks: [made('The plot')], layers: [{ id: 'TRUE_COLOR', label: 'True colour' }] });
+  bench.select(bench.checks[0].id); flushSync();
+  click(query('[aria-label="Copernicus layer"][aria-haspopup]'));
+  const menu = query('[role="menu"][aria-label="Copernicus layer"]');
+  expect(menu.querySelector('.layer-aside').textContent.trim())
+    .toBe('What you look at. Rules read the bands themselves.');
+});
+
+it('says when a rule is drawn in the display’s place, and gives the display back', async () => {
+  const { recipe } = open({ checks: [made('The plot')], layers: [{ id: 'TRUE_COLOR', label: 'True colour' }] });
+  recipe.rules = [newRule('nd', 'b', { bands: ['B12', 'B11'] })];
+  bench.select(bench.checks[0].id); flushSync();
+  // the draft never reaches a picker, so the chip says the rule rather than a layer name
+  bench.ruleLayer = { index: 0, id: 'AZIMUT_DRAFT_ABC123', back: 'TRUE_COLOR' };
+  flushSync();
+  const look = query('[aria-label="Copernicus layer"][aria-haspopup]');
+  expect(look.textContent.trim()).toBe('Display: rule 1');
+  click(look);
+  const back = query('.layer-drawn');
+  expect(back.textContent).toContain('Rule 1 is drawn on the map');
+  click(back);
+  expect(bench.ruleLayer).toBe(null);
+  expect(look.textContent.trim()).toBe('Display: True colour');
 });

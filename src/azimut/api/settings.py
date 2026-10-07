@@ -549,7 +549,8 @@ def export_settings() -> Response:
     local download of secrets that already live in their workspace.
 
     Deliberately absent: export destinations (absolute paths chosen on this
-    machine), ``cookies.txt`` (a live login session), the cases themselves
+    machine), the half-written Copernicus layer in the picker,
+    ``cookies.txt`` (a live login session), the cases themselves
     (portable folders already), the extension folder the app owns
     (``config.extension_dir()`` — those are this build's own bundled bytes, and
     the new machine's Install button writes its own copy, which the browser has
@@ -558,6 +559,9 @@ def export_settings() -> Response:
     """
     portable_settings = config.load_settings()
     portable_settings.pop("export_dirs", None)
+    # A layer half-written in the picker is this machine's scratch work, replaced
+    # by the next preview. The saved ones travel, in sentinel_layers.
+    portable_settings.pop("sentinel_draft_layer", None)
     # A machine that never paired has no token to carry, and an empty one would
     # unpair the machine this backup is restored on.
     if not portable_settings.get("ingest_token"):
@@ -595,6 +599,27 @@ class ImportedTileProvider(BaseModel):
     max_zoom: int = Field(default=19, ge=1, le=24)
     imagery: bool = True
     tile_size: Literal[256, 512] = 256
+
+
+class ImportedSentinelLayer(BaseModel):
+    """Canonical shape of a Copernicus layer written in Azimut, in a backup.
+
+    The analyst's own work, and no credential: a script is carried across
+    machines like an analyzer recipe is. The instance it reads through is
+    named by `base`, which the receiving configuration must also serve.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str = Field(pattern=r"^[A-Z0-9_]{1,40}$")
+    label: str = Field(default="", max_length=60)
+    base: str = Field(default="TRUE_COLOR", pattern=r"^[A-Z0-9_]{1,40}$")
+    script: str = Field(min_length=1, max_length=sentinel.CUSTOM_SCRIPT_MAX)
+    hint: str = Field(default="", max_length=160)
+    #: How a form wrote it, if one did. Typed loosely and re-read through
+    #: `sentinel.parse_form` on load: a memo a newer build wrote travels
+    #: without this one having to understand it.
+    form: dict[str, Any] | None = None
 
 
 class ImportedProviderStatus(BaseModel):
@@ -662,6 +687,7 @@ class ImportedSettings(BaseModel):
         ge=config.SETTINGS_SCHEMA,
         le=config.SETTINGS_SCHEMA,
     )
+    sentinel_layers: list[ImportedSentinelLayer] = Field(default_factory=list, max_length=40)
     tile_providers: list[ImportedTileProvider] = Field(default_factory=list, max_length=100)
     api_keys: dict[ShortId, SecretValue] = Field(default_factory=dict, max_length=128)
     usage: dict[ShortId, dict[UsageMonth, UsageCount]] = Field(default_factory=dict, max_length=128)

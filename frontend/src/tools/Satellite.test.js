@@ -734,10 +734,11 @@ describe('a map in more than one window', () => {
       surface.indexOf('{#if s2 && shown.provider?.id === SENTINEL_ID}'),
       surface.indexOf('{:else if s1 && shown.provider?.id === RADAR_ID}')
     );
-    // the pill always reads the day, marks a pinned one, and says how it was chosen
-    expect(s2Pill).toContain('{pinnedDay ?? s2.latest ?? \'\'}');
-    expect(s2Pill).toContain('class:exact={!!pinnedDay}');
-    expect(s2Pill).toContain("{s2.latest ? 'latest' : 'most recent'}");
+    // the pill reads the day the window named, and says so rather than naming a
+    // pass when the tiles blend the archive
+    expect(s2Pill).toContain("{renderedDay ?? (s2.undated ? 'several dates' : 'finding…')}");
+    expect(s2Pill).toContain('class:exact={!!renderedDay}');
+    expect(s2Pill).toContain('class:undated={!renderedDay && s2.undated}');
   });
 
   it('opens that tab on the map alone', () => {
@@ -856,7 +857,7 @@ describe('Esri Wayback', () => {
   });
 
   it('puts the release on the id every tile and capture keys on', () => {
-    expect(source).toContain('imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release, pass: s1.pass })');
+    expect(source).toContain('imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release, pass: s1.shownPass })');
     expect(source).toContain('wayback={wb}');
     // …and the radar pass beside it
     expect(source).toContain('{s1}');

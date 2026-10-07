@@ -28,6 +28,7 @@
   import AnalyzerSettings from './AnalyzerSettings.svelte';
   import RuleRow from './RuleRow.svelte';
   import Icon from '../../components/Icon.svelte';
+  import { layerAsRule, layerRuleWords, readCustomLayers, whyNotARule } from '../../lib/customLayers.js';
 
   let {
     catalogue,
@@ -81,6 +82,45 @@
   function add() {
     if (recipe.rules.length >= most) return;
     recipe.rules = [...recipe.rules, newRule(radar ? 'radar' : 'index', single ? 'b' : 'a')];
+  }
+
+  /**
+   * A rule out of a layer you wrote.
+   *
+   * A layer that paints one quantity is already a rule: an index is `nd`, and a
+   * band painted grey into all three channels is `band`. So the arithmetic you
+   * settled on looking at the map comes over as the rule it was, rather than
+   * being typed a second time from memory.
+   *
+   * Every layer is listed, including the ones that cannot come over, each with
+   * the reason (`whyNotARule`). Hiding them would say rules cannot be built
+   * from your layers at all, which is the opposite of what is true.
+   */
+  let mine = $state([]); // every layer written here, read when the builder opens
+  let fromLayerOpen = $state(false);
+  // Read once, and never again on the answer. Waiting on `mine.length` instead
+  // would make an empty list its own trigger: the read assigns a fresh array,
+  // the array is the effect's dependency, and the effect reads again forever.
+  let asked = false;
+
+  $effect(() => {
+    if (radar || asked) return;
+    asked = true;
+    // A local file, not a request to Copernicus: reading it costs nothing.
+    untrack(() =>
+      readCustomLayers(api)
+        .then((found) => (mine = found.layers ?? []))
+        .catch(() => {})
+    );
+  });
+
+  function addFromLayer(layer) {
+    const made = layerAsRule(layer);
+    fromLayerOpen = false;
+    if (!made || recipe.rules.length >= most) return;
+    const { measure, ...line } = made;
+    recipe.rules = [...recipe.rules, newRule(measure, single ? 'b' : 'a', line)];
+    toast(`${layer.label || layer.id} added as a rule`, 'ok');
   }
   function remove(i) {
     recipe.rules = recipe.rules.filter((_, k) => k !== i);
@@ -167,17 +207,51 @@
         {#each recipe.rules as _, i (i)}
           <RuleRow bind:rule={recipe.rules[i]} {recipe} index={i} colour={RULE_COLOURS[i % RULE_COLOURS.length]}
             signal={i === signal} reading={bench.detail?.rules?.[i] ?? null} stale={bench.stale}
+            tested={!!bench.detail}
             ticks={pinTicks(recipe.rules[i], bench.marks, bench.detail?.readings, i)}
             effect={bench.stale ? '' : describeWithout(bench.marks, bench.detail?.covered, bench.detail?.without?.[i]?.covered)}
             match={recipe.match} shown={bench.painted(i)} ontoggle={() => bench.toggleRule(i)}
+            drawn={bench.ruleLayer?.index === i} drawing={bench.ruleLayerBusy && bench.ruleLayer?.index !== i}
+            onsee={() => bench.showRule(i)} onlive={() => void bench.loadReading(i)}
             bands={limits.bands} classes={limits.classes} maxAround={limits.max_around}
             canRemove={recipe.rules.length > 1} onremove={() => remove(i)} onsignal={() => rank(i)}
             onhover={(index) => bench.hoverRule(index)} />
         {/each}
-        <button class="btn btn-sm" disabled={recipe.rules.length >= most}
-          title={recipe.rules.length >= most ? `At most ${most} rules per analyzer` : undefined} onclick={add}>
-          <Icon name="plus" size={13} /> Add a rule
-        </button>
+        <div class="add-rule">
+          <button class="btn btn-sm" disabled={recipe.rules.length >= most}
+            title={recipe.rules.length >= most ? `At most ${most} rules per analyzer` : undefined} onclick={add}>
+            <Icon name="plus" size={13} /> Add a rule
+          </button>
+          {#if mine.length}
+            <div class="from-layer">
+              <button class="btn btn-sm" class:on={fromLayerOpen}
+                disabled={recipe.rules.length >= most}
+                title="A formula you wrote, as the rule it already is"
+                onclick={() => (fromLayerOpen = !fromLayerOpen)}>
+                Reuse a formula <Icon name="chevronDown" size={12} />
+              </button>
+              {#if fromLayerOpen}
+                <div class="layer-menu card" role="menu">
+                  {#each mine as row (row.id)}
+                    {@const why = whyNotARule(row)}
+                    <button class="layer-opt" role="menuitem" disabled={!!why}
+                      title={why ? `Cannot become a rule: ${why}` : 'Add it as a rule'}
+                      onclick={() => addFromLayer(row)}>
+                      <span class="layer-name">{row.label || row.id}</span>
+                      <span class="layer-sum" class:mono={!why}>
+                        {why || layerRuleWords(row)}
+                      </span>
+                    </button>
+                  {/each}
+                  <p class="layer-note">
+                    A rule reads one number per pixel, so an index or a band comes over and a
+                    colour composite does not.
+                  </p>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
       </section>
     {:else if tab === 'checks'}
       <AnalyzerChecks {bench} />
@@ -206,6 +280,45 @@
 </div>
 
 <style>
+  /* Add a rule, and the shortcut for one you already settled on looking at the
+     map: an index layer you wrote is the same arithmetic. */
+  .add-rule { display: flex; gap: 6px; flex-wrap: wrap; }
+  .from-layer { position: relative; }
+  .from-layer .btn.on { border-color: var(--accent); color: var(--accent); }
+  .layer-menu {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 5px);
+    left: 0;
+    display: grid;
+    gap: 2px;
+    min-width: 260px;
+    max-width: min(360px, 80vw);
+    padding: 5px;
+  }
+  .layer-opt {
+    display: grid;
+    gap: 1px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    text-align: left;
+    cursor: pointer;
+  }
+  .layer-opt:hover:not(:disabled) { background: var(--bg-2); }
+  /* Shown and not offered: the row is the explanation of why it is not there. */
+  .layer-opt:disabled { cursor: default; opacity: 0.55; }
+  .layer-name { font-size: var(--fs-sm); color: var(--text-1); }
+  .layer-sum { font-size: var(--fs-xs); color: var(--text-3); }
+  .layer-note {
+    margin: 3px 2px 1px;
+    padding-top: 5px;
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    color: var(--text-3);
+  }
   .builder { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 10px; }
   .panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; transition: opacity 0.15s var(--ease); }
   .panel.locked { opacity: 0.4; pointer-events: none; user-select: none; }

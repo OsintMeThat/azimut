@@ -25,7 +25,7 @@ function open({ dates = 'two', checks = [] } = {}) {
   const api = { post: vi.fn(async (url, body) => (url.endsWith('/plan') ? { tiles: 1, missing: 2 }
     : { ready: true, missing: 0, count: 1, covered: body.check.marks.map((mark) => mark.expect === 'found'), size: 512, tiles: [],
       rules: [], candidates: [], readings: [] })) };
-  bench = new Bench({ api, recipe, limits: { max_checks: 2, max_marks: 20 }, viewBounds: () => null });
+  bench = new Bench({ api, recipe, limits: { max_checks: 2, max_marks: 60 }, viewBounds: () => null });
   target = document.createElement('div');
   document.body.append(target);
   live = mount(AnalyzerChecks, { target, props: { bench } });

@@ -56,7 +56,7 @@ REFLECTANCE = frozenset({"band", "brightness", "colour"})
 #: How many grid tiles one check may read, the ones beside a pin near an edge
 #: included. Past that the frames to fetch stop being a figure an analyst can
 #: weigh before pressing Test.
-MAX_CHECK_TILES = 12
+MAX_CHECK_TILES = 20
 #: How near to its tile's edge a pin may come, in pixels, before the tile across
 #: the edge is read as well. The examples keep their marks at least 64 pixels
 #: inside, so each of them reads one tile.
@@ -614,6 +614,83 @@ def _reading(recipe: Recipe, evaluation: Evaluation, px: int, py: int) -> dict[s
             "rules": [{"passes": bool(evaluation.passes[i][py, px]), "value": number(evaluation.values[i]),
                        "before": number(evaluation.before[i]), "after": number(evaluation.after[i])}
                       for i in range(len(recipe.rules))]}
+
+
+#: Steps a rule's value is quantised to on its way to the browser. Sixteen bits
+#: across the span actually measured puts the rounding orders of magnitude below
+#: any line an analyst can set, so the ground the browser paints while the slider
+#: moves is the ground the next test will keep, not an approximation of it.
+VALUE_STEPS = 65535
+
+
+def _value_png(values: Any, seen: Any, low: float, span: float) -> str:
+    """One rule's reading over a tile, as a PNG the browser can read exactly.
+
+    Sixteen bits split over two channels, because a canvas hands back eight-bit
+    RGBA whatever the file held: a 16-bit greyscale PNG would be truncated on
+    the way in and the line would land in the wrong place.
+    """
+    import numpy as np
+
+    scaled = (np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0) - low) / span
+    steps = np.clip(np.rint(scaled * VALUE_STEPS), 0, VALUE_STEPS).astype(np.uint16)
+    # Unmeasured ground carries no reading; the browser has the measured bit and
+    # leaves it alone, so what sits here only has to be defined.
+    steps = np.where(seen, steps, 0).astype(np.uint16)
+    rgb = np.dstack([(steps >> 8).astype(np.uint8), (steps & 0xFF).astype(np.uint8),
+                     np.zeros(steps.shape, np.uint8)])
+    out = io.BytesIO()
+    Image.fromarray(rgb, "RGB").save(out, "PNG", compress_level=6)
+    return base64.b64encode(out.getvalue()).decode("ascii")
+
+
+def rule_values(recipe: Recipe, check: Check, index: int) -> dict[str, Any]:
+    """What one rule read at every pixel of a tested check's ground.
+
+    A test sends a verdict: the ground each rule kept. That answers whether the
+    line is crossed, never where it should be. This sends the quantity itself,
+    so the line can be moved and the ground repainted without asking again — the
+    reading is the same one the test made, and the browser applies the same
+    comparison (`_passes`) to it.
+
+    One rule at a time, and only when asked: every rule of every tile at once
+    would be tens of megabytes on a press nobody made. Never fetches — a check
+    whose frames are not cached is tested first.
+    """
+    import numpy as np
+
+    _satellite(recipe, check)
+    if not 0 <= index < len(recipe.rules):
+        raise ValueError("no such rule")
+    if recipe.rules[index].measure == "class":
+        raise ValueError("a ground class is a classification, not a quantity with a line")
+    a, b = check_sources(recipe, check.a, check.b)
+    tiles = check_tiles(check)
+    lacking = missing(recipe, a, b, tiles)
+    if lacking:
+        return {"ready": False, "missing": len(lacking)}
+
+    read = {tile: _measure_tile(recipe, a, b, *tile) for tile in tiles}
+    cropped = {}
+    for tile, measured in read.items():
+        core = measured.core
+        values = measured.values[index]
+        if values is None:
+            raise ValueError("that rule reads no quantity")
+        cropped[tile] = (values[core], measured.measured[core] & np.isfinite(values[core]))
+
+    # One span over the whole ground, so a value means the same on every tile.
+    seen = [values[ok] for values, ok in cropped.values() if ok.any()]
+    low = float(min(part.min() for part in seen)) if seen else 0.0
+    high = float(max(part.max() for part in seen)) if seen else 0.0
+    span = high - low or 1.0
+
+    _, size = analyzers.GRID
+    return {"ready": True, "missing": 0, "size": size, "rule": index,
+            "low": round(low, 6), "high": round(low + span, 6), "steps": VALUE_STEPS,
+            "tiles": [{"x": x, "y": y, "box": tile_box(x, y),
+                       "values": _value_png(cropped[(x, y)][0], cropped[(x, y)][1], low, span)}
+                      for x, y in tiles]}
 
 
 def probe(recipe: Recipe, check: Check, point: tuple[float, float]) -> dict[str, Any]:

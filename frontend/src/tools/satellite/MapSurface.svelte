@@ -127,25 +127,29 @@
     imagery.displayed(providerId, view.zoom, {
       ...(s2?.variant ?? {}),
       release: wayback?.release ?? null,
-      pass: s1?.pass ?? null,
+      pass: s1?.shownPass ?? null,
     })
   );
-  const radarPass = $derived(shown.provider?.id === RADAR_ID ? s1?.pass ?? null : null);
+  const radarPass = $derived(shown.provider?.id === RADAR_ID ? s1?.shownPass ?? null : null);
   const tileProblem = $derived(tileFailure?.id === shown.id ? tileFailure : null);
 
-  /** A pinned Sentinel-2 day *is* the acquisition date — the one provider that
-   *  can answer "when was this taken?" without being asked. */
-  const pinnedDay = $derived(
+  /** The Sentinel-2 day the tiles were rendered from — the window is one
+   *  acquisition, whether the analyst pinned it or "most recent" resolved it,
+   *  so the pixels carry that date exactly. Null while no day is known, which
+   *  is the one case the tiles blend dates and nothing may be claimed. */
+  const renderedDay = $derived(
     shown.provider?.id === SENTINEL_ID && s2?.window.from ? s2.window.from : null
   );
 
   $effect(() => {
     dated = radarPass
       ? { date: radarPass.date, exact: true, source: 'Sentinel-1' }
-      : pinnedDay
-      ? { date: pinnedDay, exact: true, source: 'Sentinel-2' }
+      : renderedDay
+      ? { date: renderedDay, exact: true, source: 'Sentinel-2' }
       : shown.provider?.id === SENTINEL_ID
-        ? s2?.latest ? { date: s2.latest, exact: false, source: 'Sentinel-2' } : null
+        // an undated blend has no date to give, and the newest pass over the
+        // crosshair is not it: most of the tile may be older
+        ? null
         : imageryDate?.supported && imageryDate.date
           ? { date: imageryDate.date, exact: false, source: imageryDate.source ?? null }
           : null;
@@ -161,7 +165,7 @@
    * `imageryWhen` is the same date with a radar pass's UTC time when it has one.
    */
   export function provenance() {
-    return { provider: shown.id, ...pictureDate({ radarPass, pinnedDay, estimated: imageryDate?.date }) };
+    return { provider: shown.id, ...pictureDate({ radarPass, day: renderedDay, estimated: imageryDate?.date }) };
   }
 
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
@@ -349,7 +353,7 @@
   {#if tileProblem && !grabbing}
     <div class="tile-trouble" class:right={errorSide === 'right'} role="status" aria-label="Imagery loading error">
       <strong>Could not load imagery</strong>
-      <span>{shown.provider?.label}{shown.provider?.id === SENTINEL_ID ? ` · ${s2?.layer ?? DEFAULT_LAYER}` : ''}{pinnedDay ? ` · ${pinnedDay}` : radarPass?.date ? ` · ${radarPass.date}` : ''}</span>
+      <span>{shown.provider?.label}{shown.provider?.id === SENTINEL_ID ? ` · ${s2?.layer ?? DEFAULT_LAYER}` : ''}{renderedDay ? ` · ${renderedDay}` : radarPass?.date ? ` · ${radarPass.date}` : ''}</span>
       <p>{tileProblem.message}</p>
       <div class="error-actions">
         <button class="btn btn-sm" onclick={retryImagery}>Retry imagery</button>
@@ -382,22 +386,25 @@
        reads. -->
   {#if s2 && shown.provider?.id === SENTINEL_ID}
     <!-- The date is the picker's chip too, and it is said again here, as the
-         radar's pass is: one line reading the day, how it was chosen and what
-         is drawn from it. A pinned day is the window the tiles were rendered
-         from; otherwise the layer's default renders the most recent pass. -->
+         radar's pass is: one line reading the day the window named and whether
+         the analyst chose it. Without a day the tiles blend the archive, and
+         the pill says that rather than naming the newest pass. -->
     <span
       class="date-pill mono"
-      class:exact={!!pinnedDay}
-      title={pinnedDay
-        ? `Sentinel-2 ${s2.layerLabel} from this exact date`
-        : s2.latest
-          ? `Sentinel-2 ${s2.layerLabel}: most recent pass over this point`
-          : `Sentinel-2 ${s2.layerLabel}: most recent pass (open the picker to date it)`}
+      class:exact={!!renderedDay}
+      class:undated={!renderedDay && s2.undated}
+      title={renderedDay
+        ? s2.date
+          ? `Sentinel-2 ${s2.layerLabel} from this pass`
+          : `The newest Sentinel-2 ${s2.layerLabel} pass over this point`
+        : s2.undated
+          ? 'No pass could be dated here, so these tiles blend several dates'
+          : 'Finding the newest pass over this point'}
     >
       <Icon name="clock" size={11} />
-      {pinnedDay ?? s2.latest ?? ''}
-      {#if !pinnedDay}
-        <span class="tag">{s2.latest ? 'latest' : 'most recent'}</span>
+      {renderedDay ?? (s2.undated ? 'several dates' : 'finding…')}
+      {#if renderedDay && !s2.date}
+        <span class="tag">latest</span>
       {/if}
       {#if s2.layer !== DEFAULT_LAYER}
         <span class="tag layer">{s2.layerShort}</span>
@@ -409,13 +416,19 @@
       {/if}
     </span>
   {:else if s1 && shown.provider?.id === RADAR_ID}
-    <!-- The pass is the picker's own chip; this says what it means. -->
-    <span class="date-pill mono" class:exact={!!radarPass}
+    <!-- The pass is the picker's own chip; this says what it means. Without one
+         the tiles blend every pass over the point, which for radar mixes looks
+         from opposite sides of the track, so the pill says so. -->
+    <span class="date-pill mono" class:exact={!!radarPass} class:undated={!radarPass && s1.undated}
       title={radarPass ? `Sentinel-1 pass flying ${radarPass.orbit === 'descending' ? 'south' : 'north'}`
-        : 'Sentinel-1: most recent pass (open the picker to date it)'}>
+        : s1.undated
+          ? 'No pass could be dated here, so these tiles blend several passes'
+          : 'Finding the newest pass over this point'}>
       <Icon name="clock" size={11} />
-      {radarPass ? `${radarPass.date} ${radarPass.time.slice(0, 5)} UTC ${orbitMark(radarPass.orbit)}` : ''}
-      {#if !radarPass}<span class="tag">most recent</span>{/if}
+      {radarPass
+        ? `${radarPass.date} ${radarPass.time.slice(0, 5)} UTC ${orbitMark(radarPass.orbit)}`
+        : s1.undated ? 'several passes' : 'finding…'}
+      {#if radarPass && !s1.pass}<span class="tag">latest</span>{/if}
       <span class="tag layer">radar</span>
     </span>
   {:else if imageryDate?.supported}
@@ -502,11 +515,16 @@
     backdrop-filter: blur(6px);
     box-shadow: 0 0 0 1px var(--border);
   }
-  /* a pinned date is a fact about the pixels; "latest" is an inference from the
-     pass list — they must not look identical */
+  /* a day the window named is a fact about the pixels, pinned or resolved; a
+     blend of the archive is the one case there is no date to give, and the two
+     must not look identical */
   .date-pill.exact {
     color: var(--text-2);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok, #46a758) 55%, transparent);
+  }
+  .date-pill.undated {
+    color: var(--warn);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
   }
   .date-pill .tag {
     font-family: var(--font-sans);

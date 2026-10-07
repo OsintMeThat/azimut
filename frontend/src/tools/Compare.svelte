@@ -336,13 +336,13 @@
     api,
     place: () => ({ lat: view.lat, lon: view.lon }),
     onBilled: () => imagery.refreshUsage(),
-    peer: () => (b.present && b.providerId === RADAR_ID ? s1b.pass : null),
+    peer: () => (b.present && b.providerId === RADAR_ID ? s1b.shownPass : null),
   });
   const s1b = createRadarState({
     api,
     place: () => ({ lat: view.lat, lon: view.lon }),
     onBilled: () => imagery.refreshUsage(),
-    peer: () => (a.present && a.providerId === RADAR_ID ? s1a.pass : null),
+    peer: () => (a.present && a.providerId === RADAR_ID ? s1a.shownPass : null),
   });
 
   $effect(() => {
@@ -354,10 +354,10 @@
   const both = $derived(a.present && b.present);
   const activeView = $derived(view);
   const shownA = $derived(
-    imagery.displayed(a.providerId, view.zoom, { ...s2a.variant, release: wba.release, pass: s1a.pass })
+    imagery.displayed(a.providerId, view.zoom, { ...s2a.variant, release: wba.release, pass: s1a.shownPass })
   );
   const shownB = $derived(
-    imagery.displayed(b.providerId, view.zoom, { ...s2b.variant, release: wbb.release, pass: s1b.pass })
+    imagery.displayed(b.providerId, view.zoom, { ...s2b.variant, release: wbb.release, pass: s1b.shownPass })
   );
   const labelA = $derived(imagery.find(a.providerId)?.label ?? 'Imagery A');
   const labelB = $derived(imagery.find(b.providerId)?.label ?? 'Imagery B');
@@ -384,7 +384,7 @@
       sentinel: {
         layer: sentinel.layer,
         date: sentinel.date,
-        effectiveDate: sentinel.date || sentinel.latest,
+        effectiveDate: sentinel.day,
         maxcc: sentinel.maxcc,
       },
       waybackRelease: wayback.release,
@@ -392,9 +392,11 @@
     };
   }
 
-  /** A side's radar pass as a session keeps it. */
+  /** A side's radar pass as a session keeps it: the pass the tiles were
+   *  rendered from, so reopening the session draws the same look rather than
+   *  whichever pass is newest that day. */
   function radarSpec(radar) {
-    return { date: radar.pass?.date ?? '', time: radar.pass?.time ?? '' };
+    return { date: radar.shownPass?.date ?? '', time: radar.shownPass?.time ?? '' };
   }
 
   const archive = $derived(stripArchive(sideSpec(a, s2a, wba, s1a), sideSpec(b, s2b, wbb, s1b)));
@@ -806,13 +808,18 @@
     s2bPassTimer = setTimeout(() => s2b.loadPasses(), 600);
     return () => clearTimeout(s2bPassTimer);
   });
+  // Each side's "most recent" is resolved to a day, which is then the window its
+  // tiles are rendered from: a side is one acquisition, never a blend of the
+  // archive, or the difference between the two sides would be partly a
+  // difference between dates nobody chose. Unresolved, the lookup goes out at
+  // once; afterwards the debounce keeps a pan from spending a request per frame.
   $effect(() => {
     if (!a.ready || shownA.provider?.id !== SENTINEL_ID) return;
     view.lat;
     view.lon;
     s2a.maxcc;
     clearTimeout(s2aLatestTimer);
-    s2aLatestTimer = setTimeout(() => s2a.resolveLatest().catch(() => {}), 900);
+    s2aLatestTimer = setTimeout(() => s2a.resolveLatest().catch(() => {}), s2a.resolved ? 900 : 0);
     return () => clearTimeout(s2aLatestTimer);
   });
   $effect(() => {
@@ -821,9 +828,30 @@
     view.lon;
     s2b.maxcc;
     clearTimeout(s2bLatestTimer);
-    s2bLatestTimer = setTimeout(() => s2b.resolveLatest().catch(() => {}), 900);
+    s2bLatestTimer = setTimeout(() => s2b.resolveLatest().catch(() => {}), s2b.resolved ? 900 : 0);
     return () => clearTimeout(s2bLatestTimer);
   });
+  // Both sides' radar passes are resolved the same way: a side is one look, not
+  // a blend of every pass over the point.
+  $effect(() => {
+    if (!a.ready || shownA.provider?.id !== RADAR_ID) return;
+    view.lat;
+    view.lon;
+    clearTimeout(s1aLatestTimer);
+    s1aLatestTimer = setTimeout(() => s1a.resolveLatest().catch(() => {}), s1a.resolved ? 900 : 0);
+    return () => clearTimeout(s1aLatestTimer);
+  });
+  $effect(() => {
+    if (!b.ready || shownB.provider?.id !== RADAR_ID) return;
+    view.lat;
+    view.lon;
+    clearTimeout(s1bLatestTimer);
+    s1bLatestTimer = setTimeout(() => s1b.resolveLatest().catch(() => {}), s1b.resolved ? 900 : 0);
+    return () => clearTimeout(s1bLatestTimer);
+  });
+  let s1aLatestTimer;
+  let s1bLatestTimer;
+
   $effect(() => {
     if (a.ready && shownA.provider?.id === WAYBACK_ID) wba.loadReleases();
   });
@@ -943,7 +971,7 @@
         layer: sentinel.layer,
         // A difference is only honest over named acquisitions. Freeze a live
         // "latest" pass to the date it meant when this workspace is saved.
-        date: difference ? sentinel.date || sentinel.latest : sentinel.date,
+        date: difference ? sentinel.day : sentinel.date,
         maxcc: sentinel.maxcc,
       },
       wayback_release: wayback.release,
@@ -2136,7 +2164,7 @@
   function evolutionSide(target, sentinel, wayback, radar) {
     const spec = sideSpec(target, sentinel, wayback, radar);
     if (target.providerId === WAYBACK_ID) return { ...spec, wayback_date: wayback.date };
-    return { ...spec, sentinel: { ...spec.sentinel, date: sentinel.date || sentinel.latest || '' } };
+    return { ...spec, sentinel: { ...spec.sentinel, date: sentinel.day } };
   }
 
   /** The ground a picker row's picture shows: the evolution's centre, at its scale. */

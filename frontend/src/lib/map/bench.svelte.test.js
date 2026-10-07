@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { Bench, lookupBounds } from './bench.svelte.js';
 import { newCheck, newRecipe, newRule, signature } from './analyzerRules.js';
+import { displayLayers } from '../sentinelLayers.js';
 
 const METHODS = [{ id: 'rules', sizes: { all: { min_area: 0, cleanup: 0 } } }];
+/** What the engine names a layer previewed before it is saved. */
+const DRAFT = 'AZIMUT_DRAFT_ABC123DEF456';
 const VIEW = { west: 2, south: 48, east: 2.2, north: 48.2 };
 const PLOT = [2.01, 48.01];
 const REEF = [2.05, 48.05];
@@ -15,7 +18,7 @@ const settle = async () => {
 
 /** A bench on a recipe of two dates, with an engine that answers what a real one would. */
 function make({ dates = 'two', sensor = 'sentinel2', checks = [], answers = {}, layerState = null,
-  limits = { max_checks: 12, max_marks: 20 } } = {}) {
+  limits = { max_checks: 12, max_marks: 60 } } = {}) {
   const recipe = $state({ ...newRecipe(METHODS, { sensor, dates }), name: 'Mine', checks });
   const calls = [];
   const api = {
@@ -30,10 +33,21 @@ function make({ dates = 'two', sensor = 'sentinel2', checks = [], answers = {}, 
           tiles: [{ x: 1, y: 2, box: { west: 0, east: 1, north: 1, south: 0 }, mask: 'AAAA' }], size: 512,
           rules: body.recipe.rules.map(() => ({ share: 0.05, kept: 0.05 })), candidates: [], readings: [] };
       }
+      if (url.endsWith('/check/values')) {
+        return answer ?? { ready: true, missing: 0, size: 512, rule: body.rule, low: -1, high: 1,
+          steps: 65535, tiles: [{ x: 1, y: 2, box: { west: 0, east: 1, north: 1, south: 0 }, values: 'AAAA' }] };
+      }
       if (url.endsWith('/probe')) return answer ?? { ready: true, imaged: true, measured: true, kept: true, rules: [] };
       if (url.endsWith('/acquisitions')) return answer ?? { dates: [{ date: '2023-08-13', cloud: 3, coverage: 1 }], truncated: false };
       throw new Error(`unexpected ${url}`);
     }),
+    // Drawing a rule renders it through the ordinary draft-preview path.
+    put: vi.fn(async (url, body) => {
+      calls.push([url, body]);
+      if (url.endsWith('/draft-layer')) return { id: DRAFT };
+      throw new Error(`unexpected ${url}`);
+    }),
+    del: vi.fn(async (url) => { calls.push([url, null]); return {}; }),
   };
   const fly = vi.fn();
   const say = vi.fn();
@@ -133,6 +147,27 @@ describe('making a check', () => {
     bench.dropPin({ lon: REEF[0], lat: REEF[1] });
     expect(bench.marks).toHaveLength(1);
     expect(say).toHaveBeenCalledWith('A check holds at most 1 pins.', 'warn');
+  });
+
+  it.each([{ max_marks: 60 }, {}])('keeps sixty pins and refuses another from either the map or a probe with limits %j', (limits) => {
+    const { bench, recipe, say } = open({ limits, checks: [made('Plot')] });
+    bench.select(bench.checks[0].id);
+    bench.arm('empty');
+    for (let i = 0; i < 58; i++) bench.dropPin({ lon: REEF[0] + i / 10000, lat: REEF[1] });
+    bench.probe = { point: { lon: REEF[0], lat: REEF[1] }, pin: null };
+    bench.markProbe('empty');
+    expect(bench.marks).toHaveLength(60);
+    expect(recipe.checks[0].marks).toHaveLength(60);
+    bench.dropPin({ lon: REEF[0], lat: REEF[1] });
+    bench.probe = { point: { lon: REEF[0], lat: REEF[1] }, pin: null };
+    bench.markProbe('empty');
+    expect(bench.marks).toHaveLength(60);
+    expect(say).toHaveBeenCalledTimes(2);
+    expect(say).toHaveBeenLastCalledWith('A check holds at most 60 pins.', 'warn');
+    bench.removePin(59);
+    bench.markProbe('empty');
+    expect(bench.marks).toHaveLength(60);
+    expect(bench.probe).toBe(null);
   });
 
   it('changes the passes of a check already kept, and forgets what they had answered', () => {
@@ -331,13 +366,16 @@ describe('what a test would cost', () => {
   });
 
   it('carries the engine’s own words when the pins reach too much ground', async () => {
-    const refusal = new Error('these pins reach 14 tiles and a check reads at most 12');
+    const refusal = new Error('these pins reach 21 tiles and a check reads at most 20');
     const kept = made('Plot');
     const { bench } = open({ checks: [kept], answers: { '/api/compare/analyzers/check/plan': refusal } });
     bench.select(kept.id);
     await settle();
     expect(bench.blocked).toBe(refusal.message);
     expect(bench.plan.error).toBe(refusal.message);
+    expect(bench.canTest).toBe(false);
+    await bench.test();
+    expect(bench.last).toBe(null);
   });
 
   it('adds up what every check still lacks for Test all', async () => {
@@ -712,5 +750,180 @@ describe('the passes a lookup finds', () => {
     expect(corner.east).toBe(180);                               // never past what the engine accepts
     expect(corner.north).toBe(85);
     expect(lookupBounds(null)).toBe(null);
+  });
+});
+
+it('offers a layer written in Azimut as a display, and says it is yours', () => {
+  // the bench reads the same list every map tab does, so a script written on
+  // the Satellite map is on the analyzer's Display menu without a request
+  const offered = displayLayers(
+    [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'PLUME_SWIR', label: 'My plume', custom: true }],
+    false
+  );
+  const mine = offered.find((entry) => entry.id === 'PLUME_SWIR');
+  expect(mine.enabled).toBe(true);
+  expect(mine.custom).toBe(true);
+});
+
+describe('a rule drawn as imagery', () => {
+  /** A bench on a check, with a display the catalogue serves. */
+  const bench0 = () => {
+    const state = $state({ layers: [{ id: 'TRUE_COLOR' }, { id: 'SWIR' }], layersSource: 'instance',
+      loadLayers: vi.fn(async () => true) });
+    const kept = made('Plot');
+    const found = open({ checks: [kept], layerState: state });
+    found.bench.select(kept.id);
+    flushSync();
+    return found;
+  };
+
+  it('puts the rule\u2019s own arithmetic on the map, and gives the display back after', async () => {
+    const { bench, api } = bench0();
+    expect(bench.imagery.b.layer).toBe('TRUE_COLOR');
+
+    await bench.showRule(0);                    // the default rule measures brightness
+    flushSync();
+    const [url, body] = api.put.mock.calls[0];
+    expect(url).toBe('/api/satellite/sentinel/draft-layer');
+    expect(body.script).toContain('(p.B02 + p.B03 + p.B04) / 3');
+    expect(body.base).toBe('TRUE_COLOR');       // a script needs a data source, never radar
+    // the draft is what the map draws, while the chosen display waits underneath
+    expect(bench.shownLayer).toBe(DRAFT);
+    expect(bench.imagery.b.layer).toBe(DRAFT);
+    expect(bench.layer).toBe('TRUE_COLOR');
+
+    bench.hideRule();
+    flushSync();
+    expect(bench.shownLayer).toBe('TRUE_COLOR');
+    expect(bench.imagery.b.layer).toBe('TRUE_COLOR');
+  });
+
+  it('draws nothing for a rule that is not one quantity', async () => {
+    const { bench, recipe, api } = bench0();
+    recipe.rules = [newRule('class', 'b')];
+    flushSync();
+    await bench.showRule(0);
+    expect(api.put).not.toHaveBeenCalled();
+    expect(bench.ruleLayer).toBe(null);
+  });
+
+  it('pressing the same rule again lets it go', async () => {
+    const { bench } = bench0();
+    await bench.showRule(0); flushSync();
+    expect(bench.ruleLayer.index).toBe(0);
+    await bench.showRule(0); flushSync();
+    expect(bench.ruleLayer).toBe(null);
+  });
+
+  it('choosing a display is choosing what the map draws, so it ends the drawing', async () => {
+    const { bench } = bench0();
+    await bench.showRule(0); flushSync();
+    expect(bench.shownLayer).toBe(DRAFT);
+    bench.setLayer('SWIR');
+    flushSync();
+    expect(bench.ruleLayer).toBe(null);
+    expect(bench.shownLayer).toBe('SWIR');
+  });
+
+  it('removing the rule removes what it was drawing', async () => {
+    const { bench, recipe } = bench0();
+    recipe.rules = [newRule('brightness', 'b'), newRule('brightness', 'b')];
+    flushSync();
+    await bench.showRule(0); flushSync();
+    recipe.rules = [recipe.rules[1]];
+    bench.ruleRemoved(0);
+    flushSync();
+    expect(bench.ruleLayer).toBe(null);
+  });
+});
+
+describe('moving a line without asking again', () => {
+  /** A bench on a tested check, which is what a reading needs. */
+  async function tested() {
+    const found = open({ checks: [made('The plot')] });
+    found.bench.select(found.recipe.checks[0].id);
+    flushSync();
+    await settle();
+    await found.bench.test();
+    await settle();
+    return found;
+  }
+
+  it('fetches one rule’s reading, once, and never the imagery with it', async () => {
+    const { bench, api, calls } = await tested();
+    expect(bench.isLive(0)).toBe(false);
+    await bench.loadReading(0);
+    flushSync();
+    expect(bench.isLive(0)).toBe(true);
+    const asked = calls.filter(([url]) => url.endsWith('/check/values'));
+    expect(asked).toHaveLength(1);
+    // the route reads the cache the test filled; nothing says `read`
+    expect(asked[0][1].rule).toBe(0);
+    expect(asked[0][1].read).toBeUndefined();
+
+    // asking again while it still answers costs nothing
+    await bench.loadReading(0);
+    expect(calls.filter(([url]) => url.endsWith('/check/values'))).toHaveLength(1);
+    expect(api.post).toBeDefined();
+  });
+
+  it('keeps the reading while only the line moves, and drops it when the bands change', async () => {
+    const { bench, recipe } = await tested();
+    await bench.loadReading(0);
+    flushSync();
+
+    // the line is the one thing a reading does not answer for
+    recipe.rules[0] = { ...recipe.rules[0], value: 0.42 };
+    flushSync();
+    expect(bench.isLive(0)).toBe(true);
+    expect(bench.live.map((row) => row.index)).toEqual([0]);
+
+    // what it reads is
+    recipe.rules[0] = { ...recipe.rules[0], measure: 'nd', bands: ['B12', 'B11'] };
+    flushSync();
+    expect(bench.isLive(0)).toBe(false);
+    expect(bench.live).toEqual([]);
+  });
+
+  it('stops calling the picture old when the only change is a line it can redraw', async () => {
+    const { bench, recipe } = await tested();
+    expect(bench.stale).toBe(false);
+    await bench.loadReading(0);
+    flushSync();
+
+    // the line moved: the verdict below is older, but the ground is redrawn
+    // from the very numbers the test measured, so the layer is not dimmed
+    recipe.rules[0] = { ...recipe.rules[0], value: 0.42 };
+    flushSync();
+    expect(bench.stale).toBe(true);
+    expect(bench.staleToDraw).toBe(false);
+
+    // a second rule whose reading nobody has asked for does dim it
+    recipe.rules = [...recipe.rules, newRule('band', 'b')];
+    flushSync();
+    expect(bench.staleToDraw).toBe(true);
+  });
+
+  it('calls the picture old when what a rule reads changes, reading or not', async () => {
+    const { bench, recipe } = await tested();
+    await bench.loadReading(0);
+    flushSync();
+    recipe.rules[0] = { ...recipe.rules[0], measure: 'nd', bands: ['B12', 'B11'] };
+    flushSync();
+    expect(bench.staleToDraw).toBe(true);
+  });
+
+  it('asks for nothing before a test, and nothing for a ground class', async () => {
+    const { bench, recipe, calls } = open({ checks: [made('The plot')] });
+    bench.select(recipe.checks[0].id); flushSync(); await settle();
+    // no test has read the frames, so there is nothing cached to read back
+    await bench.loadReading(0);
+    expect(calls.filter(([url]) => url.endsWith('/check/values'))).toEqual([]);
+
+    await bench.test(); await settle();
+    recipe.rules = [newRule('class', 'b')];
+    flushSync();
+    await bench.loadReading(0);
+    expect(calls.filter(([url]) => url.endsWith('/check/values'))).toEqual([]);
   });
 });
