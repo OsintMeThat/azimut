@@ -15,11 +15,12 @@ metadata is a claim, and a claim the analyst has not looked at is not a fact.
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 import numpy as np
 from PIL import ExifTags, Image
@@ -209,10 +210,11 @@ def exif_metadata(path: Path) -> dict[str, str]:
         return {}
 
 
-def exif_facts(path: Path) -> dict[str, Any]:
+def exif_facts(path: Path | BinaryIO) -> dict[str, Any]:
     """The GPS point and capture date an image carries. Missing, unreadable or
     implausible values are left out rather than reported as empty: this feeds
-    suggestions, and a suggestion of nothing is noise."""
+    suggestions, and a suggestion of nothing is noise. A file already read into
+    memory works as well as a path."""
     try:
         with Image.open(path) as img:
             exif = img.getexif()
@@ -225,6 +227,63 @@ def exif_facts(path: Path) -> dict[str, Any]:
     taken = _taken_at(exif)
     if taken:
         facts["taken_at"] = taken
+    return facts
+
+
+# EXIF tags that say how wide the lens saw (Exif 2.3 numbering).
+_FOCAL_LENGTH = 0x920A
+_FOCAL_35 = 0xA405
+_PLANE_X_RESOLUTION = 0xA20E
+_PLANE_RESOLUTION_UNIT = 0xA210
+_PIXEL_X = 0xA002
+# millimetres per focal-plane resolution unit: inch, centimetre, millimetre
+_PLANE_UNITS = {2: 25.4, 3: 10.0, 4: 1.0}
+# the 35 mm frame's diagonal, which "equivalent" holds the lens to
+_FULL_FRAME_DIAGONAL = math.hypot(36.0, 24.0)
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
+
+
+def lens_facts(path: Path | BinaryIO) -> dict[str, Any]:
+    """How wide a photo's lens saw, from its EXIF: the focal length, and its 35 mm
+    equivalent when the camera wrote one or the sensor size lets it be worked
+    out. The Horizon view opens a photo overlay at the field of view this makes
+    (frontend lib/horizon/camera.js `fovFromFocal35`). Nothing is guessed: a
+    photo that does not say is left without, and the analyst sets the lens.
+    The head of a file is enough, since the EXIF block comes first.
+    """
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+            exif = img.getexif()
+            camera = exif.get_ifd(_EXIF_IFD) if exif else {}
+    except Exception:
+        return {}
+    facts: dict[str, Any] = {"width": width, "height": height}
+    focal = _number(camera.get(_FOCAL_LENGTH))
+    if focal is not None:
+        facts["focal_mm"] = round(focal, 2)
+    equivalent = _number(camera.get(_FOCAL_35))
+    if equivalent is None and focal is not None:
+        # the sensor's width from the focal plane's resolution, when written
+        per_unit = _number(camera.get(_PLANE_X_RESOLUTION))
+        unit = _PLANE_UNITS.get(int(camera.get(_PLANE_RESOLUTION_UNIT, 2) or 2))
+        across = _number(camera.get(_PIXEL_X)) or float(width)
+        if per_unit is not None and unit is not None:
+            sensor_width = across / per_unit * unit
+            sensor_height = sensor_width * height / max(width, 1)
+            crop = _FULL_FRAME_DIAGONAL / math.hypot(sensor_width, sensor_height)
+            if 0.8 < crop < 12:
+                equivalent = focal * crop
+                facts["focal35_worked_out"] = True
+    if equivalent is not None and 5 <= equivalent <= 2400:
+        facts["focal35_mm"] = round(equivalent, 1)
     return facts
 
 

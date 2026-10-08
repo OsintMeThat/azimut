@@ -30,7 +30,7 @@
   import { RADAR_ID, passLabel } from '../lib/radar.js';
   import { copernicusNeed } from '../lib/copernicusSetup.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
-  import { openMapAt } from '../lib/navigate.js';
+  import { lookFrom, openMapAt } from '../lib/navigate.js';
   import { followFullscreen, toggleFullscreen } from '../lib/fullscreen.js';
   import { shareView } from '../lib/map/sharedView.js';
   import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
@@ -396,7 +396,7 @@
     COMPARE_SOURCES.filter((source) => !source.provider || imagery.find(source.provider))
   );
   const pointActions = $derived(
-    actionsFor(pointMenu?.areaId ? ['lookup', 'candidate', 'measure', 'centre'] : ['lookup', 'measure', 'centre'])
+    actionsFor(pointMenu?.areaId ? ['lookup', 'candidate', 'measure', 'horizon', 'centre'] : ['lookup', 'measure', 'horizon', 'centre'])
   );
   const pointTools = otherMapTools('detect');
 
@@ -448,6 +448,8 @@
       trailing = true;
     } else if (id === 'centre') {
       engine.setView(point, engine.getZoom());
+    } else if (id === 'horizon') {
+      lookFrom({ ...point, heading: bearing });
     } else if (id === 'compare') {
       await comparePoint(point, value);
     } else if (id === 'goto') {

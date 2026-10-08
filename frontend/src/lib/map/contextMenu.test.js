@@ -28,6 +28,9 @@ describe('what the menu offers', () => {
       'candidate',
       'measure',
       'sky',
+      'horizon',
+      'stand',
+      'mark',
       'history',
       'centre',
     ]);
@@ -47,6 +50,8 @@ describe('what the menu offers', () => {
     expect(otherMapTools('satellite')).toEqual([{ id: 'compare', label: 'Compare' }, { id: 'detect', label: 'Detect' }]);
     expect(otherMapTools('detect').map((tool) => tool.id)).toEqual(['satellite', 'compare']);
     expect(otherMapTools('compare').map((tool) => tool.label)).toEqual(['Satellite', 'Detect']);
+    // Horizon is not a map a point is opened in, but its own map opens points in all three
+    expect(otherMapTools('horizon').map((tool) => tool.id)).toEqual(['satellite', 'compare', 'detect']);
   });
 
   it('opens the external maps on the clicked point, at the current zoom', () => {

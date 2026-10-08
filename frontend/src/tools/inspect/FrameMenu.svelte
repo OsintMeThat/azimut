@@ -14,7 +14,7 @@
   let {
     frame, filters, analyses, shared,
     cropAspect = $bindable(null), cropEditing = $bindable(false), beginCrop, commitCrop,
-    setRotation, rotationBusy = false, reverse, onduplicate,
+    setRotation, rotationBusy = false, reverse, horizon = null, onduplicate,
     frameSave, folder = $bindable(''),
   } = $props();
 
@@ -180,6 +180,15 @@
     >
       <Icon name="search" size={14} /> {reversing ? 'Preparing…' : 'Reverse image search'}
     </button>
+    {#if horizon}
+      <button
+        class="btn btn-sm reverse"
+        onclick={() => horizon(frame)}
+        title="Lay this frame over the Horizon view, to find where it was taken from"
+      >
+        <Icon name="compass" size={14} /> Match in Horizon
+      </button>
+    {/if}
   </div>
 </div>
 

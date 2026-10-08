@@ -343,6 +343,16 @@ export const uiState = $state({
    * same hand-off as `gotoCoords`. Consumed once, session-only.
    */
   lookAt: null,
+  /**
+   * An eye handed to the Horizon tab from a map's right-click, Look from here:
+   * `{ lat, lon, heading? }`. Consumed once, session-only.
+   */
+  horizonAt: null,
+  /**
+   * A photo or a video handed to the Horizon tab to lay over its view, from
+   * Inspect: `{ path, kind, title?, time? }`. Consumed once, session-only.
+   */
+  horizonPhoto: null,
   focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured
@@ -643,6 +653,8 @@ function clearCaseHandoffs() {
   uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.lookAt = null;
+  uiState.horizonAt = null;
+  uiState.horizonPhoto = null;
   uiState.skyAt = null;
   uiState.refViewers = [];
 }

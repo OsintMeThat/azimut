@@ -25,13 +25,17 @@
    */
   import { onMount, tick } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
-  import { createBasemaps, imageryError, OVERLAY_IDS } from '../../lib/map/basemap.js';
+  import { createRelief } from '../../lib/map/relief.js';
+  import { api } from '../../lib/api.js';
+  import { toast } from '../../lib/state.svelte.js';
+  import { createBasemaps, imageryError, IMAGERY_SOURCE, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import { RADAR_ID, orbitMark } from '../../lib/radar.js';
   import { pictureDate } from '../../lib/map/pictureDate.js';
   import Icon from '../../components/Icon.svelte';
   import Compass from '../../components/Compass.svelte';
   import ImageryChip from './ImageryChip.svelte';
+  import ReliefControl from './ReliefControl.svelte';
 
   let {
     /** The shared catalogue + meter (state/imagery.svelte.js). */
@@ -58,6 +62,16 @@
     /** Where the camera is now. Reported out; the engine is what moves it. */
     view = $bindable({ lat: 0, lon: 0, zoom: 2 }),
     bearing = $bindable(0),
+    /** Whether this surface offers the relief at all. Compare and Detect read
+     *  flat pictures side by side and stay flat. */
+    reliefOffered = false,
+    /** The relief on this surface, and how much its heights are exaggerated. */
+    reliefOn = $bindable(false),
+    exaggeration = $bindable(1),
+    /** The camera's tilt in degrees, reported out; only relief allows one. */
+    pitch = $bindable(0),
+    /** True once the relief is on the map and the camera may lean over it. */
+    reliefReady = $bindable(false),
     /** The façade, once the map is up. Null while it is not. */
     engine = $bindable(null),
     /** The map container, for the drag gestures a tool arms over it. */
@@ -111,6 +125,7 @@
 
   let mapEl = $state();
   let basemaps = null;
+  let relief = null;
   let tileFailure = $state(null);
   let failureProvider = '';
   // Acquisition date of the imagery under the crosshair — Esri only.
@@ -231,12 +246,25 @@
       bearing = Math.round(turned.bearing);
       onbearingchange(turned);
     });
+    // only a surface that offers relief has one: Compare and Detect stay flat
+    relief = reliefOffered
+      ? createRelief(engine.impl, () => api.get('/api/terrain/sources'), {
+          imagery: IMAGERY_SOURCE,
+          // a tilted view's turn is fetched ahead into the app's caches (lib/map/warmTurn.js)
+          send: (body) => api.post('/api/tiles/warm', body),
+        })
+      : null;
+    const offPitch = engine.on('pitch', (tilted) => (pitch = tilted.pitch));
     const offClick = engine.on('click', (at) => onclick(at));
     const offMenu = engine.on('contextmenu', (at) => oncontextmenu(at));
     ready = true;
     return () => {
       offSettled();
       offRotate();
+      offPitch();
+      relief?.dispose();
+      relief = null;
+      reliefReady = false;
       offClick();
       offMenu();
       basemaps.dispose();
@@ -271,6 +299,25 @@
   $effect(() => {
     const value = zoomCeiling;
     if (ready) basemaps?.setZoomCeiling(value);
+  });
+
+  /** A widget basemap is a page under the map, not a picture the map drapes. */
+  const reliefPossible = $derived(reliefOffered && !shown.provider?.widget);
+
+  // Relief asks for its sources and tiles only once it is switched on.
+  $effect(() => {
+    const on = reliefPossible && reliefOn;
+    const scale = exaggeration;
+    if (!ready || !relief) return;
+    const shown = relief;
+    shown
+      .show(on, { exaggeration: scale })
+      .then(() => (reliefReady = shown.on))
+      .catch((error) => {
+        console.error(error);
+        reliefOn = false;
+        reliefReady = false;
+      });
   });
 
   // Only a tool that lays a second picture pays for one: the rest never ask.
@@ -353,7 +400,7 @@
   class:grabbing
   style:--map-controls-top={`${controlsTop}px`}
 >
-  <div class="map" bind:this={mapEl}></div>
+  <div class="map" class:hazed={reliefPossible && reliefOn} bind:this={mapEl}></div>
 
   {#if refused}
     <p class="map-refused">The map needs WebGL, which this browser does not have.</p>
@@ -454,6 +501,19 @@
 
     <!-- Which way is up. Middle-dragging the map is what turns it. -->
     <Compass {bearing} onbearing={setBearing} />
+    {#if reliefPossible}
+      <ReliefControl bind:on={reliefOn} bind:exaggeration {pitch} ontilt={(deg) => engine?.setPitch(deg)}
+        onhint={(text) => toast(text, 'info', 6000)} />
+      {#if reliefOn && pitch > 0 && shown.provider?.meter}
+        <!-- lib/map/quotaGuard.js: past a flat view's reach the ground is Esri's -->
+        <span
+          class="date-pill"
+          title="A tilted view would spend billed tiles all the way to the horizon, so past what a flat view shows the ground is Esri's, which is free"
+        >
+          Far ground: Esri
+        </span>
+      {/if}
+    {/if}
   </div>
   {/if}
 </div>
@@ -489,6 +549,12 @@
     position: absolute;
     inset: 0;
     background: var(--bg-2);
+  }
+  /* Over relief, ground the engine has not drawn yet (far tiles still on their
+     way toward the horizon) shows through the canvas: in the haze of the sky's
+     horizon (lib/map/relief.js SKY) it reads as distance, in black as a hole. */
+  .map.hazed {
+    background: #c9d6e3;
   }
   .map-refused {
     position: absolute;

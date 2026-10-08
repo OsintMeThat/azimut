@@ -14,7 +14,7 @@
  */
 // `MapLibreMap` rather than the `Map` alias: shadowing the global here is
 // exactly the sort of thing that reads fine until someone needs a Map.
-import { MapLibreMap, NavigationControl, ScaleControl, setWorkerUrl } from 'maplibre-gl';
+import { addProtocol, MapLibreMap, NavigationControl, ScaleControl, setWorkerUrl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 // The engine's worker, bundled and given a URL by our own build rather than by
 // the engine's runtime guess — see the note in `vite.config.js`. Without this
@@ -23,8 +23,52 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import './engine.css';
 import { mapFacade, engineZoom } from './facade.js';
+import { GUARD_PROTOCOL, readGuarded, tileSource } from './quotaGuard.js';
 
 setWorkerUrl(workerUrl);
+
+/**
+ * The maps a billed tile may be asked for, by the id its address carries, so
+ * the guard can read the view the tile is for (`quotaGuard.js`).
+ */
+const guarded = new Map();
+let mapsMade = 0;
+
+/** What the guard needs of a view: where it looks, how deep, how big, how tilted. */
+function guardView(map) {
+  const centre = map.getCenter();
+  const box = map.getContainer();
+  return {
+    lat: centre.lat,
+    lon: centre.lng,
+    zoom: map.getZoom(),
+    width: box.clientWidth,
+    height: box.clientHeight,
+    pitch: map.getPitch(),
+  };
+}
+
+/**
+ * A billed tile, from its provider or, past a flat view's reach on a tilted
+ * map, from the free one. Failures carry their status and body the way the
+ * engine's own loader hands them over, so the imagery panel reads them alike.
+ */
+addProtocol(GUARD_PROTOCOL, async (params, abort) => {
+  const asked = readGuarded(params.url);
+  if (!asked) throw new Error('not a billed tile address');
+  const map = guarded.get(asked.mapId);
+  const { url } = map
+    ? tileSource(asked, guardView(map))
+    : { url: `/api/tiles/${asked.providerId}/${asked.z}/${asked.x}/${asked.y}` };
+  const response = await fetch(url, { signal: abort.signal });
+  if (!response.ok) {
+    const error = new Error(response.statusText || `tile answered ${response.status}`);
+    error.status = response.status;
+    error.body = await response.blob();
+    throw error;
+  }
+  return { data: await response.arrayBuffer() };
+});
 
 /**
  * The style the map opens with: nothing.
@@ -81,6 +125,12 @@ function settleOnLevel(map, following) {
       settling = false;
       return;
     }
+    // Over relief the engine re-seats the centre on the ground after a gesture
+    // and moves the zoom to keep the camera where it was, so the level it lands
+    // on is fractional by design. Snapping it would slide the ground out from
+    // under the hand that just let go, and a tilted view is captured as drawn,
+    // not stitched from whole levels.
+    if (map.getTerrain()) return;
     const zoom = map.getZoom();
     const level = Math.round(zoom);
     const off = Math.abs(zoom - level);
@@ -117,7 +167,13 @@ export async function createMapEngine(container, { view, imperial = false } = {}
     // the full credit line, as the tile providers' terms ask for it, rather
     // than the engine's ⓘ button on a narrow window
     attributionControl: { compact: false },
+    // A map turned round over relief comes back to ground it has drawn; keeping
+    // more levels of tiles is what spares it loading them all again.
+    maxTileCacheZoomLevels: 8,
   });
+  const mapId = `m${(mapsMade += 1)}`;
+  guarded.set(mapId, map);
+  map.once('remove', () => guarded.delete(mapId));
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
   map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
@@ -137,7 +193,7 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // A source cannot be added before the style is up, and `basemap.js` adds one
   // as soon as this returns.
   await map.once('load');
-  const facade = mapFacade(map, container);
+  const facade = mapFacade(map, container, mapId);
   settleOnLevel(map, facade.following);
   // A stable class for the tool's own cursor rules: a mode armed above the map
   // says so on the surface, whichever engine drew it.

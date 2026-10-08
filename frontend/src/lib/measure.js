@@ -172,6 +172,12 @@ export function formatDistance(m, units = 'metric') {
   return `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
 }
 
+/** A height above the sea: whole metres or feet, never kilometres. */
+export function formatHeight(m, units = 'metric') {
+  if (!Number.isFinite(m)) return '';
+  return units === 'imperial' ? `${Math.round(m * FT_PER_M)} ft` : `${Math.round(m)} m`;
+}
+
 export function formatArea(m2, units = 'metric') {
   if (units === 'imperial') {
     const sqft = m2 * FT_PER_M * FT_PER_M;

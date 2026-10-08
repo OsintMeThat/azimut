@@ -292,6 +292,41 @@ export function openMapAt(tool, { lat, lon, zoom }) {
 }
 
 /**
+ * Stand an eye on a point and open Horizon there (`uiState.horizonAt`): facing
+ * `heading` when the map that asked was turned, the eye `eyeHeight` metres up
+ * when a question set one, and `mark` (`{ lat, lon, height }`) marked when the
+ * question was whether that point is in sight.
+ */
+export function lookFrom({ lat, lon, heading, eyeHeight, mark }) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  uiState.horizonAt = {
+    lat,
+    lon,
+    ...(Number.isFinite(heading) ? { heading } : {}),
+    ...(Number.isFinite(eyeHeight) ? { eyeHeight } : {}),
+    ...(mark && Number.isFinite(mark.lat) && Number.isFinite(mark.lon) ? { mark } : {}),
+  };
+  uiState.tool = 'horizon';
+}
+
+/**
+ * Lay a case's photo or video over the Horizon view and go there
+ * (`uiState.horizonPhoto`): a video opens paused at `time`, the frame the
+ * analyst was looking at. Returns whether the tab was changed.
+ */
+export function openInHorizon({ path, kind, title, time }) {
+  if (!path || (kind !== 'image' && kind !== 'video')) return false;
+  uiState.horizonPhoto = {
+    path,
+    kind,
+    ...(title ? { title } : {}),
+    ...(kind === 'video' && Number.isFinite(time) ? { time } : {}),
+  };
+  uiState.tool = 'horizon';
+  return true;
+}
+
+/**
  * Open the Guide on whatever covers a tool.
  *
  * The press means "what is this tab", so it lands on the section written about that

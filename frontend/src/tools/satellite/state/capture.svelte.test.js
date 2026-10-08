@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCaptureState, PRESETS, RATIOS } from './capture.svelte.js';
 import { prefs } from '../../../lib/state.svelte.js';
 
@@ -375,5 +375,79 @@ describe('the scale bar and north arrow tick', () => {
     await vi.waitFor(() => expect(notify).toHaveBeenCalled());
     expect(notify.mock.calls[0][1]).toBe('warn');
     expect(capture.scaleNorth).toBe(true);
+  });
+});
+
+describe('a view tilted over the relief', () => {
+  function fakeCanvas() {
+    const drawn = [];
+    return {
+      width: 0,
+      height: 0,
+      drawn,
+      getContext: () => ({ drawImage: (...args) => drawn.push(args) }),
+      toBlob: (done) => done(new Blob(['png'])),
+    };
+  }
+
+  function drawing(complete = true) {
+    const made = fakeCanvas();
+    const real = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => (tag === 'canvas' ? made : real(tag)));
+    // a 2× screen: the map's own canvas holds two pixels per CSS pixel
+    engine.snapshot = async () => ({ canvas: { width: 3200, height: 1800 }, complete });
+    return made;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('files the picture the map drew, with its tilt, instead of a flat crop', async () => {
+    const made = drawing();
+    const capture = store({ tilt: () => 55, reliefScale: () => 2 });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    const [path, form] = api.post.mock.calls[0];
+    expect(path).toBe('/api/cases/case-1/satellite/oblique');
+    expect(form.get('pitch')).toBe('55');
+    expect(form.get('exaggeration')).toBe('2');
+    expect(form.get('bearing')).toBe('30');
+    expect(form.get('provider')).toBe('esri-world-imagery');
+    expect(form.get('imagery_date')).toBe('2024-05-01');
+    // the centred 1200×675 frame, at the canvas's own density
+    expect([made.width, made.height]).toEqual([2400, 1350]);
+    expect(made.drawn[0].slice(1, 3)).toEqual([400, 225]);
+  });
+
+  it('waits for a settled map rather than filing half of it', async () => {
+    drawing(false);
+    const capture = store({ tilt: () => 40 });
+    capture.run();
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(expect.stringContaining('still loading'), 'warn', 6000));
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stitched road for a map looking straight down', async () => {
+    const capture = store({ tilt: () => 0 });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][0]).toBe('/api/cases/case-1/satellite/capture');
+  });
+});
+
+describe('a tilted view over billed imagery', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('names the free provider that drew the far ground', async () => {
+    const real = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag) =>
+      tag === 'canvas'
+        ? { width: 0, height: 0, getContext: () => ({ drawImage() {} }), toBlob: (done) => done(new Blob(['png'])) }
+        : real(tag)
+    );
+    engine.snapshot = async () => ({ canvas: { width: 1600, height: 900 }, complete: true });
+    const capture = store({ tilt: () => 50, farProvider: () => 'esri-world-imagery' });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1].get('far_provider')).toBe('esri-world-imagery');
   });
 });

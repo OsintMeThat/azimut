@@ -496,6 +496,80 @@ def test_screenshot_capture_files_with_burned_attribution(client):
     assert body["framed"] is False
 
 
+def test_a_tilted_view_is_filed_with_its_tilt_and_the_relief_it_was_drawn_on(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    r = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5776", "lon": "8.0053", "zoom": "14", "provider": "esri-world-imagery",
+              "bearing": "150", "pitch": "62", "exaggeration": "1",
+              "imagery_date": "2024-08-13", "imagery_exact": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["method"], body["pitch"], body["bearing"]) == ("render", 62.0, 150.0)
+    assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0}
+    assert "Relief © Mapterhorn" in body["attribution"]
+    assert "taller" not in body["attribution"]
+    # a tilted view has no one scale, so no bar or arrow is drawn on it
+    assert body["marks"] is None
+    assert body["height"] == 200 + tiles.ATTRIBUTION_BAND
+    assert (body["imagery_date"], body["imagery_exact"]) == ("2024-08-13", False)
+    listed = client.get(f"/api/cases/{cid}/satellite").json()
+    assert listed[0]["pitch"] == 62.0
+
+
+def test_a_tilted_view_with_free_far_ground_credits_both_providers(client):
+    client.put("/api/settings/keys", json={"mapbox": "pk.test"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "14", "provider": "mapbox-satellite",
+              "pitch": "60", "far_provider": "esri-world-imagery"},
+    )
+    assert body.status_code == 200, body.text
+    answer = body.json()
+    assert answer["far_provider"] == "esri-world-imagery"
+    assert "Far ground Esri" in answer["attribution"]
+    plain = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "14", "provider": "esri-world-imagery", "pitch": "60"},
+    ).json()
+    assert plain["far_provider"] is None
+
+
+def test_an_exaggerated_relief_says_so_on_the_capture(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "12", "provider": "esri-world-imagery",
+              "pitch": "45", "exaggeration": "2"},
+    ).json()
+    assert "heights drawn 2× taller" in body["attribution"]
+    assert body["relief"]["exaggeration"] == 2.0
+
+
+@pytest.mark.parametrize("data, status", [
+    ({"pitch": "0"}, 422),  # a flat view goes down the stitched road
+    ({"pitch": "45", "provider": "google-js"}, 422),  # a widget is not drawn by the map
+    ({"pitch": "45", "provider": "nowhere"}, 404),
+    ({"pitch": "45", "exaggeration": "7"}, 422),
+])
+def test_a_tilted_capture_refuses_what_the_3d_map_cannot_have_drawn(client, data, status):
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    form = {"lat": "46.5", "lon": "8.0", "zoom": "12", "provider": "esri-world-imagery", **data}
+    r = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data=form,
+    )
+    assert r.status_code == status, r.text
+
+
 def test_screenshot_provenance_distinguishes_a_framed_crop_from_a_pasted_image(client):
     """A screen crop taken through the capture frame is registered — its
     lat/lon *are* the crop centre — while a pasted screenshot's coordinates are

@@ -187,3 +187,57 @@ describe('teardown', () => {
     expect(() => store().destroy()).not.toThrow();
   });
 });
+
+describe('finishing a measure and moving its points', () => {
+  function editable() {
+    layer.patch = vi.fn();
+    const m = createMeasureState({ engine: () => engine, units: () => 'metric', surface });
+    return { m };
+  }
+
+  it('needs a whole line or area before Enter finishes it, and never an angle', () => {
+    const { m } = editable();
+    m.setMode('distance');
+    m.addPoint(A);
+    expect(m.finish()).toBe(false);
+    m.addPoint(B);
+    expect(m.finish()).toBe(true);
+    expect(m.finished).toBe(true);
+    m.setMode('area');
+    m.addPoint(A);
+    m.addPoint(B);
+    expect(m.finish()).toBe(false);
+    m.setMode('angle');
+    m.addPoint(A);
+    m.addPoint(B);
+    m.addPoint(C);
+    expect(m.finish()).toBe(false);
+  });
+
+  it('turns the points into handles and takes clicks without adding any', () => {
+    const { m } = editable();
+    m.setMode('distance');
+    m.addPoint(A);
+    m.addPoint(B);
+    m.finish();
+    const handles = drawn.at(-1).filter((shape) => shape?.kind === 'marker');
+    expect(handles).toHaveLength(2);
+    expect(handles.every((shape) => shape.draggable)).toBe(true);
+    expect(m.addPoint(C)).toBe(true);
+    expect(m.points).toEqual([A, B]);
+  });
+
+  it('moves the line with a dragged handle without rebuilding the handles', () => {
+    const { m } = editable();
+    m.setMode('distance');
+    m.addPoint(A);
+    m.addPoint(B);
+    m.finish();
+    const sets = layer.set.mock.calls.length;
+    const handle = drawn.at(-1).find((shape) => shape?.id === 'measure-corner-1');
+    handle.onDrag(D);
+    expect(m.points).toEqual([A, D]);
+    expect(layer.patch).toHaveBeenCalledWith('measure-path', { points: [A, D] });
+    expect(layer.set.mock.calls.length).toBe(sets);
+  });
+});

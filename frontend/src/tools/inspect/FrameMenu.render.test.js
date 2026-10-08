@@ -25,7 +25,7 @@ const FRAME = {
 let live = null;
 let target = null;
 
-function open(reverse) {
+function open(reverse, horizon = null) {
   target = document.createElement('div');
   document.body.append(target);
   live = mount(FrameMenu, {
@@ -37,6 +37,7 @@ function open(reverse) {
       shared: {},
       setRotation: vi.fn(),
       reverse,
+      horizon,
       onduplicate: vi.fn(),
       frameSave: { defaultName: '00-00-12 clip', filedPath: null, busy: false, blocked: '', onsave: vi.fn() },
     },
@@ -81,5 +82,21 @@ describe('reverse search from a frame', () => {
     await Promise.resolve();
     flushSync();
     expect(button().disabled).toBe(false);
+  });
+});
+
+describe('a frame matched in Horizon', () => {
+  const horizonButton = () => [...target.querySelectorAll('button')].find((b) => b.textContent.includes('Match in Horizon'));
+
+  it('hands the frame over to be laid on the view', () => {
+    const horizon = vi.fn();
+    open(vi.fn(), horizon);
+    horizonButton().click();
+    expect(horizon).toHaveBeenCalledWith(FRAME);
+  });
+
+  it('is not offered where no Horizon is wired', () => {
+    open(vi.fn());
+    expect(horizonButton()).toBeUndefined();
   });
 });

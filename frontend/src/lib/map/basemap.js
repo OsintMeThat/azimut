@@ -22,11 +22,14 @@ import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
 import { INFRASTRUCTURE } from './infrastructure.js';
 import { tileTemplate as nightTemplate } from './nightlights.js';
 import { PLACE_NAMES } from './placeNames.js';
+import { guardedTemplate } from './quotaGuard.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
 
 const IMAGERY = 'basemap-imagery';
+/** The imagery's source id, for the turn read ahead over relief (`warmTurn.js`). */
+export const IMAGERY_SOURCE = IMAGERY;
 /** A second picture of the same ground, laid just over the first (`setAlternate`). */
 const ALTERNATE = 'basemap-alternate';
 /** Failed tiles after which trouble is reported without waiting for the settle. */
@@ -261,10 +264,16 @@ export function sourceMaxZoom(provider, cell) {
  *   its layer, window and cloud ceiling in it (lib/sentinel.js)
  * @param {number} cell grid cell in CSS px (lib/usage.js `layerCell`)
  */
-export function rasterSource(provider, providerId, cell) {
+export function rasterSource(provider, providerId, cell, guardId = '') {
+  // A billed provider is asked through the guard, which sends the far ground of
+  // a tilted map to the free one (`quotaGuard.js`). Direct `{s}` templates are
+  // never billed and never pass through the app.
+  const guard = guardId && provider.meter && !provider.url.includes('{s}');
   return {
     type: 'raster',
-    tiles: tileUrls(tileTemplate(provider, providerId), provider.subdomains),
+    tiles: guard
+      ? [guardedTemplate(guardId, providerId)]
+      : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
     // Bigger tiles shift the URL zoom down (512 → -1, 1024 → -2); an oversample
     // halves the cell so each tile is shown downscaled — deeper zoom on screen.
     // Google's mid-zoom mosaics are genuinely softer than its deep ones
@@ -456,7 +465,7 @@ export function createBasemaps(engine, hooks = {}) {
   function showTiles(provider, providerId, cell) {
     dropTiles();
     capZoom(provider);
-    map.addSource(IMAGERY, rasterSource(provider, providerId, cell));
+    map.addSource(IMAGERY, rasterSource(provider, providerId, cell, engine.mapId));
     map.addLayer({ id: IMAGERY, type: 'raster', source: IMAGERY },
       map.getLayer(ALTERNATE) ? ALTERNATE : lowestOverlay());
     live = `${providerId}@${cell}`;
@@ -604,7 +613,7 @@ export function createBasemaps(engine, hooks = {}) {
       alternate = key;
       alternateMetered = null;
       if (!key) return;
-      map.addSource(ALTERNATE, rasterSource(provider, providerId, cell));
+      map.addSource(ALTERNATE, rasterSource(provider, providerId, cell, engine.mapId));
       map.addLayer({
         id: ALTERNATE,
         type: 'raster',

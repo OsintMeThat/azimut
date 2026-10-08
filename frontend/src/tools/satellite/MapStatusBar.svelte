@@ -19,6 +19,8 @@
   let {
     /** Formatted coordinates, already in the analyst's own unit. */
     coords,
+    /** The ground height there, already formatted; empty while there is no relief. */
+    height = '',
     zoom,
     /** The marker is off the centre and draggable, so the coordinates are its. */
     pinned = false,
@@ -35,6 +37,7 @@
   <div class="readouts card">
     <button class="hud-coords mono" onclick={copy} title="Copy coordinates">
       {coords}
+      {#if height}<span class="height" title="Ground height here, from the relief">{height}</span>{/if}
       <span class="z">z{zoom}</span>
       {#if pinned}<span class="pin-tag">pin</span>{/if}
       <Icon name="copy" size={12} />
@@ -94,6 +97,10 @@
   }
   .z {
     color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .height {
+    color: var(--text-2);
     font-size: var(--fs-xs);
   }
   .pin-tag {

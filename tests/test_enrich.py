@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 from PIL import Image
+from PIL.TiffImagePlugin import IFDRational
 
 from azimut.engine import enrich
 
@@ -514,3 +515,30 @@ def test_one_exif_value_is_bounded_while_it_is_built(tmp_workspace):
     assert enrich._display_value(b"\x00\x01\x02" * 400) == f"{1200} bytes"
     # a short value is untouched
     assert enrich._display_value("Canon EOS 5D") == "Canon EOS 5D"
+
+
+def test_a_photo_says_how_wide_its_lens_saw(tmp_path):
+    exif = Image.Exif()
+    camera = exif.get_ifd(0x8769)
+    camera[0x920A] = IFDRational(6, 1)  # 6 mm on a phone sensor
+    camera[0xA405] = 26
+    facts = enrich.lens_facts(_image(tmp_path, size=(400, 300), exif=exif))
+    assert facts == {"width": 400, "height": 300, "focal_mm": 6.0, "focal35_mm": 26.0}
+
+
+def test_the_35mm_equivalent_is_worked_out_from_the_sensor_when_not_written(tmp_path):
+    exif = Image.Exif()
+    camera = exif.get_ifd(0x8769)
+    camera[0x920A] = IFDRational(50, 1)
+    # an APS-C sensor, 23.6 mm across a 400 px frame: 400 / 23.6 pixels a millimetre
+    camera[0xA20E] = IFDRational(4000, 236)
+    camera[0xA210] = 4
+    facts = enrich.lens_facts(_image(tmp_path, size=(400, 266), exif=exif))
+    assert facts["focal35_worked_out"] is True
+    assert facts["focal35_mm"] == pytest.approx(76.3, abs=1.0)
+
+
+def test_a_photo_that_does_not_say_is_left_without_a_lens(tmp_path):
+    facts = enrich.lens_facts(_image(tmp_path, size=(64, 48)))
+    assert facts == {"width": 64, "height": 48}
+    assert enrich.lens_facts(tmp_path / "missing.jpg") == {}

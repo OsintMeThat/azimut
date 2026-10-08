@@ -49,7 +49,7 @@ describe('the rail', () => {
   it('cuts the entries into the sections it draws a line between', () => {
     const sections = railSections(railEntries());
     expect(sections.map((section) => section.group)).toEqual(['work', 'read']);
-    expect(sections[0].entries.map((entry) => entry.id)).toEqual(['measure', 'grid']);
+    expect(sections[0].entries.map((entry) => entry.id)).toEqual(['measure', 'profile', 'grid']);
     expect(sections[1].entries.map((entry) => entry.id)).toEqual(['sky', 'reference']);
   });
 

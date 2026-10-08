@@ -24,7 +24,7 @@ function within(value, low, high) {
 }
 
 /** The view as query parameters, for `buildHash`. */
-export function viewParams({ lat, lon, zoom, bearing = 0, provider = '' } = {}) {
+export function viewParams({ lat, lon, zoom, bearing = 0, pitch = null, provider = '' } = {}) {
   const params = {};
   if (within(lat, -90, 90) && within(lon, -180, 180)) {
     params.ll = `${Number(lat.toFixed(PLACES))},${Number(lon.toFixed(PLACES))}`;
@@ -34,6 +34,9 @@ export function viewParams({ lat, lon, zoom, bearing = 0, provider = '' } = {}) 
   if (within(bearing, 0, 360) && Math.round(bearing) % 360 !== 0) {
     params.b = String(Math.round(bearing) % 360);
   }
+  // A tilt is only ever there with the relief on, so its presence, even at 0,
+  // is what brings the relief back on a reload.
+  if (within(pitch, 0, 90)) params.t = String(Math.round(pitch));
   if (provider) params.p = provider;
   return params;
 }
@@ -66,6 +69,11 @@ export function readView(params) {
   const bearing = Number(get('b'));
   if (get('b') !== null && get('b') !== undefined && within(bearing, 0, 360)) {
     view.bearing = Math.round(bearing) % 360;
+  }
+
+  const tilt = Number(get('t'));
+  if (get('t') !== null && get('t') !== undefined && within(tilt, 0, 85)) {
+    view.pitch = Math.round(tilt);
   }
 
   const provider = get('p');

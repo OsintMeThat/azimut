@@ -117,6 +117,8 @@
     lock: 'M7 11V7a5 5 0 0 1 10 0v4M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
     shield: 'M12 21.5s7.5-3.7 7.5-9.3V5.4L12 2.5 4.5 5.4v6.8c0 5.6 7.5 9.3 7.5 9.3Z',
     chart: 'M3.5 3.5v17h17m-4-5v-6m-5 6V8m-5 8.5v-3',
+    // a ridge over its baseline: the elevation profile
+    profile: 'M3 20h18M3 16.5l4.5-6.5 3.5 4 3.5-6 6.5 9.5',
     square: 'M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
     circle: 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16Z',
     line: 'M5 19 19 5',

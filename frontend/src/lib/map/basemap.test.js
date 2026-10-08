@@ -804,3 +804,19 @@ describe('the layers on a map', () => {
     });
   });
 });
+
+
+describe('billed tiles on a map that can tilt', () => {
+  it('asks a billed provider through the guard, and nothing else', () => {
+    expect(rasterSource(SENTINEL, 'sentinel2', 512, 'm4').tiles).toEqual([
+      'azimut-billed://m4/sentinel2/{z}/{x}/{y}',
+    ]);
+    expect(rasterSource(ESRI, 'esri-world-imagery', 256, 'm4').tiles).toEqual([
+      '/api/tiles/esri-world-imagery/{z}/{x}/{y}',
+    ]);
+    // a direct {s} template is never billed and never passes through the app
+    expect(rasterSource({ ...CUSTOM_XYZ, meter: 'x' }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');
+    // without a map to read the view from, the plain proxy address
+    expect(rasterSource(SENTINEL, 'sentinel2', 512).tiles).toEqual(['/api/tiles/sentinel2/{z}/{x}/{y}']);
+  });
+});

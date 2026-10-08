@@ -85,3 +85,19 @@ describe('which window this is', () => {
     expect(label('w=<script>')).toBe(null);
   });
 });
+
+describe('a tilted view of the relief', () => {
+  it('writes the tilt only while the relief is on, zero included', () => {
+    expect(viewParams({ lat: 1, lon: 1, zoom: 5 }).t).toBeUndefined();
+    expect(viewParams({ lat: 1, lon: 1, zoom: 5, pitch: null }).t).toBeUndefined();
+    expect(viewParams({ lat: 1, lon: 1, zoom: 5, pitch: 0 }).t).toBe('0');
+    expect(viewParams({ lat: 1, lon: 1, zoom: 5, pitch: 61.6 }).t).toBe('62');
+  });
+
+  it('reads a tilt back, and refuses one the map could not take', () => {
+    expect(readView(new URLSearchParams('ll=46,7&z=12&t=55')).pitch).toBe(55);
+    expect(readView(new URLSearchParams('ll=46,7&z=12&t=0')).pitch).toBe(0);
+    expect(readView(new URLSearchParams('ll=46,7&z=12&t=120')).pitch).toBeUndefined();
+    expect(readView(new URLSearchParams('ll=46,7&z=12')).pitch).toBeUndefined();
+  });
+});

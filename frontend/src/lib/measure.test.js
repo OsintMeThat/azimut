@@ -8,6 +8,7 @@ import {
   formatDistance,
   formatArea,
   formatAngle,
+  formatHeight,
   destination,
   orientedExtent,
 } from './measure.js';
@@ -222,5 +223,14 @@ describe('orientedExtent', () => {
   it('keeps a shape across the antimeridian its own size', () => {
     const { length } = orientedExtent([{ lat: 0, lon: 179.9995 }, { lat: 0, lon: -179.9995 }]);
     expect(length).toBeCloseTo(111, 0);
+  });
+});
+
+describe('formatHeight', () => {
+  it('reads a height in whole metres or feet', () => {
+    expect(formatHeight(2412.4)).toBe('2412 m');
+    expect(formatHeight(4806.5, 'imperial')).toBe('15769 ft');
+    expect(formatHeight(-28.2)).toBe('-28 m');
+    expect(formatHeight(null)).toBe('');
   });
 });

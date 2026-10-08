@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startRectDrag, startRotateDrag, turnFromKey, turnFromPress } from './gestures.js';
+import {
+  ORBIT_TILT_PER_PX,
+  ORBIT_TURN_PER_PX,
+  startRectDrag,
+  startRotateDrag,
+  turnFromKey,
+  turnFromPress,
+} from './gestures.js';
 
 /** The façade, as far as the gestures reach into it. */
 function stubEngine({ bearing = 0 } = {}) {
@@ -251,5 +258,94 @@ describe('turning from the keyboard', () => {
     expect(turnFromKey(engine, keydown('ArrowLeft', { shiftKey: false }))).toBe(false);
     expect(turnFromKey(null, keydown('ArrowLeft'))).toBe(false);
     expect(engine.bearings).toEqual([]);
+  });
+});
+
+describe('orbiting over the relief', () => {
+  /** A map that keeps a ground point where the projection puts it. */
+  function orbitEngine({ sky = false } = {}) {
+    const engine = stubEngine({ bearing: 10 });
+    engine.pitches = [];
+    engine.camera = () => ({ lat: 0, lon: 0, zoom: 12, bearing: 10, pitch: 20 });
+    engine.setPitch = (deg) => engine.pitches.push(deg);
+    // The ground under a pixel is pixel / 1000 shifted by where the camera is; a
+    // tilt moves it by six pixels' worth, which the orbit has to shift back. A shift
+    // only lands 80% of the way, as over relief, so it takes several. A press
+    // on the sky unprojects somewhere that never projects back.
+    let centre = [0, 0];
+    engine.shifts = [];
+    engine.shiftBy = ({ lat, lon }) => {
+      engine.shifts.push({ lat, lon });
+      centre = [centre[0] + lat * 0.8, centre[1] + lon * 0.8];
+    };
+    // a thousand pixels to the degree, as at a street-level zoom
+    const drift = () => (engine.pitches.length ? [-0.003, 0.006] : [0, 0]);
+    engine.containerPointToLatLng = ({ x, y }) => ({
+      lat: y / 1000 + centre[0] - drift()[0],
+      lon: x / 1000 + centre[1] - drift()[1],
+    });
+    engine.latLngToContainerPoint = ({ lat, lon }) => {
+      if (sky) return { x: 9999, y: -9999 };
+      return { x: (lon - centre[1] + drift()[1]) * 1000, y: (lat - centre[0] + drift()[0]) * 1000 };
+    };
+    engine.offset = (pinned) => {
+      const now = engine.latLngToContainerPoint(pinned);
+      return Math.hypot(now.x - 100, now.y - 100);
+    };
+    return engine;
+  }
+
+  it('orbits on the middle button and Shift where the map has relief, turns where it has not', () => {
+    const engine = orbitEngine();
+    expect(turnFromPress(engine, press(1, 140, 120), { tilt: true })).toBe(true);
+    drag(140, 60);
+    expect(engine.pitches.at(-1)).toBeCloseTo(20 + 60 * ORBIT_TILT_PER_PX);
+    release();
+    const flat = orbitEngine();
+    turnFromPress(flat, press(1, 140, 120), { tilt: false });
+    drag(140, 60);
+    expect(flat.pitches).toHaveLength(0);
+  });
+
+  it('leans toward the horizon dragging up, and the ground follows a sideways hand', () => {
+    const engine = orbitEngine();
+    turnFromPress(engine, { ...press(0, 140, 120), shiftKey: true }, { tilt: true });
+    drag(180, 100);
+    expect(engine.pitches.at(-1)).toBeCloseTo(20 + 20 * ORBIT_TILT_PER_PX);
+    expect(engine.bearings.at(-1)).toBeCloseTo(10 - 40 * ORBIT_TURN_PER_PX);
+  });
+
+  it('shifts the grabbed ground back under the pointer until it is there, and holds none on the sky', () => {
+    const engine = orbitEngine();
+    const pinned = engine.containerPointToLatLng({ x: 100, y: 100 });
+    // mid-gesture, the screen-to-ground reading is a stale frame: it must not be asked
+    const unproject = engine.containerPointToLatLng;
+    let asked = 0;
+    engine.containerPointToLatLng = (point) => {
+      asked += 1;
+      return unproject(point);
+    };
+    turnFromPress(engine, press(1, 140, 120), { tilt: true });
+    drag(150, 110);
+    // nudged north and east to read how the point moves, then shifted home
+    expect(engine.shifts.length).toBeGreaterThan(3);
+    expect(engine.offset(pinned)).toBeLessThan(0.5);
+    // never a pan in pixels, and the ground under the press read only once, at the press
+    expect(engine.pans).toEqual([]);
+    expect(asked).toBe(1);
+    release();
+    const sky = orbitEngine({ sky: true });
+    turnFromPress(sky, press(1, 140, 120), { tilt: true });
+    drag(150, 110);
+    expect(sky.shifts).toEqual([]);
+    expect(sky.pitches.length).toBeGreaterThan(0);
+  });
+
+  it('puts north back up on a middle click that never moved', () => {
+    const engine = orbitEngine();
+    turnFromPress(engine, press(1, 140, 120), { tilt: true });
+    release();
+    expect(engine.bearings).toEqual([0]);
+    expect(engine.pitches).toEqual([]);
   });
 });

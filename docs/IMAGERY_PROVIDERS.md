@@ -676,6 +676,47 @@ Checked 2026-09-13.
 | Active fires | NASA FIRMS, keyed, through the app | see above | |
 | Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain | Level 8 (750 m); opaque, drawn lowest at 85% |
 
+## Relief, summit names and the turn read ahead
+
+The 3D map and the Horizon tab add three sources, all key-less, all asked
+only once a view needs them. Checked 2026-10-08.
+
+| Need | Source | Licence / terms | Notes |
+|---|---|---|---|
+| Terrain heights | Mapterhorn `tiles.mapterhorn.com/{z}/{x}/{y}.webp` (terrarium, 512 px, planet to z12, surveys deeper) | open data sources, `© Mapterhorn`, attribution page linked | through the app (`api/terrain.py`), disk cache `cache/terrain/` bounded at 1 GiB with an LRU sweep at start, absences kept 30 days |
+| Terrain fallback | AWS Terrain Tiles `s3.amazonaws.com/elevation-tiles-prod/terrarium` (Mapzen, 256 px) | open data, Mapzen and AWS credited | asked only when Mapterhorn cannot be reached; four of its tiles one level deeper make one of ours |
+| Summit names | Overpass API: `overpass-api.de`, then `overpass.private.coffee`, then `overpass.kumi.systems` (public instances listed on the OSM wiki) | ODbL © OSM contributors | Horizon only, once Summit names is switched on; one 1° cell a question, nearest first, two at a time, cached 90 days (`engine/peaks.py`). The main instance took a minute for a whole view's box and answered 429/504 under load, hence cells and the mirrors |
+
+**Imagery over a Horizon view** (`/api/horizon/drape`, `engine/drape.py`) reads
+Esri World Imagery or a Wayback release, at the level each pixel's ground needs,
+at most 700 tiles a view, through the same proxy function and disk cache as the
+map. A billed provider is refused over the whole turn: that is hundreds of tiles.
+
+The one exception is **Sentinel-2 near the eye**, on the analyst's own
+Copernicus key and quota: switched on in the view ("Sentinel-2 nearer than
+5 km", up to 30 km), it is laid only on the ground nearer than that, Esri
+beyond, as Satellite's 3D view keeps billed tiles off the far ground. A whole
+turn within 5 km is about ten 512 px tiles at Sentinel-2's 10 m. Before it is
+switched on the view says how many requests it would cost
+(`/api/horizon/drape/estimate`, worked out by the app from the picture's grid,
+nothing fetched, tiles already on disk not counted); switching it on asks the
+catalogue once for the newest pass under 30 % cloud in the last 90 days (one
+request, `/api/satellite/sentinel/dates`), again only when the eye moves
+farther than 10 km. The meter counts every tile, and a paused quota refuses it.
+
+**Shadows and full detail** need nothing new: the shadows of the sun or the
+moon (`/api/horizon/shadow`, `engine/shadow.py`) and a full-detail picture
+(`full_detail`, the finest terrain out to 20 km) read the same terrain tiles,
+through the same cache. Full detail reads z14 out to 20 km, which is a few
+hundred tiles the first time over new ground; it is asked only once switched
+on.
+
+**The turn read ahead** (`/api/tiles/warm`, `engine/tilewarm.py`): when a tilted
+3D view rests, the map asks its own engine which tiles eight headings around it
+would cover and the app fetches them into the disk caches, so a quick turn reads
+them from disk. Free cacheable providers and the relief only; a billed one is
+never read ahead. It is the analyst's own looking around, read a little early.
+
 ## GeoConfirmed is a query, not a feed
 
 An added layer (`engine/geoconfirmed.py`), not an overlay: the backend reads it

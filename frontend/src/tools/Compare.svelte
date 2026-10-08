@@ -22,7 +22,7 @@
   import { copyText } from '../lib/clipboard.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
-  import { openMapAt } from '../lib/navigate.js';
+  import { lookFrom, openMapAt } from '../lib/navigate.js';
   import { followFullscreen, toggleFullscreen } from '../lib/fullscreen.js';
   import { wrapLon } from '../lib/coords.js';
   import {
@@ -1678,7 +1678,7 @@
   let canvasA = $state(null);
   let canvasB = $state(null);
   const pointActions = $derived(
-    actionsFor(both ? ['lookup', 'place', 'measure'] : ['lookup', 'place'])
+    actionsFor(both ? ['lookup', 'place', 'measure', 'horizon'] : ['lookup', 'place', 'horizon'])
   );
   const pointTools = otherMapTools('compare');
 
@@ -1731,6 +1731,8 @@
       await tick();
       (side === 'a' ? canvasA : canvasB)?.startFrom([point.lon, point.lat]);
       toast('Click the far end of the measure', 'info', 4000);
+    } else if (id === 'horizon') {
+      lookFrom(point);
     } else if (id === 'goto') {
       openMapAt(value, { ...point, zoom: view.zoom });
     }

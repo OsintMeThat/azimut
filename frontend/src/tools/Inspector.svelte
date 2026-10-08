@@ -13,7 +13,7 @@
   } from '../lib/inspectWork.svelte.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { deletedToast } from '../lib/trash.js';
-  import { openInReverseSearch } from '../lib/navigate.js';
+  import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
@@ -471,6 +471,20 @@
     }
   }
 
+  /**
+   * Lay a frame over the Horizon view, as filmed: the file itself at the
+   * frame's moment, not its crop, so the lens is still the camera's.
+   */
+  function horizonFrame(frame) {
+    const video = frame.time != null;
+    openInHorizon({
+      path: frame.path,
+      kind: video ? 'video' : 'image',
+      title: work.source?.title || work.source?.filename,
+      ...(video ? { time: frame.time } : {}),
+    });
+  }
+
   // -- frames -----------------------------------------------------------------------
   async function capture(time) {
     // Two round trips, long enough on a slow video to switch file in between. The
@@ -847,6 +861,7 @@
               bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop}
               setRotation={setFrameRotation} {rotationBusy}
               reverse={reverseFrame}
+              horizon={horizonFrame}
               onduplicate={duplicateFrame}
               frameSave={{
                 defaultName: frameNames.get(activeFrame.id),

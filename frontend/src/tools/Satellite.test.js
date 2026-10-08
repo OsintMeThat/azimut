@@ -22,6 +22,18 @@ function satelliteSources() {
   return files;
 }
 
+describe('the map rail', () => {
+  it('says which of its tools is on, every one of them', async () => {
+    // a tool armed with its icon left plain reads as nothing being on: the
+    // Elevation profile was, until this was checked
+    const { railEntries } = await import('../lib/map/tools.js');
+    const block = source.slice(source.indexOf('<MapRail'), source.indexOf('onpick={pickTool}'));
+    for (const entry of railEntries()) {
+      expect(block, `${entry.id} is in the rail and never shown on`).toMatch(new RegExp(`\\b${entry.id}: \\{\\s*on:`));
+    }
+  });
+});
+
 describe('Satellite saved work', () => {
   // The indexes, the filter, the Locate pass and the row actions are the store's
   // (`satellite/state/saved.svelte.test.js`, which exercises them for real).
@@ -899,12 +911,14 @@ describe('the right-click menu', () => {
   });
 
   it('offers its own subset of acts, and opens the point in Compare or Detect', () => {
-    expect(source).toContain("actionsFor(['lookup', 'place', 'measure', 'sky', 'history', 'centre'])");
+    expect(source).toContain("actionsFor(['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre'])");
     expect(source).toContain("otherMapTools('satellite')");
     expect(source).toContain('tools={pointTools}');
     const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));
     const body = acts.slice(0, acts.indexOf('async function comparePoint'));
     expect(body).toContain("openMapAt(value, { ...point, zoom: center.zoom })");
+    // Look from here hands the eye the way the map faces
+    expect(body).toContain('lookFrom({ ...point, heading: bearing })');
   });
 
   it('drops a lookup answer that arrives after the menu moved on', () => {

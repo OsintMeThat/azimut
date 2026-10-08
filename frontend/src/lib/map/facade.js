@@ -40,7 +40,11 @@ const EVENTS = {
   // rather than in the engine and has to be placed again as the ground moves.
   'view-move': ['move'],
   rotate: ['rotate'],
+  // a tilt, which only a map with relief on can take
+  pitch: ['pitch'],
   click: ['click'],
+  // the pointer over the map, for a line that follows it while it is drawn
+  'pointer-move': ['mousemove'],
   // The engine only fires it for a right-click that did not drag, and stops
   // the browser's own menu once anything listens for it.
   contextmenu: ['contextmenu'],
@@ -133,10 +137,15 @@ export function framePadding(padding) {
  *
  * @param {object} map the engine's own map object
  * @param {HTMLElement} [container] the element the map was built in
+ * @param {string} [mapId] this map's name to the billed-tile guard (`quotaGuard.js`)
  */
-export function mapFacade(map, container) {
+export function mapFacade(map, container, mapId = '') {
   // Set while another map's frame is being copied onto this one (`follow`).
   let following = false;
+  // The centre's height above the sea, held through a gesture over relief
+  // (`holdElevation`), or null to let the engine set it.
+  let heldElevation = null;
+  const held = () => (heldElevation == null ? {} : { elevation: heldElevation });
   const settledHandlers = new Set();
 
   /**
@@ -168,6 +177,8 @@ export function mapFacade(map, container) {
       lon: wrapLon(centre.lng),
       zoom: viewZoom(map.getZoom()),
       bearing: normalizeBearing(-map.getBearing()),
+      // 0 on a flat map: only relief lets the camera tilt (`relief.js`)
+      pitch: Math.round(map.getPitch()),
     };
   }
 
@@ -209,15 +220,70 @@ export function mapFacade(map, container) {
     /**
      * A whole camera in one jump, turn included: one move and one settle, where
      * `setView` then `setBearing` would settle once on the old heading first.
+     * A camera that names no tilt keeps the one the map has; a flat map holds
+     * any tilt it is handed at zero.
      */
-    setCamera: ({ lat, lon, zoom, bearing = 0 }) =>
-      map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom), bearing: -normalizeBearing(bearing) }),
+    setCamera: ({ lat, lon, zoom, bearing = 0, pitch }) =>
+      map.jumpTo({
+        center: [lon, lat],
+        zoom: engineZoom(zoom),
+        bearing: -normalizeBearing(bearing),
+        ...(Number.isFinite(pitch) ? { pitch } : {}),
+      }),
     setZoom: (zoom) => map.setZoom(engineZoom(zoom)),
-    setBearing: (deg) => map.setBearing(-normalizeBearing(deg)),
+    setBearing: (deg) =>
+      heldElevation == null
+        ? map.setBearing(-normalizeBearing(deg))
+        : map.jumpTo({ bearing: -normalizeBearing(deg), ...held() }),
+    /** Tilt from straight down, in degrees; held at zero unless relief is on. */
+    setPitch: (deg) =>
+      heldElevation == null
+        ? map.setPitch(Math.max(0, Number(deg) || 0))
+        : map.jumpTo({ pitch: Math.max(0, Number(deg) || 0), ...held() }),
+    /**
+     * Keep the centre's height where it is until the returned release is called.
+     *
+     * Over relief the engine puts the centre back on the ground under it at
+     * every jump, without moving anything to make up for it: on a steep slope a
+     * shift of a few metres moves the camera by hundreds, and a gesture that
+     * turns, tilts and shifts at every move of the hand comes apart. Holding
+     * the height keeps each jump exactly the move that was asked for.
+     */
+    holdElevation() {
+      // The engine re-seats the centre on the ground at every frame and every
+      // relief tile that lands, without moving anything to make up for it, so a
+      // gesture of ours over relief jumps each time a tile arrives. Its own
+      // gestures avoid that with a freeze it lifts at the end, re-seating the
+      // centre while keeping the camera where it is (handler_manager.ts). There
+      // is no public handle on it, so this reaches for the same one, and does
+      // without where an engine has none.
+      const camera = map._camera;
+      if (camera) camera.elevationFreeze = true;
+      heldElevation = map.getCenterElevation?.() ?? null;
+      return () => {
+        heldElevation = null;
+        if (!camera) return;
+        camera.elevationFreeze = false;
+        if (map.terrain && map.getCenterClampedToGround?.()) {
+          const update = camera.getTransformForUpdate();
+          update.recalculateZoomAndCenter(map.terrain);
+          camera.applyUpdatedTransform(update);
+        }
+      };
+    },
     /** How deep this map goes right now, in app zoom: its basemap's ceiling. */
     maxZoom: () => viewZoom(map.getMaxZoom()),
     /** Never animated: a rotation pans the map once per pointer move. */
     panBy: (dx, dy) => map.panBy([dx, dy], { duration: 0 }),
+    /**
+     * Move the camera over the ground by this many degrees, turn, tilt and zoom
+     * kept. A pan in pixels is read off a flat plane, which over tall relief and
+     * a steep tilt lands far from where it was aimed; a shift in degrees does not.
+     */
+    shiftBy: ({ lat, lon }) => {
+      const centre = map.getCenter();
+      map.jumpTo({ center: [centre.lng + lon, centre.lat + lat], ...held() });
+    },
     fitBounds,
     fitPoints,
 
@@ -271,7 +337,13 @@ export function mapFacade(map, container) {
      */
     frame() {
       const centre = map.getCenter();
-      return { lng: centre.lng, lat: centre.lat, zoom: map.getZoom(), bearing: map.getBearing() };
+      return {
+        lng: centre.lng,
+        lat: centre.lat,
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      };
     },
 
     /**
@@ -283,7 +355,12 @@ export function mapFacade(map, container) {
     follow(next, { settled = false } = {}) {
       following = true;
       try {
-        map.jumpTo({ center: [next.lng, next.lat], zoom: next.zoom, bearing: next.bearing });
+        map.jumpTo({
+          center: [next.lng, next.lat],
+          zoom: next.zoom,
+          bearing: next.bearing,
+          ...(Number.isFinite(next.pitch) ? { pitch: next.pitch } : {}),
+        });
       } finally {
         following = false;
       }
@@ -295,6 +372,18 @@ export function mapFacade(map, container) {
 
     /** True while the view moves or has tiles in flight, so a capture now would be partial. */
     tilesLoading: () => map.isMoving() || !map.areTilesLoaded(),
+
+    /**
+     * Resolves once the map is at rest with every tile in, relief included.
+     * What a camera that leans over the relief waits for: tilted before the
+     * ground under it has arrived, the engine seats the centre at sea level,
+     * under the mountains it is looking at.
+     */
+    idle: () =>
+      new Promise((resolve) => {
+        if (!map.isMoving() && map.areTilesLoaded()) resolve();
+        else map.once('idle', () => resolve());
+      }),
 
     /**
      * The drawn pixels, once every visible tile is in.
@@ -350,7 +439,9 @@ export function mapFacade(map, container) {
       // pressed, since a menu opens there. A shape that answers its own click
       // answers its own right-click too: a flagged grid cell is not also a menu.
       const relay =
-        name === 'click' || name === 'contextmenu'
+        name === 'pointer-move'
+          ? (event) => handler({ lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) })
+          : name === 'click' || name === 'contextmenu'
           ? (event) => {
               if (shapeUnder(event.point)) return;
               const at = { lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) };
@@ -392,6 +483,9 @@ export function mapFacade(map, container) {
      * and read it, so it crosses the boundary as itself.
      */
     container,
+
+    /** This map's name to the billed-tile guard, which reads its view per tile. */
+    mapId,
 
     /**
      * The engine's own map.

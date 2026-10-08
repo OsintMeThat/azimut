@@ -24,9 +24,10 @@ function fakeMap(frame = { lng: 2, lat: 48, zoom: 15, bearing: 0 }) {
     getCenter: () => ({ lng: map.frame.lng, lat: map.frame.lat }),
     getZoom: () => map.frame.zoom,
     getBearing: () => map.frame.bearing,
-    jumpTo({ center, zoom, bearing }) {
+    getPitch: () => map.frame.pitch ?? 0,
+    jumpTo({ center, zoom, bearing, pitch }) {
       map.jumps += 1;
-      map.frame = { lng: center[0], lat: center[1], zoom, bearing };
+      map.frame = { lng: center[0], lat: center[1], zoom, bearing, ...(pitch === undefined ? {} : { pitch }) };
       map.fire('move');
       map.fire('moveend');
     },
@@ -51,7 +52,7 @@ describe('linked map cameras', () => {
     const { leftMap, rightMap, left, right } = pair();
     linkCameras([left, right]);
     leftMap.gesture({ lng: 2.5, lat: 48.2, zoom: 15.37, bearing: -12 });
-    expect(rightMap.frame).toEqual({ lng: 2.5, lat: 48.2, zoom: 15.37, bearing: -12 });
+    expect(rightMap.frame).toEqual({ lng: 2.5, lat: 48.2, zoom: 15.37, bearing: -12, pitch: 0 });
   });
 
   it('never sends a copied frame back to the map that led it', () => {
@@ -90,7 +91,7 @@ describe('linked map cameras', () => {
     const { rightMap, left, right } = pair();
     const link = linkCameras([left, right]);
     link.align(0);
-    expect(rightMap.frame).toEqual({ lng: 2, lat: 48, zoom: 15, bearing: 0 });
+    expect(rightMap.frame).toEqual({ lng: 2, lat: 48, zoom: 15, bearing: 0, pitch: 0 });
   });
 
   it('stops following once disposed', () => {

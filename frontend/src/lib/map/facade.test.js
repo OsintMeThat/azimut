@@ -41,6 +41,7 @@ function stubMap(overrides = {}) {
     getMinZoom: () => 0,
     getMaxZoom: () => 21,
     getBearing: () => -37,
+    getPitch: () => 0,
     getBounds: () => ({
       getNorth: () => 0,
       getSouth: () => -1,
@@ -53,6 +54,7 @@ function stubMap(overrides = {}) {
     jumpTo: (...args) => calls.jumpTo.push(args),
     setZoom: (...args) => calls.setZoom.push(args),
     setBearing: (...args) => calls.setBearing.push(args),
+    setPitch: (...args) => (calls.setPitch ??= []).push(args),
     panBy: (...args) => calls.panBy.push(args),
     easeTo: (...args) => calls.easeTo.push(args),
     cameraForBounds: (...args) => {
@@ -130,7 +132,7 @@ describe('the map façade keeps the engine on its own side', () => {
     // an engine keeps counting past ±180 across the date line; the capture
     // route bounds lon to ±180, so an unwrapped centre answered 422
     const map = stubMap({ getCenter: () => ({ lat: 12, lng: 190.5 }) });
-    expect(mapFacade(map).camera()).toEqual({ lat: 12, lon: -169.5, zoom: 16, bearing: 37 });
+    expect(mapFacade(map).camera()).toEqual({ lat: 12, lon: -169.5, zoom: 16, bearing: 37, pitch: 0 });
   });
 
   it('leaves a longitude that is already one alone, to the last decimal', () => {
@@ -162,6 +164,85 @@ describe('the map façade keeps the engine on its own side', () => {
       [{ center: [2, 1], zoom: 15, bearing: -37 }],
       [{ center: [4, 3], zoom: 11, bearing: -0 }],
     ]);
+  });
+
+  it('carries a tilt only when one is named, and never below flat', () => {
+    const map = stubMap({ getPitch: () => 61.6 });
+    const facade = mapFacade(map);
+    expect(facade.camera().pitch).toBe(62);
+    facade.setCamera({ lat: 1, lon: 2, zoom: 16, bearing: 0, pitch: 45 });
+    expect(map.calls.jumpTo[0][0].pitch).toBe(45);
+    facade.setPitch(-10);
+    facade.setPitch(30);
+    expect(map.calls.setPitch).toEqual([[0], [30]]);
+  });
+
+  it('waits for the map to rest with its tiles in', async () => {
+    let idle;
+    let moving = true;
+    const map = stubMap({
+      isMoving: () => moving,
+      areTilesLoaded: () => false,
+      once: (name, handler) => name === 'idle' && (idle = handler),
+    });
+    let done = false;
+    mapFacade(map).idle().then(() => (done = true));
+    await Promise.resolve();
+    expect(done).toBe(false);
+    moving = false;
+    idle();
+    await Promise.resolve();
+    expect(done).toBe(true);
+    const ready = stubMap({ isMoving: () => false, areTilesLoaded: () => true });
+    await expect(mapFacade(ready).idle()).resolves.toBeUndefined();
+  });
+
+  it('holds the centre’s height through a gesture, and re-seats it after with the camera kept', () => {
+    const recalculated = [];
+    const update = { recalculateZoomAndCenter: (terrain) => recalculated.push(terrain) };
+    const camera = {
+      elevationFreeze: false,
+      getTransformForUpdate: () => update,
+      applyUpdatedTransform: (transform) => recalculated.push(transform === update ? 'applied' : 'other'),
+    };
+    const map = stubMap({ getCenterElevation: () => 2930, getCenterClampedToGround: () => true });
+    map._camera = camera;
+    map.terrain = 'relief';
+    const facade = mapFacade(map);
+    const release = facade.holdElevation();
+    expect(camera.elevationFreeze).toBe(true);
+    facade.setPitch(40);
+    facade.setBearing(10);
+    facade.shiftBy({ lat: 0, lon: 0.001 });
+    expect(map.calls.jumpTo.map(([jump]) => jump.elevation)).toEqual([2930, 2930, 2930]);
+    release();
+    expect(camera.elevationFreeze).toBe(false);
+    expect(recalculated).toEqual(['relief', 'applied']);
+    facade.setPitch(41);
+    expect(map.calls.setPitch).toEqual([[41]]);
+  });
+
+  it('holds what it can on an engine with no freeze of its own', () => {
+    const map = stubMap({ getCenterElevation: () => 120 });
+    const release = mapFacade(map).holdElevation();
+    expect(() => release()).not.toThrow();
+  });
+
+  it('shifts the camera over the ground by degrees, keeping the rest of it', () => {
+    const map = stubMap();
+    mapFacade(map).shiftBy({ lat: 0.5, lon: -0.25 });
+    const [jump] = map.calls.jumpTo.at(-1);
+    expect(jump.center[0]).toBeCloseTo(2.2945 - 0.25, 9);
+    expect(jump.center[1]).toBeCloseTo(48.8584 + 0.5, 9);
+    expect(Object.keys(jump)).toEqual(['center']);
+  });
+
+  it('hands a linked map the tilt with the rest of the frame', () => {
+    const leader = mapFacade(stubMap({ getPitch: () => 50 }));
+    const peerMap = stubMap();
+    mapFacade(peerMap).follow(leader.frame());
+    expect(peerMap.calls.jumpTo[0][0].pitch).toBe(50);
+    expect(engineEvents('pitch')).toEqual(['pitch']);
   });
 
   it('reports the ceiling in app zoom', () => {
@@ -293,7 +374,7 @@ describe('the event vocabulary', () => {
     mapFacade(map).on('view-settled', seen);
     const [, relay] = map.calls.on[0];
     relay();
-    expect(seen).toHaveBeenCalledWith({ lat: 48.8584, lon: 2.2945, zoom: 16, bearing: 37 });
+    expect(seen).toHaveBeenCalledWith({ lat: 48.8584, lon: 2.2945, zoom: 16, bearing: 37, pitch: 0 });
   });
 
   it('hands a click the point clicked, wrapped like any other', () => {

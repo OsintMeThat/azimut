@@ -11,6 +11,7 @@ asks the question — every path is built from :func:`workspace_root`.
     └── .azimut/              # app machinery, hidden from normal browsing
         ├── bundles/
         ├── cache/tiles/
+        ├── cache/terrain/
         ├── lock              # held by the one Azimut using this workspace
         ├── runtime/          # newer scrapers fetched at runtime
         ├── scratch/          # one-shot sessions, promotable to cases
@@ -412,6 +413,11 @@ def settings_dir() -> Path:
 def tile_cache_dir() -> Path:
     """Disposable map imagery cache, outside every case and backup."""
     return internal_dir() / "cache" / "tiles"
+
+
+def terrain_cache_dir() -> Path:
+    """Terrain height tiles: bounded by size rather than age (engine/terrain.py)."""
+    return internal_dir() / "cache" / "terrain"
 
 
 def settings_path() -> Path:

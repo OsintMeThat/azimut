@@ -13,6 +13,7 @@
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
   import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
+  import { createProfileState } from './satellite/state/profile.svelte.js';
   import { createSkyState } from './satellite/state/sky.svelte.js';
   import { createGridState } from './satellite/state/grid.svelte.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
@@ -32,6 +33,9 @@
     caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
   import { copyText } from '../lib/clipboard.js';
+  import { formatHeight } from '../lib/measure.js';
+  import { FREE_FAR_PROVIDER } from '../lib/map/quotaGuard.js';
+  import { bearingBetween } from '../lib/horizon/geometry.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
   import { startRectDrag, turnFromKey, turnFromPress } from '../lib/map/gestures.js';
   import { panelWidth } from '../lib/panelWidth.js';
@@ -39,7 +43,7 @@
   import { assignFolder } from '../lib/filing.js';
   import { filedToast } from '../lib/folders.js';
   import { saveRelation } from '../lib/relations.svelte.js';
-  import { openComparison, openEntity, openMapAt } from '../lib/navigate.js';
+  import { lookFrom, openComparison, openEntity, openMapAt } from '../lib/navigate.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
@@ -100,6 +104,10 @@
   import MapLayers from './satellite/MapLayers.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import MapStatusBar from './satellite/MapStatusBar.svelte';
+  import ElevationProfile from './satellite/ElevationProfile.svelte';
+  import ProfilePanel from './satellite/ProfilePanel.svelte';
+  import ProfileQuestion from './satellite/ProfileQuestion.svelte';
+  import FloatingWindow from '../components/FloatingWindow.svelte';
   import MarkerMenu from './satellite/MarkerMenu.svelte';
   import MeasurePanel from './satellite/MeasurePanel.svelte';
   import SunPanel from './satellite/SunPanel.svelte';
@@ -158,6 +166,16 @@
   let markerSurface = null; // lib/map/surface.js — holds the pin while in move mode
   let markerLatLng = $state(null); // {lat, lon} of the moved pin
   let bearing = $state(0);
+  // The relief under the imagery (lib/map/relief.js): off until asked for, and
+  // only then does the map tilt, by Ctrl+drag or from its control.
+  let reliefOn = $state(false);
+  let reliefReady = $state(false);
+  let exaggeration = $state(1);
+  let pitch = $state(0);
+  // A tilt the address asked for, held until the relief is there to lean over.
+  let pendingTilt = null;
+  // The ground height at the point the readout names, from the relief drawn.
+  let groundHeight = $state(null);
   // Middle-drag rotates the map around the grabbed point.
   let rotating = $state(false);
   let rotatePivot = $state({ x: 0, y: 0 }); // grabbed point, map-wrap-local px
@@ -473,6 +491,43 @@
     engine: () => engine,
     units: () => prefs.units,
   });
+  // The Elevation profile tool: a line drawn for its ground (state/profile.svelte.js).
+  const profile = createProfileState({ engine: () => engine, api });
+
+  /**
+   * Where the profile's window first opens: low and centred, unless the line
+   * lies there, then high. After that it opens where it was left.
+   */
+  function profileWindowPlace(box) {
+    const w = Math.min(820, box.w - 24);
+    const low = { x: Math.max(12, (box.w - w) / 2), y: box.h - 330, w, h: 240 };
+    const drawn = engine ? profile.points.map((point) => engine.latLngToContainerPoint(point)) : [];
+    if (!drawn.length) return low;
+    const covers = (rect) =>
+      drawn.some((at) => at.x >= rect.x && at.x <= rect.x + rect.w && at.y >= rect.y && at.y <= rect.y + rect.h);
+    const high = { ...low, y: 70 };
+    return covers(low) && !covers(high) ? high : low;
+  }
+
+  // while a profile line is being clicked out, its next stretch follows the pointer
+  $effect(() => {
+    if (!engine || !profile.on || profile.finished) return;
+    return engine.on('pointer-move', (at) => profile.follow(at));
+  });
+
+  /** The profile's question asked in Horizon: standing at A, facing B, B marked. */
+  function lookAlongProfile() {
+    const a = profile.points[0];
+    const b = profile.points.at(-1);
+    if (!a || !b) return;
+    lookFrom({
+      lat: a.lat,
+      lon: a.lon,
+      heading: bearingBetween(a, b),
+      eyeHeight: profile.eyeHeight,
+      mark: { lat: b.lat, lon: b.lon, height: profile.targetHeight },
+    });
+  }
 
   /**
    * Which half of the panel is showing.
@@ -610,6 +665,7 @@
       viewLink = null;
       offActivated();
       measure.destroy();
+      profile.destroy();
       sky.destroy();
       grid.destroy();
       footprint.destroy();
@@ -628,7 +684,7 @@
   $effect(() => {
     const element = mapEl;
     if (!element) return;
-    // middle-mouse or shift drag rotates the view
+    // middle-mouse or shift drag rotates the view, and tilts it over relief
     element.addEventListener('mousedown', onMiddleRotateStart, true);
     // left-drag draws the capture marquee when that mode is armed
     element.addEventListener('mousedown', onSelectDrag, true);
@@ -649,6 +705,12 @@
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
     // Shift and an arrow turn the map, as on every map in the app
     if (!typing && turnFromKey(engine, e)) return;
+    // Enter finishes a measured line or area, or a profile line: their points
+    // become handles, and a profile reads the ground
+    if (!typing && e.key === 'Enter' && (profile.finish() || (measure.mode && measure.finish()))) {
+      e.preventDefault();
+      return;
+    }
     // Enter confirms a polygon area, same as the Confirm button
     if (grid.on && grid.drawMode === 'polygon' && !typing && e.key === 'Enter') {
       e.preventDefault();
@@ -741,14 +803,17 @@
 
   // --- middle-drag rotate, Google-Earth style ---
   // Grab a point and drag sideways: the map turns around *that* point (not the
-  // centre), with a sober target marking the pivot. A middle click alone puts
-  // north back up (lib/map/gestures.js).
+  // centre), with a sober target marking the pivot. Over relief the drag also
+  // tilts, up toward the horizon. A middle click alone puts north back up
+  // (lib/map/gestures.js).
   function onMiddleRotateStart(e) {
     if (!engine) return;
     // Shift and the left button turns too, as it did on the old map. Never over
     // a mode already waiting for a left drag, though: those own the button.
     turnFromPress(engine, e, {
       shift: !capture.armed && grid.drawMode !== 'rect',
+      // over relief the same press orbits, Google Earth style: up and down tilt
+      tilt: reliefReady,
       onPivot: (pivot) => {
         rotatePivot = pivot;
         rotating = true;
@@ -831,6 +896,41 @@
     if (!mapReady || bearingApplied) return;
     bearingApplied = true;
     if (openingView?.bearing) setBearing(openingView.bearing);
+    // A tilt in the address is a view of the relief, so the relief comes back
+    // with it; the camera leans once the terrain is there to lean over.
+    if (openingView?.pitch != null) {
+      reliefOn = true;
+      pendingTilt = openingView.pitch;
+    }
+  });
+  $effect(() => {
+    if (!reliefReady || pendingTilt == null || !engine) return;
+    const tilt = pendingTilt;
+    pendingTilt = null;
+    // once the relief under the centre is in, or the centre is seated at sea level
+    engine.idle().then(() => engine?.setPitch(tilt));
+  });
+
+  /**
+   * The ground height under the readout's point, asked of the app once the
+   * point stops moving. Only with the relief on: a flat map asks no terrain
+   * server anything.
+   */
+  let heightAsked = 0;
+  $effect(() => {
+    const { lat, lon } = displayCoords;
+    groundHeight = null;
+    if (!reliefOn || !mapReady || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const mine = ++heightAsked;
+    const timer = setTimeout(async () => {
+      try {
+        const answer = await api.get(`/api/terrain/elevation?lat=${lat}&lon=${lon}`);
+        if (mine === heightAsked) groundHeight = answer.elevation;
+      } catch {
+        // no relief reachable: the readout simply goes without a height
+      }
+    }, 350);
+    return () => clearTimeout(timer);
   });
 
   /**
@@ -846,6 +946,7 @@
       lon: center.lon,
       zoom: center.zoom,
       bearing,
+      pitch: reliefOn ? pitch : null,
       provider: providerId,
     });
     if (windowNumber) params.w = String(windowNumber);
@@ -941,6 +1042,7 @@
       lon: center.lon,
       zoom: center.zoom,
       bearing,
+      pitch: reliefOn ? pitch : null,
       provider: providerId,
     });
     params.w = String(nextWindowNumber());
@@ -959,7 +1061,7 @@
   // chrome, never part of a capture.
   let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup, feature?, layer? }
   let pointLookupSeq = 0;
-  const pointActions = actionsFor(['lookup', 'place', 'measure', 'sky', 'history', 'centre']);
+  const pointActions = actionsFor(['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre']);
   const pointTools = otherMapTools('satellite');
 
   function onMapContextMenu(at) {
@@ -995,6 +1097,9 @@
     } else if (id === 'sky') {
       if (!sky.on) arm(modes, 'sky');
       sky.handOff({ ...point, date: sky.day || undefined });
+    } else if (id === 'horizon') {
+      // a turned map faces somewhere: the eye faces the same way
+      lookFrom({ ...point, heading: bearing });
     } else if (id === 'history') {
       const zoom = Math.max(center.zoom, 15);
       providerId = WAYBACK_ID;
@@ -1075,6 +1180,7 @@
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
+    if (profile.addPoint(at)) return;
     measure.addPoint(at);
   }
 
@@ -1092,6 +1198,13 @@
    * here reads a store until a rail seat is pressed.
    */
   const modes = {
+    profile: {
+      isOn: () => profile.on,
+      open: () => profile.open(),
+      close: () => profile.close(),
+      // a finished line is moved by its handles, not by clicks
+      pointing: () => profile.on && !profile.finished,
+    },
     measure: {
       isOn: () => measure.panelOpen || Boolean(measure.mode),
       open: () => measure.togglePanel(),
@@ -1757,6 +1870,9 @@
     // rather than being armed through it — otherwise pressing Capture while
     // Grid Search is drawing leaves two modes waiting for the same left drag.
     onArm: () => closeOthers(modes, 'capture'),
+    tilt: () => (reliefOn ? pitch : 0),
+    reliefScale: () => exaggeration,
+    farProvider: () => (reliefOn && pitch > 0 && shown.provider?.meter ? FREE_FAR_PROVIDER : null),
   });
   let sizeMenuEl = $state(); // bound to the popover wrapper — outside-click detection
   // The live drag outline, in map-container px. Shared chrome: the capture
@@ -2207,6 +2323,11 @@
         bind:element={mapEl}
         bind:view={center}
         bind:bearing
+        reliefOffered
+        bind:reliefOn
+        bind:exaggeration
+        bind:pitch
+        bind:reliefReady
         bind:ready={mapReady}
         bind:refused={mapRefused}
         bind:providerId
@@ -2334,6 +2455,7 @@
           bind:height={railHeight}
           state={{
             measure: { on: modes.measure.isOn() },
+            profile: { on: profile.on },
             grid: { on: grid.on },
             sky: { on: sky.on },
             reference: {
@@ -2355,6 +2477,14 @@
                 mode={measure.mode}
                 setMode={setMeasureMode}
                 clear={() => measure.clear()}
+                points={measure.points}
+                finished={measure.finished}
+              />
+            {:else if armedMode === 'profile'}
+              <ProfilePanel
+                points={profile.points.length}
+                finished={profile.finished}
+                clear={() => profile.clear()}
               />
             {:else if armedMode === 'sky'}
               <SunPanel
@@ -2472,12 +2602,44 @@
         <TurnGuide x={rotatePivot.x} y={rotatePivot.y} />
       {/if}
 
+      <!-- A profile line's ground, in a window the analyst moves and sizes, with
+           the point under the pointer marked on the line itself. -->
+      {#if profile.showing}
+        <FloatingWindow
+          id="elevation-profile"
+          title="Elevation profile"
+          icon="profile"
+          min={{ w: 420, h: 210 }}
+          placement={profileWindowPlace}
+          onclose={() => profile.close()}
+        >
+          {#snippet header()}
+            <ProfileQuestion
+              eyeHeight={profile.eyeHeight}
+              targetHeight={profile.targetHeight}
+              sight={profile.profile?.sight ?? null}
+              units={prefs.units}
+              setHeights={(heights) => profile.setHeights(heights)}
+              onlook={profile.points.length >= 2 ? lookAlongProfile : null}
+            />
+          {/snippet}
+          <ElevationProfile
+            profile={profile.profile}
+            busy={profile.busy}
+            error={profile.error}
+            units={prefs.units}
+            onhover={(at) => profile.showReading(at)}
+          />
+        </FloatingWindow>
+      {/if}
+
       <!-- Where you are and what the armed tool is reading, then the two acts
            that take something off the map. The imagery provider left this bar
            for the surface's own corner: it describes the picture, not the
            tool, and two compared surfaces each show their own. -->
       <MapStatusBar
         coords={readout}
+        height={groundHeight == null ? '' : formatHeight(groundHeight, prefs.units)}
         zoom={center.zoom}
         pinned={moveMode && !!markerLatLng}
         copy={copyCoords}

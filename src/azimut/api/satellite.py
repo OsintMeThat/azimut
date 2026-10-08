@@ -14,6 +14,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 # Aliased: this module already imports the ``time`` module for tile timing, and
 # the sky routes need the datetime classes of the same names.
 from datetime import date as calendar_date, datetime, time as wall_clock, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
@@ -36,8 +37,10 @@ from ..engine import (
     satellite as satellite_engine,
     sentinel,
     sky,
+    terrain,
     tilecache,
     tiles,
+    tilewarm,
     wayback,
 )
 from ..workspace import Case, CaseError
@@ -838,6 +841,66 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
             headers={"Cache-Control": "private, max-age=3600", "X-Azimut-Overzoom": str(up)},
         )
     raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
+
+
+# One list of a full turn: 8 headings of a tilted view rarely pass 600 tiles.
+WARM_MAX_TILES = 1200
+WARM_MAX_TERRAIN = 400
+_warmer = tilewarm.Warmer()
+
+
+class WarmIn(BaseModel):
+    """What a full turn of a tilted map will show, nearest first."""
+
+    provider: str | None = None
+    tiles: list[tuple[int, int, int]] = Field(default_factory=list, max_length=WARM_MAX_TILES)
+    terrain: list[tuple[int, int, int]] = Field(default_factory=list, max_length=WARM_MAX_TERRAIN)
+
+
+def warmable(provider: tiles.Provider) -> bool:
+    """Whether a provider's tiles may be fetched before they are shown.
+
+    Free and cacheable only: a billed tile fetched ahead is quota spent on a
+    view that may never be turned to, and a tile that may not be cached has
+    nowhere to wait.
+    """
+    return provider.cacheable and not provider.meter and not provider.widget and not provider.session
+
+
+def _warm_imagery(provider: tiles.Provider, z: int, x: int, y: int) -> None:
+    if not tilecache.has(provider.id, z, x, y):
+        _serve_tile(provider, z, x, y)  # stores what it fetched
+
+
+def _warm_terrain(z: int, x: int, y: int) -> None:
+    if not terrain.known(z, x, y):
+        terrain.tile(z, x, y)  # stores what it fetched
+
+
+@router.post("/tiles/warm")
+def warm_tiles(body: WarmIn) -> dict[str, Any]:
+    """Fetch the tiles a turn of a tilted map will show into the disk caches.
+
+    The map sends this when a tilted view settles (lib/map/warmTurn.js). It is
+    the analyst's own looking around, read a little ahead; a billed provider is
+    never read ahead. A newer list replaces the one still in flight.
+    """
+    jobs: list[tilewarm.Job] = []
+    if body.provider and body.tiles:
+        try:
+            provider = tiles.get_provider(body.provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if warmable(provider):
+            native_z = _native_grid_zoom(provider)
+            for z, x, y in body.tiles:
+                ceiling = provider.max_zoom if native_z is None else min(provider.max_zoom, native_z)
+                if 0 <= z <= ceiling and 0 <= x < (1 << z) and 0 <= y < (1 << z):
+                    jobs.append(partial(_warm_imagery, provider, z, x, y))
+    for z, x, y in body.terrain:
+        if 0 <= z <= terrain.PLANET_ZOOM and 0 <= x < (1 << z) and 0 <= y < (1 << z):
+            jobs.append(partial(_warm_terrain, z, x, y))
+    return {"queued": _warmer.replace(jobs)}
 
 
 #: The three things a placard can turn out to mean, once the key-status
@@ -1692,6 +1755,114 @@ async def capture_screenshot(
         extra_attrs={
             "coords": coords_dd, "lat": lat, "lon": lon,
             "plus_code": plus_code, "zoom": zoom, "bearing": bearing,
+            "provider": prov.id,
+        },
+        title=label,
+        dedupe=False,
+    )
+    locate_on_save(case, result["entity"]["id"], lat, lon)
+    saved_changed(case)
+    return {"path": result["item"]["path"], "title": label, **provenance}
+
+
+@router.post("/cases/{case_id}/satellite/oblique")
+async def capture_oblique(
+    case_id: str,
+    image: UploadFile,
+    lat: float = Form(ge=-90, le=90),
+    lon: float = Form(ge=-180, le=180),
+    zoom: int = Form(ge=1, le=22),
+    provider: str = Form(),
+    bearing: float = Form(default=0.0, ge=0, le=360),
+    pitch: float = Form(gt=0, le=85),
+    exaggeration: float = Form(default=1.0, ge=1, le=3),
+    imagery_date: str | None = Form(default=None),
+    imagery_exact: bool = Form(default=True),
+    far_provider: str | None = Form(default=None),
+) -> dict[str, Any]:
+    """File the tilted view the 3D map drew as a capture.
+
+    A tilted view has no straight-down frame to stitch from tiles, so this is
+    the picture the map rendered, imagery draped over the relief, with the
+    camera that drew it: ``pitch`` beside ``bearing``, so the view can be set up
+    again. Nothing about it is a single scale, so no scale bar or north arrow is
+    drawn. Relief drawn taller than it is says so on the image itself.
+
+    ``lat``/``lon`` are the ground point at the centre of the frame.
+    ``far_provider`` names who drew the far ground when it is not ``provider``:
+    a billed basemap stops where a flat view would, and the free one carries on
+    to the horizon (frontend lib/map/quotaGuard.js). A picture made of two
+    providers credits both and records both.
+    """
+    case = get_case(case_id)
+    try:
+        prov = tiles.get_provider(provider)
+        far = tiles.get_provider(far_provider) if far_provider else None
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if prov.widget or not prov.capturable:
+        raise HTTPException(status_code=422, detail=f"{prov.label} cannot be captured from the 3D map")
+
+    import io
+
+    raw = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"the view must be under {MAX_IMAGE_BYTES // 1024 // 1024} MB"
+        )
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"not a readable image: {errors.explain(exc)}") from exc
+
+    relief = terrain.MAPTERHORN
+    attribution = f"{prov.attribution} · Relief {relief.attribution}"
+    if far is not None and far.id != prov.id:
+        attribution += f" · Far ground {far.attribution}"
+    if exaggeration > 1:
+        attribution += f" · heights drawn {exaggeration:g}× taller"
+    img = tiles.burn_attribution(img, attribution)
+
+    label = satellite_engine.coords_label(lat, lon)
+    coords_dd = satellite_engine.coords_label(lat, lon, "dd")
+    plus_code = geo.plus_code(lat, lon)
+    provenance: dict[str, Any] = {
+        "provider": prov.id,
+        "provider_label": prov.label,
+        "method": "render",  # the map's own drawing of a tilted view
+        "framed": True,
+        "lat": lat,
+        "lon": lon,
+        "zoom": zoom,
+        "bearing": bearing,
+        "pitch": pitch,
+        "relief": {"source": relief.id, "exaggeration": exaggeration},
+        "far_provider": far.id if far is not None and far.id != prov.id else None,
+        "attribution": attribution,
+        "attribution_burned": True,
+        "marks": None,
+        "plus_code": plus_code,
+        "dms": geo.to_dms(lat, lon),
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "imagery_date": (imagery_date or "").strip() or None,
+        "width": img.width,
+        "height": img.height,
+    }
+    if provenance["imagery_date"] and not imagery_exact:
+        provenance["imagery_exact"] = False
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"sat_{stamp}_z{zoom}_{prov.id}_tilt{round(pitch)}.png"
+    result = media_engine.import_image(
+        case,
+        img,
+        filename,
+        {"type": "satellite", **provenance},
+        by="satellite",
+        entity_type="capture",
+        extra_attrs={
+            "coords": coords_dd, "lat": lat, "lon": lon,
+            "plus_code": plus_code, "zoom": zoom, "bearing": bearing, "pitch": pitch,
             "provider": prov.id,
         },
         title=label,

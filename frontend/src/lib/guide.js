@@ -192,7 +192,7 @@ export const GUIDE = [
     id: 'map',
     title: 'Map',
     lead: 'Where a finding gets a coordinate, and where a coordinate gets a picture.',
-    tools: ['satellite', 'compare', 'detect', 'coordinates'],
+    tools: ['satellite', 'compare', 'detect', 'horizon', 'coordinates'],
     points: [
       {
         label: 'Four providers need no key',
@@ -249,6 +249,18 @@ export const GUIDE = [
       {
         label: 'Checks prove an analyzer, and one is needed to save it',
         text: 'On the map, New check takes its passes, then Should be found and Should stay empty drop pins where a candidate should come out and where none may. Test paints what each rule keeps under the pins, says its cost first and turns each pin green or red; a line that loses the burn or catches the reef shows at once. The examples come with theirs.',
+      },
+      {
+        label: '3D is a switch on Satellite',
+        text: 'It lifts the imagery onto the relief, at real scale unless you pick a taller one, and the middle button then tilts as well as turns. Elevation profile reads the ground along a line and says whether its end is in sight.',
+      },
+      {
+        label: 'Horizon stands you on the ground',
+        text: 'Right-click a map and choose Look from here, or pick the spot on the tab\'s own map. Drag the view to turn, use the wheel to zoom, click to read the ground there and double-click to go there. The ridges, distances and summit names come from the same terrain model, with the curve of the Earth.',
+      },
+      {
+        label: 'A photo laid over Horizon says where it was taken from',
+        text: 'Add a photo or video and drag the terrain under it until the ridge lines meet the picture; its lens comes from the file when it says one. Trace the skyline and the gap says in degrees how close the terrain is, and Fit closes it from where you left it. On a video, pin the view at two moments and it follows the pan between them.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',
@@ -376,6 +388,27 @@ export const GUIDE = [
           { combo: 'P', does: 'flags the cell and saves it as a place' },
           { combo: 'Enter', does: 'confirms a polygon grid area' },
           { combo: 'Escape', does: 'stops the review, or the area being drawn' },
+        ],
+      },
+      {
+        where: 'Horizon',
+        keys: [
+          { combo: 'Drag', does: 'turns the view, as does the strip over it' },
+          { combo: 'Wheel', does: 'narrows or widens the lens about the pointer' },
+          { combo: 'Shift+drag', does: 'rolls the view' },
+          { combo: 'Double-click', does: 'goes to the ground clicked, facing the same way' },
+          { combo: '↑ / ↓', does: 'walks forward and back, Shift for five steps' },
+          { combo: '← / →', does: 'turns by a tenth of the lens' },
+          { combo: 'Page Up / Down', does: 'tilts up and down' },
+          { combo: '+ / -', does: 'narrows and widens the lens' },
+          { combo: 'N', does: 'faces north' },
+          { combo: 'Alt+wheel', does: 'raises or lowers the eye' },
+          { combo: 'T', does: 'traces the skyline on a photo laid over the view, or stops' },
+          { combo: 'B', does: 'blinks between the photo and the terrain' },
+          { combo: 'Ctrl+Z', does: 'takes the last stroke of the trace back' },
+          { combo: 'Space', does: 'plays or pauses a video laid over the view' },
+          { combo: ', / .', does: 'steps the video a frame back or on' },
+          { combo: 'Escape', does: 'stops tracing, or leaves Move the viewpoint with the eye where it was' },
         ],
       },
       {

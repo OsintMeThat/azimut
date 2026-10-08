@@ -48,6 +48,17 @@ export const MAP_MODES = [
     panel: true,
   },
   {
+    // A line drawn for its ground: heights along it and whether its end is in
+    // sight. Apart from Measure because it asks the terrain server something,
+    // and drawing a distance never should.
+    id: 'profile',
+    label: 'Elevation profile',
+    icon: 'profile',
+    group: 'work',
+    cursor: 'measuring',
+    panel: true,
+  },
+  {
     id: 'grid',
     label: 'Grid Search',
     icon: 'grid',

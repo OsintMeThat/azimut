@@ -70,6 +70,7 @@
     { id: 'satellite', label: TOOL_LABELS.satellite, load: () => import('./tools/Satellite.svelte') },
     { id: 'compare', label: TOOL_LABELS.compare, load: () => import('./tools/Compare.svelte') },
     { id: 'detect', label: TOOL_LABELS.detect, load: () => import('./tools/Detect.svelte') },
+    { id: 'horizon', label: TOOL_LABELS.horizon, load: () => import('./tools/Horizon.svelte') },
     { id: 'coordinates', label: TOOL_LABELS.coordinates, load: () => import('./tools/Coordinates.svelte') },
     { id: 'proof', label: TOOL_LABELS.proof, load: () => import('./tools/ProofComposer.svelte') },
     { id: 'post', label: TOOL_LABELS.post, load: () => import('./tools/PostComposer.svelte') },

@@ -71,7 +71,8 @@ to fix a point on the map.*
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services, which the capture extension opens with the picture already in them. |
 | **Inspect** | Reads any photo or video closely with sharpest-frame capture, frame adjustments, editable crop and ELA hints, all kept with the file as you work. |
 | **Collage** | Lays out frames and images from any number of files on one canvas, with per-piece warp and crop and auto-stitch for panoramas. |
-| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measurement tools, stacked overlays, your own KML, GeoJSON or GPX layers, and AOI grids for area review. |
+| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measurement tools, a 3D relief view with elevation profiles, stacked overlays, your own KML, GeoJSON or GPX layers, and AOI grids for area review. |
+| **Horizon** | Stand anywhere and see what the eye sees: ridges, relief or imagery out to 150 km with the curve of the Earth, summit names, the sun and moon against the ridges, and whether a point is in sight. |
 | **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights and ground-anchored notes that follow both maps. |
 | **Detect** | Sweeps drawn areas of Sentinel-2 and Sentinel-1 radar for vessels, fires, construction, burn scars, floods and other changes, and only a candidate you keep becomes a case pin. |
 | **Coords & Sky** | Converts coordinate formats, opens map links, and reads the sun and moon at that point on a date, computed offline. |

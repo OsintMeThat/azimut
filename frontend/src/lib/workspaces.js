@@ -48,7 +48,7 @@ export const HOME_WORKSPACE = {
 export const WORKSPACES = [
   { id: 'collect', label: 'Sources', icon: 'download', tools: ['media', 'files', 'reverse'] },
   { id: 'examine', label: 'Examine', icon: 'inspect', tools: ['inspect', 'collage'] },
-  { id: 'map', label: 'Map', icon: 'satellite', tools: ['satellite', 'compare', 'detect', 'coordinates'] },
+  { id: 'map', label: 'Map', icon: 'satellite', tools: ['satellite', 'compare', 'detect', 'horizon', 'coordinates'] },
   { id: 'compose', label: 'Compose', icon: 'proof', tools: ['proof', 'post', 'notebook'] },
 ];
 
@@ -70,6 +70,7 @@ export const TOOL_LABELS = {
   satellite: 'Satellite',
   compare: 'Compare',
   detect: 'Detect',
+  horizon: 'Horizon',
   coordinates: 'Coords & Sky',
   proof: 'Geo Proof',
   post: 'Geo Report',

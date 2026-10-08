@@ -45,6 +45,18 @@ def get(provider_id: str, z: int, x: int, y: int) -> tuple[bytes, str] | None:
     return None
 
 
+def has(provider_id: str, z: int, x: int, y: int) -> bool:
+    """Whether a fresh copy is on disk, without reading it. Never raises."""
+    base = _tile_dir(provider_id, z)
+    for ext in _TYPE:
+        try:
+            age = time.time() - (base / f"{int(x)}_{int(y)}.{ext}").stat().st_mtime
+        except OSError:
+            continue
+        return age <= TTL_DAYS * 86400
+    return False
+
+
 def put(provider_id: str, z: int, x: int, y: int, content: bytes, media_type: str) -> None:
     """Store one served tile. Never raises — the cache is an optimization."""
     ext = _EXT.get((media_type or "").split(";")[0].strip())
