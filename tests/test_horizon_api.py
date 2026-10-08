@@ -2,6 +2,7 @@
 
 import base64
 import math
+import struct
 import zlib
 
 import numpy as np
@@ -243,15 +244,194 @@ def test_the_sky_refuses_a_date_it_cannot_read(client):
     assert answer.status_code == 422
 
 
-def test_full_detail_is_asked_for_and_drawn_on_the_same_grid(client, synthetic_relief):
-    usual = _ask(client, step=1.0, far=40_000).json()
-    full = _ask(client, step=1.0, far=40_000, full_detail=True)
-    assert full.status_code == 200, full.text
-    full = full.json()
-    assert full["azimuth"] == usual["azimuth"]
-    assert full["elevation"] == usual["elevation"]
-    asked = {z for z, _x, _y in synthetic_relief.calls}
-    assert terrain.MAX_ZOOM in asked
+# -- the tiles the browser's mesh reads, in batches --------------------------------
+
+
+def _framed(body):
+    """The `(length, bytes)` frames of a batch answer, in order."""
+    frames, at = [], 0
+    while at < len(body):
+        (size,) = struct.unpack_from("<I", body, at)
+        frames.append(body[at + 4:at + 4 + size])
+        at += 4 + size
+    return frames
+
+
+def test_terrain_tiles_come_in_one_answer_in_the_order_asked(client, monkeypatch):
+    held = {(5, 1, 2): b"first", (5, 3, 4): b"second!"}
+    monkeypatch.setattr(terrain, "tile", lambda z, x, y: (held[(z, x, y)], "", "") if (z, x, y) in held else None)
+    answer = client.get("/api/horizon/tiles/terrain", params={"t": "5/3/4,5/9/9,5/1/2"})
+    assert answer.status_code == 200
+    assert answer.headers["content-type"] == "application/octet-stream"
+    assert _framed(answer.content) == [b"second!", b"", b"first"]
+
+
+def test_a_terrain_tile_that_fails_is_a_gap_not_a_failed_request(client, monkeypatch):
+    def tile(z, x, y):
+        if x == 1:
+            raise terrain.TerrainUnavailable("offline")
+        return b"ok", "", ""
+
+    monkeypatch.setattr(terrain, "tile", tile)
+    answer = client.get("/api/horizon/tiles/terrain", params={"t": "6/1/1,6/2/1"})
+    assert answer.status_code == 200
+    assert _framed(answer.content) == [b"", b"ok"]
+
+
+@pytest.mark.parametrize("t", [
+    "", "5/1", "a/b/c", "5/1/2,", "5/-1/2", "15/0/0", "3/8/0", "3/0/8", "5/1/2 ",
+])
+def test_a_bad_terrain_batch_is_refused_at_the_edge(client, monkeypatch, t):
+    monkeypatch.setattr(terrain, "tile", lambda *a: pytest.fail("nothing is fetched"))
+    answer = client.get("/api/horizon/tiles/terrain", params={"t": t})
+    assert answer.status_code == 422
+
+
+def test_a_batch_has_a_size_limit(client, monkeypatch):
+    from azimut.api import horizon as horizon_api
+
+    monkeypatch.setattr(terrain, "tile", lambda *a: (b"x", "", ""))
+    ok = ",".join(f"8/{i}/0" for i in range(horizon_api.TILES_MAX))
+    assert client.get("/api/horizon/tiles/terrain", params={"t": ok}).status_code == 200
+    too_many = ok + ",8/99/0"
+    assert client.get("/api/horizon/tiles/terrain", params={"t": too_many}).status_code == 422
+
+
+class _Served:
+    """Stands for the map's tile helper: what each tile answers, and what was asked."""
+
+    def __init__(self, held):
+        self.held, self.calls = held, []
+
+    def __call__(self, provider, z, x, y):
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+
+        self.calls.append((provider.id, z, x, y))
+        if (z, x, y) not in self.held:
+            raise HTTPException(status_code=404, detail="no imagery")
+        return Response(content=self.held[(z, x, y)], media_type="image/png")
+
+
+def _sentinel(monkeypatch, blocked=False):
+    """A Sentinel-2 provider with a native ceiling of 14, billed per tile."""
+    import dataclasses
+
+    from azimut.engine import tiles
+
+    real = tiles.get_provider
+    fake = dataclasses.replace(
+        real("esri-world-imagery"), id="sentinel2", label="Sentinel-2", meter="sentinel",
+        max_zoom=16, max_native_zoom=14,
+    )
+    monkeypatch.setattr(tiles, "get_provider", lambda pid: fake if pid == "sentinel2" else real(pid))
+    from azimut import config
+
+    monkeypatch.setattr(config, "usage_blocked", lambda meter, settings=None: blocked)
+    return fake
+
+
+def test_imagery_tiles_are_served_as_the_map_serves_them(client, monkeypatch):
+    from azimut.api import satellite
+
+    served = _Served({(7, 1, 1): b"png-a", (7, 2, 1): b"png-b"})
+    monkeypatch.setattr(satellite, "serve_tile", served)
+    answer = client.get(
+        "/api/horizon/tiles/imagery", params={"provider": "esri-world-imagery", "t": "7/2/1,7/0/0,7/1/1"}
+    )
+    assert answer.status_code == 200
+    assert _framed(answer.content) == [b"png-b", b"", b"png-a"]
+    assert [call[0] for call in served.calls] == ["esri-world-imagery"] * 3
+
+
+def test_imagery_zoom_goes_up_to_the_providers_own_limit(client, monkeypatch):
+    from azimut.api import satellite
+    from azimut.engine import tiles
+
+    monkeypatch.setattr(satellite, "serve_tile", _Served({}))
+    limit = tiles.get_provider("esri-world-imagery").max_zoom
+    params = {"provider": "esri-world-imagery"}
+    assert client.get("/api/horizon/tiles/imagery", params={**params, "t": f"{limit}/0/0"}).status_code == 200
+    assert client.get("/api/horizon/tiles/imagery", params={**params, "t": f"{limit + 1}/0/0"}).status_code == 422
+
+
+def test_imagery_that_is_not_free_imagery_is_refused(client, monkeypatch):
+    from azimut.api import satellite
+
+    monkeypatch.setattr(satellite, "serve_tile", lambda *a: pytest.fail("nothing is fetched"))
+    client.put("/api/settings/keys", json={"mapbox": "pk.test"})
+    for provider in ("mapbox-satellite", "osm"):
+        answer = client.get("/api/horizon/tiles/imagery", params={"provider": provider, "t": "3/1/1"})
+        assert answer.status_code == 422, provider
+    assert client.get("/api/horizon/tiles/imagery", params={"provider": "nope", "t": "3/1/1"}).status_code == 404
+
+
+def test_sentinel_2_tiles_are_served_and_a_paused_meter_refuses_the_whole_batch(client, monkeypatch):
+    from azimut.api import satellite
+
+    _sentinel(monkeypatch)
+    served = _Served({(10, 5, 5): b"s2"})
+    monkeypatch.setattr(satellite, "serve_tile", served)
+    answer = client.get("/api/horizon/tiles/imagery", params={"provider": "sentinel2", "t": "10/5/5,10/5/6"})
+    assert answer.status_code == 200
+    assert _framed(answer.content) == [b"s2", b""]
+
+    _sentinel(monkeypatch, blocked=True)
+    served.calls.clear()
+    paused = client.get("/api/horizon/tiles/imagery", params={"provider": "sentinel2", "t": "10/5/5"})
+    assert paused.status_code == 429
+    assert served.calls == []
+
+
+def test_the_estimate_counts_the_uncached_tiles_inside_the_disc(client, monkeypatch):
+    from azimut.engine import tilecache
+
+    fake = _sentinel(monkeypatch)
+    asked = []
+
+    def has(provider_id, z, x, y):
+        asked.append((provider_id, z, x, y))
+        return x % 2 == 0
+
+    monkeypatch.setattr(tilecache, "has", has)
+    body = {"lat": 45.0, "lon": 6.0, "near_provider": "sentinel2", "near_reach": 5000}
+    answer = client.post("/api/horizon/tiles/estimate", json=body)
+    assert answer.status_code == 200, answer.text
+    counted = answer.json()
+    # z14 tiles are about 1.7 km wide at 45 degrees: a 5 km radius touches a few dozen
+    assert 25 <= counted["tiles"] <= 45
+    assert {key[0] for key in asked} == {fake.id}
+    assert {key[1] for key in asked} == {14}
+    assert counted["requests"] == sum(1 for key in asked if key[2] % 2 == 1)
+    assert 0 < counted["requests"] < counted["tiles"]
+    # a wider disc touches more tiles
+    wider = client.post("/api/horizon/tiles/estimate", json={**body, "near_reach": 10000}).json()
+    assert wider["tiles"] > counted["tiles"]
+    # tiles all on disk: nothing would be asked
+    monkeypatch.setattr(tilecache, "has", lambda *a: True)
+    assert client.post("/api/horizon/tiles/estimate", json=body).json()["requests"] == 0
+
+
+def test_the_estimate_asks_nothing_of_the_network_and_works_while_paused(client, monkeypatch):
+    from azimut.api import satellite
+    from azimut.engine import tilecache
+
+    _sentinel(monkeypatch, blocked=True)
+    monkeypatch.setattr(satellite, "serve_tile", lambda *a: pytest.fail("nothing is fetched"))
+    monkeypatch.setattr(tilecache, "has", lambda *a: False)
+    body = {"lat": 45.0, "lon": 6.0, "near_provider": "sentinel2"}
+    answer = client.post("/api/horizon/tiles/estimate", json=body)
+    assert answer.status_code == 200
+    assert answer.json()["requests"] == answer.json()["tiles"] > 0
+
+
+def test_the_estimate_refuses_what_is_not_sentinel_2_or_out_of_range(client, monkeypatch):
+    _sentinel(monkeypatch)
+    body = {"lat": 45.0, "lon": 6.0, "near_provider": "esri-world-imagery"}
+    assert client.post("/api/horizon/tiles/estimate", json=body).status_code == 422
+    sentinel = {**body, "near_provider": "sentinel2"}
+    assert client.post("/api/horizon/tiles/estimate", json={**sentinel, "near_reach": 100}).status_code == 422
+    assert client.post("/api/horizon/tiles/estimate", json={**sentinel, "near_reach": 99_000}).status_code == 422
 
 
 # -- the photo laid over the view ------------------------------------------------

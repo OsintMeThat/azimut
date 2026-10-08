@@ -184,13 +184,29 @@ def _cached(z: int, x: int, y: int) -> Fetched | None | _Miss:
 
 
 def _store(folder: str, z: int, x: int, y: int, content: bytes, ext: str = "") -> None:
-    """Never raises: the cache is an optimisation."""
+    """Whole or not at all, so a reader on another thread never meets half a
+    tile. Never raises: the cache is an optimisation."""
     path = _path(folder, z, x, y, ext)
+    part = path.with_name(f"{path.name}.{threading.get_ident()}.part")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
+        part.write_bytes(content)
+        os.replace(part, path)
     except OSError:
-        pass
+        try:
+            part.unlink()
+        except OSError:
+            pass
+
+
+def _forget(z: int, x: int, y: int) -> None:
+    """Drop a tile's cached copies, so the next read asks for it again."""
+    for source in SOURCES:
+        for ext in _MEDIA:
+            try:
+                _path(source.id, z, x, y, ext).unlink()
+            except OSError:
+                pass
 
 
 def known(z: int, x: int, y: int) -> bool:
@@ -205,14 +221,34 @@ def known(z: int, x: int, y: int) -> bool:
         return False
 
 
+_fetching: dict[Key, threading.Lock] = {}
+_fetching_guard = threading.Lock()
+
+
+def _fetch_lock(key: Key) -> threading.Lock:
+    with _fetching_guard:
+        if len(_fetching) > 4096:
+            _fetching.clear()
+        return _fetching.setdefault(key, threading.Lock())
+
+
 def tile(z: int, x: int, y: int) -> Fetched | None:
     """One terrain tile of the 512 px grid, or None where there is no data.
 
-    Raises `TerrainUnavailable` when no source can be reached.
+    Raises `TerrainUnavailable` when no source can be reached. Threads asking
+    for the same tile at once wait for one download rather than make several.
     """
     cached = _cached(z, x, y)
     if not isinstance(cached, _Miss):
         return cached
+    with _fetch_lock((z, x, y)):
+        cached = _cached(z, x, y)
+        if not isinstance(cached, _Miss):
+            return cached
+        return _download(z, x, y)
+
+
+def _download(z: int, x: int, y: int) -> Fetched | None:
     reason = ""
     try:
         status, content = _get(MAPTERHORN.url.format(z=z, x=x, y=y))
@@ -491,7 +527,10 @@ class Sampler:
         count = lat.size
         v = values.reshape(4, count)
         climb = absent.reshape(4, count).any(axis=0)
-        blended = (v[0] * (1 - fx) + v[1] * fx) * (1 - fy) + (v[2] * (1 - fx) + v[3] * fx) * fy
+        # the mosaic's own arithmetic, so the two reads agree to the bit
+        top = v[0] + fx * (v[1] - v[0])
+        bottom = v[2] + fx * (v[3] - v[2])
+        blended = top + fy * (bottom - top)
         keep = ~climb
         if keep.any():
             out[where[keep]] = blended[keep]
@@ -520,23 +559,30 @@ class Sampler:
         nx, ny = tx_hi - tx_lo + 1, ty_hi - ty_lo + 1
         if nx * ny > MOSAIC_MAX_TILES:
             return False
-        # local pixel coordinates, and the tiles the four neighbours fall in
+        # local pixel coordinates, one flat index a point into the mosaic; the
+        # right neighbour is the next pixel, the lower one a row down (none at
+        # the world's lower edge, where the row is held)
+        width = nx * TILE
         lx0 = x0 - tx_lo * TILE
-        lx1 = lx0 + 1
         ly0 = ya - ty_lo * TILE
-        ly1 = yb - ty_lo * TILE
-        cells = [
-            (ly >> _SHIFT) * nx + (lx >> _SHIFT)
-            for ly in (ly0, ly1) for lx in (lx0, lx1)
-        ]
+        down = yb - ya
+        i00 = ly0 * width + lx0
+        # the tiles touched: the upper-left neighbour's, and for points on a
+        # tile's last pixel the tiles their other neighbours spill into
         touched = np.zeros(nx * ny, dtype=bool)
-        for neighbour in cells:
-            touched[neighbour] = True
+        touched[(ly0 >> _SHIFT) * nx + (lx0 >> _SHIFT)] = True
+        last = TILE - 1
+        edge = ((lx0 & last) == last) | (((ly0 & last) == last) & (down > 0))
+        if edge.any():
+            ex, ey = lx0[edge], ly0[edge]
+            for ly in (ey, ey + down[edge]):
+                for lx in (ex, ex + 1):
+                    touched[(ly >> _SHIFT) * nx + (lx >> _SHIFT)] = True
         used = np.flatnonzero(touched)
         tiles_across = 1 << zoom
         self._load(zoom, (tx_lo + used % nx) * tiles_across + (ty_lo + used // nx), tiles_across)
 
-        mosaic = np.zeros((ny * TILE, nx * TILE), dtype=np.float32)
+        mosaic = np.zeros((ny * TILE, width), dtype=np.float32)
         absent = np.zeros((ny, nx), dtype=bool)
         for slot in used:
             row, column = divmod(int(slot), nx)
@@ -546,16 +592,20 @@ class Sampler:
             else:
                 mosaic[row * TILE:(row + 1) * TILE, column * TILE:(column + 1) * TILE] = heights
 
-        v00 = mosaic[ly0, lx0]
-        v01 = mosaic[ly0, lx1]
-        v10 = mosaic[ly1, lx0]
-        v11 = mosaic[ly1, lx1]
-        blended = (v00 * (1 - fx) + v01 * fx) * (1 - fy) + (v10 * (1 - fx) + v11 * fx) * fy
+        flat = mosaic.ravel()
+        i10 = i00 + down * width
+        v00 = flat.take(i00)
+        top = v00 + fx * (flat.take(i00 + 1) - v00)
+        v10 = flat.take(i10)
+        bottom = v10 + fx * (flat.take(i10 + 1) - v10)
+        blended = top + fy * (bottom - top)
+        climb = None
         if zoom > PLANET_ZOOM and absent.any():
-            flat = absent.ravel()
-            climb = flat[cells[0]] | flat[cells[1]] | flat[cells[2]] | flat[cells[3]]
-        else:
-            climb = None
+            gone = absent.ravel()
+            climb = np.zeros(x0.size, dtype=bool)
+            for ly in (ly0, ly0 + down):
+                for lx in (lx0, lx0 + 1):
+                    climb |= gone[(ly >> _SHIFT) * nx + (lx >> _SHIFT)]
         if climb is None or not climb.any():
             out[where] = blended
             self.zooms.add(zoom)
@@ -590,7 +640,17 @@ class Sampler:
             fetched = fetch(*key)
             if fetched is None:
                 return key, None, ""
-            heights = decode(fetched[0])
+            try:
+                heights = decode(fetched[0])
+            except TerrainUnavailable:
+                if self.fetch is not None:
+                    raise
+                # a cached copy cut short (a crash mid-write): fetched again, once
+                _forget(*key)
+                fetched = tile(*key)
+                if fetched is None:
+                    return key, None, ""
+                heights = decode(fetched[0])
             if heights.shape != (TILE, TILE):
                 raise TerrainUnavailable("a terrain tile came in an unexpected size")
             return key, heights, fetched[2]

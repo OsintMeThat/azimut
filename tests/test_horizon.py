@@ -243,23 +243,3 @@ def test_normals_of_a_window_of_the_turn_stay_inside_it():
     assert np.abs(normal_east[:, 50:]).max() < 3e-3
 
 
-def test_full_detail_reads_the_finest_terrain_out_to_its_reach_and_no_farther():
-    eye = horizon.Observer(*EYE)
-    usual = horizon.lod_zooms(np.array([500.0, 5_000.0, 15_000.0, 60_000.0]), EYE[0])
-    full = horizon.lod_zooms(np.array([500.0, 5_000.0, 15_000.0, 60_000.0]), EYE[0], full_detail=True)
-    assert full[:3].tolist() == [terrain.MAX_ZOOM] * 3
-    assert usual[2] < terrain.MAX_ZOOM
-    assert full[3] == usual[3]
-    rays = horizon.detail_distances(150_000.0)
-    assert np.all(np.diff(rays) > 0)
-    near = rays[rays <= horizon.FULL_DETAIL_REACH]
-    # steps a few metres long at the reach, where the usual ray steps sixty
-    assert np.diff(near)[-1] < 40
-    assert rays[-1] == pytest.approx(horizon.ray_distances(150_000.0)[-1], rel=0.01)
-    found = horizon.sweep(eye, azimuths=np.arange(55.0, 65.0, 1.0), far=40_000.0,
-                          sampler=_sampler(Relief(peaks=(NEAR, FAR))), full_detail=True)
-    assert terrain.MAX_ZOOM in found.zooms
-    # the same skyline either way, to the terrain's own precision
-    usual_sweep = horizon.sweep(eye, azimuths=np.arange(55.0, 65.0, 1.0), far=40_000.0,
-                                sampler=_sampler(Relief(peaks=(NEAR, FAR))))
-    assert np.allclose(found.skyline, usual_sweep.skyline, atol=0.05)

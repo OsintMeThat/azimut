@@ -1,44 +1,36 @@
 /**
- * The Horizon tab's view: where the eye stands, how it looks, and the picture
- * the app drew from there.
+ * The Horizon tab's view: where the eye stands, how it looks, and what the app
+ * worked out from there.
  *
- * Moving the eye is the only thing that asks the app for a new picture
- * (`/api/horizon/panorama`); turning, tilting, zooming and relighting all
- * happen in the browser over the one it has. So a move is made to feel quick
- * in two steps: a coarse picture first (half a degree a cell, back in well
- * under a second over cached ground), then the full one at a tenth of a degree,
- * which replaces it. A newer move drops whatever an older one is still
- * waiting for.
- *
- * A narrow lens wants finer cells than a full turn can afford, so once the
- * camera rests on a telephoto view the window it shows is asked for again at
- * the step its pixels need (`detailRequest`), and drawn over the turn.
- *
- * Full detail, switched on, first asks for what the lens shows, whatever its
- * width, at a cell a pixel over the finest terrain out to 20 km, so the view
- * sharpens where it looks within seconds; then the whole turn on the full
- * picture's grid, which replaces it when it comes, for turning around.
+ * The picture itself is drawn in the browser from terrain meshes
+ * (lib/horizon/mesh/scene.js), which the view lays round the eye once it has
+ * rested there (`placed`, after `LOAD_DELAY`, so a dragged eye lands once).
+ * The app marches the same eye's turn as well (`/api/horizon/panorama`, a
+ * tenth of a degree a cell): the skyline the summit names sit on, the strip,
+ * the map's footprint and the trace's gap are read off it. A newer move drops
+ * whatever an older one is still waiting for.
  *
  * Summit names come from OpenStreetMap only once the analyst switches them on,
  * the same rule every overlay keeps: the network is reached for what was asked.
  * The switch is remembered in this browser, since turning it on was that
  * analyst's own choice. So does the imagery laid over the ground (Satellite),
- * read from a free provider once that ground is picked. Sentinel-2, billed on
- * the analyst's Copernicus account, is laid only on the ground nearer than a
- * distance and only once switched on (`setNear`); how many requests that
- * costs is worked out first, for free (`nearEstimate`).
+ * read from a free provider once that ground is picked (`imagery`, which the
+ * tiles are drawn with). Sentinel-2, billed on the analyst's Copernicus
+ * account, is laid only on the ground nearer than a distance and only once
+ * switched on (`setNear`); how many requests that costs is worked out first,
+ * for free (`nearEstimate`).
  *
- * With a day set, the sun or the moon lights the ground (`light`), and the
- * shadows ridges cast are marched by the app once the hour rests (`shadow`):
- * the light moves with the slider at once, its shadows follow.
+ * With a day set, the sun or the moon lights the ground (`light`), and ridges
+ * cast their shadows (`shaded`): both are drawn on the GPU, so they follow the
+ * hour slider at once.
  */
-import { decodePanorama, inflate } from '../../../lib/horizon/panorama.js';
-import { turnBetween, verticalFov } from '../../../lib/horizon/camera.js';
+import { decodePanorama } from '../../../lib/horizon/panorama.js';
 import { MAP_LIGHT, minuteOf, SHADOW_DEPTH, skyLight } from '../../../lib/horizon/sky.js';
 import { distanceBetween, groundPoint } from '../../../lib/horizon/geometry.js';
 import { daysBefore, isoDay, latestAllowedPass, SENTINEL_ID, variantId } from '../../../lib/sentinel.js';
 import {
   DEFAULT_HEIGHTS,
+  DEFAULT_REACH,
   FOV,
   GROUNDS,
   headingOf,
@@ -50,24 +42,15 @@ import {
   VISIBILITY_KM,
 } from '../../../lib/horizon/view.js';
 
-/** The free imagery laid over the ground in Imagery (api/horizon.py `/drape`). */
+/** The free imagery laid over the ground in Imagery (api/horizon.py `/tiles/imagery`). */
 export const DRAPE_PROVIDER = 'esri-world-imagery';
 /** A dated Wayback release of the same imagery, for the ground as it was. */
 export const waybackSource = (release) => `esri-wayback~${release}`;
 
-/** An image the app sent in base64, ready for the GPU. */
-export async function decodeImage(base64, type = 'image/webp') {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  return createImageBitmap(new Blob([bytes], { type }));
-}
-
-/** Degrees a cell of the quick first picture, and of the full one. */
-export const COARSE_STEP = 0.5;
-export const FINE_STEP = 0.1;
+/** Degrees a cell of the turn the app marches for the skyline. */
+export const PANORAMA_STEP = 0.1;
 /** ms an eye must rest before its picture is asked for: a dragged eye asks once. */
 export const LOAD_DELAY = 220;
-/** ms a camera must rest before a finer window is asked for. */
-export const DETAIL_DELAY = 300;
 /**
  * How many ridges the Lines picture draws, fewest to most: the step in distance
  * between two neighbouring pixels that counts as an edge.
@@ -92,21 +75,11 @@ export const ESTIMATE_DELAY = 300;
 /** How far one step takes each eye, in metres: a few paces, a drone's hop, an aircraft's glide. */
 export const STEP_M = { ground: 50, drone: 100, aircraft: 500 };
 
-/** ms the light must rest before its shadows are asked for: a dragged hour asks once. */
-export const SHADOW_DELAY = 250;
-/** A light weaker than this casts no shadow worth a march (a thin moon). */
+/** A light weaker than this casts no shadow worth drawing (a thin moon). */
 export const SHADOW_STRENGTH = 0.04;
-/** Degrees the light may move before the shadows held stop matching it. */
-export const SHADOW_SLACK = 0.6;
 
-/** Whether the shadows held were cast by this light, near enough to be drawn with it. */
-export function shadowFits(shadow, light) {
-  if (!shadow || !light?.body || light.strength < SHADOW_STRENGTH) return false;
-  return (
-    Math.abs(turnBetween(shadow.lightAzimuth, light.azimuth)) < SHADOW_SLACK &&
-    Math.abs(shadow.lightAltitude - light.altitude) < SHADOW_SLACK
-  );
-}
+/** Whether a light casts shadows: the sun's or the moon's, strong enough. */
+export const castsShadows = (light) => Boolean(light?.body && light.strength >= SHADOW_STRENGTH);
 
 /** Where this browser remembers that summit names were switched on, and how dark shadows are. */
 export const PEAKS_KEY = 'azimut.horizon.peaks';
@@ -120,71 +93,8 @@ function browserStorage() {
     return null;
   }
 }
-/** A window is worth asking for once a cell of the turn spans this many pixels. */
-export const DETAIL_ABOVE_PX = 1.6;
-/** The finest step the app draws, and the most cells one window may hold. */
-export const DETAIL_MIN_STEP = 0.005;
-export const DETAIL_MAX_CELLS = 3_000_000;
-const NICE_STEPS = [0.005, 0.01, 0.02, 0.025, 0.05];
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-
-/**
- * The finer window a camera wants, or null when the turn is fine enough.
- * `always` asks for one at about a cell a pixel even through a wide lens, as
- * full detail does.
- *
- * `body` is what the app is asked: the view and a margin each side, so a small
- * turn stays inside it, at the step that gives about one cell a pixel, inside
- * the turn's own band of elevation. `need` is the part the view shows now,
- * which is what a window already held has to cover (`detailCovers`).
- *
- * @param {object} camera `{ heading, tilt, roll, fov, projection }`
- * @param {{ width: number, height: number }} frame CSS pixels
- * @param {object} panorama the turn's grid (`azimuth`, `elevation`)
- */
-export function detailRequest(camera, frame, panorama, { always = false } = {}) {
-  if (!panorama || !(frame.width > 0 && frame.height > 0)) return null;
-  const perPixel = camera.fov / frame.width;
-  if (!always && panorama.azimuth.step <= perPixel * DETAIL_ABOVE_PX) return null;
-  let step = NICE_STEPS.find((candidate) => candidate >= perPixel) ?? NICE_STEPS.at(-1);
-  if (step >= panorama.azimuth.step) return null;
-  const tall = verticalFov({ ...camera, width: frame.width, height: frame.height });
-  const reach = Math.abs(camera.roll ?? 0) > 1 ? Math.max(tall, camera.fov) : tall;
-  const panoTop = panorama.elevation.top;
-  const panoBottom = panoTop - panorama.elevation.step * (panorama.elevation.count - 1);
-  const window = (across, up) => {
-    const span = Math.min(360, across);
-    const top = Math.min(panoTop, camera.tilt + up);
-    const bottom = Math.max(panoBottom, camera.tilt - up);
-    return { start: (((camera.heading - span / 2) % 360) + 360) % 360, span, top, bottom };
-  };
-  const asked = window(camera.fov * 1.6 + 2, reach * 0.8 + 0.5);
-  if (asked.top <= asked.bottom) return null;
-  while ((asked.span / step) * ((asked.top - asked.bottom) / step) > DETAIL_MAX_CELLS) step *= 1.5;
-  if (step >= panorama.azimuth.step) return null;
-  const shown = window(camera.fov + 0.5, reach / 2 + 0.25);
-  return {
-    body: {
-      azimuth_start: Number(asked.start.toFixed(4)),
-      azimuth_span: Number(asked.span.toFixed(4)),
-      step: Number(step.toFixed(4)),
-      top: Number(asked.top.toFixed(3)),
-      bottom: Number(asked.bottom.toFixed(3)),
-    },
-    need: { ...shown, step },
-  };
-}
-
-/** Whether a window already held shows what a camera needs now, as finely. */
-export function detailCovers(held, wanted) {
-  if (!held || !wanted) return false;
-  const { need } = wanted;
-  if (held.step > need.step * 1.01) return false;
-  const off = (((need.start - held.azimuth_start) % 360) + 360) % 360;
-  return off + need.span <= held.azimuth_span + 1e-6 && need.top <= held.top + 1e-6
-    && need.bottom >= held.bottom - 1e-6;
-}
 
 /**
  * @param {object} deps
@@ -197,11 +107,9 @@ export function detailCovers(held, wanted) {
 export function createHorizonState({
   api,
   decode = decodePanorama,
-  image = decodeImage,
   later = setTimeout,
   cancel = clearTimeout,
   storage = browserStorage(),
-  open = inflate,
 }) {
   const remembered = (key) => {
     try {
@@ -218,8 +126,10 @@ export function createHorizonState({
     }
   };
   let observer = $state(null);
+  // the eye as last placed, which the meshes and the march are both for
+  let placed = $state.raw(null);
   let camera = $state({ heading: 0, tilt: 0, roll: 0, fov: FOV.start, projection: 'camera' });
-  // how far the air lets the eye see, metres, null for clear air; the march reaches past the
+  // how far the air lets the eye see, metres, null for clear air; the view reaches past the
   // eye's default only for air that sees farther
   let visibility = $state(null);
   let near = $state(0);
@@ -227,17 +137,10 @@ export function createHorizonState({
   let lines = $state(linesByDefault('relief'));
   let ridges = $state(2);
   let panorama = $state.raw(null);
-  let detail = $state.raw(null);
-  let quality = $state('none');
-  // the finest terrain all round, asked for: on for the next eyes too, held for this one
-  let fullDetail = $state(false);
-  let fullHeld = false;
-  let fullBusy = $state(false);
-  let detailBusy = $state(false);
-  let fullError = $state('');
   let busy = $state(false);
   let error = $state('');
-  let frame = { width: 0, height: 0 };
+  // how many times what failed was asked for again, which the view's tiles follow
+  let retries = $state(0);
 
   let peaksOn = $state(remembered(PEAKS_KEY) === '1');
   let peaks = $state.raw([]);
@@ -249,14 +152,9 @@ export function createHorizonState({
   let target = $state(null);
   let pointed = $state(null);
 
-  // the ground's colours for Imagery, over the full picture's grid
-  let drape = $state.raw(null);
-  let drapeBusy = $state(false);
-  let drapeError = $state('');
-  let drapeAsked = 0;
-  let drapeFor = '';
-  let fineBody = null;
+  // the imagery the ground is drawn in, and what the app said when it refused it
   let drapeSource = $state(DRAPE_PROVIDER);
+  let imageryError = $state('');
   let releases = $state.raw([]);
   let releasesBusy = $state(false);
   // Sentinel-2 on the near ground: switched on, how far, which pass (the one picked, or the
@@ -272,10 +170,6 @@ export function createHorizonState({
   let nearEstimate = $state.raw(null);
   let estimateAsked = 0;
   let estimateTimer = null;
-  // …and over the finer window, on its own grid
-  let detailDrape = $state.raw(null);
-  let detailDrapeAsked = 0;
-  let detailBody = null;
 
   let skyOn = $state(false);
   let skyDate = $state('');
@@ -285,26 +179,18 @@ export function createHorizonState({
   let skyError = $state('');
   let skyAsked = 0;
 
-  // the light a ridge hides, marched by the app for the light of the hour, and how dark it leaves it
+  // how dark the shadows ridges cast leave the ground, kept in this browser
   const keptDepth = Number.parseFloat(remembered(SHADOWS_KEY) ?? '');
   let shadowDepth = $state(Number.isFinite(keptDepth) ? Math.min(1, Math.max(0, keptDepth)) : SHADOW_DEPTH);
-  let shadow = $state.raw(null);
-  let shadowBusy = $state(false);
-  let shadowError = $state('');
-  let shadowAsked = 0;
-  let shadowTimer = null;
-  let shadowFor = '';
 
   let asked = 0;
   let loadTimer = null;
-  let detailTimer = null;
-  let detailAsked = 0;
-  let detailHeld = null;
-  let detailWanted = null;
   let peaksAsked = 0;
   let peaksFor = '';
   let peaksTimer = null;
   let controller = null;
+
+  const reachOf = (eye) => reachFor(eye.mode, visibility) ?? DEFAULT_REACH[eye.mode] ?? DEFAULT_REACH.ground;
 
   const body = (extra) => ({
     lat: observer.lat,
@@ -316,10 +202,6 @@ export function createHorizonState({
     ...extra,
   });
 
-  function bottomOf(picture) {
-    return picture.elevation.top - picture.elevation.step * (picture.elevation.count - 1);
-  }
-
   async function load() {
     loadTimer = null;
     if (!observer) return;
@@ -327,47 +209,20 @@ export function createHorizonState({
     controller?.abort();
     controller = typeof AbortController === 'function' ? new AbortController() : null;
     const signal = controller?.signal;
-    detailAsked += 1;
-    detailHeld = null;
-    detailBusy = false;
-    detail = null;
-    detailBody = null;
-    detailDrapeAsked += 1;
-    detailDrape = null;
-    drapeAsked += 1;
-    drape = null;
-    drapeFor = '';
-    shadowAsked += 1;
-    shadow = null;
-    shadowFor = '';
-    shadowBusy = false;
-    fullHeld = false;
-    fullBusy = false;
-    fullError = '';
-    fineBody = null;
+    placed = { ...observer, far: reachOf(observer) };
     busy = true;
     error = '';
+    // a new place may want a newer pass: looked for before anything billed is laid there
+    if (nearOn && !nearPicked && (!nearFoundAt || distanceBetween(nearFoundAt, observer) > NEAR_REFIND_M)) {
+      findPass();
+    }
+    askSky();
+    if (target) mark(target);
     try {
-      const coarse = await decode(await api.post('/api/horizon/panorama', body({ step: COARSE_STEP }), { signal }));
+      const turn = await decode(await api.post('/api/horizon/panorama', body({ step: PANORAMA_STEP }), { signal }));
       if (mine !== asked) return;
-      panorama = coarse;
-      quality = 'coarse';
-      const asking = body({ step: FINE_STEP, top: coarse.elevation.top, bottom: bottomOf(coarse) });
-      const fine = await decode(await api.post('/api/horizon/panorama', asking, { signal }));
-      if (mine !== asked) return;
-      panorama = fine;
-      quality = 'fine';
-      fineBody = asking;
-      askDetail();
-      // a new place may want a newer pass: only the drape waits for it, so nothing
-      // billed is laid from the last place's pass first
-      if (nearOn && !nearPicked && (!nearFoundAt || distanceBetween(nearFoundAt, observer) > NEAR_REFIND_M)) {
-        findPass().then(() => mine === asked && askDrape());
-      } else askDrape();
-      askEstimate();
+      panorama = turn;
       askPeaks();
-      askSky();
-      if (target) mark(target);
     } catch (failure) {
       if (mine === asked && failure?.name !== 'AbortError') error = failure.message;
     } finally {
@@ -379,62 +234,6 @@ export function createHorizonState({
     pointed = null;
     if (loadTimer) cancel(loadTimer);
     loadTimer = later(load, LOAD_DELAY);
-  }
-
-  /** The turn again over the finest terrain, once the full picture is in, when asked for. */
-  async function fetchFull() {
-    if (!fullDetail || fullHeld || fullBusy || quality !== 'fine' || !fineBody) return;
-    const mine = asked;
-    fullBusy = true;
-    fullError = '';
-    try {
-      const answer = await decode(
-        await api.post('/api/horizon/panorama', { ...fineBody, full_detail: true }, { signal: controller?.signal })
-      );
-      if (mine !== asked) return;
-      panorama = answer;
-      fullHeld = true;
-    } catch (failure) {
-      if (mine === asked && failure?.name !== 'AbortError') fullError = failure.message;
-    } finally {
-      if (mine === asked) fullBusy = false;
-    }
-  }
-
-  async function fetchDetail() {
-    detailTimer = null;
-    if (quality !== 'fine') return;
-    const wanted = detailRequest(camera, frame, panorama, { always: fullDetail });
-    detailWanted = wanted;
-    // with full detail, the whole turn follows the window the lens wanted
-    if (!wanted || detailCovers(detailHeld, wanted)) {
-      fetchFull();
-      return;
-    }
-    const mine = ++detailAsked;
-    detailBusy = fullDetail;
-    try {
-      const asking = body({ ...wanted.body, ...(fullDetail ? { full_detail: true } : {}) });
-      const answer = await decode(await api.post('/api/horizon/panorama', asking));
-      if (mine !== detailAsked) return;
-      detail = answer;
-      detailHeld = wanted.body;
-      detailBody = asking;
-      detailDrape = null;
-      askDetailDrape();
-    } catch {
-      // the turn is still on screen: a window that failed is only a coarser view
-    } finally {
-      if (mine === detailAsked) {
-        detailBusy = false;
-        fetchFull();
-      }
-    }
-  }
-
-  function askDetail() {
-    if (detailTimer) cancel(detailTimer);
-    detailTimer = later(fetchDetail, DETAIL_DELAY);
   }
 
   /**
@@ -470,58 +269,11 @@ export function createHorizonState({
     }
   }
 
-  /**
-   * The ground's colours, laid by the app over the very grid of the full
-   * picture, which it still holds, so nothing is marched twice.
-   */
   /** The Sentinel-2 rendering laid near the eye, or null while it is off or no pass is known. */
   function nearProvider() {
     return nearOn && nearDate
       ? variantId(SENTINEL_ID, { from: nearDate, to: nearDate, maxcc: NEAR_MAXCC })
       : null;
-  }
-
-  /** What a drape asks for beyond the picture's grid: the free imagery, and Sentinel-2 near. */
-  function drapeAsk() {
-    const near = nearProvider();
-    return { provider: drapeSource, ...(near ? { near_provider: near, near_reach: nearReach } : {}) };
-  }
-
-  async function askDrape() {
-    if (ground !== 'imagery' || quality !== 'fine' || !fineBody) return;
-    const key = `${JSON.stringify(drapeAsk())}|${JSON.stringify(fineBody)}`;
-    if (key === drapeFor) return;
-    const mine = ++drapeAsked;
-    drapeBusy = true;
-    drapeError = '';
-    try {
-      const answer = await api.post('/api/horizon/drape', { ...fineBody, ...drapeAsk() });
-      const picture = await image(answer.image);
-      if (mine !== drapeAsked) return;
-      drape = { image: picture, credits: answer.credits ?? [] };
-      drapeFor = key;
-    } catch (failure) {
-      if (mine === drapeAsked) drapeError = failure.message;
-    } finally {
-      if (mine === drapeAsked) drapeBusy = false;
-    }
-  }
-
-  /** The imagery over the finer window, once it and Imagery are both there. */
-  async function askDetailDrape() {
-    if (ground !== 'imagery' || !detailBody) return;
-    const source = JSON.stringify(drapeAsk());
-    if (detailDrape?.body === detailBody && detailDrape.source === source) return;
-    const mine = ++detailDrapeAsked;
-    const asking = detailBody;
-    try {
-      const answer = await api.post('/api/horizon/drape', { ...asking, ...drapeAsk() });
-      const picture = await image(answer.image);
-      if (mine !== detailDrapeAsked || asking !== detailBody) return;
-      detailDrape = { image: picture, body: asking, source };
-    } catch {
-      // the turn's own imagery is still there, only coarser
-    }
   }
 
   /**
@@ -553,13 +305,6 @@ export function createHorizonState({
     }
   }
 
-  /** Lay the imagery again, Sentinel-2 near or not. */
-  function redrape() {
-    drapeFor = '';
-    askDrape();
-    askDetailDrape();
-  }
-
   function askEstimate() {
     if (estimateTimer) cancel(estimateTimer);
     estimateTimer = later(fetchEstimate, ESTIMATE_DELAY);
@@ -568,12 +313,12 @@ export function createHorizonState({
   /** How many Sentinel Hub requests laying Sentinel-2 near would cost: worked out by the app, free. */
   async function fetchEstimate() {
     estimateTimer = null;
-    if (ground !== 'imagery' || quality !== 'fine' || !fineBody) return;
+    if (ground !== 'imagery' || !observer) return;
     const mine = ++estimateAsked;
     try {
-      const answer = await api.post('/api/horizon/drape/estimate', {
-        ...fineBody,
-        provider: drapeSource,
+      const answer = await api.post('/api/horizon/tiles/estimate', {
+        lat: observer.lat,
+        lon: observer.lon,
         near_provider: nearProvider() ?? SENTINEL_ID,
         near_reach: nearReach,
       });
@@ -603,7 +348,6 @@ export function createHorizonState({
       sky = answer;
       // an unset day is today on the place's own clock, which the app knows
       if (!skyDate) skyDate = answer.date;
-      askShadow();
     } catch (failure) {
       if (mine === skyAsked) skyError = failure.message;
     } finally {
@@ -614,46 +358,6 @@ export function createHorizonState({
   /** The light of the chosen hour, or the map's north-west light while no day is read. */
   function lightNow() {
     return skyOn && sky ? skyLight(sky, minuteOf(skyTime) ?? 720) : MAP_LIGHT;
-  }
-
-  function askShadow() {
-    if (shadowTimer) cancel(shadowTimer);
-    shadowTimer = later(fetchShadow, SHADOW_DELAY);
-  }
-
-  /** The shadows of the light of the hour over the full picture, once both are there. */
-  async function fetchShadow() {
-    shadowTimer = null;
-    const light = lightNow();
-    if (!light.body || light.strength < SHADOW_STRENGTH || quality !== 'fine' || !fineBody) return;
-    const lightAzimuth = Number((((light.azimuth % 360) + 360) % 360).toFixed(2)) % 360;
-    const lightAltitude = Number(Math.min(90, Math.max(-10, light.altitude)).toFixed(2));
-    const key = `${JSON.stringify(fineBody)}|${lightAzimuth}|${lightAltitude}`;
-    if (key === shadowFor) return;
-    const mine = ++shadowAsked;
-    shadowBusy = true;
-    shadowError = '';
-    try {
-      const answer = await api.post('/api/horizon/shadow', {
-        ...fineBody,
-        light_azimuth: lightAzimuth,
-        light_altitude: lightAltitude,
-      });
-      const bytes = await open(answer.light);
-      if (mine !== shadowAsked) return;
-      shadow = {
-        light: bytes,
-        azimuth: answer.azimuth,
-        elevation: answer.elevation,
-        lightAzimuth: answer.light_azimuth,
-        lightAltitude: answer.light_altitude,
-      };
-      shadowFor = key;
-    } catch (failure) {
-      if (mine === shadowAsked) shadowError = failure.message;
-    } finally {
-      if (mine === shadowAsked) shadowBusy = false;
-    }
   }
 
   /** Stand somewhere. The eye keeps its kind and height unless told otherwise. */
@@ -696,6 +400,10 @@ export function createHorizonState({
     get observer() {
       return observer;
     },
+    /** The eye as last placed, with how far it sees (`far`): what the view lays its ground round. */
+    get placed() {
+      return placed;
+    },
     get camera() {
       return camera;
     },
@@ -719,14 +427,10 @@ export function createHorizonState({
      * finished: one line for the header, the most pressing first.
      */
     get status() {
-      if (busy) return quality === 'none' ? 'Drawing the view…' : 'Sharpening…';
-      if (fullBusy || detailBusy) return 'Loading full detail…';
       if (nearBusy) return 'Finding the newest Sentinel-2 pass…';
-      if (drapeBusy) return 'Laying the imagery over the ground…';
       if (releasesBusy) return 'Reading the imagery archive…';
       if (peaksOn && (peaksPending || peaksBusy)) return 'Reading summit names…';
       if (skyOn && skyBusy) return 'Reading the sky…';
-      if (skyOn && shadowBusy) return 'Casting shadows…';
       return '';
     },
     /** 0 (fewest) to 4 (most): how many ridges Lines draws (`RIDGE_STEPS`). */
@@ -738,35 +442,6 @@ export function createHorizonState({
     },
     get panorama() {
       return panorama;
-    },
-    get detail() {
-      return detail;
-    },
-    /** Whether the finest terrain is asked for, all round out to 20 km. */
-    get fullDetail() {
-      return fullDetail;
-    },
-    /** Whether the picture on screen is the full-detail one. */
-    get fullHeld() {
-      return fullHeld && Boolean(panorama);
-    },
-    get fullError() {
-      return fullError;
-    },
-    setFullDetail(on) {
-      fullDetail = Boolean(on);
-      if (!fullDetail) return;
-      // windows held were marched over the usual terrain: the lens's first, then the turn
-      detailHeld = null;
-      askDetail();
-    },
-    retryFull() {
-      fullError = '';
-      fetchFull();
-    },
-    /** 'none' | 'coarse' | 'fine': how finished the picture on screen is. */
-    get quality() {
-      return quality;
     },
     get busy() {
       return busy;
@@ -820,12 +495,6 @@ export function createHorizonState({
     showSky(on) {
       skyOn = on;
       if (on) askSky();
-      else {
-        if (shadowTimer) cancel(shadowTimer);
-        shadowTimer = null;
-        shadowAsked += 1;
-        shadowBusy = false;
-      }
     },
     setSkyDate(date) {
       if (!date || date === skyDate) return;
@@ -835,9 +504,8 @@ export function createHorizonState({
     setSkyTime(time) {
       if (!time || time === skyTime) return;
       skyTime = time;
-      askShadow();
     },
-    /** How dark the shadows the ground casts are, 0 (light) to 1 (dark); drawn, not marched. */
+    /** How dark the shadows the ground casts are, 0 (light) to 1 (dark). */
     get shadowDepth() {
       return shadowDepth;
     },
@@ -851,20 +519,9 @@ export function createHorizonState({
     get light() {
       return lightNow();
     },
-    /** The shadows the app marched, `{ light, azimuth, elevation, lightAzimuth, lightAltitude }`. */
-    get shadow() {
-      return shadow;
-    },
-    get shadowBusy() {
-      return shadowBusy;
-    },
-    get shadowError() {
-      return shadowError;
-    },
-    retryShadow() {
-      shadowFor = '';
-      shadowError = '';
-      askShadow();
+    /** Whether ridges cast shadows now: a day is read and the sun or the moon is strong enough. */
+    get shaded() {
+      return skyOn && castsShadows(lightNow());
     },
     /** A point picked in the view: `{ lat, lon, azimuth, elevation, distance }`. */
     get pointed() {
@@ -900,7 +557,7 @@ export function createHorizonState({
       reload();
     },
 
-    /** Turn, tilt, roll or zoom: never a new picture, only a window when one is due. */
+    /** Turn, tilt, roll or zoom: nothing asked of the app. */
     look(change) {
       const next = { ...camera, ...change };
       next.heading = headingOf(next.heading);
@@ -909,7 +566,6 @@ export function createHorizonState({
       const widest = next.projection === 'panorama' ? 360 : FOV.max;
       next.fov = clamp(Number(next.fov) || FOV.start, FOV.min, widest);
       camera = next;
-      if (quality === 'fine') askDetail();
     },
 
     /**
@@ -927,7 +583,7 @@ export function createHorizonState({
       if (observer && reachFor(observer.mode, visibility) !== before) reload();
     },
     /** Ground closer than this many metres is taken away: a hill in front. */
-    setNear(metres) {
+    setNearLimit(metres) {
       const next = Math.max(0, Number(metres) || 0);
       if (next === near) return;
       near = next;
@@ -939,15 +595,19 @@ export function createHorizonState({
       if (!GROUNDS.includes(next) || next === ground) return;
       ground = next;
       if (next === 'plain') lines = true;
-      askDrape();
-      askDetailDrape();
     },
     setLines(on) {
       lines = Boolean(on);
     },
-    /** The imagery laid over the ground, `{ image, credits }`, once Imagery asked for it. */
-    get drape() {
-      return drape;
+    /**
+     * The imagery the ground is drawn in: the free provider all round, and
+     * Sentinel-2 nearer than its reach once switched on and a pass is known;
+     * null while the ground is not Satellite, so nothing is read for it.
+     */
+    get imagery() {
+      if (ground !== 'imagery') return null;
+      const sentinel = nearProvider();
+      return { provider: drapeSource, near: sentinel ? { provider: sentinel, reach: nearReach } : null };
     },
     /** Which imagery is laid over the ground: the latest, or a dated Wayback release. */
     get drapeSource() {
@@ -956,8 +616,7 @@ export function createHorizonState({
     setDrapeSource(source) {
       if (!source || source === drapeSource) return;
       drapeSource = source;
-      askDrape();
-      askDetailDrape();
+      imageryError = '';
     },
     /** Wayback's releases, newest first, once asked for (a request to Esri). */
     get releases() {
@@ -972,7 +631,7 @@ export function createHorizonState({
       try {
         releases = (await api.get('/api/satellite/wayback/releases')).releases ?? [];
       } catch (failure) {
-        drapeError = failure.message;
+        imageryError = failure.message;
       } finally {
         releasesBusy = false;
       }
@@ -1005,15 +664,14 @@ export function createHorizonState({
     /** Sentinel-2 on the near ground, on or off: on finds the newest pass first, unless one was picked. */
     async setNear(on) {
       nearOn = Boolean(on);
+      imageryError = '';
       if (nearOn && !nearDate) await findPass();
-      redrape();
       askEstimate();
     },
     setNearReach(metres) {
       const next = NEAR_REACHES.includes(Number(metres)) ? Number(metres) : NEAR_REACH;
       if (next === nearReach) return;
       nearReach = next;
-      if (nearOn) redrape();
       askEstimate();
     },
     /** A pass picked from those found; '' goes back to the newest under the ceiling. */
@@ -1024,30 +682,20 @@ export function createHorizonState({
         nearDate = '';
         await findPass();
       }
-      if (nearOn) redrape();
       askEstimate();
     },
     async retryNear() {
       await findPass();
-      if (nearOn) redrape();
     },
-    /** Worked out again: the view's Satellite controls ask when they show the switch. */
+    /** Worked out again: the view's Satellite controls ask, only where a Copernicus key is set. */
     askEstimate,
-    /** The imagery over the finer window, `{ image }`, when there is one. */
-    get detailDrape() {
-      return detailDrape;
+    /** What the app said when it refused the imagery asked (a paused quota, a key gone), or ''. */
+    get imageryError() {
+      return imageryError;
     },
-    get drapeBusy() {
-      return drapeBusy;
-    },
-    get drapeError() {
-      return drapeError;
-    },
-
-    /** The size of the frame the view draws into, which decides when a window is worth it. */
-    setFrame(next) {
-      frame = { width: next.width, height: next.height };
-      if (quality === 'fine') askDetail();
+    /** The view's tiles were refused their imagery: said here, with a way to ask again. */
+    imageryRefused(message) {
+      imageryError = message || 'The imagery could not be loaded.';
     },
 
     showPeaks(on) {
@@ -1073,7 +721,12 @@ export function createHorizonState({
 
     /** The picture again, from the same eye: after a failure, or to try the network once more. */
     retry() {
+      retries += 1;
       reload();
+    },
+    /** Counts the asks to try again, which the view's tiles answer by asking what came back empty. */
+    get retries() {
+      return retries;
     },
     /** Summit names again, after OpenStreetMap failed or left areas out. */
     retryPeaks() {
@@ -1081,11 +734,9 @@ export function createHorizonState({
       peaksFailed = 0;
       askPeaks();
     },
-    retryDrape() {
-      drapeFor = '';
-      drapeError = '';
-      askDrape();
-      askDetailDrape();
+    retryImagery() {
+      imageryError = '';
+      retries += 1;
     },
     retrySky() {
       askSky();
@@ -1121,32 +772,17 @@ export function createHorizonState({
         observer = { ...view.observer };
       }
       if (moved && observer) reload();
-      else {
-        askDrape();
-        askDetailDrape();
-      }
     },
 
     destroy() {
       asked += 1;
-      detailAsked += 1;
       peaksAsked += 1;
       skyAsked += 1;
-      drapeAsked += 1;
-      detailDrapeAsked += 1;
-      shadowAsked += 1;
       estimateAsked += 1;
       controller?.abort();
       if (loadTimer) cancel(loadTimer);
-      if (detailTimer) cancel(detailTimer);
       if (peaksTimer) cancel(peaksTimer);
-      if (shadowTimer) cancel(shadowTimer);
       if (estimateTimer) cancel(estimateTimer);
-    },
-
-    /** For tests: the window a camera asked for last. */
-    get detailWanted() {
-      return detailWanted;
     },
   };
 }

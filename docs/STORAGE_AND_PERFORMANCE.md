@@ -18,6 +18,7 @@ exported copy stays a finished file under `exports/` or the selected Views folde
     bundles/                 # exported bundles and transient imports
     cache/tiles/             # disposable map tile cache
     cache/terrain/           # terrain height tiles, bounded by size, not age
+    cache/peaks/             # summit names from OpenStreetMap, a file a 1° cell
     lock                     # held by the one Azimut using this workspace
     runtime/                 # updated scraper distributions
     scratch/                 # complete, promotable one-shot cases
@@ -82,7 +83,7 @@ source that changes during the read, renames the copy into place, then
 writes the pointer — that write is the whole switch, so an interruption before
 it leaves the old folder authoritative and one after leaves the new one, both
 complete. The old folder is then renamed `<name>.old-<date>` and kept until the
-analyst drops it. The tile and terrain caches are not copied, being disposable by contract,
+analyst drops it. Nothing under `cache/` is copied, being disposable by contract,
 and a destination that already holds other files gets an `Azimut` subfolder
 rather than settling among them. Choosing a root is also where the path budget
 below is enforced: `layout.room_for_workspace_root()` refuses a root too long

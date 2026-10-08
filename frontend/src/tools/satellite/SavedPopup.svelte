@@ -207,9 +207,11 @@
             </section>
           {/if}
           <p class="acts">
-            <button type="button" class="link" onclick={() => onedit(row)}>
-              {row.kind === 'comparison' ? 'Open in Compare' : 'Edit'}
-            </button>
+            {#if onedit}
+              <button type="button" class="link" onclick={() => onedit(row)}>
+                {row.kind === 'comparison' ? 'Open in Compare' : 'Edit'}
+              </button>
+            {/if}
             {#if row.kind === 'place' && ontrace}
               <button
                 type="button"

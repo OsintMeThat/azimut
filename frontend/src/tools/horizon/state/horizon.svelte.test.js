@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  COARSE_STEP,
+  castsShadows,
   createHorizonState,
-  detailCovers,
-  detailRequest,
-  FINE_STEP,
-  PEAKS_KEY,
+  DRAPE_PROVIDER,
+  LOAD_DELAY,
   NEAR_REACH,
-  SHADOW_DELAY,
+  PANORAMA_STEP,
+  PEAKS_KEY,
   SHADOWS_KEY,
-  shadowFits,
   STEP_M,
 } from './horizon.svelte.js';
 
@@ -28,6 +26,7 @@ function picture(step, extra = {}) {
 }
 
 let timers;
+let delays;
 let api;
 let requests;
 let storage;
@@ -44,12 +43,11 @@ function memoryStorage(seed = {}) {
 function store() {
   return createHorizonState({
     storage,
-    open: async (bytes) => bytes,
     api,
     decode: async (answer) => answer,
-    image: async (base64) => ({ bitmap: base64 }),
-    later: (fn) => {
+    later: (fn, ms) => {
       timers.push(fn);
+      delays.push(ms);
       return timers.length;
     },
     cancel: (handle) => {
@@ -66,8 +64,25 @@ async function tick() {
   await Promise.resolve();
 }
 
+/** Let every answer already on its way arrive. */
+async function settle() {
+  for (let i = 0; i < 30; i += 1) await Promise.resolve();
+}
+
+/** Run every timer due without waiting for what it asks, then let answers arrive. */
+async function fire() {
+  const due = timers.filter(Boolean);
+  timers = [];
+  for (const fn of due) fn();
+  await settle();
+}
+
+const asked = (path) => requests.filter((r) => r.path === path);
+const turns = () => asked('/api/horizon/panorama');
+
 beforeEach(() => {
   timers = [];
+  delays = [];
   requests = [];
   storage = memoryStorage();
   api = {
@@ -76,11 +91,18 @@ beforeEach(() => {
       if (path === '/api/horizon/target') {
         return { azimuth: 90, angle: 1.2, distance: 5000, visible: true, margin_deg: 0.4, ground: 1200 };
       }
-      if (body.azimuth_span) return picture(body.step, { azimuth: { start: body.azimuth_start, step: body.step, count: 10, full: false } });
+      if (path === '/api/horizon/tiles/estimate') return { requests: body.near_reach / 1000, tiles: 9 };
+      if (path === '/api/horizon/sky') return { date: '2026-10-08', step_minutes: 2, sun: {}, moon: {} };
       return picture(body.step);
     }),
     get: vi.fn(async () => ({ peaks: [{ name: 'Eiger', azimuth: 80, angle: 2, distance: 9000 }] })),
   };
+});
+
+afterEach(() => {
+  // the picture is drawn in the browser: the app is never asked for one again
+  const gone = ['/api/horizon/drape', '/api/horizon/shadow', '/api/horizon/window', '/api/horizon/detail/start'];
+  for (const [path] of api.post.mock.calls) expect(gone).not.toContain(path);
 });
 
 describe('the Horizon view', () => {
@@ -89,20 +111,21 @@ describe('the Horizon view', () => {
     view.look({ heading: 90 });
     await tick();
     expect(api.post).not.toHaveBeenCalled();
-    expect(view.quality).toBe('none');
+    expect(view.placed).toBeNull();
+    expect(view.panorama).toBeNull();
   });
 
-  it('draws a quick coarse picture, then the full one, from the band the first found', async () => {
+  it('places the eye once it rests, and marches its turn once for the skyline', async () => {
     const view = store();
     view.standAt(EYE);
     expect(api.post).not.toHaveBeenCalled(); // the eye rests a moment first
+    expect(view.placed).toBeNull();
+    expect(delays).toContain(LOAD_DELAY);
     await tick();
-    expect(requests.map((r) => r.body.step)).toEqual([COARSE_STEP, FINE_STEP]);
-    expect(requests[0].body).toMatchObject({ lat: EYE.lat, lon: EYE.lon, mode: 'ground', height: 1.7 });
-    expect(requests[1].body.top).toBe(12);
-    expect(requests[1].body.bottom).toBe(-25);
-    expect(view.quality).toBe('fine');
-    expect(view.panorama.azimuth.step).toBe(FINE_STEP);
+    expect(view.placed).toEqual({ ...EYE, mode: 'ground', height: 1.7, far: 150000 });
+    expect(turns()).toHaveLength(1);
+    expect(turns()[0].body).toEqual({ lat: EYE.lat, lon: EYE.lon, mode: 'ground', height: 1.7, step: PANORAMA_STEP });
+    expect(view.panorama.azimuth.step).toBe(PANORAMA_STEP);
     expect(view.busy).toBe(false);
   });
 
@@ -112,8 +135,9 @@ describe('the Horizon view', () => {
     view.standAt({ lat: 46.56, lon: 7.84 });
     view.standAt({ lat: 46.57, lon: 7.85 });
     await tick();
-    expect(requests.filter((r) => r.body.step === COARSE_STEP)).toHaveLength(1);
-    expect(requests[0].body.lat).toBe(46.57);
+    expect(turns()).toHaveLength(1);
+    expect(turns()[0].body.lat).toBe(46.57);
+    expect(view.placed.lat).toBe(46.57);
   });
 
   it('turning, tilting and zooming never ask for a new turn', async () => {
@@ -126,7 +150,7 @@ describe('the Horizon view', () => {
     expect(view.camera.tilt).toBe(89);
     expect(view.camera.fov).toBe(150);
     await tick();
-    expect(requests.slice(before).every((r) => r.body.azimuth_span)).toBe(true);
+    expect(requests.length).toBe(before);
   });
 
   it('gives a drone and an aircraft their own heights, and keeps a set one on a move', async () => {
@@ -141,26 +165,9 @@ describe('the Horizon view', () => {
     expect(view.observer.height).toBe(3000);
     view.setHeight(99999);
     expect(view.observer.height).toBe(15000);
-  });
-
-  it('asks for a finer window once a telephoto rests, and not again inside it', async () => {
-    const view = store();
-    view.setFrame({ width: 1200, height: 600 });
-    view.look({ fov: 90 });
-    view.standAt(EYE);
     await tick();
-    await tick();
-    expect(requests.some((r) => r.body.azimuth_span)).toBe(false); // 90° on 1200 px: the turn is fine
-    view.look({ fov: 10, heading: 80 });
-    await tick();
-    const window = requests.at(-1).body;
-    expect(window.azimuth_span).toBeCloseTo(18, 6);
-    expect(window.step).toBeLessThanOrEqual(0.01);
-    expect(view.detail).not.toBeNull();
-    const count = requests.length;
-    view.look({ heading: 81 });
-    await tick();
-    expect(requests.length).toBe(count);
+    // an aircraft sees farther, and its ground is laid that far
+    expect(view.placed).toMatchObject({ mode: 'aircraft', height: 15000, far: 300000 });
   });
 
   it('names summits only once they are switched on', async () => {
@@ -236,47 +243,39 @@ describe('the Horizon view', () => {
     expect(marks[1].body.lat).toBe(46.5);
   });
 
-  it('lays imagery over the full picture only once Imagery is picked, on the same grid', async () => {
-    const base = api.post;
-    api.post = vi.fn(async (path, body) =>
-      path === '/api/horizon/drape' ? { image: 'AAAA', credits: [{ attribution: 'Esri' }] } : base(path, body)
-    );
-    const view = store();
-    view.standAt(EYE);
-    await tick();
-    expect(api.post.mock.calls.some(([path]) => path === '/api/horizon/drape')).toBe(false);
-    view.setGround('imagery');
-    await Promise.resolve();
-    await Promise.resolve();
-    const [, asked] = api.post.mock.calls.find(([path]) => path === '/api/horizon/drape');
-    const fine = api.post.mock.calls.find(([path, body]) => path === '/api/horizon/panorama' && body.step === FINE_STEP)[1];
-    expect(asked).toEqual({ ...fine, provider: 'esri-world-imagery' });
-    expect(view.drape.image).toEqual({ bitmap: 'AAAA' });
-    view.setGround('plain');
-    view.setGround('imagery');
-    await Promise.resolve();
-    expect(api.post.mock.calls.filter(([path]) => path === '/api/horizon/drape')).toHaveLength(1);
-  });
-
-  it('lays a dated Wayback release over the ground once one is picked', async () => {
-    const base = api.post;
-    api.post = vi.fn(async (path, body) =>
-      path === '/api/horizon/drape' ? { image: body.provider, credits: [] } : base(path, body)
-    );
+  it('reads imagery for the ground only once Satellite is picked: the latest, or a dated release', async () => {
     api.get = vi.fn(async () => ({ releases: [{ release: 64776, date: '2021-06-30' }] }));
     const view = store();
     view.standAt(EYE);
     await tick();
+    expect(view.imagery).toBeNull();
     view.setGround('imagery');
-    await Promise.resolve();
-    await Promise.resolve();
+    expect(view.imagery).toEqual({ provider: DRAPE_PROVIDER, near: null });
     expect(api.get).not.toHaveBeenCalled(); // the archive is only read when asked
     await view.loadReleases();
     expect(view.releases[0].date).toBe('2021-06-30');
     view.setDrapeSource('esri-wayback~64776');
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(view.drape.image).toEqual({ bitmap: 'esri-wayback~64776' });
+    expect(view.imagery).toEqual({ provider: 'esri-wayback~64776', near: null });
+    view.setGround('relief');
+    expect(view.imagery).toBeNull();
+    expect(view.drapeSource).toBe('esri-wayback~64776'); // kept for the next time
+  });
+
+  it('says when the imagery was refused, and asks the view to try again', async () => {
+    const view = store();
+    view.standAt(EYE);
+    await tick();
+    view.setGround('imagery');
+    const before = view.retries;
+    view.imageryRefused('Sentinel Hub is paused');
+    expect(view.imageryError).toBe('Sentinel Hub is paused');
+    view.imageryRefused('');
+    expect(view.imageryError).toBe('The imagery could not be loaded.');
+    view.retryImagery();
+    expect(view.imageryError).toBe('');
+    expect(view.retries).toBe(before + 1);
+    view.retry();
+    expect(view.retries).toBe(before + 2);
   });
 
   it('draws more or fewer ridges within its steps', () => {
@@ -308,7 +307,8 @@ describe('the Horizon view', () => {
       ground: 'plain',
     });
     await tick();
-    expect(requests[0].body).toMatchObject({ lat: 15.3, mode: 'drone', height: 300, far: 200000 });
+    expect(turns()[0].body).toMatchObject({ lat: 15.3, mode: 'drone', height: 300, far: 200000 });
+    expect(view.placed).toMatchObject({ lat: 15.3, mode: 'drone', far: 200000 });
     expect(view.camera.heading).toBe(200);
     expect(view.ground).toBe('plain');
     expect(view.lines).toBe(true); // plain ground comes with its lines unless the address says otherwise
@@ -316,7 +316,7 @@ describe('the Horizon view', () => {
     expect(view.lines).toBe(true);
   });
 
-  it('hazes the far ground for thick air, and marches farther only for air that sees past the default', async () => {
+  it('hazes the far ground for thick air, and reaches farther only for air that sees past the default', async () => {
     const view = store();
     view.standAt(EYE);
     await tick();
@@ -327,10 +327,12 @@ describe('the Horizon view', () => {
     expect(requests.length).toBe(before); // haze is drawn, not marched
     view.setVisibility(250_000);
     await tick();
-    expect(requests.at(-1).body.far).toBe(250_000);
+    expect(turns().at(-1).body.far).toBe(250_000);
+    expect(view.placed.far).toBe(250_000);
     view.setVisibility(null);
     await tick();
-    expect(requests.at(-1).body.far).toBeUndefined();
+    expect(turns().at(-1).body.far).toBeUndefined();
+    expect(view.placed.far).toBe(150_000);
     view.setVisibility(-4);
     expect(view.visibility).toBeNull();
     expect(view.place.visibility).toBeNull();
@@ -347,6 +349,19 @@ describe('the Horizon view', () => {
     view.setGround('nonsense');
     expect(view.ground).toBe('plain');
     expect(view.place).toMatchObject({ ground: 'plain', lines: false });
+  });
+
+  it('takes the near ground away from a limit, without switching Sentinel-2 on', async () => {
+    const view = store();
+    view.standAt(EYE);
+    await tick();
+    view.setNearLimit(800);
+    expect(view.near).toBe(800);
+    expect(view.nearOn).toBe(false);
+    await tick();
+    expect(turns().at(-1).body.near).toBe(800);
+    view.setNearLimit('nonsense');
+    expect(view.near).toBe(0);
   });
 
   it('remembers summit names switched on in this browser, and survives a refused storage', async () => {
@@ -371,7 +386,7 @@ describe('the Horizon view', () => {
     expect(refused.peaksOn).toBe(true);
   });
 
-  it('says what it is doing in one line, the picture first, and nothing once done', async () => {
+  it('says what it is doing in one line, and nothing once done', async () => {
     let round = 0;
     api.get = vi.fn(async () => {
       round += 1;
@@ -390,7 +405,7 @@ describe('the Horizon view', () => {
     expect(view.status).toBe('');
   });
 
-  it('tries summit names, imagery, the sky and a marked point again after a failure', async () => {
+  it('tries summit names, the sky and a marked point again after a failure', async () => {
     let failing = true;
     const base = api.post;
     api.get = vi.fn(async () => {
@@ -398,69 +413,29 @@ describe('the Horizon view', () => {
       return { peaks: [{ name: 'Eiger' }], pending: 0, failed: 0 };
     });
     api.post = vi.fn(async (path, body) => {
-      if (failing && ['/api/horizon/drape', '/api/horizon/sky', '/api/horizon/target'].includes(path)) {
-        throw new Error('offline');
-      }
-      if (path === '/api/horizon/drape') return { image: 'AAAA', credits: [] };
-      if (path === '/api/horizon/sky') return { date: '2026-10-08', step_minutes: 2, sun: {}, moon: {} };
+      if (failing && ['/api/horizon/sky', '/api/horizon/target'].includes(path)) throw new Error('offline');
       return base(path, body);
     });
     const view = store();
     view.standAt(EYE);
     await tick();
     view.showPeaks(true);
-    view.setGround('imagery');
     view.showSky(true);
     await view.mark({ lat: 46.6, lon: 7.9 });
     await Promise.resolve();
     await Promise.resolve();
     expect(view.peaksError).toContain('busy');
-    expect(view.drapeError).toBe('offline');
     expect(view.skyError).toBe('offline');
     expect(view.target.error).toBe('offline');
     failing = false;
     view.retryPeaks();
-    view.retryDrape();
     view.retrySky();
     await view.retryTarget();
     await Promise.resolve();
     await Promise.resolve();
     expect(view.peaks[0].name).toBe('Eiger');
-    expect(view.drape.image).toEqual({ bitmap: 'AAAA' });
     expect(view.sky.date).toBe('2026-10-08');
     expect(view.target).toMatchObject({ visible: true, busy: false });
-  });
-});
-
-describe('a finer window for a narrow lens', () => {
-  const turn = picture(0.1);
-  const frame = { width: 1200, height: 700 };
-
-  it('is not asked for while a cell of the turn is under two pixels', () => {
-    expect(detailRequest({ heading: 0, tilt: 0, roll: 0, fov: 90 }, frame, turn)).toBeNull();
-  });
-
-  it('spans the view and a margin at about a cell a pixel, inside the band', () => {
-    const { body: wanted } = detailRequest({ heading: 5, tilt: 0, roll: 0, fov: 8 }, frame, turn);
-    expect(wanted.azimuth_start).toBeCloseTo(357.6, 6);
-    expect(wanted.step).toBe(0.01);
-    expect(wanted.top).toBeLessThanOrEqual(12);
-    expect(wanted.bottom).toBeGreaterThanOrEqual(-25);
-    expect((wanted.azimuth_span / wanted.step) * ((wanted.top - wanted.bottom) / wanted.step)).toBeLessThanOrEqual(3e6);
-  });
-
-  it('coarsens rather than overflow the app', () => {
-    const { body: wanted } = detailRequest({ heading: 0, tilt: 0, roll: 0, fov: 2 }, { width: 4000, height: 3000 }, turn);
-    expect((wanted.azimuth_span / wanted.step) * ((wanted.top - wanted.bottom) / wanted.step)).toBeLessThanOrEqual(3e6);
-  });
-
-  it('knows when the window held already shows what the view needs', () => {
-    const held = { azimuth_start: 350, azimuth_span: 30, step: 0.01, top: 5, bottom: -5 };
-    const need = (start, step = 0.01) => ({ need: { start, span: 20, step, top: 4, bottom: -4 } });
-    expect(detailCovers(held, need(355))).toBe(true);
-    expect(detailCovers(held, need(10))).toBe(false);
-    expect(detailCovers(held, need(355, 0.005))).toBe(false);
-    expect(detailCovers(null, need(355))).toBe(false);
   });
 });
 
@@ -480,84 +455,16 @@ function day() {
   return { date: '2026-10-08', step_minutes: 2, sun, moon };
 }
 
-describe('full detail', () => {
-  it('marches the turn again over the finest terrain once asked, on the full picture\'s grid', async () => {
-    const view = store();
-    view.standAt(EYE);
-    await tick();
-    expect(requests.some((r) => r.body.full_detail)).toBe(false); // never on its own
-    view.setFullDetail(true);
-    await tick();
-    await Promise.resolve();
-    await Promise.resolve();
-    const full = requests.find((r) => r.body.full_detail && !r.body.azimuth_span);
-    const fine = requests.find((r) => r.body.step === FINE_STEP && !r.body.full_detail);
-    expect(full.body).toEqual({ ...fine.body, full_detail: true });
-    expect(view.fullHeld).toBe(true);
-    expect(view.quality).toBe('fine');
-    // the next eye gets it too, after its usual pictures
-    view.standAt({ lat: 46.6, lon: 7.9 });
-    await tick();
-    await tick();
-    const steps = requests.slice(-3).map((r) => [r.body.step, Boolean(r.body.full_detail)]);
-    expect(steps).toEqual([[COARSE_STEP, false], [FINE_STEP, false], [FINE_STEP, true]]);
-  });
-
-  it('sharpens what the lens shows first, whatever its width, then the turn, and says so', async () => {
-    let release;
-    const base = api.post;
-    api.post = vi.fn(async (path, body, options) => {
-      if (body.full_detail && !body.azimuth_span) await new Promise((resolve) => (release = resolve));
-      return base(path, body, options);
-    });
-    const view = store();
-    view.setFrame({ width: 1200, height: 600 });
-    view.look({ fov: 90 }); // wide enough that the turn needs no window of its own
-    view.standAt(EYE);
-    await tick();
-    await tick();
-    expect(requests.some((r) => r.body.azimuth_span)).toBe(false);
-    view.setFullDetail(true);
-    await tick();
-    await Promise.resolve();
-    const asked = requests.filter((r) => r.body.full_detail);
-    // the lens's own window first, at about a cell a pixel, then the turn
-    expect(asked[0].body.azimuth_span).toBeGreaterThan(90);
-    expect(asked[0].body.step).toBeLessThan(FINE_STEP);
-    expect(view.status).toBe('Loading full detail…');
-    for (let i = 0; i < 8; i += 1) await Promise.resolve();
-    // the turn is asked once the window is in (held here until released)
-    const turn = api.post.mock.calls.filter(([, sent]) => sent.full_detail).at(-1)[1];
-    expect(turn.azimuth_span).toBeUndefined();
-    release();
-    for (let i = 0; i < 8; i += 1) await Promise.resolve();
-    expect(view.fullHeld).toBe(true);
-    expect(view.status).toBe('');
-  });
-});
-
 describe('Sentinel-2 near the eye', () => {
   function withCopernicus({ dates = [{ date: '2026-09-28', cloud: 64 }, { date: '2026-09-23', cloud: 4 }, { date: '2026-09-18', cloud: 12 }] } = {}) {
-    const base = api.post;
     api.get = vi.fn(async (path) => {
       requests.push({ path, body: {} });
       if (path.startsWith('/api/satellite/sentinel/dates')) return { dates };
       return { peaks: [], pending: 0, failed: 0 };
     });
-    api.post = vi.fn(async (path, body, options) => {
-      if (path === '/api/horizon/drape') {
-        requests.push({ path, body });
-        return { image: 'AAAA', credits: [] };
-      }
-      if (path === '/api/horizon/drape/estimate') {
-        requests.push({ path, body });
-        return { requests: body.near_reach / 1000, tiles: 9 };
-      }
-      return base(path, body, options);
-    });
   }
-  const drapes = () => requests.filter((r) => r.path === '/api/horizon/drape');
   const lookups = () => requests.filter((r) => r.path.startsWith('/api/satellite/sentinel/dates'));
+  const estimates = () => asked('/api/horizon/tiles/estimate');
   const settle = async () => {
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
   };
@@ -570,15 +477,15 @@ describe('Sentinel-2 near the eye', () => {
     view.setGround('imagery');
     await settle();
     expect(lookups()).toHaveLength(0);
-    expect(drapes().at(-1).body.near_provider).toBeUndefined();
+    expect(view.imagery.near).toBeNull();
     await view.setNear(true);
     await settle();
     expect(lookups()).toHaveLength(1);
     expect(view.nearDate).toBe('2026-09-23'); // the newest under 30% cloud, not the cloudy newest
-    const laid = drapes().at(-1).body;
-    expect(laid.provider).toBe('esri-world-imagery');
-    expect(laid.near_provider).toBe('sentinel2~TRUE_COLOR~2026-09-23~2026-09-23~CC30');
-    expect(laid.near_reach).toBe(NEAR_REACH);
+    expect(view.imagery).toEqual({
+      provider: 'esri-world-imagery',
+      near: { provider: 'sentinel2~TRUE_COLOR~2026-09-23~2026-09-23~CC30', reach: NEAR_REACH },
+    });
   });
 
   it('lays it as far as asked, from the pass picked, and back to Esri alone when off', async () => {
@@ -590,16 +497,32 @@ describe('Sentinel-2 near the eye', () => {
     await view.setNear(true);
     await settle();
     view.setNearReach(20_000);
-    await settle();
-    expect(drapes().at(-1).body.near_reach).toBe(20_000);
+    expect(view.imagery.near.reach).toBe(20_000);
     view.setNearReach(123); // not offered: the default
     expect(view.nearReach).toBe(NEAR_REACH);
     await view.setNearDate('2026-09-18');
     await settle();
-    expect(drapes().at(-1).body.near_provider).toContain('2026-09-18');
+    expect(view.imagery.near.provider).toContain('2026-09-18');
     await view.setNear(false);
+    expect(view.imagery.near).toBeNull();
+  });
+
+  it('looks for a newer pass only once the eye has moved far', async () => {
+    withCopernicus();
+    const view = store();
+    view.standAt(EYE);
+    await tick();
+    view.setGround('imagery');
+    await view.setNear(true);
     await settle();
-    expect(drapes().at(-1).body.near_provider).toBeUndefined();
+    view.standAt({ lat: EYE.lat + 0.01, lon: EYE.lon });
+    await tick();
+    await settle();
+    expect(lookups()).toHaveLength(1);
+    view.standAt({ lat: EYE.lat + 0.5, lon: EYE.lon });
+    await tick();
+    await settle();
+    expect(lookups()).toHaveLength(2);
   });
 
   it('says so when no pass is clear enough, and works out the cost for free', async () => {
@@ -608,15 +531,28 @@ describe('Sentinel-2 near the eye', () => {
     view.standAt(EYE);
     await tick();
     view.setGround('imagery');
+    await tick();
+    expect(estimates()).toHaveLength(0); // the controls ask, where a Copernicus key is set
     view.askEstimate();
     await tick();
-    const estimate = requests.filter((r) => r.path === '/api/horizon/drape/estimate').at(-1).body;
-    expect(estimate.near_provider).toBe('sentinel2');
+    expect(estimates().at(-1).body).toEqual({ lat: EYE.lat, lon: EYE.lon, near_provider: 'sentinel2', near_reach: NEAR_REACH });
     expect(view.nearEstimate).toEqual({ requests: 5, tiles: 9 });
+    view.setNearReach(20_000);
+    await tick();
+    expect(view.nearEstimate).toEqual({ requests: 20, tiles: 9 });
     await view.setNear(true);
     await settle();
     expect(view.nearError).toContain('No Sentinel-2 pass under 30% cloud');
-    expect(drapes().at(-1).body.near_provider).toBeUndefined(); // nothing billed without a pass
+    expect(view.imagery.near).toBeNull(); // nothing billed without a pass
+  });
+
+  it('works out no cost while the ground is not Satellite', async () => {
+    const view = store();
+    view.standAt(EYE);
+    await tick();
+    view.askEstimate();
+    await tick();
+    expect(estimates()).toHaveLength(0);
   });
 });
 
@@ -644,61 +580,44 @@ describe('walking from the viewpoint', () => {
     expect(view.observer).toMatchObject({ mode: 'aircraft', height: 3000 });
     expect(view.camera.heading).toBe(90);
     await tick();
-    // a walk of several steps asks for one picture, where it ends
-    expect(requests.filter((r) => r.body.step === COARSE_STEP)).toHaveLength(1);
+    // a walk of several steps is placed once, where it ends
+    expect(turns()).toHaveLength(1);
+    expect(view.placed).toMatchObject({ lat: view.observer.lat, lon: view.observer.lon });
   });
 });
 
 describe('shadows from the sun and the moon', () => {
   function withSky(answer = day()) {
     const base = api.post;
-    api.post = vi.fn(async (path, body) => {
-      requests.push({ path, body });
-      if (path === '/api/horizon/sky') return answer;
-      if (path === '/api/horizon/shadow') {
-        return {
-          light: 'bytes',
-          azimuth: { start: 0, step: 0.2, count: 1800, full: true },
-          elevation: { top: 12, step: 0.2, count: 186 },
-          light_azimuth: body.light_azimuth,
-          light_altitude: body.light_altitude,
-        };
-      }
-      return base(path, body);
-    });
+    api.post = vi.fn(async (path, body) => (path === '/api/horizon/sky' ? answer : base(path, body)));
   }
-  const shadows = () => requests.filter((r) => r.path === '/api/horizon/shadow');
 
-  it('marches nothing until a day is read, then the hour\'s light once it rests', async () => {
+  it('casts none until a day is read, then follows the hour at once', async () => {
     withSky();
     const view = store();
     view.standAt(EYE);
-    await tick();
     await tick();
     expect(view.light.phase).toBe('map');
-    expect(shadows()).toHaveLength(0);
+    expect(view.shaded).toBe(false);
     view.showSky(true);
     await Promise.resolve();
     await Promise.resolve();
-    // the hour is dragged: the light follows at once, one march once it rests
-    view.setSkyTime('09:00');
-    view.setSkyTime('09:30');
     view.setSkyTime('10:00');
     expect(view.light.body).toBe('sun');
-    await tick();
-    expect(shadows()).toHaveLength(1);
-    const asked = shadows()[0].body;
-    expect(asked.light_altitude).toBeCloseTo(view.light.altitude, 1);
-    expect(asked.step).toBe(FINE_STEP); // the full picture's grid
-    expect(view.shadow.light).toBe('bytes');
-    expect(shadowFits(view.shadow, view.light)).toBe(true);
-    // the same hour again asks nothing
-    view.setSkyTime('10:00');
-    await tick();
-    expect(shadows()).toHaveLength(1);
+    expect(view.shaded).toBe(true);
+    // the hour moves the light with nothing asked, now or later
+    const count = requests.length;
+    const waiting = timers.filter(Boolean).length;
+    const morning = view.light.azimuth;
+    view.setSkyTime('16:00');
+    expect(view.light.azimuth).toBeGreaterThan(morning + 30);
+    expect(timers.filter(Boolean)).toHaveLength(waiting);
+    expect(requests.length).toBe(count);
+    view.showSky(false);
+    expect(view.shaded).toBe(false);
   });
 
-  it('casts no shadow on a moonless night, and drops what it held on a move', async () => {
+  it('casts no shadow on a moonless night', async () => {
     withSky();
     const view = store();
     view.standAt(EYE);
@@ -706,45 +625,20 @@ describe('shadows from the sun and the moon', () => {
     view.showSky(true);
     await Promise.resolve();
     await Promise.resolve();
-    await tick();
-    expect(view.shadow).not.toBeNull();
     view.setSkyTime('02:00');
     expect(view.light).toMatchObject({ phase: 'night', body: null });
-    expect(shadowFits(view.shadow, view.light)).toBe(false);
-    const count = shadows().length;
-    await tick();
-    expect(shadows()).toHaveLength(count);
-    view.standAt({ lat: 46.6, lon: 7.9 });
-    await tick();
-    expect(view.shadow).toBeNull();
+    expect(view.shaded).toBe(false);
   });
 
-  it('says when it is casting them, and tries again after a failure', async () => {
-    withSky();
-    const base = api.post;
-    let fail = true;
-    api.post = vi.fn(async (path, body) => {
-      if (path === '/api/horizon/shadow' && fail) throw new Error('Terrain could not be loaded');
-      return base(path, body);
-    });
-    const view = store();
-    view.standAt(EYE);
-    await tick();
-    view.showSky(true);
-    await Promise.resolve();
-    await Promise.resolve();
-    await tick();
-    expect(view.shadowError).toContain('Terrain');
-    fail = false;
-    view.retryShadow();
-    expect(timers.filter(Boolean)).toHaveLength(1); // after SHADOW_DELAY, like any other ask
-    expect(SHADOW_DELAY).toBeGreaterThan(0);
-    await tick();
-    expect(view.shadowError).toBe('');
-    expect(view.shadow).not.toBeNull();
+  it('lets only the sun or a moon bright enough cast shadows', () => {
+    expect(castsShadows({ body: 'sun', strength: 1 })).toBe(true);
+    expect(castsShadows({ body: 'moon', strength: 0.05 })).toBe(true);
+    expect(castsShadows({ body: 'moon', strength: 0.01 })).toBe(false);
+    expect(castsShadows({ body: null, strength: 0.5 })).toBe(false);
+    expect(castsShadows(null)).toBe(false);
   });
 
-  it('keeps shadows as dark as asked, remembered in this browser, without touching the open ground or a new march', async () => {
+  it('keeps shadows as dark as asked, remembered in this browser, without touching the light of the hour', async () => {
     withSky();
     const view = store();
     view.standAt(EYE);
@@ -752,8 +646,6 @@ describe('shadows from the sun and the moon', () => {
     view.showSky(true);
     await Promise.resolve();
     await Promise.resolve();
-    await tick();
-    const marches = shadows().length;
     const before = view.light;
     view.setShadowDepth(1);
     expect(view.light).toEqual(before); // the light of the hour is the hour's
@@ -763,17 +655,5 @@ describe('shadows from the sun and the moon', () => {
     expect(view.shadowDepth).toBe(0);
     view.setShadowDepth('nonsense');
     expect(view.shadowDepth).toBe(0);
-    await tick();
-    expect(shadows()).toHaveLength(marches);
-  });
-
-  it('lets shadows held stand only for a light within a hair of theirs', () => {
-    const held = { lightAzimuth: 120, lightAltitude: 20 };
-    const sun = { body: 'sun', strength: 1, azimuth: 120.3, altitude: 20.2 };
-    expect(shadowFits(held, sun)).toBe(true);
-    expect(shadowFits(held, { ...sun, azimuth: 121 })).toBe(false);
-    expect(shadowFits(held, { ...sun, strength: 0.01 })).toBe(false);
-    expect(shadowFits({ lightAzimuth: 359.8, lightAltitude: 5 }, { ...sun, azimuth: 0.1, altitude: 5 })).toBe(true);
-    expect(shadowFits(null, sun)).toBe(false);
   });
 });

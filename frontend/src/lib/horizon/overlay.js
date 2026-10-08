@@ -20,6 +20,8 @@ import { focal, rayFor, turnBetween } from './camera.js';
 import { heightFor } from './view.js';
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+/** A point of the photo, 0 to 1, to a millionth: far under a pixel of any photo laid. */
+const fraction = (value) => Math.round(clamp(value, 0, 1) * 1e6) / 1e6;
 
 /**
  * The largest box of a photo's shape inside the room there is, centred, in
@@ -37,16 +39,293 @@ export function fitFrame(aspect, room) {
   return { width: w, height: h, left: Math.round((room.width - w) / 2), top: Math.round((room.height - h) / 2) };
 }
 
-/** A stroke drawn in CSS pixels, as the photo's own coordinates (0 to 1), close points dropped. */
-export function strokeFrom(points, size, { spacing = 1.5 } = {}) {
+// -- the loupe ------------------------------------------------------------------
+
+/** The most the loupe magnifies: well past a photo's own pixels, for a trace drawn to the pixel. */
+export const LOUPE_MAX = 16;
+/** The whole photo in the frame. */
+export const NO_LOUPE = Object.freeze({ zoom: 1, x: 0.5, y: 0.5 });
+
+/**
+ * How far a photo pinned to the terrain lets the view go: out to this much
+ * wider than the photo, and this many photo widths off its middle, where a
+ * straight lens still draws the ground without stretching it past reading.
+ */
+export const FREE_ZOOM_MIN = 0.3;
+export const FREE_REACH = 2;
+
+/**
+ * A loupe kept on the photo: never smaller than the frame, never looking past
+ * the photo's edges. A photo pinned to the terrain (`free`) lets it go wider
+ * and further, the terrain round the photo then showing.
+ */
+export function clampLoupe({ zoom, x, y }, { free = false } = {}) {
+  const z = clamp(Number(zoom) || 1, free ? FREE_ZOOM_MIN : 1, LOUPE_MAX);
+  const half = 0.5 / z;
+  const within = (value) =>
+    free ? clamp(Number.isFinite(value) ? value : 0.5, 0.5 - FREE_REACH, 0.5 + FREE_REACH) : clamp(Number(value) || 0.5, half, 1 - half);
+  return { zoom: z, x: within(x), y: within(y) };
+}
+
+/** The point of the photo under a point of the screen (CSS pixels), 0 to 1 across and down. */
+export function photoAt(loupe, x, y, size) {
+  return { u: loupe.x + (x / size.width - 0.5) / loupe.zoom, v: loupe.y + (y / size.height - 0.5) / loupe.zoom };
+}
+
+/** Where a point of the photo is on screen, in CSS pixels. */
+export function screenAt(loupe, u, v, size) {
+  return { x: ((u - loupe.x) * loupe.zoom + 0.5) * size.width, y: ((v - loupe.y) * loupe.zoom + 0.5) * size.height };
+}
+
+/** The loupe magnified by a factor about a point of the screen, which keeps the point of the photo under it. */
+export function zoomLoupe(loupe, factor, at, size, { free = false } = {}) {
+  const under = photoAt(loupe, at.x, at.y, size);
+  const zoom = clamp(loupe.zoom * factor, free ? FREE_ZOOM_MIN : 1, LOUPE_MAX);
+  return clampLoupe({ zoom, x: under.u - (at.x / size.width - 0.5) / zoom, y: under.v - (at.y / size.height - 0.5) / zoom }, { free });
+}
+
+/** The loupe moved with the hand: the photo follows a drag of `dx`, `dy` CSS pixels. */
+export function panLoupe(loupe, dx, dy, size, { free = false } = {}) {
+  return clampLoupe({ ...loupe, x: loupe.x - dx / size.width / loupe.zoom, y: loupe.y - dy / size.height / loupe.zoom }, { free });
+}
+
+/** Whether a loupe shows anything but the whole photo in the frame. */
+export const loupeMoved = (loupe) => Boolean(loupe) && (loupe.zoom !== 1 || loupe.x !== 0.5 || loupe.y !== 0.5);
+
+
+// -- a lens's curve --------------------------------------------------------------
+
+/** The most a photo's lens curve is undone either way: the curve stays one to one out to the corners. */
+export const BEND_MAX = 0.3;
+
+/** A photo's half-diagonal in its own coordinates across and down, which the curve is measured in. */
+export function bendShape(aspect) {
+  const diagonal = Math.hypot(aspect, 1);
+  return { across: (2 * aspect) / diagonal, down: 2 / diagonal };
+}
+
+const bendRadius = (u, v, shape) => Math.hypot((u - 0.5) * shape.across, (v - 0.5) * shape.down);
+
+/**
+ * Where a curving lens put a point a straight one would have put at `point`,
+ * both the photo's own (0 to 1): the photo's pixel that belongs there. `k` < 0
+ * is a barrel (the edges bowed in, a wide lens, an action camera), `k` > 0 a
+ * pincushion; the distance from the middle grows by 1 + k r², r in
+ * half-diagonals, so k = −0.1 pulls the corners in by a tenth.
+ */
+export function bent(point, k, shape) {
+  if (!k) return point;
+  const r = bendRadius(point.u, point.v, shape);
+  const grow = 1 + k * r * r;
+  return { u: 0.5 + (point.u - 0.5) * grow, v: 0.5 + (point.v - 0.5) * grow };
+}
+
+/** …and back: where a straight lens would have put the photo's pixel at `point`. */
+export function straightened(point, k, shape) {
+  if (!k) return point;
+  const far = bendRadius(point.u, point.v, shape);
+  if (!(far > 0)) return point;
+  // the radius a straight lens gives, r + k r³ = far, by Newton from the curved one
+  let r = far;
+  for (let i = 0; i < 12; i += 1) {
+    const step = (r + k * r * r * r - far) / (1 + 3 * k * r * r);
+    r -= step;
+    if (Math.abs(step) < 1e-10) break;
+  }
+  const shrink = r / far;
+  return { u: 0.5 + (point.u - 0.5) * shrink, v: 0.5 + (point.v - 0.5) * shrink };
+}
+
+// -- the photo's shape, pulled by its corners ----------------------------------------
+
+/**
+ * The photo's four corners where it lies untouched, in the frame's own
+ * coordinates (0 to 1 across and down): top left, top right, bottom right,
+ * bottom left. A warp is the same four, moved: the photo is drawn between
+ * them in perspective, as a collage's piece is, which squares a photo taken
+ * at a slant or squeezes a stretched one back.
+ */
+export const FLAT_CORNERS = Object.freeze([
+  Object.freeze({ u: 0, v: 0 }),
+  Object.freeze({ u: 1, v: 0 }),
+  Object.freeze({ u: 1, v: 1 }),
+  Object.freeze({ u: 0, v: 1 }),
+]);
+
+/** How far past the frame a corner may be pulled, in frames: far enough to stretch, near enough to find again. */
+export const WARP_REACH = 1;
+
+/** A corner kept within reach of the frame. */
+export function clampCorner({ u, v }) {
+  return { u: clamp(u, -WARP_REACH, 1 + WARP_REACH), v: clamp(v, -WARP_REACH, 1 + WARP_REACH) };
+}
+
+/** Whether four corners are where an untouched photo has them. */
+export function isFlat(corners) {
+  return !corners || corners.every((corner, index) => Math.abs(corner.u - FLAT_CORNERS[index].u) < 1e-9 && Math.abs(corner.v - FLAT_CORNERS[index].v) < 1e-9);
+}
+
+/**
+ * The 3×3 matrix, row by row, that takes a point of the photo (0 to 1) to
+ * where it lies between four corners (Heckbert's square to quad). Null when
+ * the corners have folded onto a line.
+ */
+export function warpMatrix(corners) {
+  const [p0, p1, p2, p3] = corners;
+  const sx = p0.u - p1.u + p2.u - p3.u;
+  const sy = p0.v - p1.v + p2.v - p3.v;
+  const dx1 = p1.u - p2.u;
+  const dx2 = p3.u - p2.u;
+  const dy1 = p1.v - p2.v;
+  const dy2 = p3.v - p2.v;
+  const den = dx1 * dy2 - dx2 * dy1;
+  if (Math.abs(den) < 1e-12) return null;
+  const g = (sx * dy2 - dx2 * sy) / den;
+  const h = (dx1 * sy - sx * dy1) / den;
+  return [
+    p1.u - p0.u + g * p1.u, p3.u - p0.u + h * p3.u, p0.u,
+    p1.v - p0.v + g * p1.v, p3.v - p0.v + h * p3.v, p0.v,
+    g, h, 1,
+  ];
+}
+
+/** A 3×3 matrix's inverse, row by row; null for one that has none. */
+export function invertMatrix(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h;
+  const B = -(d * i - f * g);
+  const C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  if (Math.abs(det) < 1e-12) return null;
+  return [
+    A / det, -(b * i - c * h) / det, (b * f - c * e) / det,
+    B / det, (a * i - c * g) / det, -(a * f - c * d) / det,
+    C / det, -(a * h - b * g) / det, (a * e - b * d) / det,
+  ];
+}
+
+/** A point through a 3×3 matrix, in perspective. */
+export function throughMatrix(m, { u, v }) {
+  const w = m[6] * u + m[7] * v + m[8];
+  return { u: (m[0] * u + m[1] * v + m[2]) / w, v: (m[3] * u + m[4] * v + m[5]) / w };
+}
+
+/** Where a point of the photo lies in the frame once its corners are pulled. */
+export function warped(point, corners) {
+  const m = corners && !isFlat(corners) ? warpMatrix(corners) : null;
+  return m ? throughMatrix(m, point) : point;
+}
+
+/** …and back: the point of the photo under a point of the frame. */
+export function unwarped(point, corners) {
+  const m = corners && !isFlat(corners) ? warpMatrix(corners) : null;
+  const back = m && invertMatrix(m);
+  return back ? throughMatrix(back, point) : point;
+}
+
+/**
+ * What the GPU reads a pixel of the photo through: the frame to the photo,
+ * as a 3×3 matrix column by column (GLSL's order). The identity for none.
+ */
+export function warpUniform(corners) {
+  const m = corners && !isFlat(corners) ? warpMatrix(corners) : null;
+  const back = m ? invertMatrix(m) : null;
+  if (!back) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  return [back[0], back[3], back[6], back[1], back[4], back[7], back[2], back[5], back[8]];
+}
+
+/** Whether a point of the frame lies inside the four corners. */
+export function insideCorners(point, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+    const a = corners[i];
+    const b = corners[j];
+    if (a.v > point.v !== b.v > point.v && point.u < ((b.u - a.u) * (point.v - a.v)) / (b.v - a.v) + a.u) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * A stroke drawn in CSS pixels, as the photo's own coordinates (0 to 1), close
+ * points dropped; through a loupe, the point of the photo under each.
+ */
+export function strokeFrom(points, size, { spacing = 1.5, loupe = NO_LOUPE } = {}) {
   const kept = [];
   let last = null;
   for (const point of points) {
     if (last && Math.hypot(point.x - last.x, point.y - last.y) < spacing) continue;
-    kept.push({ u: clamp(point.x / size.width, 0, 1), v: clamp(point.y / size.height, 0, 1) });
+    const at = photoAt(loupe, point.x, point.y, size);
+    kept.push({ u: fraction(at.u), v: fraction(at.v) });
     last = point;
   }
   return kept;
+}
+
+const between = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+function pointToSegment(p, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = dx * dx + dy * dy;
+  const t = length ? clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / length, 0, 1) : 0;
+  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+}
+
+function crosses(a, b, c, d) {
+  const side = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
+}
+
+function segmentToSegment(a, b, c, d) {
+  if (crosses(a, b, c, d)) return 0;
+  return Math.min(pointToSegment(a, c, d), pointToSegment(b, c, d), pointToSegment(c, a, b), pointToSegment(d, a, b));
+}
+
+/**
+ * Strokes with what lies within `radius` screen pixels of a path rubbed out.
+ * Strokes and path are in the photo's coordinates; `scale` is the photo's
+ * size on screen (through a loupe, its magnified size). A stroke rubbed
+ * through the middle becomes two, and a piece too short to be a line goes.
+ * The strokes come back as they were when nothing was rubbed.
+ */
+export function eraseStrokes(strokes, path, radius, scale) {
+  if (!path.length || !(radius > 0)) return strokes;
+  const toPx = (p) => ({ x: p.u * scale.width, y: p.v * scale.height });
+  const toPhoto = (p) => ({ u: fraction(p.x / scale.width), v: fraction(p.y / scale.height) });
+  const rub = path.map(toPx);
+  const rubs = rub.length > 1 ? rub.slice(1).map((end, i) => [rub[i], end]) : [[rub[0], rub[0]]];
+  const near = (p) => rubs.some(([a, b]) => pointToSegment(p, a, b) < radius);
+  const touches = (a, b) => rubs.some(([c, d]) => segmentToSegment(a, b, c, d) < radius);
+  let changed = false;
+  const kept = [];
+  for (const stroke of strokes) {
+    const line = stroke.map(toPx);
+    let piece = [];
+    const close = () => {
+      if (piece.length > 1) kept.push(piece);
+      piece = [];
+    };
+    if (near(line[0])) changed = true;
+    else piece.push(stroke[0]);
+    for (let i = 1; i < line.length; i += 1) {
+      const a = line[i - 1];
+      const b = line[i];
+      if (!touches(a, b)) {
+        piece.push(stroke[i]);
+        continue;
+      }
+      // the stretch the rubber crossed, walked finely enough to cut it where it did
+      changed = true;
+      const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / (radius / 3)));
+      for (let k = 1; k <= steps; k += 1) {
+        const at = k === steps ? b : between(a, b, k / steps);
+        if (near(at)) close();
+        else piece.push(k === steps ? stroke[i] : toPhoto(at));
+      }
+    }
+    close();
+  }
+  return changed ? kept : strokes;
 }
 
 /** The most points a trace is read at: plenty for a skyline, cheap enough per frame. */

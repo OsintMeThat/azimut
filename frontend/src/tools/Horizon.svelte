@@ -5,10 +5,11 @@
    * Satellite answers "what is this ground"; this tab answers what an eye
    * standing on it sees, which is the question a photo or a video puts to an
    * investigator: from where, looking which way, was this taken. The picture
-   * is the app's own horizon march from that eye (engine/horizon.py), curved
-   * Earth and refraction included, never exaggerated, and every reading taken
-   * off it (a summit's name, a clicked slope's distance, whether a mast is in
-   * sight) comes from that one march.
+   * is the terrain round that eye drawn on the GPU, on the same curved Earth
+   * and refraction as the app's horizon march (engine/horizon.py), never
+   * exaggerated: a summit's name sits on the march's skyline, a clicked slope's
+   * distance is read off the very ground drawn, and whether a mast is in sight
+   * is the march's line of sight.
    *
    * Three layouts around one map, which is moved rather than mounted twice:
    *
@@ -20,7 +21,16 @@
    * - **Looking**: the view is the hero, the whole turn in a strip over it; the
    *   map shrinks to the top of the inspector on the right, where a click
    *   marks a point the view then shows, in sight or hidden, and the eye can
-   *   be dragged. The inspector folds away for a wider view.
+   *   be dragged. The inspector folds away for a wider view. The small map
+   *   can trade places with the view, as a street-level viewer's does: the map
+   *   then fills the main area and the view waits, live, in the map's corner,
+   *   a click away from coming back.
+   *
+   * The map lays the borders, the place names and the case's saved work over
+   * its picture from the start, in every layout and before any eye, the three
+   * a read of the ground begins with;
+   * its own Layers menu turns each off and picks the base map (satellite,
+   * topographic, streets), all key-less.
    *
    * A photo or a video can be laid over the view (state/overlay.svelte.js):
    * the frame then takes its shape between a band over it (which file, how
@@ -32,23 +42,36 @@
    */
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
-  import { caseState, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { assignFolder } from '../lib/filing.js';
   import { splitHash } from '../lib/hash.js';
   import { copyText } from '../lib/clipboard.js';
   import { onBackForward, settlePlace } from '../lib/backButton.js';
   import { openMapAt } from '../lib/navigate.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { createSurface } from '../lib/map/surface.js';
+  import { seenLens } from '../lib/horizon/camera.js';
   import { bearingBetween, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
   import { HZ } from '../lib/horizon/marks.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
-  import { fitFrame, fitToTrace, gapDegrees, skylineBetween, traceGap, traceSamples } from '../lib/horizon/overlay.js';
+  import {
+    fitFrame,
+    fitToTrace,
+    gapDegrees,
+    loupeMoved,
+    skylineBetween,
+    traceGap,
+    traceSamples,
+  } from '../lib/horizon/overlay.js';
   import { createImageryState } from './satellite/state/imagery.svelte.js';
+  import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createHorizonState } from './horizon/state/horizon.svelte.js';
   import { createOverlayState } from './horizon/state/overlay.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
+  import MapLayers from './satellite/MapLayers.svelte';
+  import SavedOverlay from './satellite/SavedOverlay.svelte';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import HorizonView from './horizon/HorizonView.svelte';
   import HorizonStrip from './horizon/HorizonStrip.svelte';
@@ -80,11 +103,24 @@
   let moving = $state(false);
   /** The inspector folded away, for a wider view. */
   let folded = $state(false);
+  /** The map and the view traded places: the map large, the view waiting in its corner. */
+  let mapLarge = $state(false);
+  /** The small map's Layers menu, open. */
+  let layersOpen = $state(false);
   /** How to set Copernicus up, shown over the view when its locked switch is pressed. */
   let copernicusHelp = $state(false);
   const copernicus = $derived(Boolean(imagery.providers?.length && imagery.find('sentinel2')));
 
   const layout = $derived(!view.observer ? 'picking' : moving ? 'moving' : 'looking');
+  /** The loupe the view is seen through while a photo lies on it, or null. */
+  const seenLoupe = $derived(
+    overlay.source && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null
+  );
+  /** What the view shows, through that loupe: the heading and width the map's cone and knob follow. */
+  const shownLens = $derived(
+    seenLoupe ? { ...view.camera, ...seenLens({ ...view.camera, width: frame.width, height: frame.height, loupe: seenLoupe }) } : view.camera
+  );
+  const swapped = $derived(mapLarge && layout === 'looking');
 
   // -- opening ------------------------------------------------------------------
 
@@ -184,6 +220,7 @@
   $effect(() => {
     void layout;
     void folded;
+    void swapped;
     if (!surface) return;
     tick().then(() => surface?.resize());
   });
@@ -215,10 +252,73 @@
   }
 
   function onKey(event) {
-    if (event.key === 'Escape' && moving && !pointMenu && !event.defaultPrevented) {
+    if (event.key !== 'Escape' || pointMenu || event.defaultPrevented) return;
+    if (layersOpen) {
+      event.preventDefault();
+      layersOpen = false;
+    } else if (moving) {
       event.preventDefault();
       cancelMove();
+    } else if (swapped) {
+      event.preventDefault();
+      mapLarge = false;
     }
+  }
+
+  // -- the map's layers ----------------------------------------------------------------
+
+  /** The key-less base maps the small map offers, in the order they are read. */
+  const MAP_BASES = [
+    { id: 'esri-world-imagery', label: 'Satellite', title: 'Esri satellite imagery' },
+    { id: 'opentopomap', label: 'Topographic', title: 'OpenTopoMap: contour lines and summit names' },
+    { id: 'osm', label: 'Streets', title: 'OpenStreetMap' },
+  ];
+  const bases = $derived(MAP_BASES.filter((base) => imagery.find(base.id)));
+  const baseIsImagery = $derived(imagery.find(providerId)?.imagery ?? true);
+  /** Borders, place names and the case's saved work, on from the start. */
+  const mapLayers = $state({ boundaries: true, placenames: true, saved: true });
+  const overlays = $derived(
+    [mapLayers.boundaries && 'boundaries', mapLayers.placenames && baseIsImagery && 'placenames'].filter(Boolean)
+  );
+
+  // the case's saved work: places, captures and located photos and videos, read as Satellite reads them
+  const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
+  $effect(() => savedWork.load(caseState.current?.id ?? null));
+  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
+  const savedItems = $derived([...savedWork.rows, ...savedWork.media]);
+
+  const layerRows = $derived([
+    {
+      id: 'boundaries',
+      label: 'Borders',
+      on: mapLayers.boundaries,
+      title: 'Country, region and district borders, from Esri',
+      toggle: () => (mapLayers.boundaries = !mapLayers.boundaries),
+    },
+    {
+      id: 'placenames',
+      label: 'Place names',
+      on: mapLayers.placenames,
+      disabled: !baseIsImagery,
+      detail: baseIsImagery ? '' : 'imagery only',
+      title: baseIsImagery ? 'Towns, villages and hamlets, from OpenStreetMap via OpenFreeMap' : 'Only useful over satellite imagery',
+      toggle: () => (mapLayers.placenames = !mapLayers.placenames),
+    },
+    {
+      id: 'saved',
+      label: 'Saved work',
+      on: mapLayers.saved,
+      disabled: !savedItems.length,
+      detail: savedItems.length ? String(savedItems.length) : '',
+      title: savedItems.length ? "This case's saved places and captures, and its located photos and videos" : 'Nothing is saved or placed in this case yet',
+      toggle: () => (mapLayers.saved = !mapLayers.saved),
+    },
+  ]);
+
+  /** A saved item picked on the map: the map goes to it. */
+  function flyToSaved(row) {
+    if (row.lat == null || row.lon == null || !engine) return;
+    engine.setView({ lat: Number(row.lat), lon: Number(row.lon) }, Math.max(engine.getZoom(), Number(row.zoom) || 13));
   }
 
   // -- the marks on the map --------------------------------------------------------
@@ -246,7 +346,7 @@
   function lookHandle(eye) {
     const zoom = mapView?.zoom ?? 12;
     const metresPerPixel = (156543.03 * Math.cos((eye.lat * Math.PI) / 180)) / 2 ** zoom;
-    return groundPoint(eye, view.camera.heading, HANDLE_PX * metresPerPixel);
+    return groundPoint(eye, shownLens.heading, HANDLE_PX * metresPerPixel);
   }
   // set while the knob is in the hand, so the view turning under it does not move it back
   let aiming = false;
@@ -259,6 +359,8 @@
     const eye = view.observer;
     const target = view.target;
     const pointed = view.pointed;
+    // a photo held to the terrain: neither the eye nor its heading may be dragged away from it
+    const held = Boolean(overlay.source && overlay.locked);
     if (!eyeLayer) return;
     const state = !target ? '' : target.busy || target.error ? 'busy' : target.visible ? 'seen' : 'hidden';
     eyeLayer.set([
@@ -269,8 +371,8 @@
         className: 'horizon-look',
         html: '<span></span>',
         size: [12, 12],
-        title: 'Drag to turn the view',
-        draggable: true,
+        title: held ? 'The photo is locked to the terrain' : 'Drag to turn the view',
+        draggable: !held,
         zIndex: 901,
         onDragStart: () => (aiming = true),
         onDrag: (at) => {
@@ -290,8 +392,8 @@
         className: 'horizon-eye',
         html: `<span style="background:${HZ.lens}"></span>`,
         size: [16, 16],
-        title: 'The viewpoint: drag to move it',
-        draggable: true,
+        title: held ? 'The viewpoint, held while the photo is locked' : 'The viewpoint: drag to move it',
+        draggable: !held,
         zIndex: 900,
         onDrag: (at) => (dragAt = at),
         onDragEnd: () => {
@@ -326,7 +428,7 @@
   // the knob follows the view as it turns, and the map as it zooms
   $effect(() => {
     const eye = view.observer;
-    void view.camera.heading;
+    void shownLens.heading;
     void mapView?.zoom;
     if (!eyeLayer || !eye || aiming) return;
     const knob = lookHandle(eye);
@@ -338,8 +440,8 @@
   let coneDrawn = false;
   $effect(() => {
     const eye = view.observer;
-    const points = footprint(eye, view.panorama, view.camera, {
-      step: Math.max(0.5, Math.min(view.camera.fov, 360) / 90),
+    const points = footprint(eye, view.panorama, shownLens, {
+      step: Math.max(0.5, Math.min(shownLens.fov, 360) / 90),
       limit: view.visibility ?? Infinity,
     });
     if (!coneLayer) return;
@@ -448,7 +550,12 @@
 
   const credits = $derived.by(() => {
     const names = (view.panorama?.credits ?? []).map((credit) => credit.attribution);
-    if (view.ground === 'imagery' && view.drape) names.push(...view.drape.credits.map((credit) => credit.attribution));
+    if (view.imagery) {
+      // a dated release is credited as its archive is
+      const provider = imagery.find(view.imagery.provider) ?? imagery.find(view.imagery.provider.split('~')[0]);
+      if (view.imagery.near) names.push(imagery.find('sentinel2')?.attribution);
+      names.push(provider?.attribution);
+    }
     if (view.peaksOn && view.peaks.length) names.push('© OpenStreetMap contributors');
     const resolution = view.panorama?.resolution ? `${view.panorama.resolution} m relief` : '';
     return [...names, resolution].filter(Boolean).join(' · ');
@@ -459,10 +566,11 @@
 
   // -- the photo laid over the view ------------------------------------------------
 
-  /** The terrain's skyline at an azimuth: the finer window's where it reaches, the turn's elsewhere. */
-  const skyline = (azimuth) => skylineBetween(view.detail, azimuth) ?? skylineBetween(view.panorama, azimuth);
+  /** The terrain's skyline at an azimuth, from the turn the app marched. */
+  const skyline = (azimuth) => skylineBetween(view.panorama, azimuth);
   const traceCamera = $derived({ ...view.camera, width: frame.width, height: frame.height });
-  const samples = $derived(overlay.traceShown && frame.width ? traceSamples(overlay.strokes, frame) : []);
+  // the trace as it shows on the straightened photo, which is what meets the terrain
+  const samples = $derived(overlay.traceShown && frame.width ? traceSamples(overlay.strokesSeen, frame) : []);
   const gap = $derived(samples.length && view.panorama ? traceGap(samples, traceCamera, skyline) : null);
 
   /**
@@ -470,6 +578,7 @@
    * when it said one. The toast says what changed and takes it back.
    */
   function fit() {
+    if (overlay.locked) return;
     const result = fitToTrace(samples, traceCamera, skyline, { lens: !overlay.lens });
     if (!result) {
       toast('Trace more of the skyline first', 'warn');
@@ -486,6 +595,14 @@
       label: 'Undo',
       onClick: () => view.look({ heading, tilt, roll, fov }),
     });
+  }
+
+  /** The skyline found in the photo, laid as the trace; the toast takes it back. */
+  function detect() {
+    const result = overlay.detectSkyline();
+    if (result.error) toast(result.error, 'warn');
+    else if (!result.found) toast('No clear skyline in this photo', 'warn');
+    else toast('Skyline found: rub out what is not the ridge', 'ok', 8000, { label: 'Undo', onClick: () => overlay.undoStroke() });
   }
 
   function layCase(item) {
@@ -551,7 +668,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="horizon-tool {layout}" class:folded>
+<div class="horizon-tool {layout}" class:folded class:swapped>
   <div class="hz-main">
     <header class="tool-header hz-head">
       {#if layout === 'looking'}
@@ -572,7 +689,7 @@
       {#if layout === 'looking' && !overlay.source}
         <button
           type="button"
-          class="btn btn-sm hz-act"
+          class="btn btn-primary btn-sm hz-act"
           onclick={() => (photoDialog = true)}
           title="Lay a photo or video over the view to match it"
           aria-label="Add a photo or video"
@@ -586,7 +703,10 @@
         <button
           type="button"
           class="btn btn-ghost btn-sm fold"
-          onclick={() => (folded = !folded)}
+          onclick={() => {
+            folded = !folded;
+            mapLarge = false;
+          }}
           aria-expanded={!folded}
           title={folded ? 'Show the map and settings' : 'Hide the map and settings'}
           aria-label={folded ? 'Show the map and settings' : 'Hide the map and settings'}
@@ -597,11 +717,22 @@
     </header>
 
     <div class="hz-stage dark-surface">
-      <HorizonStrip {view} {frame} {bodies} />
+      {#if !swapped}
+        <HorizonStrip {view} {frame} {bodies} locked={Boolean(overlay.source && overlay.locked)} loupe={seenLoupe} />
+      {/if}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="view-area" ondragover={onDragOver} ondragleave={() => (dropping = false)} ondrop={onDrop}>
-        {#if overlay.source && layout === 'looking'}
-          <OverlayBar {overlay} {gap} onchange={() => (photoDialog = true)} onfit={fit} />
+        {#if overlay.source && layout === 'looking' && !swapped}
+          <OverlayBar
+            {overlay}
+            {gap}
+            {view}
+            {copernicus}
+            onsetup={() => (copernicusHelp = true)}
+            onchange={() => (photoDialog = true)}
+            onfit={fit}
+            ondetect={detect}
+          />
         {/if}
         <div class="frame-slot" bind:clientWidth={slot.width} bind:clientHeight={slot.height}>
           <div
@@ -632,7 +763,7 @@
             </div>
           {/if}
         </div>
-        {#if overlay.source?.kind === 'video' && layout === 'looking'}
+        {#if overlay.source?.kind === 'video' && layout === 'looking' && !swapped}
           <OverlayTransport {overlay} />
         {/if}
         {#if copernicusHelp}
@@ -645,10 +776,14 @@
             <p>{view.error}</p>
             <button type="button" class="btn btn-sm" onclick={() => view.retry()}>Try again</button>
           </div>
-        {:else if layout === 'looking' && !view.panorama}
-          <p class="drawing"><span class="spinner" aria-hidden="true"></span>Drawing the view…</p>
         {/if}
       </div>
+      {#if swapped}
+        <!-- the view waits in the map's corner, live: a click brings it back -->
+        <button type="button" class="hz-back" onclick={() => (mapLarge = false)} title="Back to the view (Esc)">
+          <span class="hz-back-tag"><Icon name="maximize" size={12} />Back to the view</span>
+        </button>
+      {/if}
     </div>
   </div>
 
@@ -670,6 +805,7 @@
         bind:refused
         bind:providerId
         {imagery}
+        {overlays}
         home={mapView}
         resetToHome={false}
         chrome={false}
@@ -693,6 +829,16 @@
             />
           </div>
         {/if}
+        {#if mapLayers.saved && caseState.current}
+          <SavedOverlay
+            engine={ready ? engine : null}
+            items={savedItems}
+            caseId={caseState.current.id}
+            coords={(item) => fmtCoords(item.lat, item.lon)}
+            onopen={flyToSaved}
+            onrefresh={reloadCase}
+          />
+        {/if}
         {#if pointMenu}
           <MapContextMenu
             at={pointMenu}
@@ -706,6 +852,51 @@
           />
         {/if}
       </MapSurface>
+      <!-- the layers from the first look at the map, before any eye: they say where one is -->
+      <div class="hz-map-tools">
+        <button
+          type="button"
+          class="hz-map-btn"
+          class:on={layersOpen}
+          aria-expanded={layersOpen}
+          aria-controls="hz-map-layers"
+          onclick={() => (layersOpen = !layersOpen)}
+          title="Base map and layers"
+          aria-label="Map layers"
+        >
+          <Icon name="layers" size={14} />
+        </button>
+        {#if layout === 'looking'}
+          <button
+            type="button"
+            class="hz-map-btn"
+            onclick={() => {
+              mapLarge = !mapLarge;
+              layersOpen = false;
+            }}
+            title={swapped ? 'Back to the view (Esc)' : 'Enlarge the map, the view in its corner'}
+            aria-label={swapped ? 'Back to the view' : 'Enlarge the map'}
+          >
+            <Icon name={swapped ? 'minimize' : 'maximize'} size={14} />
+          </button>
+        {/if}
+      </div>
+      {#if layersOpen}
+        <div class="hz-layers" id="hz-map-layers" role="dialog" aria-label="Base map and layers">
+          <div class="hz-bases" role="group" aria-label="Base map">
+            {#each bases as base (base.id)}
+              <button
+                type="button"
+                class:on={providerId === base.id}
+                aria-pressed={providerId === base.id}
+                title={base.title}
+                onclick={() => (providerId = base.id)}>{base.label}</button
+              >
+            {/each}
+          </div>
+          <MapLayers rows={layerRows} />
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -885,18 +1076,6 @@
   .trouble p {
     margin: 0;
   }
-  .drawing {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin: 0;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    pointer-events: none;
-  }
   .spinner {
     width: 10px;
     height: 10px;
@@ -955,15 +1134,145 @@
     display: none;
   }
   /* the small map zooms with the wheel: its buttons would cover the ground round the eye */
-  .looking .hz-map :global(.maplibregl-ctrl-top-left) {
+  .looking:not(.swapped) .hz-map :global(.maplibregl-ctrl-top-left) {
     display: none;
   }
-  /* the small map's credit wraps beside its scale bar rather than over it */
-  .looking .hz-map :global(.maplibregl-ctrl-attrib) {
-    max-width: 230px;
-    white-space: normal;
+  /* traded places: the map fills the main area under the header, the view waits in its corner */
+  .looking.swapped .hz-map {
+    top: 40px;
+    right: 340px;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    height: auto;
+    border-left: none;
+    border-bottom: none;
+  }
+  /* placed against the tool itself: the inspector's top, where the small map was */
+  .looking.swapped .hz-stage {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 3;
+    width: 340px;
+    height: 250px;
+    border-left: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .looking.swapped .hz-stage :global(:is(.controls, .hint, .scale, .credits, .loupe, .away, .warp-corner, .caret-row)) {
+    display: none;
+  }
+  .hz-back {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: flex-end;
+    padding: 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .hz-back-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: var(--r-md);
+    background: var(--hz-glass);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+  }
+  .hz-back:hover .hz-back-tag,
+  .hz-back:focus-visible .hz-back-tag {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .hz-back:focus-visible {
+    outline: none;
+  }
+  .hz-map-tools {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 700;
+    display: flex;
+    gap: 4px;
+  }
+  .hz-map-btn {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--text-1);
+    cursor: pointer;
+  }
+  .hz-map-btn:hover,
+  .hz-map-btn.on {
+    color: var(--accent);
+  }
+  .hz-map-btn:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .hz-layers {
+    position: absolute;
+    top: 42px;
+    right: 8px;
+    z-index: 701;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 236px;
+    padding: 10px;
+    border-radius: var(--r-md);
+    background: var(--bg-1);
+    box-shadow:
+      0 0 0 1px var(--border),
+      0 8px 24px rgba(0, 0, 0, 0.35);
+    font-size: var(--fs-xs);
+  }
+  .hz-bases {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--r-md);
+    background: var(--bg-0);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .hz-bases button {
+    flex: 1;
+    min-height: 24px;
+    padding: 0 6px;
+    border-radius: var(--r-sm);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .hz-bases button:hover {
+    color: var(--text-1);
+  }
+  .hz-bases button.on {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  /* the small map's credits hold one line beside its scale bar, the whole of them under the pointer */
+  .looking:not(.swapped) .hz-map :global(.maplibregl-ctrl-attrib) {
+    max-width: 210px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     text-align: right;
     line-height: 1.25;
+  }
+  .looking:not(.swapped) .hz-map :global(.maplibregl-ctrl-attrib:hover) {
+    max-width: 320px;
+    white-space: normal;
   }
   .hz-search {
     position: absolute;

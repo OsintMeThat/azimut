@@ -1,10 +1,12 @@
-"""What can be seen from a point, as the picture the Horizon tab looks through.
+"""What can be seen from a point, and the tiles the Horizon tab's mesh is built from.
 
 The panorama is computed here, by the same march every relief tool reads
 (engine/horizon.py), and sent as rasters over azimuth and elevation: the
-distance to the ground at each pixel, and the ground's slope there. The browser
-only reprojects them to a camera and colours them, so turning, zooming, tilting
-or relighting the view never asks for a new sweep; moving the eye does.
+distance to the ground at each pixel, and the ground's slope there. The tab
+reads its skyline, the summit names and the strip from them; moving the eye
+asks for a new sweep. `/peaks`, `/target`, `/sky` and `/photo` answer the
+smaller questions around it: named summits, whether a point is hidden, the sun
+and the moon against the ridges, and what a photo says about its lens.
 
 The rasters travel deflated and base64-encoded inside the JSON: one request,
 nothing to keep in step, and the browser inflates them with its own
@@ -12,9 +14,13 @@ DecompressionStream. Distances go as 16-bit codes on a log scale (`DEPTH_*`),
 which keeps one part in five thousand at every range, a fifth of a metre a
 kilometre out, in half the bytes of a float and far fewer once deflated.
 
-A picture covers the whole turn, or a window of it: a narrow lens looking
-through a telephoto wants cells finer than a full turn can afford, so the tab
-asks for the few degrees it shows at the step its pixels need.
+The ground itself is drawn in the browser, as a mesh on the GPU, from tiles it
+reads in batches here (`/tiles/terrain`, `/tiles/imagery`): a browser opens six
+connections to one host, so hundreds of small images would queue where one
+answer per few dozen tiles does not. Imagery goes through the map's own cache
+and proxy (api/satellite.py), so the meter, the native ceiling and the overzoom
+over gaps are the map's. `/tiles/estimate` says what Sentinel-2 laid near the
+eye would ask of Sentinel Hub, before anything is fetched.
 """
 
 from __future__ import annotations
@@ -22,18 +28,19 @@ from __future__ import annotations
 import base64
 import io
 import math
-import threading
+import re
+import struct
 import zlib
-from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
-from PIL import Image
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 
 from .. import config
-from ..engine import drape as drape_engine, horizon, peaks, sentinel as sentinel_engine, shadow as shadow_engine, terrain
+from ..engine import horizon, peaks, sentinel as sentinel_engine, terrain
 
 router = APIRouter(prefix="/api/horizon", tags=["horizon"])
 
@@ -57,14 +64,30 @@ PROBE_STEP = 1.0
 # band over the highest ridge afterwards, rather than sized by a probe first:
 # the extra rows cost less than the probe's turn.
 UNPROBED_CELLS = 400_000
-# Distance codes: 0 is sky, 1..65535 run from DEPTH_MIN to DEPTH_MAX metres on a
-# log scale (frontend lib/horizon/panorama.js decodes them).
+# Distance codes: frontend lib/horizon/panorama.js decodes them.
 DEPTH_MIN = 1.0
 DEPTH_MAX = 1_000_000.0
 DEPTH_CODES = 65534
 
 
-class PanoramaIn(BaseModel):
+def depth_codes(depth: np.ndarray) -> np.ndarray:
+    """Distances in metres (NaN for sky) as 16-bit log codes: 0 is sky, 1..65535 run
+    from DEPTH_MIN to DEPTH_MAX."""
+    span = math.log(DEPTH_MAX / DEPTH_MIN)
+    clipped = np.clip(np.nan_to_num(depth, nan=DEPTH_MIN), DEPTH_MIN, DEPTH_MAX)
+    codes = 1 + np.rint(np.log(clipped / DEPTH_MIN) / span * DEPTH_CODES)
+    codes[np.isnan(depth)] = 0
+    return codes.astype(np.uint16)
+
+
+def normal_bytes(normal: np.ndarray) -> np.ndarray:
+    """A component of the ground's unit normal as a signed byte."""
+    return (np.clip(normal, -1, 1) * 127).round().astype(np.int8)
+
+
+class ViewIn(BaseModel):
+    """Where the eye stands, and what its picture is drawn through."""
+
     lat: float = Field(ge=-terrain.MAX_LAT, le=terrain.MAX_LAT)
     lon: float = Field(ge=-180, le=180)
     mode: Literal["ground", "drone", "aircraft"] = "ground"
@@ -73,26 +96,31 @@ class PanoramaIn(BaseModel):
     # Rays start this far out: the ground in front taken away.
     near: float = Field(default=0.0, ge=0, le=horizon.FAR_MAX)
     refraction: float = Field(default=horizon.REFRACTION_K, ge=0, le=0.3)
+
+    @model_validator(mode="after")
+    def _sane_eye(self) -> ViewIn:
+        low, high = HEIGHT_LIMITS[self.mode]
+        if not low <= self.height <= high:
+            raise ValueError(
+                f"a {self.mode} eye is {low:g} to {high:g} m high"
+            )
+        if self.far is not None and self.near >= self.far:
+            raise ValueError("the near limit must be closer than the far one")
+        return self
+
+
+class PanoramaIn(ViewIn):
     step: float = Field(default=0.1, ge=0.005, le=1.0)
     top: float | None = Field(default=None, ge=-90, le=90)
     bottom: float | None = Field(default=None, ge=-90, le=90)
     # A window of the turn, from this azimuth clockwise over this many degrees.
     azimuth_start: float = Field(default=0.0, ge=0, lt=360)
     azimuth_span: float = Field(default=360.0, gt=0, le=360)
-    # The finest terrain all round out to engine/horizon.py FULL_DETAIL_REACH.
-    full_detail: bool = False
 
     @model_validator(mode="after")
     def _sane(self) -> PanoramaIn:
-        low, high = HEIGHT_LIMITS[self.mode]
-        if not low <= self.height <= high:
-            raise ValueError(
-                f"a {self.mode} eye is {low:g} to {high:g} m high"
-            )
         if self.top is not None and self.bottom is not None and self.top <= self.bottom:
             raise ValueError("the top of the view must be above its bottom")
-        if self.far is not None and self.near >= self.far:
-            raise ValueError("the near limit must be closer than the far one")
         return self
 
 
@@ -100,42 +128,6 @@ def _pack(array: np.ndarray) -> str:
     """Little-endian bytes, deflated, in base64."""
     raw = np.ascontiguousarray(array).astype(array.dtype.newbyteorder("<"), copy=False).tobytes()
     return base64.b64encode(zlib.compress(raw, 6)).decode("ascii")
-
-
-# The last few pictures drawn, so the imagery laid over one (`/drape`) reads its
-# distances rather than marching the same rays again.
-_PICTURES_KEPT = 4
-_pictures: OrderedDict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = OrderedDict()
-_pictures_lock = threading.Lock()
-
-
-def _picture_key(body: PanoramaIn) -> str:
-    return body.model_dump_json()
-
-
-def _keep_picture(key: str, azimuths: np.ndarray, rows: np.ndarray, depth: np.ndarray) -> None:
-    with _pictures_lock:
-        _pictures[key] = (azimuths, rows, depth)
-        _pictures.move_to_end(key)
-        while len(_pictures) > _PICTURES_KEPT:
-            _pictures.popitem(last=False)
-
-
-def _kept_picture(key: str) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    with _pictures_lock:
-        found = _pictures.get(key)
-        if found is not None:
-            _pictures.move_to_end(key)
-        return found
-
-
-def depth_codes(depth: np.ndarray) -> np.ndarray:
-    """Distances in metres (NaN for sky) as 16-bit log codes."""
-    span = math.log(DEPTH_MAX / DEPTH_MIN)
-    clipped = np.clip(np.nan_to_num(depth, nan=DEPTH_MIN), DEPTH_MIN, DEPTH_MAX)
-    codes = 1 + np.rint(np.log(clipped / DEPTH_MIN) / span * DEPTH_CODES)
-    codes[np.isnan(depth)] = 0
-    return codes.astype(np.uint16)
 
 
 def _rows(top: float, bottom: float, step: float) -> np.ndarray:
@@ -149,7 +141,6 @@ def panorama(body: PanoramaIn) -> dict[str, Any]:
     found, rows, azimuths, sampler = _draw(body)
     assert found.depth is not None and found.normal_east is not None
     assert found.normal_north is not None
-    _keep_picture(_picture_key(body), azimuths, rows, found.depth)
     return {
         "observer": {
             "lat": body.lat, "lon": body.lon, "mode": body.mode, "height": body.height,
@@ -167,8 +158,8 @@ def panorama(body: PanoramaIn) -> dict[str, Any]:
         "skyline_distance": [round(float(v), 1) for v in found.skyline_distance],
         "depth": _pack(depth_codes(found.depth)),
         "depth_scale": {"min": DEPTH_MIN, "max": DEPTH_MAX, "codes": DEPTH_CODES},
-        "normal_east": _pack((np.clip(found.normal_east, -1, 1) * 127).round().astype(np.int8)),
-        "normal_north": _pack((np.clip(found.normal_north, -1, 1) * 127).round().astype(np.int8)),
+        "normal_east": _pack(normal_bytes(found.normal_east)),
+        "normal_north": _pack(normal_bytes(found.normal_north)),
         "resolution_m": sampler.resolution(body.lat),
         "credits": sampler.credits(),
     }
@@ -202,7 +193,7 @@ def _draw(body: PanoramaIn) -> tuple[horizon.Horizon, np.ndarray, np.ndarray, te
             )
         found = horizon.sweep(
             observer, azimuths=azimuths, rows=rows, far=body.far, k=body.refraction,
-            sampler=sampler, near=body.near, full_detail=body.full_detail,
+            sampler=sampler, near=body.near,
         )
     except horizon.BelowGround as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -227,106 +218,6 @@ def _draw(body: PanoramaIn) -> tuple[horizon.Horizon, np.ndarray, np.ndarray, te
 # few tens of 512 px tiles at 10 m, and past it Sentinel-2's pixel is the size of a
 # field anyway.
 NEAR_REACH_MAX = 30_000.0
-
-
-class DrapeIn(PanoramaIn):
-    """A picture already asked for, and the imagery to lay over it.
-
-    `provider` is a free one, over all the ground. `near_provider`, a Sentinel-2
-    rendering (a variant id), is laid on the ground nearer than `near_reach`
-    metres only: the one billed picture a view may carry, kept to the few
-    tiles near the eye.
-    """
-
-    provider: str = "esri-world-imagery"
-    near_provider: str | None = Field(default=None, max_length=120)
-    near_reach: float = Field(default=5_000.0, ge=500.0, le=NEAR_REACH_MAX)
-
-
-@router.post("/drape")
-def drape(body: DrapeIn) -> dict[str, Any]:
-    """The ground's colours over a picture, on the same grid as its distances.
-
-    The picture is read from the ones just drawn when the same eye and grid
-    were asked for, and marched again otherwise. Only a free provider whose
-    tiles may be cached is laid over a view: a whole turn reads a few hundred
-    tiles, which on a billed provider would be quota spent on scenery.
-    """
-    from . import satellite as satellite_api
-
-    provider = _free_imagery(body.provider)
-    near_provider = _near_imagery(body.near_provider) if body.near_provider else None
-    azimuths, rows, depth = _picture_for(body)
-
-    def fetch_from(source: Any, tile: int) -> drape_engine.Fetch:
-        def fetch(z: int, x: int, y: int) -> np.ndarray | None:
-            served = satellite_api._serve_tile(source, z, x, y)
-            if served is None or not isinstance(served, tuple):
-                return None
-            return drape_engine.decode(served[0], tile)
-
-        return fetch
-
-    near = None
-    if near_provider is not None:
-        near = drape_engine.Near(
-            reach=body.near_reach, fetch=fetch_from(near_provider, near_provider.tile_size),
-            ceiling=_ceiling(near_provider), tile=near_provider.tile_size,
-        )
-    picture, used = drape_engine.drape_panorama(
-        body.lat, body.lon, azimuths, body.step, depth,
-        fetch_from(provider, drape_engine.TILE), _ceiling(provider), near=near,
-    )
-    buffer = io.BytesIO()
-    Image.fromarray(picture, "RGB").save(buffer, format="WEBP", quality=88, method=4)
-    return {
-        "image": base64.b64encode(buffer.getvalue()).decode("ascii"),
-        "width": int(picture.shape[1]),
-        "height": int(picture.shape[0]),
-        "provider": provider.id,
-        "near_provider": near_provider.id if near_provider else None,
-        "levels": sorted(used),
-        "credits": [
-            {"label": source.label, "attribution": source.attribution, "link": ""}
-            for source in ([near_provider] if near_provider else []) + [provider]
-        ],
-    }
-
-
-@router.post("/drape/estimate")
-def drape_estimate(body: DrapeIn) -> dict[str, Any]:
-    """How many billed tiles laying `near_provider` over a picture would ask for.
-
-    Worked out here from the picture's own grid, nothing fetched, and only the
-    tiles not already on disk counted: what the analyst is told before
-    Sentinel-2 is laid over a view.
-    """
-    from ..engine import tilecache
-
-    if not body.near_provider:
-        return {"requests": 0, "tiles": 0}
-    near_provider = _near_imagery(body.near_provider, check_quota=False)
-    azimuths, _rows, depth = _picture_for(body)
-    _cells, lat, lon, distance, footprint = drape_engine.ground_points(
-        body.lat, body.lon, azimuths, body.step, depth
-    )
-    close = distance < body.near_reach
-    wanted = drape_engine.tiles_for(
-        lat[close], lon[close], footprint[close], _ceiling(near_provider), near_provider.tile_size
-    )
-    missing = [key for key in wanted if not tilecache.has(near_provider.id, *key)]
-    return {"requests": len(missing), "tiles": len(wanted)}
-
-
-def _picture_for(body: PanoramaIn) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The picture a body names: kept from just now, or drawn again."""
-    grid = PanoramaIn(**{key: value for key, value in body.model_dump().items() if key in PanoramaIn.model_fields})
-    kept = _kept_picture(_picture_key(grid))
-    if kept is not None:
-        return kept
-    found, rows, azimuths, _sampler = _draw(grid)
-    assert found.depth is not None
-    return azimuths, rows, found.depth
 
 
 def _ceiling(provider: Any) -> int:
@@ -375,53 +266,136 @@ def _near_imagery(provider_id: str, *, check_quota: bool = True) -> Any:
     return provider
 
 
-class ShadowIn(PanoramaIn):
-    """A picture already asked for, and where the light stands over it."""
+# -- tile batches ---------------------------------------------------------------
 
-    light_azimuth: float = Field(ge=0, lt=360)
-    light_altitude: float = Field(ge=-10, le=90)
-    # Every this many cells across and down; unset, as few as keep the march
-    # to `SHADOW_CELLS` ground cells. A shadow is soft, and the browser blends
-    # between them.
-    every: int | None = Field(default=None, ge=1, le=8)
-
-
-# Ground cells a shadow march takes on: about a second and a half of work.
-SHADOW_CELLS = 150_000
+# Tiles one batch may ask for.
+TILES_MAX = 64
+_TILE_KEY = re.compile(r"^\d+/\d+/\d+$")
+# Bounded: the laptop this runs on has other things to do.
+_TILE_WORKERS = 12
+_tile_pool = ThreadPoolExecutor(max_workers=_TILE_WORKERS, thread_name_prefix="horizon-tiles")
 
 
-@router.post("/shadow")
-def shadow(body: ShadowIn) -> dict[str, Any]:
-    """How much of the sun or the moon each ground cell of a picture sees.
+def _tile_keys(t: str, max_zoom: int) -> list[tuple[int, int, int]]:
+    """The `z/x/y` keys of a batch, checked at the edge."""
+    keys = []
+    for part in t.split(","):
+        if not _TILE_KEY.match(part):
+            raise HTTPException(status_code=422, detail="Tiles are listed as z/x/y, comma-separated")
+        z, x, y = (int(v) for v in part.split("/"))
+        if z > max_zoom:
+            raise HTTPException(status_code=422, detail=f"Tile zoom goes up to {max_zoom}")
+        if x >= 1 << z or y >= 1 << z:
+            raise HTTPException(status_code=422, detail="A tile lies outside the grid of its zoom")
+        keys.append((z, x, y))
+    if not keys:
+        raise HTTPException(status_code=422, detail="Ask for at least one tile")
+    if len(keys) > TILES_MAX:
+        raise HTTPException(status_code=422, detail=f"At most {TILES_MAX} tiles in one request")
+    return keys
 
-    The ground's own slope is lit in the browser; what it cannot know is that
-    a ridge stands between a face and the light, which is a march over the
-    terrain from every cell (engine/shadow.py). The picture is read from the
-    ones just drawn when the same eye and grid were asked for, and marched
-    again otherwise. The answer is a light raster on the picture's grid, one
-    cell in `every` each way: 255 lit, 0 in shadow.
-    """
-    azimuths, rows, depth = _picture_for(body)
-    ground = int(np.isfinite(depth).sum())
-    every = body.every or max(1, min(8, math.ceil(math.sqrt(ground / SHADOW_CELLS))))
-    sampler = terrain.Sampler()
+
+def _batch(keys: list[tuple[int, int, int]], one: Any) -> Response:
+    """For each key in order, a little-endian u32 length (0: no tile) and the bytes."""
+    parts = list(_tile_pool.map(lambda key: one(*key), keys))
+    body = b"".join(struct.pack("<I", len(part)) + part for part in parts)
+    return Response(content=body, media_type="application/octet-stream")
+
+
+def _terrain_tile(z: int, x: int, y: int) -> bytes:
     try:
-        light = shadow_engine.shadow_panorama(
-            body.lat, body.lon, azimuths[::every], body.step * every, depth[::every, ::every],
-            body.light_azimuth, body.light_altitude, sampler, k=body.refraction,
-        )
-    except terrain.TerrainUnavailable as exc:
-        raise HTTPException(status_code=502, detail=f"Terrain could not be loaded: {exc}") from exc
-    return {
-        "light": _pack(light),
-        "azimuth": {
-            "start": float(azimuths[0]), "step": body.step * every, "count": int(light.shape[1]),
-            "full": body.azimuth_span >= 360.0,
-        },
-        "elevation": {"top": float(rows[0]), "step": body.step * every, "count": int(light.shape[0])},
-        "light_azimuth": body.light_azimuth,
-        "light_altitude": body.light_altitude,
-    }
+        fetched = terrain.tile(z, x, y)
+    except terrain.TerrainUnavailable:
+        return b""
+    return fetched[0] if fetched else b""
+
+
+@router.get("/tiles/terrain")
+def tiles_terrain(t: str = Query(max_length=TILES_MAX * 24)) -> Response:
+    """Terrain tiles in one answer, as `terrain.tile` returns them (engine/terrain.py)."""
+    return _batch(_tile_keys(t, terrain.MAX_ZOOM), _terrain_tile)
+
+
+@router.get("/tiles/imagery")
+def tiles_imagery(
+    t: str = Query(max_length=TILES_MAX * 24), provider: str = Query(min_length=1, max_length=120),
+) -> Response:
+    """Imagery tiles in one answer, each served as the map's tile proxy serves it.
+
+    A free imagery provider, or a Sentinel-2 rendering (billed per tile, refused
+    whole while the monthly free tier is paused).
+    """
+    from . import satellite as satellite_api
+
+    source = _imagery_source(provider)
+    keys = _tile_keys(t, source.max_zoom)
+
+    def one(z: int, x: int, y: int) -> bytes:
+        try:
+            answer = satellite_api.serve_tile(source, z, x, y)
+        except HTTPException:
+            return b""
+        return bytes(answer.body) if answer.status_code == 200 else b""
+
+    return _batch(keys, one)
+
+
+def _imagery_source(provider_id: str) -> Any:
+    if provider_id.partition(sentinel_engine.VARIANT_SEP)[0] == "sentinel2":
+        return _near_imagery(provider_id)
+    return _free_imagery(provider_id)
+
+
+class EstimateIn(BaseModel):
+    lat: float = Field(ge=-terrain.MAX_LAT, le=terrain.MAX_LAT)
+    lon: float = Field(ge=-180, le=180)
+    near_provider: str = Field(min_length=1, max_length=120)
+    near_reach: float = Field(default=5_000.0, ge=500.0, le=NEAR_REACH_MAX)
+
+
+def _tiles_within(lat: float, lon: float, reach: float, zoom: int) -> list[tuple[int, int, int]]:
+    """The Web Mercator tiles of a zoom that touch the disc of `reach` metres round a point."""
+    n = 1 << zoom
+    dlat = math.degrees(reach / terrain.EARTH_RADIUS)
+    dlon = dlat / max(math.cos(math.radians(lat)), 0.01)
+
+    def row(v: float) -> float:
+        v = max(-terrain.MAX_LAT, min(terrain.MAX_LAT, v))
+        return (1 - math.asinh(math.tan(math.radians(v))) / math.pi) / 2 * n
+
+    def latitude(r: float) -> float:
+        return math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * r / n))))
+
+    y0 = max(0, int(math.floor(row(lat + dlat))))
+    y1 = min(n - 1, int(math.floor(row(lat - dlat))))
+    x0 = int(math.floor((lon - dlon + 180) / 360 * n))
+    x1 = int(math.floor((lon + dlon + 180) / 360 * n))
+    found = []
+    for y in range(y0, y1 + 1):
+        low, high = latitude(y + 1), latitude(y)
+        near_lat = min(max(lat, low), high)
+        for x in range(x0, x1 + 1):
+            west, east = x / n * 360 - 180, (x + 1) / n * 360 - 180
+            near_lon = min(max(lon, west), east)
+            if terrain.distance(lat, lon, near_lat, near_lon) <= reach:
+                found.append((zoom, x % n, y))
+    return sorted(set(found))
+
+
+@router.post("/tiles/estimate")
+def tiles_estimate(body: EstimateIn) -> dict[str, int]:
+    """How many billed tiles laying Sentinel-2 near the eye would ask Sentinel Hub for.
+
+    The tiles at the provider's ceiling that touch the disc round the eye, and
+    those of them not already on disk. Worked out here, nothing fetched: what
+    the analyst is told before Sentinel-2 is laid.
+    """
+    from ..engine import tilecache
+
+    provider = _near_imagery(body.near_provider, check_quota=False)
+    wanted = _tiles_within(body.lat, body.lon, body.near_reach, _ceiling(provider))
+    missing = [key for key in wanted if not tilecache.has(provider.id, *key)]
+    return {"requests": len(missing), "tiles": len(wanted)}
 
 
 # Summit names reach no farther than this: past it they crowd the skyline

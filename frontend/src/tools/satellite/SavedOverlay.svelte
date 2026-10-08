@@ -85,7 +85,8 @@
         coords,
         fullscreen,
         onopen: close(onopen),
-        onedit: close(onedit),
+        // a map that cannot edit a saved item (Horizon's) offers no Edit
+        onedit: onedit && close(onedit),
         // tracing takes over the map, so the card that armed it gets out of
         // the way first — the same rule as every other act here
         ontrace: ontrace && close(ontrace),

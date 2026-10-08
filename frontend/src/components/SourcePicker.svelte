@@ -1,3 +1,14 @@
+<script module>
+  const FILTERS = [
+    { id: 'all', label: 'All' },
+    { id: 'image', label: 'Images' },
+    { id: 'video', label: 'Video' },
+    { id: 'capture', label: 'Captures' },
+    { id: 'frame', label: 'Frames' },
+    { id: 'collage', label: 'Collages' },
+  ];
+</script>
+
 <script>
   import { fileUrl } from '../lib/fileUrl.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
@@ -10,16 +21,9 @@
   // lead, most recent first, because going back to one is the common move; the
   // rest follow in library order. The same list is the empty state and the
   // "change file" dialog of both Inspect and Reverse Search, so none of them drift.
-  let { media, works = [], caseId, current = null, onpick } = $props();
-
-  const FILTERS = [
-    { id: 'all', label: 'All' },
-    { id: 'image', label: 'Images' },
-    { id: 'video', label: 'Video' },
-    { id: 'capture', label: 'Captures' },
-    { id: 'frame', label: 'Frames' },
-    { id: 'collage', label: 'Collages' },
-  ];
+  // A tool that reads only some kinds narrows the filters (`filters`), and a
+  // dialog that is one step of a larger task takes a denser grid (`dense`).
+  let { media, works = [], caseId, current = null, onpick, filters = FILTERS, dense = false } = $props();
 
   let query = $state('');
   let filter = $state('all');
@@ -68,7 +72,7 @@
       <button class="btn btn-ghost btn-sm browse" class:active={browsing} title="Browse folders" onclick={() => (browsing = !browsing)}>…</button>
     </div>
     <div class="filters" aria-label="Media type">
-      {#each FILTERS as f (f.id)}
+      {#each filters as f (f.id)}
         <button class="btn btn-ghost btn-sm" class:active={filter === f.id} aria-pressed={filter === f.id} onclick={() => setFilter(f.id)}>
           {f.label}
         </button>
@@ -105,17 +109,17 @@
             {#if frameCount(m)}<span class="count">{frameCount(m)}</span>{/if}
           </span>
           <span class="title">{m.title || m.filename}</span>
-          <span class="meta">{categoryOf(m)}{m.folder ? ` · ${m.folder}` : ''}</span>
+          {#if !dense}<span class="meta">{categoryOf(m)}{m.folder ? ` · ${m.folder}` : ''}</span>{/if}
         </button>
       {/snippet}
 
       {#if recent.length}
         <h4>Worked on</h4>
-        <div class="grid">{#each recent as m (m.path)}{@render card(m)}{/each}</div>
+        <div class="grid" class:dense>{#each recent as m (m.path)}{@render card(m)}{/each}</div>
         {#if rest.length}<h4>Everything else</h4>{/if}
       {/if}
       {#if rest.length}
-        <div class="grid">{#each rest as m (m.path)}{@render card(m)}{/each}</div>
+        <div class="grid" class:dense>{#each rest as m (m.path)}{@render card(m)}{/each}</div>
       {:else if !recent.length}
         <p class="hint">No media matches this filter.</p>
       {/if}
@@ -169,6 +173,14 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 10px;
+  }
+  .grid.dense {
+    grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+    gap: 8px;
+  }
+  .grid.dense .title {
+    font-size: var(--fs-xs);
+    font-weight: 500;
   }
   .card {
     display: flex;

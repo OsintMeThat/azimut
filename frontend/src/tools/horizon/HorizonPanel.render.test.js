@@ -29,6 +29,7 @@ function picture(step) {
 function fakeApi({ peaks = async () => ({ peaks: [], pending: 0, failed: 0 }) } = {}) {
   return {
     post: vi.fn(async (path, body) => {
+      if (path === '/api/horizon/tiles/estimate') return { requests: 3, tiles: 9 };
       if (path === '/api/horizon/target') {
         return { azimuth: 90, angle: 1.2, distance: 5000, visible: true, margin_deg: 0.4, ground: 1200 };
       }
@@ -36,7 +37,6 @@ function fakeApi({ peaks = async () => ({ peaks: [], pending: 0, failed: 0 }) } 
         const track = { azimuth: [90, 180], altitude: [-5, 30], clear: [false, true], events: [] };
         return { date: body.date ?? '2026-10-08', step_minutes: 720, sun: track, moon: { ...track, illuminated: 0.5 } };
       }
-      if (path === '/api/horizon/shadow') throw new Error('not asked here');
       return picture(body.step);
     }),
     get: vi.fn(peaks),
@@ -51,7 +51,6 @@ function state(api = fakeApi()) {
   return createHorizonState({
     api,
     decode: async (answer) => answer,
-    image: async () => ({}),
     later: (fn) => {
       timers.push(fn);
       return timers.length;
@@ -102,7 +101,7 @@ describe('the Horizon inspector', () => {
     view.standAt(EYE);
     await settle();
     const root = render(HorizonPanel, { view, onmove: vi.fn() });
-    const groups = [...root.querySelectorAll('details')].map((group) => [group.querySelector('summary').textContent, group.open]);
+    const groups = [...root.querySelectorAll('details')].map((group) => [group.querySelector('.group-title').textContent, group.open]);
     expect(groups).toEqual([
       ['Viewpoint', true],
       ['Lens', true],
@@ -111,9 +110,27 @@ describe('the Horizon inspector', () => {
     ]);
     expect(text(root)).toContain('Eye height');
     expect(text(root)).toContain('Ground 2866 m above sea level');
-    expect(text(root)).toContain('Summit names (OpenStreetMap)');
+    expect(text(root)).toContain('Summit names OpenStreetMap');
     // the heading is the caret's alone
     expect(text(root)).not.toMatch(/Heading/);
+  });
+
+  it('says a folded group\'s gist on its title line, and only while it is folded', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const root = render(HorizonPanel, { view });
+    const lens = [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === 'Lens');
+    expect(lens.querySelector('.gist')).toBeNull();
+    lens.open = false;
+    lens.dispatchEvent(new Event('toggle'));
+    flushSync();
+    expect(lens.querySelector('.gist').textContent).toMatch(/^\d+° · \d+ mm$/);
+    const more = [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === 'More settings');
+    expect(more.querySelector('.gist')).toBeNull(); // nothing set there yet
+    view.look({ tilt: 3 });
+    flushSync();
+    expect(more.querySelector('.gist').textContent).toBe('Leaning');
   });
 
   it('says which kind of eye is pressed, and names its height for it', async () => {
@@ -126,10 +143,12 @@ describe('the Horizon inspector', () => {
     flushSync();
     expect(button(root, 'Drone').getAttribute('aria-pressed')).toBe('true');
     expect(button(root, 'On foot').getAttribute('aria-pressed')).toBe('false');
-    expect(text(root)).toContain('Height above ground');
+    expect(text(root)).toContain('Height');
+    expect(text(root)).toContain('above the ground');
     button(root, 'Aircraft').click();
     flushSync();
-    expect(text(root)).toContain('Altitude above sea');
+    expect(text(root)).toContain('Altitude');
+    expect(text(root)).toContain('above sea level');
   });
 
   it('offers Move the viewpoint only where it can be done', async () => {
@@ -187,6 +206,19 @@ describe('the Horizon inspector', () => {
     expect(view.observer).toMatchObject({ lat: 46.6, lon: 7.95 });
   });
 
+  it('clears the ground clicked in the view, and says again how to read it', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    view.point({ lat: 46.6, lon: 7.95, azimuth: 60, elevation: -1, distance: 9010 });
+    const root = render(HorizonPanel, { view });
+    const reading = root.querySelector('.reading.pointed');
+    [...reading.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Clear').click();
+    flushSync();
+    expect(view.pointed).toBeNull();
+    expect(reading.textContent).toContain('Click the view to read the ground there.');
+  });
+
   it('says what failed beside the picture, with a way to try again', async () => {
     let fail = true;
     const view = state(
@@ -208,6 +240,35 @@ describe('the Horizon inspector', () => {
     button(alert, 'Try again').click();
     await settle();
     expect(root.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('says when the imagery was refused, and asks for it again', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    view.setGround('imagery');
+    view.imageryRefused('Sentinel Hub is paused: 90% of the monthly free tier is used');
+    const root = render(HorizonPanel, { view });
+    const alert = root.querySelector('[role="alert"]');
+    expect(alert.textContent).toContain('Sentinel Hub is paused');
+    const before = view.retries;
+    button(alert, 'Try again').click();
+    flushSync();
+    expect(root.querySelector('[role="alert"]')).toBeNull();
+    expect(view.retries).toBe(before + 1);
+  });
+
+  it('hides the ground closer than a limit, leaving Sentinel-2 alone', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const root = render(HorizonPanel, { view });
+    const field = [...root.querySelectorAll('label')].find((label) => label.textContent.includes('Hide nearer than'));
+    const input = root.querySelector(`#${field.htmlFor}`);
+    input.value = '750';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(view.near).toBe(750);
+    expect(view.nearOn).toBe(false);
   });
 
   it('picks the sun\'s day on a calendar as well as by typing it', async () => {
@@ -247,6 +308,96 @@ describe('the Horizon inspector', () => {
   });
 });
 
+describe('a photo laid over the view, in the inspector', () => {
+  function photo(over = {}) {
+    return {
+      source: { name: 'summit.jpg', kind: 'image' },
+      lens: null,
+      facts: {},
+      size: { width: 4000, height: 3000 },
+      strokes: [],
+      busy: false,
+      bend: 0,
+      setBend: vi.fn(),
+      useLens: vi.fn(),
+      undoStroke: vi.fn(),
+      clearTrace: vi.fn(),
+      ...over,
+    };
+  }
+
+  it('undoes a lens’s curve from a slider, says which kind, and double-click sets none', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const overlay = photo({ bend: -0.12 });
+    const root = render(HorizonPanel, { view, overlay, onmove: vi.fn() });
+    const slider = root.querySelector('input[aria-label="Lens distortion"]');
+    expect(slider.getAttribute('aria-valuetext')).toBe('Barrel 0.12');
+    expect(text(root)).toContain('Distortion');
+    slider.value = '0.05';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(overlay.setBend).toHaveBeenLastCalledWith('0.05');
+    slider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(overlay.setBend).toHaveBeenLastCalledWith(0);
+    const straight = render(HorizonPanel, { view, overlay: photo(), onmove: vi.fn() });
+    expect(straight.querySelector('input[aria-label="Lens distortion"]').getAttribute('aria-valuetext')).toBe('None');
+  });
+});
+
+describe('a photo locked to the terrain, in the inspector', () => {
+  it('holds still whatever would part photo and terrain, and says why', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const overlay = {
+      source: { name: 'summit.jpg', kind: 'image' },
+      lens: null,
+      facts: {},
+      size: { width: 4000, height: 3000 },
+      strokes: [],
+      busy: false,
+      bend: 0,
+      locked: true,
+      setBend: vi.fn(),
+    };
+    const root = render(HorizonPanel, { view, overlay, onmove: vi.fn() });
+    expect(text(root)).toContain('The photo is pinned to the terrain');
+    const sheet = (title) =>
+      [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === title).querySelector('fieldset');
+    expect(sheet('Viewpoint').disabled).toBe(true);
+    expect(sheet('Lens').disabled).toBe(true);
+    expect(sheet('On the view').disabled).toBe(false);
+    expect(root.querySelector('input[aria-label="Lens distortion"]').disabled).toBe(true);
+    expect(root.querySelector('input[aria-label="Tilt"]').disabled).toBe(true);
+    expect(root.querySelector('input[aria-label="Visibility"]').disabled).toBe(false);
+  });
+});
+
+describe('a number with its arrows', () => {
+  it('steps by a tenth, ten tenths with Shift, within its bounds', async () => {
+    const { default: NumberField } = await import('./NumberField.svelte');
+    const onchange = vi.fn();
+    const root = render(NumberField, { value: 1.7, unit: 'm', step: 0.1, min: 0.5, max: 2, label: 'Eye height', onchange });
+    const up = root.querySelector('button[aria-label="Eye height up"]');
+    const down = root.querySelector('button[aria-label="Eye height down"]');
+    up.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+    up.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    expect(onchange).toHaveBeenLastCalledWith(1.8);
+    down.dispatchEvent(new PointerEvent('pointerdown', { button: 0, shiftKey: true, bubbles: true }));
+    down.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    expect(onchange).toHaveBeenLastCalledWith(0.7);
+    const low = render(NumberField, { value: 0.6, step: 0.1, min: 0.5, label: 'Low', onchange });
+    low.querySelector('button[aria-label="Low down"]').dispatchEvent(new PointerEvent('pointerdown', { button: 0, shiftKey: true, bubbles: true }));
+    low.querySelector('button[aria-label="Low down"]').dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    expect(onchange).toHaveBeenLastCalledWith(0.5);
+    const input = root.querySelector('input');
+    input.value = '';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(onchange).toHaveBeenLastCalledWith(null);
+  });
+});
+
 describe('the picture controls on the view', () => {
   it('say which ground is drawn, and plain ground brings its lines', () => {
     const view = state();
@@ -263,17 +414,6 @@ describe('the picture controls on the view', () => {
     lines().click();
     flushSync();
     expect(view.lines).toBe(false);
-  });
-
-  it('switch full detail on and off, and say which', () => {
-    const view = state();
-    const root = render(PictureControls, { view });
-    const full = () => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Full detail');
-    expect(full().getAttribute('aria-pressed')).toBe('false');
-    full().click();
-    flushSync();
-    expect(view.fullDetail).toBe(true);
-    expect(full().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('keep Sentinel-2 locked without a Copernicus key, and say how to get one', () => {

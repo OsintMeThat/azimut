@@ -43,12 +43,6 @@ NEAR_STEP = 5.0
 STEP_RATIO = 0.003
 # Terrain level per distance: a pixel about this fraction of the distance.
 LOD_RATIO = 0.003
-# Full detail, asked for: the finest terrain (z14, about 7 m) all round out to
-# this far, and steps along each ray a few of its pixels long so none of it is
-# stepped over. Past it the march reads as usual.
-FULL_DETAIL_REACH = 20_000.0
-FULL_DETAIL_LOD = 0.0003
-FULL_DETAIL_STEP = 0.0015
 FAR_MAX = 500_000.0
 # Azimuths marched at once; bounds the memory a full turn needs.
 CHUNK = 240
@@ -121,24 +115,9 @@ def ray_distances(far: float, near_step: float = NEAR_STEP, ratio: float = STEP_
     return np.concatenate([near, switch * (1.0 + ratio) ** np.arange(steps + 1)])
 
 
-def lod_zooms(distances: np.ndarray, lat: float, *, full_detail: bool = False) -> np.ndarray:
-    """The terrain level each sample reads: pixel ≈ LOD_RATIO × distance.
-
-    With `full_detail`, the finest level out to `FULL_DETAIL_REACH`.
-    """
-    def ratio(d: float) -> float:
-        return FULL_DETAIL_LOD if full_detail and d <= FULL_DETAIL_REACH else LOD_RATIO
-
-    return np.array([terrain.zoom_for(max(d * ratio(d), 1.0), lat) for d in distances])
-
-
-def detail_distances(far: float, near_step: float = NEAR_STEP) -> np.ndarray:
-    """A full-detail ray: fine steps out to `FULL_DETAIL_REACH`, the usual ones past it."""
-    fine = ray_distances(min(far, FULL_DETAIL_REACH), near_step, FULL_DETAIL_STEP)
-    if far <= FULL_DETAIL_REACH:
-        return fine
-    usual = ray_distances(far, near_step)
-    return np.concatenate([fine, usual[usual > fine[-1]]])
+def lod_zooms(distances: np.ndarray, lat: float) -> np.ndarray:
+    """The terrain level each sample reads: pixel ≈ LOD_RATIO × distance."""
+    return np.array([terrain.zoom_for(max(d * LOD_RATIO, 1.0), lat) for d in distances])
 
 
 def default_far(observer: Observer) -> float:
@@ -184,25 +163,22 @@ def sweep(
     sampler: terrain.Sampler | None = None,
     near_step: float = NEAR_STEP,
     near: float = 0.0,
-    full_detail: bool = False,
 ) -> Horizon:
     """March rays at `azimuths` (degrees) and read what they see.
 
     `rows`, elevation angles in degrees from the top of the picture down, turn on
     the picture. `near` starts every ray that far out, which takes away the
-    ground in front, a hill that hides the range behind it. `full_detail` reads
-    the finest terrain out to `FULL_DETAIL_REACH`, in steps fine enough for it:
-    slower, and more tiles the first time.
+    ground in front, a hill that hides the range behind it.
     """
     sampler = sampler or terrain.Sampler()
     ground = float(sampler.heights(observer.lat, observer.lon, terrain.MAX_ZOOM))
     altitude = observer.altitude(ground)
     far = float(far if far is not None else default_far(observer))
     az = np.asarray(azimuths, dtype=np.float64)
-    distances = detail_distances(far, near_step) if full_detail else ray_distances(far, near_step)
+    distances = ray_distances(far, near_step)
     if near > 0:
         distances = distances[distances >= min(near, float(distances[-1]))]
-    zooms = lod_zooms(distances, observer.lat, full_detail=full_detail)
+    zooms = lod_zooms(distances, observer.lat)
     bands = _bands(zooms)
     row_angles = None if rows is None else np.radians(np.asarray(rows, dtype=np.float64))
 

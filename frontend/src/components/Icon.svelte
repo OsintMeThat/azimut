@@ -124,6 +124,8 @@
     line: 'M5 19 19 5',
     curve: 'M4 18c4 0 4-12 8-12s4 12 8 12',
     freehand: 'M3 17c3-9 5 5 8-2s4-8 6-2 3-2 4-5',
+    // a rubber at a slant over the line it leaves
+    eraser: 'M7 21 2.7 16.7a2.4 2.4 0 0 1 0-3.4l9.6-9.6a2.4 2.4 0 0 1 3.4 0l5.6 5.6a2.4 2.4 0 0 1 0 3.4L13 21M22 21H7M5 11l9 9',
     arrow: 'M5 19 19 5m0 0h-8m8 0v8',
     text: 'M5 6V4h14v2M12 4v16m-3 0h6',
     cursor: 'm4 3 6.2 15.5 2.2-6.5 6.5-2.2L4 3Z',

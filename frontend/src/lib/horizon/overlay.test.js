@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { toScreen } from './camera.js';
 import {
+  bendShape,
+  bent,
+  BEND_MAX,
+  clampLoupe,
+  FREE_REACH,
+  FREE_ZOOM_MIN,
+  loupeMoved,
+  clampCorner,
+  FLAT_CORNERS,
+  insideCorners,
+  invertMatrix,
+  isFlat,
+  throughMatrix,
+  unwarped,
+  WARP_REACH,
+  warped,
+  warpMatrix,
+  warpUniform,
   cameraAt,
+  eraseStrokes,
   fitFrame,
   fitToTrace,
   gapText,
@@ -9,11 +28,18 @@ import {
   heightText,
   isZoned,
   localClock,
+  LOUPE_MAX,
+  NO_LOUPE,
+  panLoupe,
+  photoAt,
   pinAt,
+  screenAt,
   skylineBetween,
+  straightened,
   strokeFrom,
   traceGap,
   traceSamples,
+  zoomLoupe,
 } from './overlay.js';
 
 const SIZE = { width: 1000, height: 750 };
@@ -46,6 +72,76 @@ describe('the frame takes the photo’s shape', () => {
   });
   it('gives nothing while there is no room', () => {
     expect(fitFrame(1.5, { width: 0, height: 400 }).width).toBe(0);
+  });
+});
+
+describe('the loupe over a photo', () => {
+  it('keeps the point of the photo under the pointer while it magnifies', () => {
+    const at = { x: 800, y: 200 };
+    const before = photoAt(NO_LOUPE, at.x, at.y, SIZE);
+    const loupe = zoomLoupe(NO_LOUPE, 3, at, SIZE);
+    expect(loupe.zoom).toBe(3);
+    const after = photoAt(loupe, at.x, at.y, SIZE);
+    expect(after.u).toBeCloseTo(before.u, 9);
+    expect(after.v).toBeCloseTo(before.v, 9);
+  });
+
+  it('goes from the screen to the photo and back', () => {
+    const loupe = { zoom: 4, x: 0.3, y: 0.7 };
+    const point = photoAt(loupe, 123, 456, SIZE);
+    const back = screenAt(loupe, point.u, point.v, SIZE);
+    expect(back.x).toBeCloseTo(123, 9);
+    expect(back.y).toBeCloseTo(456, 9);
+    expect(screenAt(loupe, 0.3, 0.7, SIZE)).toEqual({ x: 500, y: 375 });
+  });
+
+  it('never looks past the photo’s edges nor shrinks it under the frame', () => {
+    const near = zoomLoupe(NO_LOUPE, 2, { x: 0, y: 0 }, SIZE);
+    expect(near).toEqual({ zoom: 2, x: 0.25, y: 0.25 });
+    expect(zoomLoupe(near, 0.1, { x: 500, y: 375 }, SIZE)).toEqual(NO_LOUPE);
+    expect(zoomLoupe(NO_LOUPE, 1000, { x: 500, y: 375 }, SIZE).zoom).toBe(LOUPE_MAX);
+    // dragged far right, it stops with the photo's left edge on the frame's
+    expect(panLoupe(near, 5000, 0, SIZE).x).toBeCloseTo(0.25, 9);
+  });
+
+  it('lets the photo follow the hand', () => {
+    const loupe = { zoom: 2, x: 0.5, y: 0.5 };
+    const moved = panLoupe(loupe, 100, -75, SIZE);
+    // the photo goes right and up with the hand: the middle looks further left and lower
+    expect(moved.x).toBeCloseTo(0.45, 9);
+    expect(moved.y).toBeCloseTo(0.55, 9);
+  });
+
+  it('keeps a stroke drawn through it on the photo point under the pen', () => {
+    const loupe = { zoom: 4, x: 0.25, y: 0.25 };
+    const [first] = strokeFrom([{ x: 500, y: 375 }, { x: 600, y: 375 }], SIZE, { loupe });
+    expect(first).toEqual({ u: 0.25, v: 0.25 });
+  });
+});
+
+describe('a lens’s curve', () => {
+  const shape = bendShape(4 / 3);
+
+  it('measures from the middle in half-diagonals: a corner is 1 away', () => {
+    expect(bent({ u: 1, v: 1 }, -0.1, shape).u).toBeCloseTo(0.5 + 0.5 * 0.9, 9);
+    expect(bent({ u: 0.5, v: 0.5 }, -0.3, shape)).toEqual({ u: 0.5, v: 0.5 });
+    expect(bent({ u: 0.2, v: 0.7 }, 0, shape)).toEqual({ u: 0.2, v: 0.7 });
+  });
+
+  it('bows the edges in for a barrel, out for a pincushion', () => {
+    const edge = { u: 1, v: 0.5 };
+    expect(bent(edge, -0.2, shape).u).toBeLessThan(1);
+    expect(bent(edge, 0.2, shape).u).toBeGreaterThan(1);
+  });
+
+  it('is undone exactly, out to the corners at the strongest it is set', () => {
+    for (const k of [-BEND_MAX, -0.12, 0.07, BEND_MAX]) {
+      for (const point of [{ u: 0, v: 0 }, { u: 1, v: 1 }, { u: 0.9, v: 0.3 }, { u: 0.51, v: 0.5 }]) {
+        const back = straightened(bent(point, k, shape), k, shape);
+        expect(back.u).toBeCloseTo(point.u, 9);
+        expect(back.v).toBeCloseTo(point.v, 9);
+      }
+    }
   });
 });
 
@@ -98,6 +194,38 @@ describe('a trace', () => {
     expect(gapText({ median: 0.4123, span: 52.25 })).toBe('Gap 0.41° median over 52° of skyline');
     expect(gapText({ median: 3.27, span: 6.5 })).toBe('Gap 3.3° median over 6.5° of skyline');
     expect(gapText(null)).toBe('');
+  });
+});
+
+describe('rubbing a trace out', () => {
+  const SCALE = { width: 1000, height: 1000 };
+  const line = [{ u: 0.1, v: 0.5 }, { u: 0.9, v: 0.5 }];
+
+  it('cuts a stroke in two where the rubber crossed it, even between its points', () => {
+    const [left, right] = eraseStrokes([line], [{ u: 0.5, v: 0.4 }, { u: 0.5, v: 0.6 }], 10, SCALE);
+    expect(left[0]).toEqual({ u: 0.1, v: 0.5 });
+    expect(right.at(-1)).toEqual({ u: 0.9, v: 0.5 });
+    // the cut is the rubber's width, about 20 px either side of the middle at most
+    expect(left.at(-1).u).toBeGreaterThan(0.48);
+    expect(left.at(-1).u).toBeLessThanOrEqual(0.49);
+    expect(right[0].u).toBeGreaterThanOrEqual(0.51);
+    expect(right[0].u).toBeLessThan(0.52);
+  });
+
+  it('measures the rubber on screen, so a loupe rubs finer', () => {
+    // at 10× the photo is 10 000 px wide: 10 px is a thousandth of it
+    const [left] = eraseStrokes([line], [{ u: 0.5, v: 0.5 }], 10, { width: 10000, height: 10000 });
+    expect(left.at(-1).u).toBeGreaterThan(0.498);
+  });
+
+  it('drops what is left too short to be a line, and a stroke rubbed out whole', () => {
+    const short = [{ u: 0.5, v: 0.1 }, { u: 0.505, v: 0.1 }];
+    expect(eraseStrokes([short, line], [{ u: 0.5, v: 0.1 }], 20, SCALE)).toEqual([line]);
+  });
+
+  it('leaves the strokes as they were when it touched none', () => {
+    const strokes = [line];
+    expect(eraseStrokes(strokes, [{ u: 0.5, v: 0.9 }], 10, SCALE)).toBe(strokes);
   });
 });
 
@@ -211,5 +339,80 @@ describe('the time a photo says', () => {
     expect(localClock('2024-06-12T12:31:00Z')).toBeNull();
     expect(localClock('yesterday')).toBeNull();
     expect(localClock('2024-06-12T12:31:00Z', 'Not/AZone')).toBeNull();
+  });
+});
+
+describe('a photo pulled by its corners', () => {
+  const SLANT = [
+    { u: 0.1, v: 0.05 },
+    { u: 0.95, v: 0.15 },
+    { u: 0.85, v: 0.9 },
+    { u: 0.05, v: 1.1 },
+  ];
+
+  it('lays each corner of the photo on the corner it was pulled to', () => {
+    const corners = [
+      { u: 0, v: 0 },
+      { u: 1, v: 0 },
+      { u: 1, v: 1 },
+      { u: 0, v: 1 },
+    ];
+    SLANT.forEach((corner, index) => {
+      const at = warped(corners[index], SLANT);
+      expect(at.u).toBeCloseTo(corner.u, 9);
+      expect(at.v).toBeCloseTo(corner.v, 9);
+    });
+  });
+
+  it('reads back the point of the photo under a point of the frame', () => {
+    const point = { u: 0.37, v: 0.61 };
+    const back = unwarped(warped(point, SLANT), SLANT);
+    expect(back.u).toBeCloseTo(point.u, 9);
+    expect(back.v).toBeCloseTo(point.v, 9);
+  });
+
+  it('leaves an untouched photo alone, and the GPU reads it through the identity', () => {
+    expect(isFlat(FLAT_CORNERS)).toBe(true);
+    expect(isFlat(null)).toBe(true);
+    expect(isFlat(SLANT)).toBe(false);
+    expect(warped({ u: 0.3, v: 0.4 }, FLAT_CORNERS)).toEqual({ u: 0.3, v: 0.4 });
+    expect(warpUniform(null)).toEqual([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  });
+
+  it('hands the GPU the frame-to-photo matrix column by column', () => {
+    const columns = warpUniform(SLANT);
+    // back to rows, then through it: a corner of the frame's warp lands on the photo's corner
+    const rows = [columns[0], columns[3], columns[6], columns[1], columns[4], columns[7], columns[2], columns[5], columns[8]];
+    const corner = throughMatrix(rows, SLANT[2]);
+    expect(corner.u).toBeCloseTo(1, 9);
+    expect(corner.v).toBeCloseTo(1, 9);
+    expect(invertMatrix(warpMatrix(SLANT))).not.toBeNull();
+  });
+
+  it('refuses corners folded onto a line', () => {
+    const folded = [
+      { u: 0, v: 0 },
+      { u: 0.5, v: 0 },
+      { u: 1, v: 0 },
+      { u: 0.2, v: 0 },
+    ];
+    expect(warpMatrix(folded)).toBeNull();
+    expect(warped({ u: 0.5, v: 0.5 }, folded)).toEqual({ u: 0.5, v: 0.5 });
+  });
+
+  it('keeps a corner within reach of the frame, and knows what lies inside the four', () => {
+    expect(clampCorner({ u: -5, v: 3 })).toEqual({ u: -WARP_REACH, v: 1 + WARP_REACH });
+    expect(insideCorners({ u: 0.5, v: 0.5 }, SLANT)).toBe(true);
+    expect(insideCorners({ u: 0.02, v: 0.02 }, SLANT)).toBe(false);
+  });
+});
+
+describe('a loupe let free over the terrain', () => {
+  it('goes wider than the photo and past its edges only when free', () => {
+    expect(clampLoupe({ zoom: 0.5, x: 1.4, y: 0.5 })).toEqual({ zoom: 1, x: 0.5, y: 0.5 });
+    expect(clampLoupe({ zoom: 0.5, x: 1.4, y: 0.5 }, { free: true })).toEqual({ zoom: 0.5, x: 1.4, y: 0.5 });
+    expect(clampLoupe({ zoom: 0.01, x: 9, y: -9 }, { free: true })).toEqual({ zoom: FREE_ZOOM_MIN, x: 0.5 + FREE_REACH, y: 0.5 - FREE_REACH });
+    expect(loupeMoved({ zoom: 1, x: 0.5, y: 0.5 })).toBe(false);
+    expect(loupeMoved({ zoom: 0.5, x: 0.5, y: 0.5 })).toBe(true);
   });
 });

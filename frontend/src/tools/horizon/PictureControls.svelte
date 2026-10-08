@@ -6,7 +6,6 @@
    *
    * The lines are their own switch because Phase 5 lays them alone over a
    * photo; plain ground has nothing else to show, so picking it turns them on.
-   * Full detail, under them, asks for the finest terrain all round.
    *
    * With satellite imagery, Sentinel-2 can be laid on the ground near the eye,
    * from the analyst's Copernicus quota, Esri beyond: what that costs is said
@@ -34,10 +33,10 @@
     { id: 'plain', label: 'Plain', title: 'Dark ground, for the ridge lines alone' },
   ];
 
-  // what Sentinel-2 near would cost, worked out (for free) whenever a picture or the ground changes
+  // what Sentinel-2 near would cost, worked out (for free) whenever the eye or the ground changes
   $effect(() => {
-    void view.panorama;
-    if (copernicus && view.ground === 'imagery' && view.quality === 'fine') view.askEstimate();
+    void view.placed;
+    if (copernicus && view.ground === 'imagery' && view.placed) view.askEstimate();
   });
 
   const cost = $derived.by(() => {
@@ -86,38 +85,24 @@
       </span>Ridge lines
     </button>
   </div>
-  <div class="row">
-    <button
-      type="button"
-      class="toggle"
-      class:on={view.fullDetail}
-      aria-pressed={view.fullDetail}
-      title="The finest terrain all round, out to 20 km: slower, and more to download the first time"
-      onclick={() => view.setFullDetail(!view.fullDetail)}
-    >
-      <span class="box" aria-hidden="true">
-        {#if view.fullDetail}<svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5.2 4 7.6 8.6 2.4" /></svg>{/if}
-      </span>Full detail
-    </button>
   {#if view.ground === 'imagery'}
-    <select
-      class="release"
-      value={view.drapeSource}
-      onchange={pickImagery}
-      aria-label="Which imagery"
-      title="The latest imagery, or a dated release from Esri's archive"
-    >
-      <option value={DRAPE_PROVIDER}>Latest imagery</option>
-      {#each view.releases as release (release.release)}
-        <option value={waybackSource(release.release)}>{release.date}</option>
-      {/each}
-      {#if !view.releases.length}
-        <option value="older">{view.releasesBusy ? 'Reading the archive…' : 'Older releases…'}</option>
-      {/if}
-    </select>
-  {/if}
-  </div>
-  {#if view.ground === 'imagery'}
+    <div class="row">
+      <select
+        class="release"
+        value={view.drapeSource}
+        onchange={pickImagery}
+        aria-label="Which imagery"
+        title="The latest imagery, or a dated release from Esri's archive"
+      >
+        <option value={DRAPE_PROVIDER}>Latest imagery</option>
+        {#each view.releases as release (release.release)}
+          <option value={waybackSource(release.release)}>{release.date}</option>
+        {/each}
+        {#if !view.releases.length}
+          <option value="older">{view.releasesBusy ? 'Reading the archive…' : 'Older releases…'}</option>
+        {/if}
+      </select>
+    </div>
     <div class="row">
       {#if copernicus}
         <button

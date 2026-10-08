@@ -1,10 +1,13 @@
 <script>
   /**
-   * What the eye sees: the app's panorama looked through the camera.
+   * What the eye sees, drawn from the terrain round it.
    *
-   * The picture is drawn on the GPU (lib/horizon/renderer.js) and redrawn only
-   * when something changed, once a frame at most, so a drag or a wheel turn
-   * never waits on anything but the screen. Everything read off the picture is
+   * The picture is drawn on the GPU from terrain meshes and their satellite
+   * pictures (lib/horizon/mesh/scene.js), and redrawn only when something
+   * changed, once a frame at most, so a drag or a wheel turn never waits on
+   * anything but the screen. Placing the eye loads the ground all round behind
+   * a progress; after that, turning never waits, and a zoom sharpens what it
+   * shows as its tiles come. Everything read off the picture is
    * laid over it in the page, positioned by the same camera arithmetic the
    * shader uses (lib/horizon/camera.js): the azimuth ruler with the heading
    * caret, the elevation scale and the level line, the summit names set in the
@@ -12,33 +15,56 @@
    *
    * Gestures, as in a street-level viewer: the landscape follows the hand when
    * dragged, the wheel narrows or widens the lens about the point under the
-   * pointer, Shift and a drag rolls the frame, Alt and the wheel raises or
-   * lowers the eye. A click that did not drag reads the ground there, which
-   * the map then shows. A line at the bottom says so until the first drag.
+   * pointer, Shift and a drag turns the frame about a pivot as the hand goes
+   * round it, Alt and the wheel raises or lowers the eye. A click that did not
+   * drag reads the ground there, which the map then shows. A line at the
+   * bottom says so until the first drag.
    *
    * A photo or a video laid over the view (state/overlay.svelte.js) is drawn
    * on the GPU too, fixed on screen while the same gestures move the terrain
-   * under it; while its skyline is being traced, a drag draws instead.
+   * under it; while its skyline is being traced, a drag draws instead. Over a
+   * photo the wheel is a loupe on photo and terrain together (Shift and the
+   * wheel is then the lens), Space or the middle button and a drag moves the
+   * loupe, and Shift and a click sets the pivot on the photo. With the photo's
+   * corners out (W), a corner pulled reshapes the photo and a drag inside it
+   * moves it; outside it, a drag still moves the terrain. With the photo
+   * pinned to the terrain (L), the view moves over the terrain with the photo
+   * on it: a drag or the arrows carry both, the wheel or + and − zoom both,
+   * out past the photo's edges; nothing that would part them is taken: no
+   * roll, lens, height or walk.
+   *
+   * The heading caret has two small arrows either side, a tenth of a degree a
+   * press (a degree with Shift), for the last nudge a drag overshoots.
    */
-  import { onMount } from 'svelte';
-  import { createRenderer } from '../../lib/horizon/renderer.js';
-  import { rayFor, toScreen, turnBetween, verticalFov } from '../../lib/horizon/camera.js';
-  import { cellAt, inSight, SKY, skylineAt } from '../../lib/horizon/panorama.js';
+  import { onDestroy, onMount, untrack } from 'svelte';
+  import { repeatPress } from '../../lib/repeatPress.js';
+  import { createScene } from '../../lib/horizon/mesh/scene.js';
+  import { focal, rayFor, seenLens, toScreen, turnAbout, turnBetween, verticalFov } from '../../lib/horizon/camera.js';
+  import { inSight, skylineAt } from '../../lib/horizon/panorama.js';
   import {
     azimuthTicks,
     elevationTicks,
     faceTowards,
-    groundPoint,
     headingText,
     levelLine,
     parseHeading,
   } from '../../lib/horizon/geometry.js';
   import { labelAt, mergePeaks, placeLabels } from '../../lib/horizon/labels.js';
-  import { heightStep, heightText, strokeFrom } from '../../lib/horizon/overlay.js';
+  import {
+    heightStep,
+    heightText,
+    insideCorners,
+    loupeMoved,
+    NO_LOUPE,
+    photoAt,
+    screenAt,
+    strokeFrom,
+  } from '../../lib/horizon/overlay.js';
+
   import { pointerReading, summitReading } from '../../lib/horizon/readings.js';
   import { formatDistance } from '../../lib/measure.js';
   import { MAP_LIGHT, shadowKeep } from '../../lib/horizon/sky.js';
-  import { RIDGE_STEPS, shadowFits } from './state/horizon.svelte.js';
+  import { RIDGE_STEPS } from './state/horizon.svelte.js';
   import PictureControls from './PictureControls.svelte';
 
   let {
@@ -63,13 +89,17 @@
   /** Where this browser remembers that the gesture lines were understood, without and with a photo. */
   const HINT_KEY = 'azimut.horizon.hint';
   const PHOTO_HINT_KEY = 'azimut.horizon.photoHint';
-  /** How far either side of the heading caret the ruler keeps its labels out. */
-  const CARET_CLEAR = 52;
+  /** How far either side of the heading caret and its arrows the ruler keeps its labels out. */
+  const CARET_CLEAR = 76;
 
   let box = $state();
   let canvas = $state();
-  let renderer = null;
+  let scene = null;
   let unsupported = $state('');
+  /** What the ground all round still waits for (mesh/scene.js `progressOf`), whether the eye has landed, or failed to. */
+  let progress = $state({ phase: 'landing', share: 0 });
+  let landed = $state(false);
+  let failed = $state(false);
   let size = $state({ width: 0, height: 0 });
   let pointer = $state(null);
   /** The height the wheel just set, said beside the pointer for a moment: `{ text, x, y }`. */
@@ -99,51 +129,20 @@
   }
 
   const laid = $derived(Boolean(overlay?.source));
+  /** The loupe over the photo while it shows anything but the whole photo, which the camera is then seen through. */
+  const loupe = $derived(laid && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null);
 
-  const camera = $derived({ ...view.camera, width: size.width, height: size.height });
-
-  /** The distance at a direction from the finest picture held there, or SKY / null. */
-  function depthAt(azimuth, elevation) {
-    for (const picture of [view.detail, view.panorama]) {
-      if (!picture) continue;
-      const cell = cellAt(picture, azimuth, elevation);
-      if (cell >= 0) return picture.depth[cell];
-    }
-    return null;
-  }
+  const camera = $derived({ ...view.camera, width: size.width, height: size.height, ...(loupe ? { loupe } : {}) });
+  /** What the middle of the screen faces, which the heading caret says: the lens's own heading without a loupe. */
+  const facing = $derived(seenLens(camera));
 
   // -- drawing ----------------------------------------------------------------
 
-  let shownPanorama = null;
-  let shownDetail = null;
-  let shownDrape = null;
-  let shownDetailDrape = null;
-  let shownShadow = null;
   let shownPicture = null;
   let shownFrame = -1;
   function draw() {
     frame = 0;
-    if (!renderer) return;
-    if (view.panorama !== shownPanorama) {
-      shownPanorama = view.panorama;
-      if (shownPanorama) renderer.setPanorama(shownPanorama);
-    }
-    if (view.detail !== shownDetail) {
-      shownDetail = view.detail;
-      renderer.setDetail(shownDetail);
-    }
-    if (view.drape !== shownDrape) {
-      shownDrape = view.drape;
-      renderer.setDrape(shownDrape?.image ?? null);
-    }
-    if (view.detailDrape !== shownDetailDrape) {
-      shownDetailDrape = view.detailDrape;
-      renderer.setDetailDrape(shownDetailDrape?.image ?? null);
-    }
-    if (view.shadow !== shownShadow) {
-      shownShadow = view.shadow;
-      renderer.setShadow(shownShadow);
-    }
+    if (!scene) return;
     // the photo, or the video's frame on show once it has one
     const picture = laid ? overlay.picture : null;
     const ready = !picture || !('readyState' in picture) || picture.readyState >= 2;
@@ -151,35 +150,64 @@
       if (ready) {
         shownPicture = picture;
         shownFrame = overlay?.frame ?? -1;
-        renderer.setPhoto(picture ?? null);
+        scene.setPhoto(picture ?? null);
       }
     }
     if (!(size.width > 0)) return;
-    renderer.draw(camera, {
+    const now = scene.draw(camera, {
       ground: view.ground,
       lines: view.lines,
       sky,
-      // shadows marched for another hour are left off until this one's come
-      shaded: shadowFits(view.shadow, sky),
+      shaded: view.shaded,
       keep: shadowKeep(view.shadowDepth),
       visibility: view.visibility ?? 0,
+      near: view.near,
       jump: RIDGE_STEPS[view.ridges],
       photo: laid ? overlay.shown : 1,
+      bend: laid && overlay.bend ? [overlay.bend, overlay.bendShape.across, overlay.bendShape.down] : [0, 1, 1],
     });
+    // said in whole percents, so the page is not redrawn for every tile
+    if (now.phase !== progress.phase || Math.floor(now.share * 100) !== Math.floor(progress.share * 100)) progress = now;
+    landed = scene.landed;
+    failed = scene.failed;
+  }
+
+  function redraw() {
+    if (scene && !frame) frame = requestAnimationFrame(draw);
   }
 
   $effect(() => {
     // read everything a frame depends on, then draw on the next one
-    void [view.panorama, view.detail, view.drape, view.detailDrape, view.shadow, view.shadowDepth, view.ground, view.lines, view.ridges, view.visibility, camera, sky];
-    void [overlay?.picture, overlay?.frame, overlay?.shown];
-    if (!renderer || frame) return;
-    frame = requestAnimationFrame(draw);
+    void [view.shadowDepth, view.ground, view.lines, view.ridges, view.visibility, view.near, view.shaded, camera, sky];
+    void [overlay?.picture, overlay?.frame, overlay?.shown, overlay?.bend];
+    redraw();
+  });
+
+  // the ground laid round the eye once it rests somewhere, and the imagery it is drawn in
+  $effect(() => {
+    const placed = view.placed;
+    if (placed) scene?.place(placed, placed.far);
+  });
+  $effect(() => {
+    const imagery = view.imagery;
+    scene?.setImagery(imagery);
+  });
+  // what came back empty is asked again when the analyst asks to try again
+  let tried = null;
+  $effect(() => {
+    const retries = view.retries;
+    const again = tried !== null && retries !== tried;
+    tried = retries;
+    if (again) untrack(() => scene?.retry());
   });
 
   onMount(() => {
     try {
-      renderer = createRenderer(canvas);
-      if (!renderer) unsupported = 'This view needs WebGL2, which this browser does not offer.';
+      scene = createScene(canvas, {
+        onChange: redraw,
+        onRefused: (refusal) => view.imageryRefused(refusal.message),
+      });
+      if (!scene) unsupported = 'This view needs WebGL2, which this browser does not offer.';
     } catch (failure) {
       unsupported = failure.message;
     }
@@ -190,30 +218,39 @@
       canvas.width = Math.max(1, Math.round(width * density));
       canvas.height = Math.max(1, Math.round(height * density));
       size = { width, height };
-      view.setFrame(size);
     };
     const observer = new ResizeObserver(fit);
     observer.observe(box);
     fit();
+    if (view.placed) scene?.place(view.placed, view.placed.far);
+    scene?.setImagery(view.imagery);
+    redraw();
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
-      renderer?.dispose();
-      renderer = null;
+      scene?.dispose();
+      scene = null;
     };
   });
 
   // -- reading the picture ----------------------------------------------------
 
-  const shown = $derived(Boolean(size.width && view.panorama));
+  const shown = $derived(Boolean(size.width && landed));
 
-  /** The ground under a pixel, or null for sky and off the picture. */
+  /** What the view says while its ground loads: the whole turn first, then its pictures, the shadows, the lens. */
+  const loadingText = $derived.by(() => {
+    const percent = `${Math.floor(progress.share * 100)}%`;
+    if (progress.phase === 'landing') return `Loading the view all round · ${percent}`;
+    if (progress.phase === 'imagery') return `Laying the imagery all round · ${percent}`;
+    if (progress.phase === 'shadows') return 'Casting shadows…';
+    if (progress.phase === 'sharpening') return 'Sharpening…';
+    return '';
+  });
+
+  /** The ground under a pixel (`distance` null for the sky), or null before the eye has landed. */
   function groundAt(x, y) {
-    if (!view.observer || !view.panorama) return null;
-    const { azimuth, elevation } = rayFor(camera, x, y);
-    const distance = depthAt(azimuth, elevation);
-    if (distance == null || distance === SKY) return { azimuth, elevation, distance: null };
-    return { azimuth, elevation, distance, ...groundPoint(view.observer, azimuth, distance) };
+    if (!view.observer) return null;
+    return scene?.groundAt(camera, x, y) ?? null;
   }
 
   const inFrame = (at) => at.visible && at.x >= 0 && at.x <= size.width && at.y >= 0 && at.y <= size.height;
@@ -243,9 +280,9 @@
     return mergePeaks(view.peaks.filter((peak) => peak.distance <= reach && inSight(view.panorama, peak)));
   });
 
-  /** The corner the picture controls cover, which no name may. */
+  /** The corner the picture controls cover, which no name may; with a photo laid they sit in its band instead. */
   const reserved = $derived(
-    controls.width
+    controls.width && !laid
       ? [{ left: size.width - controls.width - 18, top: 0, right: size.width, bottom: controls.height + 18 }]
       : []
   );
@@ -361,7 +398,7 @@
 
   const readout = $derived.by(() => {
     // the height the wheel just set is said where the pointer is: one reading there at a time
-    if (!pointer || dragging || !shown || heightNote) return null;
+    if (!pointer || dragging || !shown || heightNote || tracing || erasing) return null;
     const text = hoverLabel
       ? summitReading(hoverLabel, units)
       : pointer.ground
@@ -385,68 +422,253 @@
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
 
+  /** The hover reading asked last: an older one coming back late is dropped. */
+  let hoverAsked = 0;
+
   /** Controls laid over the view keep their own clicks and keys. */
   const onControl = (event) => Boolean(event.target?.closest?.('.hz-control'));
 
   /** The stroke being drawn along the photo's skyline, in CSS pixels, while the hand is down. */
   let drawing = $state.raw([]);
   const tracing = $derived(laid && overlay.tracing);
+  const erasing = $derived(laid && overlay.erasing);
+  /** The photo's corners out to be pulled. */
+  const warping = $derived(laid && overlay.warping);
+  /** The photo held to the terrain: the view's gestures carry both, and none parts them. */
+  const locked = $derived(laid && overlay.locked);
+  /** How far the rubber reaches, in screen pixels, and where it is while erasing. */
+  const RUBBER_PX = 12;
+  let rubberAt = $state(null);
+  /** Space held over a photo: a drag then moves the loupe; a tap still plays or pauses a video. */
+  let spaceHeld = $state(false);
+  let spaceMoved = false;
+  /** Shift held: the pivot a roll turns about is shown while the pointer is over the view. */
+  let shiftHeld = $state(false);
+  let hovering = $state(false);
+  /** The roll a Shift and drag has reached, said beside the pivot while the hand is down. */
+  let rollNote = $state(null);
+  /** How far from the pivot the hand must be before its angle round it is read. */
+  const PIVOT_CLEAR = 24;
+
+  const shownLoupe = $derived(loupe ?? NO_LOUPE);
+
+  /** The point a roll turns about, on screen: the photo's pivot while it is in sight, the middle otherwise. */
+  const pivotAt = $derived.by(() => {
+    const middle = { x: size.width / 2, y: size.height / 2 };
+    if (!laid || !overlay.pivot) return middle;
+    const at = screenAt(shownLoupe, overlay.pivot.u, overlay.pivot.v, size);
+    return at.x >= 0 && at.x <= size.width && at.y >= 0 && at.y <= size.height ? at : middle;
+  });
+
+  /** The photo's four corners on screen while they are out to be pulled. */
+  const cornersAt = $derived(warping && size.width ? overlay.corners.map((corner) => screenAt(shownLoupe, corner.u, corner.v, size)) : []);
+  const cornersLine = $derived(cornersAt.map((at) => `${at.x.toFixed(1)},${at.y.toFixed(1)}`).join(' '));
+  /** Over the photo while its corners are out: a drag there moves it. */
+  let overPhoto = $state(false);
+
+  /** A corner taken in the hand: it follows the pointer until it is let go. */
+  function pullCorner(event, index) {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    overlay.setPulling(true);
+    const move = (ev) => {
+      const at = local(ev);
+      overlay.setCorner(index, photoAt(shownLoupe, at.x, at.y, size));
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      overlay.setPulling(false);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  }
+
+  /** The photo's size on screen, magnified by the loupe: what the rubber's reach is measured against. */
+  const photoScale = $derived({ width: size.width * shownLoupe.zoom, height: size.height * shownLoupe.zoom });
+
+  /** A stroke kept on the photo, as points on screen through the loupe. */
+  const onScreen = (stroke) =>
+    stroke
+      .map((p) => {
+        const at = screenAt(shownLoupe, p.u, p.v, size);
+        return `${at.x.toFixed(1)},${at.y.toFixed(1)}`;
+      })
+      .join(' ');
 
   function onPointerDown(event) {
-    if (event.button !== 0 || !view.panorama || onControl(event)) return;
+    if (!view.observer || onControl(event)) return;
+    // the middle button, or Space held, moves the loupe over the photo
+    const panning = laid && (event.button === 1 || (event.button === 0 && spaceHeld));
+    if (event.button !== 0 && !panning) return;
+    if (event.button === 1) event.preventDefault();
     box.setPointerCapture(event.pointerId);
     box.focus({ preventScroll: true });
+    if (panning) {
+      press = { ...local(event), pan: true };
+      return;
+    }
     if (tracing) {
       press = { ...local(event), tracing: true };
       drawing = [local(event)];
       return;
     }
-    press = { ...local(event), camera: { ...view.camera }, moved: false, roll: event.shiftKey };
+    if (erasing) {
+      const at = local(event);
+      press = { ...at, erasing: true };
+      overlay.beginErase();
+      overlay.eraseAlong([photoAt(shownLoupe, at.x, at.y, size)], RUBBER_PX, photoScale);
+      return;
+    }
+    if (warping && !event.shiftKey) {
+      const at = local(event);
+      if (insideCorners(photoAt(shownLoupe, at.x, at.y, size), overlay.corners)) {
+        press = { ...at, shaping: true, corners: [...overlay.corners] };
+        overlay.setPulling(true);
+        dragging = true;
+        return;
+      }
+    }
+    if (locked) {
+      // held to the terrain: a drag moves photo and terrain together, a click still reads the ground
+      press = { ...local(event), pan: true, locked: true, travel: 0 };
+      return;
+    }
+    press = { ...local(event), camera: { ...camera }, moved: false, roll: event.shiftKey, pivot: pivotAt, swept: 0, angle: null };
+  }
+
+  /** The angle the hand has swept round the pivot since it pressed, clockwise on screen, in degrees. */
+  function sweep(at) {
+    const { pivot } = press;
+    if (Math.hypot(at.x - pivot.x, at.y - pivot.y) < PIVOT_CLEAR) return press.swept;
+    const angle = (Math.atan2(at.y - pivot.y, at.x - pivot.x) * 180) / Math.PI;
+    if (press.angle !== null) press.swept += turnBetween(press.angle, angle);
+    press.angle = angle;
+    return press.swept;
   }
 
   function onPointerMove(event) {
     const at = local(event);
+    shiftHeld = event.shiftKey;
+    hovering = true;
+    rubberAt = erasing && !onControl(event) ? at : null;
+    overPhoto = warping && !onControl(event) && insideCorners(photoAt(shownLoupe, at.x, at.y, size), overlay.corners);
     if (!press) {
-      pointer = onControl(event) || tracing ? null : { ...at, ground: groundAt(at.x, at.y) };
+      if (onControl(event) || tracing || erasing || overPhoto) {
+        pointer = null;
+        return;
+      }
+      // the reading follows a frame later, so the page never waits on the GPU while the hand moves
+      pointer = { ...at, ground: pointer?.ground ?? null };
+      const ask = ++hoverAsked;
+      scene?.groundSoon(camera, at.x, at.y).then((ground) => {
+        if (ground !== undefined && ask === hoverAsked && pointer) pointer = { ...pointer, ground };
+      });
+      return;
+    }
+    if (press.erasing) {
+      const from = photoAt(shownLoupe, press.x, press.y, size);
+      overlay.eraseAlong([from, photoAt(shownLoupe, at.x, at.y, size)], RUBBER_PX, photoScale);
+      press.x = at.x;
+      press.y = at.y;
+      return;
+    }
+    if (press.pan) {
+      const dx = at.x - press.x;
+      const dy = at.y - press.y;
+      if (!dx && !dy) return;
+      press.travel = (press.travel ?? 0) + Math.abs(dx) + Math.abs(dy);
+      press.x = at.x;
+      press.y = at.y;
+      spaceMoved = true;
+      dragging = true;
+      pointer = null;
+      scene?.moving();
+      overlay.panLoupe(dx, dy, size);
       return;
     }
     if (press.tracing) {
       drawing = [...drawing, at];
       return;
     }
+    if (press.shaping) {
+      // the photo follows the hand, its four corners together
+      const du = (at.x - press.x) / size.width / shownLoupe.zoom;
+      const dv = (at.y - press.y) / size.height / shownLoupe.zoom;
+      overlay.setCorners(press.corners.map((corner) => ({ u: corner.u + du, v: corner.v + dv })));
+      return;
+    }
     const dx = at.x - press.x;
     const dy = at.y - press.y;
+    if (press.roll && press.angle === null) sweep({ x: press.x, y: press.y });
     if (!press.moved && Math.hypot(dx, dy) < CLICK_SLOP) return;
     if (!press.moved && !hinted) understood(HINT_KEY);
     if (!press.moved && laid && !photoHinted) understood(PHOTO_HINT_KEY);
     press.moved = true;
     dragging = true;
     pointer = null;
+    scene?.moving();
     const start = press.camera;
     if (press.roll) {
-      view.look({ roll: start.roll + dx * 0.25 });
+      // the terrain turns round the pivot as the hand goes round it
+      view.look(turnAbout(start, press.pivot.x, press.pivot.y, sweep(at)));
+      rollNote = { text: `Roll ${view.camera.roll.toFixed(1)}°`, x: press.pivot.x, y: press.pivot.y };
       return;
     }
-    const across = start.fov / size.width;
-    const up =
-      start.projection === 'panorama' ? across : verticalFov({ ...start, width: size.width, height: size.height }) / size.height;
+    const across = start.fov / size.width / (start.loupe?.zoom ?? 1);
+    const up = start.projection === 'panorama' ? across : verticalFov(start) / size.height;
     view.look({ heading: start.heading - dx * across, tilt: start.tilt + dy * up });
   }
 
   function onPointerUp(event) {
     if (!press) return;
+    if (press.pan) {
+      const clicked = press.locked && press.travel < CLICK_SLOP;
+      press = null;
+      dragging = false;
+      if (clicked) {
+        const at = local(event);
+        const ground = groundAt(at.x, at.y);
+        if (ground?.distance != null) view.point(ground);
+      }
+      return;
+    }
+    if (press.erasing) {
+      press = null;
+      overlay.endErase();
+      return;
+    }
+    if (press.shaping) {
+      press = null;
+      dragging = false;
+      overlay.setPulling(false);
+      return;
+    }
     if (press.tracing) {
       press = null;
-      const stroke = strokeFrom(drawing, size);
+      const stroke = strokeFrom(drawing, size, { loupe: shownLoupe });
       drawing = [];
-      if (stroke.length > 1) overlay.addStroke(stroke);
+      // snapped onto the sky's edge near it, unless Alt asks for the line as drawn
+      if (stroke.length > 1) overlay.addStroke(stroke, { snap: !event.altKey, scale: photoScale });
       return;
     }
     const clicked = !press.moved;
+    const rolled = press.roll;
     press = null;
     dragging = false;
+    rollNote = null;
     if (!clicked) return;
     const at = local(event);
+    if (rolled && laid) {
+      // Shift and a click sets the pivot on the photo: a summit matched stays put while the rest turns
+      overlay.setPivot(photoAt(shownLoupe, at.x, at.y, size));
+      return;
+    }
     const ground = groundAt(at.x, at.y);
     if (ground?.distance != null) view.point(ground);
   }
@@ -472,17 +694,32 @@
     heightNoteTimer = setTimeout(() => (heightNote = null), 1200);
   }
 
-  /** The lens narrows or widens about the direction under the pointer, which stays put. */
+  /**
+   * The lens narrows or widens about the direction under the pointer, which
+   * stays put. Over a photo the wheel is the loupe, about the pointer too,
+   * and Shift and the wheel the lens.
+   */
   function onWheel(event) {
-    if (!view.panorama || onControl(event)) return;
+    if (!view.observer || onControl(event)) return;
     event.preventDefault();
+    scene?.moving();
     if (event.altKey) {
-      raise(event);
+      if (!locked) raise(event);
       return;
     }
     const at = local(event);
+    // Shift turns a mouse wheel sideways in most browsers; a pinch comes as Ctrl and small steps
+    const delta = event.deltaY || event.deltaX;
+    const unit = event.deltaMode === 1 ? 0.05 : event.ctrlKey ? 0.01 : 0.0015;
+    if (laid && !event.shiftKey) {
+      // not under a stroke being drawn, which is kept in screen pixels until the hand lifts
+      if (!press?.tracing) overlay.zoomLoupe(Math.exp(-delta * unit), at, size);
+      return;
+    }
+    // the lens would part a locked photo from its terrain
+    if (locked) return;
     const before = rayFor(camera, at.x, at.y);
-    const scale = Math.exp(event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015));
+    const scale = Math.exp(delta * unit);
     const fov = view.camera.fov * scale;
     view.look({ fov });
     const narrowed = { ...camera, ...view.camera, width: size.width, height: size.height };
@@ -504,9 +741,24 @@
    * tilt, + and − zoom, N faces north.
    */
   function onKey(event) {
-    if (!view.panorama || onControl(event)) return;
+    if (!view.observer || onControl(event)) return;
     if (laid && onPhotoKey(event)) {
       event.preventDefault();
+      return;
+    }
+    if (locked) {
+      // pinned: the arrows move over the terrain and + and − zoom, the photo going with it; nothing walks
+      const tenth = { x: size.width / 10, y: size.height / 10 };
+      const pans = { ArrowLeft: [tenth.x, 0], ArrowRight: [-tenth.x, 0], PageUp: [0, tenth.y], PageDown: [0, -tenth.y] };
+      const zooms = { '+': 1.25, '=': 1.25, '-': 0.8 };
+      const middle = { x: size.width / 2, y: size.height / 2 };
+      if (event.key in pans && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        overlay.panLoupe(...pans[event.key], size);
+      } else if (event.key in zooms && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        overlay.zoomLoupe(zooms[event.key], middle, size);
+      }
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -534,38 +786,86 @@
     const change = turns[event.key];
     if (!change) return;
     event.preventDefault();
+    scene?.moving();
     view.look(change);
   }
 
   /**
-   * The photo's keys: Space plays or pauses a video, comma and full stop step
-   * a frame, B blinks, T traces, Ctrl+Z takes the last stroke back, Escape
-   * stops tracing. True when the key was the photo's.
+   * The photo's keys: Space held and a drag moves the loupe (a tap plays or
+   * pauses a video), 0 shows the whole photo, comma and full stop step a
+   * frame, B blinks, T traces, E rubs out, W puts the photo's corners out, L
+   * locks the photo to the terrain, H hides the trace, Ctrl+Z takes the last change to the trace back, Escape
+   * puts the pen, the rubber or the corners away. True when the key was the
+   * photo's.
    */
   function onPhotoKey(event) {
     const key = event.key;
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'z') {
-      if (!overlay.strokes.length) return false;
+      if (!overlay.canUndo) return false;
       overlay.undoStroke();
       return true;
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return false;
     const video = overlay.source.kind === 'video';
-    if (key === ' ' && video) overlay.togglePlay();
+    if (key === ' ') {
+      if (!event.repeat) {
+        spaceHeld = true;
+        spaceMoved = false;
+      }
+    } else if (key === '0') overlay.fitLoupe();
     else if (key === ',' && video) overlay.step(-1);
     else if (key === '.' && video) overlay.step(1);
     else if (key === 'b' || key === 'B') overlay.setBlink(!overlay.blink);
     else if (key === 't' || key === 'T') overlay.setTracing(!overlay.tracing);
-    else if (key === 'Escape' && overlay.tracing) {
+    else if (key === 'e' || key === 'E') overlay.setErasing(!overlay.erasing);
+    else if ((key === 'w' || key === 'W') && overlay.source.kind === 'image') overlay.setWarping(!overlay.warping);
+    else if (key === 'l' || key === 'L') overlay.setLocked(!overlay.locked);
+    else if ((key === 'h' || key === 'H') && overlay.strokes.length) overlay.setTraceHidden(!overlay.traceHidden);
+    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping)) {
       event.stopPropagation();
       overlay.setTracing(false);
+      overlay.setErasing(false);
+      overlay.setWarping(false);
     } else return false;
     return true;
   }
 
+  /** Where a key typed goes into a field rather than to the view. */
+  const typingIn = (target) => Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+
+  /**
+   * The photo's keys are read wherever the focus is while the pointer is over
+   * the view, so a key after a press on the photo's band (T, E, Space…) acts
+   * on the view rather than on that button.
+   */
+  function onWindowKey(event) {
+    if (event.key === 'Shift') shiftHeld = event.type === 'keydown';
+    const elsewhere = event.target !== box && !box?.contains(event.target) && !typingIn(event.target);
+    // under the pointer now: never a view hidden with its tab, nor one a dialog covers
+    const over = Boolean(box?.matches?.(':hover'));
+    if (event.type === 'keydown' && event.key !== ' ' && laid && over && elsewhere && view.observer && onPhotoKey(event)) {
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== ' ') return;
+    if (event.type === 'keydown') {
+      if (!laid || !over || spaceHeld || !elsewhere) return;
+      event.preventDefault();
+      spaceHeld = true;
+      spaceMoved = false;
+      box.focus({ preventScroll: true });
+      return;
+    }
+    if (!spaceHeld) return;
+    spaceHeld = false;
+    event.preventDefault();
+    // a tap plays or pauses a video; a hold that moved the loupe does not
+    if (laid && overlay.source.kind === 'video' && !spaceMoved) overlay.togglePlay();
+  }
+
   /** A double click on the ground goes there, facing the same way. */
   function onDoubleClick(event) {
-    if (!view.panorama || onControl(event) || tracing) return;
+    if (!view.observer || onControl(event) || tracing || erasing || locked) return;
     const at = local(event);
     const ground = groundAt(at.x, at.y);
     if (ground?.distance != null) view.standAt(ground);
@@ -578,7 +878,8 @@
   let caretInput = $state();
 
   function editHeading() {
-    typed = String(Number(view.camera.heading.toFixed(1)));
+    if (locked) return;
+    typed = String(Number(facing.heading.toFixed(1)));
     typing = true;
     queueMicrotask(() => {
       caretInput?.focus();
@@ -588,9 +889,31 @@
 
   function applyHeading() {
     const heading = parseHeading(typed);
-    if (heading != null) view.look({ heading });
+    // the middle of the screen is turned to it, which is the lens's own heading without a loupe
+    if (heading != null) view.look({ heading: view.camera.heading + turnBetween(facing.heading, heading) });
     typing = false;
   }
+
+  /**
+   * The caret's two arrows: a tenth of a degree a press, a whole one with
+   * Shift, held to keep turning. A pinned photo is not turned away from: the
+   * view moves over the terrain by as much, the photo going with it.
+   */
+  const turnBy = (direction) => (shift) => {
+    const degrees = direction * (shift ? 1 : 0.1);
+    if (!locked) {
+      view.look({ heading: view.camera.heading + degrees });
+      return;
+    }
+    const perDegree = (focal(camera) * Math.PI) / 180;
+    overlay.panLoupe(-degrees * perDegree, 0, size);
+  };
+  const turnLeft = repeatPress(turnBy(-1));
+  const turnRight = repeatPress(turnBy(1));
+  onDestroy(() => {
+    turnLeft.stop();
+    turnRight.stop();
+  });
 
   function onCaretKey(event) {
     if (event.key === 'Enter') {
@@ -607,32 +930,70 @@
   }
 </script>
 
+<svelte:window
+  onkeydown={onWindowKey}
+  onkeyup={onWindowKey}
+  onblur={() => {
+    shiftHeld = false;
+    spaceHeld = false;
+  }}
+/>
+
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   class="horizon-view"
   class:daylight={view.ground !== 'plain' || laid}
   class:dragging
-  class:tracing
+  class:tracing={tracing || erasing}
+  class:shaping={overPhoto}
+  class:panning={laid && spaceHeld}
   bind:this={box}
   tabindex="0"
   role="application"
-  aria-label="View from the eye: drag to turn, wheel to zoom, Shift and drag to roll, Alt and wheel to change the height, click to read the ground, double-click to go there, up and down arrows to walk"
+  aria-label={laid
+    ? 'Photo over the view: drag to move the terrain under it, wheel to look closer, Space and drag to move around the photo, Shift and drag to roll about the pivot, Shift and click to set the pivot, Shift and wheel to change the lens, Alt and wheel to change the height'
+    : 'View from the eye: drag to turn, wheel to zoom, Shift and drag to roll, Alt and wheel to change the height, click to read the ground, double-click to go there, up and down arrows to walk'}
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
   onpointerup={onPointerUp}
   onpointercancel={() => {
+    if (press?.erasing) overlay.endErase();
+    if (press?.shaping) overlay.setPulling(false);
     press = null;
+    drawing = [];
     dragging = false;
+    rollNote = null;
   }}
-  onpointerleave={() => (pointer = null)}
+  onpointerleave={() => {
+    pointer = null;
+    hovering = false;
+    rubberAt = null;
+  }}
+  onmousedown={(event) => {
+    // the middle button moves the loupe, never the browser's own scrolling
+    if (event.button === 1 && laid) event.preventDefault();
+  }}
   onwheel={onWheel}
   onkeydown={onKey}
+  onblur={() => (spaceHeld = false)}
   ondblclick={onDoubleClick}
 >
   <canvas bind:this={canvas}></canvas>
 
   {#if unsupported}
     <p class="notice">{unsupported}</p>
+  {:else if failed && !view.error}
+    <div class="glass loading failed hz-control" role="alert">
+      The ground here could not be loaded
+      <button type="button" onclick={() => view.retry()}>Try again</button>
+    </div>
+  {:else if view.observer && loadingText}
+    <div class="glass loading" role="status" aria-live="polite">
+      {loadingText}
+      {#if progress.phase === 'landing' || progress.phase === 'imagery'}
+        <span class="bar"><span style:width="{Math.round(progress.share * 100)}%"></span></span>
+      {/if}
+    </div>
   {/if}
 
   <svg class="overlay" width={size.width} height={size.height} aria-hidden="true">
@@ -670,9 +1031,9 @@
         text-anchor="middle">{label.name}</text
       >
     {/each}
-    {#if laid && overlay.traceShown}
-      {#each overlay.strokes as stroke, index (index)}
-        {@const points = stroke.map((p) => `${(p.u * size.width).toFixed(1)},${(p.v * size.height).toFixed(1)}`).join(' ')}
+    {#if laid && overlay.traceShown && !overlay.traceHidden}
+      {#each overlay.strokesSeen as stroke, index (index)}
+        {@const points = onScreen(stroke)}
         <polyline class="trace under" {points} />
         <polyline class="trace over" {points} />
       {/each}
@@ -698,7 +1059,37 @@
         <path d="M0 0 L-6 -12 L6 -12 Z" />
       </g>
     {/if}
+    {#if rubberAt}
+      <circle class="rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
+    {/if}
+    {#if cornersAt.length}
+      <polygon class="warp-edge under" points={cornersLine} />
+      <polygon class="warp-edge over" points={cornersLine} />
+    {/if}
+    {#if shown && ((shiftHeld && hovering) || rollNote)}
+      <!-- the point a roll turns about, ringed -->
+      <g class="pivot" transform="translate({pivotAt.x} {pivotAt.y})">
+        {#each ['under', 'over'] as layer (layer)}
+          <g class={layer}>
+            <circle class="dot" r="2.5" />
+            <circle class="ring" r="13" />
+          </g>
+        {/each}
+      </g>
+    {/if}
   </svg>
+
+  {#each cornersAt as at, index (index)}
+    <button
+      type="button"
+      class="warp-corner hz-control c{index}"
+      style:left="{at.x}px"
+      style:top="{at.y}px"
+      aria-label="Pull corner {index + 1} of the photo"
+      title="Pull to reshape the photo"
+      onpointerdown={(event) => pullCorner(event, index)}
+    ></button>
+  {/each}
 
   <!-- the elevation scale's numbers, on the view's glass so they read over sky and snow alike -->
   {#each scale as tick (tick.elevation)}
@@ -720,7 +1111,8 @@
       class="glass away hz-control {item.side} {item.id}"
       class:hidden={item.hidden}
       style:top="{item.y}px"
-      title="Turn to it"
+      disabled={locked}
+      title={locked ? 'Unlock the photo to turn' : 'Turn to it'}
       onclick={() => turnTo(item)}
     >
       {#if item.side === 'left'}<span aria-hidden="true">◂</span>{/if}
@@ -730,7 +1122,7 @@
     </button>
   {/each}
 
-  {#if view.panorama}
+  {#if view.observer && !laid}
     <div class="controls">
       <PictureControls {view} {copernicus} {onsetup} bind:width={controls.width} bind:height={controls.height} />
     </div>
@@ -744,10 +1136,25 @@
     <div class="glass readout mono" style:left="{heightNote.x + 14}px" style:top="{heightNote.y + 14}px">{heightNote.text}</div>
   {/if}
 
-  {#if shown && tracing}
-    <p class="glass hint">Draw along the skyline in the photo · Ctrl+Z takes a stroke back · Esc when done</p>
+  {#if rollNote}
+    <div class="glass readout mono" style:left="{rollNote.x + 22}px" style:top="{rollNote.y + 18}px">{rollNote.text}</div>
+  {/if}
+
+  {#if loupe}
+    <div class="glass loupe hz-control">
+      <span class="mono">×{loupe.zoom < 10 ? loupe.zoom.toFixed(1) : Math.round(loupe.zoom)}</span>
+      <button type="button" onclick={() => overlay.fitLoupe()} title="Back to the whole photo in the frame (0)">Fit</button>
+    </div>
+  {/if}
+
+  {#if shown && warping}
+    <p class="glass hint">Pull a corner to reshape the photo · Drag inside it to move it · Esc when done</p>
+  {:else if shown && tracing}
+    <p class="glass hint">Draw along the skyline, it snaps to the edge · Alt+drag draws freely · Wheel to look closer · Esc when done</p>
+  {:else if shown && erasing}
+    <p class="glass hint">Drag over the trace to rub it out · Wheel to look closer · Ctrl+Z takes it back · Esc when done</p>
   {:else if shown && laid && !photoHinted}
-    <p class="glass hint">Drag to move the terrain under the photo · Wheel to zoom · Shift+drag to roll · Alt+wheel for height</p>
+    <p class="glass hint">Drag to move the terrain under the photo · Wheel to look closer · Space+drag to move around · Shift+drag to roll</p>
   {:else if shown && !hinted}
     <p class="glass hint">Drag to turn · Wheel to zoom · Double-click to go there · ↑ ↓ to walk</p>
   {/if}
@@ -761,20 +1168,46 @@
       {#each ticks as tick (tick.azimuth)}
         <span class="tick" class:named={tick.named} style:left="{tick.x}px" aria-hidden="true">{tick.label}</span>
       {/each}
-      {#if typing}
-        <input
-          bind:this={caretInput}
-          bind:value={typed}
-          class="hz-caret hz-control mono"
-          aria-label="Heading in degrees, or a wind such as SW"
-          onkeydown={onCaretKey}
-          onblur={applyHeading}
-        />
-      {:else}
-        <button type="button" class="hz-caret hz-control mono" aria-label="Heading, click to type" onclick={editHeading}>
-          {headingText(view.camera.heading, view.camera.fov)}
-        </button>
-      {/if}
+      <div class="caret-row hz-control">
+        {#each [[turnLeft, 'left', 'M5.5 1.5 2.5 5 5.5 8.5'], null, [turnRight, 'right', 'M2.5 1.5 5.5 5 2.5 8.5']] as side, index (index)}
+          {#if side}
+            {@const [press, way, path] = side}
+            <button
+              type="button"
+              class="hz-nudge"
+              tabindex="-1"
+              aria-label="Turn {way} a tenth of a degree"
+              title="Turn {way} by 0.1°; Shift for 1°"
+              onpointerdown={press.start}
+              onpointerup={press.stop}
+              onpointerleave={press.stop}
+              onpointercancel={press.stop}
+            >
+              <svg width="8" height="10" viewBox="0 0 8 10" aria-hidden="true"><path d={path} /></svg>
+            </button>
+          {:else if typing}
+            <input
+              bind:this={caretInput}
+              bind:value={typed}
+              class="hz-caret mono"
+              aria-label="Heading in degrees, or a wind such as SW"
+              onkeydown={onCaretKey}
+              onblur={applyHeading}
+            />
+          {:else}
+            <button
+              type="button"
+              class="hz-caret mono"
+              aria-label="Heading, click to type"
+              disabled={locked}
+              title={locked ? 'Unlock the photo to turn' : undefined}
+              onclick={editHeading}
+            >
+              {headingText(facing.heading, facing.fov)}
+            </button>
+          {/if}
+        {/each}
+      </div>
     </div>
   {/if}
 </div>
@@ -796,6 +1229,10 @@
   }
   .horizon-view.tracing {
     cursor: crosshair;
+  }
+  .horizon-view.panning,
+  .horizon-view.shaping {
+    cursor: move;
   }
   .horizon-view:focus-visible {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -893,6 +1330,60 @@
     stroke-width: 2;
   }
 
+  /* -- the photo's corners, out to be pulled ----------------------------------- */
+  .warp-edge {
+    fill: none;
+    stroke-linejoin: round;
+  }
+  .warp-edge.under {
+    stroke: rgba(0, 0, 0, 0.5);
+    stroke-width: 3.5;
+  }
+  .warp-edge.over {
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+  }
+  /* a corner is a bracket on the photo's side of its point, as a crop's is, so the frame's edge never hides it */
+  .warp-corner {
+    position: absolute;
+    z-index: 4;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0 solid var(--accent);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.7));
+    cursor: grab;
+  }
+  .warp-corner.c0 {
+    border-width: 3px 0 0 3px;
+  }
+  .warp-corner.c1 {
+    border-width: 3px 3px 0 0;
+    transform: translateX(-100%);
+  }
+  .warp-corner.c2 {
+    border-width: 0 3px 3px 0;
+    transform: translate(-100%, -100%);
+  }
+  .warp-corner.c3 {
+    border-width: 0 0 3px 3px;
+    transform: translateY(-100%);
+  }
+  .warp-corner:hover,
+  .warp-corner:active {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .warp-corner:active {
+    cursor: grabbing;
+  }
+  .warp-corner:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   /* -- marks ------------------------------------------------------------------ */
   .pointed {
     fill: none;
@@ -904,6 +1395,30 @@
   .pointed .over {
     stroke: var(--hz-mark);
     stroke-width: 2;
+  }
+  .pivot {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .pivot .under {
+    stroke: rgba(0, 0, 0, 0.6);
+    stroke-width: 4;
+  }
+  .pivot .over {
+    stroke: var(--hz-mark);
+    stroke-width: 1.8;
+  }
+  .rubber {
+    fill: color-mix(in srgb, var(--text-1) 12%, transparent);
+    stroke: var(--text-1);
+    stroke-width: 1;
+  }
+  .pivot .ring {
+    stroke-dasharray: 5 4;
+  }
+  .pivot .over .dot {
+    fill: var(--hz-mark);
   }
   .target path {
     fill: var(--hz-seen);
@@ -1017,6 +1532,34 @@
     top: 10px;
     right: 10px;
   }
+  /* how much the loupe magnifies, and the way back to the whole photo */
+  .loupe {
+    position: absolute;
+    top: 10px;
+    left: 48px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 2px 2px 8px;
+    font-size: 11px;
+  }
+  .loupe button {
+    height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-1);
+    font: inherit;
+    cursor: pointer;
+  }
+  .loupe button:hover {
+    background: color-mix(in srgb, var(--text-1) 10%, transparent);
+  }
+  .loupe button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
   .readout {
     position: absolute;
     padding: 3px 7px;
@@ -1044,6 +1587,52 @@
     color: var(--text-2);
     font-size: 10px;
     pointer-events: none;
+  }
+  /* the ground still loading, said once over the view rather than in a corner of the page */
+  .loading {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 200px;
+    padding: 4px 10px;
+    transform: translateX(-50%);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-align: center;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .loading .bar {
+    height: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--text-1) 15%, transparent);
+    overflow: hidden;
+  }
+  .loading .bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.2s;
+  }
+  .loading.failed {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-1);
+    pointer-events: auto;
+  }
+  .loading.failed button {
+    height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--text-1) 10%, transparent);
+    color: var(--text-1);
+    font: inherit;
+    cursor: pointer;
   }
   .notice {
     position: absolute;
@@ -1086,15 +1675,50 @@
     color: var(--text-1);
     font-weight: 700;
   }
-  .hz-caret {
+  /* the caret and its two arrows, centred on the heading: the arrows are alike, so the notch stays true */
+  .caret-row {
     position: absolute;
     left: 50%;
     bottom: 2px;
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
+  .hz-nudge {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--r-sm);
+    background: var(--hz-glass);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--text-1);
+    cursor: pointer;
+  }
+  .hz-nudge:hover:not(:disabled) {
+    color: var(--accent);
+  }
+  .hz-nudge:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .hz-nudge svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .hz-caret {
+    position: relative;
     min-width: 64px;
     width: max-content;
     height: 24px;
     padding: 0 8px;
-    transform: translateX(-50%);
     border: none;
     border-radius: var(--r-sm);
     background: var(--accent);
@@ -1120,6 +1744,10 @@
     width: 64px;
     outline: none;
     box-shadow: inset 0 0 0 2px var(--accent-text);
+  }
+  button.hz-caret:disabled {
+    cursor: default;
+    opacity: 0.75;
   }
   button.hz-caret:focus-visible {
     outline: none;

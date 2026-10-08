@@ -434,3 +434,43 @@ def test_a_profile_without_the_question_carries_no_verdict(client, monkeypatch):
     _network(monkeypatch, lambda request: httpx.Response(404, text="Not found"))
     answer = client.post("/api/terrain/profile", json={"points": [[43, 5], [43, 5.1]]}).json()
     assert "sight" not in answer
+
+
+def test_a_cached_tile_cut_short_is_fetched_again(tmp_workspace, monkeypatch):
+    whole = terrain.encode(np.full((terrain.TILE, terrain.TILE), 812.0, dtype=np.float32))
+    lat, lon = 46.0, 7.5
+    px, py = terrain._pixels(np.array([lat]), np.array([lon]), 9)
+    tx, ty = int(px[0]) >> 9, int(py[0]) >> 9
+    terrain._store(terrain.MAPTERHORN.id, 9, tx, ty, whole[: len(whole) // 3], "webp")
+    asked = []
+
+    def get(url):
+        asked.append(url)
+        return 200, whole
+
+    monkeypatch.setattr(terrain, "_get", get)
+    terrain.forget_decoded()
+    assert float(terrain.Sampler().heights(lat, lon, 9)) == pytest.approx(812.0, abs=0.01)
+    assert len(asked) == 1
+
+
+def test_threads_asking_one_tile_at_once_download_it_once(tmp_workspace, monkeypatch):
+    import threading
+    import time
+
+    whole = terrain.encode(np.zeros((terrain.TILE, terrain.TILE), dtype=np.float32))
+    asked = []
+
+    def slow(url):
+        asked.append(url)
+        time.sleep(0.2)
+        return 200, whole
+
+    monkeypatch.setattr(terrain, "_get", slow)
+    threads = [threading.Thread(target=terrain.tile, args=(9, 10, 11)) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(asked) == 1
+    assert not list(terrain._path(terrain.MAPTERHORN.id, 9, 10, 11, "webp").parent.glob("*.part"))

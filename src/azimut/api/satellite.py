@@ -780,6 +780,12 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
         provider = tiles.get_provider(provider_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return serve_tile(provider, z, x, y)
+
+
+def serve_tile(provider: tiles.Provider, z: int, x: int, y: int) -> Response:
+    """One tile of a provider as the map's proxy serves it: disk cache, meter,
+    native ceiling and overzoom over gaps. Raises HTTPException when there is none."""
     if z < 0 or z > provider.max_zoom:
         raise HTTPException(status_code=422, detail="tile zoom out of range")
     grid_size = 1 << z

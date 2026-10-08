@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createRenderer, lightVector } from './renderer.js';
+import { createMeshRenderer, lightVector } from './renderer.js';
 
-// The shader itself runs in Chromium (the Horizon probes); importing the module
+// The shaders run in Chromium (the Horizon e2e checks); importing the module
 // here is what catches a shader source that breaks the file it is written in.
 describe('the Horizon renderer', () => {
   it('points its light the way an azimuth and an altitude say', () => {
@@ -16,8 +16,8 @@ describe('the Horizon renderer', () => {
     expect(nw[1]).toBeGreaterThan(0);
   });
 
-  it('says so when the browser has no WebGL2', () => {
-    const canvas = { getContext: () => null };
-    expect(createRenderer(canvas)).toBeNull();
+  it('says so when the browser has no WebGL2, or no float targets to draw distances in', () => {
+    expect(createMeshRenderer({ getContext: () => null })).toBeNull();
+    expect(createMeshRenderer({ getContext: () => ({ getExtension: () => null }) })).toBeNull();
   });
 });
