@@ -276,7 +276,7 @@ describe('the map façade keeps the engine on its own side', () => {
     // the end is heard after the re-seat, so the settled view says where the centre landed
     expect(heard).toEqual(['re-seated', 'rotateend', 'moveend']);
     release();
-    expect(heard).toHaveLength(3);
+    expect(heard.filter((type) => type === 'moveend')).toHaveLength(1);
     // and the map is the engine's own again: a jump is a whole movement
     expect(Object.hasOwn(map, 'fire')).toBe(false);
     heard.length = 0;

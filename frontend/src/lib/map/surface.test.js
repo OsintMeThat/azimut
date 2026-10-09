@@ -149,6 +149,10 @@ function stubClasses() {
       this.lngLat = at;
       return this;
     }
+    // the engine's test against the relief, which reads the drawn depth back off the card
+    _updateOpacity(force) {
+      (this.tested ??= []).push(force);
+    }
     getLngLat() {
       return { lat: this.lngLat[1], lng: this.lngLat[0] };
     }
@@ -365,6 +369,19 @@ describe('a mark is HTML at a position', () => {
     expect(mark.element.className).toContain('sky-body');
     expect(mark.element.innerHTML).toBe('<i class="glyph"></i>');
     expect(mark.element.style.width).toBe('20px');
+  });
+
+  it('tests a mark against the relief only once the camera is at rest', () => {
+    const map = stubMap();
+    createSurface(stubEngine(map)).set([MARK]);
+    const heard = (type) => map.calls.on.find(([name]) => name === type)[1];
+    const mark = marks[0];
+    heard('movestart')();
+    mark._updateOpacity(false);
+    expect(mark.tested).toBeUndefined();
+    heard('moveend')();
+    mark._updateOpacity(true);
+    expect(mark.tested).toEqual([true]);
   });
 
   it('sits the anchor the caller named on the coordinate', () => {
