@@ -11,7 +11,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { createHorizonState } from './state/horizon.svelte.js';
+import { createHorizonState, waybackSource } from './state/horizon.svelte.js';
 import HorizonPanel from './HorizonPanel.svelte';
 import PictureControls from './PictureControls.svelte';
 
@@ -81,6 +81,10 @@ function render(Component, props) {
 }
 
 const button = (root, name) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === name);
+const openImagery = (root) => {
+  root.querySelector('[aria-controls="hz-imagery"]').click();
+  flushSync();
+};
 const text = (root) => root.textContent.replace(/\s+/g, ' ');
 
 afterEach(() => {
@@ -240,6 +244,27 @@ describe('the Horizon inspector', () => {
     button(alert, 'Try again').click();
     await settle();
     expect(root.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('says quietly that some summits are missing while the app asks again by itself', async () => {
+    let fail = true;
+    const api = fakeApi({
+      peaks: async () => (fail ? { peaks: [], pending: 0, failed: 3, retry_in: 30 } : { peaks: [], pending: 0, failed: 0 }),
+    });
+    const view = state(api);
+    view.standAt(EYE);
+    await settle();
+    view.showPeaks(true);
+    await settle();
+    const root = render(HorizonPanel, { view });
+    expect(root.querySelector('[role="alert"]')).toBeNull();
+    const note = root.querySelector('.problem[role="status"]');
+    expect(note.textContent).toContain('OpenFreeMap did not answer for some summits');
+    fail = false;
+    button(note, 'Try again').click();
+    await settle();
+    expect(api.get.mock.calls.at(-1)[0]).toContain('&retry=true');
+    expect(root.querySelector('.problem')).toBeNull();
   });
 
   it('says when the imagery was refused, and asks for it again', async () => {
@@ -421,6 +446,7 @@ describe('the picture controls on the view', () => {
     view.setGround('imagery');
     const onsetup = vi.fn();
     const root = render(PictureControls, { view, copernicus: false, onsetup });
+    openImagery(root);
     const locked = [...root.querySelectorAll('button')].find((b) => b.textContent.includes('Sentinel-2'));
     expect(locked.textContent.trim()).toBe('Sentinel-2 near the eye');
     locked.click();
@@ -431,20 +457,74 @@ describe('the picture controls on the view', () => {
     const view = state();
     view.setGround('imagery');
     const root = render(PictureControls, { view, copernicus: true });
+    openImagery(root);
     const near = [...root.querySelectorAll('button')].find((b) => b.textContent.includes('Sentinel-2 nearer than'));
     expect(near.getAttribute('aria-pressed')).toBe('false');
     const reach = root.querySelector('[aria-label="How far Sentinel-2 is laid"]');
     expect([...reach.options].map((option) => option.textContent)).toEqual(['2 km', '5 km', '10 km', '20 km', '30 km']);
   });
 
-  it('offer a release of the imagery only with satellite ground', () => {
+  it('offer a release of the imagery only with satellite ground, folded under one button', () => {
     const view = state();
     const root = render(PictureControls, { view });
-    expect(root.querySelector('select')).toBeNull();
+    expect(root.querySelector('[aria-controls="hz-imagery"]')).toBeNull();
     button(root, 'Satellite').click();
     flushSync();
+    // one row on the sky: the settings wait under the button that names the release
+    expect(root.querySelector('select')).toBeNull();
+    expect(root.querySelector('[aria-controls="hz-imagery"]').textContent.trim()).toBe('Latest imagery');
+    openImagery(root);
     const select = root.querySelector('select');
     expect(select.options[0].textContent).toBe('Latest imagery');
     expect(select.options[1].textContent).toBe('Older releases…');
+    // another ground folds them away, and coming back finds them folded
+    button(root, 'Relief').click();
+    flushSync();
+    button(root, 'Satellite').click();
+    flushSync();
+    expect(root.querySelector('#hz-imagery')).toBeNull();
+  });
+
+  it('name the release drawn and Sentinel-2 near on the folded button, and fold away on Escape or a press elsewhere', () => {
+    const view = {
+      ground: 'imagery',
+      lines: false,
+      drapeSource: waybackSource(13192),
+      releases: [{ release: 13192, date: '2023-05-10' }],
+      releasesBusy: false,
+      nearOn: true,
+      nearReach: 5000,
+      nearEstimate: null,
+      nearPasses: [],
+      placed: null,
+      setGround: vi.fn(),
+      setLines: vi.fn(),
+    };
+    const root = render(PictureControls, { view, copernicus: true });
+    const more = root.querySelector('[aria-controls="hz-imagery"]');
+    expect(text(more).trim()).toBe('2023-05-10 S2 · 5 km');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    openImagery(root);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('#hz-imagery [aria-label="How far Sentinel-2 is laid"]')).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(root.querySelector('#hz-imagery')).toBeNull();
+    openImagery(root);
+    root.querySelector('#hz-imagery select').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    flushSync();
+    expect(root.querySelector('#hz-imagery')).not.toBeNull();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    flushSync();
+    expect(root.querySelector('#hz-imagery')).toBeNull();
+  });
+
+  it('lay the imagery open, without the lines, inside a menu that has them elsewhere', () => {
+    const view = state();
+    view.setGround('imagery');
+    const root = render(PictureControls, { view, lines: false, menu: false });
+    expect([...root.querySelectorAll('button')].some((b) => b.textContent.includes('Ridge lines'))).toBe(false);
+    expect(root.querySelector('[aria-controls="hz-imagery"]')).toBeNull();
+    expect(root.querySelector('[aria-label="Which imagery"]')).not.toBeNull();
   });
 });

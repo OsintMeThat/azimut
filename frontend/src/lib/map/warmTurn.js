@@ -18,6 +18,8 @@
  * app refuses one anyway.
  */
 
+import { BATCH_PROTOCOL } from './tileBatch.js';
+
 /** Below this tilt the view is near enough flat that a turn uncovers little. */
 export const WARM_MIN_PITCH = 30;
 /** Headings a turn is read at, the one on screen included. */
@@ -28,8 +30,9 @@ export const WARM_DELAY = 500;
 export const WARM_MAX_TILES = 1200;
 export const WARM_MAX_TERRAIN = 400;
 
-const PROXIED = /^\/api\/tiles\/([^/]+)\/\{z\}\/\{x\}\/\{y\}$/;
-const TERRAIN = /^\/api\/terrain\/tiles\/\{z\}\/\{x\}\/\{y\}$/;
+// the app's proxy as an address, or as the batches a map asks in (`tileBatch.js`)
+const PROXIED = new RegExp(`^(?:/api/tiles|${BATCH_PROTOCOL}://[^/]+/imagery)/([^/]+)/\\{z\\}/\\{x\\}/\\{y\\}$`);
+const TERRAIN = new RegExp(`^(?:/api/terrain/tiles|${BATCH_PROTOCOL}://[^/]+/terrain)/\\{z\\}/\\{x\\}/\\{y\\}$`);
 
 /** The provider a tile address template is proxied for, or null. */
 export function proxiedProvider(template) {

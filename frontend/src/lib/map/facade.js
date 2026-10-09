@@ -30,6 +30,7 @@
  */
 import { wrapLon } from '../coords.js';
 import { haversine } from '../measure.js';
+import { HAND, PLACED, reseatKeepingEye } from './groundHold.js';
 
 /** What happened to the view → the engine events that say so. */
 const EVENTS = {
@@ -132,6 +133,79 @@ export function framePadding(padding) {
   return { left: x, right: x, top: y, bottom: y };
 }
 
+/** The engine events that open a movement, and those that close it, in the order it closes one. */
+const MOVE_OPENS = new Set(['movestart', 'zoomstart', 'rotatestart', 'pitchstart', 'rollstart']);
+const MOVE_CLOSES = ['zoomend', 'rotateend', 'pitchend', 'rollend', 'moveend'];
+
+/**
+ * Fold the jumps of a gesture into one movement of the map's.
+ *
+ * A gesture over relief moves the camera by jumps, several per move of the
+ * hand, and the engine reports each jump as a whole movement, start to end.
+ * Whatever waits for a movement to end then ran at every jump: the app's
+ * settled view, and each of the engine's markers, which reads the depth of the
+ * drawn ground back off the graphics card when a movement ends. Chrome holds
+ * the page until the card has drawn everything queued before each such read,
+ * and thousands of them a second stalled the map for a tenth of a second at a
+ * time. Folded, the gesture opens once, moves at every jump, and ends once when
+ * the last fold is let go, as the engine's own gestures do.
+ *
+ * Folds may overlap (a wheel burst still settling as a drag starts), in any
+ * order: the map's events stay folded until every one is let go.
+ *
+ * @param {object} map the engine's own map
+ * @returns {() => () => void} opens a fold and hands back its release
+ */
+export function createMoveFold(map) {
+  let open = 0;
+  let opened = new Set();
+  let closes = new Map();
+  let fire = null;
+  let ownFire = false;
+
+  function folded(event, properties) {
+    const type = typeof event === 'string' ? event : event?.type;
+    if (MOVE_OPENS.has(type)) {
+      if (opened.has(type)) return this;
+      opened.add(type);
+    } else if (MOVE_CLOSES.includes(type)) {
+      closes.set(type, [event, properties]);
+      return this;
+    }
+    return fire.call(this, event, properties);
+  }
+
+  function unfold() {
+    const held = closes;
+    if (ownFire) map.fire = fire;
+    else delete map.fire;
+    fire = null;
+    opened = new Set();
+    closes = new Map();
+    for (const type of MOVE_CLOSES) {
+      const close = held.get(type);
+      if (close) map.fire(...close);
+    }
+  }
+
+  return () => {
+    if (typeof map?.fire !== 'function') return () => {};
+    if (open === 0) {
+      ownFire = Object.prototype.hasOwnProperty.call(map, 'fire');
+      fire = map.fire;
+      map.fire = folded;
+    }
+    open += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      open -= 1;
+      if (open === 0) unfold();
+    };
+  };
+}
+
 /**
  * Wrap a built map in the façade.
  *
@@ -147,6 +221,7 @@ export function mapFacade(map, container, mapId = '') {
   let heldElevation = null;
   const held = () => (heldElevation == null ? {} : { elevation: heldElevation });
   const settledHandlers = new Set();
+  const foldMoves = createMoveFold(map);
 
   /**
    * Layers that answer their own click.
@@ -197,11 +272,14 @@ export function mapFacade(map, container, mapId = '') {
     // A box with no extent at all (one point) fits at any zoom, so clamp — the
     // engine's own ceiling is the answer there, never Infinity.
     const zoom = Math.min(ceiling, Math.floor(fitted.zoom));
-    map.easeTo({
-      center: fitted.center,
-      zoom: Math.max(map.getMinZoom(), zoom),
-      duration: options.animate ? 420 : 0,
-    });
+    map.easeTo(
+      {
+        center: fitted.center,
+        zoom: Math.max(map.getMinZoom(), zoom),
+        duration: options.animate ? 420 : 0,
+      },
+      PLACED
+    );
   }
 
   /** Frame every point handed over. False when none of them was usable. */
@@ -216,7 +294,8 @@ export function mapFacade(map, container, mapId = '') {
     camera,
     getZoom: () => viewZoom(map.getZoom()),
 
-    setView: ({ lat, lon }, zoom) => map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom) }),
+    /** The app putting the camera somewhere (`groundHold.js` PLACED). */
+    setView: ({ lat, lon }, zoom) => map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom) }, PLACED),
     /**
      * A whole camera in one jump, turn included: one move and one settle, where
      * `setView` then `setBearing` would settle once on the old heading first.
@@ -224,22 +303,53 @@ export function mapFacade(map, container, mapId = '') {
      * any tilt it is handed at zero.
      */
     setCamera: ({ lat, lon, zoom, bearing = 0, pitch }) =>
-      map.jumpTo({
-        center: [lon, lat],
-        zoom: engineZoom(zoom),
-        bearing: -normalizeBearing(bearing),
-        ...(Number.isFinite(pitch) ? { pitch } : {}),
-      }),
-    setZoom: (zoom) => map.setZoom(engineZoom(zoom)),
+      map.jumpTo(
+        {
+          center: [lon, lat],
+          zoom: engineZoom(zoom),
+          bearing: -normalizeBearing(bearing),
+          ...(Number.isFinite(pitch) ? { pitch } : {}),
+        },
+        PLACED
+      ),
+    setZoom: (zoom) =>
+      heldElevation == null
+        ? map.setZoom(engineZoom(zoom))
+        : map.jumpTo({ zoom: engineZoom(zoom), ...held() }, HAND),
+    /** The app zoom unrounded, for a gesture that eases the zoom (`gestures.js`). */
+    exactZoom: () => exactViewZoom(map.getZoom()),
+    /**
+     * Move the eye straight toward a point on the ground, by as much as `levels`
+     * of zoom would bring it (one level halves the way), turn and tilt kept; a
+     * negative count backs away from it. The point stays where it is drawn,
+     * since the line from the eye to it does not turn. False on an engine that
+     * cannot say where its eye is. A move of the hand's (`groundHold.js`).
+     */
+    dollyToward({ lat, lon }, levels) {
+      const tr = map._camera?.transform;
+      if (!tr?.getCameraLngLat || !map.calculateCameraOptionsFromCameraLngLatAltRotation) return false;
+      const eye = tr.getCameraLngLat();
+      const altitude = tr.getCameraAltitude();
+      const ground = map.queryTerrainElevation?.([lon, lat]) ?? 0;
+      const share = 1 - 2 ** -levels;
+      const placed = map.calculateCameraOptionsFromCameraLngLatAltRotation(
+        [eye.lng + (lon - eye.lng) * share, eye.lat + (lat - eye.lat) * share],
+        altitude + (ground - altitude) * share,
+        map.getBearing(),
+        map.getPitch()
+      );
+      map.jumpTo({ center: placed.center, zoom: placed.zoom, elevation: placed.elevation }, HAND);
+      return true;
+    },
     setBearing: (deg) =>
       heldElevation == null
         ? map.setBearing(-normalizeBearing(deg))
-        : map.jumpTo({ bearing: -normalizeBearing(deg), ...held() }),
+        : map.jumpTo({ bearing: -normalizeBearing(deg), ...held() }, HAND),
     /** Tilt from straight down, in degrees; held at zero unless relief is on. */
     setPitch: (deg) =>
       heldElevation == null
         ? map.setPitch(Math.max(0, Number(deg) || 0))
-        : map.jumpTo({ pitch: Math.max(0, Number(deg) || 0), ...held() }),
+        : map.jumpTo({ pitch: Math.max(0, Number(deg) || 0), ...held() }, HAND),
     /**
      * Keep the centre's height where it is until the returned release is called.
      *
@@ -248,6 +358,9 @@ export function mapFacade(map, container, mapId = '') {
      * shift of a few metres moves the camera by hundreds, and a gesture that
      * turns, tilts and shifts at every move of the hand comes apart. Holding
      * the height keeps each jump exactly the move that was asked for.
+     *
+     * The hold is also one movement: the jumps made meanwhile end once, when
+     * it is let go (`createMoveFold`).
      */
     holdElevation() {
       // The engine re-seats the centre on the ground at every frame and every
@@ -256,19 +369,20 @@ export function mapFacade(map, container, mapId = '') {
       // gestures avoid that with a freeze it lifts at the end, re-seating the
       // centre while keeping the camera where it is (handler_manager.ts). There
       // is no public handle on it, so this reaches for the same one, and does
-      // without where an engine has none.
+      // without where an engine has none. The moves made meanwhile say they are
+      // the hand's, so the eye stays where the gesture leaves it (`groundHold.js`).
       const camera = map._camera;
       if (camera) camera.elevationFreeze = true;
       heldElevation = map.getCenterElevation?.() ?? null;
+      const unfold = foldMoves();
       return () => {
         heldElevation = null;
-        if (!camera) return;
-        camera.elevationFreeze = false;
-        if (map.terrain && map.getCenterClampedToGround?.()) {
-          const update = camera.getTransformForUpdate();
-          update.recalculateZoomAndCenter(map.terrain);
-          camera.applyUpdatedTransform(update);
+        if (camera) {
+          camera.elevationFreeze = false;
+          reseatKeepingEye(map);
         }
+        // after the re-seat, so the one settled view says where the centre landed
+        unfold();
       };
     },
     /** How deep this map goes right now, in app zoom: its basemap's ceiling. */
@@ -282,7 +396,31 @@ export function mapFacade(map, container, mapId = '') {
      */
     shiftBy: ({ lat, lon }) => {
       const centre = map.getCenter();
-      map.jumpTo({ center: [centre.lng + lon, centre.lat + lat], ...held() });
+      map.jumpTo({ center: [centre.lng + lon, centre.lat + lat], ...held() }, heldElevation == null ? undefined : HAND);
+    },
+    /**
+     * Where a ground point would be drawn were the camera shifted by `shift`
+     * degrees (`shiftBy`), worked out on a copy of the camera: a gesture aims
+     * its shift with this and moves the real one once. Null on an engine whose
+     * camera cannot be copied.
+     */
+    pointAfterShift({ lat, lon }, shift) {
+      const tr = map._camera?.transform;
+      if (!tr?.clone) return null;
+      const next = tr.clone();
+      // the engine's own position objects, which its camera expects
+      const centre = map.getCenter();
+      centre.lng += shift.lon;
+      centre.lat += shift.lat;
+      next.setCenter(centre);
+      const terrain = (map.style && map.terrain) || undefined;
+      if (heldElevation != null) next.setElevation(heldElevation);
+      else if (terrain) next.setElevation(terrain.getElevationForLngLat(centre, next));
+      const at = map.getCenter();
+      at.lng = lon;
+      at.lat = lat;
+      const point = next.locationToScreenPoint(at, terrain);
+      return { x: point.x, y: point.y };
     },
     fitBounds,
     fitPoints,
@@ -330,6 +468,12 @@ export function mapFacade(map, container, mapId = '') {
     /** The container changed size; re-read it. */
     resize: () => map.resize(),
 
+    /** Whether a press landed on the drawn map itself, not on a marker or a control over it. */
+    onSurface: (target) => Boolean(target) && target === map.getCanvas?.(),
+
+    /** Give the map the keyboard, as a press on it would. */
+    focus: () => map.getCanvas?.()?.focus?.({ preventScroll: true }),
+
     /**
      * The camera exactly as the engine holds it, fractional zoom included. Only
      * a second map copying this one reads it (`cameraLink.js`): anything that
@@ -355,12 +499,15 @@ export function mapFacade(map, container, mapId = '') {
     follow(next, { settled = false } = {}) {
       following = true;
       try {
-        map.jumpTo({
-          center: [next.lng, next.lat],
-          zoom: next.zoom,
-          bearing: next.bearing,
-          ...(Number.isFinite(next.pitch) ? { pitch: next.pitch } : {}),
-        });
+        map.jumpTo(
+          {
+            center: [next.lng, next.lat],
+            zoom: next.zoom,
+            bearing: next.bearing,
+            ...(Number.isFinite(next.pitch) ? { pitch: next.pitch } : {}),
+          },
+          PLACED
+        );
       } finally {
         following = false;
       }

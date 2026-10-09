@@ -18,7 +18,7 @@ exported copy stays a finished file under `exports/` or the selected Views folde
     bundles/                 # exported bundles and transient imports
     cache/tiles/             # disposable map tile cache
     cache/terrain/           # terrain height tiles, bounded by size, not age
-    cache/peaks/             # summit names from OpenStreetMap, a file a 1° cell
+    cache/peaks/             # summit names from OpenFreeMap's tiles, a file a tile
     lock                     # held by the one Azimut using this workspace
     runtime/                 # updated scraper distributions
     scratch/                 # complete, promotable one-shot cases

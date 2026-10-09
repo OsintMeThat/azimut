@@ -393,7 +393,7 @@ export const GUIDE = [
       {
         where: 'Horizon',
         keys: [
-          { combo: 'Drag', does: 'turns the view, as does the strip over it' },
+          { combo: 'Drag', does: 'turns the view, as does the strip under it' },
           { combo: 'Wheel', does: 'narrows or widens the lens about the pointer' },
           { combo: 'Shift+drag', does: 'rolls the view' },
           { combo: 'Double-click', does: 'goes to the ground clicked, facing the same way' },

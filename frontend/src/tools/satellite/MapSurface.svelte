@@ -25,7 +25,7 @@
    */
   import { onMount, tick } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
-  import { createRelief } from '../../lib/map/relief.js';
+  import { createRelief, steadyZoom } from '../../lib/map/relief.js';
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { createBasemaps, imageryError, IMAGERY_SOURCE, OVERLAY_IDS } from '../../lib/map/basemap.js';
@@ -133,13 +133,25 @@
   let dateRequest = 0;
   let dateTimer;
   /**
+   * The zoom the imagery is chosen at: the view's own, or over relief the one
+   * it last chose at until the view has really moved (lib/map/relief.js
+   * `steadyZoom`). Remembered across readings, so it is kept beside the
+   * derivation rather than in state; the first reading takes the view's.
+   */
+  let chosenAt = null;
+  const layerZoom = $derived.by(() => {
+    const next = view.zoom;
+    chosenAt = reliefOffered && reliefOn ? steadyZoom(chosenAt, next) : next;
+    return chosenAt;
+  });
+  /**
    * What this surface actually shows, which is not always what it was asked
    * for: a billed basemap steps aside when the month is nearly spent or the
    * view is zoomed out. The capture and the imagery date follow the display,
    * so provenance always matches the pixels.
    */
   const shown = $derived(
-    imagery.displayed(providerId, view.zoom, {
+    imagery.displayed(providerId, layerZoom, {
       ...(s2?.variant ?? {}),
       release: wayback?.release ?? null,
       pass: s1?.shownPass ?? null,
@@ -236,6 +248,21 @@
     basemaps.setZoomCeiling(zoomCeiling);
     showBasemap();
     showOverlays();
+    // Only a surface that offers relief has one: Compare and Detect stay flat.
+    // Built before anything listens for a settled view, so a move over relief is
+    // reported once its centre sits on the ground (lib/map/groundHold.js).
+    relief = reliefOffered
+      ? createRelief(
+          engine.impl,
+          () => api.get('/api/terrain/sources'),
+          {
+            imagery: IMAGERY_SOURCE,
+            // a tilted view's turn is fetched ahead into the app's caches (lib/map/warmTurn.js)
+            send: (body) => api.post('/api/tiles/warm', body),
+          },
+          { mapId: engine.mapId }
+        )
+      : null;
     // the façade wraps the centre back inside ±180 for us, which is what every
     // route a capture reaches enforces
     const offSettled = engine.on('view-settled', (settled) => {
@@ -246,14 +273,6 @@
       bearing = Math.round(turned.bearing);
       onbearingchange(turned);
     });
-    // only a surface that offers relief has one: Compare and Detect stay flat
-    relief = reliefOffered
-      ? createRelief(engine.impl, () => api.get('/api/terrain/sources'), {
-          imagery: IMAGERY_SOURCE,
-          // a tilted view's turn is fetched ahead into the app's caches (lib/map/warmTurn.js)
-          send: (body) => api.post('/api/tiles/warm', body),
-        })
-      : null;
     const offPitch = engine.on('pitch', (tilted) => (pitch = tilted.pitch));
     const offClick = engine.on('click', (at) => onclick(at));
     const offMenu = engine.on('contextmenu', (at) => oncontextmenu(at));

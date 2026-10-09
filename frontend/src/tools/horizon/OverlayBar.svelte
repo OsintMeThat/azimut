@@ -2,10 +2,12 @@
   /**
    * The band over the view while a photo or a video lies on it, read left to
    * right as the work goes: which file; how much of it shows against the
-   * terrain, or a blink between the two; the skyline traced or found on it,
-   * and the photo's corners to pull; how far the terrain's skyline lies from
-   * the trace, with the fit that closes it as the one lit act, and the lock
-   * that holds the match once it is good; then how the ground is drawn,
+   * terrain, or a blink between the two, and the ridge lines over it; the
+   * skyline traced or found on it, and the photo's corners to pull; how far
+   * the terrain's skyline lies from the trace, with the fit that closes it as
+   * the one lit act, the places it found when one alone did not stand out,
+   * and the lock that holds the match once it is good; then
+   * how the ground is drawn,
    * every gesture and key, and a way to take the photo away.
    * It sits above the frame rather than on it, so nothing covers the photo
    * being matched, and the ground's own controls leave the view for it.
@@ -13,7 +15,8 @@
   import Icon from '../../components/Icon.svelte';
   import PictureControls from './PictureControls.svelte';
   import { clockTime } from '../../lib/inspect.js';
-  import { gapDegrees, gapSpan } from '../../lib/horizon/overlay.js';
+  import { gapDegrees, gapSpan, isAtPlace } from '../../lib/horizon/overlay.js';
+  import { headingText } from '../../lib/horizon/geometry.js';
 
   let {
     /** The overlay (state/overlay.svelte.js). */
@@ -24,6 +27,12 @@
     onchange = () => {},
     /** Asked to turn the view onto the trace. */
     onfit = () => {},
+    /** Whether the fit is searching the turn. */
+    fitting = false,
+    /** The places the search found, best first, when one alone did not stand out (`searchedPlaces`). */
+    places = [],
+    /** Asked to turn to one of them, by its index. */
+    onplace = () => {},
     /** Asked to find the skyline in the photo. */
     ondetect = () => {},
     /** The tab's view state, for how the ground is drawn under the photo; none hides that menu. */
@@ -90,17 +99,24 @@
   let groundOpen = $state(false);
   let groundButton = $state();
   let groundBox = $state();
+  // the places a search found are listed for that search alone: a new one starts folded
+  let placesFor = $state.raw(null);
+  const placesOpen = $derived(places.length > 1 && placesFor === places);
+  let placesButton = $state();
+  let placesBox = $state();
 
   /** A press anywhere else, or Escape, folds a list away. */
   function onWindowPointer(event) {
     if (keysOpen && !keysBox?.contains(event.target) && !keysButton?.contains(event.target)) keysOpen = false;
     if (groundOpen && !groundBox?.contains(event.target) && !groundButton?.contains(event.target)) groundOpen = false;
+    if (placesOpen && !placesBox?.contains(event.target) && !placesButton?.contains(event.target)) placesFor = null;
   }
   function onWindowKey(event) {
-    if ((keysOpen || groundOpen) && event.key === 'Escape') {
+    if ((keysOpen || groundOpen || placesOpen) && event.key === 'Escape') {
       event.stopPropagation();
       keysOpen = false;
       groundOpen = false;
+      placesFor = null;
     }
   }
 </script>
@@ -152,9 +168,25 @@
     aria-pressed={overlay.blink}
     onclick={() => overlay.setBlink(!overlay.blink)}
     title="Switch between the {what.toLowerCase()} and the terrain (B)"
+    aria-label="Blink"
   >
     <Icon name="blink" size={14} /><span class="word spare">Blink</span>
   </button>
+  {#if view}
+    <!-- the same box and tick as on the view without a photo, and its words stay as the band narrows -->
+    <button
+      type="button"
+      class="act check"
+      class:on={view.lines}
+      aria-pressed={view.lines}
+      onclick={() => view.setLines(!view.lines)}
+      title="Outline every ridge over the {what.toLowerCase()}, coloured by distance"
+    >
+      <span class="box" aria-hidden="true">
+        {#if view.lines}<svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5.2 4 7.6 8.6 2.4" /></svg>{/if}
+      </span>Ridge lines
+    </button>
+  {/if}
 
   <span class="divider" aria-hidden="true"></span>
 
@@ -166,6 +198,7 @@
       aria-pressed={overlay.tracing}
       onclick={() => overlay.setTracing(!overlay.tracing)}
       title="Draw along the skyline in the {what.toLowerCase()} (T)"
+      aria-label="Trace skyline"
     >
       <Icon name="freehand" size={14} /><span class="word">Trace skyline</span>
     </button>
@@ -176,7 +209,7 @@
       title="Find the skyline from the colours of sky and ground"
       aria-label="Detect the skyline"
     >
-      <Icon name="profile" size={14} /><span class="word">Detect</span>
+      <Icon name="profile" size={14} /><span class="word minor">Detect</span>
     </button>
     {#if overlay.strokes.length || overlay.erasing}
       <span class="sub" role="group" aria-label="The trace">
@@ -224,7 +257,7 @@
         title={overlay.locked ? 'Unlock the photo to reshape it' : 'Pull the photo by its corners, to square a photo taken at a slant (W)'}
         aria-label="Reshape the photo"
       >
-        <Icon name="polygon" size={14} /><span class="word">Reshape</span>
+        <Icon name="polygon" size={14} /><span class="word minor">Reshape</span>
       </button>
       {#if overlay.warped}
         <button
@@ -252,13 +285,31 @@
       <button
         type="button"
         class="act primary"
-        disabled={overlay.locked}
+        disabled={overlay.locked || fitting}
+        aria-busy={fitting}
         onclick={onfit}
-        title={overlay.locked ? 'Unlock the photo to fit it again' : 'Turn, tilt and roll the terrain to meet your trace'}
+        title={overlay.locked ? 'Unlock the photo to fit it again' : 'Find your trace on the whole turn and lay the terrain on it'}
         aria-label="Fit to trace"
       >
-        <Icon name="wand" size={14} /><span class="word long">Fit to trace</span><span class="word short">Fit</span>
+        {#if fitting}<span class="spinner" aria-hidden="true"></span>{:else}<Icon name="wand" size={14} />{/if}<span
+          class="word long">{fitting ? 'Fitting…' : 'Fit to trace'}</span
+        ><span class="word short">Fit</span>
       </button>
+      {#if places.length > 1}
+        <button
+          bind:this={placesButton}
+          type="button"
+          class="act"
+          class:on={placesOpen}
+          aria-expanded={placesOpen}
+          aria-controls="hz-photo-places"
+          onclick={() => (placesFor = placesOpen ? null : places)}
+          title="The places on the turn that fit the trace"
+          aria-label="Places that fit"
+        >
+          <Icon name="compass" size={14} /><span class="mono">{places.length}</span><Icon name="chevronDown" size={12} />
+        </button>
+      {/if}
     {:else if overlay.tracing}
       <span class="say">Draw along the skyline in the {what.toLowerCase()}.</span>
     {:else if overlay.busy}
@@ -325,7 +376,20 @@
   {#if groundOpen && view}
     <div bind:this={groundBox} class="pop ground" id="hz-photo-ground" role="dialog" aria-label="Ground under the {what.toLowerCase()}">
       <h3>Ground under the {what.toLowerCase()}</h3>
-      <PictureControls {view} {copernicus} {onsetup} />
+      <PictureControls {view} {copernicus} {onsetup} lines={false} menu={false} />
+    </div>
+  {/if}
+
+  {#if placesOpen}
+    <div bind:this={placesBox} class="pop places" id="hz-photo-places" role="dialog" aria-label="Places that fit">
+      <h3>Places that fit</h3>
+      {#each places as place, index (index)}
+        {@const at = view ? isAtPlace(view.camera, place) : false}
+        <button type="button" class="place" class:on={at} aria-pressed={at} disabled={overlay.locked} onclick={() => onplace(index)}>
+          <strong class="mono">{headingText(place.camera.heading, place.camera.fov)}</strong>
+          <span>explains {Math.round(Math.max(0, place.explained) * 100)}% of the trace</span>
+        </button>
+      {/each}
     </div>
   {/if}
 
@@ -384,6 +448,7 @@
   }
   .file {
     max-width: 230px;
+    min-width: 56px;
     color: var(--text-1);
     font-weight: 600;
   }
@@ -400,6 +465,35 @@
   .act.on {
     color: var(--accent);
     background: var(--accent-soft);
+  }
+  /* a tick box says on or off by itself: on, only the box and the words turn amber */
+  .act.check {
+    gap: 7px;
+  }
+  .act.check.on {
+    background: transparent;
+  }
+  .act.check.on:hover {
+    background: color-mix(in srgb, var(--text-1) 7%, transparent);
+  }
+  .box {
+    display: grid;
+    place-items: center;
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    box-shadow: inset 0 0 0 1.5px currentColor;
+  }
+  .act.check.on .box {
+    background: var(--accent);
+    box-shadow: none;
+  }
+  .box svg {
+    fill: none;
+    stroke: var(--accent-text);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   /* the one act the band leads to: closing the gap */
   .act.primary {
@@ -460,14 +554,14 @@
     margin: 0 4px;
     background: var(--border);
   }
+  /* the fit is the band's one lit act: everything else gives way before it does */
   .reading {
+    flex: none;
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-width: 0;
     margin-left: auto;
     padding-right: 4px;
-    overflow: hidden;
   }
   .gap {
     display: inline-flex;
@@ -498,6 +592,10 @@
     opacity: 0.4;
     cursor: default;
   }
+  .act.primary .spinner {
+    border-color: color-mix(in srgb, var(--accent-text) 30%, transparent);
+    border-top-color: var(--accent-text);
+  }
   /* a list folded down over the view's top right corner */
   .pop {
     position: absolute;
@@ -518,6 +616,46 @@
   }
   .keys {
     width: 340px;
+  }
+  .places {
+    right: 120px;
+    gap: 2px;
+    min-width: 240px;
+  }
+  .place {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 8px;
+    border: none;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .place strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .place:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text-1) 7%, transparent);
+  }
+  .place.on {
+    background: var(--accent-soft);
+  }
+  .place.on strong {
+    color: var(--accent);
+  }
+  .place:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .place:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
   .ground {
     --hz-glass: var(--bg-2);
@@ -578,11 +716,12 @@
       transform: rotate(360deg);
     }
   }
-  /* as the band narrows, the gap's number and every button stay; their words go, the least needed first */
+  /* as the band narrows, the gap's number and every button stay; their words go, the least needed first,
+     and on the narrowest the slider leaves its two ends, which still set the photo or the terrain alone */
   .short {
     display: none;
   }
-  @container (max-width: 1300px) {
+  @container (max-width: 1560px) {
     .gap .span,
     .long {
       display: none;
@@ -591,8 +730,9 @@
       display: inline;
     }
   }
-  @container (max-width: 1120px) {
-    .spare {
+  @container (max-width: 1300px) {
+    .spare,
+    .minor {
       display: none;
     }
     .file {
@@ -602,17 +742,24 @@
       width: 90px;
     }
   }
-  @container (max-width: 940px) {
-    .word {
+  @container (max-width: 1180px) {
+    .word:not(.short) {
       display: none;
     }
     .file {
       max-width: 130px;
     }
   }
-  @container (max-width: 640px) {
-    .fade input {
-      width: 64px;
+  @container (max-width: 1000px) {
+    .fade input,
+    .short {
+      display: none;
+    }
+    .act {
+      padding: 0 7px;
+    }
+    .divider {
+      margin: 0 1px;
     }
   }
 </style>

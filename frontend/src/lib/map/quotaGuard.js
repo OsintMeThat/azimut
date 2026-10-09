@@ -79,9 +79,9 @@ export function readGuarded(url) {
   return { mapId, providerId, z: Number(z), x: Number(x), y: Number(y) };
 }
 
-/** Where a guarded tile is really fetched from. */
+/** Where a guarded tile is really fetched from: which provider, and at what address on its own. */
 export function tileSource(asked, view) {
   const far = farTile(asked, view);
   const provider = far ? FREE_FAR_PROVIDER : asked.providerId;
-  return { far, url: `/api/tiles/${provider}/${asked.z}/${asked.x}/${asked.y}` };
+  return { far, provider, url: `/api/tiles/${provider}/${asked.z}/${asked.x}/${asked.y}` };
 }

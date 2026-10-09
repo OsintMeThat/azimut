@@ -37,7 +37,13 @@
   import { FREE_FAR_PROVIDER } from '../lib/map/quotaGuard.js';
   import { bearingBetween } from '../lib/horizon/geometry.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
-  import { startRectDrag, turnFromKey, turnFromPress } from '../lib/map/gestures.js';
+  import {
+    createReliefWheel,
+    startGroundPan,
+    startRectDrag,
+    turnFromKey,
+    turnFromPress,
+  } from '../lib/map/gestures.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
@@ -686,12 +692,18 @@
     if (!element) return;
     // middle-mouse or shift drag rotates the view, and tilts it over relief
     element.addEventListener('mousedown', onMiddleRotateStart, true);
+    // over relief a plain drag holds the grabbed ground under the hand, and the
+    // wheel zooms toward the ground under the pointer
+    element.addEventListener('mousedown', onGroundPanStart, true);
+    element.addEventListener('wheel', onReliefWheel, { capture: true, passive: false });
     // left-drag draws the capture marquee when that mode is armed
     element.addEventListener('mousedown', onSelectDrag, true);
     // …and a Grid Search area when the rectangle tool is armed
     element.addEventListener('mousedown', onGridRectStart, true);
     return () => {
       element.removeEventListener('mousedown', onMiddleRotateStart, true);
+      element.removeEventListener('mousedown', onGroundPanStart, true);
+      element.removeEventListener('wheel', onReliefWheel, { capture: true });
       element.removeEventListener('mousedown', onSelectDrag, true);
       element.removeEventListener('mousedown', onGridRectStart, true);
     };
@@ -820,6 +832,36 @@
       },
       onEnd: () => (rotating = false),
     });
+  }
+
+  /**
+   * A plain drag over relief: the grabbed ground stays under the hand, near
+   * ground and far alike (lib/map/gestures.js). Shift is the orbit's, and the
+   * marquee and the grid rectangle own the left button while they are armed;
+   * a marker or a control under the press keeps it.
+   */
+  function onGroundPanStart(e) {
+    if (!engine || !reliefReady || e.button !== 0) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (capture.armed || grid.drawMode === 'rect' || !engine.onSurface(e.target)) return;
+    startGroundPan(engine, e);
+  }
+
+  /** The wheel over relief, one per map: it eases a zoom over several frames. */
+  let reliefWheel = null;
+  $effect(() => {
+    const surface = engine;
+    if (!surface) return;
+    reliefWheel = createReliefWheel(surface);
+    return () => {
+      reliefWheel?.stop();
+      reliefWheel = null;
+    };
+  });
+
+  function onReliefWheel(e) {
+    if (!reliefReady || !reliefWheel) return;
+    reliefWheel.wheel(e);
   }
 
   // Actions that leave the tool — switching to another tool, opening a browser

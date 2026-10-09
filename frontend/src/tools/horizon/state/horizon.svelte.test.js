@@ -183,13 +183,13 @@ describe('the Horizon view', () => {
     expect(view.peaks[0].name).toBe('Eiger');
   });
 
-  it('keeps reading the names while areas are still coming in, nearest first', async () => {
+  it('keeps reading the names while tiles are still coming in, nearest first', async () => {
     let round = 0;
     api.get = vi.fn(async () => {
       round += 1;
-      return round === 1
-        ? { peaks: [{ name: 'Eiger', azimuth: 80, angle: 2, distance: 9000 }], pending: 2, failed: 0 }
-        : { peaks: [{ name: 'Eiger' }, { name: 'Mönch' }], pending: 0, failed: 1 };
+      if (round === 1) return { peaks: [{ name: 'Eiger', azimuth: 80, angle: 2, distance: 9000 }], pending: 2, failed: 0 };
+      if (round === 2) return { peaks: [{ name: 'Eiger' }, { name: 'Mönch' }], pending: 0, failed: 1, retry_in: 30 };
+      return { peaks: [{ name: 'Eiger' }, { name: 'Mönch' }, { name: 'Jungfrau' }], pending: 0, failed: 0, retry_in: 0 };
     });
     const view = store();
     view.standAt(EYE);
@@ -204,8 +204,28 @@ describe('the Horizon view', () => {
     expect(view.peaks).toHaveLength(2);
     expect(view.peaksPending).toBe(0);
     expect(view.peaksFailed).toBe(1);
+    // the tile that could not be read is asked again once the app's wait is over
+    expect(delays.at(-1)).toBe(30_000);
     await tick();
-    expect(api.get).toHaveBeenCalledTimes(2); // nothing left to wait for
+    expect(api.get).toHaveBeenCalledTimes(3);
+    expect(api.get.mock.calls[2][0]).not.toContain('retry');
+    expect(view.peaks).toHaveLength(3);
+    expect(view.peaksFailed).toBe(0);
+    await tick();
+    expect(api.get).toHaveBeenCalledTimes(3); // nothing left to wait for
+  });
+
+  it('credits the names as the app names their source', async () => {
+    const credits = [{ label: 'OpenFreeMap', attribution: 'OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors' }];
+    api.get = vi.fn(async () => ({ peaks: [{ name: 'Eiger' }], pending: 0, failed: 0, credits }));
+    const view = store();
+    expect(view.peaksCredits).toEqual([]);
+    view.standAt(EYE);
+    await tick();
+    view.showPeaks(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(view.peaksCredits).toEqual(credits);
   });
 
   it('reads the sun and the moon only once asked, for the place\'s own day, and again on a move', async () => {
@@ -409,7 +429,7 @@ describe('the Horizon view', () => {
     let failing = true;
     const base = api.post;
     api.get = vi.fn(async () => {
-      if (failing) throw new Error('OpenStreetMap is busy');
+      if (failing) throw new Error('The app did not answer');
       return { peaks: [{ name: 'Eiger' }], pending: 0, failed: 0 };
     });
     api.post = vi.fn(async (path, body) => {
@@ -424,7 +444,7 @@ describe('the Horizon view', () => {
     await view.mark({ lat: 46.6, lon: 7.9 });
     await Promise.resolve();
     await Promise.resolve();
-    expect(view.peaksError).toContain('busy');
+    expect(view.peaksError).toBe('The app did not answer');
     expect(view.skyError).toBe('offline');
     expect(view.target.error).toBe('offline');
     failing = false;
@@ -434,6 +454,8 @@ describe('the Horizon view', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(view.peaks[0].name).toBe('Eiger');
+    // trying again asks the app not to wait out the tiles that failed
+    expect(api.get.mock.calls.at(-1)[0]).toContain('&retry=true');
     expect(view.sky.date).toBe('2026-10-08');
     expect(view.target).toMatchObject({ visible: true, busy: false });
   });

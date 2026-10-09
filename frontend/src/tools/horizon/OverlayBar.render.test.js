@@ -5,6 +5,8 @@
  * of every gesture and key the photo answers to.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import OverlayBar from './OverlayBar.svelte';
 
@@ -153,6 +155,58 @@ describe('the band over a photo', () => {
     expect(onfit).toHaveBeenCalledOnce();
   });
 
+  it('waits on the search with the fit held, so it cannot be asked twice', () => {
+    const root = bar(fakeOverlay(), { gap: { median: 0.4, span: 52, offset: 0.1, points: 40 }, fitting: true });
+    const fit = button(root, 'Fit to trace');
+    expect(fit.disabled).toBe(true);
+    expect(fit.getAttribute('aria-busy')).toBe('true');
+    expect(fit.textContent).toContain('Fitting…');
+    expect(fit.title).toMatch(/whole turn/);
+  });
+
+  it('lists the places the search found when none stood out, and lights the one in view', () => {
+    const gap = { median: 0.4, span: 52, offset: 0.1, points: 40 };
+    const place = (heading, explained) => ({ camera: { heading, tilt: 1, fov: 60 }, gap: { median: 0.21 }, explained, close: true });
+    const onplace = vi.fn();
+    const view = { camera: { heading: 147.3, tilt: 1, fov: 60 }, ground: 'relief', lines: true, setLines: vi.fn() };
+    const places = [place(299.6, 0.47), place(147.3, 0.4)];
+    const root = bar(fakeOverlay(), { gap, view, places, onplace });
+    const open = button(root, 'Places that fit');
+    expect(open.textContent).toContain('2');
+    expect(root.querySelector('#hz-photo-places')).toBeNull();
+    open.click();
+    flushSync();
+    const rows = [...root.querySelectorAll('#hz-photo-places button')];
+    expect(rows.map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      '300° NW explains 47% of the trace',
+      '147° SE explains 40% of the trace',
+    ]);
+    expect(rows.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    rows[0].click();
+    expect(onplace).toHaveBeenCalledWith(0);
+    // Escape folds the list away
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(root.querySelector('#hz-photo-places')).toBeNull();
+    // one place is the fit itself: nothing to choose between
+    const one = bar(fakeOverlay(), { gap, view, places: [place(299.6, 0.47)] });
+    expect(button(one, 'Places that fit')).toBeNull();
+  });
+
+  it('keeps every button’s name when the band hides its words', () => {
+    const root = bar(fakeOverlay());
+    expect(button(root, 'Trace skyline')).not.toBeNull();
+    expect(button(root, 'Blink')).not.toBeNull();
+  });
+
+  it('keeps the fit whole however narrow the band, its neighbours giving up their words first', () => {
+    const source = readFileSync(resolve('src/tools/horizon/OverlayBar.svelte'), 'utf8');
+    const style = source.slice(source.indexOf('<style>'));
+    const reading = style.slice(style.indexOf('.reading {'), style.indexOf('}', style.indexOf('.reading {')));
+    expect(reading).toContain('flex: none');
+    expect(reading).not.toContain('overflow: hidden');
+  });
+
   it('keeps how the ground is drawn in a menu of its own, off the photo', () => {
     const view = { ground: 'relief', lines: true, setGround: vi.fn(), setLines: vi.fn(), releases: [], placed: null };
     const root = bar(fakeOverlay(), { view });
@@ -170,6 +224,39 @@ describe('the band over a photo', () => {
     // without the view's state the band offers no such menu
     const bare = bar(fakeOverlay());
     expect([...bare.querySelectorAll('button')].some((b) => b.getAttribute('aria-controls') === 'hz-photo-ground')).toBe(false);
+    expect([...bare.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Ridge lines')).toBe(false);
+  });
+
+  it('keeps the ridge lines on the band itself, and the imagery open in the ground menu', () => {
+    const view = {
+      ground: 'imagery',
+      lines: true,
+      setGround: vi.fn(),
+      setLines: vi.fn(),
+      drapeSource: 'esri-world-imagery',
+      releases: [],
+      releasesBusy: false,
+      nearOn: false,
+      nearReach: 5000,
+      nearEstimate: null,
+      nearPasses: [],
+      placed: null,
+    };
+    const root = bar(fakeOverlay(), { view });
+    const lines = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Ridge lines');
+    expect(lines.getAttribute('aria-pressed')).toBe('true');
+    // ticked like the switch on the view without a photo, so it reads as one
+    expect(lines.querySelector('.box svg')).not.toBeNull();
+    lines.click();
+    expect(view.setLines).toHaveBeenCalledWith(false);
+    [...root.querySelectorAll('button')].find((b) => b.getAttribute('aria-controls') === 'hz-photo-ground').click();
+    flushSync();
+    const menu = root.querySelector('#hz-photo-ground');
+    // one switch for the lines, the band's: the menu is how the ground is drawn
+    expect([...menu.querySelectorAll('button')].some((b) => b.textContent.includes('Ridge lines'))).toBe(false);
+    // already a menu, it lays the imagery open rather than folding it under another button
+    expect(menu.querySelector('[aria-label="Which imagery"]')).not.toBeNull();
+    expect(menu.querySelector('[aria-controls="hz-imagery"]')).toBeNull();
   });
 
   it('locks the photo to the terrain, and then offers no fit and no reshape', () => {

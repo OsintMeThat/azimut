@@ -1,15 +1,16 @@
 <script>
   /**
-   * The whole turn over the view, north at the left edge (lib/horizon/strip.js).
+   * The whole turn under the view, north at the left edge (lib/horizon/strip.js).
    *
    * However narrow the lens, this says where it points: the skyline of the full
    * turn fitted to the strip's height, the slope close by hatched, the lens's
    * field left clear and the rest veiled, the eight winds on a band of their
    * own under it, the marked point, and the sun and moon while their paths
-   * are on. Drag the field to turn; a press elsewhere faces that way and can
-   * be dragged on from there. While a laid photo is pinned to the terrain the
-   * strip only reads (turning would part them), its field following the view
-   * as it moves over the terrain.
+   * are on. It sits just under the view's heading ruler, so its lit field
+   * reads as the span that ruler shows. Drag the field to turn; a press
+   * elsewhere faces that way and can be dragged on from there. While a laid
+   * photo is pinned to the terrain the strip only reads (turning would part
+   * them), its field following the view as it moves over the terrain.
    */
   import { rayFor } from '../../lib/horizon/camera.js';
   import { windOf } from '../../lib/horizon/geometry.js';
@@ -194,7 +195,7 @@
     flex: 0 0 44px;
     height: 44px;
     background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
     cursor: ew-resize;
     outline: none;
     touch-action: none;

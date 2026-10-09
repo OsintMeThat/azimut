@@ -11,11 +11,17 @@ feature here is many points or many rectangles sharing their properties,
 written as one MultiPoint or one MultiPolygon: a burning week is tens of
 thousands of detections, and one feature each would make the tile mostly
 headers. The geometry is encoded with numpy, a whole feature at a time.
+
+The app also reads one shape from someone else's tiles: the points of one
+layer (`read_points`), which is how Horizon takes its summit names from a map
+tile without decoding the roads and buildings around them.
 """
 
 from __future__ import annotations
 
+import gzip
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -159,3 +165,153 @@ def _value(value: Value) -> bytes:
 def encode(layers: list[Layer]) -> bytes:
     """A tile of these layers. A layer with nothing in it is left out."""
     return b"".join(_field(3, layer.encode()) for layer in layers if layer.features)
+
+
+# -- reading -------------------------------------------------------------------
+
+
+def _read_varint(buf: memoryview, i: int) -> tuple[int, int]:
+    value = shift = 0
+    while True:
+        byte = buf[i]
+        i += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, i
+        shift += 7
+
+
+def _read_fields(buf: memoryview) -> Iterator[tuple[int, int, int | memoryview]]:
+    """``(field number, wire type, value)`` of one message's fields, in order.
+
+    A length-delimited value is a view of the buffer rather than a copy, so a
+    field stepped over costs nothing but its header.
+    """
+    i, end = 0, len(buf)
+    while i < end:
+        key, i = _read_varint(buf, i)
+        number, wire = key >> 3, key & 7
+        value: int | memoryview
+        if wire == 0:
+            value, i = _read_varint(buf, i)
+        elif wire == 2:
+            size, i = _read_varint(buf, i)
+            value = buf[i:i + size]
+            i += size
+        elif wire == 1:
+            value = buf[i:i + 8]
+            i += 8
+        elif wire == 5:
+            value = buf[i:i + 4]
+            i += 4
+        else:
+            raise ValueError(f"wire type {wire} is not one a vector tile uses")
+        if i > end:
+            raise ValueError("a field runs past the end of its message")
+        yield number, wire, value
+
+
+def _read_value(buf: memoryview) -> Value | None:
+    for number, _wire, value in _read_fields(buf):
+        if isinstance(value, memoryview):
+            if number == 1:
+                return bytes(value).decode("utf-8", "replace")
+            if number == 2:
+                return float(struct.unpack("<f", value)[0])
+            if number == 3:
+                return float(struct.unpack("<d", value)[0])
+        elif number == 4:
+            return value - (1 << 64) if value >= 1 << 63 else value
+        elif number == 5:
+            return value
+        elif number == 6:
+            return (value >> 1) ^ -(value & 1)
+        elif number == 7:
+            return bool(value)
+    return None
+
+
+def _layer_points(layer: memoryview) -> list[tuple[float, float, dict[str, Value]]]:
+    keys: list[str] = []
+    values: list[Value | None] = []
+    features: list[memoryview] = []
+    extent = EXTENT
+    for number, _wire, value in _read_fields(layer):
+        if number == 2 and isinstance(value, memoryview):
+            features.append(value)
+        elif number == 3 and isinstance(value, memoryview):
+            keys.append(bytes(value).decode("utf-8", "replace"))
+        elif number == 4 and isinstance(value, memoryview):
+            values.append(_read_value(value))
+        elif number == 5 and isinstance(value, int) and value > 0:
+            extent = value
+    found = []
+    for feature in features:
+        tags: list[int] = []
+        kind = 0
+        commands: list[int] = []
+        for number, _wire, value in _read_fields(feature):
+            if number == 3 and isinstance(value, int):
+                kind = value
+            elif number == 2 and isinstance(value, memoryview):
+                tags = _read_packed(value)
+            elif number == 4 and isinstance(value, memoryview):
+                commands = _read_packed(value)
+        if kind != _POINT:
+            continue
+        properties: dict[str, Value] = {}
+        for k in range(0, len(tags) - 1, 2):
+            if tags[k] < len(keys) and tags[k + 1] < len(values):
+                read = values[tags[k + 1]]
+                if read is not None:
+                    properties[keys[tags[k]]] = read
+        x = y = i = 0
+        while i < len(commands):
+            command, count = commands[i] & 7, commands[i] >> 3
+            i += 1
+            if command != _MOVE_TO:
+                break
+            for _ in range(count):
+                if i + 1 >= len(commands):
+                    break
+                x += (commands[i] >> 1) ^ -(commands[i] & 1)
+                y += (commands[i + 1] >> 1) ^ -(commands[i + 1] & 1)
+                i += 2
+                found.append((x / extent, y / extent, properties))
+    return found
+
+
+def _read_packed(buf: memoryview) -> list[int]:
+    out, i = [], 0
+    while i < len(buf):
+        value, i = _read_varint(buf, i)
+        out.append(value)
+    return out
+
+
+def read_points(tile: bytes, name: str) -> list[tuple[float, float, dict[str, Value]]]:
+    """The points of one layer of a tile, each ``(x, y, properties)``.
+
+    ``x`` and ``y`` are fractions of the tile from its top-left corner, so a
+    point the tile carries in its buffer, past its edge, falls below 0 or past
+    1. Only the named layer is decoded: the others are stepped over whole. A
+    gzipped tile, as tile servers store them, is opened first. Raises
+    `ValueError` on a tile that is not one.
+    """
+    if tile[:2] == b"\x1f\x8b":
+        try:
+            tile = gzip.decompress(tile)
+        except (OSError, EOFError) as exc:
+            raise ValueError("a gzipped tile that does not open") from exc
+    try:
+        for number, _wire, layer in _read_fields(memoryview(tile)):
+            if number != 3 or not isinstance(layer, memoryview):
+                continue
+            for field_number, _field_wire, value in _read_fields(layer):
+                if field_number == 1 and isinstance(value, memoryview):
+                    if bytes(value).decode("utf-8", "replace") == name:
+                        return _layer_points(layer)
+                    break
+    except IndexError as exc:
+        raise ValueError("a tile cut short") from exc
+    return []

@@ -18,13 +18,14 @@
    * - **Moving** the eye ("Move the viewpoint"): the same large map beside the
    *   inspector, the eye and its cone drawn; a click stands there and comes
    *   back. Cancel or Escape leaves it where it was.
-   * - **Looking**: the view is the hero, the whole turn in a strip over it; the
-   *   map shrinks to the top of the inspector on the right, where a click
-   *   marks a point the view then shows, in sight or hidden, and the eye can
-   *   be dragged. The inspector folds away for a wider view. The small map
-   *   can trade places with the view, as a street-level viewer's does: the map
-   *   then fills the main area and the view waits, live, in the map's corner,
-   *   a click away from coming back.
+   * - **Looking**: the view is the hero, the whole turn in a strip under it,
+   *   beside its heading; the map shrinks to the top of the inspector on the
+   *   right, where a click marks a point the view then shows, in sight or
+   *   hidden, and the eye can be dragged. The inspector folds away for a wider
+   *   view, or its left edge is dragged to widen it, the map growing with it.
+   *   The small map can trade places with the view, as a street-level
+   *   viewer's does: the map then fills the main area and the view waits,
+   *   live, in the map's corner, a click away from coming back.
    *
    * The map lays the borders, the place names and the case's saved work over
    * its picture from the start, in every layout and before any eye, the three
@@ -52,6 +53,7 @@
   import { createSurface } from '../lib/map/surface.js';
   import { seenLens } from '../lib/horizon/camera.js';
   import { bearingBetween, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
+  import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
@@ -60,6 +62,9 @@
     fitToTrace,
     gapDegrees,
     loupeMoved,
+    matchRequest,
+    searchedPlaces,
+    searchOutcome,
     skylineBetween,
     traceGap,
     traceSamples,
@@ -103,6 +108,10 @@
   let moving = $state(false);
   /** The inspector folded away, for a wider view. */
   let folded = $state(false);
+  // the inspector's left edge is a drag handle; the width sticks across reloads
+  let sideW = $state(inspectorWidth.clampWidth(inspectorWidth.loadWidth(), window.innerWidth));
+  let sideResizing = $state(false);
+  const mapH = $derived(mapHeightFor(sideW));
   /** The map and the view traded places: the map large, the view waiting in its corner. */
   let mapLarge = $state(false);
   /** The small map's Layers menu, open. */
@@ -221,6 +230,7 @@
     void layout;
     void folded;
     void swapped;
+    void sideW;
     if (!surface) return;
     tick().then(() => surface?.resize());
   });
@@ -556,7 +566,7 @@
       if (view.imagery.near) names.push(imagery.find('sentinel2')?.attribution);
       names.push(provider?.attribution);
     }
-    if (view.peaksOn && view.peaks.length) names.push('© OpenStreetMap contributors');
+    if (view.peaksOn && view.peaks.length) names.push(...view.peaksCredits.map((credit) => credit.attribution));
     const resolution = view.panorama?.resolution ? `${view.panorama.resolution} m relief` : '';
     return [...names, resolution].filter(Boolean).join(' · ');
   });
@@ -573,29 +583,90 @@
   const samples = $derived(overlay.traceShown && frame.width ? traceSamples(overlay.strokesSeen, frame) : []);
   const gap = $derived(samples.length && view.panorama ? traceGap(samples, traceCamera, skyline) : null);
 
+  /** The places the last whole-turn search found, while the eye and the trace are the ones it read. */
+  let search = $state.raw(null);
+  const searched = $derived(
+    search && search.panorama === view.panorama && search.strokes === overlay.strokesSeen ? search : null
+  );
+  let fitting = $state(false);
+
   /**
-   * Turn the view so its skyline meets the trace; the lens stays the photo's
-   * when it said one. The toast says what changed and takes it back.
+   * Find the trace on the whole turn and turn the view onto it; the lens stays
+   * the photo's when it said one. A trace too flat to search, a turn that is
+   * not whole or an app that does not answer is fitted from where the analyst
+   * left it. The toast says what changed and takes it back.
    */
-  function fit() {
-    if (overlay.locked) return;
-    const result = fitToTrace(samples, traceCamera, skyline, { lens: !overlay.lens });
+  async function fit() {
+    if (overlay.locked || fitting) return;
+    if (!gap) {
+      toast('Trace more of the skyline first', 'warn');
+      return;
+    }
+    const lens = !overlay.lens;
+    const camera = traceCamera;
+    const looked = view.camera;
+    const traced = samples;
+    const panorama = view.panorama;
+    const strokes = overlay.strokesSeen;
+    const before = gap;
+    const body = matchRequest(traced, camera, panorama, { known: !lens });
+    let found = null;
+    if (body) {
+      fitting = true;
+      try {
+        found = await api.post('/api/horizon/match', body);
+      } catch {
+        found = null;
+      } finally {
+        fitting = false;
+      }
+      // the view, the eye or the trace moved meanwhile: the answer is for another view
+      if (view.camera !== looked || view.panorama !== panorama || overlay.strokesSeen !== strokes) return;
+    }
+    if (!found || found.verdict === 'flat') {
+      fitFromHere(traced, camera, before, { lens, flat: found?.verdict === 'flat' });
+      return;
+    }
+    const places = searchedPlaces(found, traced, camera, skyline, { lens });
+    search = { panorama, strokes, verdict: found.verdict, places };
+    const outcome = searchOutcome(found, places, camera, { lens, before });
+    if (outcome.take >= 0) lookAtPlace(places[outcome.take], outcome.text, outcome.kind);
+    else if (outcome.closest >= 0) {
+      toast(outcome.text, outcome.kind, 8000, { label: 'Show the closest', onClick: () => takePlace(outcome.closest) });
+    } else toast(outcome.text, outcome.kind);
+  }
+
+  /** The fit from where the analyst left the view, alone: what Fit did before it searched the turn. */
+  function fitFromHere(traced, camera, before, { lens, flat }) {
+    const result = fitToTrace(traced, camera, skyline, { lens });
     if (!result) {
       toast('Trace more of the skyline first', 'warn');
       return;
     }
-    if (!result.improved || !gap) {
-      toast('The view is already as close to the trace as a fit gets');
+    if (!result.improved) {
+      if (flat) toast('The trace is too flat to search the whole turn', 'warn');
+      else toast('The view is already as close to the trace as a fit gets');
       return;
     }
-    const { heading, tilt, roll, fov } = view.camera;
-    const before = gapDegrees(gap);
-    view.look(result.camera);
-    toast(`Fitted to the trace: gap ${before}° to ${gapDegrees(result.gap)}°`, 'ok', 8000, {
-      label: 'Undo',
-      onClick: () => view.look({ heading, tilt, roll, fov }),
-    });
+    const gaps = `gap ${gapDegrees(before)}° to ${gapDegrees(result.gap)}°`;
+    if (flat) lookAtPlace(result, `Fitted near where you left it, ${gaps}. The trace is too flat to search the whole turn`, 'warn');
+    else lookAtPlace(result, `Fitted to the trace: ${gaps}`);
   }
+
+  /** Turn the view to a place, with a toast that takes it back. */
+  function lookAtPlace(place, text, kind = 'ok') {
+    const { heading, tilt, roll, fov } = view.camera;
+    view.look(lensOf(place.camera));
+    toast(text, kind, 8000, { label: 'Undo', onClick: () => view.look({ heading, tilt, roll, fov }) });
+  }
+
+  /** One of the places the search found, from the band's buttons or a toast. */
+  function takePlace(index) {
+    const place = searched?.places[index];
+    if (place && !overlay.locked) view.look(lensOf(place.camera));
+  }
+
+  const lensOf = ({ heading, tilt, roll, fov }) => ({ heading, tilt, roll, fov });
 
   /** The skyline found in the photo, laid as the trace; the toast takes it back. */
   function detect() {
@@ -664,15 +735,90 @@
   function turnTo(direction) {
     view.look(faceTowards({ ...view.camera, width: frame.width || 1, height: frame.height || 1 }, direction));
   }
+
+  // -- the inspector's width ------------------------------------------------------
+
+  const SIDE_KEY_STEP = 16;
+
+  function setSideWidth(w) {
+    sideW = inspectorWidth.clampWidth(w, window.innerWidth);
+  }
+
+  function startSideResize(event) {
+    if (event.button !== 0) return;
+    event.preventDefault(); // don't start a text selection under the cursor
+    // held by the handle, so the view under the pointer reads no hover on the way
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startW = sideW;
+    let wanted = startW;
+    let pending = 0;
+    sideResizing = true;
+    // dragging left (a smaller clientX) widens the inspector: it grows into the view
+    const move = (ev) => {
+      wanted = startW + startX - ev.clientX;
+      // the view and the small map redraw for the new size once a frame, not once an event
+      if (!pending) {
+        pending = requestAnimationFrame(() => {
+          pending = 0;
+          setSideWidth(wanted);
+        });
+      }
+    };
+    const up = () => {
+      if (pending) cancelAnimationFrame(pending);
+      setSideWidth(wanted);
+      sideResizing = false;
+      inspectorWidth.saveWidth(sideW); // one write per drag, not one per frame
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
+  function onSideResizeKey(event) {
+    const step = { ArrowLeft: SIDE_KEY_STEP, ArrowRight: -SIDE_KEY_STEP }[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+    event.stopPropagation(); // the arrows walk the view otherwise
+    setSideWidth(sideW + step);
+    inspectorWidth.saveWidth(sideW);
+  }
+
+  function resetSideWidth() {
+    setSideWidth(inspectorWidth.DEFAULT_W);
+    inspectorWidth.saveWidth(sideW);
+  }
+
+  // A width dragged out on a wide screen would eat a narrower window whole, so
+  // re-clamp against the viewport as it changes. The clamped-down value is not
+  // written back: what the user chose is what a later session restores.
+  $effect(() => {
+    const onWindowResize = () => setSideWidth(sideW);
+    window.addEventListener('resize', onWindowResize);
+    return () => window.removeEventListener('resize', onWindowResize);
+  });
 </script>
 
 <svelte:window onkeydown={onKey} />
 
-<div class="horizon-tool {layout}" class:folded class:swapped>
+<div
+  class="horizon-tool {layout}"
+  class:folded
+  class:swapped
+  class:resizing={sideResizing}
+  style:--hz-side="{sideW}px"
+  style:--hz-map-h="{mapH}px"
+>
   <div class="hz-main">
     <header class="tool-header hz-head">
       {#if layout === 'looking'}
-        <h2 class="hz-title">View from <span class="mono">{title}</span></h2>
+        <h2 class="hz-title" aria-label="View from {title}" title="Where the eye stands">
+          <span class="hz-eye" aria-hidden="true"></span><span class="mono">{title}</span>
+        </h2>
       {:else}
         <div class="hz-ask">
           <h2>{layout === 'moving' ? 'Move the viewpoint' : 'Pick a viewpoint'}</h2>
@@ -717,9 +863,6 @@
     </header>
 
     <div class="hz-stage dark-surface">
-      {#if !swapped}
-        <HorizonStrip {view} {frame} {bodies} locked={Boolean(overlay.source && overlay.locked)} loupe={seenLoupe} />
-      {/if}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="view-area" ondragover={onDragOver} ondragleave={() => (dropping = false)} ondrop={onDrop}>
         {#if overlay.source && layout === 'looking' && !swapped}
@@ -731,6 +874,9 @@
             onsetup={() => (copernicusHelp = true)}
             onchange={() => (photoDialog = true)}
             onfit={fit}
+            {fitting}
+            places={searched && searched.verdict !== 'match' ? searched.places : []}
+            onplace={takePlace}
             ondetect={detect}
           />
         {/if}
@@ -778,6 +924,10 @@
           </div>
         {/if}
       </div>
+      <!-- under the view, by its heading: the strip's lit field is the span the ruler above it reads -->
+      {#if !swapped}
+        <HorizonStrip {view} {frame} {bodies} locked={Boolean(overlay.source && overlay.locked)} loupe={seenLoupe} />
+      {/if}
       {#if swapped}
         <!-- the view waits in the map's corner, live: a click brings it back -->
         <button type="button" class="hz-back" onclick={() => (mapLarge = false)} title="Back to the view (Esc)">
@@ -786,6 +936,20 @@
       {/if}
     </div>
   </div>
+
+  {#if layout !== 'picking' && !folded}
+    <!-- a <button> rather than a bare div: the handle must be focusable and
+         keyboard-driven (arrows resize), and the element carries that for free -->
+    <button
+      type="button"
+      class="hz-resizer"
+      aria-label="Resize the map and settings"
+      title="Drag to resize · double-click to reset"
+      onpointerdown={startSideResize}
+      ondblclick={resetSideWidth}
+      onkeydown={onSideResizeKey}
+    ></button>
+  {/if}
 
   <aside class="hz-inspector" aria-label="Map and settings">
     <div class="hz-slot"></div>
@@ -921,7 +1085,7 @@
     --hz-hidden: var(--anno-1);
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, 1fr) var(--hz-side);
     height: 100%;
     min-height: 0;
     background: var(--bg-0);
@@ -963,9 +1127,22 @@
     font-size: var(--fs-md);
     white-space: nowrap;
   }
+  .hz-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
   .hz-title .mono {
     font-weight: 500;
-    color: var(--text-2);
+  }
+  /* the eye as the map draws it: an amber dot in a light ring */
+  .hz-eye {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-1) 85%, transparent);
   }
   .hz-ask {
     display: flex;
@@ -1091,6 +1268,31 @@
   }
 
   /* -- the inspector --------------------------------------------------------- */
+  /* the grab strip on the inspector's left edge, over the map as well as the settings */
+  .hz-resizer {
+    position: absolute;
+    top: 0;
+    right: calc(var(--hz-side) - 3px);
+    bottom: 0;
+    z-index: 4;
+    width: 5px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: col-resize;
+    transition: background 0.12s;
+  }
+  .hz-resizer:hover,
+  .hz-resizer:focus-visible,
+  .resizing .hz-resizer {
+    background: var(--accent);
+    outline: none;
+  }
+  /* a drag reads as one gesture: no text selection on the way */
+  .horizon-tool.resizing {
+    cursor: col-resize;
+    user-select: none;
+  }
   .hz-inspector {
     display: flex;
     flex-direction: column;
@@ -1099,7 +1301,7 @@
     background: var(--bg-1);
   }
   .hz-slot {
-    flex: 0 0 250px;
+    flex: 0 0 var(--hz-map-h);
   }
   .moving .hz-slot {
     flex-basis: 0;
@@ -1120,13 +1322,13 @@
     inset: 40px 0 0 0;
   }
   .moving .hz-map {
-    inset: 40px 340px 0 0;
+    inset: 40px var(--hz-side) 0 0;
   }
   .looking .hz-map {
     top: 0;
     right: 0;
-    width: 340px;
-    height: 250px;
+    width: var(--hz-side);
+    height: var(--hz-map-h);
     border-left: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
   }
@@ -1140,7 +1342,7 @@
   /* traded places: the map fills the main area under the header, the view waits in its corner */
   .looking.swapped .hz-map {
     top: 40px;
-    right: 340px;
+    right: var(--hz-side);
     bottom: 0;
     left: 0;
     width: auto;
@@ -1154,8 +1356,8 @@
     top: 0;
     right: 0;
     z-index: 3;
-    width: 340px;
-    height: 250px;
+    width: var(--hz-side);
+    height: var(--hz-map-h);
     border-left: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
   }

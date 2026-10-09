@@ -1,66 +1,80 @@
 """Named summits around an eye, for the labels on a panorama.
 
-They come from OpenStreetMap through the Overpass API: every node tagged
-`natural=peak` or `natural=volcano` that carries a name. The answer is kept
-under the workspace in 1° × 1° cells for three months, so a reopened view and
-its neighbours ask for nothing. A cell holding no summit is kept too, as an
-empty one.
+They are OpenStreetMap's, read from OpenFreeMap's vector tiles: the
+OpenMapTiles `mountain_peak` layer, every `natural=peak` or `natural=volcano`
+that carries a name. OpenFreeMap is free, key-less and has no request quota; it
+is served from a CDN, rebuilt every week, and the map's place names already read
+it. The public Overpass servers asked before were shared and often busy, and one
+turned an address away for up to an hour after the burst of questions a single
+view makes.
 
-The public Overpass servers are shared and often busy: a whole view's area in
-one question took a minute, or was turned away. So the names never hold the
-view up. Each cell is asked on its own, the eye's own cell first and the rest
-outward, in the background two at a time, and the view reads whatever cells
-are in so far (`known_around`) and asks again while some are still coming. A
-server that turns a question away (busy, rate limit, error) hands it to the
-next one in `ENDPOINTS`, all listed on the OpenStreetMap wiki as public
-instances. A cell no server would answer is left for a few minutes before it
-is asked again.
+A tile carries every layer of the map, roads and buildings included, so how deep
+the tiles are read falls with distance (`RINGS`). Below zoom 14 a tile keeps only
+its most important summits (a Wikipedia article first, then height), so a
+shallower tile still names the far ones a panorama can pick out. Each tile's
+summits are kept under the workspace for three months, so a reopened view and its
+neighbours ask for nothing. A tile with no summit is kept too, as an empty one.
 
-Overpass is asked only once summit names are switched on in a view, which is
-the analyst asking what they are looking at.
+The names never hold the view up. Tiles not in yet are asked in the background,
+nearest first, and the view reads whatever is in so far (`known_around`) and asks
+again while some are still coming. A tile that could not be read is left a while,
+twice as long each time, then asked again when the view next asks, or at once
+when the analyst says to try again.
+
+Nothing is asked until summit names are switched on in a view, which is the
+analyst asking what they are looking at.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import math
-import re
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 from .. import config
-from . import tiles
+from . import mvt, terrain, tiles
 
 logger = logging.getLogger(__name__)
 
-# Asked in this order; a server that turns a question away passes it on.
-ENDPOINTS = (
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-)
+# The tile paths name the weekly build, so the source is the TileJSON naming the
+# current one, read again after `TEMPLATE_TTL`, or after `TEMPLATE_FRESH` when a
+# tile is missing (the build it named is gone).
+TILEJSON = "https://tiles.openfreemap.org/planet"
+TILE_HOST = "https://tiles.openfreemap.org/"
+TEMPLATE_TTL = 6 * 3600.0
+TEMPLATE_FRESH = 60.0
+LAYER = "mountain_peak"
+CLASSES = frozenset({"peak", "volcano"})
 TTL_DAYS = 90
-# Overpass's own ceiling for one cell's query, and ours for the answer.
-QUERY_TIMEOUT = 25
-# Cells asked at once: the public servers allow a few slots per address.
-PARALLEL = 2
-# How long a cell no server would answer is left alone.
-RETRY_AFTER = 300.0
-# The widest box asked for at once, in cells: past this a view is an aircraft's
-# looking over half a country, and the labels stop at the nearer summits.
-MAX_CELLS = 64
-_ELE = re.compile(r"-?\d+(?:\.\d+)?")
+# The zoom read out to each distance from the eye, in metres. Measured against
+# Overpass on four 1° cells (2026-10-09): zoom 12 named all but one of the 487
+# summits of the densest, zoom 11 nine in ten and zoom 10 half, and every zoom
+# from 10 named all of them in the three sparser cells. A whole 150 km view in the
+# Alps is about 160 tiles and 15 MB, read once.
+RINGS = ((15_000.0, 12), (40_000.0, 11), (100_000.0, 10), (math.inf, 9))
+# Tiles asked at once, as a browser asks a map host.
+PARALLEL = 6
+# How long a tile that could not be read is left the first time, and at most.
+RETRY_AFTER = 30.0
+RETRY_MAX = 600.0
+# The most tiles one view reads, nearest first. Far north a 200 km view crosses
+# about 560 (Lyngen, 69.6° N); past this the labels stop at the nearer summits.
+MAX_TILES = 800
+
+Key = tuple[int, int, int]
 
 
 class PeaksUnavailable(Exception):
-    """Overpass could not be reached or did not answer."""
+    """A tile could not be read."""
 
 
 @dataclass(frozen=True)
@@ -76,52 +90,55 @@ def cache_dir() -> Path:
     return config.internal_dir() / "cache" / "peaks"
 
 
-def _cell_path(lat: int, lon: int) -> Path:
-    return cache_dir() / f"{lat}_{lon}.json"
+def _tile_path(key: Key) -> Path:
+    z, x, y = key
+    return cache_dir() / str(z) / str(x) / f"{y}.json"
 
 
-def cells_around(lat: float, lon: float, radius_m: float) -> list[tuple[int, int]]:
-    """The 1° cells a circle of `radius_m` around a point touches."""
-    dlat = radius_m / 111_195.0
-    dlon = radius_m / (111_195.0 * max(math.cos(math.radians(lat)), 0.01))
-    south, north = math.floor(lat - dlat), math.floor(min(lat + dlat, 89.999))
-    west, east = math.floor(lon - dlon), math.floor(lon + dlon)
-    cells = []
-    for la in range(max(south, -90), north + 1):
-        for lo in range(west, east + 1):
-            cells.append((la, (lo + 180) % 360 - 180))
-    return sorted(set(cells))
-
-
-def parse_ele(value: str | None) -> float | None:
-    """A summit height from OSM's `ele`, which is metres but not always tidy."""
-    if not value:
+def _height(value: object) -> float | None:
+    """A summit height from the tile, which is whole metres, or nothing when absurd."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    found = _ELE.search(value.replace(",", "."))
-    if not found:
-        return None
-    number = float(found.group())
-    if "ft" in value.lower():
-        number *= 0.3048
-    return number if -500 < number < 9000 else None
+    return float(value) if -500 < value < 9000 else None
 
 
-def _from_elements(elements: list[dict[str, Any]]) -> list[Peak]:
-    found = []
-    for element in elements:
-        tags = element.get("tags") or {}
-        name = (tags.get("name") or "").strip()
-        if not name or "lat" not in element or "lon" not in element:
-            continue
-        found.append(Peak(
-            name=name, lat=float(element["lat"]), lon=float(element["lon"]),
-            ele=parse_ele(tags.get("ele")), name_en=(tags.get("name:en") or None),
-        ))
-    return found
+@functools.lru_cache(maxsize=16)
+def tiles_around(lat: float, lon: float, radius_m: float) -> tuple[tuple[Key, float, float], ...]:
+    """The tiles a view of `radius_m` reads, nearest first, each with the band of
+    distances it names: ``(key, inner, outer)``.
+
+    A tile is read at its ring's zoom when it reaches into that ring, and names
+    only the summits inside it, so each summit comes from exactly one tile.
+    """
+    plan: list[tuple[float, Key, float, float]] = []
+    inner = 0.0
+    for reach, zoom in RINGS:
+        if inner >= radius_m:
+            break
+        outer = min(reach, radius_m)
+        dlat = outer / 111_195.0
+        dlon = min(outer / (111_195.0 * max(math.cos(math.radians(lat)), 0.01)), 180.0)
+        x0, y0 = tiles.project(lat + dlat, lon - dlon, zoom)
+        x1, y1 = tiles.project(lat - dlat, lon + dlon, zoom)
+        count = 1 << zoom
+        for x in range(math.floor(x0), math.floor(x1) + 1):
+            for y in range(max(math.floor(y0), 0), min(math.floor(y1), count - 1) + 1):
+                north, west = tiles.unproject(x, y, zoom)
+                south, east = tiles.unproject(x + 1, y + 1, zoom)
+                nearest = terrain.distance(lat, lon, min(max(lat, south), north), min(max(lon, west), east))
+                farthest = max(
+                    terrain.distance(lat, lon, corner_lat, corner_lon)
+                    for corner_lat in (south, north) for corner_lon in (west, east)
+                )
+                if nearest < outer and farthest >= inner:
+                    plan.append((nearest, (zoom, x % count, y), inner, outer))
+        inner = outer
+    plan.sort(key=lambda row: row[0])
+    return tuple((key, low, high) for _near, key, low, high in plan[:MAX_TILES])
 
 
-def _read_cell(lat: int, lon: int) -> list[Peak] | None:
-    path = _cell_path(lat, lon)
+def _read_tile(key: Key) -> list[Peak] | None:
+    path = _tile_path(key)
     try:
         if time.time() - path.stat().st_mtime > TTL_DAYS * 86400:
             return None
@@ -131,121 +148,188 @@ def _read_cell(lat: int, lon: int) -> list[Peak] | None:
     return [Peak(**row) for row in rows]
 
 
-def _write_cell(lat: int, lon: int, found: list[Peak]) -> None:
-    path = _cell_path(lat, lon)
+def _write_tile(key: Key, found: list[Peak]) -> None:
+    """Written aside then moved in, so a view reading meanwhile never sees half of it."""
+    path = _tile_path(key)
+    part = path.with_name(f"{path.stem}.{threading.get_ident()}.part")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps([peak.__dict__ for peak in found]), encoding="utf-8")
+        part.write_text(json.dumps([peak.__dict__ for peak in found]), encoding="utf-8")
+        os.replace(part, path)
     except OSError:
-        pass
+        part.unlink(missing_ok=True)
 
 
-def _query(lat: int, lon: int) -> str:
-    """One cell's summits. Two exact tag matches rather than a pattern, so the
-    server answers from its index."""
-    box = f"({lat},{lon},{lat + 1},{lon + 1})"
-    return (
-        f"[out:json][timeout:{QUERY_TIMEOUT}];"
-        f'(node["natural"="peak"]["name"]{box};node["natural"="volcano"]["name"]{box};);'
-        "out qt;"
-    )
+# -- reading OpenFreeMap -------------------------------------------------------
+
+_client_lock = threading.Lock()
+_client_instance: httpx.Client | None = None
+_template_lock = threading.Lock()
+_template: tuple[str, float] | None = None
+# when the TileJSON last could not be read: until `RETRY_AFTER` has passed, every
+# tile fails at once rather than each waiting its turn to ask a host that is down
+_template_missed = -math.inf
 
 
-def _ask_cell(lat: int, lon: int) -> list[Peak]:
-    """One cell from the first server that answers it."""
-    query = _query(lat, lon)
-    reason = "no Overpass server answered"
-    for url in ENDPOINTS:
-        try:
-            response = httpx.post(
-                url, data={"data": query}, timeout=QUERY_TIMEOUT + 10,
+def _client() -> httpx.Client:
+    global _client_instance
+    with _client_lock:
+        if _client_instance is None:
+            _client_instance = httpx.Client(
+                follow_redirects=True,
+                timeout=tiles.TILE_TIMEOUT,
+                limits=httpx.Limits(max_keepalive_connections=PARALLEL, max_connections=PARALLEL),
                 headers={"User-Agent": tiles.USER_AGENT},
             )
-        except httpx.HTTPError as exc:
-            reason = tiles.upstream_failure(exc)
-            continue
-        if response.status_code != 200:
-            reason = f"Overpass answered {response.status_code}"
-            continue
+        return _client_instance
+
+
+def _get(url: str) -> tuple[int, bytes]:
+    """Status and body of one GET, asked again on a transient failure."""
+    for attempt in range(1, tiles.MAX_TILE_TRIES + 1):
+        last = attempt == tiles.MAX_TILE_TRIES
         try:
-            elements = response.json().get("elements", [])
-        except ValueError:
-            reason = "Overpass sent something that is not JSON"
+            response = _client().get(url)
+        except httpx.HTTPError as exc:
+            if last:
+                raise PeaksUnavailable(tiles.upstream_failure(exc)) from exc
             continue
-        return _from_elements(elements)
-    raise PeaksUnavailable(reason)
+        if response.status_code in tiles.TRANSIENT_STATUSES and not last:
+            time.sleep(tiles.RETRY_PAUSE)
+            continue
+        return response.status_code, response.content
+    raise AssertionError("unreachable")  # the loop returns or raises on its last turn
 
 
-def _fetch(cell: tuple[int, int]) -> None:
-    """Ask one cell and keep the answer. The cell stays in flight until its file
+def _tile_template(fresh: bool = False) -> str:
+    """The current build's tile address, from the TileJSON. `fresh` reads it again
+    unless that was done in the last `TEMPLATE_FRESH` seconds."""
+    global _template, _template_missed
+    with _template_lock:
+        now = time.monotonic()
+        if _template and now - _template[1] < (TEMPLATE_FRESH if fresh else TEMPLATE_TTL):
+            return _template[0]
+        if now - _template_missed < RETRY_AFTER:
+            raise PeaksUnavailable("OpenFreeMap could not be reached a moment ago")
+        try:
+            status, body = _get(TILEJSON)
+            if status != 200:
+                raise PeaksUnavailable(f"OpenFreeMap answered {status}")
+            try:
+                template = json.loads(body)["tiles"][0]
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                raise PeaksUnavailable("OpenFreeMap sent a TileJSON without tiles") from exc
+            if not isinstance(template, str) or not template.startswith(TILE_HOST):
+                raise PeaksUnavailable("OpenFreeMap named its tiles somewhere else")
+        except PeaksUnavailable:
+            _template_missed = time.monotonic()
+            raise
+        _template = (template, time.monotonic())
+        return template
+
+
+def _ask_tile(key: Key) -> list[Peak]:
+    """One tile's named summits, inside the tile itself."""
+    z, x, y = key
+    template = _tile_template()
+    status, body = _get(template.format(z=z, x=x, y=y))
+    if status == 404:
+        # the build it named may be gone: the TileJSON names the new one
+        newer = _tile_template(fresh=True)
+        if newer != template:
+            status, body = _get(newer.format(z=z, x=x, y=y))
+    if status == 404:
+        return []
+    if status != 200:
+        raise PeaksUnavailable(f"OpenFreeMap answered {status}")
+    found = []
+    for fx, fy, tags in mvt.read_points(body, LAYER):
+        name = str(tags.get("name") or "").strip()
+        if not name or tags.get("class") not in CLASSES or not (0 <= fx < 1 and 0 <= fy < 1):
+            continue
+        lat, lon = tiles.unproject(x + fx, y + fy, z)
+        english = str(tags.get("name:en") or "").strip()
+        found.append(Peak(
+            name=name, lat=round(lat, 6), lon=round(lon, 6),
+            ele=_height(tags.get("ele")), name_en=english if english and english != name else None,
+        ))
+    return found
+
+
+def _fetch(key: Key) -> None:
+    """Ask one tile and keep the answer. The tile stays in flight until its file
     is written, so a view reading meanwhile never asks for it twice."""
     try:
-        found = _ask_cell(*cell)
-    except Exception as exc:  # any failure is the same "not now" for one cell
-        logger.info("summit names for cell %s: %s", cell, exc)
+        found = _ask_tile(key)
+    except Exception as exc:  # any failure is the same "not now" for one tile
+        logger.info("summit names for tile %s: %s", key, exc)
         with _lock:
-            _failed[cell] = time.monotonic()
-            _in_flight.discard(cell)
+            wait = min(_failed[key][1] * 2, RETRY_MAX) if key in _failed else RETRY_AFTER
+            _failed[key] = (time.monotonic() + wait, wait)
+            _in_flight.discard(key)
         return
-    # a summit on a cell's edge belongs to the cell its own floor names
-    _write_cell(*cell, [p for p in found if (math.floor(p.lat), math.floor(p.lon)) == cell])
+    _write_tile(key, found)
     with _lock:
-        _failed.pop(cell, None)
-        _in_flight.discard(cell)
+        _failed.pop(key, None)
+        _in_flight.discard(key)
 
 
 _lock = threading.Lock()
-_in_flight: set[tuple[int, int]] = set()
-_failed: dict[tuple[int, int], float] = {}
+_in_flight: set[Key] = set()
+# when a tile that could not be read may be asked again, and how long it was left
+_failed: dict[Key, tuple[float, float]] = {}
 _pool: ThreadPoolExecutor | None = None
 
 
-def _start(cell: tuple[int, int]) -> None:
+def _start(key: Key) -> None:
     global _pool
     if _pool is None:
         _pool = ThreadPoolExecutor(max_workers=PARALLEL, thread_name_prefix="peaks")
-    _in_flight.add(cell)
-    _pool.submit(_fetch, cell)
+    _in_flight.add(key)
+    _pool.submit(_fetch, key)
 
 
 @dataclass(frozen=True)
 class Known:
-    """What the cells around an eye hold so far."""
+    """What the tiles around an eye hold so far."""
 
     peaks: list[Peak]
-    pending: int  # cells still being asked
-    failed: int  # cells no server would answer just now
+    pending: int  # tiles still being read
+    failed: int  # tiles that could not be read just now
+    retry_in: float  # seconds until the first of those is asked again
 
 
-def known_around(lat: float, lon: float, radius_m: float) -> Known:
+def known_around(lat: float, lon: float, radius_m: float, retry: bool = False) -> Known:
     """Every named summit the cache holds around a point, asking for the rest.
 
-    Never waits on the network: cells not in yet are asked in the background,
-    the eye's own first and the rest by distance, and counted as pending.
+    Never waits on the network: tiles not in yet are asked in the background,
+    nearest first, and counted as pending. `retry` asks the tiles that could not
+    be read again now rather than once their wait is over.
     """
-    cells = sorted(
-        cells_around(lat, lon, radius_m),
-        key=lambda c: math.hypot(c[0] + 0.5 - lat, (c[1] + 0.5 - lon) * math.cos(math.radians(lat))),
-    )[:MAX_CELLS]
     found: list[Peak] = []
     pending = failed = 0
+    retry_in = math.inf
     with _lock:
-        for cell in cells:
-            cached = _read_cell(*cell)
+        now = time.monotonic()
+        for key, inner, outer in tiles_around(lat, lon, radius_m):
+            cached = _read_tile(key)
             if cached is not None:
-                found.extend(cached)
-            elif cell in _in_flight:
+                found.extend(
+                    peak for peak in cached if inner <= terrain.distance(lat, lon, peak.lat, peak.lon) < outer
+                )
+            elif key in _in_flight:
                 pending += 1
-            elif time.monotonic() - _failed.get(cell, -RETRY_AFTER) < RETRY_AFTER:
+            elif key in _failed and now < _failed[key][0] and not retry:
                 failed += 1
+                retry_in = min(retry_in, _failed[key][0] - now)
             else:
-                _start(cell)
+                _start(key)
                 pending += 1
-    return Known(found, pending, failed)
+    return Known(found, pending, failed, retry_in if failed else 0.0)
 
 
 def wait_idle(timeout: float = 10.0) -> bool:
-    """Block until no cell is being asked. For tests."""
+    """Block until no tile is being read. For tests."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with _lock:
@@ -255,7 +339,12 @@ def wait_idle(timeout: float = 10.0) -> bool:
     return False
 
 
-def forget_failures() -> None:
-    """Let every cell be asked again at once. For tests."""
+def forget() -> None:
+    """Let every tile be asked again at once, and the build be read again. For tests."""
+    global _template, _template_missed
     with _lock:
         _failed.clear()
+    with _template_lock:
+        _template = None
+        _template_missed = -math.inf
+    tiles_around.cache_clear()

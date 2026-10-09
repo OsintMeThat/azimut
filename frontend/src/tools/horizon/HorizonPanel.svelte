@@ -166,12 +166,14 @@
   const problems = $derived(
     [
       view.peaksOn && view.peaksError && { id: 'peaks', text: view.peaksError, retry: () => view.retryPeaks() },
+      // the app asks again by itself, so this one only says so
       view.peaksOn &&
         !view.peaksError &&
         view.peaksFailed && {
-          id: 'peaks-busy',
-          text: 'OpenStreetMap is busy: some summits are not named yet.',
+          id: 'peaks-missing',
+          text: 'OpenFreeMap did not answer for some summits. Asking again shortly.',
           retry: () => view.retryPeaks(),
+          quiet: true,
         },
       view.ground === 'imagery' &&
         view.imageryError && { id: 'imagery', text: view.imageryError, retry: () => view.retryImagery() },
@@ -292,7 +294,7 @@
   {/if}
 
   {#each problems as problem (problem.id)}
-    <p class="problem" role="alert">
+    <p class="problem" class:quiet={problem.quiet} role={problem.quiet ? 'status' : 'alert'}>
       <span>{problem.text}</span>
       <button type="button" class="btn btn-ghost btn-sm" onclick={problem.retry}>Try again</button>
     </p>
@@ -489,7 +491,7 @@
     {@render group('lens', 'Lens', lensGist, lensBody, locked)}
 
     {#snippet onViewBody()}
-      <label class="check wide" title="Names read from OpenStreetMap once this is on">
+      <label class="check wide" title="Names from OpenStreetMap via OpenFreeMap, read once this is on">
         <input type="checkbox" checked={view.peaksOn} onchange={(event) => view.showPeaks(event.currentTarget.checked)} />
         <span>Summit names</span>
         <span class="source">OpenStreetMap</span>
@@ -689,10 +691,6 @@
     gap: 2px;
     padding-left: 22px;
   }
-  /* a verdict, where it is, by how much: its room is kept while nothing is marked */
-  .reading.marked .body {
-    min-height: 52px;
-  }
   .glyph {
     display: grid;
     flex: none;
@@ -770,6 +768,10 @@
     border-radius: var(--r-md);
     background: var(--danger-soft);
     color: var(--danger);
+  }
+  .problem.quiet {
+    background: var(--bg-2);
+    color: var(--text-2);
   }
 
   /* -- a group: its title, its gist while folded, a chevron on the right -------- */

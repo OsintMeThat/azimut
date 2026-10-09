@@ -4,9 +4,10 @@ The panorama is computed here, by the same march every relief tool reads
 (engine/horizon.py), and sent as rasters over azimuth and elevation: the
 distance to the ground at each pixel, and the ground's slope there. The tab
 reads its skyline, the summit names and the strip from them; moving the eye
-asks for a new sweep. `/peaks`, `/target`, `/sky` and `/photo` answer the
-smaller questions around it: named summits, whether a point is hidden, the sun
-and the moon against the ridges, and what a photo says about its lens.
+asks for a new sweep. `/peaks`, `/target`, `/sky`, `/match` and `/photo`
+answer the smaller questions around it: named summits, whether a point is
+hidden, the sun and the moon against the ridges, where on the turn a skyline
+traced on a photo lies, and what a photo says about its lens.
 
 The rasters travel deflated and base64-encoded inside the JSON: one request,
 nothing to keep in step, and the browser inflates them with its own
@@ -40,7 +41,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 
 from .. import config
-from ..engine import horizon, peaks, sentinel as sentinel_engine, terrain
+from ..engine import horizon, peaks, sentinel as sentinel_engine, skymatch, terrain
 
 router = APIRouter(prefix="/api/horizon", tags=["horizon"])
 
@@ -399,12 +400,12 @@ def tiles_estimate(body: EstimateIn) -> dict[str, int]:
 
 
 # Summit names reach no farther than this: past it they crowd the skyline
-# rather than name it, and the Overpass box grows with the square of it.
+# rather than name it, and the tiles read grow with the square of it.
 PEAK_RADIUS_MAX = 200_000.0
 PEAKS_MAX = 3000
-OSM_CREDIT = {
-    "label": "OpenStreetMap",
-    "attribution": "© OpenStreetMap contributors",
+PEAKS_CREDIT = {
+    "label": "OpenFreeMap",
+    "attribution": "OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors",
     "link": "https://www.openstreetmap.org/copyright",
 }
 
@@ -416,6 +417,7 @@ def peaks_around(
     altitude: float = Query(ge=-500, le=20_000),
     far: float = Query(default=150_000.0, ge=1000, le=horizon.FAR_MAX),
     refraction: float = Query(default=horizon.REFRACTION_K, ge=0, le=0.3),
+    retry: bool = False,
 ) -> dict[str, Any]:
     """The named summits around an eye, placed where it sees them.
 
@@ -424,12 +426,13 @@ def peaks_around(
     Whether a summit is in sight is the panorama's to say, so every one is
     sent and the picture decides.
 
-    Answers at once with the names known so far: `pending` counts the areas
-    still being asked of OpenStreetMap, and the view asks again until none are
-    left; `failed` counts those no server would answer just now.
+    Answers at once with the names known so far: `pending` counts the tiles
+    still being read, and the view asks again until none are left; `failed`
+    counts those that could not be read just now, asked again by themselves
+    after `retry_in` seconds, or at once with `retry`.
     """
     radius = min(far, PEAK_RADIUS_MAX)
-    known = peaks.known_around(lat, lon, radius)
+    known = peaks.known_around(lat, lon, radius, retry=retry)
     found = known.peaks
     near = []
     for peak in found:
@@ -471,7 +474,8 @@ def peaks_around(
             )), 4),
         })
     return {
-        "peaks": rows, "pending": known.pending, "failed": known.failed, "credits": [OSM_CREDIT],
+        "peaks": rows, "pending": known.pending, "failed": known.failed,
+        "retry_in": math.ceil(known.retry_in), "credits": [PEAKS_CREDIT],
     }
 
 
@@ -523,6 +527,86 @@ def target(body: TargetIn) -> dict[str, Any]:
         "visible": visible,
         "margin_deg": round(margin, 4),
         "ground": round(ground, 1),
+    }
+
+
+# A traced skyline sent to /match: twice the browser's most samples, and a
+# whole turn as fine as a panorama is ever marched.
+MATCH_POINTS_MAX = 2000
+MATCH_SKYLINE_MAX = 72_000
+# Picture-plane points this far out, in half widths, are off any frame a photo lies in.
+MATCH_PLANE_MAX = 20.0
+
+
+class MatchIn(BaseModel):
+    """A traced skyline and the turn of terrain to look for it on.
+
+    The turn is the one the tab already marched (`/panorama`'s skyline), so the
+    search reads what the analyst sees. The trace is points on the picture
+    plane, right and up from the lens's middle in half widths of the frame
+    (engine/skymatch.py), and `half_width` is that half width on screen.
+    """
+
+    skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
+    start: float = Field(default=0.0, ge=0, lt=360)
+    step: float = Field(gt=0, le=10)
+    x: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
+    y: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
+    half_width: float = Field(gt=0, le=20_000)
+    fov: float = Field(ge=skymatch.FOV_MIN, le=skymatch.FOV_MAX)
+    # the photo says its lens: no other is tried
+    known: bool = False
+    tilt: float = Field(default=0.0, ge=-89, le=89)
+    roll: float = Field(default=0.0, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def _sane(self) -> MatchIn:
+        if len(self.x) != len(self.y):
+            raise ValueError("the trace needs as many x as y")
+        if abs(len(self.skyline) * self.step - 360.0) > self.step / 2:
+            raise ValueError("the skyline must cover the whole turn")
+        points = np.asarray(self.x + self.y, dtype=np.float64)
+        if not np.isfinite(points).all() or np.abs(points).max() > MATCH_PLANE_MAX:
+            raise ValueError("the trace lies off the picture")
+        angles = np.asarray([v for v in self.skyline if v is not None], dtype=np.float64)
+        if angles.size < skymatch.MIN_POINTS:
+            raise ValueError("the skyline holds no angles")
+        if not np.isfinite(angles).all() or np.abs(angles).max() > 90:
+            raise ValueError("the skyline holds angles no view has")
+        return self
+
+
+@router.post("/match")
+def match_trace(body: MatchIn) -> dict[str, Any]:
+    """Where on the turn the traced skyline lies: the best places, and how sure.
+
+    Each place is a camera (heading, tilt, lens) with its median gap to the
+    terrain in degrees and the share of the trace's shape it explains; `close`
+    marks those explaining about as much as the best. `lenses` is the range of
+    fields of view tried, the photo's own alone when it says one.
+    """
+    angles = np.asarray([np.nan if v is None else v for v in body.skyline], dtype=np.float64)
+    found = skymatch.match(
+        np.asarray(body.x), np.asarray(body.y), skymatch.Turn(body.start, body.step, angles),
+        half_width=body.half_width, fov=body.fov, known=body.known, tilt=body.tilt, roll=body.roll,
+    )
+    tried = skymatch.lenses(body.fov, known=body.known)
+    best = found.fits[0].explained if found.fits else 0.0
+    return {
+        "verdict": found.verdict,
+        "fits": [
+            {
+                "heading": round(fit.heading, 3),
+                "tilt": round(fit.tilt, 3),
+                "fov": round(fit.fov, 3),
+                "gap": round(fit.gap, 4),
+                "explained": round(fit.explained, 3),
+                "close": i == 0 or fit.explained >= skymatch.AMBIGUOUS_SHARE * best,
+                "points": fit.points,
+            }
+            for i, fit in enumerate(found.fits)
+        ],
+        "lenses": [round(tried[0], 1), round(tried[-1], 1)],
     }
 
 

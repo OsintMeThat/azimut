@@ -10,8 +10,9 @@
  * the map's footprint and the trace's gap are read off it. A newer move drops
  * whatever an older one is still waiting for.
  *
- * Summit names come from OpenStreetMap only once the analyst switches them on,
- * the same rule every overlay keeps: the network is reached for what was asked.
+ * Summit names, OpenStreetMap's read from OpenFreeMap's tiles, are asked for
+ * only once the analyst switches them on, the same rule every overlay keeps:
+ * the network is reached for what was asked.
  * The switch is remembered in this browser, since turning it on was that
  * analyst's own choice. So does the imagery laid over the ground (Satellite),
  * read from a free provider once that ground is picked (`imagery`, which the
@@ -148,6 +149,7 @@ export function createHorizonState({
   let peaksError = $state('');
   let peaksPending = $state(0);
   let peaksFailed = $state(0);
+  let peaksCredits = $state.raw([]);
 
   let target = $state(null);
   let pointed = $state(null);
@@ -238,10 +240,11 @@ export function createHorizonState({
 
   /**
    * The names known around the eye. The app answers at once with what it has
-   * and says how many areas are still coming from OpenStreetMap; while some
-   * are, it is asked again a moment later, so names appear nearest first.
+   * and says how many tiles are still coming; while some are, it is asked again
+   * a moment later, so names appear nearest first. Tiles that could not be read
+   * are asked again once the app's wait for them is over, or at once on `retry`.
    */
-  async function askPeaks() {
+  async function askPeaks(retry = false) {
     if (peaksTimer) cancel(peaksTimer);
     peaksTimer = null;
     if (!peaksOn || !observer || !panorama) return;
@@ -254,13 +257,17 @@ export function createHorizonState({
     peaksError = '';
     try {
       const answer = await api.get(
-        `/api/horizon/peaks?lat=${observer.lat}&lon=${observer.lon}&altitude=${altitude}&far=${panorama.far}`
+        `/api/horizon/peaks?lat=${observer.lat}&lon=${observer.lon}&altitude=${altitude}&far=${panorama.far}` +
+          (retry === true ? '&retry=true' : '')
       );
       if (mine !== peaksAsked) return;
       peaks = answer.peaks;
+      peaksCredits = answer.credits ?? [];
       peaksPending = answer.pending ?? 0;
       peaksFailed = answer.failed ?? 0;
+      // tiles that could not be read are asked again by the app once their wait is over
       if (peaksPending) peaksTimer = later(askPeaks, PEAKS_POLL);
+      else if (peaksFailed) peaksTimer = later(askPeaks, Math.max(PEAKS_POLL, (answer.retry_in ?? 0) * 1000));
       else peaksFor = key;
     } catch (failure) {
       if (mine === peaksAsked) peaksError = failure.message;
@@ -461,12 +468,16 @@ export function createHorizonState({
     get peaksError() {
       return peaksError;
     },
-    /** Areas still being read from OpenStreetMap, and areas no server would answer. */
+    /** Tiles still being read, and tiles that could not be read just now (asked again by themselves). */
     get peaksPending() {
       return peaksPending;
     },
     get peaksFailed() {
       return peaksFailed;
+    },
+    /** Who the summit names are credited to, as the app names them: `[{ label, attribution, link }]`. */
+    get peaksCredits() {
+      return peaksCredits;
     },
     /** A point on the map, placed in the view: `{ lat, lon, azimuth, angle, distance, visible, margin_deg }`. */
     get target() {
@@ -728,11 +739,11 @@ export function createHorizonState({
     get retries() {
       return retries;
     },
-    /** Summit names again, after OpenStreetMap failed or left areas out. */
+    /** Summit names again now, rather than once the tiles that could not be read have waited. */
     retryPeaks() {
       peaksFor = '';
       peaksFailed = 0;
-      askPeaks();
+      askPeaks(true);
     },
     retryImagery() {
       imageryError = '';

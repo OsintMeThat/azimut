@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,7 +44,7 @@ from ..engine import (
     wayback,
 )
 from ..workspace import Case, CaseError
-from . import events
+from . import events, tile_batch
 from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
 from .naming import slugify
@@ -781,6 +781,29 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return serve_tile(provider, z, x, y)
+
+
+@router.get("/tiles/batch/{provider_id}")
+def batched_tiles(
+    provider_id: str, t: str = Query(max_length=tile_batch.QUERY_MAX)
+) -> StreamingResponse:
+    """Live-map tiles of one provider, many in one answer (api/tile_batch.py).
+
+    What a tilted map asks for. Each tile is served exactly as `tile_proxy`
+    serves it, cache, meter, native ceiling and overzoom included, and carries
+    the status that route would have answered.
+    """
+    try:
+        provider = tiles.get_provider(provider_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    keys = tile_batch.tile_keys(t, provider.max_zoom)
+
+    def one(z: int, x: int, y: int) -> tile_batch.Served:
+        answer = serve_tile(provider, z, x, y)
+        return answer.status_code, bytes(answer.body)
+
+    return tile_batch.stream(keys, one)
 
 
 def serve_tile(provider: tiles.Provider, z: int, x: int, y: int) -> Response:

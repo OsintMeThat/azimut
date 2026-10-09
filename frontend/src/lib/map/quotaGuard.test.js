@@ -37,6 +37,7 @@ describe('billed imagery past the flat view', () => {
     expect(farTile(far, VIEW)).toBe(true);
     expect(tileSource({ ...far, providerId: 'sentinel2' }, VIEW)).toEqual({
       far: true,
+      provider: FREE_FAR_PROVIDER,
       url: `/api/tiles/${FREE_FAR_PROVIDER}/${far.z}/${far.x}/${far.y}`,
     });
   });

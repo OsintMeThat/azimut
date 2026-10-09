@@ -12,10 +12,11 @@ from typing import Any
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from ..engine import horizon, terrain
+from . import tile_batch
 
 router = APIRouter(prefix="/api/terrain", tags=["terrain"])
 
@@ -59,6 +60,21 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
     return Response(
         content=content, media_type=media_type, headers={"Cache-Control": TILE_CACHE_CONTROL}
     )
+
+
+@router.get("/batch")
+def terrain_batch(t: str = Query(max_length=tile_batch.QUERY_MAX)) -> StreamingResponse:
+    """Relief tiles, many in one answer (api/tile_batch.py), each as `terrain_tile` serves it."""
+    keys = tile_batch.tile_keys(t, terrain.PLANET_ZOOM)
+
+    def one(z: int, x: int, y: int) -> tile_batch.Served:
+        try:
+            fetched = terrain.tile(z, x, y)
+        except terrain.TerrainUnavailable as exc:
+            raise _unavailable(exc) from exc
+        return 200, fetched[0] if fetched else terrain.sea_tile()
+
+    return tile_batch.stream(keys, one)
 
 
 @router.get("/elevation")

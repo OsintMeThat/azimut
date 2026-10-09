@@ -16,7 +16,8 @@
  * A video adds time. A pin keeps the view's alignment at a moment of it, and
  * between two pins the view turns as the camera did (`cameraAt`).
  */
-import { focal, rayFor, turnBetween } from './camera.js';
+import { focal, principal, rayFor, turnBetween } from './camera.js';
+import { headingText } from './geometry.js';
 import { heightFor } from './view.js';
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -567,6 +568,133 @@ export function fitToTrace(samples, camera, skyline, { lens = true } = {}) {
     gap: after,
     improved: true,
   };
+}
+
+// -- the whole turn searched -----------------------------------------------------
+
+/**
+ * The trace on the picture plane, as the whole-turn search reads it
+ * (`/api/horizon/match`, engine/skymatch.py): each point right and up from the
+ * lens's middle in half widths of the frame, and that half width on screen.
+ * A lens F degrees wide sees a point (x, y) along tangents (x, y)·tan(F/2), so
+ * the search can try other lenses on the same points.
+ */
+export function tracePlane(samples, camera) {
+  const half = focal(camera) * Math.tan((camera.fov * Math.PI) / 360);
+  const centre = principal(camera);
+  return {
+    x: samples.map((s) => (s.x - centre.x) / half),
+    y: samples.map((s) => -(s.y - centre.y) / half),
+    half_width: half,
+  };
+}
+
+/**
+ * What to ask the search: the trace, the camera it starts from, and the turn
+ * the view already marched, so it reads the skyline the analyst sees. Null
+ * while that turn is not whole (a window of it), when only a fit from here can.
+ *
+ * @param {{ known?: boolean }} [options] `known`: the photo said its lens, which is then the only one tried
+ */
+export function matchRequest(samples, camera, panorama, { known = false } = {}) {
+  if (!panorama?.skyline?.length || panorama.azimuth?.full === false) return null;
+  return {
+    skyline: panorama.skyline,
+    start: panorama.azimuth.start,
+    step: panorama.azimuth.step,
+    ...tracePlane(samples, camera),
+    fov: camera.fov,
+    known,
+    tilt: camera.tilt,
+    roll: camera.roll ?? 0,
+  };
+}
+
+/**
+ * Each place the search found, brought onto the trace here as Fit brings the
+ * analyst's own placing: `{ camera, gap, explained, close }`, best first. A
+ * place the refinement cannot improve stays as the search left it.
+ *
+ * @param {{ fits: object[] }} found the search's answer
+ * @param {{ lens?: boolean }} [options] `lens`: whether the field of view may change
+ */
+export function searchedPlaces(found, samples, camera, skyline, { lens = true } = {}) {
+  return (found?.fits ?? []).map((fit) => {
+    const start = { ...camera, heading: fit.heading, tilt: fit.tilt, fov: lens ? fit.fov : camera.fov };
+    const refined = fitToTrace(samples, start, skyline, { lens });
+    const placed = refined?.improved ? refined.camera : start;
+    return { camera: placed, gap: traceGap(samples, placed, skyline), explained: fit.explained, close: fit.close };
+  });
+}
+
+/**
+ * The place a Fit turns to: the best, unless another about as good lies
+ * within half the lens of where the analyst was looking, whose placing then
+ * decides between them. -1 when there is none.
+ */
+export function placeToTake(places, camera) {
+  let pick = places.length ? 0 : -1;
+  let nearest = Infinity;
+  places.forEach((place, i) => {
+    if (!place.close) return;
+    const away = Math.abs(turnBetween(camera.heading, place.camera.heading));
+    if (away <= camera.fov / 2 && away < nearest) {
+      nearest = away;
+      pick = i;
+    }
+  });
+  return pick;
+}
+
+/**
+ * What a Fit does with the search's answer: `take`, the place it turns to (-1
+ * for none), `closest`, the place a "Show the closest" offers when it turns to
+ * none, and the toast's `text` and `kind`. `before` is the gap the view had.
+ */
+export function searchOutcome(found, places, camera, { lens = true, before = null } = {}) {
+  const at = placeToTake(places, camera);
+  const place = places[at];
+  const where = (p) => headingText(p.camera.heading, p.camera.fov);
+  if (found.verdict === 'none' || !place) {
+    const [low, high] = found.lenses ?? [];
+    const range = lens && low < high ? ` with a lens of ${Math.round(low)}° to ${Math.round(high)}°` : '';
+    return { take: -1, closest: place ? 0 : -1, text: `Nothing on this horizon matches the trace${range}`, kind: 'warn' };
+  }
+  // the view already stands at that place, and the fit would not bring the trace closer
+  const stay = isSamePlace(camera, place) && !closer(place.gap, before);
+  const take = stay ? -1 : at;
+  if (found.verdict === 'ambiguous') {
+    const other = places.find((p, i) => i !== at && p.close);
+    const also = other ? `, and ${where(other)} fits about as well` : '';
+    return { take, closest: -1, text: `Fitted at ${where(place)}${also}`, kind: 'warn' };
+  }
+  if (found.verdict === 'loose') {
+    return { take, closest: -1, text: `Loose fit at ${where(place)}: compare the ridges with the photo`, kind: 'warn' };
+  }
+  if (stay) return { take, closest: -1, text: 'The view is already as close to the trace as a fit gets', kind: 'info' };
+  const gaps = before && place.gap ? `: gap ${gapDegrees(before)}° to ${gapDegrees(place.gap)}°` : '';
+  return { take, closest: -1, text: `Fitted at ${where(place)}${gaps}`, kind: 'ok' };
+}
+
+/** Within a tenth of the lens, and never under a degree: the same place on the turn. */
+function isSamePlace(camera, place) {
+  return Math.abs(turnBetween(camera.heading, place.camera.heading)) < Math.max(1, camera.fov / 10);
+}
+
+/** Whether a gap is closer than another by more than a twentieth, which a fit again would not be. */
+function closer(gap, before) {
+  if (!gap || !before) return true;
+  return gap.median < before.median * 0.95;
+}
+
+/** Whether the view is at a place: the same heading, tilt and lens to a twentieth of a degree. */
+export function isAtPlace(camera, place) {
+  const near = (a, b) => Math.abs(a - b) < 0.05;
+  return (
+    near(turnBetween(camera.heading, place.camera.heading), 0) &&
+    near(camera.tilt, place.camera.tilt) &&
+    near(camera.fov, place.camera.fov)
+  );
 }
 
 // -- a video's pins ------------------------------------------------------------

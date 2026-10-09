@@ -305,6 +305,28 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('hands the engine a ceiling only when it changes', async () => {
+    // Over relief the engine settles the camera by a hair on every ceiling it is
+    // handed and reports a move; the surface re-states the basemap on every
+    // settled view, so an unchanged ceiling handed back each time froze the page.
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      let ceiling = 22;
+      map.getMaxZoom = () => ceiling;
+      map.setMaxZoom = (zoom) => {
+        map.calls.setMaxZoom.push([zoom]);
+        ceiling = zoom;
+      };
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show({ ...ESRI, max_zoom: 19 }, ESRI.id, 256);
+      basemaps.show({ ...ESRI, max_zoom: 19 }, ESRI.id, 256);
+      basemaps.setZoomCeiling(null);
+      expect(map.calls.setMaxZoom).toEqual([[18]]);
+      basemaps.setZoomCeiling(17);
+      expect(map.calls.setMaxZoom).toEqual([[18], [16]]);
+    });
+  });
+
   it('leaves a layer alone when nothing about it changed', async () => {
     // returning to the tab refetches the providers, and the fresh objects re-run
     // the layer effect, so this is the common path rather than an edge case
@@ -807,12 +829,12 @@ describe('the layers on a map', () => {
 
 
 describe('billed tiles on a map that can tilt', () => {
-  it('asks a billed provider through the guard, and nothing else', () => {
+  it('asks a billed provider through the guard, and a free one in the batches a tilted map asks in', () => {
     expect(rasterSource(SENTINEL, 'sentinel2', 512, 'm4').tiles).toEqual([
       'azimut-billed://m4/sentinel2/{z}/{x}/{y}',
     ]);
     expect(rasterSource(ESRI, 'esri-world-imagery', 256, 'm4').tiles).toEqual([
-      '/api/tiles/esri-world-imagery/{z}/{x}/{y}',
+      'azimut-tiles://m4/imagery/esri-world-imagery/{z}/{x}/{y}',
     ]);
     // a direct {s} template is never billed and never passes through the app
     expect(rasterSource({ ...CUSTOM_XYZ, meter: 'x' }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');

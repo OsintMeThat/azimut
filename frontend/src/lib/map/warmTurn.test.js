@@ -68,6 +68,10 @@ describe('reading a turn ahead', () => {
     expect(proxiedProvider('https://a.tile.example/{z}/{x}/{y}.png')).toBeNull();
     expect(proxiedProvider(undefined)).toBeNull();
     expect(isTerrainTemplate('/api/terrain/tiles/{z}/{x}/{y}')).toBe(true);
+    // …and as the batches a tilted map asks in (tileBatch.js)
+    expect(proxiedProvider('azimut-tiles://m1/imagery/esri-world-imagery/{z}/{x}/{y}')).toBe('esri-world-imagery');
+    expect(isTerrainTemplate('azimut-tiles://m1/terrain/{z}/{x}/{y}')).toBe(true);
+    expect(isTerrainTemplate('azimut-tiles://m1/imagery/esri-world-imagery/{z}/{x}/{y}')).toBe(false);
     expect(isTerrainTemplate('/api/tiles/esri-world-imagery/{z}/{x}/{y}')).toBe(false);
   });
 

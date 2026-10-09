@@ -24,15 +24,18 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import './engine.css';
 import { mapFacade, engineZoom } from './facade.js';
 import { GUARD_PROTOCOL, readGuarded, tileSource } from './quotaGuard.js';
+import { appTile, BATCH_PROTOCOL, createTileBatcher, readBatched } from './tileBatch.js';
 
 setWorkerUrl(workerUrl);
 
 /**
- * The maps a billed tile may be asked for, by the id its address carries, so
- * the guard can read the view the tile is for (`quotaGuard.js`).
+ * The maps a tile may be asked for, by the id its address carries, so a
+ * protocol of ours can read the view the tile is for: the billed guard
+ * (`quotaGuard.js`) and the batches of a tilted map (`tileBatch.js`).
  */
-const guarded = new Map();
+const maps = new Map();
 let mapsMade = 0;
+const batcher = createTileBatcher();
 
 /** What the guard needs of a view: where it looks, how deep, how big, how tilted. */
 function guardView(map) {
@@ -48,26 +51,27 @@ function guardView(map) {
   };
 }
 
+/** A tile through the app, in a batch while this map stands on relief (`tileBatch.js`). */
+const throughApp = (map, asked, signal) =>
+  appTile(asked, { batcher, signal, batched: asked.kind === 'terrain' || Boolean(map?.getTerrain?.()) });
+
 /**
  * A billed tile, from its provider or, past a flat view's reach on a tilted
- * map, from the free one. Failures carry their status and body the way the
- * engine's own loader hands them over, so the imagery panel reads them alike.
+ * map, from the free one.
  */
 addProtocol(GUARD_PROTOCOL, async (params, abort) => {
   const asked = readGuarded(params.url);
   if (!asked) throw new Error('not a billed tile address');
-  const map = guarded.get(asked.mapId);
-  const { url } = map
-    ? tileSource(asked, guardView(map))
-    : { url: `/api/tiles/${asked.providerId}/${asked.z}/${asked.x}/${asked.y}` };
-  const response = await fetch(url, { signal: abort.signal });
-  if (!response.ok) {
-    const error = new Error(response.statusText || `tile answered ${response.status}`);
-    error.status = response.status;
-    error.body = await response.blob();
-    throw error;
-  }
-  return { data: await response.arrayBuffer() };
+  const map = maps.get(asked.mapId);
+  const providerId = map ? tileSource(asked, guardView(map)).provider : asked.providerId;
+  return throughApp(map, { ...asked, kind: 'imagery', providerId }, abort.signal);
+});
+
+/** A free provider's tile or a relief tile, through the app (`tileBatch.js`). */
+addProtocol(BATCH_PROTOCOL, async (params, abort) => {
+  const asked = readBatched(params.url);
+  if (!asked) throw new Error('not a tile address');
+  return throughApp(maps.get(asked.mapId), asked, abort.signal);
 });
 
 /**
@@ -172,8 +176,8 @@ export async function createMapEngine(container, { view, imperial = false } = {}
     maxTileCacheZoomLevels: 8,
   });
   const mapId = `m${(mapsMade += 1)}`;
-  guarded.set(mapId, map);
-  map.once('remove', () => guarded.delete(mapId));
+  maps.set(mapId, map);
+  map.once('remove', () => maps.delete(mapId));
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
   map.addControl(new NavigationControl({ showCompass: false }), 'top-left');

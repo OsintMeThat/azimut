@@ -6,6 +6,8 @@ import {
   exaggerationOf,
   MAX_TILT,
   RELIEF_SOURCE,
+  STEADY_LEVELS,
+  steadyZoom,
   TILT_TILE_RATIO,
 } from './relief.js';
 
@@ -23,17 +25,33 @@ const SOURCES = {
 
 function stubMap() {
   const sources = new Map();
-  const calls = { terrain: [], maxPitch: [], sky: [], lod: [] };
+  const calls = { terrain: [], maxPitch: [], sky: [], lod: [], clamp: [], mousePan: [], wheel: [] };
   const listeners = new Map();
+  const count = (name) => listeners.get(name)?.size ?? 0;
   return {
     calls,
     listeners,
+    count,
+    fire: (name, event) => [...(listeners.get(name) ?? [])].forEach((handler) => handler(event)),
+    _camera: { transformCameraUpdate: null },
+    dragPan: {
+      _mousePan: { enable: () => calls.mousePan.push(true), disable: () => calls.mousePan.push(false) },
+    },
+    scrollZoom: { enable: () => calls.wheel.push(true), disable: () => calls.wheel.push(false) },
+    setCenterClampedToGround: (on) => calls.clamp.push(on),
     setSourceTileLodParams: (levels, ratio) => calls.lod.push([levels, ratio]),
-    on: (name, handler) => listeners.set(name, handler),
-    off: (name, handler) => listeners.get(name) === handler && listeners.delete(name),
+    on: (name, handler) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name).add(handler);
+    },
+    off: (name, handler) => listeners.get(name)?.delete(handler),
     getSource: (id) => sources.get(id),
     addSource: (id, spec) => sources.set(id, spec),
-    setTerrain: (spec) => calls.terrain.push(spec),
+    setTerrain: (spec) => {
+      calls.terrain.push(spec);
+      // the clamp in force when the terrain changes is what seats the flat map
+      calls.clampAtTerrain = calls.clamp.at(-1);
+    },
     setMaxPitch: (n) => calls.maxPitch.push(n),
     setSky: (spec) => calls.sky.push(spec),
     sources,
@@ -93,11 +111,11 @@ describe('relief', () => {
     expect(map.calls.lod.at(-1)[1]).toBe(TILT_TILE_RATIO);
     // a basemap switched while relief is on arrives as style data
     map.calls.lod.length = 0;
-    map.listeners.get('styledata')();
+    map.fire('styledata');
     expect(map.calls.lod).toEqual([[expect.any(Number), TILT_TILE_RATIO]]);
     await relief.show(false);
     expect(map.calls.lod.at(-1)[1]).toBe(3);
-    expect(map.listeners.has('styledata')).toBe(false);
+    expect(map.count('styledata')).toBe(0);
   });
 
   it('lets the last switch win while the sources are still being read', async () => {
@@ -114,17 +132,67 @@ describe('relief', () => {
 
   it('reads a tilted turn ahead only while the relief is on, and only when asked to', async () => {
     const map = stubMap();
-    await createRelief(map, async () => SOURCES).show(true);
-    expect(map.listeners.has('moveend')).toBe(false);
+    const plain = createRelief(map, async () => SOURCES);
+    // the seating of the centre listens from the start (groundHold.js)
+    const seating = map.count('moveend');
+    await plain.show(true);
+    expect(map.count('moveend')).toBe(seating);
 
     const warmed = stubMap();
     const relief = createRelief(warmed, async () => SOURCES, { imagery: 'basemap-imagery', send: vi.fn() });
     await relief.show(true);
-    expect(warmed.listeners.has('moveend')).toBe(true);
+    expect(warmed.count('moveend')).toBe(seating + 1);
     await relief.show(false);
-    expect(warmed.listeners.has('moveend')).toBe(false);
+    expect(warmed.count('moveend')).toBe(seating);
     await relief.show(true);
     relief.dispose();
-    expect(warmed.listeners.has('moveend')).toBe(false);
+    expect(warmed.count('moveend')).toBe(0);
+  });
+
+  it('asks the relief in the batches a tilted map asks in, on a map of the app’s', async () => {
+    expect(demSource(SOURCES, 'm3').tiles).toEqual(['azimut-tiles://m3/terrain/{z}/{x}/{y}']);
+    const map = stubMap();
+    await createRelief(map, async () => SOURCES, null, { mapId: 'm3' }).show(true);
+    expect(map.sources.get(RELIEF_SOURCE).tiles).toEqual(['azimut-tiles://m3/terrain/{z}/{x}/{y}']);
+  });
+
+  it('takes the drag and the wheel over from the engine while on, and gives them back', async () => {
+    const map = stubMap();
+    const relief = createRelief(map, async () => SOURCES);
+    await relief.show(true);
+    expect(map.calls.mousePan).toEqual([false]);
+    expect(map.calls.wheel).toEqual([false]);
+    await relief.show(false);
+    expect(map.calls.mousePan).toEqual([false, true]);
+    expect(map.calls.wheel).toEqual([false, true]);
+  });
+
+  it('lets the eye ride new ground in, and seats a flat map at sea level again', async () => {
+    const map = stubMap();
+    const relief = createRelief(map, async () => SOURCES);
+    await relief.show(true);
+    // the app placed this ground: the engine's own seating, until the map is idle
+    expect(map.calls.clamp.at(-1)).toBe(true);
+    map.fire('idle');
+    expect(map.calls.clamp.at(-1)).toBe(false);
+    await relief.show(false);
+    expect(map.calls.clampAtTerrain).toBe(true);
+  });
+
+  it('keeps the eye out of the ground while on, and only then', async () => {
+    const map = stubMap();
+    const relief = createRelief(map, async () => SOURCES);
+    await relief.show(true);
+    expect(typeof map._camera.transformCameraUpdate).toBe('function');
+    await relief.show(false);
+    expect(map._camera.transformCameraUpdate).toBeNull();
+  });
+
+  it('chooses the imagery again only once the zoom has really moved', () => {
+    expect(steadyZoom(15, 16)).toBe(15);
+    expect(steadyZoom(15, 14)).toBe(15);
+    expect(steadyZoom(15, 15 + STEADY_LEVELS)).toBe(15 + STEADY_LEVELS);
+    expect(steadyZoom(15, 15 - STEADY_LEVELS)).toBe(15 - STEADY_LEVELS);
+    expect(steadyZoom(undefined, 16)).toBe(16);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toScreen } from './camera.js';
+import { rayFor, toScreen } from './camera.js';
 import {
   bendShape,
   bent,
@@ -40,6 +40,12 @@ import {
   traceGap,
   traceSamples,
   zoomLoupe,
+  isAtPlace,
+  matchRequest,
+  placeToTake,
+  searchedPlaces,
+  searchOutcome,
+  tracePlane,
 } from './overlay.js';
 
 const SIZE = { width: 1000, height: 750 };
@@ -414,5 +420,103 @@ describe('a loupe let free over the terrain', () => {
     expect(clampLoupe({ zoom: 0.01, x: 9, y: -9 }, { free: true })).toEqual({ zoom: FREE_ZOOM_MIN, x: 0.5 + FREE_REACH, y: 0.5 - FREE_REACH });
     expect(loupeMoved({ zoom: 1, x: 0.5, y: 0.5 })).toBe(false);
     expect(loupeMoved({ zoom: 0.5, x: 0.5, y: 0.5 })).toBe(true);
+  });
+});
+
+describe('a fit searched over the whole turn', () => {
+  const samples = traceSamples(traced(TRUE), SIZE);
+
+  it('sends the trace on the picture plane, in half widths from the lens’s middle', () => {
+    const plane = tracePlane([{ x: 500, y: 375 }, { x: 1000, y: 0 }, { x: 250, y: 750 }], TRUE);
+    expect(plane.half_width).toBe(500);
+    expect(plane.x).toEqual([0, 1, -0.5]);
+    expect(plane.y).toEqual([-0, 0.75, -0.75]);
+  });
+
+  it('puts each point where the lens sees it: tangents of half the lens across', () => {
+    const level = { ...TRUE, heading: 0, tilt: 0, roll: 0 };
+    const [x] = tracePlane([{ x: 800, y: 375 }], level).x;
+    const ray = rayFor(level, 800, 375);
+    expect(Math.atan(x * Math.tan(Math.PI / 6)) * (180 / Math.PI)).toBeCloseTo(ray.azimuth, 9);
+  });
+
+  it('asks about the turn the view marched, and only a whole one', () => {
+    const body = matchRequest(samples, TRUE, PANORAMA, { known: true });
+    expect(body.skyline).toBe(PANORAMA.skyline);
+    expect(body).toMatchObject({ start: 0, step: 0.1, fov: 60, known: true, tilt: 1, roll: 1.5 });
+    expect(body.x).toHaveLength(samples.length);
+    expect(matchRequest(samples, TRUE, { ...PANORAMA, azimuth: { ...PANORAMA.azimuth, full: false } })).toBeNull();
+    expect(matchRequest(samples, TRUE, null)).toBeNull();
+  });
+
+  it('brings each place the search found onto the trace', () => {
+    const found = { fits: [{ heading: 95.6, tilt: 0.6, fov: 61, explained: 0.9, close: true }] };
+    const [place] = searchedPlaces(found, samples, { ...TRUE, heading: 200, roll: 0 }, skyline);
+    expect(place.camera.heading).toBeCloseTo(95, 0);
+    expect(place.camera.fov).toBeCloseTo(60, 0);
+    expect(place.gap.median).toBeLessThan(0.05);
+    expect(place).toMatchObject({ explained: 0.9, close: true });
+  });
+
+  it('keeps the photo’s lens on every place', () => {
+    const found = { fits: [{ heading: 95.6, tilt: 0.6, fov: 61, explained: 0.9, close: true }] };
+    const [place] = searchedPlaces(found, samples, { ...TRUE, heading: 200 }, skyline, { lens: false });
+    expect(place.camera.fov).toBe(60);
+  });
+
+  const at = (heading, close = true) => ({ camera: { heading, tilt: 0, fov: 60 }, gap: { median: 0.1 }, close });
+
+  it('turns to the best place, or to one about as good where the analyst was looking', () => {
+    const view = { heading: 140, fov: 60 };
+    expect(placeToTake([at(30), at(150)], view)).toBe(1);
+    // too far from the view to be its hint
+    expect(placeToTake([at(30), at(200)], view)).toBe(0);
+    // near the view, but well behind the best
+    expect(placeToTake([at(30), at(150, false)], view)).toBe(0);
+    expect(placeToTake([], view)).toBe(-1);
+  });
+
+  it('knows when the view is at a place already', () => {
+    expect(isAtPlace({ heading: 359.98, tilt: 1, fov: 60 }, { camera: { heading: 0.01, tilt: 1.02, fov: 60 } })).toBe(true);
+    expect(isAtPlace({ heading: 10, tilt: 1, fov: 60 }, { camera: { heading: 10.2, tilt: 1, fov: 60 } })).toBe(false);
+  });
+
+  const view = { heading: 10, tilt: 0, fov: 60 };
+  const before = { median: 2.4 };
+
+  it('says where it fitted and how much closer the trace now lies', () => {
+    const outcome = searchOutcome({ verdict: 'match', fits: [] }, [at(299)], view, { before });
+    expect(outcome).toMatchObject({ take: 0, kind: 'ok' });
+    expect(outcome.text).toBe('Fitted at 299° NW: gap 2.4° to 0.10°');
+  });
+
+  it('says a loose fit is to be checked, and names a rival about as good', () => {
+    const loose = searchOutcome({ verdict: 'loose', fits: [] }, [at(299)], view, { before });
+    expect(loose.text).toBe('Loose fit at 299° NW: compare the ridges with the photo');
+    const both = searchOutcome({ verdict: 'ambiguous', fits: [] }, [at(299), at(147)], view, { before });
+    expect(both).toMatchObject({ take: 0, kind: 'warn' });
+    expect(both.text).toBe('Fitted at 299° NW, and 147° SE fits about as well');
+  });
+
+  it('turns nowhere when nothing matches, offers the closest, and names the lenses tried', () => {
+    const none = searchOutcome({ verdict: 'none', fits: [], lenses: [40, 90] }, [at(112)], view, { before });
+    expect(none).toMatchObject({ take: -1, closest: 0, kind: 'warn' });
+    expect(none.text).toBe('Nothing on this horizon matches the trace with a lens of 40° to 90°');
+    const known = searchOutcome({ verdict: 'none', fits: [], lenses: [60, 60] }, [], view, { lens: false, before });
+    expect(known).toMatchObject({ take: -1, closest: -1 });
+    expect(known.text).toBe('Nothing on this horizon matches the trace');
+  });
+
+  it('stays put when the view is the best place already, give or take a hair', () => {
+    const here = { camera: { heading: 10.3, tilt: 0.02, fov: 60.4 }, gap: { median: 2.35 }, close: true };
+    const outcome = searchOutcome({ verdict: 'match', fits: [] }, [here], view, { before });
+    expect(outcome).toMatchObject({ take: -1, kind: 'info' });
+    expect(outcome.text).toBe('The view is already as close to the trace as a fit gets');
+    // a loose fit at the place the view stands on still says it is loose, and moves nothing
+    const loose = searchOutcome({ verdict: 'loose', fits: [] }, [here], view, { before });
+    expect(loose).toMatchObject({ take: -1, kind: 'warn' });
+    // the same place, but the fit brings the trace closer: it is taken
+    const nearer = { ...here, gap: { median: 1.1 } };
+    expect(searchOutcome({ verdict: 'match', fits: [] }, [nearer], view, { before }).take).toBe(0);
   });
 });

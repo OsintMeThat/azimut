@@ -23,6 +23,7 @@ import { INFRASTRUCTURE } from './infrastructure.js';
 import { tileTemplate as nightTemplate } from './nightlights.js';
 import { PLACE_NAMES } from './placeNames.js';
 import { guardedTemplate } from './quotaGuard.js';
+import { batchedTemplate } from './tileBatch.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
@@ -265,14 +266,16 @@ export function sourceMaxZoom(provider, cell) {
  * @param {number} cell grid cell in CSS px (lib/usage.js `layerCell`)
  */
 export function rasterSource(provider, providerId, cell, guardId = '') {
-  // A billed provider is asked through the guard, which sends the far ground of
-  // a tilted map to the free one (`quotaGuard.js`). Direct `{s}` templates are
-  // never billed and never pass through the app.
-  const guard = guardId && provider.meter && !provider.url.includes('{s}');
+  // On a map of the app's (`guardId` names it), a billed provider is asked
+  // through the guard, which sends the far ground of a tilted map to the free
+  // one (`quotaGuard.js`), and any other provider the app proxies through the
+  // batches a tilted map asks in (`tileBatch.js`); a flat map still asks each
+  // tile at its own address. Direct `{s}` templates never pass through the app.
+  const proxied = guardId && !provider.url.includes('{s}');
   return {
     type: 'raster',
-    tiles: guard
-      ? [guardedTemplate(guardId, providerId)]
+    tiles: proxied
+      ? [provider.meter ? guardedTemplate(guardId, providerId) : batchedTemplate(guardId, providerId)]
       : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
     // Bigger tiles shift the URL zoom down (512 → -1, 1024 → -2); an oversample
     // halves the cell so each tile is shown downscaled — deeper zoom on screen.
@@ -459,7 +462,11 @@ export function createBasemaps(engine, hooks = {}) {
     // A map linked to another one stops where the shallower of the two does,
     // or the deeper one would pull its partner's camera past its pixels.
     const deepest = Math.min(provider.max_zoom, sharedCeiling ?? Infinity);
-    map.setMaxZoom(deepest - 1);
+    // Only when it changes. The engine treats every call as a camera update and,
+    // over relief, may settle the camera by a hair and report a move for it; the
+    // surface re-states the basemap on every settled view, so an unchanged
+    // ceiling handed back each time turned into a loop that froze the page.
+    if (map.getMaxZoom?.() !== deepest - 1) map.setMaxZoom(deepest - 1);
   }
 
   function showTiles(provider, providerId, cell) {

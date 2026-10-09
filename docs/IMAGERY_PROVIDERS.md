@@ -685,7 +685,7 @@ only once a view needs them. Checked 2026-10-08.
 |---|---|---|---|
 | Terrain heights | Mapterhorn `tiles.mapterhorn.com/{z}/{x}/{y}.webp` (terrarium, 512 px, planet to z12, surveys deeper) | open data sources, `© Mapterhorn`, attribution page linked | through the app (`api/terrain.py`), disk cache `cache/terrain/` bounded at 1 GiB with an LRU sweep at start, absences kept 30 days |
 | Terrain fallback | AWS Terrain Tiles `s3.amazonaws.com/elevation-tiles-prod/terrarium` (Mapzen, 256 px) | open data, Mapzen and AWS credited | asked only when Mapterhorn cannot be reached; four of its tiles one level deeper make one of ours |
-| Summit names | Overpass API: `overpass-api.de`, then `overpass.private.coffee`, then `overpass.kumi.systems` (public instances listed on the OSM wiki) | ODbL © OSM contributors | Horizon only, once Summit names is switched on; one 1° cell a question, nearest first, two at a time, cached 90 days (`engine/peaks.py`). The main instance took a minute for a whole view's box and answered 429/504 under load, hence cells and the mirrors |
+| Summit names | OpenFreeMap `planet` vector tiles, the `mountain_peak` layer (named `natural=peak` and `volcano`), found through the same TileJSON as place names | data ODbL © OSM contributors, © OpenMapTiles, OpenFreeMap credited; no key, no quota | Horizon only, once Summit names is switched on (`engine/peaks.py`). Zoom 12 within 15 km of the eye, 11 to 40 km, 10 to 100 km, 9 beyond: a 150 km view in the Alps is about 160 tiles and 15 MB, once. Each tile's summits are cached 90 days, nearest first, six at a time; a tile that fails waits 30 s, doubling to 10 min. Overpass was dropped on 2026-10-09: its public servers were busy, and `overpass-api.de` refused this address outright after a view's burst of cells |
 
 **The Horizon view's ground** is a mesh the browser draws on the GPU. It reads
 terrain tiles (to z14) and free imagery tiles itself, in batches of up to 64
@@ -697,8 +697,9 @@ are computed in the browser from that terrain, with nothing more to download,
 and there is no Horizon cache folder.
 
 The one billed exception is **Sentinel-2 near the eye**, on the analyst's own
-Copernicus key and quota: switched on in the view ("Sentinel-2 nearer than
-5 km", up to 30 km), it is laid only on the ground nearer than that, Esri
+Copernicus key and quota: switched on under the view's imagery button
+("Sentinel-2 nearer than 5 km", up to 30 km; the button then reads "S2 · 5
+km"), it is laid only on the ground nearer than that, Esri
 beyond, as Satellite's 3D view keeps billed tiles off the far ground. Tiles are
 read at the provider's native level and never beyond it, so nothing is billed
 for upsampling. Before it is switched on the view says how many requests it
@@ -714,6 +715,17 @@ refuses the batch.
 would cover and the app fetches them into the disk caches, so a quick turn reads
 them from disk. Free cacheable providers and the relief only; a billed one is
 never read ahead. It is the analyst's own looking around, read a little early.
+
+**A tilted map's tiles come in batches** (`/api/tiles/batch/{provider}`,
+`/api/terrain/batch`, `api/tile_batch.py`; `lib/map/tileBatch.js`). A browser
+keeps six connections to the app, and a view tilted toward the horizon asks for a
+hundred tiles at once. With relief on, the tiles the map asks for in one go travel
+as one request per source, up to 32 of them, at most four requests at a time so
+the app's other calls keep a connection. The app fetches them side by side and
+writes each as it is done, so a slow tile holds up none of the others. Each tile
+is served exactly as its own route serves it: same cache, same meter, same
+overzoom, same status when it fails. A flat map still asks each tile at its own
+address, and a batch the app refuses whole falls back to that.
 
 ## GeoConfirmed is a query, not a feed
 

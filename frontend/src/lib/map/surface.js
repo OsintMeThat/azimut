@@ -149,6 +149,30 @@ export function shapeGeometry(shape) {
 }
 
 /**
+ * Hold a mark's test against the relief while the camera moves.
+ *
+ * Over relief the engine dims a mark the ground hides. It finds out by reading
+ * the drawn depth back off the graphics card, for every mark, ten times a
+ * second while the map moves. Chrome holds the page until the card has drawn
+ * everything queued before each read, so a dozen marks stalled a tilted map at
+ * every move. The test now waits for the camera to come to rest; a flat map
+ * never runs it.
+ *
+ * The engine has no switch for the test, so this reaches past its public
+ * surface. A marker without that handle is left alone.
+ *
+ * @param {object} marker the engine's marker
+ * @param {() => boolean} moving whether the camera is moving right now
+ */
+export function testReliefAtRest(marker, moving) {
+  const test = marker._updateOpacity;
+  if (typeof test !== 'function') return;
+  marker._updateOpacity = function (...args) {
+    if (!moving()) test.apply(this, args);
+  };
+}
+
+/**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
  * @param {(id: any) => void} [opts.onPopupOpen] a card was opened on a mark
@@ -178,6 +202,13 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
   let releaseClicks = null;
   let answering = false; // something on this surface answers a click
   const listeners = []; // [type, layerId, handler] to unbind on destroy
+  // Between the start and the end of a movement of the camera. A gesture over
+  // relief is one movement however many jumps it takes (`facade.js`).
+  let moving = false;
+  const startMoving = () => (moving = true);
+  const stopMoving = () => (moving = false);
+  map.on('movestart', startMoving);
+  map.on('moveend', stopMoving);
 
   function paintLayers() {
     return [FILL, ...dashLayers.values(), LINE, DOT];
@@ -326,6 +357,7 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
     })
       .setLngLat([shape.at.lon, shape.at.lat])
       .addTo(map);
+    testReliefAtRest(marker, () => moving);
 
     if (shape.popup || shape.onClick) {
       // The mark answers its own click; the map's handler — which drops a
@@ -682,6 +714,8 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       refreshClaim();
       for (const [type, layers, handler] of listeners) map.off(type, layers, handler);
       listeners.length = 0;
+      map.off('movestart', startMoving);
+      map.off('moveend', stopMoving);
       // Each of these is asked for before it is taken away, because the map
       // itself may already be gone: a tool tearing down destroys its own
       // surfaces before its map, but an overlay component's cleanup runs when

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createMoveFold,
   engineEvents,
   engineZoom,
   exactViewZoom,
@@ -9,6 +10,7 @@ import {
   pointsExtent,
   viewZoom,
 } from './facade.js';
+import { HAND, PLACED } from './groundHold.js';
 
 /**
  * A map the façade can be driven against without a browser. The point of
@@ -151,7 +153,8 @@ describe('the map façade keeps the engine on its own side', () => {
     const facade = mapFacade(map);
     facade.setView({ lat: 1, lon: 2 }, 16);
     facade.setZoom(18);
-    expect(map.calls.jumpTo).toEqual([[{ center: [2, 1], zoom: 15 }]]);
+    // a camera the app puts somewhere says so, for the 3D map's seating (groundHold.js)
+    expect(map.calls.jumpTo).toEqual([[{ center: [2, 1], zoom: 15 }, PLACED]]);
     expect(map.calls.setZoom).toEqual([[17]]);
   });
 
@@ -161,8 +164,8 @@ describe('the map façade keeps the engine on its own side', () => {
     facade.setCamera({ lat: 1, lon: 2, zoom: 16, bearing: 37 });
     facade.setCamera({ lat: 3, lon: 4, zoom: 12 });
     expect(map.calls.jumpTo).toEqual([
-      [{ center: [2, 1], zoom: 15, bearing: -37 }],
-      [{ center: [4, 3], zoom: 11, bearing: -0 }],
+      [{ center: [2, 1], zoom: 15, bearing: -37 }, PLACED],
+      [{ center: [4, 3], zoom: 11, bearing: -0 }, PLACED],
     ]);
   });
 
@@ -199,13 +202,11 @@ describe('the map façade keeps the engine on its own side', () => {
 
   it('holds the centre’s height through a gesture, and re-seats it after with the camera kept', () => {
     const recalculated = [];
-    const update = { recalculateZoomAndCenter: (terrain) => recalculated.push(terrain) };
     const camera = {
       elevationFreeze: false,
-      getTransformForUpdate: () => update,
-      applyUpdatedTransform: (transform) => recalculated.push(transform === update ? 'applied' : 'other'),
+      transform: { recalculateZoomAndCenter: (terrain) => recalculated.push(terrain) },
     };
-    const map = stubMap({ getCenterElevation: () => 2930, getCenterClampedToGround: () => true });
+    const map = stubMap({ getCenterElevation: () => 2930, _update: () => recalculated.push('drawn') });
     map._camera = camera;
     map.terrain = 'relief';
     const facade = mapFacade(map);
@@ -214,18 +215,112 @@ describe('the map façade keeps the engine on its own side', () => {
     facade.setPitch(40);
     facade.setBearing(10);
     facade.shiftBy({ lat: 0, lon: 0.001 });
-    expect(map.calls.jumpTo.map(([jump]) => jump.elevation)).toEqual([2930, 2930, 2930]);
+    facade.setZoom(14.5);
+    expect(map.calls.jumpTo.map(([jump]) => jump.elevation)).toEqual([2930, 2930, 2930, 2930]);
+    expect(map.calls.jumpTo.at(-1)[0].zoom).toBe(13.5);
+    // the moves are the hand's, so the eye stays where they leave it (groundHold.js)
+    expect(map.calls.jumpTo.map(([, data]) => data)).toEqual([HAND, HAND, HAND, HAND]);
+    expect(facade.exactZoom()).toBe(16);
+    expect(recalculated).toEqual([]);
     release();
     expect(camera.elevationFreeze).toBe(false);
-    expect(recalculated).toEqual(['relief', 'applied']);
+    expect(recalculated).toEqual(['relief', 'drawn']);
     facade.setPitch(41);
     expect(map.calls.setPitch).toEqual([[41]]);
+  });
+
+  it('tells a press on the drawn map from one on a marker, and gives the map the keyboard', () => {
+    const canvas = { focus: vi.fn() };
+    const facade = mapFacade(stubMap({ getCanvas: () => canvas }));
+    expect(facade.onSurface(canvas)).toBe(true);
+    expect(facade.onSurface({ tagName: 'DIV' })).toBe(false);
+    expect(facade.onSurface(null)).toBe(false);
+    facade.focus();
+    expect(canvas.focus).toHaveBeenCalledWith({ preventScroll: true });
   });
 
   it('holds what it can on an engine with no freeze of its own', () => {
     const map = stubMap({ getCenterElevation: () => 120 });
     const release = mapFacade(map).holdElevation();
     expect(() => release()).not.toThrow();
+  });
+
+  /** The stub with the engine's own `fire`, on its prototype as the engine has it, recording what is heard. */
+  function firingMap(overrides = {}) {
+    const heard = [];
+    class Evented {
+      fire(event) {
+        heard.push(typeof event === 'string' ? event : event.type);
+        return this;
+      }
+    }
+    return { map: Object.assign(new Evented(), stubMap(overrides)), heard };
+  }
+
+  /** One jump as the engine reports it: a whole movement, start to end. */
+  function jump(map) {
+    for (const type of ['movestart', 'move', 'rotatestart', 'rotate', 'rotateend', 'moveend']) map.fire({ type });
+  }
+
+  it('makes a held gesture one movement: it starts once, moves at every jump, and ends when let go', () => {
+    const { map, heard } = firingMap({ getCenterElevation: () => 2930, _update: () => heard.push('re-seated') });
+    map._camera = { elevationFreeze: false, transform: { recalculateZoomAndCenter: () => {} } };
+    map.terrain = 'relief';
+    const release = mapFacade(map).holdElevation();
+    jump(map);
+    jump(map);
+    jump(map);
+    expect(heard).toEqual(['movestart', 'move', 'rotatestart', 'rotate', 'move', 'rotate', 'move', 'rotate']);
+    heard.length = 0;
+    release();
+    // the end is heard after the re-seat, so the settled view says where the centre landed
+    expect(heard).toEqual(['re-seated', 'rotateend', 'moveend']);
+    release();
+    expect(heard).toHaveLength(3);
+    // and the map is the engine's own again: a jump is a whole movement
+    expect(Object.hasOwn(map, 'fire')).toBe(false);
+    heard.length = 0;
+    jump(map);
+    expect(heard).toEqual(['movestart', 'move', 'rotatestart', 'rotate', 'rotateend', 'moveend']);
+  });
+
+  it('keeps overlapping holds one movement until the last is let go, whichever goes first', () => {
+    const { map, heard } = firingMap();
+    const fold = createMoveFold(map);
+    const wheel = fold();
+    jump(map);
+    const drag = fold();
+    jump(map);
+    wheel();
+    jump(map);
+    expect(heard.filter((type) => type === 'movestart')).toHaveLength(1);
+    expect(heard).not.toContain('moveend');
+    drag();
+    expect(heard.filter((type) => type === 'moveend')).toHaveLength(1);
+    expect(Object.hasOwn(map, 'fire')).toBe(false);
+  });
+
+  it('works out where a point would be drawn after a shift on a copy of the camera, not the camera', () => {
+    const live = { clone: () => copy };
+    const copy = {
+      setCenter: vi.fn(),
+      setElevation: vi.fn(),
+      locationToScreenPoint: vi.fn((at, terrain) => ({ x: at.lng * 10, y: at.lat * 10, terrain })),
+    };
+    // the engine's position objects are fresh on every read
+    const map = stubMap({ getCenter: () => ({ lat: 10, lng: 20 }), getCenterElevation: () => 2930 });
+    map._camera = { elevationFreeze: false, transform: live };
+    map.style = {};
+    map.terrain = 'relief';
+    const facade = mapFacade(map);
+    const release = facade.holdElevation();
+    expect(facade.pointAfterShift({ lat: 1, lon: 2 }, { lat: 0.5, lon: -0.25 })).toEqual({ x: 20, y: 10 });
+    expect(copy.setCenter).toHaveBeenCalledWith({ lat: 10.5, lng: 19.75 });
+    expect(copy.setElevation).toHaveBeenCalledWith(2930);
+    expect(copy.locationToScreenPoint.mock.calls[0][1]).toBe('relief');
+    expect(map.calls.jumpTo).toEqual([]);
+    release();
+    expect(mapFacade(stubMap()).pointAfterShift({ lat: 1, lon: 2 }, { lat: 0, lon: 0 })).toBeNull();
   });
 
   it('shifts the camera over the ground by degrees, keeping the rest of it', () => {
@@ -293,7 +388,7 @@ describe('framing an extent', () => {
     mapFacade(map).fitBounds({ north: 4, south: 1, east: 8, west: 2 }, { maxZoom: 20 });
     expect(map.calls.cameraForBounds[0][1].maxZoom).toBe(19);
     expect(map.calls.easeTo).toEqual([
-      [{ center: { lat: 2, lng: 5 }, zoom: 13, duration: 0 }],
+      [{ center: { lat: 2, lng: 5 }, zoom: 13, duration: 0 }, PLACED],
     ]);
   });
 
