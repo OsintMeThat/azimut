@@ -43,20 +43,29 @@
    */
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
-  import { caseState, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { assignFolder } from '../lib/filing.js';
   import { splitHash } from '../lib/hash.js';
   import { copyText } from '../lib/clipboard.js';
-  import { onBackForward, settlePlace } from '../lib/backButton.js';
+  import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { openMapAt } from '../lib/navigate.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { createSurface } from '../lib/map/surface.js';
+  import { shareView } from '../lib/map/sharedView.js';
+  import { formatDistance } from '../lib/measure.js';
   import { seenLens } from '../lib/horizon/camera.js';
-  import { bearingBetween, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
+  import { bearingBetween, elsewhere, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
   import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
+  import { photoKept } from '../lib/horizon/savedView.js';
+  import { AUTO_REACH, searchHints } from '../lib/horizon/hints.js';
+  import { blinkColours, composePair, composeView, photoTag, standingText, viewFilename } from '../lib/horizon/viewExport.js';
+  import { canvasBlob, blobBase64 } from '../lib/map/compareExport.js';
+  import { destinationLabel } from '../lib/exportDest.js';
+  import { earthCameraLink } from '../lib/maplinks.js';
+  import { verticalFov } from '../lib/horizon/camera.js';
   import {
     fitFrame,
     fitToTrace,
@@ -73,6 +82,7 @@
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createHorizonState } from './horizon/state/horizon.svelte.js';
   import { createOverlayState } from './horizon/state/overlay.svelte.js';
+  import { createViewsState } from './horizon/state/views.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import MapLayers from './satellite/MapLayers.svelte';
@@ -84,12 +94,29 @@
   import OverlayBar from './horizon/OverlayBar.svelte';
   import OverlayTransport from './horizon/OverlayTransport.svelte';
   import PhotoDialog from './horizon/PhotoDialog.svelte';
+  import ViewsMenu from './horizon/ViewsMenu.svelte';
+  import ExportMenu from './horizon/ExportMenu.svelte';
+  import CaptureMenu from './horizon/CaptureMenu.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import Icon from '../components/Icon.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
 
   const view = createHorizonState({ api });
   const imagery = createImageryState({ api });
   const overlay = createOverlayState({ api, view });
+  /** The view on screen, which draws the saved work's preview. */
+  let viewPane = $state(null);
+  const views = createViewsState({
+    api,
+    view,
+    overlay,
+    caseId: () => caseState.current?.id ?? null,
+    snapshot: () => viewPane?.snapshot() ?? Promise.resolve(null),
+    footprint: () => footprint(view.observer, view.panorama, view.camera, {
+      step: Math.max(0.5, Math.min(view.camera.fov, 360) / 90),
+      limit: view.visibility ?? Infinity,
+    }),
+  });
 
   let providerId = $state('esri-world-imagery');
   let mapView = $state(null);
@@ -189,6 +216,345 @@
     });
   });
 
+  // -- saved views ------------------------------------------------------------------
+
+  /** The case's views, read when a case opens or its work moves; the one open is let go with its case. */
+  let viewsCase = null;
+  $effect(() => {
+    const caseId = caseState.current?.id ?? null;
+    void caseState.rev;
+    untrack(() => {
+      if (viewsCase !== null && caseId !== viewsCase) views.fresh();
+      viewsCase = caseId;
+      views.load(caseId);
+    });
+  });
+
+  /** The name in the header: the open view's, or what was typed for a new one. */
+  let viewTitle = $state('');
+  $effect(() => {
+    const current = views.current;
+    untrack(() => (viewTitle = current?.title ?? ''));
+  });
+  const renamed = $derived(Boolean(views.current && viewTitle.trim() && viewTitle.trim() !== views.current.title));
+  /** Whether Save has something to keep: the view changed, or its name did. */
+  const unsaved = $derived(views.dirty || renamed);
+  const saveBlocked = $derived(!caseState.current ? 'Open a case to keep this view' : '');
+
+  async function saveView() {
+    if (saveBlocked || views.busy || !unsaved || !view.observer) return;
+    // a photo of this computer, laid before a case was open, cannot be kept with the view
+    const local = !photoKept(overlay);
+    const answer = await views.save(viewTitle);
+    if (!answer) return;
+    if (local) toast(`Saved ${answer.title}, without the photo: it is a file of this computer, not of the case`, 'warn', 6500);
+    else toast(`Saved ${answer.title}`);
+  }
+
+  /** What waits on the analyst's word before the view on screen is let go: `{ revert, name }`. */
+  let discarding = $state(null);
+  /** Work a switch would lose: a saved view's changes, or a photo laid and matched but never saved. */
+  const keepsWork = () => views.dirty && Boolean(views.current || overlay.source);
+
+  function openView(name) {
+    const same = views.current?.name === name;
+    if (same && !views.dirty) return;
+    if (keepsWork()) {
+      discarding = { revert: same, name };
+      return;
+    }
+    showView(name);
+  }
+
+  async function showView(name) {
+    discarding = null;
+    moving = false;
+    mapLarge = false;
+    if (await views.open(name)) flyToEye();
+  }
+
+  function newView() {
+    views.fresh();
+    viewTitle = '';
+  }
+
+  /** Back to the map with no eye, to pick another viewpoint; a word first when unsaved work would go. */
+  function closeView() {
+    if (keepsWork()) {
+      discarding = { close: true };
+      return;
+    }
+    leaveView();
+  }
+
+  function leaveView() {
+    discarding = null;
+    overlay.remove();
+    views.fresh();
+    viewTitle = '';
+    search = null;
+    view.leave();
+    uiState.horizonEye = null;
+    moving = false;
+    mapLarge = false;
+    folded = false;
+  }
+
+  /** A view handed over from the saved work (Satellite, Files): opened here. */
+  $effect(() => {
+    const asked = uiState.openHorizonView;
+    if (uiState.tool !== 'horizon' || !asked || !caseState.current) return;
+    untrack(() => {
+      uiState.openHorizonView = null;
+      openView(asked);
+    });
+  });
+
+  // what went wrong opening or saving a view, or what a view opened without
+  $effect(() => {
+    const message = views.error;
+    if (!message) return;
+    untrack(() => {
+      toast(message, 'warn', 6500);
+      views.clearError();
+    });
+  });
+
+  onDestroy(holdsUnsaved('horizon', () => Boolean(views.current && unsaved)));
+
+  // -- exporting ---------------------------------------------------------------------
+
+  /** The kind of picture being drawn, or ''. */
+  let exportBusy = $state('');
+
+  /** Google Earth standing at the eye, looking where the view looks. */
+  const earthLink = $derived.by(() => {
+    const eye = view.observer;
+    const altitude = view.panorama?.observer?.altitude;
+    if (!eye || !Number.isFinite(altitude) || view.camera.projection === 'panorama') return '';
+    const { heading, tilt, roll } = view.camera;
+    const vfov = verticalFov({ ...view.camera, width: frame.width || 16, height: frame.height || 9 });
+    return earthCameraLink({ lat: eye.lat, lon: eye.lon, altitude, heading, tilt, roll, vfov });
+  });
+
+  /**
+   * Write the view out as a picture (lib/horizon/viewExport.js): drawn by the
+   * view at the export's size, composed with its names, ruler and credits,
+   * and written to the export folder; with `keep`, a copy is kept in the case
+   * under the saved view. The pair kinds and the blink draw the photo and the
+   * terrain through the same frame. `trace` draws the skyline traced on the
+   * photo over it, and `signed` closes the credits with the Azimut lockup.
+   */
+  async function exportView(kind, { keep = false, trace = false, signed = true } = {}) {
+    if (exportBusy || !viewPane || !view.observer) return;
+    const pair = kind === 'row' || kind === 'column' || kind === 'blink';
+    if (pair && !overlay.source) return;
+    exportBusy = kind;
+    try {
+      const owner = await ensureCase();
+      const drawn = await viewPane.exportPicture({
+        kind: kind === 'turn' ? 'turn' : 'view',
+        variants: pair ? [{ photo: 1 }, { photo: 0 }] : [{}],
+      });
+      if (!drawn) throw new Error('the view has not finished landing');
+      const title = viewTitle.trim() || views.suggested;
+      const common = {
+        layers: drawn.layers,
+        scale: drawn.scale,
+        title,
+        standing: standingText({ observer: view.observer, camera: drawn.camera, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime }, kind }),
+        credits,
+        daylight: view.ground !== 'plain' || Boolean(overlay.source),
+        trace,
+        signed,
+      };
+      const filename = viewFilename(title, kind);
+      let result;
+      if (kind === 'blink') {
+        const [photoFrame, terrainFrame] = drawn.frames;
+        const form = new FormData();
+        form.append('image_a', await canvasBlob(composeView({ ...common, picture: photoFrame, tag: photoTag(overlay.warped) })), 'photo.png');
+        form.append('image_b', await canvasBlob(composeView({ ...common, picture: terrainFrame, tag: 'Terrain, simulated' })), 'terrain.png');
+        form.append('animation', 'blink');
+        form.append('interval', '800');
+        form.append('keep', blinkColours());
+        form.append('filename', filename);
+        result = await api.post(`/api/cases/${owner.id}/compare/gif`, form);
+      } else {
+        const picture = pair
+          ? composePair({ ...common, photo: drawn.frames[0], terrain: drawn.frames[1], layout: kind, reshaped: overlay.warped })
+          : composeView({ ...common, picture: drawn.frames[0], tag: reshapedShown() ? photoTag(true) : '' });
+        const blob = await canvasBlob(picture);
+        result = await api.post(`/api/cases/${owner.id}/plates`, { filename, format: 'png', png: await blobBase64(blob), overwrite: false });
+        if (keep && views.current) await keepPicture(owner.id, blob, kind, filename);
+      }
+      toast(`${result.file} written to ${destinationLabel(result.path)}${keep && views.current && kind !== 'blink' ? ', and kept in the case' : ''}`, 'ok', 5200, {
+        label: 'Show',
+        onClick: () => api.post(`/api/cases/${owner.id}/plates/reveal`).catch(() => {}),
+      });
+    } catch (failure) {
+      toast(`Export failed: ${failure.message}`, 'danger');
+    } finally {
+      exportBusy = '';
+    }
+  }
+
+  /** A picture of the saved view kept in the case, listed under it. */
+  async function keepPicture(caseId, blob, kind, filename) {
+    const form = new FormData();
+    form.append('image', blob, 'view.png');
+    form.append('kind', kind);
+    form.append('filename', filename);
+    if (credits) form.append('attribution', credits);
+    const answer = await api.post(`/api/cases/${encodeURIComponent(caseId)}/horizon/views/${encodeURIComponent(views.current.name)}/images`, form);
+    reloadCase();
+    return answer.path;
+  }
+
+  let captureBusy = $state(false);
+
+  /** Whether the picture shows a photo pulled by hand, which its tag then says. */
+  const reshapedShown = () => Boolean(overlay.source && overlay.warped && overlay.shown > 0);
+
+  /**
+   * File the view in the case as it shows, or an `area` of it dragged over the
+   * view: Satellite's capture, for this tab. It is drawn through the screen's
+   * own camera, the loupe kept, with the names, the ruler and the credits an
+   * export has, and says what the picture faces rather than the view's lens.
+   * No saved view is needed, nor an open case (one is made); a saved view and
+   * the photo laid are named on it.
+   */
+  async function captureView(area = false) {
+    if (captureBusy || exportBusy || !viewPane || !view.observer) return;
+    const box = area ? await viewPane.chooseArea() : null;
+    if (area && !box) return;
+    captureBusy = true;
+    try {
+      const owner = await ensureCase();
+      const drawn = await viewPane.exportPicture({ kind: 'screen', area: box });
+      if (!drawn) throw new Error('the view has not finished landing');
+      const title = viewTitle.trim() || views.suggested;
+      const faced = { ...view.camera, ...(drawn.lens ? { heading: drawn.lens.heading, fov: drawn.lens.fov } : {}) };
+      const picture = composeView({
+        picture: drawn.frames[0],
+        layers: drawn.layers,
+        scale: drawn.scale,
+        title,
+        standing: standingText({ observer: view.observer, camera: faced, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime } }),
+        credits,
+        daylight: view.ground !== 'plain' || Boolean(overlay.source),
+        tag: reshapedShown() ? photoTag(true) : '',
+      });
+      const form = new FormData();
+      form.append('image', await canvasBlob(picture), 'capture.png');
+      form.append('filename', viewFilename(title, 'capture'));
+      form.append('lat', String(view.observer.lat));
+      form.append('lon', String(view.observer.lon));
+      form.append('heading', String(((faced.heading % 360) + 360) % 360));
+      form.append('fov', String(faced.fov));
+      form.append('area', box ? 'true' : 'false');
+      if (views.current) form.append('view', views.current.name);
+      const photo = overlay.source;
+      if (photo?.path && photo.caseId === owner.id) form.append('photo', photo.path);
+      if (credits) form.append('attribution', credits);
+      await api.post(`/api/cases/${encodeURIComponent(owner.id)}/horizon/captures`, form);
+      reloadCase();
+      toast(box ? 'Area of the view captured & filed' : 'View captured & filed', 'ok');
+    } catch (failure) {
+      toast(`Capture failed: ${failure.message}`, 'danger', 6000);
+    } finally {
+      captureBusy = false;
+    }
+  }
+
+  /**
+   * The photo and the terrain through the same frame, the ridge lines on both,
+   * kept under the view and laid as two panels of a new Geo Proof. A view never
+   * saved is saved first: the panels say which view they came from.
+   */
+  async function sendToProof() {
+    if (exportBusy || !viewPane || !overlay.source) return;
+    if (!caseState.current) {
+      toast('Open a case to send the view to Geo Proof', 'warn');
+      return;
+    }
+    exportBusy = 'proof';
+    try {
+      if (!views.current || unsaved) {
+        const saved = await views.save(viewTitle);
+        if (!saved) return;
+      }
+      const drawn = await viewPane.exportPicture({ kind: 'view', variants: [{ photo: 1 }, { photo: 0 }] });
+      if (!drawn) throw new Error('the view has not finished landing');
+      const caseId = caseState.current.id;
+      const name = views.current.title;
+      const paths = [];
+      const photoPart = overlay.warped ? 'photo reshaped, with the ridge lines' : 'photo with the ridge lines';
+      for (const [index, part] of [['photo', photoPart], ['terrain', 'terrain, simulated']].entries()) {
+        const blob = await canvasBlob(drawn.frames[index]);
+        paths.push(await keepPicture(caseId, blob, part[0], `${name} ${part[1]}`));
+      }
+      for (const path of paths) if (!uiState.composeQueue.includes(path)) uiState.composeQueue.push(path);
+      uiState.tool = 'proof';
+    } catch (failure) {
+      toast(`Could not send the view to Geo Proof: ${failure.message}`, 'danger');
+    } finally {
+      exportBusy = '';
+    }
+  }
+
+  // -- one camera with the other map tabs -------------------------------------------
+
+  /**
+   * The window's camera (lib/map/sharedView.js). Once the eye and its look
+   * rest, the other maps look from the eye, turned to its heading; Coords &
+   * Sky reads the eye; Satellite draws its cone. While no eye stands, this
+   * tab's map follows the others as any map tab does. A standing eye never
+   * moves for them: when they look elsewhere, the map offers to move there.
+   */
+  const share = shareView('horizon', { state: uiState, enabled: () => prefs.mapSync });
+  let standTimer = 0;
+  $effect(() => {
+    const eye = view.observer;
+    const { heading, fov, projection } = shownLens;
+    if (!eye) return;
+    clearTimeout(standTimer);
+    // a turn in the hand, or a video playing, is said once it rests
+    standTimer = setTimeout(() => {
+      untrack(() => {
+        uiState.horizonEye = { lat: eye.lat, lon: eye.lon, heading, fov, projection };
+        // a hidden tab moved nothing the analyst is looking at
+        if (uiState.tool !== 'horizon') return;
+        share.stood({ lat: eye.lat, lon: eye.lon, heading }, mapView?.zoom ?? 13);
+        uiState.mapPoint = { lat: eye.lat, lon: eye.lon, zoom: uiState.mapView?.zoom ?? 13 };
+      });
+    }, 400);
+  });
+  onDestroy(() => clearTimeout(standTimer));
+
+  /** With no eye yet, the map is a map tab like the others: it goes where they left the window. */
+  $effect(() => {
+    void uiState.mapView;
+    if (uiState.tool !== 'horizon' || !ready || !engine || layout !== 'picking') return;
+    untrack(() => {
+      const next = share.pending(engine.camera());
+      if (next) engine.setCamera(next);
+    });
+  });
+
+  /** Where the other maps look, once they left the eye behind: offered, never followed. */
+  const away = $derived(view.observer ? elsewhere(uiState.mapView, view.observer) : null);
+
+  function moveThere() {
+    const there = away;
+    if (!there) return;
+    startMove();
+    tick().then(() => {
+      surface?.resize();
+      engine?.setView({ lat: there.lat, lon: there.lon }, Math.max(12, Math.min(there.zoom ?? 14, 16)));
+    });
+  }
+
   // -- the address ----------------------------------------------------------------
 
   let lastEye = '';
@@ -262,6 +628,11 @@
   }
 
   function onKey(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && uiState.tool === 'horizon' && layout === 'looking') {
+      event.preventDefault();
+      saveView();
+      return;
+    }
     if (event.key !== 'Escape' || pointMenu || event.defaultPrevented) return;
     if (layersOpen) {
       event.preventDefault();
@@ -295,7 +666,10 @@
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   $effect(() => savedWork.load(caseState.current?.id ?? null));
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
-  const savedItems = $derived([...savedWork.rows, ...savedWork.media]);
+  // the view open here is the eye the map already draws: its saved row would sit on it twice
+  const savedItems = $derived(
+    [...savedWork.rows, ...savedWork.media].filter((row) => row.kind !== 'view' || row.view !== views.current?.name)
+  );
 
   const layerRows = $derived([
     {
@@ -576,8 +950,11 @@
 
   // -- the photo laid over the view ------------------------------------------------
 
-  /** The terrain's skyline at an azimuth, from the turn the app marched. */
-  const skyline = (azimuth) => skylineBetween(view.panorama, azimuth);
+  /**
+   * The terrain's skyline at an azimuth, from the turn the app marched: as it
+   * stands within the reach the trace is read against, unless told another.
+   */
+  const skyline = (azimuth, reach = overlay.reach) => skylineBetween(view.panorama, azimuth, reach);
   const traceCamera = $derived({ ...view.camera, width: frame.width, height: frame.height });
   // the trace as it shows on the straightened photo, which is what meets the terrain
   const samples = $derived(overlay.traceShown && frame.width ? traceSamples(overlay.strokesSeen, frame) : []);
@@ -609,7 +986,15 @@
     const panorama = view.panorama;
     const strokes = overlay.strokesSeen;
     const before = gap;
-    const body = matchRequest(traced, camera, panorama, { known: !lens });
+    const told = overlay.hints;
+    // how far the photo sees: left to Fit, every cut is tried; set, that cut alone is the turn
+    const reach = told.reach === 'auto' ? 'auto' : overlay.reach;
+    const body = matchRequest(traced, camera, panorama, {
+      known: !lens,
+      reach,
+      autoReach: AUTO_REACH,
+      ...searchHints(told, { lensKnown: !lens }),
+    });
     let found = null;
     if (body) {
       fitting = true;
@@ -629,7 +1014,9 @@
     }
     const places = searchedPlaces(found, traced, camera, skyline, { lens });
     search = { panorama, strokes, verdict: found.verdict, places };
-    const outcome = searchOutcome(found, places, camera, { lens, before });
+    const outcome = searchOutcome(found, places, camera, { lens, before, facing: Boolean(told.facing) });
+    // staying put, the view still reads the trace against the reach the place lies on
+    if (outcome.here >= 0) takeReach(places[outcome.here]);
     if (outcome.take >= 0) lookAtPlace(places[outcome.take], outcome.text, outcome.kind);
     else if (outcome.closest >= 0) {
       toast(outcome.text, outcome.kind, 8000, { label: 'Show the closest', onClick: () => takePlace(outcome.closest) });
@@ -653,17 +1040,35 @@
     else lookAtPlace(result, `Fitted to the trace: ${gaps}`);
   }
 
-  /** Turn the view to a place, with a toast that takes it back. */
+  /**
+   * Turn the view to a place, with a toast that takes it back. A place found on
+   * a cut of the turn is read against that cut from then on, while how far the
+   * photo sees is left to Fit.
+   */
   function lookAtPlace(place, text, kind = 'ok') {
     const { heading, tilt, roll, fov } = view.camera;
+    const reachBefore = overlay.reachFound;
+    takeReach(place);
     view.look(lensOf(place.camera));
-    toast(text, kind, 8000, { label: 'Undo', onClick: () => view.look({ heading, tilt, roll, fov }) });
+    toast(text, kind, 8000, {
+      label: 'Undo',
+      onClick: () => {
+        overlay.setReachFound(reachBefore);
+        view.look({ heading, tilt, roll, fov });
+      },
+    });
+  }
+
+  function takeReach(place) {
+    if (overlay.hints.reach === 'auto' && 'reach' in place) overlay.setReachFound(place.reach);
   }
 
   /** One of the places the search found, from the band's buttons or a toast. */
   function takePlace(index) {
     const place = searched?.places[index];
-    if (place && !overlay.locked) view.look(lensOf(place.camera));
+    if (!place || overlay.locked) return;
+    takeReach(place);
+    view.look(lensOf(place.camera));
   }
 
   const lensOf = ({ heading, tilt, roll, fov }) => ({ heading, tilt, roll, fov });
@@ -816,9 +1221,43 @@
   <div class="hz-main">
     <header class="tool-header hz-head">
       {#if layout === 'looking'}
-        <h2 class="hz-title" aria-label="View from {title}" title="Where the eye stands">
-          <span class="hz-eye" aria-hidden="true"></span><span class="mono">{title}</span>
-        </h2>
+        <!-- the view's name, read as a title until it is clicked; where the eye stands is in its tooltip -->
+        <div class="hz-title">
+          <span class="hz-eye" aria-hidden="true"></span>
+          <input
+            class="hz-name"
+            bind:value={viewTitle}
+            placeholder={views.suggested}
+            maxlength="200"
+            spellcheck="false"
+            style:width="{Math.min(36, Math.max(10, (viewTitle || views.suggested).length + 1))}ch"
+            aria-label="View name"
+            title="{views.current ? 'Rename this view: Save keeps the new name' : 'Name this view'} · stands at {title}"
+            onkeydown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+                saveView();
+              } else if (event.key === 'Escape') {
+                event.stopPropagation();
+                viewTitle = views.current?.title ?? '';
+                event.currentTarget.blur();
+              }
+            }}
+          />
+          {#if views.current && unsaved}
+            <span class="hz-unsaved" role="img" aria-label="Unsaved changes" title="Changes not saved yet"></span>
+          {/if}
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm hz-close"
+            onclick={closeView}
+            title="Close this view and pick another viewpoint"
+            aria-label="Close the view"
+          >
+            <Icon name="x" size={13} />
+          </button>
+        </div>
       {:else}
         <div class="hz-ask">
           <h2>{layout === 'moving' ? 'Move the viewpoint' : 'Pick a viewpoint'}</h2>
@@ -841,6 +1280,38 @@
           aria-label="Add a photo or video"
         >
           <Icon name="image" size={14} /><span class="hz-act-label">Add a photo or video</span>
+        </button>
+      {/if}
+      {#if caseState.current && layout !== 'moving'}
+        <ViewsMenu
+          {views}
+          caseId={caseState.current.id}
+          {unsaved}
+          onopen={openView}
+          onnew={layout === 'looking' ? newView : null}
+          onrevert={layout === 'looking' ? () => openView(views.current?.name) : null}
+        />
+      {/if}
+      {#if layout === 'looking'}
+        <CaptureMenu busy={captureBusy} oncapture={captureView} />
+        <ExportMenu
+          photo={Boolean(overlay.source)}
+          saved={Boolean(views.current)}
+          traced={Boolean(overlay.source && overlay.strokes.length)}
+          busy={exportBusy}
+          earth={earthLink}
+          onexport={exportView}
+          onproof={sendToProof}
+        />
+        <button
+          type="button"
+          class="btn btn-sm hz-act"
+          onclick={saveView}
+          disabled={Boolean(saveBlocked) || views.busy || !unsaved}
+          title={saveBlocked || (unsaved ? 'Keep this view in the case (Ctrl+S)' : 'Saved')}
+          aria-label="Save the view"
+        >
+          <Icon name="save" size={13} /><span class="hz-act-label">Save</span>
         </button>
       {/if}
       {#if layout === 'moving'}
@@ -875,6 +1346,7 @@
             onchange={() => (photoDialog = true)}
             onfit={fit}
             {fitting}
+            heading={view.camera.heading}
             places={searched && searched.verdict !== 'match' ? searched.places : []}
             onplace={takePlace}
             ondetect={detect}
@@ -892,6 +1364,7 @@
             bind:clientHeight={frame.height}
           >
             <HorizonView
+              bind:this={viewPane}
               {view}
               {overlay}
               units={prefs.units}
@@ -979,6 +1452,9 @@
         onclick={onMapClick}
         oncontextmenu={onMapContextMenu}
         onusage={() => imagery.refreshUsage()}
+        onviewsettled={(camera) => {
+          if (layout === 'picking') share.settled(camera, engine?.maxZoom());
+        }}
       >
         {#if layout !== 'looking'}
           <div class="hz-search">
@@ -1045,6 +1521,16 @@
           </button>
         {/if}
       </div>
+      {#if away && layout === 'looking'}
+        <button
+          type="button"
+          class="hz-away"
+          onclick={moveThere}
+          title="Open the large map there, then click where to stand"
+        >
+          <span>Other maps: {formatDistance(away.metres, prefs.units)} away</span><strong>Move there</strong>
+        </button>
+      {/if}
       {#if layersOpen}
         <div class="hz-layers" id="hz-map-layers" role="dialog" aria-label="Base map and layers">
           <div class="hz-bases" role="group" aria-label="Base map">
@@ -1072,6 +1558,21 @@
     onpick={layCase}
     onfile={layFile}
     onclose={() => (photoDialog = false)}
+  />
+{/if}
+
+{#if discarding}
+  <ConfirmDialog
+    title="Discard unsaved changes?"
+    message={discarding.revert
+      ? `This view goes back to the version saved as “${discarding.name}”.`
+      : views.current
+        ? `The changes to “${views.current.title}” have not been saved.`
+        : 'The view on screen and the work on its photo have not been saved.'}
+    confirmLabel="Discard changes"
+    icon="horizon"
+    onconfirm={() => (discarding.close ? leaveView() : showView(discarding.name))}
+    oncancel={() => (discarding = null)}
   />
 {/if}
 
@@ -1132,8 +1633,49 @@
     align-items: center;
     gap: 8px;
   }
-  .hz-title .mono {
+  .hz-name {
+    min-width: 0;
+    max-width: 100%;
+    padding: 3px 6px;
+    margin-left: -6px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--fs-md);
+    font-weight: 600;
+    text-overflow: ellipsis;
+  }
+  .hz-name::placeholder {
+    color: var(--text-1);
     font-weight: 500;
+  }
+  .hz-name:hover {
+    border-color: var(--border);
+  }
+  .hz-name:focus {
+    outline: none;
+    border-color: var(--border-strong);
+    background: var(--bg-2);
+  }
+  .hz-name:focus::placeholder {
+    color: var(--text-3);
+  }
+  .hz-close {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+  }
+  /* the open view has changes Save would keep */
+  .hz-unsaved {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
   }
   /* the eye as the map draws it: an amber dot in a light ring */
   .hz-eye {
@@ -1401,6 +1943,37 @@
     z-index: 700;
     display: flex;
     gap: 4px;
+  }
+  /* the other maps look elsewhere: a quiet offer at the foot of the map */
+  .hz-away {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 16px);
+    padding: 4px 9px;
+    border: none;
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .hz-away span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hz-away strong {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .hz-away:hover strong {
+    text-decoration: underline;
   }
   .hz-map-btn {
     display: grid;

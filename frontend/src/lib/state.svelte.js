@@ -23,7 +23,7 @@ export const prefs = $state({
   coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
-  mapSync: true, // Satellite, Compare and Detect share one camera
+  mapSync: true, // Satellite, Compare, Detect and Horizon share one camera
   detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'], saved: true },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
@@ -260,6 +260,7 @@ export const uiState = $state({
   openInspect: null, // name of a file's Inspect work, reopened on that file
   openCollage: null, // collage name to reopen in the Collage tool
   openCompare: null, // compare-session name to reopen in the Compare tool
+  openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
@@ -322,10 +323,10 @@ export const uiState = $state({
    */
   mapPoint: null, // { lat, lon, zoom }
   /**
-   * The window's camera, which Satellite, Compare and Detect share while
-   * `prefs.mapSync` is on (`lib/map/sharedView.js`): `{ lat, lon, zoom,
+   * The window's camera, which Satellite, Compare, Detect and Horizon share
+   * while `prefs.mapSync` is on (`lib/map/sharedView.js`): `{ lat, lon, zoom,
    * bearing, by }`, where `by` is the tab that wrote it or 'link' for the
-   * chain. Session-only. A case switch leaves it: a camera is not case state.
+   * chain. Horizon writes its eye there, turned to its heading. Session-only. A case switch leaves it: a camera is not case state.
    */
   mapView: null,
   /**
@@ -348,6 +349,12 @@ export const uiState = $state({
    * `{ lat, lon, heading? }`. Consumed once, session-only.
    */
   horizonAt: null,
+  /**
+   * Where the Horizon tab's eye stands and looks, once it rests: `{ lat, lon,
+   * heading, fov, projection }`. Satellite draws it as a dashed cone, the view
+   * no save has kept. Session-only, and not case state: a camera is not.
+   */
+  horizonEye: null,
   /**
    * A photo or a video handed to the Horizon tab to lay over its view, from
    * Inspect: `{ path, kind, title?, time? }`. Consumed once, session-only.
@@ -640,6 +647,7 @@ function clearCaseHandoffs() {
   uiState.openInspect = null;
   uiState.openCollage = null;
   uiState.openCompare = null;
+  uiState.openHorizonView = null;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;

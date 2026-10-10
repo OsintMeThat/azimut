@@ -103,6 +103,8 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "collage": len(layout.collage_rel(longest_name)),
         "collage preview": len(layout.collage_thumb_rel(longest_name)),
         "compare session": len(layout.compare_session_rel(longest_name)),
+        "horizon view": len(layout.horizon_view_rel(longest_name)),
+        "horizon view preview": len(layout.horizon_thumb_rel(longest_name)),
         "grid": len(layout.grid_rel(longest_name)),
         "map layer spec": len(layout.layer_spec_rel(longest_name)),
         "map layer snapshot": len(layout.layer_snapshot_rel(longest_name)),

@@ -114,6 +114,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .inspect/     # one Inspect work per file (.v1/ keeps 0.3.0 sessions)
     .collages/    # collage layouts and their previews; the picture is media
     .compare/     # saved Compare session specs
+    .horizon/     # saved Horizon views and their previews
     .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
     .layers/      # added map layers: spec, snapshot, icons
@@ -144,7 +145,7 @@ schema fields, plus two pieces of case metadata that own no files, the to-do lis
 and the work folder. It no longer holds the graph, so the case switcher can identify a
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
-`proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.analysis/`,
+`proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.horizon/`, `.analysis/`,
 `.layers/` and `notes/` are the source of truth for their own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:

@@ -37,14 +37,38 @@ export function openDepth(bytes, scale) {
 }
 
 /**
+ * The skyline at each reach the app kept it at (`skyline_cuts`): one row of
+ * float32 angles per reach, NaN where no ground stands. `[{ reach, skyline }]`,
+ * nearest first; none when the app sent none.
+ */
+export function openCuts(bytes, reaches, count) {
+  if (!bytes?.byteLength || !reaches?.length || !(count > 0)) return [];
+  const rows = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  if (rows.length < reaches.length * count) return [];
+  return reaches.map((reach, i) => ({ reach, skyline: rows.subarray(i * count, (i + 1) * count) }));
+}
+
+/**
+ * The panorama's skyline within a reach: the cut it keeps there (`cuts`, the
+ * skyline haze would leave), or the whole turn's for none, or for a reach this
+ * panorama does not keep (one past its far limit is the whole turn anyway).
+ */
+export function skylineWithin(panorama, reach = null) {
+  if (!Number.isFinite(reach)) return panorama?.skyline ?? null;
+  return panorama?.cuts?.find((cut) => cut.reach === reach)?.skyline ?? panorama?.skyline ?? null;
+}
+
+/**
  * The answer, with its rasters as typed arrays. Sky becomes `SKY`, which a
  * shader can test for where NaN would be lost on the way to the GPU.
  */
 export async function decodePanorama(answer) {
-  const [depthBytes, eastBytes, northBytes] = await Promise.all([
+  const cuts = answer.skyline_cuts;
+  const [depthBytes, eastBytes, northBytes, cutBytes] = await Promise.all([
     inflate(answer.depth),
     inflate(answer.normal_east),
     inflate(answer.normal_north),
+    cuts?.skylines ? inflate(cuts.skylines) : null,
   ]);
   const depth = openDepth(depthBytes, answer.depth_scale);
   return {
@@ -56,6 +80,7 @@ export async function decodePanorama(answer) {
     elevation: answer.elevation,
     skyline: answer.skyline,
     skylineDistance: answer.skyline_distance,
+    cuts: openCuts(cutBytes, cuts?.reach, answer.azimuth.count),
     depth,
     east: new Int8Array(eastBytes.buffer, eastBytes.byteOffset, eastBytes.byteLength),
     north: new Int8Array(northBytes.buffer, northBytes.byteOffset, northBytes.byteLength),

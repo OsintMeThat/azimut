@@ -56,6 +56,8 @@ INSPECT_DIR = ".inspect"
 COLLAGE_DIR = ".collages"
 #: Saved Compare session specs. Their rendered image is a media working file.
 COMPARE_DIR = ".compare"
+#: Saved Horizon views, each beside the small preview its list shows.
+HORIZON_DIR = ".horizon"
 # Saved analyzer zones, follow-ups and runs with their owned input frames.
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
@@ -90,6 +92,7 @@ CASE_SUBDIRS = (
     INSPECT_DIR,
     COLLAGE_DIR,
     COMPARE_DIR,
+    HORIZON_DIR,
     ANALYSIS_DIR,
     SEARCH_DIR,
     LAYERS_DIR,
@@ -506,6 +509,15 @@ def collage_thumb_rel(name: str) -> str:
 
 def compare_session_rel(name: str) -> str:
     return f"{COMPARE_DIR}/{name}.json"
+
+
+def horizon_view_rel(name: str) -> str:
+    return f"{HORIZON_DIR}/{name}.json"
+
+
+def horizon_thumb_rel(name: str) -> str:
+    """The preview the saved work lists show, drawn by the browser at each save."""
+    return f"{HORIZON_DIR}/{name}.webp"
 
 
 def analysis_rel(kind: str, ident: str) -> str:

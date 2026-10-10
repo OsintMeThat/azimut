@@ -90,7 +90,10 @@ MADE_HERE: tuple[str, ...] = ("inspect",)
 #: imagery rather than footage: the Timeline draws the files they made on a lane of
 #: their own, apart from the sources' pictures and videos and what Inspect cut from them.
 FROM_ABOVE: tuple[str, ...] = ("satellite", "screenshot", "compare")
-PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE)
+#: A picture of a saved Horizon view is the app's render of the terrain from the
+#: eye: produced here, so held back with the rest, but seen from the ground, not
+#: from above, so it stays off the imagery lane.
+PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE, "horizon")
 
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an

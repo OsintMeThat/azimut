@@ -1452,11 +1452,25 @@ export function satPanelInput(s, format = 'dd') {
  * Panel input for a media image. Traces the real source link through the
  * derivation chain (a collage/frame carries no URL of its own — follow it back
  * to the downloaded original). A file uploaded from disk has no URL, so it
- * contributes no source.
+ * contributes no source. A picture of a saved Horizon view also brings the eye
+ * it was drawn from, as the point the proof states, and the terrain's credits.
  */
 export function mediaPanelInput(m, mediaList = []) {
   const byPath = new Map(mediaList.map((x) => [x.path, x]));
   const urls = resolveSourceUrls(m, byPath);
+  const source = m.source ?? {};
+  if (source.type === 'horizon' && source.lat != null && source.lon != null) {
+    // a picture of a saved Horizon view stands where its eye stood, which the analyst
+    // placed: the proof answers with that point, and the photo's own link is its source
+    return {
+      src: m.path,
+      meta: {
+        kind: 'horizon', source_url: urls[0], source_urls: urls, lat: source.lat, lon: source.lon,
+        aimed: true, attribution: source.attribution ?? '', heading: source.heading ?? null,
+      },
+      caption: { photo: 'Photo, the terrain\'s ridge lines over it', terrain: 'Terrain, simulated from the same eye' }[source.kind] ?? '',
+    };
+  }
   return {
     src: m.path,
     meta: { kind: 'media', source_url: urls[0], source_urls: urls },

@@ -48,7 +48,7 @@ export const UNLOCATED = 'Unlocated';
 const OTHER_CONTINENT = 'Other';
 
 /** The row kinds the Captures position holds: imagery of a point, however made. */
-export const CAPTURE_KINDS = new Set(['capture', 'screenshot', 'comparison']);
+export const CAPTURE_KINDS = new Set(['capture', 'screenshot', 'comparison', 'view']);
 
 function matchesKind(row, kind) {
   if (kind === 'places') return row.kind === 'place';

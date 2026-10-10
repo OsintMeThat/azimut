@@ -4,7 +4,7 @@ import {
   layoutPanels, layoutPanelsFree, freeNormalizeDelta, panelsBottom,
   panelsBlockHeight, panelHeight, panelScale, captionBand, legendLineHeight, footerBand,
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
-  autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
+  autoAimed, autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
   normalizeSources, statedSources,
   proofCoordsText, proofSource, orderedFeatureColors, legendLines,
   dedupeBySrc, satPanelInput, mediaPanelInput,
@@ -526,6 +526,24 @@ describe('mediaPanelInput — media panel carries its traced source', () => {
     expect(input.meta).toMatchObject({
       kind: 'media', source_url: 'https://x.com/a/1', source_urls: ['https://x.com/a/1'],
     });
+  });
+});
+
+describe('mediaPanelInput — a picture of a saved Horizon view', () => {
+  it('states the eye it was drawn from, aimed, its credits, and the photo\'s source link', () => {
+    const photo = { path: 'media/ridge.jpg', source: { type: 'download', webpage_url: 'https://x.com/a/2' } };
+    const terrain = {
+      path: 'media/North ridge terrain.png',
+      source: { type: 'horizon', kind: 'terrain', lat: 16.9988, lon: 45.0938, heading: 297, from: 'media/ridge.jpg', attribution: '© Mapterhorn' },
+    };
+    const input = mediaPanelInput(terrain, [photo, terrain]);
+    expect(input.meta).toMatchObject({
+      kind: 'horizon', lat: 16.9988, lon: 45.0938, aimed: true, attribution: '© Mapterhorn', source_url: 'https://x.com/a/2',
+    });
+    expect(input.caption).toBe('Terrain, simulated from the same eye');
+    // the proof answers with that point, as checked
+    expect(autoCoords([input])).toEqual({ lat: 16.9988, lon: 45.0938 });
+    expect(autoAimed([input])).toBe(true);
   });
 });
 

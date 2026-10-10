@@ -917,8 +917,8 @@ describe('the right-click menu', () => {
     const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));
     const body = acts.slice(0, acts.indexOf('async function comparePoint'));
     expect(body).toContain("openMapAt(value, { ...point, zoom: center.zoom })");
-    // Look from here hands the eye the way the map faces
-    expect(body).toContain('lookFrom({ ...point, heading: bearing })');
+    // Look from here hands the eye the way up the turned map, the bearing counted the other way
+    expect(body).toContain('lookFrom({ ...point, heading: headingUp(bearing) })');
   });
 
   it('drops a lookup answer that arrives after the menu moved on', () => {

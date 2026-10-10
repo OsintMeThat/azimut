@@ -49,7 +49,8 @@
   import { assignFolder } from '../lib/filing.js';
   import { filedToast } from '../lib/folders.js';
   import { saveRelation } from '../lib/relations.svelte.js';
-  import { lookFrom, openComparison, openEntity, openMapAt } from '../lib/navigate.js';
+  import { lookFrom, openComparison, openEntity, openHorizonView, openMapAt } from '../lib/navigate.js';
+  import { headingUp } from '../lib/map/facade.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
@@ -131,6 +132,7 @@
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import MediaViewer from './satellite/MediaViewer.svelte';
   import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
+  import HorizonEyeOverlay from './satellite/HorizonEyeOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
 
   /**
@@ -1140,8 +1142,8 @@
       if (!sky.on) arm(modes, 'sky');
       sky.handOff({ ...point, date: sky.day || undefined });
     } else if (id === 'horizon') {
-      // a turned map faces somewhere: the eye faces the same way
-      lookFrom({ ...point, heading: bearing });
+      // a turned map faces somewhere: the eye faces the way up the screen
+      lookFrom({ ...point, heading: headingUp(bearing) });
     } else if (id === 'history') {
       const zoom = Math.max(center.zoom, 15);
       providerId = WAYBACK_ID;
@@ -2062,6 +2064,10 @@
       title: 'Delete this comparison?',
       detail: 'Moves the saved comparison to the case trash. Its images stay in Media.',
     },
+    view: {
+      title: 'Delete this view?',
+      detail: 'Moves the saved Horizon view to the case trash. Its images stay in Media.',
+    },
   };
   let deleteBusy = $state(false);
 
@@ -2083,10 +2089,11 @@
   }
 
   /** The edit action, for whichever kind of row it was pressed on. A comparison
-   *  is edited where it was made. */
+   *  or a view is edited where it was made. */
   function editSaved(row) {
     if (row.kind === 'place') openEditPlace(row);
     else if (row.kind === 'comparison') openComparison(row);
+    else if (row.kind === 'view') openHorizonView(row);
     else notesItem = row;
   }
 
@@ -2430,6 +2437,13 @@
       {#if sheetPoints && sheetShown}
         <SheetPointsOverlay engine={mapReady ? engine : null} points={sheetPoints.points} />
       {/if}
+
+      <!-- where Horizon stands now, dashed: no save has kept it yet -->
+      <HorizonEyeOverlay
+        engine={mapReady ? engine : null}
+        eye={uiState.horizonEye}
+        onopen={() => (uiState.tool = 'horizon')}
+      />
 
       {#if temporalMap && temporalShown}
         <TemporalMapOverlay

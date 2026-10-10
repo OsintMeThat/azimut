@@ -116,7 +116,7 @@
   const photo = $derived(overlay?.source ?? null);
   /** A laid photo held to the terrain: whatever would part them holds still. */
   const locked = $derived(Boolean(photo && overlay.locked));
-  const LOCKED_TITLE = 'The photo is pinned to the terrain: unlock it to change this';
+  const LOCKED_TITLE = 'Photo and terrain move together: move one alone to change this';
   const lens = $derived(photo ? overlay.lens : null);
   const lensOff = $derived(Boolean(lens) && Math.abs(lens.fov - camera.fov) > 0.05);
   const fileWord = $derived(photo?.kind === 'video' ? 'video' : 'photo');
@@ -290,7 +290,7 @@
   {/if}
 
   {#if locked}
-    <p class="locked-note"><Icon name="lock" size={12} />The photo is pinned to the terrain: drag and zoom move both. Unlock it to change the match.</p>
+    <p class="locked-note"><Icon name="lock" size={12} />Photo and terrain move together. Move one alone to change the match.</p>
   {/if}
 
   {#each problems as problem (problem.id)}

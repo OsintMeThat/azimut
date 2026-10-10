@@ -9,6 +9,7 @@
   import { groupSavedMarkers, markKind, markerPrecision } from '../../lib/savedMarkers.js';
   import { TEARDROP, TEARDROP_CARD_OFFSET } from '../../lib/mapMarkers.js';
   import { openEntity } from '../../lib/navigate.js';
+  import { coneMark } from '../../lib/horizon/marks.js';
   import SavedPopup from './SavedPopup.svelte';
 
   let {
@@ -27,7 +28,7 @@
     onmedia,
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
 
   /** True when every item under a mark is a located file: it opens the viewer. */
   const isMedia = (mark) => mark.kinds.every((kind) => kind === 'media');
@@ -159,13 +160,20 @@
    *
    * A comparison's footprint is something else: the export frame, the ground its
    * images show. It is outlined in dashes and left unfilled, so it never reads as
-   * a guess about where something is.
+   * a guess about where something is. A view's is the ground its lens took in,
+   * out to the skyline, drawn the same way and fainter: it can reach far.
    */
   function shapesFor(mark, id) {
     const row = mark.items.find((r) => r.footprint || r.radius_m > 0);
     if (!row) return [];
-    const style = row.kind === 'comparison'
-      ? { stroke: '#f5a623', strokeWidth: 1.5, strokeOpacity: 0.9, dash: '5 4', interactive: false }
+    const style = row.kind === 'comparison' || row.kind === 'view'
+      ? {
+          stroke: '#f5a623',
+          strokeWidth: row.kind === 'view' ? 1 : 1.5,
+          strokeOpacity: row.kind === 'view' ? 0.6 : 0.9,
+          dash: '5 4',
+          interactive: false,
+        }
       : {
           stroke: '#f5a623',
           strokeWidth: 1.5,
@@ -180,6 +188,24 @@
       : [{ id: `${id}:shape`, kind: 'circle', at: mark, radiusM: row.radius_m, style }];
   }
 
+  /**
+   * A view's cone under its pin: which way it looked, at the same size on screen
+   * at every zoom, turning with the map.
+   */
+  function conesFor(mark, id) {
+    return mark.items
+      .filter((row) => row.kind === 'view' && Number.isFinite(row.heading))
+      .map((row, index) => ({
+        id: `${id}:cone:${index}`,
+        kind: 'marker',
+        at: mark,
+        className: 'saved-cone',
+        ...coneMark(row.projection === 'panorama' ? 360 : row.fov),
+        rotation: row.heading,
+        keyboard: false,
+      }));
+  }
+
   function rebuild(rows, precision) {
     const marks = groupSavedMarkers(rows, precision);
     surface ??= createSurface(engine, {
@@ -190,6 +216,7 @@
       marks.flatMap((mark, at) => [
         // the shape first, so the pin stays on top of its own uncertainty
         ...shapesFor(mark, at),
+        ...conesFor(mark, at),
         {
           id: at,
           kind: 'marker',
@@ -308,6 +335,10 @@
      filed around it without leaving the layer's one colour family */
   :global(.saved-mark-media) {
     box-shadow: 0 0 0 1.5px #fff, 0 2px 5px rgba(0, 0, 0, 0.45);
+  }
+  /* a view's cone lies on the ground under its pin and never takes a click */
+  :global(.saved-cone) {
+    pointer-events: none;
   }
   :global(.saved-mark-wrap.is-active .saved-mark),
   :global(.saved-mark-wrap.is-hovered .saved-mark),

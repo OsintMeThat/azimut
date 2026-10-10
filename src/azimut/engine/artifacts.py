@@ -137,6 +137,9 @@ KINDS: dict[str, Kind] = {
     # The rendered image is a media working file of its own, not a companion:
     # a proof may already be built on it, so it outlives the session.
     "compare-session": Kind(path_attr="spec"),
+    # The images made from a view are media of their own, as a comparison's are;
+    # its preview travels with it, since only the open view can draw it again.
+    "horizon-view": Kind(path_attr="spec", companions=(Named(layout.horizon_thumb_rel),)),
     "analysis-zones": Kind(path_attr="spec"),
     "analysis-area": Kind(path_attr="spec"),
     "analysis-follow-up": Kind(path_attr="spec"),

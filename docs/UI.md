@@ -2375,6 +2375,13 @@ A map whose imagery stops short of the shared zoom lands at its own ceiling and
 leaves the deeper zoom standing for the tab that has it. A Detect run under
 review keeps its ground. A saved comparison follows like the rest, and moving it
 leaves it saved; Save keeps the new view.
+Horizon shares where it stands: once its eye and its look rest, the other maps
+look from the eye, turned to its heading, at the zoom they had, and Coords & Sky
+reads the eye. Satellite draws that eye with a dashed cone. The eye itself never
+moves for another map, since a photo may be matched on it: when the other maps
+look more than 1.5 km away, Horizon's map offers **Move there**, which opens the
+large map on that ground for a click to stand. While no eye stands, Horizon's map
+follows the others like any map tab.
 Switching case leaves the camera where it is, since a view is not case state.
 Settings → General → Map tabs turns it off, and each tab keeps its own camera again.
 

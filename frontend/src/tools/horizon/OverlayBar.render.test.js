@@ -32,9 +32,11 @@ function fakeOverlay(over = {}) {
     warping: false,
     warped: false,
     locked: false,
+    moves: 'terrain',
     setWarping: vi.fn(),
     resetWarp: vi.fn(),
     setLocked: vi.fn(),
+    setMoves: vi.fn(),
     ...over,
   };
 }
@@ -92,18 +94,20 @@ describe('the band over a photo', () => {
     const list = root.querySelector('#hz-photo-keys');
     const rows = [...list.querySelectorAll('dt')].map((dt) => `${dt.textContent.trim()} → ${dt.nextElementSibling.textContent}`);
     for (const row of [
+      'Drag → Move what Move says: the photo, the terrain or both',
+      'Wheel → Zoom it, or pinch',
       'Shift+wheel → Change the lens',
-      'Shift+drag → Roll about the pivot',
+      'Shift+drag → Roll the terrain about the pivot',
       'Shift+click → Set the pivot',
       'Alt+wheel → Change the eye height',
-      'Wheel → Look closer, or pinch',
-      'Space+drag → Move around the photo, or the middle button',
+      'Space+drag → Move both, or the middle button',
+      'Space+wheel → Look closer at both',
+      'L → Move both, or back to one alone',
       'Alt+drag → Draw without snapping',
       'E → Rub out',
       'H → Hide or show the trace',
       'Ctrl+Z → Take the last change back',
-      'W → Reshape the photo by its corners',
-      'L → Pin the photo to the terrain, or unpin it',
+      'W → Reshape the photo by its corners and edges',
     ]) {
       expect(rows).toContain(row);
     }
@@ -259,18 +263,76 @@ describe('the band over a photo', () => {
     expect(menu.querySelector('[aria-controls="hz-imagery"]')).toBeNull();
   });
 
-  it('locks the photo to the terrain, and then offers no fit and no reshape', () => {
+  it('says what a drag moves, and moving both offers no fit and no reshape', () => {
     const overlay = fakeOverlay();
     const root = bar(overlay);
-    const lock = button(root, 'Lock the photo to the terrain');
-    expect(lock.textContent.trim()).toBe('Lock');
-    lock.click();
-    expect(overlay.setLocked).toHaveBeenCalledWith(true);
-    const held = bar(fakeOverlay({ locked: true, warped: true }), { gap: { median: 0.4, span: 52, offset: 0.1, points: 40 } });
-    expect(button(held, 'Lock the photo to the terrain').getAttribute('aria-pressed')).toBe('true');
-    expect(button(held, 'Lock the photo to the terrain').textContent.trim()).toBe('Locked');
+    const group = root.querySelector('[role="radiogroup"][aria-label="What a drag moves"]');
+    expect([...group.querySelectorAll('[role="radio"]')].map((radio) => radio.textContent.trim())).toEqual(['Photo', 'Terrain', 'Both']);
+    expect(button(root, 'Move the terrain').getAttribute('aria-checked')).toBe('true');
+    expect(button(root, 'Move the photo').getAttribute('aria-checked')).toBe('false');
+    button(root, 'Move the photo').click();
+    expect(overlay.setMoves).toHaveBeenCalledWith('photo');
+    button(root, 'Move both').click();
+    expect(overlay.setMoves).toHaveBeenCalledWith('both');
+    const video = bar(fakeOverlay({ source: { kind: 'video', name: 'clip.mp4' } }));
+    expect(button(video, 'Move the video').textContent.trim()).toBe('Video');
+    const held = bar(fakeOverlay({ locked: true, moves: 'both', warped: true }), { gap: { median: 0.4, span: 52, offset: 0.1, points: 40 } });
+    expect(button(held, 'Move both').getAttribute('aria-checked')).toBe('true');
     expect(button(held, 'Fit to trace').disabled).toBe(true);
     expect(button(held, 'Reshape the photo').disabled).toBe(true);
     expect(button(held, 'Square the photo again').disabled).toBe(true);
+  });
+});
+
+describe('what the analyst knows about the photo', () => {
+  const told = (over = {}) =>
+    fakeOverlay({
+      hints: { zoom: 'any', facing: null, reach: 'auto' },
+      reach: null,
+      reachFound: null,
+      lens: null,
+      setHints: vi.fn(),
+      ...over,
+    });
+  const gap = { median: 0.4, span: 30, points: 40 };
+
+  it('sits beside Fit, says "What you know" until something is, then sums it up', () => {
+    const plain = bar(told(), { gap });
+    expect(button(plain, 'What you know').textContent).toContain('What you know');
+    const said = bar(told({ hints: { zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' }, reach: 20_000 }), { gap });
+    expect(said.querySelector('button[aria-label^="What you know:"]').textContent).toContain('Zoomed · 218° SW · within 20 km');
+  });
+
+  it('opens on the three things to say, each starting at not knowing', () => {
+    const overlay = told();
+    const root = bar(overlay, { gap, heading: 132.4 });
+    button(root, 'What you know').click();
+    flushSync();
+    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
+    expect(menu).not.toBeNull();
+    const checked = [...menu.querySelectorAll('[role="radio"][aria-checked="true"]')].map((b) => b.textContent.trim());
+    expect(checked).toEqual(['Any', 'Anywhere', 'Auto']);
+    // the words a zoom stands for are on its button
+    const zoomed = [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Zoomed');
+    expect(zoomed.title).toMatch(/10° to 35°/);
+    zoomed.click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ zoom: 'zoomed' });
+    [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Roughly this way').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ facing: { heading: 132.4 } });
+    [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === '100 km').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ reach: 100_000 });
+    // Auto stops at 50 km, and says so
+    const auto = [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Auto');
+    expect(auto.title).toMatch(/up to 50 km/);
+  });
+
+  it('keeps the lens the photo says, and says the reach Fit found', () => {
+    const root = bar(told({ lens: { mm: 26, fov: 64.2 }, reachFound: 20_000 }), { gap });
+    button(root, 'What you know').click();
+    flushSync();
+    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
+    expect(menu.textContent).toContain('The photo says 26 mm, 64° across: Fit keeps it.');
+    expect([...menu.querySelectorAll('[role="radio"]')].some((b) => b.textContent.trim() === 'Zoomed')).toBe(false);
+    expect(menu.textContent).toContain('Fit found the skyline within 20 km.');
   });
 });

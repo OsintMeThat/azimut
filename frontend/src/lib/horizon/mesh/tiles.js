@@ -17,12 +17,22 @@
  *
  * A tile is drawn only once it is held; until its children all are, it is
  * drawn instead of them, so a view never opens a hole while it sharpens. Asks
- * go to the workers in batches, the lens's first and coarse before fine, and
+ * go to the workers in batches, the frame's own first and coarse before fine,
+ * then a margin round it so a small turn finds the ground sharp, and
  * what no frame has used for a while is let go past `budget` tiles. A tile
  * that will surely be split once it comes has its children asked with it, so
  * a deep zoom does not wait for one level after another; and the lens
  * sharpens only the ground its frame shows, from each tile's heights (its
  * parent's until its own come), not the ground under the frame's bottom edge.
+ * The margin is 3° round a wide lens and about half the lens round a narrow
+ * one: a fixed 3° round a 1° telephoto had it sharpen seven times its frame.
+ * The view says it is sharpening (`sharpening`) only while the frame itself
+ * waits.
+ *
+ * Ground a nearer ridge hides is not sharpened either (`setOccluder`): the
+ * eye's own turn, marched by the app, says how far each ray meets the ground,
+ * and a tile whose top every ray across it meets ground well short of is
+ * hidden whole. It keeps the detail it has, which nobody can see.
  *
  * The pictures follow the imagery asked (`setImagery`): the free provider all
  * round, Sentinel-2 on the tiles nearer than its reach. A tile built for other
@@ -30,6 +40,7 @@
  * on screen first.
  */
 import { seenLens } from '../camera.js';
+import { depthAt } from '../panorama.js';
 import { MERC, RAD, eyeFrame, latToY, lonToX, tileLat, tileLon } from './geo.js';
 
 export const MAX_Z = 18;
@@ -37,6 +48,24 @@ export const ROOT_Z = 6;
 /** Pixels a picture pixel may cover in the base all round, and at most how many tiles it holds. */
 export const BASE_K = 3;
 export const BASE_MAX = 900;
+/** Degrees sharpened either side of a lens beyond its frame: at most this, about half a narrow lens. */
+export const MARGIN_DEG = 3;
+/** The margin's share of a narrow lens, and its floor. */
+const MARGIN_SHARE = 0.5;
+const MARGIN_MIN = 0.25;
+/**
+ * A tile is called hidden only with room to spare: its top read this many
+ * degrees higher, the ground in front this much nearer than the tile (metres,
+ * or a share of its distance). Every column of the turn across it is read.
+ */
+const HIDE_RISE_DEG = 0.15;
+const HIDE_SHORT_M = 150;
+const HIDE_SHORT_SHARE = 0.1;
+
+/** How far round a lens of `fov` degrees the ground is sharpened beyond its frame, in degrees. */
+export function marginFor(fov) {
+  return Math.min(MARGIN_DEG, Math.max(MARGIN_MIN, MARGIN_SHARE * fov));
+}
 const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
 
 /**
@@ -75,6 +104,8 @@ export function createTiles({
   let loading = 0;
   let picturing = 0;
   let wanted = imagery;
+  // the eye's turn as the app marched it (lib/horizon/panorama.js), while it is this tree's eye
+  let occluder = null;
 
   function geometryOf(z, x, y) {
     const lon0 = tileLon(x, z);
@@ -132,6 +163,39 @@ export function createTiles({
   function elevationOf(d, h, alt) {
     const delta = d / frame.R;
     return Math.atan2((frame.R + h) * Math.cos(delta) - (frame.R + alt), (frame.R + h) * Math.sin(delta));
+  }
+
+  /**
+   * Whether nearer ground hides the whole tile from an eye `alt` metres up: at
+   * the height its top is seen, every ray across it meets ground well short of
+   * it. Along one ray a lower look meets ground no farther, so the rest of the
+   * tile is hidden too. Worked out once a tile for each turn and each height
+   * its top is known by.
+   */
+  function hiddenBehind(r, alt) {
+    if (!occluder || alt == null || r.full || !(r.span < 180)) return false;
+    const range = rangeOf(r);
+    if (!range) return false;
+    if (r.hidBy === occluder && r.hidAt === range.high) return r.hidden;
+    const high = range.high + 50;
+    let top = Math.max(elevationOf(r.dmin, high, alt), elevationOf(r.dmax, high, alt));
+    const horizon = Math.sqrt(Math.max(0, 2 * frame.R * (alt - high)));
+    if (horizon > r.dmin && horizon < r.dmax) top = Math.max(top, elevationOf(horizon, high, alt));
+    const look = top / RAD + HIDE_RISE_DEG;
+    const short = r.dmin - Math.max(HIDE_SHORT_M, HIDE_SHORT_SHARE * r.dmin);
+    const step = occluder.azimuth.step;
+    let hidden = true;
+    for (let a = r.middle - r.span / 2; a <= r.middle + r.span / 2 + 1e-9; a += step) {
+      const ground = depthAt(occluder, a, look);
+      if (ground == null || ground >= short) {
+        hidden = false;
+        break;
+      }
+    }
+    r.hidBy = occluder;
+    r.hidAt = range.high;
+    r.hidden = hidden;
+    return hidden;
   }
   // what a tile's picture pixel spans seen from the eye, which stands `rise` over the ground
   const angleOf = (r, shift = 0) => r.size / 256 / Math.max(Math.hypot(Math.max(r.dmin - shift, 0), rise), 1);
@@ -192,28 +256,33 @@ export function createTiles({
     const lens = camera.projection === 'panorama' ? camera : { ...camera, ...seenLens(camera) };
     const width = Math.max(camera.width, 1);
     const pixel = (lens.fov * RAD) / width;
+    // degrees either side of the heading: the frame's own (`exact`), and with the margin round it (`half`)
     let half;
+    let exact;
     // radians above the level the frame spans, a degree over each way
     let up;
     if (camera.projection === 'panorama') {
       half = Math.min(180, camera.fov / 2 + 2);
+      exact = half;
       const tall = (camera.fov * camera.height) / width / 2;
       up = [(lens.tilt ?? 0) - tall, (lens.tilt ?? 0) + tall];
     } else {
       const hHalf = (lens.fov / 2) * RAD;
       const vHalf = Math.atan((Math.tan(hHalf) * camera.height) / width);
       const corner = Math.min(89 * RAD, Math.abs((lens.tilt ?? 0) * RAD) + vHalf);
-      half = Math.atan(Math.tan(hHalf) / Math.cos(corner)) / RAD + 3 + Math.abs(camera.roll ?? 0);
+      exact = Math.atan(Math.tan(hHalf) / Math.cos(corner)) / RAD + Math.abs(camera.roll ?? 0);
+      half = exact + marginFor(lens.fov);
       // rolled, the frame reaches as far up and down as its corners
       const tall = (Math.abs(camera.roll ?? 0) > 0.5 ? Math.atan(Math.hypot(Math.tan(hHalf), Math.tan(vHalf))) : vHalf) / RAD;
       up = [(lens.tilt ?? 0) - tall, (lens.tilt ?? 0) + tall];
     }
     up = [(up[0] - 1) * RAD, (up[1] + 1) * RAD];
-    const visible = (r) => {
-      if (r.full || half >= 180) return true;
+    const within = (r, wide) => {
+      if (r.full || wide >= 180) return true;
       const slack = shift > 0 ? (r.dmin <= shift ? 180 : Math.asin(shift / r.dmin) / RAD) : 0;
-      return Math.abs(wrap180(r.middle - lens.heading)) <= half + r.span / 2 + slack;
+      return Math.abs(wrap180(r.middle - lens.heading)) <= wide + r.span / 2 + slack;
     };
+    const visible = (r) => within(r, half);
     // whether some of the tile's ground can be in the frame up and down; a coarse ancestor's
     // heights may miss a peak, hence the 50 m each way
     const inFrame = (r) => {
@@ -231,7 +300,11 @@ export function createTiles({
       return top >= up[0] && bottom <= up[1];
     };
     const seenNow = (r) => visible(r) && inFrame(r);
-    const fineFor = (r) => r.z < MAX_Z && seenNow(r) && angleOf(r, shift) > sharp * pixel;
+    // behind a nearer ridge: the turn was marched from where the tree was laid, so not once walked off
+    const behind = (r) => shift < 1 && hiddenBehind(r, alt);
+    // in the frame itself, not only in the margin round it: asked first, and what the view waits for
+    const framed = (r) => within(r, exact) && inFrame(r) && !behind(r);
+    const fineFor = (r) => r.z < MAX_Z && seenNow(r) && !behind(r) && angleOf(r, shift) > sharp * pixel;
     const meshes = [];
     const pictures = [];
     const drawn = [];
@@ -239,8 +312,9 @@ export function createTiles({
     const want = (r, seen) => {
       if (r.state !== 'idle') return;
       const off = r.full ? 0 : Math.abs(wrap180(r.middle - lens.heading)) / 360;
-      meshes.push({ r, priority: (seen ? 0 : 100) + r.z + off });
-      if (seen) sharpening += 1;
+      const inside = seen && framed(r);
+      meshes.push({ r, priority: (inside ? 0 : seen ? 50 : 100) + r.z + off });
+      if (inside) sharpening += 1;
     };
     /** A tile not held yet that will be split once it comes: its children are asked with it. */
     const ahead = (r, depth) => {
@@ -270,7 +344,7 @@ export function createTiles({
         if (c.state === 'ready') visit(c, drawing && !here);
         else {
           if (c.state === 'idle') want(c, seenNow(c));
-          else if (c.state === 'loading' && seenNow(c)) sharpening += 1;
+          else if (c.state === 'loading' && framed(c)) sharpening += 1;
           if (c.state !== 'failed') ahead(c, 1);
         }
       }
@@ -288,8 +362,9 @@ export function createTiles({
     for (const r of records.values()) {
       if (r.state !== 'ready' || pictured(r)) continue;
       const seen = onScreen.has(r);
-      if (seen) sharpening += 1;
-      if (r.picturing !== providerOf(r)) pictures.push({ r, priority: (seen ? 0 : 100) + r.z + r.dmin / 1e7 });
+      const inside = seen && framed(r);
+      if (inside) sharpening += 1;
+      if (r.picturing !== providerOf(r)) pictures.push({ r, priority: (inside ? 0 : seen ? 50 : 100) + r.z + r.dmin / 1e7 });
     }
     askMeshes(meshes);
     askPictures(pictures);
@@ -392,6 +467,16 @@ export function createTiles({
     /** The imagery the ground is drawn in: `{ provider, near: { provider, reach } | null }`, or null for none. */
     setImagery(next) {
       wanted = next;
+    },
+    /**
+     * The eye's turn as the app marched it (lib/horizon/panorama.js), which
+     * says what nearer ground hides; taken only when it was marched from where
+     * this tree stands.
+     */
+    setOccluder(panorama) {
+      const from = panorama?.observer;
+      const here = from && Math.abs(from.lat - lat) < 1e-6 && Math.abs(from.lon - lon) < 1e-6;
+      occluder = here && panorama.depth && panorama.azimuth?.full !== false ? panorama : null;
     },
     /**
      * What came back empty asked again, after the app refused or was not

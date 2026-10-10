@@ -557,22 +557,29 @@ def _preview_image(raw: bytes) -> "Image.Image":
     return image
 
 
+def preview_webp(raw: bytes) -> bytes:
+    """A preview the browser drew, as the WebP a case keeps: pixels this side
+    re-encoded, whatever arrived. A saved Horizon view's preview is kept the same way."""
+    image = _preview_image(raw)
+    buf = io.BytesIO()
+    image.save(buf, "WEBP", quality=80)
+    return buf.getvalue()
+
+
 def save_collage_thumb(case: "Case", name: str, raw: bytes) -> dict[str, Any] | None:
     """File the preview of a saved collage, or None when no collage has that name.
 
     Written as WebP whatever arrived, so what sits in the case is always pixels this
     side re-encoded, and the entity points at it for the graph and the Timeline.
     """
-    image = _preview_image(raw)
-    buf = io.BytesIO()
-    image.save(buf, "WEBP", quality=80)
+    data = preview_webp(raw)
     stem = layout.slugify(name, "Collage")
     rel = layout.collage_rel(stem)
     thumb = layout.collage_thumb_rel(stem)
     with case.lock:
         if not case.resolve_inside(rel).is_file():
             return None
-        replace_atomic(case.resolve_inside(thumb), buf.getvalue())
+        replace_atomic(case.resolve_inside(thumb), data)
         entity = case.find_entity(attr="spec", value=rel)
         if entity and (entity.get("attrs") or {}).get("thumb") != thumb:
             case.update_entity(entity["id"], {"attrs": {"thumb": thumb}})

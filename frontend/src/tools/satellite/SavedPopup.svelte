@@ -14,7 +14,7 @@
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
-  import { keptLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
+  import { keptLabel, lookLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
 
   let {
     items = [],
@@ -28,8 +28,8 @@
     onrefresh, // a relation was settled: sync the other surfaces
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
-  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot', comparison: 'Comparison' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
+  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot', comparison: 'Comparison', view: 'Horizon view' };
 
   const rowKey = (row) => row.key ?? row.id;
 
@@ -43,6 +43,7 @@
    *  for one field is how they drift apart. */
   function spread(row) {
     if (row.kind === 'comparison') return row.footprint ? 'framed' : null;
+    if (row.kind === 'view') return lookLabel(row) || null;
     if (row.footprint) return 'traced area';
     const m = Number(row.radius_m);
     if (!(m > 0)) return null;
@@ -209,7 +210,7 @@
           <p class="acts">
             {#if onedit}
               <button type="button" class="link" onclick={() => onedit(row)}>
-                {row.kind === 'comparison' ? 'Open in Compare' : 'Edit'}
+                {row.kind === 'comparison' ? 'Open in Compare' : row.kind === 'view' ? 'Open in Horizon' : 'Edit'}
               </button>
             {/if}
             {#if row.kind === 'place' && ontrace}

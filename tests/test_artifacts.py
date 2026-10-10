@@ -135,6 +135,15 @@ def test_a_collage_owns_its_preview_but_not_its_exported_picture(client):
     assert artifacts.caches(case, entity) == []
 
 
+def test_a_horizon_view_owns_its_preview_but_not_the_photo_it_was_matched_on(client):
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    entity = case.find_entity(attr="spec", value=full.horizon_view)
+
+    assert set(artifacts.owned(case, entity)) == {full.horizon_view, full.horizon_thumb}
+    assert full.photo not in artifacts.owned(case, entity)
+
+
 def test_every_type_in_a_full_case_declares_what_it_owns(client):
     """A type in neither table is not a decision, it is an oversight — the next
     tool declares its files in ``KINDS`` or declares it has none in ``NO_FILES``,

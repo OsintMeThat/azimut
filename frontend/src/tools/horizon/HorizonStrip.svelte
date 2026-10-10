@@ -122,7 +122,7 @@
 <div
   class="hz-strip"
   class:locked
-  title={locked ? 'The photo is locked to the terrain: unlock it to turn' : undefined}
+  title={locked ? 'Photo and terrain move together: move one alone to turn' : undefined}
   bind:clientWidth={width}
   role="slider"
   tabindex="0"

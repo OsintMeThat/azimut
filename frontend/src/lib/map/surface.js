@@ -349,11 +349,17 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       element.tabIndex = 0;
       element.setAttribute('role', 'button');
     }
+    // A mark that lies on the ground (a viewpoint's cone) turns and tilts with
+    // the map: `rotation` is its compass bearing, whatever way the map is turned.
+    const grounded = Number.isFinite(shape.rotation)
+      ? { rotation: shape.rotation, rotationAlignment: 'map', pitchAlignment: 'map' }
+      : {};
     const marker = new Marker({
       element,
       anchor: 'center',
       offset: markOffset(shape),
       draggable: !!shape.draggable,
+      ...grounded,
     })
       .setLngLat([shape.at.lon, shape.at.lat])
       .addTo(map);
@@ -621,6 +627,7 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
           mark.marker.setOffset(markOffset(patch.icon));
         }
         if (patch.at) mark.marker.setLngLat([patch.at.lon, patch.at.lat]);
+        if (Number.isFinite(patch.rotation)) mark.marker.setRotation(patch.rotation);
         return true;
       }
       const feature = byShape.get(id);

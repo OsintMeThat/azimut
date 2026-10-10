@@ -5,9 +5,14 @@ import {
   bent,
   BEND_MAX,
   clampLoupe,
-  FREE_REACH,
-  FREE_ZOOM_MIN,
+  edgeMiddles,
+  edgeMoved,
+  grownPhoto,
+  photoGrid,
+  LOUPE_MIN,
+  LOUPE_REACH,
   loupeMoved,
+  slidPhoto,
   clampCorner,
   FLAT_CORNERS,
   insideCorners,
@@ -42,7 +47,6 @@ import {
   zoomLoupe,
   isAtPlace,
   matchRequest,
-  placeToTake,
   searchedPlaces,
   searchOutcome,
   tracePlane,
@@ -101,13 +105,13 @@ describe('the loupe over a photo', () => {
     expect(screenAt(loupe, 0.3, 0.7, SIZE)).toEqual({ x: 500, y: 375 });
   });
 
-  it('never looks past the photo’s edges nor shrinks it under the frame', () => {
+  it('stays within reach of the photo, out and in', () => {
     const near = zoomLoupe(NO_LOUPE, 2, { x: 0, y: 0 }, SIZE);
     expect(near).toEqual({ zoom: 2, x: 0.25, y: 0.25 });
-    expect(zoomLoupe(near, 0.1, { x: 500, y: 375 }, SIZE)).toEqual(NO_LOUPE);
+    expect(zoomLoupe(near, 0.01, { x: 500, y: 375 }, SIZE).zoom).toBe(LOUPE_MIN);
     expect(zoomLoupe(NO_LOUPE, 1000, { x: 500, y: 375 }, SIZE).zoom).toBe(LOUPE_MAX);
-    // dragged far right, it stops with the photo's left edge on the frame's
-    expect(panLoupe(near, 5000, 0, SIZE).x).toBeCloseTo(0.25, 9);
+    // dragged far right, it stops a few photo widths off
+    expect(panLoupe(near, 50000, 0, SIZE).x).toBeCloseTo(0.5 - LOUPE_REACH, 9);
   });
 
   it('lets the photo follow the hand', () => {
@@ -278,6 +282,22 @@ describe('the skyline between two columns', () => {
     expect(skylineBetween(window, 30)).toBeNull();
     expect(skylineBetween({ ...window, skyline: [null, null, null, null, null] }, 11)).toBeNull();
   });
+  it('reads a cut of the turn when asked for its reach, and the whole turn otherwise', () => {
+    const cut = new Float32Array(360).fill(1);
+    cut[11] = NaN;
+    const turn = {
+      azimuth: { start: 0, step: 1, count: 360, full: true },
+      skyline: Array.from({ length: 360 }, () => 5),
+      cuts: [{ reach: 20_000, skyline: cut }],
+    };
+    expect(skylineBetween(turn, 10.5)).toBe(5);
+    expect(skylineBetween(turn, 10.5, 20_000)).toBe(1);
+    // a column the cut has no ground in is read from its neighbour, as on the whole turn
+    expect(skylineBetween(turn, 10.5, 20_000)).toBe(1);
+    expect(skylineBetween(turn, 11.5, 20_000)).toBe(1);
+    // a reach this panorama does not keep (past its far limit) is the whole turn
+    expect(skylineBetween(turn, 10.5, 80_000)).toBe(5);
+  });
 });
 
 describe('a video’s pins', () => {
@@ -348,6 +368,53 @@ describe('the time a photo says', () => {
   });
 });
 
+describe('the grid and the edges of a photo being reshaped', () => {
+  const SKEW = [
+    { u: 0.1, v: 0 },
+    { u: 1, v: 0.1 },
+    { u: 0.9, v: 1 },
+    { u: 0, v: 0.9 },
+  ];
+
+  it('draws the edges and the lines between them as the photo shows', () => {
+    const lines = photoGrid((p) => warped(p, SKEW), { lines: 4, samples: 8 });
+    // five across and five down, edges included, nine points each
+    expect(lines).toHaveLength(10);
+    expect(lines.every((line) => line.length === 9)).toBe(true);
+    // the top edge runs from corner to corner
+    expect(lines[0][0].u).toBeCloseTo(0.1, 9);
+    expect(lines[0][8].v).toBeCloseTo(0.1, 9);
+    // a curve bends the lines; through nothing, the grid is the frame's
+    const plain = photoGrid((p) => p, { lines: 2, samples: 2 });
+    expect(plain[2]).toEqual([{ u: 0, v: 0.5 }, { u: 0.5, v: 0.5 }, { u: 1, v: 0.5 }]);
+  });
+
+  it('finds the middle of each edge in perspective, not halfway between its corners', () => {
+    const [top, right, bottom, left] = edgeMiddles(FLAT_CORNERS);
+    expect([top, right, bottom, left]).toEqual([{ u: 0.5, v: 0 }, { u: 1, v: 0.5 }, { u: 0.5, v: 1 }, { u: 0, v: 0.5 }]);
+    const middle = edgeMiddles(SKEW)[0];
+    const m = warped({ u: 0.5, v: 0 }, SKEW);
+    expect(middle).toEqual(m);
+  });
+
+  it('moves an edge across itself, stretching the photo that way, or every way when free', () => {
+    const scale = { width: 1000, height: 500 };
+    // the right edge pulled right and down: only the part across the edge is taken
+    const stretched = edgeMoved(FLAT_CORNERS, 1, { x: 100, y: 40 }, scale);
+    expect(stretched[1]).toEqual({ u: 1.1, v: 0 });
+    expect(stretched[2]).toEqual({ u: 1.1, v: 1 });
+    expect(stretched[0]).toBe(FLAT_CORNERS[0]);
+    // the top edge pushed down squeezes the photo from above
+    const squeezed = edgeMoved(FLAT_CORNERS, 0, { x: 30, y: 50 }, scale);
+    expect(squeezed[0].u).toBeCloseTo(0, 9);
+    expect(squeezed[0].v).toBeCloseTo(0.1, 9);
+    expect(squeezed[1].v).toBeCloseTo(0.1, 9);
+    const free = edgeMoved(FLAT_CORNERS, 1, { x: 100, y: 40 }, scale, { free: true });
+    expect(free[1].u).toBeCloseTo(1.1, 9);
+    expect(free[1].v).toBeCloseTo(0.08, 9);
+  });
+});
+
 describe('a photo pulled by its corners', () => {
   const SLANT = [
     { u: 0.1, v: 0.05 },
@@ -413,13 +480,64 @@ describe('a photo pulled by its corners', () => {
   });
 });
 
-describe('a loupe let free over the terrain', () => {
-  it('goes wider than the photo and past its edges only when free', () => {
-    expect(clampLoupe({ zoom: 0.5, x: 1.4, y: 0.5 })).toEqual({ zoom: 1, x: 0.5, y: 0.5 });
-    expect(clampLoupe({ zoom: 0.5, x: 1.4, y: 0.5 }, { free: true })).toEqual({ zoom: 0.5, x: 1.4, y: 0.5 });
-    expect(clampLoupe({ zoom: 0.01, x: 9, y: -9 }, { free: true })).toEqual({ zoom: FREE_ZOOM_MIN, x: 0.5 + FREE_REACH, y: 0.5 - FREE_REACH });
+describe('a loupe over the terrain round the photo', () => {
+  it('goes wider than the photo and past its edges, within reach', () => {
+    expect(clampLoupe({ zoom: 0.5, x: 1.4, y: 0.5 })).toEqual({ zoom: 0.5, x: 1.4, y: 0.5 });
+    expect(clampLoupe({ zoom: 0.01, x: 9, y: -9 })).toEqual({ zoom: LOUPE_MIN, x: 0.5 + LOUPE_REACH, y: 0.5 - LOUPE_REACH });
     expect(loupeMoved({ zoom: 1, x: 0.5, y: 0.5 })).toBe(false);
     expect(loupeMoved({ zoom: 0.5, x: 0.5, y: 0.5 })).toBe(true);
+  });
+});
+
+describe('the photo moved over a terrain that stays put', () => {
+  const LENS = { heading: 200, tilt: 2, roll: 1.5, fov: 30, projection: 'camera' };
+  const seen = (camera, loupe, x, y) => rayFor({ ...camera, width: SIZE.width, height: SIZE.height, loupe }, x, y);
+  const close = (a, b, digits = 6) => {
+    expect(Math.abs(((a.azimuth - b.azimuth + 540) % 360) - 180)).toBeLessThan(10 ** -digits);
+    expect(a.elevation).toBeCloseTo(b.elevation, digits);
+  };
+
+  it('slides the photo with the hand and leaves the ground under it where it was', () => {
+    const at = { x: 640, y: 300 };
+    const before = seen(LENS, NO_LOUPE, at.x, at.y);
+    const slid = slidPhoto(LENS, NO_LOUPE, 120, -40, at, SIZE);
+    const moved = { ...LENS, heading: slid.heading, tilt: slid.tilt };
+    // the photo went with the hand…
+    expect(screenAt(slid.loupe, 0.5, 0.5, SIZE)).toEqual({ x: 620, y: 335 });
+    // …and the terrain stayed under the pointer
+    close(seen(moved, slid.loupe, at.x, at.y), before);
+    // elsewhere a lens seen off its axis draws it a little apart, which a narrow lens hardly shows
+    const tele = { ...LENS, fov: 5 };
+    const narrow = slidPhoto(tele, NO_LOUPE, 120, -40, at, SIZE);
+    const turned = { ...tele, heading: narrow.heading, tilt: narrow.tilt };
+    close(seen(turned, narrow.loupe, 100, 600), seen(tele, NO_LOUPE, 100, 600), 2);
+  });
+
+  it('grows the photo over the terrain by widening its lens, the terrain keeping its size', () => {
+    const at = { x: 300, y: 500 };
+    const grown = grownPhoto(LENS, NO_LOUPE, 2, at, SIZE);
+    expect(grown.loupe.zoom).toBeCloseTo(2, 9);
+    // twice as big on screen, so twice the tangent: the photo covers twice the terrain
+    expect(Math.tan((grown.fov * Math.PI) / 360)).toBeCloseTo(2 * Math.tan((LENS.fov * Math.PI) / 360), 9);
+    const moved = { ...LENS, fov: grown.fov, heading: grown.heading, tilt: grown.tilt };
+    close(seen(moved, grown.loupe, at.x, at.y), seen(LENS, NO_LOUPE, at.x, at.y));
+    // and the terrain keeps its size across the screen, as near as a narrow lens off its axis draws it
+    const tele = { ...LENS, fov: 5 };
+    const narrow = grownPhoto(tele, NO_LOUPE, 2, at, SIZE);
+    const widened = { ...tele, fov: narrow.fov, heading: narrow.heading, tilt: narrow.tilt };
+    close(seen(widened, narrow.loupe, 900, 100), seen(tele, NO_LOUPE, 900, 100), 2);
+    // the point of the photo under the pointer stays under it
+    expect(photoAt(grown.loupe, at.x, at.y, SIZE).u).toBeCloseTo(photoAt(NO_LOUPE, at.x, at.y, SIZE).u, 9);
+  });
+
+  it('stops growing where the lens can widen or narrow no more', () => {
+    const wide = grownPhoto({ ...LENS, fov: 140 }, NO_LOUPE, 4, { x: 500, y: 375 }, SIZE, { min: 1, max: 150 });
+    expect(wide.fov).toBeCloseTo(150, 9);
+    expect(wide.loupe.zoom).toBeGreaterThan(1);
+    expect(wide.loupe.zoom).toBeLessThan(4);
+    const shrunk = grownPhoto({ ...LENS, fov: 1.2 }, NO_LOUPE, 0.5, { x: 500, y: 375 }, SIZE, { min: 1, max: 150 });
+    expect(shrunk.fov).toBeCloseTo(1, 9);
+    expect(shrunk.loupe.zoom).toBeCloseTo(Math.tan(Math.PI / 360) / Math.tan((1.2 * Math.PI) / 360), 9);
   });
 });
 
@@ -449,6 +567,54 @@ describe('a fit searched over the whole turn', () => {
     expect(matchRequest(samples, TRUE, null)).toBeNull();
   });
 
+  // the same turn, as haze 20 km out leaves it, and the whole turn with a far range standing over the ridge
+  const HAZED = {
+    ...PANORAMA,
+    skyline: PANORAMA.skyline.map((v) => Math.max(v, 6.5)),
+    cuts: [
+      { reach: 10_000, skyline: Float32Array.from(PANORAMA.skyline, (v) => v - 1) },
+      { reach: 20_000, skyline: Float32Array.from(PANORAMA.skyline) },
+    ],
+  };
+
+  it('sends the cuts of the turn Fit tries on its own, or the one the analyst chose', () => {
+    const auto = matchRequest(samples, TRUE, HAZED, { reach: 'auto', within: [10, 35], facing: [90, 30] });
+    // the farthest cut tried is the turn, the nearer ones go beside it; the whole turn is not searched
+    expect(auto.reach).toBe(20_000);
+    expect(auto.skyline).toHaveLength(3600);
+    expect(auto.skyline[5]).toBeCloseTo(ridge(0.5), 3);
+    expect(auto.cuts.map((cut) => cut.reach)).toEqual([10_000]);
+    expect(auto).toMatchObject({ within: [10, 35], facing: [90, 30] });
+    // left to itself, Fit stops at a reach: farther cuts only when asked for
+    const near = matchRequest(samples, TRUE, HAZED, { reach: 'auto', autoReach: 15_000 });
+    expect(near).toMatchObject({ reach: 10_000, cuts: [] });
+    const chosen = matchRequest(samples, TRUE, HAZED, { reach: 20_000 });
+    expect(chosen).toMatchObject({ reach: 20_000, cuts: [] });
+    expect(chosen.skyline[5]).toBeCloseTo(ridge(0.5), 3);
+    // clear air, a reach the panorama does not keep, or a panorama keeping none: the whole turn alone
+    expect(matchRequest(samples, TRUE, HAZED, { reach: null })).toMatchObject({ skyline: HAZED.skyline, reach: null, cuts: [] });
+    expect(matchRequest(samples, TRUE, HAZED, { reach: 100_000 })).toMatchObject({ skyline: HAZED.skyline, reach: null });
+    expect(matchRequest(samples, TRUE, PANORAMA, { reach: 'auto' })).toMatchObject({ skyline: PANORAMA.skyline, reach: null });
+    // the photo says its lens: no range of lenses goes with it
+    expect(matchRequest(samples, TRUE, HAZED, { known: true, within: [10, 35] })).not.toHaveProperty('within');
+  });
+
+  it('refines and measures each place on the cut of the turn it lies on', () => {
+    const along = (azimuth, reach = null) => skylineBetween(HAZED, azimuth, reach);
+    const found = { fits: [{ heading: 95.4, tilt: 0.8, roll: 1.3, fov: 60, explained: 0.9, close: true, reach: 20_000 }] };
+    const [place] = searchedPlaces(found, samples, { ...TRUE, heading: 200, roll: 0 }, along, { lens: false });
+    expect(place.reach).toBe(20_000);
+    expect(place.camera.heading).toBeCloseTo(95, 0);
+    expect(place.camera.roll).toBeCloseTo(1.5, 0);
+    expect(place.gap.median).toBeLessThan(0.05);
+    // the same place read against the whole turn, the far range over the ridge, lies far off it
+    const whole = searchedPlaces({ fits: [{ ...found.fits[0], reach: null }] }, samples, { ...TRUE, heading: 200 }, along, {
+      lens: false,
+    });
+    expect(whole[0].reach).toBeNull();
+    expect(whole[0].gap.median).toBeGreaterThan(0.5);
+  });
+
   it('brings each place the search found onto the trace', () => {
     const found = { fits: [{ heading: 95.6, tilt: 0.6, fov: 61, explained: 0.9, close: true }] };
     const [place] = searchedPlaces(found, samples, { ...TRUE, heading: 200, roll: 0 }, skyline);
@@ -465,15 +631,15 @@ describe('a fit searched over the whole turn', () => {
   });
 
   const at = (heading, close = true) => ({ camera: { heading, tilt: 0, fov: 60 }, gap: { median: 0.1 }, close });
+  const view = { heading: 10, tilt: 0, fov: 60 };
+  const before = { median: 2.4 };
 
-  it('turns to the best place, or to one about as good where the analyst was looking', () => {
-    const view = { heading: 140, fov: 60 };
-    expect(placeToTake([at(30), at(150)], view)).toBe(1);
-    // too far from the view to be its hint
-    expect(placeToTake([at(30), at(200)], view)).toBe(0);
-    // near the view, but well behind the best
-    expect(placeToTake([at(30), at(150, false)], view)).toBe(0);
-    expect(placeToTake([], view)).toBe(-1);
+  it('turns to the best place, wherever the view happened to look', () => {
+    const looking = { heading: 140, tilt: 0, fov: 60 };
+    // a rival about as good where the view looks is named, not taken: only what is said decides
+    const both = searchOutcome({ verdict: 'ambiguous', fits: [] }, [at(30), at(150)], looking, { before });
+    expect(both).toMatchObject({ take: 0 });
+    expect(both.text).toBe('Fitted at 30° NE, but 150° SE fits as well: say which way it faces');
   });
 
   it('knows when the view is at a place already', () => {
@@ -481,8 +647,6 @@ describe('a fit searched over the whole turn', () => {
     expect(isAtPlace({ heading: 10, tilt: 1, fov: 60 }, { camera: { heading: 10.2, tilt: 1, fov: 60 } })).toBe(false);
   });
 
-  const view = { heading: 10, tilt: 0, fov: 60 };
-  const before = { median: 2.4 };
 
   it('says where it fitted and how much closer the trace now lies', () => {
     const outcome = searchOutcome({ verdict: 'match', fits: [] }, [at(299)], view, { before });
@@ -495,7 +659,28 @@ describe('a fit searched over the whole turn', () => {
     expect(loose.text).toBe('Loose fit at 299° NW: compare the ridges with the photo');
     const both = searchOutcome({ verdict: 'ambiguous', fits: [] }, [at(299), at(147)], view, { before });
     expect(both).toMatchObject({ take: 0, kind: 'warn' });
-    expect(both.text).toBe('Fitted at 299° NW, and 147° SE fits about as well');
+    // the hint that would settle it is named, unless the analyst already gave it
+    expect(both.text).toBe('Fitted at 299° NW, but 147° SE fits as well: say which way it faces');
+    const told = searchOutcome({ verdict: 'ambiguous', fits: [] }, [at(299), at(147)], view, { before, facing: true });
+    expect(told.text).toBe('Fitted at 299° NW, and 147° SE fits about as well');
+  });
+
+  it('names the place the view already stands at, whose reach still counts', () => {
+    const there = { ...at(10), reach: 20_000 };
+    const outcome = searchOutcome({ verdict: 'match', fits: [] }, [there], view, { before: { median: 0.1 } });
+    expect(outcome).toMatchObject({ take: -1, here: 0 });
+    const moved = searchOutcome({ verdict: 'match', fits: [] }, [at(299)], view, { before });
+    expect(moved).toMatchObject({ take: 0, here: -1 });
+  });
+
+  it('says when the place lies on the ridges a cut of the turn keeps', () => {
+    const cut = { ...at(299), reach: 20_000 };
+    expect(searchOutcome({ verdict: 'match', fits: [] }, [cut], view, { before }).text).toBe(
+      'Fitted at 299° NW: gap 2.4° to 0.10°, on the ridges within 20 km'
+    );
+    expect(searchOutcome({ verdict: 'loose', fits: [] }, [cut], view, { before }).text).toBe(
+      'Loose fit at 299° NW, on the ridges within 20 km: compare the ridges with the photo'
+    );
   });
 
   it('turns nowhere when nothing matches, offers the closest, and names the lenses tried', () => {

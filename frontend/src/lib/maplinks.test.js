@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapLinks } from './maplinks.js';
+import { earthCameraLink, mapLinks } from './maplinks.js';
 
 /**
  * The forms asserted here are the ones a browser was actually driven through
@@ -94,5 +94,17 @@ describe('mapLinks', () => {
       expect(label).toBeTruthy();
       expect(url.startsWith('https://')).toBe(true);
     }
+  });
+});
+
+describe('Google Earth from a Horizon eye', () => {
+  it('stands the camera at the eye, looking the way the view looks', () => {
+    const url = earthCameraLink({ lat: 46.5586, lon: 7.8353, altitude: 2971.74, heading: 95.5, tilt: 2, roll: -1, vfov: 34.6 });
+    expect(url).toBe('https://earth.google.com/web/@46.5586,7.8353,2971.7a,0d,34.6y,95.5h,92t,-1r');
+  });
+
+  it('keeps the heading in a turn and the tilt between straight down and straight up', () => {
+    const url = earthCameraLink({ lat: 1, lon: 2, altitude: 10, heading: -10, tilt: -120, vfov: 0 });
+    expect(url).toContain(',35y,350h,0t,0r');
   });
 });

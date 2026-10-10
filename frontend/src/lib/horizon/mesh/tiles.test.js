@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTiles, ROOT_Z } from './tiles.js';
+import { createTiles, marginFor, MARGIN_DEG, ROOT_Z } from './tiles.js';
+import { tileLat, tileLon } from './geo.js';
+import { bearingBetween, distanceBetween } from '../geometry.js';
 
 const EYE = { lat: 45.94, lon: 7.82 };
 const CAMERA = { heading: 0, tilt: 0, roll: 0, fov: 60, width: 240, height: 160, projection: 'camera' };
@@ -151,6 +153,84 @@ describe('the tile tree', () => {
     const high = asked({ alt: 1000 });
     const anywhere = asked({});
     expect(high).toBeLessThan(anywhere / 2);
+  });
+
+  it('sharpens 3° round a wide lens and about half a narrow one round it', () => {
+    expect(marginFor(60)).toBe(MARGIN_DEG);
+    expect(marginFor(6)).toBe(MARGIN_DEG);
+    expect(marginFor(2)).toBe(1);
+    expect(marginFor(0.2)).toBe(0.25);
+  });
+
+  it('asks a narrow lens\'s own frame before the margin round it, and waits only for the frame', () => {
+    const t = tree();
+    t.tiles.land(CAMERA);
+    t.settle();
+    const telephoto = { ...CAMERA, fov: 2, width: 240, height: 160 };
+    t.tiles.frame(telephoto, 1.5);
+    // how near the frame's middle a tile comes, from its corners; one the line of sight crosses, none
+    const nearest = ({ z, x, y }) => {
+      const offs = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => {
+        const at = { lat: tileLat(y + v, z), lon: tileLon(x + u, z) };
+        return ((bearingBetween(EYE, at) + 540) % 360) - 180;
+      });
+      if (Math.min(...offs) < 0 && Math.max(...offs) > 0) return 0;
+      return Math.min(...offs.map(Math.abs));
+    };
+    const asked = t.meshes.map((ask) => nearest(ask));
+    // the frame is 1° either side; the margin takes it to 2°
+    const firstOutside = asked.findIndex((off) => off > 1.2);
+    const lastInside = asked.findLastIndex((off) => off < 0.8);
+    expect(firstOutside).toBeGreaterThan(-1);
+    expect(lastInside).toBeLessThan(firstOutside);
+    // what the view waits for is the frame: held, it says so
+    const done = t.settle(telephoto);
+    expect(done.sharpening).toBe(0);
+  });
+
+  it('does not sharpen ground a nearer ridge hides, nor wait for it', () => {
+    // a ridge 500 m off all round: under 2° up every ray meets it there
+    const step = 0.5;
+    const rows = 41;
+    const depth = new Float32Array(rows * 360).fill(-1);
+    for (let row = 0; row < rows; row += 1) {
+      const elevation = 10 - row * step;
+      if (elevation <= 2) for (let column = 0; column < 360; column += 1) depth[row * 360 + column] = 500;
+    }
+    const turn = {
+      observer: { ...EYE },
+      azimuth: { start: 0, step: 1, count: 360, full: true },
+      elevation: { top: 10, step, count: rows },
+      depth,
+    };
+    const telephoto = { ...CAMERA, fov: 2 };
+    // how many fine tiles the lens asks for past 3 km, where only ground behind the ridge lies
+    // (a coarse tile across the ridge still asks its children, once, to be drawn by them)
+    const farAsks = (occluder) => {
+      const t = tree();
+      t.tiles.land(CAMERA);
+      t.settle(CAMERA, 1.5, { alt: 10 });
+      if (occluder) t.tiles.setOccluder(occluder);
+      let far = 0;
+      let sharpening = 0;
+      for (let round = 0; round < 40; round += 1) {
+        sharpening = t.tiles.frame(telephoto, 1.5, { alt: 10 }).sharpening;
+        if (!t.meshes.length) break;
+        for (const { z, x, y } of t.meshes) {
+          const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => distanceBetween(EYE, { lat: tileLat(y + v, z), lon: tileLon(x + u, z) }));
+          if (z >= 16 && Math.min(...corners) > 3000) far += 1;
+        }
+        t.build();
+      }
+      return { far, sharpening };
+    };
+    const open = farAsks(null);
+    const hidden = farAsks(turn);
+    expect(open.far).toBeGreaterThan(20);
+    expect(hidden.far).toBe(0);
+    expect(hidden.sharpening).toBe(0);
+    // a turn marched from elsewhere is no guide here
+    expect(farAsks({ ...turn, observer: { lat: EYE.lat + 0.01, lon: EYE.lon } }).far).toBe(open.far);
   });
 
   it('widens what may be in sight by how far the eye has walked from where the tree was laid', () => {

@@ -96,6 +96,8 @@ export function createScene(
   let tiles = null;
   let imagery = null;
   let photo = null;
+  // the eye's turn as the app marched it, which says what nearer ground hides (tiles.js)
+  let marched = null;
   let lost = false;
   let progress = { phase: 'landing', share: 0 };
   let heightAsked = 0;
@@ -121,6 +123,7 @@ export function createScene(
       release: (tile) => renderer.dropTile(tile),
       attach: (tile, image) => renderer.setImage(tile, image),
     });
+    tiles.setOccluder(marched);
     for (const worker of workers) worker.postMessage({ type: 'eye', id, lat, lon, mode, height });
     progress = { phase: 'landing', share: 0 };
     onChange();
@@ -247,6 +250,17 @@ export function createScene(
     setPhoto(source) {
       photo = source;
       renderer?.setPhoto(source);
+    },
+
+    /**
+     * The eye's turn as the app marched it (`/api/horizon/panorama`, decoded):
+     * ground a nearer ridge hides is not sharpened. Ignored for any eye but
+     * the one the tiles were laid round.
+     */
+    setOccluder(panorama) {
+      marched = panorama ?? null;
+      tiles?.setOccluder(marched);
+      onChange();
     },
 
     /** The hand is moving the view: a slow card may draw coarser until it rests. */

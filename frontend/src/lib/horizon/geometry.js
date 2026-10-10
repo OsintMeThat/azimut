@@ -34,6 +34,22 @@ export function distanceBetween(a, b) {
   return 2 * EARTH * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** How far the other map tabs must look from the eye before Horizon offers to stand there, in metres. */
+export const AWAY_M = 1500;
+
+/**
+ * Where the other map tabs look (`uiState.mapView`), once another of them or
+ * the chain left it more than `AWAY_M` from the eye: `{ lat, lon, zoom,
+ * metres }`, else null. Horizon offers to move there; its eye never follows
+ * by itself.
+ */
+export function elsewhere(shared, eye) {
+  if (!shared || !eye || shared.by === 'horizon') return null;
+  if (!Number.isFinite(shared.lat) || !Number.isFinite(shared.lon)) return null;
+  const metres = distanceBetween(eye, shared);
+  return metres > AWAY_M ? { lat: shared.lat, lon: shared.lon, zoom: shared.zoom, metres } : null;
+}
+
 /** Initial bearing from `a` to `b`, degrees clockwise from north. */
 export function bearingBetween(a, b) {
   const p1 = a.lat * RAD;

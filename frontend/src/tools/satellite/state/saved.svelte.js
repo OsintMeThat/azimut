@@ -35,7 +35,7 @@ function loadGroup() {
 const MEDIA_INDEX = (caseId) => `/api/cases/${caseId}/satellite/media`;
 
 /** The entity a row's kind files through, where it is not the capture type. */
-const ENTITY_TYPE = { place: 'place', media: 'media', comparison: 'compare-session' };
+const ENTITY_TYPE = { place: 'place', media: 'media', comparison: 'compare-session', view: 'horizon-view' };
 
 export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let rows = $state([]);
@@ -213,10 +213,10 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     }
   }
 
-  /** Drop a saved item: a capture loses its image file, a place or a comparison
-   *  its entity. A comparison's images stay in Media, as they do from Compare. */
+  /** Drop a saved item: a capture loses its image file, a place, a comparison or
+   *  a view its entity. Their images stay in Media, as they do from their tools. */
   async function remove(caseId, row) {
-    return row.kind === 'place' || row.kind === 'comparison'
+    return row.kind === 'place' || row.kind === 'comparison' || row.kind === 'view'
       ? api.del(`/api/cases/${caseId}/entities/${row.id}`)
       : api.del(`/api/cases/${caseId}/satellite?path=${encodeURIComponent(row.path)}`);
   }

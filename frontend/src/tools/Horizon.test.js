@@ -8,10 +8,37 @@ const markup = source.slice(source.indexOf('</script>'), source.indexOf('<style>
 const style = source.slice(source.indexOf('<style>'));
 
 describe('the Horizon layout', () => {
-  it('heads the view with the eye’s coordinates alone, the words kept for a screen reader', () => {
-    const heading = markup.slice(markup.indexOf('<h2 class="hz-title"'), markup.indexOf('</h2>'));
-    expect(heading).toContain('aria-label="View from {title}"');
-    expect(heading.replace(/aria-label="[^"]*"/, '')).not.toContain('View from');
+  it('heads the view with its name, offered from the photo or the place, where it stands in the tooltip', () => {
+    const heading = markup.slice(markup.indexOf('<div class="hz-title">'), markup.indexOf('<span class="hz-status"'));
+    expect(heading).toContain('bind:value={viewTitle}');
+    expect(heading).toContain('placeholder={views.suggested}');
+    expect(heading).toContain('aria-label="View name"');
+    expect(heading).toContain('stands at {title}');
+    // a changed saved view says so with a dot, not a word
+    expect(heading).toContain('class="hz-unsaved"');
+  });
+
+  it('keeps the view\'s acts to three plain buttons, Open there as soon as a case is, eye or no eye', () => {
+    const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
+    expect(header.match(/<ViewsMenu/g)).toHaveLength(1);
+    expect(header).toContain("{#if caseState.current && layout !== 'moving'}");
+    expect(header).toContain('<ExportMenu');
+    expect(header).toContain('aria-label="Save the view"');
+    expect(header).toContain('onclick={saveView}');
+  });
+
+  it('closes the view back to the map, asking first when unsaved work would go', () => {
+    expect(markup).toContain('onclick={closeView}');
+    expect(source).toMatch(/function closeView\(\) \{\s*if \(keepsWork\(\)\) \{\s*discarding = \{ close: true \};/);
+    expect(source).toMatch(/function leaveView\(\) \{[^}]*overlay\.remove\(\);[^}]*view\.leave\(\);/s);
+  });
+
+  it('offers to move where the other maps look, on the map, and never follows them by itself', () => {
+    expect(markup).toContain('{#if away && layout === \'looking\'}');
+    expect(markup).toContain('onclick={moveThere}');
+    expect(source).toContain("share.stood({ lat: eye.lat, lon: eye.lon, heading }");
+    // the map follows the others only while no eye stands
+    expect(source).toMatch(/layout !== 'picking'\) return;\s*untrack\(\(\) => \{\s*const next = share\.pending/);
   });
 
   it('lays the whole-turn strip under the view, by its heading ruler', () => {

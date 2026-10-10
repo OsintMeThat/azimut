@@ -21,17 +21,19 @@
    * bottom says so until the first drag.
    *
    * A photo or a video laid over the view (state/overlay.svelte.js) is drawn
-   * on the GPU too, fixed on screen while the same gestures move the terrain
-   * under it; while its skyline is being traced, a drag draws instead. Over a
-   * photo the wheel is a loupe on photo and terrain together (Shift and the
-   * wheel is then the lens), Space or the middle button and a drag moves the
-   * loupe, and Shift and a click sets the pivot on the photo. With the photo's
-   * corners out (W), a corner pulled reshapes the photo and a drag inside it
-   * moves it; outside it, a drag still moves the terrain. With the photo
-   * pinned to the terrain (L), the view moves over the terrain with the photo
-   * on it: a drag or the arrows carry both, the wheel or + and − zoom both,
-   * out past the photo's edges; nothing that would part them is taken: no
-   * roll, lens, height or walk.
+   * on the GPU too, and a drag and the wheel move what the band says
+   * (`overlay.moves`): the terrain under the photo (the wheel is then the
+   * lens), the photo over the terrain (the view turns and widens the lens the
+   * other way, so the ground under the hand stays put), or both, the photo
+   * held to the terrain: nothing that would part them is taken then, no roll,
+   * lens, height or walk. The arrows and + and − follow the same choice.
+   * While the skyline is being traced or rubbed out, a drag draws and the
+   * wheel looks closer at both. Space or the middle button and a drag moves
+   * both whatever is chosen, Space and the wheel looks closer at both, and
+   * Shift and a click sets the pivot on the photo. With the photo's corners
+   * out (W), over a grid that shows what they do, a corner pulled slants the
+   * photo, an edge stretches or squeezes it, and a drag inside it moves it;
+   * outside it, a drag moves as chosen.
    *
    * The heading caret has two small arrows either side, a tenth of a degree a
    * press (a degree with Shift), for the last nudge a drag overshoots.
@@ -53,17 +55,22 @@
   import {
     heightStep,
     heightText,
+    edgeMiddles,
+    edgeMoved,
+    grownPhoto,
     insideCorners,
     loupeMoved,
     NO_LOUPE,
     photoAt,
     screenAt,
+    slidPhoto,
     strokeFrom,
   } from '../../lib/horizon/overlay.js';
 
   import { pointerReading, summitReading } from '../../lib/horizon/readings.js';
   import { formatDistance } from '../../lib/measure.js';
   import { MAP_LIGHT, shadowKeep } from '../../lib/horizon/sky.js';
+  import { areaLens, areaWithin, exportScale, layersIn, turnCamera } from '../../lib/horizon/viewExport.js';
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
   import PictureControls from './PictureControls.svelte';
 
@@ -89,6 +96,17 @@
   /** Where this browser remembers that the gesture lines were understood, without and with a photo. */
   const HINT_KEY = 'azimut.horizon.hint';
   const PHOTO_HINT_KEY = 'azimut.horizon.photoHint';
+  /** What the gestures do over a photo, by what a drag moves: said to a screen reader, and on the line under the photo. */
+  const GESTURES = {
+    terrain: 'drag to move the terrain under it, wheel to zoom the terrain, Shift and drag to roll, Alt and wheel to change the height',
+    photo: 'drag to move the photo over the terrain, wheel to make the photo bigger or smaller, Shift and drag to roll the terrain',
+    both: 'drag to move photo and terrain together, wheel to look closer',
+  };
+  const HINTS = {
+    terrain: 'Drag to move the terrain under the photo · Wheel to zoom it · Space+drag to move both · Shift+drag to roll',
+    photo: 'Drag to move the photo over the terrain · Wheel to make it bigger or smaller · Space+drag to move both',
+    both: 'Drag to move photo and terrain together · Wheel to look closer · Click to read the ground',
+  };
   /** How far either side of the heading caret and its arrows the ruler keeps its labels out. */
   const CARET_CLEAR = 76;
 
@@ -107,6 +125,8 @@
   let dragging = $state(false);
   let controls = $state({ width: 0, height: 0 });
   let hinted = $state(remembered(HINT_KEY));
+  /** An export drawing its own camera: `{ text }` on the veil over the view, or null. */
+  let exporting = $state(null);
   let photoHinted = $state(remembered(PHOTO_HINT_KEY));
   let frame = 0;
 
@@ -140,9 +160,26 @@
 
   let shownPicture = null;
   let shownFrame = -1;
+  /** What the renderer draws the view with, as the tab stands. */
+  function drawOptions() {
+    return {
+      ground: view.ground,
+      lines: view.lines,
+      sky,
+      shaded: view.shaded,
+      keep: shadowKeep(view.shadowDepth),
+      visibility: view.visibility ?? 0,
+      near: view.near,
+      jump: RIDGE_STEPS[view.ridges],
+      photo: laid ? overlay.shown : 1,
+      bend: laid && overlay.bend ? [overlay.bend, overlay.bendShape.across, overlay.bendShape.down] : [0, 1, 1],
+    };
+  }
+
   function draw() {
     frame = 0;
-    if (!scene) return;
+    // an export draws its own camera meanwhile, under its veil
+    if (!scene || exporting) return;
     // the photo, or the video's frame on show once it has one
     const picture = laid ? overlay.picture : null;
     const ready = !picture || !('readyState' in picture) || picture.readyState >= 2;
@@ -154,18 +191,7 @@
       }
     }
     if (!(size.width > 0)) return;
-    const now = scene.draw(camera, {
-      ground: view.ground,
-      lines: view.lines,
-      sky,
-      shaded: view.shaded,
-      keep: shadowKeep(view.shadowDepth),
-      visibility: view.visibility ?? 0,
-      near: view.near,
-      jump: RIDGE_STEPS[view.ridges],
-      photo: laid ? overlay.shown : 1,
-      bend: laid && overlay.bend ? [overlay.bend, overlay.bendShape.across, overlay.bendShape.down] : [0, 1, 1],
-    });
+    const now = scene.draw(camera, drawOptions());
     // said in whole percents, so the page is not redrawn for every tile
     if (now.phase !== progress.phase || Math.floor(now.share * 100) !== Math.floor(progress.share * 100)) progress = now;
     landed = scene.landed;
@@ -191,6 +217,11 @@
   $effect(() => {
     const imagery = view.imagery;
     scene?.setImagery(imagery);
+  });
+  // the turn the app marched says what nearer ground hides, which is not sharpened
+  $effect(() => {
+    const turn = view.panorama;
+    scene?.setOccluder(turn);
   });
   // what came back empty is asked again when the analyst asks to try again
   let tried = null;
@@ -224,6 +255,7 @@
     fit();
     if (view.placed) scene?.place(view.placed, view.placed.far);
     scene?.setImagery(view.imagery);
+    scene?.setOccluder(view.panorama);
     redraw();
     return () => {
       observer.disconnect();
@@ -232,6 +264,150 @@
       scene = null;
     };
   });
+
+  /**
+   * The view as it shows, no wider than `width`, as a PNG: the preview the
+   * saved work lists show. The GPU keeps its last frame, so it is read as is;
+   * null before the eye has landed.
+   */
+  export async function snapshot(width = 640) {
+    if (!canvas || !landed || !canvas.width || !canvas.height) return null;
+    const scale = Math.min(1, width / canvas.width);
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(canvas.width * scale));
+    out.height = Math.max(1, Math.round(canvas.height * scale));
+    const context = out.getContext('2d');
+    if (!context) return null;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(canvas, 0, 0, out.width, out.height);
+    return new Promise((resolve) => out.toBlob((blob) => resolve(blob), 'image/png'));
+  }
+
+  /**
+   * The camera an export is drawn through, in CSS pixels: the view's frame
+   * with no loupe (the photo's frame when one is laid), the screen as it
+   * shows (`screen`, through the loupe), or the whole turn.
+   */
+  function exportCamera(kind) {
+    if (kind === 'turn') return view.panorama ? turnCamera(view.panorama, { mode: view.observer?.mode }) : null;
+    if (!(size.width > 0 && size.height > 0)) return null;
+    if (kind === 'screen') return { ...camera };
+    return { ...view.camera, width: size.width, height: size.height };
+  }
+
+  /** What an export writes over its picture, placed for `through`: names, ticks, the trace, the marked point. */
+  function layersFor(through, kind) {
+    const labels = placeLabels(seenPeaks, through, { skylineY: skylineOf(through) });
+    const ticks = azimuthTicks(through);
+    const trace =
+      kind === 'view' && laid && overlay.traceShown
+        ? overlay.strokesSeen.map((stroke) => stroke.map((p) => ({ x: p.u * through.width, y: p.v * through.height })))
+        : [];
+    const target = view.target && !view.target.busy && !view.target.error ? toScreen(through, view.target.azimuth, view.target.angle) : null;
+    const marked = target?.visible && target.x >= 0 && target.x <= through.width && target.y >= 0 && target.y <= through.height
+      ? { x: target.x, y: target.y, visible: Boolean(view.target.visible) }
+      : null;
+    return { labels, ticks, trace, target: marked };
+  }
+
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+  function copyOf(source) {
+    const out = document.createElement('canvas');
+    out.width = source.width;
+    out.height = source.height;
+    out.getContext('2d')?.drawImage(source, 0, 0);
+    return out;
+  }
+
+  /** An area of a drawn canvas, given in CSS pixels of a picture drawn `scale` times as big. */
+  function cutOf(source, area, scale) {
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(area.width * scale));
+    out.height = Math.max(1, Math.round(area.height * scale));
+    out.getContext('2d')?.drawImage(source, area.x * scale, area.y * scale, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
+  }
+
+  // -- an area of the view to capture ------------------------------------------------
+
+  /** The area being chosen: what answers once it is (`{ answer }`), and the box drawn so far, in CSS pixels. */
+  let choosing = $state(null);
+  let chosen = $state(null);
+
+  /**
+   * Ask for an area of the view: a box dragged over it, answered as
+   * `{ x, y, width, height }` in CSS pixels, or null when Escape gives up.
+   */
+  export function chooseArea() {
+    choosing?.answer(null);
+    return new Promise((answer) => {
+      chosen = null;
+      choosing = { answer };
+      box?.focus({ preventScroll: true });
+    });
+  }
+
+  function endChoosing(area) {
+    const asked = choosing;
+    choosing = null;
+    chosen = null;
+    asked?.answer(area);
+  }
+
+  /**
+   * The view drawn for an export: through `kind`'s camera (the view's frame,
+   * the screen as it shows, or the whole turn), at up to twice the screen's
+   * pixels, under a veil that says so. It is drawn until the ground it shows
+   * is sharp (or `wait` ms), then once per entry of `variants` (renderer
+   * options over the tab's own: `{ photo: 1 }` the photo alone, `{ photo: 0 }`
+   * the terrain alone), each copied before the next is drawn, and the screen
+   * comes back as it was. An `area` of the screen (CSS pixels) is cut out of
+   * each. Answers `{ frames, layers, camera, scale, lens }`, `lens` what the
+   * picture faces and how wide it is (`areaLens`), or null when there is no
+   * view to draw.
+   */
+  export async function exportPicture({ kind = 'view', variants = [{}], area = null, wait = kind === 'turn' ? 25000 : 12000 } = {}) {
+    if (!scene || !canvas || !landed || exporting) return null;
+    const through = exportCamera(kind);
+    if (!through) return null;
+    const scale = exportScale(through.width);
+    const before = { width: canvas.width, height: canvas.height };
+    const text = kind === 'turn' ? 'Drawing the whole turn…' : 'Drawing the export…';
+    exporting = { text };
+    try {
+      canvas.width = Math.round(through.width * scale);
+      canvas.height = Math.round(through.height * scale);
+      const options = drawOptions();
+      const started = performance.now();
+      // the ground sharpens for this camera: drawn each frame until nothing is left to come
+      for (;;) {
+        const now = scene.draw(through, options);
+        if (!now.phase || performance.now() - started > wait) break;
+        exporting = { text: now.phase === 'sharpening' ? `${text.replace('…', '')} · sharpening…` : text };
+        await nextFrame();
+      }
+      const cut = area ? areaWithin(area, through) : null;
+      const frames = variants.map((change) => {
+        scene.draw(through, { ...options, ...change });
+        return cut ? cutOf(canvas, cut, scale) : copyOf(canvas);
+      });
+      const whole = { x: 0, y: 0, width: through.width, height: through.height };
+      const layers = layersFor(through, kind);
+      return {
+        frames,
+        layers: cut ? layersIn(layers, cut) : layers,
+        camera: through,
+        scale,
+        lens: through.projection === 'panorama' ? null : areaLens(through, cut ?? whole),
+      };
+    } finally {
+      canvas.width = before.width;
+      canvas.height = before.height;
+      exporting = null;
+      draw();
+    }
+  }
 
   // -- reading the picture ----------------------------------------------------
 
@@ -259,16 +435,19 @@
   const level = $derived(shown ? levelLine(camera) : null);
   const scale = $derived(shown ? elevationTicks(camera) : []);
 
-  /** The skyline's height on screen over a column, for the names set above it. */
-  function skylineY(x) {
-    const panorama = view.panorama;
-    if (!panorama) return null;
-    const { azimuth } = rayFor(camera, x, size.height / 2);
-    const elevation = skylineAt(panorama, azimuth);
-    if (!Number.isFinite(elevation)) return null;
-    const at = toScreen(camera, azimuth, elevation);
-    return at.visible ? at.y : null;
+  /** The skyline's height over a column of a camera's frame, for the names set above it. */
+  function skylineOf(through) {
+    return (x) => {
+      const panorama = view.panorama;
+      if (!panorama) return null;
+      const { azimuth } = rayFor(through, x, through.height / 2);
+      const elevation = skylineAt(panorama, azimuth);
+      if (!Number.isFinite(elevation)) return null;
+      const at = toScreen(through, azimuth, elevation);
+      return at.visible ? at.y : null;
+    };
   }
+  const skylineY = (x) => skylineOf(camera)(x);
 
   /**
    * Summits the picture shows, one per top, worked out once per picture rather
@@ -436,6 +615,8 @@
   const warping = $derived(laid && overlay.warping);
   /** The photo held to the terrain: the view's gestures carry both, and none parts them. */
   const locked = $derived(laid && overlay.locked);
+  /** What a drag and the wheel move: the terrain, the photo, or both (`overlay.moves`). */
+  const moves = $derived(laid ? overlay.moves : 'terrain');
   /** How far the rubber reaches, in screen pixels, and where it is while erasing. */
   const RUBBER_PX = 12;
   let rubberAt = $state(null);
@@ -463,6 +644,10 @@
   /** The photo's four corners on screen while they are out to be pulled. */
   const cornersAt = $derived(warping && size.width ? overlay.corners.map((corner) => screenAt(shownLoupe, corner.u, corner.v, size)) : []);
   const cornersLine = $derived(cornersAt.map((at) => `${at.x.toFixed(1)},${at.y.toFixed(1)}`).join(' '));
+  /** The middle of each edge on screen, a handle that stretches or squeezes the photo that way. */
+  const edgesAt = $derived(warping && size.width ? edgeMiddles(overlay.corners).map((middle) => screenAt(shownLoupe, middle.u, middle.v, size)) : []);
+  /** The photo's grid on screen, as it shows. */
+  const gridLines = $derived(warping && size.width ? overlay.grid.map(onScreen) : []);
   /** Over the photo while its corners are out: a drag there moves it. */
   let overPhoto = $state(false);
 
@@ -489,6 +674,35 @@
     handle.addEventListener('pointercancel', up);
   }
 
+  /**
+   * An edge taken in the hand: its two corners follow the pointer across the
+   * edge, which stretches or squeezes the photo; Shift lets them follow it
+   * every way.
+   */
+  function pullEdge(event, index) {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    overlay.setPulling(true);
+    const from = local(event);
+    const corners = [...overlay.corners];
+    const move = (ev) => {
+      const at = local(ev);
+      overlay.setCorners(edgeMoved(corners, index, { x: at.x - from.x, y: at.y - from.y }, photoScale, { free: ev.shiftKey }));
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      overlay.setPulling(false);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  }
+
   /** The photo's size on screen, magnified by the loupe: what the rubber's reach is measured against. */
   const photoScale = $derived({ width: size.width * shownLoupe.zoom, height: size.height * shownLoupe.zoom });
 
@@ -503,6 +717,14 @@
 
   function onPointerDown(event) {
     if (!view.observer || onControl(event)) return;
+    if (choosing) {
+      if (event.button !== 0) return;
+      box.setPointerCapture(event.pointerId);
+      const at = local(event);
+      press = { choosing: true, from: at };
+      chosen = { x: at.x, y: at.y, width: 0, height: 0 };
+      return;
+    }
     // the middle button, or Space held, moves the loupe over the photo
     const panning = laid && (event.button === 1 || (event.button === 0 && spaceHeld));
     if (event.button !== 0 && !panning) return;
@@ -539,6 +761,11 @@
       press = { ...local(event), pan: true, locked: true, travel: 0 };
       return;
     }
+    if (moves === 'photo' && !event.shiftKey) {
+      // the photo slides over the terrain from where the hand took it
+      press = { ...local(event), slide: true, from: local(event), lens: { ...view.camera }, loupe: shownLoupe, moved: false };
+      return;
+    }
     press = { ...local(event), camera: { ...camera }, moved: false, roll: event.shiftKey, pivot: pivotAt, swept: 0, angle: null };
   }
 
@@ -558,8 +785,12 @@
     hovering = true;
     rubberAt = erasing && !onControl(event) ? at : null;
     overPhoto = warping && !onControl(event) && insideCorners(photoAt(shownLoupe, at.x, at.y, size), overlay.corners);
+    if (press?.choosing) {
+      chosen = { x: press.from.x, y: press.from.y, width: at.x - press.from.x, height: at.y - press.from.y };
+      return;
+    }
     if (!press) {
-      if (onControl(event) || tracing || erasing || overPhoto) {
+      if (onControl(event) || tracing || erasing || overPhoto || choosing) {
         pointer = null;
         return;
       }
@@ -596,6 +827,20 @@
       drawing = [...drawing, at];
       return;
     }
+    if (press.slide) {
+      const dx = at.x - press.from.x;
+      const dy = at.y - press.from.y;
+      if (!press.moved && Math.hypot(dx, dy) < CLICK_SLOP) return;
+      if (!press.moved && !photoHinted) understood(PHOTO_HINT_KEY);
+      press.moved = true;
+      dragging = true;
+      pointer = null;
+      scene?.moving();
+      const slid = slidPhoto(press.lens, press.loupe, dx, dy, at, size);
+      overlay.setLoupe(slid.loupe);
+      view.look({ heading: slid.heading, tilt: slid.tilt });
+      return;
+    }
     if (press.shaping) {
       // the photo follows the hand, its four corners together
       const du = (at.x - press.x) / size.width / shownLoupe.zoom;
@@ -627,6 +872,14 @@
 
   function onPointerUp(event) {
     if (!press) return;
+    if (press.choosing) {
+      press = null;
+      // a box too small to be a picture is no answer: drag again, or Escape
+      const area = areaWithin(chosen, size);
+      if (area) endChoosing(area);
+      else chosen = null;
+      return;
+    }
     if (press.pan) {
       const clicked = press.locked && press.travel < CLICK_SLOP;
       press = null;
@@ -647,6 +900,16 @@
       press = null;
       dragging = false;
       overlay.setPulling(false);
+      return;
+    }
+    if (press.slide) {
+      const clicked = !press.moved;
+      press = null;
+      dragging = false;
+      if (!clicked) return;
+      const at = local(event);
+      const ground = groundAt(at.x, at.y);
+      if (ground?.distance != null) view.point(ground);
       return;
     }
     if (press.tracing) {
@@ -696,8 +959,10 @@
 
   /**
    * The lens narrows or widens about the direction under the pointer, which
-   * stays put. Over a photo the wheel is the loupe, about the pointer too,
-   * and Shift and the wheel the lens.
+   * stays put. Over a photo the wheel zooms what a drag moves, about the
+   * pointer too: the terrain (the lens), the photo, or both (the loupe);
+   * drawing or rubbing out, or with Space held, it looks closer at both.
+   * Shift and the wheel is the lens.
    */
   function onWheel(event) {
     if (!view.observer || onControl(event)) return;
@@ -711,13 +976,18 @@
     // Shift turns a mouse wheel sideways in most browsers; a pinch comes as Ctrl and small steps
     const delta = event.deltaY || event.deltaX;
     const unit = event.deltaMode === 1 ? 0.05 : event.ctrlKey ? 0.01 : 0.0015;
-    if (laid && !event.shiftKey) {
+    const factor = Math.exp(-delta * unit);
+    if (laid && (tracing || erasing || locked || spaceHeld) && !event.shiftKey) {
       // not under a stroke being drawn, which is kept in screen pixels until the hand lifts
-      if (!press?.tracing) overlay.zoomLoupe(Math.exp(-delta * unit), at, size);
+      if (!press?.tracing) overlay.zoomLoupe(factor, at, size);
       return;
     }
     // the lens would part a locked photo from its terrain
     if (locked) return;
+    if (moves === 'photo' && !event.shiftKey) {
+      growPhoto(factor, at);
+      return;
+    }
     const before = rayFor(camera, at.x, at.y);
     const scale = Math.exp(delta * unit);
     const fov = view.camera.fov * scale;
@@ -729,6 +999,13 @@
       narrowed.tilt += before.elevation - after.elevation;
     }
     view.look({ heading: narrowed.heading, tilt: narrowed.tilt });
+  }
+
+  /** The photo grown or shrunk over the terrain about a point of the screen, the terrain keeping its size there. */
+  function growPhoto(factor, at) {
+    const grown = grownPhoto(view.camera, shownLoupe, factor, at, size);
+    overlay.setLoupe(grown.loupe);
+    view.look({ fov: grown.fov, heading: grown.heading, tilt: grown.tilt });
   }
 
   /** A held key walks at this pace at most, so each step's picture can come. */
@@ -758,6 +1035,26 @@
       } else if (event.key in zooms && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
         overlay.zoomLoupe(zooms[event.key], middle, size);
+      }
+      return;
+    }
+    if (moves === 'photo') {
+      // the arrows move the photo over the terrain and + and − grow or shrink it
+      const tenth = { x: size.width / 10, y: size.height / 10 };
+      const slides = { ArrowLeft: [-tenth.x, 0], ArrowRight: [tenth.x, 0], ArrowUp: [0, -tenth.y], ArrowDown: [0, tenth.y] };
+      const grows = { '+': 1.25, '=': 1.25, '-': 0.8 };
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const middle = { x: size.width / 2, y: size.height / 2 };
+      if (event.key in slides) {
+        event.preventDefault();
+        scene?.moving();
+        const slid = slidPhoto(view.camera, shownLoupe, ...slides[event.key], middle, size);
+        overlay.setLoupe(slid.loupe);
+        view.look({ heading: slid.heading, tilt: slid.tilt });
+      } else if (event.key in grows) {
+        event.preventDefault();
+        scene?.moving();
+        growPhoto(grows[event.key], middle);
       }
       return;
     }
@@ -840,6 +1137,13 @@
    */
   function onWindowKey(event) {
     if (event.key === 'Shift') shiftHeld = event.type === 'keydown';
+    if (choosing && event.type === 'keydown' && event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      press = null;
+      endChoosing(null);
+      return;
+    }
     const elsewhere = event.target !== box && !box?.contains(event.target) && !typingIn(event.target);
     // under the pointer now: never a view hidden with its tab, nor one a dialog covers
     const over = Boolean(box?.matches?.(':hover'));
@@ -944,14 +1248,15 @@
   class="horizon-view"
   class:daylight={view.ground !== 'plain' || laid}
   class:dragging
-  class:tracing={tracing || erasing}
+  class:tracing={tracing || erasing || Boolean(choosing)}
   class:shaping={overPhoto}
   class:panning={laid && spaceHeld}
+  class:sliding={moves === 'photo' && !tracing && !erasing}
   bind:this={box}
   tabindex="0"
   role="application"
   aria-label={laid
-    ? 'Photo over the view: drag to move the terrain under it, wheel to look closer, Space and drag to move around the photo, Shift and drag to roll about the pivot, Shift and click to set the pivot, Shift and wheel to change the lens, Alt and wheel to change the height'
+    ? `Photo over the view: ${GESTURES[moves]}, Space and drag to move both, Shift and click to set the pivot`
     : 'View from the eye: drag to turn, wheel to zoom, Shift and drag to roll, Alt and wheel to change the height, click to read the ground, double-click to go there, up and down arrows to walk'}
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
@@ -986,6 +1291,10 @@
     <div class="glass loading failed hz-control" role="alert">
       The ground here could not be loaded
       <button type="button" onclick={() => view.retry()}>Try again</button>
+    </div>
+  {:else if exporting}
+    <div class="export-veil" role="status" aria-live="polite">
+      <div class="glass loading">{exporting.text}</div>
     </div>
   {:else if view.observer && loadingText}
     <div class="glass loading" role="status" aria-live="polite">
@@ -1062,6 +1371,16 @@
     {#if rubberAt}
       <circle class="rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
     {/if}
+    {#if chosen}
+      {@const x = Math.min(chosen.x, chosen.x + chosen.width)}
+      {@const y = Math.min(chosen.y, chosen.y + chosen.height)}
+      <rect class="area under" {x} {y} width={Math.abs(chosen.width)} height={Math.abs(chosen.height)} />
+      <rect class="area over" {x} {y} width={Math.abs(chosen.width)} height={Math.abs(chosen.height)} />
+    {/if}
+    {#each gridLines as points, index (index)}
+      <polyline class="warp-grid under" {points} />
+      <polyline class="warp-grid over" {points} />
+    {/each}
     {#if cornersAt.length}
       <polygon class="warp-edge under" points={cornersLine} />
       <polygon class="warp-edge over" points={cornersLine} />
@@ -1090,6 +1409,18 @@
       onpointerdown={(event) => pullCorner(event, index)}
     ></button>
   {/each}
+  {#each edgesAt as at, index (index)}
+    <button
+      type="button"
+      class="warp-side hz-control"
+      class:across={index % 2 === 1}
+      style:left="{at.x}px"
+      style:top="{at.y}px"
+      aria-label="Pull the {['top', 'right', 'bottom', 'left'][index]} edge of the photo"
+      title="Pull to stretch or squeeze the photo that way, Shift to pull it every way"
+      onpointerdown={(event) => pullEdge(event, index)}
+    ></button>
+  {/each}
 
   <!-- the elevation scale's numbers, on the view's glass so they read over sky and snow alike -->
   {#each scale as tick (tick.elevation)}
@@ -1112,7 +1443,7 @@
       class:hidden={item.hidden}
       style:top="{item.y}px"
       disabled={locked}
-      title={locked ? 'Unlock the photo to turn' : 'Turn to it'}
+      title={locked ? 'Move one alone to turn' : 'Turn to it'}
       onclick={() => turnTo(item)}
     >
       {#if item.side === 'left'}<span aria-hidden="true">◂</span>{/if}
@@ -1147,14 +1478,16 @@
     </div>
   {/if}
 
-  {#if shown && warping}
-    <p class="glass hint">Pull a corner to reshape the photo · Drag inside it to move it · Esc when done</p>
+  {#if shown && choosing}
+    <p class="glass hint">Drag a box over the view to capture it · Esc to cancel</p>
+  {:else if shown && warping}
+    <p class="glass hint">Pull a corner to slant the photo, an edge to stretch it · Drag inside it to move it · Esc when done</p>
   {:else if shown && tracing}
     <p class="glass hint">Draw along the skyline, it snaps to the edge · Alt+drag draws freely · Wheel to look closer · Esc when done</p>
   {:else if shown && erasing}
     <p class="glass hint">Drag over the trace to rub it out · Wheel to look closer · Ctrl+Z takes it back · Esc when done</p>
   {:else if shown && laid && !photoHinted}
-    <p class="glass hint">Drag to move the terrain under the photo · Wheel to look closer · Space+drag to move around · Shift+drag to roll</p>
+    <p class="glass hint">{HINTS[moves]}</p>
   {:else if shown && !hinted}
     <p class="glass hint">Drag to turn · Wheel to zoom · Double-click to go there · ↑ ↓ to walk</p>
   {/if}
@@ -1200,7 +1533,7 @@
               class="hz-caret mono"
               aria-label="Heading, click to type"
               disabled={locked}
-              title={locked ? 'Unlock the photo to turn' : undefined}
+              title={locked ? 'Move one alone to turn' : undefined}
               onclick={editHeading}
             >
               {headingText(facing.heading, facing.fov)}
@@ -1231,7 +1564,8 @@
     cursor: crosshair;
   }
   .horizon-view.panning,
-  .horizon-view.shaping {
+  .horizon-view.shaping,
+  .horizon-view.sliding {
     cursor: move;
   }
   .horizon-view:focus-visible {
@@ -1344,6 +1678,20 @@
     stroke-width: 1.5;
     stroke-dasharray: 6 4;
   }
+  /* the area being chosen for a capture, drawn as the photo's edge is */
+  .area {
+    fill: none;
+  }
+  .area.under {
+    stroke: rgba(0, 0, 0, 0.5);
+    stroke-width: 3.5;
+  }
+  .area.over {
+    fill: color-mix(in srgb, var(--accent) 8%, transparent);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+  }
   /* a corner is a bracket on the photo's side of its point, as a crop's is, so the frame's edge never hides it */
   .warp-corner {
     position: absolute;
@@ -1379,9 +1727,46 @@
   .warp-corner:active {
     cursor: grabbing;
   }
-  .warp-corner:focus-visible {
+  .warp-corner:focus-visible,
+  .warp-side:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+  }
+  /* an edge's handle is a short bar along it, as a crop's side is */
+  .warp-side {
+    position: absolute;
+    z-index: 4;
+    width: 26px;
+    height: 8px;
+    padding: 0;
+    border: 2px solid var(--accent);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.7));
+    transform: translate(-50%, -50%);
+    cursor: ns-resize;
+  }
+  .warp-side.across {
+    width: 8px;
+    height: 26px;
+    cursor: ew-resize;
+  }
+  .warp-side:hover,
+  .warp-side:active {
+    background: color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  /* the grid says what the corners and the curve do to the photo, light enough to see it through */
+  .warp-grid {
+    fill: none;
+    stroke-linejoin: round;
+  }
+  .warp-grid.under {
+    stroke: rgba(0, 0, 0, 0.35);
+    stroke-width: 2.5;
+  }
+  .warp-grid.over {
+    stroke: rgba(255, 255, 255, 0.7);
+    stroke-width: 1;
   }
 
   /* -- marks ------------------------------------------------------------------ */
@@ -1589,6 +1974,13 @@
     pointer-events: none;
   }
   /* the ground still loading, said once over the view rather than in a corner of the page */
+  /* an export draws its own camera into the canvas: the screen waits behind this */
+  .export-veil {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    background: var(--bg-0);
+  }
   .loading {
     position: absolute;
     top: 10px;

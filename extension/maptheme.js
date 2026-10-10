@@ -94,6 +94,7 @@
     video: "M4 6h11a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm12 4 5-3v10l-5-3",
     grip: "M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01",
     minimize: "M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3m8 0v-3a2 2 0 0 1 2-2h3",
+    horizon: "M5 17.5 20.5 7M5 17.5h15.5M12.5 13.5l2.5-2.5 2 1.5 3.5-3.5M5 16a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z",
   };
 
   /** One icon as an inline SVG string, for the panel's own markup. */
@@ -106,11 +107,11 @@
   }
 
   /** Which glyph a saved row is drawn with — `SavedOverlay.svelte`'s own map. */
-  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", comparison: "compare" };
+  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", comparison: "compare", view: "horizon" };
 
   /** The kinds a stack may mix and still draw as a capture — `geoTree.js`'s
    *  `CAPTURE_KINDS`. Any other mix draws as a place (`markKind` in the app). */
-  const SAVED_CAPTURE_KINDS = ["capture", "screenshot", "comparison"];
+  const SAVED_CAPTURE_KINDS = ["capture", "screenshot", "comparison", "view"];
 
   window.AzimutMapTheme = {
     TOKENS,

@@ -387,7 +387,7 @@ describe('a photo locked to the terrain, in the inspector', () => {
       setBend: vi.fn(),
     };
     const root = render(HorizonPanel, { view, overlay, onmove: vi.fn() });
-    expect(text(root)).toContain('The photo is pinned to the terrain');
+    expect(text(root)).toContain('Photo and terrain move together');
     const sheet = (title) =>
       [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === title).querySelector('fieldset');
     expect(sheet('Viewpoint').disabled).toBe(true);

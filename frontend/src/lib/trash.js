@@ -27,6 +27,7 @@ export const FILE_BACKED = new Set([
   'inspect-session',
   'collage',
   'compare-session',
+  'horizon-view',
   'analysis-zones',
   'analysis-area',
   'analysis-follow-up',

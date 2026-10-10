@@ -106,6 +106,26 @@ afterEach(() => {
 });
 
 describe('the Horizon view', () => {
+  it('stands nowhere again once left, keeping how the picture is drawn, and drops what was on its way', async () => {
+    const view = store();
+    view.standAt(EYE);
+    view.setGround('imagery');
+    view.look({ heading: 120 });
+    await tick();
+    await view.mark({ lat: 46.6, lon: 7.9 });
+    view.standAt({ lat: 46.57, lon: 7.85 });
+    view.leave();
+    await tick();
+    expect(view.observer).toBeNull();
+    expect(view.placed).toBeNull();
+    expect(view.panorama).toBeNull();
+    expect(view.target).toBeNull();
+    // the walk asked before leaving never lands
+    expect(turns()).toHaveLength(1);
+    expect(view.ground).toBe('imagery');
+    expect(view.camera.heading).toBe(120);
+  });
+
   it('asks for nothing until the eye stands somewhere', async () => {
     const view = store();
     view.look({ heading: 90 });

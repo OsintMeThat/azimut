@@ -43,6 +43,13 @@ export function openComparison(row) {
   uiState.tool = 'compare';
 }
 
+/** A saved Horizon view, from a Saved-panel row, reopened in Horizon. */
+export function openHorizonView(row) {
+  if (!row?.view) return;
+  uiState.openHorizonView = row.view;
+  uiState.tool = 'horizon';
+}
+
 /** Tool a given entity type opens in (also gates the "Open in tool" button). */
 export const ENTITY_TOOL = {
   media: 'media',
@@ -52,6 +59,7 @@ export const ENTITY_TOOL = {
   'inspect-session': 'inspect',
   collage: 'collage',
   'compare-session': 'compare',
+  'horizon-view': 'horizon',
   'analysis-zones': 'detect',
   'analysis-area': 'detect',
   'analysis-follow-up': 'detect',
@@ -191,6 +199,12 @@ export function openEntity(entity, resolved = false) {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openCompare = name;
     uiState.tool = 'compare';
+    return;
+  }
+  if (entity.type === 'horizon-view') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openHorizonView = name;
+    uiState.tool = 'horizon';
     return;
   }
   if (['analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {

@@ -762,7 +762,13 @@ export function createHorizonState({
       return { observer, camera, visibility, near, ground, lines };
     },
 
-    /** Take a view from the address or a Back, as one move. */
+    /**
+     * Take a view from the address or a Back, as one move. A saved view
+     * (state/views.svelte.js) also brings how the picture was drawn: `ridges`,
+     * `imagery`, `sentinel` (its reach and pass, never switched on: it is
+     * billed), `names`, `shadows` and `sky`. Its shadow depth is the view's,
+     * so it is not remembered as this browser's.
+     */
     restore(view) {
       const nextVisibility = view.visibility ?? null;
       const nextNear = view.near ?? 0;
@@ -773,6 +779,21 @@ export function createHorizonState({
       if (view.camera) camera = { ...camera, ...view.camera };
       ground = GROUNDS.includes(view.ground) ? view.ground : 'relief';
       lines = view.lines ?? linesByDefault(ground);
+      if (Number.isFinite(view.ridges)) this.setRidges(view.ridges);
+      if (view.imagery) this.setDrapeSource(view.imagery);
+      if (view.sentinel) {
+        nearOn = false;
+        nearReach = NEAR_REACHES.includes(view.sentinel.reach) ? view.sentinel.reach : NEAR_REACH;
+        nearPicked = Boolean(view.sentinel.date);
+        nearDate = view.sentinel.date ?? '';
+      }
+      if (typeof view.names === 'boolean' && view.names !== peaksOn) this.showPeaks(view.names);
+      if (Number.isFinite(view.shadows)) shadowDepth = Math.min(1, Math.max(0, view.shadows));
+      if (view.sky) {
+        if (view.sky.time) skyTime = view.sky.time;
+        if (view.sky.date) skyDate = view.sky.date;
+        skyOn = Boolean(view.sky.on);
+      }
       if (view.observer) {
         moved ||=
           !observer ||
@@ -783,6 +804,39 @@ export function createHorizonState({
         observer = { ...view.observer };
       }
       if (moved && observer) reload();
+      // the same eye under another day: only the sky is asked again
+      else if (view.sky?.on) askSky();
+    },
+
+    /**
+     * Stand nowhere again: the eye, its picture and what was read from it go,
+     * and the tab is back on its map, to pick a viewpoint. How the picture is
+     * drawn (the ground, the lens, the hour) stays for the next eye.
+     */
+    leave() {
+      asked += 1;
+      peaksAsked += 1;
+      skyAsked += 1;
+      estimateAsked += 1;
+      controller?.abort();
+      if (loadTimer) cancel(loadTimer);
+      if (peaksTimer) cancel(peaksTimer);
+      loadTimer = null;
+      peaksTimer = null;
+      observer = null;
+      placed = null;
+      panorama = null;
+      busy = false;
+      error = '';
+      peaks = [];
+      peaksFor = '';
+      peaksBusy = false;
+      peaksPending = 0;
+      peaksFailed = 0;
+      target = null;
+      pointed = null;
+      sky = null;
+      skyBusy = false;
     },
 
     destroy() {

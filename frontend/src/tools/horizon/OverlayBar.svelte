@@ -5,15 +5,18 @@
    * terrain, or a blink between the two, and the ridge lines over it; the
    * skyline traced or found on it, and the photo's corners to pull; how far
    * the terrain's skyline lies from the trace, with the fit that closes it as
-   * the one lit act, the places it found when one alone did not stand out,
-   * and the lock that holds the match once it is good; then
-   * how the ground is drawn,
+   * the one lit act, what the analyst knows about the photo to narrow it, the
+   * places it found when one alone did not stand out; what a drag and the
+   * wheel move, the photo, the terrain or both, which holds the match once it
+   * is good; then how the ground is drawn,
    * every gesture and key, and a way to take the photo away.
    * It sits above the frame rather than on it, so nothing covers the photo
    * being matched, and the ground's own controls leave the view for it.
    */
   import Icon from '../../components/Icon.svelte';
   import PictureControls from './PictureControls.svelte';
+  import PhotoHints from './PhotoHints.svelte';
+  import { hintsSummary } from '../../lib/horizon/hints.js';
   import { clockTime } from '../../lib/inspect.js';
   import { gapDegrees, gapSpan, isAtPlace } from '../../lib/horizon/overlay.js';
   import { headingText } from '../../lib/horizon/geometry.js';
@@ -40,33 +43,46 @@
     /** Whether a Copernicus key is set, and how to ask for the setup when it is not (PictureControls). */
     copernicus = false,
     onsetup = () => {},
+    /** Where the view looks now, which "roughly this way" takes. */
+    heading = 0,
   } = $props();
+
+  /** What is known about the photo, in the band's words; '' while nothing is. */
+  const told = $derived(hintsSummary(overlay.hints, overlay.reach));
 
   const terrainShare = $derived(Math.round((1 - overlay.mix) * 100));
   const what = $derived(overlay.source?.kind === 'video' ? 'Video' : 'Photo');
   const away = $derived(overlay.source?.kind === 'video' && overlay.strokes.length > 0 && !overlay.traceShown);
   const isPhoto = $derived(overlay.source?.kind === 'image');
   const GROUND_NAMES = { relief: 'Relief', imagery: 'Satellite', plain: 'Plain' };
+  /** What a drag and the wheel can move, in the order the slider's two ends name photo and terrain. */
+  const MOVES = $derived([
+    { id: 'photo', icon: what === 'Video' ? 'video' : 'image', word: what, title: `Drag and the wheel move the ${what.toLowerCase()} over the terrain` },
+    { id: 'terrain', icon: 'horizon', word: 'Terrain', title: `Drag and the wheel move the terrain under the ${what.toLowerCase()}` },
+    { id: 'both', icon: 'lock', word: 'Both', title: `Drag and the wheel move both, the ${what.toLowerCase()} held to the terrain (L)` },
+  ]);
 
   /** The gestures and keys over a photo, by what they are for. */
   const KEYS = [
     {
       title: 'Align',
       rows: [
-        [['Drag'], 'Move the terrain under the photo'],
-        [['Shift', 'drag'], 'Roll about the pivot'],
+        [['Drag'], 'Move what Move says: the photo, the terrain or both'],
+        [['Wheel'], 'Zoom it, or pinch'],
+        [['Arrows'], 'Move it a step, + and − to zoom'],
+        [['Shift', 'drag'], 'Roll the terrain about the pivot'],
         [['Shift', 'click'], 'Set the pivot'],
         [['Shift', 'wheel'], 'Change the lens'],
         [['Alt', 'wheel'], 'Change the eye height'],
-        [['W'], 'Reshape the photo by its corners'],
-        [['L'], 'Pin the photo to the terrain, or unpin it'],
+        [['W'], 'Reshape the photo by its corners and edges'],
+        [['L'], 'Move both, or back to one alone'],
       ],
     },
     {
       title: 'Look',
       rows: [
-        [['Wheel'], 'Look closer, or pinch'],
-        [['Space', 'drag'], 'Move around the photo, or the middle button'],
+        [['Space', 'drag'], 'Move both, or the middle button'],
+        [['Space', 'wheel'], 'Look closer at both'],
         [['0'], 'Show the whole photo'],
         [['B'], 'Blink between photo and terrain'],
       ],
@@ -99,6 +115,9 @@
   let groundOpen = $state(false);
   let groundButton = $state();
   let groundBox = $state();
+  let hintsOpen = $state(false);
+  let hintsButton = $state();
+  let hintsBox = $state();
   // the places a search found are listed for that search alone: a new one starts folded
   let placesFor = $state.raw(null);
   const placesOpen = $derived(places.length > 1 && placesFor === places);
@@ -109,13 +128,15 @@
   function onWindowPointer(event) {
     if (keysOpen && !keysBox?.contains(event.target) && !keysButton?.contains(event.target)) keysOpen = false;
     if (groundOpen && !groundBox?.contains(event.target) && !groundButton?.contains(event.target)) groundOpen = false;
+    if (hintsOpen && !hintsBox?.contains(event.target) && !hintsButton?.contains(event.target)) hintsOpen = false;
     if (placesOpen && !placesBox?.contains(event.target) && !placesButton?.contains(event.target)) placesFor = null;
   }
   function onWindowKey(event) {
-    if ((keysOpen || groundOpen || placesOpen) && event.key === 'Escape') {
+    if ((keysOpen || groundOpen || hintsOpen || placesOpen) && event.key === 'Escape') {
       event.stopPropagation();
       keysOpen = false;
       groundOpen = false;
+      hintsOpen = false;
       placesFor = null;
     }
   }
@@ -254,7 +275,7 @@
         aria-pressed={overlay.warping}
         disabled={overlay.locked}
         onclick={() => overlay.setWarping(!overlay.warping)}
-        title={overlay.locked ? 'Unlock the photo to reshape it' : 'Pull the photo by its corners, to square a photo taken at a slant (W)'}
+        title={overlay.locked ? 'Move one alone to reshape the photo' : 'Pull the photo by its corners or edges, to square a slanted photo or squeeze a stretched one (W)'}
         aria-label="Reshape the photo"
       >
         <Icon name="polygon" size={14} /><span class="word minor">Reshape</span>
@@ -283,12 +304,29 @@
         <strong class="mono">Gap {gapDegrees(gap)}°</strong><span class="span">over {gapSpan(gap)}° of skyline</span>
       </span>
       <button
+        bind:this={hintsButton}
+        type="button"
+        class="act"
+        class:on={hintsOpen}
+        class:said={Boolean(told)}
+        aria-expanded={hintsOpen}
+        aria-controls="hz-photo-hints"
+        onclick={() => (hintsOpen = !hintsOpen)}
+        title="Tell Fit what you know about the photo"
+        aria-label={told ? `What you know: ${told}` : 'What you know'}
+      >
+        <Icon name="sliders" size={14} /><span class="word" class:told={Boolean(told)}>{told || 'What you know'}</span><Icon
+          name="chevronDown"
+          size={12}
+        />
+      </button>
+      <button
         type="button"
         class="act primary"
         disabled={overlay.locked || fitting}
         aria-busy={fitting}
         onclick={onfit}
-        title={overlay.locked ? 'Unlock the photo to fit it again' : 'Find your trace on the whole turn and lay the terrain on it'}
+        title={overlay.locked ? 'Move one alone to fit again' : 'Find your trace on the whole turn and lay the terrain on it'}
         aria-label="Fit to trace"
       >
         {#if fitting}<span class="spinner" aria-hidden="true"></span>{:else}<Icon name="wand" size={14} />{/if}<span
@@ -319,19 +357,23 @@
     {/if}
   </div>
 
-  <button
-    type="button"
-    class="act"
-    class:on={overlay.locked}
-    aria-pressed={overlay.locked}
-    onclick={() => overlay.setLocked(!overlay.locked)}
-    title={overlay.locked
-      ? 'Unpin the photo from the terrain, back to matching it (L)'
-      : 'Pin the photo to the terrain: drag and zoom then move over the terrain with the photo on it (L)'}
-    aria-label="Lock the photo to the terrain"
-  >
-    <Icon name="lock" size={14} /><span class="word">{overlay.locked ? 'Locked' : 'Lock'}</span>
-  </button>
+  <div class="zone moves" role="radiogroup" aria-label="What a drag moves">
+    <span class="caption minor" aria-hidden="true">Move</span>
+    {#each MOVES as move (move.id)}
+      <button
+        type="button"
+        role="radio"
+        class="act"
+        class:on={overlay.moves === move.id}
+        aria-checked={overlay.moves === move.id}
+        onclick={() => overlay.setMoves(move.id)}
+        title={move.title}
+        aria-label="Move {move.id === 'both' ? 'both' : `the ${move.word.toLowerCase()}`}"
+      >
+        <Icon name={move.icon} size={14} /><span class="word">{move.word}</span>
+      </button>
+    {/each}
+  </div>
 
   {#if view}
     <button
@@ -377,6 +419,13 @@
     <div bind:this={groundBox} class="pop ground" id="hz-photo-ground" role="dialog" aria-label="Ground under the {what.toLowerCase()}">
       <h3>Ground under the {what.toLowerCase()}</h3>
       <PictureControls {view} {copernicus} {onsetup} lines={false} menu={false} />
+    </div>
+  {/if}
+
+  {#if hintsOpen}
+    <div bind:this={hintsBox} class="pop hints-pop" id="hz-photo-hints" role="dialog" aria-label="What you know about the photo">
+      <h3>What you know about the photo</h3>
+      <PhotoHints {overlay} {heading} />
     </div>
   {/if}
 
@@ -529,6 +578,10 @@
   .fade {
     gap: 6px;
   }
+  .caption {
+    padding: 0 4px 0 2px;
+    color: var(--text-3);
+  }
   .fade.dim {
     opacity: 0.55;
   }
@@ -616,6 +669,16 @@
   }
   .keys {
     width: 340px;
+  }
+  .hints-pop {
+    right: 150px;
+  }
+  .told {
+    color: var(--text-1);
+  }
+  /* something is said: the icon stays amber when the band is too narrow for the words */
+  .act.said :global(svg:first-child) {
+    color: var(--accent);
   }
   .places {
     right: 120px;

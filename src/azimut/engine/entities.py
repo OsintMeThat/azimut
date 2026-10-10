@@ -576,6 +576,9 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="frames and images laid out together, exported as one picture"),
     EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
                hint="two map sources, their layers and the shared camera"),
+    # An eye on the terrain, the way it looked, and the photo matched over it.
+    EntityType("horizon-view", "Horizon view", DOCUMENT, "horizon", ANNEX,
+               hint="where an eye stood and what it saw, often with a photo matched on it"),
     EntityType("analysis-zones", "Area group", DOCUMENT, "polygon", ANNEX,
                hint="an ordered group of case areas used in Detect"),
     EntityType("analysis-area", "Area", DOCUMENT, "mapArea", ANNEX,

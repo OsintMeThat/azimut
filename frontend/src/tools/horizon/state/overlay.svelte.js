@@ -21,17 +21,18 @@
  * What the photo says about its place and time is offered, never applied:
  * the analyst decides (`facts`).
  *
- * Once matched, the photo can be pinned to the terrain (`locked`): the view
- * then moves over the terrain with the photo on it, through a loupe let free
- * to go wider than the photo and past its edges, so a drag carries both and
- * zooming out shrinks both. Nothing that would move one against the other is
- * taken meanwhile (the lens, the curve, the corners; the view's own fields
- * and the gestures that turn, roll or raise hold too). Let go, the view
- * comes back onto the photo.
+ * A drag and the wheel move one thing at a time (`moves`): the terrain under
+ * the photo, the photo over the terrain (the view turns and widens its lens
+ * the other way, so the terrain stays put), or both together. Moving both
+ * holds the photo to the terrain (`locked`), as once it is matched: the view
+ * then moves over the terrain with the photo on it, and nothing that would
+ * move one against the other is taken (the lens, the curve, the corners; the
+ * view's own fields and the gestures that turn, roll or raise hold too).
  *
  * A loupe magnifies the photo and the terrain under it together, so looking
  * closer never moves the match; the terrain under it is sharpened as for a
- * narrower lens. A pivot, a point of the photo, is what the view turns about
+ * narrower lens. It may go wider than the photo and past its edges, the
+ * terrain round the photo then showing. A pivot, a point of the photo, is what the view turns about
  * when it is rolled: a summit already matched stays matched.
  *
  * A lens that curves straight lines (a wide one, an action camera) is undone
@@ -51,6 +52,7 @@
  */
 import { fileUrl } from '../../../lib/fileUrl.js';
 import { fovFromFocal35 } from '../../../lib/horizon/camera.js';
+import { cleanHints, NO_HINTS } from '../../../lib/horizon/hints.js';
 import {
   BEND_MAX,
   bendShape,
@@ -60,6 +62,7 @@ import {
   clampLoupe,
   eraseStrokes,
   FLAT_CORNERS,
+  photoGrid,
   isFlat,
   NO_LOUPE,
   panLoupe,
@@ -219,6 +222,12 @@ export function createOverlayState({
   let pulling = $state(false);
   /** The photo held to the terrain: nothing moves one against the other until it is let go. */
   let locked = $state(false);
+  /** What a drag and the wheel move while the photo is not held to the terrain: `terrain` or `photo`. */
+  let moving = $state('terrain');
+  /** What the analyst knows about the photo, told to Fit (lib/horizon/hints.js). */
+  let hints = $state.raw(NO_HINTS);
+  /** The cut of the terrain's skyline the last Fit found the trace on, metres, or null for the whole turn. */
+  let reachFound = $state(null);
 
   let opened = 0;
   let blinkTimer = null;
@@ -248,6 +257,8 @@ export function createOverlayState({
     return bend ? unitPoint(shown) : p;
   }
   const seen = $derived(bend || warp ? strokes.map((stroke) => stroke.map(toSeen)) : strokes);
+  /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
+  const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
   const pulledPicture = $derived(warp && still && source?.kind === 'image' ? warpPicture(still, warp, { fast: pulling }) : null);
 
@@ -313,6 +324,9 @@ export function createOverlayState({
     warping = false;
     pulling = false;
     locked = false;
+    moving = 'terrain';
+    hints = NO_HINTS;
+    reachFound = null;
     if (loupe !== NO_LOUPE) setLoupe(NO_LOUPE);
   }
 
@@ -597,6 +611,33 @@ export function createOverlayState({
     get lens() {
       return lensOf();
     },
+    /** What the analyst knows about the photo (lib/horizon/hints.js): each optional, none by default. */
+    get hints() {
+      return hints;
+    },
+    /** Say more, or less, about the photo: only the hints named change. */
+    setHints(change) {
+      if (!source) return;
+      hints = cleanHints({ ...hints, ...change });
+    },
+    /**
+     * How far out the terrain's skyline is read against the trace, metres, or
+     * null for the whole turn: the reach the analyst set, else the one the last
+     * Fit found the trace on.
+     */
+    get reach() {
+      if (hints.reach === 'all') return null;
+      if (Number.isFinite(hints.reach)) return hints.reach;
+      return reachFound;
+    },
+    /** The reach a Fit found the trace on, read against from then on while how far the photo sees is left to Fit. */
+    get reachFound() {
+      return reachFound;
+    },
+    setReachFound(reach) {
+      reachFound = Number.isFinite(reach) ? reach : null;
+    },
+
     /** Lay the photo's own lens on the view again, after a zoom. */
     useLens() {
       if (locked) return;
@@ -664,15 +705,24 @@ export function createOverlayState({
     get loupe() {
       return loupe;
     },
-    /** Magnify by a factor about a point of the screen (CSS pixels of a frame this size), which stays put. */
+    /**
+     * Magnify by a factor about a point of the screen (CSS pixels of a frame
+     * this size), which stays put: wider than the photo too, the terrain
+     * round it then showing.
+     */
     zoomLoupe(factor, at, size) {
       if (!source || !(size?.width > 0)) return;
-      setLoupe(zoomLoupe(loupe, factor, at, size, { free: locked }));
+      setLoupe(zoomLoupe(loupe, factor, at, size));
     },
-    /** Move the loupe with the hand, `dx`, `dy` CSS pixels; a pinned photo goes past its own edges. */
+    /** Move the loupe with the hand, `dx`, `dy` CSS pixels, past the photo's own edges too. */
     panLoupe(dx, dy, size) {
-      if (!source || (loupe.zoom <= 1 && !locked) || !(size?.width > 0)) return;
-      setLoupe(panLoupe(loupe, dx, dy, size, { free: locked }));
+      if (!source || !(size?.width > 0)) return;
+      setLoupe(panLoupe(loupe, dx, dy, size));
+    },
+    /** Lay a loupe the view worked out (the photo moved over a terrain that stays put). */
+    setLoupe(next) {
+      if (!source || !next) return;
+      setLoupe(clampLoupe(next));
     },
     /** The whole photo in the frame again. */
     fitLoupe() {
@@ -781,6 +831,10 @@ export function createOverlayState({
     get warped() {
       return Boolean(warp);
     },
+    /** The photo's grid in the frame as it shows (its corners and its curve), while the corners are out; none otherwise. */
+    get grid() {
+      return grid;
+    },
     /** All four corners at once (`[{ u, v }]` in the frame), each kept within reach of it. */
     setCorners(next) {
       if (source?.kind !== 'image' || locked || next?.length !== 4 || !next.every((p) => Number.isFinite(p?.u) && Number.isFinite(p?.v))) return;
@@ -802,17 +856,28 @@ export function createOverlayState({
     get locked() {
       return locked;
     },
-    /** Hold the photo to the terrain, or let it go; holding it puts the corners away. */
+    /** Hold the photo to the terrain, or let it go; holding it puts the corners away. The photo stays where it shows. */
     setLocked(on) {
       locked = Boolean(on) && Boolean(source);
-      if (locked) {
-        warping = false;
-        pulling = false;
+      if (!locked) return;
+      warping = false;
+      pulling = false;
+    },
+    /**
+     * What a drag and the wheel move: `terrain` under the photo, the `photo`
+     * over the terrain, or `both` together, the photo held to the terrain.
+     */
+    get moves() {
+      return locked ? 'both' : moving;
+    },
+    setMoves(which) {
+      if (!source || !['terrain', 'photo', 'both'].includes(which)) return;
+      if (which === 'both') {
+        this.setLocked(true);
         return;
       }
-      // let go, the view comes back onto the photo
-      const kept = clampLoupe(loupe);
-      setLoupe(kept.zoom === 1 ? NO_LOUPE : kept);
+      moving = which;
+      this.setLocked(false);
     },
     /** The moment of the video the trace was drawn on, null for a photo. */
     get traceTime() {
@@ -985,6 +1050,36 @@ export function createOverlayState({
     /** Whether a pin stands at the moment on show. */
     get pinnedHere() {
       return pins.some((pin) => Math.abs(pin.time - time) <= PIN_SLACK_S);
+    },
+
+    /**
+     * The work a saved view kept on this photo, laid back once the photo is
+     * open (state/views.svelte.js): how much shows, its lens curve and pulled
+     * corners, the trace and, for a video, the moment it was drawn on and the
+     * pins, what was known about it and the reach Fit found the trace on.
+     * Nothing to take back: it is where the view starts again.
+     */
+    restoreWork({
+      mix: share = 1,
+      bend: k = 0,
+      corners = null,
+      strokes: drawn = [],
+      traceTime: at = null,
+      pins: kept = [],
+      hints: told = NO_HINTS,
+      reach: found = null,
+    } = {}) {
+      if (!source) return;
+      hints = cleanHints(told);
+      reachFound = Number.isFinite(found) ? found : null;
+      mix = Math.min(1, Math.max(0, Number(share) || 0));
+      bend = Math.round(Math.min(BEND_MAX, Math.max(-BEND_MAX, Number(k) || 0)) * 1000) / 1000;
+      const pulled = source.kind === 'image' && corners?.length === 4 ? corners.map((p) => roundPoint(clampCorner(p))) : null;
+      warp = pulled && !isFlat(pulled) ? pulled : null;
+      strokes = drawn.filter((stroke) => stroke.length).map((stroke) => stroke.map(unitPoint));
+      traceTime = source.kind === 'video' && strokes.length && Number.isFinite(at) ? at : null;
+      history = [];
+      pins = source.kind === 'video' ? [...kept].sort((a, b) => a.time - b.time) : [];
     },
 
     destroy() {

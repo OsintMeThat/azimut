@@ -125,6 +125,13 @@ class PanoramaIn(ViewIn):
         return self
 
 
+# The reaches a panorama's skyline is also kept at, metres: the skyline haze
+# would leave if the air stopped there. Left to itself a Fit tries those up to
+# 50 km (frontend lib/horizon/hints.js), since the skyline a photo shows is
+# often a nearer one than the turn's outermost; farther only when asked.
+SKYLINE_CUTS = (5_000.0, 10_000.0, 20_000.0, 50_000.0, 100_000.0)
+
+
 def _pack(array: np.ndarray) -> str:
     """Little-endian bytes, deflated, in base64."""
     raw = np.ascontiguousarray(array).astype(array.dtype.newbyteorder("<"), copy=False).tobytes()
@@ -157,6 +164,11 @@ def panorama(body: PanoramaIn) -> dict[str, Any]:
         "elevation": {"top": float(rows[0]), "step": body.step, "count": int(rows.size)},
         "skyline": [round(float(v), 3) for v in found.skyline],
         "skyline_distance": [round(float(v), 1) for v in found.skyline_distance],
+        # one row of float32 angles per reach, as `depth` is packed
+        "skyline_cuts": {
+            "reach": [round(float(v), 1) for v in found.cuts],
+            "skylines": _pack(found.skyline_cuts.astype(np.float32)) if found.cuts.size else "",
+        },
         "depth": _pack(depth_codes(found.depth)),
         "depth_scale": {"min": DEPTH_MIN, "max": DEPTH_MAX, "codes": DEPTH_CODES},
         "normal_east": _pack(normal_bytes(found.normal_east)),
@@ -192,9 +204,10 @@ def _draw(body: PanoramaIn) -> tuple[horizon.Horizon, np.ndarray, np.ndarray, te
                 status_code=422,
                 detail="That picture is too large. Use a coarser step or a narrower band",
             )
+        far = body.far if body.far is not None else horizon.default_far(observer)
         found = horizon.sweep(
             observer, azimuths=azimuths, rows=rows, far=body.far, k=body.refraction,
-            sampler=sampler, near=body.near,
+            sampler=sampler, near=body.near, cuts=[c for c in SKYLINE_CUTS if body.near < c < far],
         )
     except horizon.BelowGround as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -531,23 +544,52 @@ def target(body: TargetIn) -> dict[str, Any]:
 
 
 # A traced skyline sent to /match: twice the browser's most samples, and a
-# whole turn as fine as a panorama is ever marched.
+# whole turn as fine as a panorama is ever marched, cut at a few reaches.
 MATCH_POINTS_MAX = 2000
 MATCH_SKYLINE_MAX = 72_000
+MATCH_CUTS_MAX = 8
 # Picture-plane points this far out, in half widths, are off any frame a photo lies in.
 MATCH_PLANE_MAX = 20.0
+
+
+def _turn_angles(skyline: list[float | None]) -> np.ndarray:
+    """A skyline as the search reads it: degrees, NaN where no ground stands."""
+    return np.asarray([np.nan if v is None else v for v in skyline], dtype=np.float64)
+
+
+def _sane_skyline(skyline: list[float | None]) -> None:
+    # None is a column without ground; a NaN sent by hand is not a number at all
+    angles = np.asarray([v for v in skyline if v is not None], dtype=np.float64)
+    if angles.size < skymatch.MIN_POINTS:
+        raise ValueError("the skyline holds no angles")
+    if not np.isfinite(angles).all() or np.abs(angles).max() > 90:
+        raise ValueError("the skyline holds angles no view has")
+
+
+class CutIn(BaseModel):
+    """The same turn's skyline as it stands if the air stops `reach` metres out."""
+
+    reach: float = Field(gt=0, le=horizon.FAR_MAX)
+    skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
 
 
 class MatchIn(BaseModel):
     """A traced skyline and the turn of terrain to look for it on.
 
-    The turn is the one the tab already marched (`/panorama`'s skyline), so the
-    search reads what the analyst sees. The trace is points on the picture
-    plane, right and up from the lens's middle in half widths of the frame
-    (engine/skymatch.py), and `half_width` is that half width on screen.
+    The turn is the one the tab already marched (`/panorama`'s skyline, or one
+    of its `skyline_cuts` with that cut's `reach`, and nearer cuts as `cuts`),
+    so the search reads what the analyst sees. The
+    trace is points on the picture plane, right and up from the lens's middle
+    in half widths of the frame (engine/skymatch.py), and `half_width` is that
+    half width on screen. What the analyst knows narrows the search: `within`
+    bounds an unknown lens (degrees, low and high), `facing` the heading (the
+    sector's middle and half its width), and `level` holds the roll.
     """
 
     skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
+    # how far out `skyline` was cut, metres; None when it is the whole turn
+    reach: float | None = Field(default=None, gt=0, le=horizon.FAR_MAX)
+    cuts: list[CutIn] = Field(default_factory=list, max_length=MATCH_CUTS_MAX)
     start: float = Field(default=0.0, ge=0, lt=360)
     step: float = Field(gt=0, le=10)
     x: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
@@ -558,6 +600,9 @@ class MatchIn(BaseModel):
     known: bool = False
     tilt: float = Field(default=0.0, ge=-89, le=89)
     roll: float = Field(default=0.0, ge=-180, le=180)
+    within: list[float] | None = Field(default=None, min_length=2, max_length=2)
+    facing: list[float] | None = Field(default=None, min_length=2, max_length=2)
+    level: bool = False
 
     @model_validator(mode="after")
     def _sane(self) -> MatchIn:
@@ -568,11 +613,19 @@ class MatchIn(BaseModel):
         points = np.asarray(self.x + self.y, dtype=np.float64)
         if not np.isfinite(points).all() or np.abs(points).max() > MATCH_PLANE_MAX:
             raise ValueError("the trace lies off the picture")
-        angles = np.asarray([v for v in self.skyline if v is not None], dtype=np.float64)
-        if angles.size < skymatch.MIN_POINTS:
-            raise ValueError("the skyline holds no angles")
-        if not np.isfinite(angles).all() or np.abs(angles).max() > 90:
-            raise ValueError("the skyline holds angles no view has")
+        _sane_skyline(self.skyline)
+        for cut in self.cuts:
+            if len(cut.skyline) != len(self.skyline):
+                raise ValueError("a cut of the turn must have the turn's columns")
+            _sane_skyline(cut.skyline)
+        if self.within is not None:
+            low, high = sorted(self.within)
+            if not (skymatch.FOV_MIN <= low and high <= skymatch.FOV_MAX):
+                raise ValueError(f"lenses run from {skymatch.FOV_MIN:g}° to {skymatch.FOV_MAX:g}°")
+        if self.facing is not None:
+            centre, half = self.facing
+            if not (0 <= centre < 360 and 0 < half <= 180):
+                raise ValueError("a sector is its middle (0 to 360°) and half its width (up to 180°)")
         return self
 
 
@@ -580,17 +633,25 @@ class MatchIn(BaseModel):
 def match_trace(body: MatchIn) -> dict[str, Any]:
     """Where on the turn the traced skyline lies: the best places, and how sure.
 
-    Each place is a camera (heading, tilt, lens) with its median gap to the
-    terrain in degrees and the share of the trace's shape it explains; `close`
-    marks those explaining about as much as the best. `lenses` is the range of
-    fields of view tried, the photo's own alone when it says one.
+    Each place is a camera (heading, tilt, roll, lens) with its median gap to
+    the terrain in degrees and the share of the trace's shape it explains;
+    `close` marks those explaining about as much as the best, and `reach` the
+    cut of the turn it lies on (metres, null for the whole turn). `lenses` is
+    the range of fields of view tried, the photo's own alone when it says one.
     """
-    angles = np.asarray([np.nan if v is None else v for v in body.skyline], dtype=np.float64)
+    turns = [
+        skymatch.Turn(body.start, body.step, _turn_angles(cut.skyline), reach=cut.reach)
+        for cut in sorted(body.cuts, key=lambda cut: cut.reach)
+    ]
+    turns.append(skymatch.Turn(body.start, body.step, _turn_angles(body.skyline), reach=body.reach))
+    within = (min(body.within), max(body.within)) if body.within else None
+    facing = (body.facing[0], body.facing[1]) if body.facing else None
     found = skymatch.match(
-        np.asarray(body.x), np.asarray(body.y), skymatch.Turn(body.start, body.step, angles),
+        np.asarray(body.x), np.asarray(body.y), turns,
         half_width=body.half_width, fov=body.fov, known=body.known, tilt=body.tilt, roll=body.roll,
+        within=within, facing=facing, level=body.level,
     )
-    tried = skymatch.lenses(body.fov, known=body.known)
+    tried = skymatch.lenses(body.fov, known=body.known, within=within)
     best = found.fits[0].explained if found.fits else 0.0
     return {
         "verdict": found.verdict,
@@ -598,7 +659,9 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
             {
                 "heading": round(fit.heading, 3),
                 "tilt": round(fit.tilt, 3),
+                "roll": round(fit.roll, 3),
                 "fov": round(fit.fov, 3),
+                "reach": None if fit.reach is None else round(fit.reach, 1),
                 "gap": round(fit.gap, 4),
                 "explained": round(fit.explained, 3),
                 "close": i == 0 or fit.explained >= skymatch.AMBIGUOUS_SHARE * best,

@@ -156,3 +156,83 @@ def test_places_returned_stand_apart():
     # best first
     shares = [fit.explained for fit in found.fits]
     assert shares == sorted(shares, reverse=True)
+
+
+def test_a_range_of_lenses_is_stepped_end_to_end():
+    tried = skymatch.lenses(60.0, known=False, within=(5.0, 40.0))
+    assert tried[0] == pytest.approx(5.0) and tried[-1] == pytest.approx(40.0)
+    assert tried == sorted(tried)
+    assert np.diff(np.log(tried)).max() <= np.log(skymatch.RANGE_RATIO) + 1e-9
+    # past the lenses a view has, the range is clipped; a lens the photo says still wins
+    clipped = skymatch.lenses(60.0, known=False, within=(0.1, 500.0))
+    assert clipped[0] == skymatch.FOV_MIN and clipped[-1] == skymatch.FOV_MAX
+    assert skymatch.lenses(52.0, known=True, within=(5.0, 40.0)) == [52.0]
+
+
+def test_a_narrow_lens_is_found_across_a_range_far_from_the_views():
+    x, y = trace_on(RANGE, heading=52.0, fov=8.0)
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0, within=(1.5, 120.0))
+    best = found.fits[0]
+    assert best.heading == pytest.approx(52.0, abs=0.2)
+    assert best.fov == pytest.approx(8.0, rel=0.03)
+    # the view's own lens give or take never reaches it
+    alone = skymatch.match(x, y, RANGE, half_width=HALF, fov=60.0)
+    assert all(abs(fit.fov - 8.0) > 1.0 for fit in alone.fits)
+
+
+def test_a_rolled_camera_is_found_with_its_roll():
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0, tilt=1.0, roll=3.0)
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=52.0, known=True)
+    best = found.fits[0]
+    assert found.verdict == "match"
+    assert best.heading == pytest.approx(47.0, abs=0.3)
+    assert best.roll == pytest.approx(3.0, abs=0.3)
+    assert best.tilt == pytest.approx(1.0, abs=0.3)
+    # held level, the same trace fits worse
+    held = skymatch.match(x, y, RANGE, half_width=HALF, fov=52.0, known=True, level=True)
+    assert held.fits[0].roll == 0.0
+    assert held.fits[0].explained < best.explained
+
+
+def test_a_roll_buried_under_the_slide_is_still_found():
+    # a wide lens and a few degrees of roll: at roll 0 the right heading is not the cheapest
+    x, y = trace_on(RANGE, heading=228.0, fov=80.0, roll=-4.0)
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=80.0, known=True)
+    assert found.fits[0].heading == pytest.approx(228.0, abs=0.3)
+    assert found.fits[0].roll == pytest.approx(-4.0, abs=0.3)
+
+
+def test_a_skyline_haze_left_is_found_on_the_cut_that_holds_it():
+    near = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
+    farther = skyturn([(50, 4.0, 10)], base=0.0)
+    whole = skymatch.Turn(0.0, STEP, np.maximum(near.angles, farther.angles))
+    cut = skymatch.Turn(0.0, STEP, near.angles, reach=10_000.0)
+    x, y = trace_on(cut, heading=50.0, fov=40.0)
+    found = skymatch.match(x, y, [cut, whole], half_width=HALF, fov=40.0, known=True)
+    assert found.fits[0].heading == pytest.approx(50.0, abs=0.3)
+    assert found.fits[0].reach == 10_000.0
+    # on the whole turn alone the far range stands over the traced ridge: nothing explains it
+    alone = skymatch.match(x, y, whole, half_width=HALF, fov=40.0, known=True)
+    assert alone.fits[0].reach is None
+    assert alone.fits[0].explained < found.fits[0].explained - 0.3
+
+
+def test_a_sector_keeps_the_search_inside_it():
+    twice = skyturn([(30, 5, 3), (42, 3, 2), (210, 5, 3), (222, 3, 2)])
+    x, y = trace_on(twice, heading=36.0, fov=50.0)
+    found = skymatch.match(x, y, twice, half_width=HALF, fov=50.0, known=True, facing=(200.0, 30.0))
+    assert found.fits[0].heading == pytest.approx(216.0, abs=0.5)
+    assert all(abs((fit.heading - 200.0 + 180) % 360 - 180) <= 30.0 for fit in found.fits)
+    # the other copy, outside it, is never offered
+    assert not any(abs((fit.heading - 36.0 + 180) % 360 - 180) < 10 for fit in found.fits)
+
+
+def test_the_turn_reads_the_same_with_and_without_holes():
+    holed = skyturn([(40, 6, 3)], nan_between=(300, 301))
+    plain = skyturn([(40, 6, 3)])
+    az = np.linspace(-20.0, 380.0, 997)
+    keep = (np.mod(az, 360.0) < 299.0) | (np.mod(az, 360.0) > 302.0)
+    assert np.allclose(holed.at(az)[keep], plain.at(az)[keep])
+    # exactly round north, the last column meets the first
+    assert plain.at(360.0) == pytest.approx(plain.at(0.0))
+    assert plain.at(359.95) == pytest.approx((plain.angles[-1] + plain.angles[0]) / 2)

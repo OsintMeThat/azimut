@@ -2,6 +2,8 @@
 
 import json
 
+import numpy as np
+
 import pytest
 
 from skyturns import HALF, RANGE, trace_on
@@ -99,3 +101,71 @@ def test_the_search_reads_no_terrain(client, monkeypatch):
     monkeypatch.setattr(horizon, "sweep", no_sweep)
     answer = client.post(URL, json=_body())
     assert answer.status_code == 200, answer.text
+
+
+def _cut_body(**change):
+    """A trace of a near ridge the whole turn hides behind a farther range, with the turn's cut."""
+    from skyturns import skyturn
+
+    near = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
+    farther = skyturn([(50, 4.0, 10)], base=0.0)
+    whole = [round(float(v), 3) for v in np.maximum(near.angles, farther.angles)]
+    x, y = trace_on(near, heading=50.0, fov=40.0)
+    body = _body(skyline=whole, x=x.tolist(), y=y.tolist(), fov=40.0, known=True,
+                 cuts=[{"reach": 10_000.0, "skyline": [round(float(v), 3) for v in near.angles]}])
+    body.update(change)
+    return body
+
+
+def test_a_cut_of_the_turn_is_searched_and_said(client):
+    answer = client.post(URL, json=_cut_body())
+    assert answer.status_code == 200, answer.text
+    best = answer.json()["fits"][0]
+    assert best["heading"] == pytest.approx(50.0, abs=0.3)
+    assert best["reach"] == 10_000.0
+    whole = client.post(URL, json=_cut_body(cuts=[])).json()["fits"][0]
+    assert whole["reach"] is None
+    assert whole["explained"] < best["explained"] - 0.3
+
+
+def test_a_turn_sent_cut_says_its_reach_on_every_place(client):
+    body = _cut_body()
+    body["skyline"], body["reach"], body["cuts"] = body["cuts"][0]["skyline"], 10_000.0, []
+    found = client.post(URL, json=body).json()
+    assert found["fits"][0]["heading"] == pytest.approx(50.0, abs=0.3)
+    assert all(fit["reach"] == 10_000.0 for fit in found["fits"])
+
+
+def test_the_lens_range_and_the_sector_narrow_the_search(client):
+    x, y = trace_on(RANGE, heading=52.0, fov=8.0)
+    body = _body(x=x.tolist(), y=y.tolist(), fov=60.0, within=[120.0, 1.5])
+    found = client.post(URL, json=body).json()
+    assert found["fits"][0]["fov"] == pytest.approx(8.0, rel=0.03)
+    assert found["lenses"] == [1.5, 120.0]
+    inside = client.post(URL, json={**body, "facing": [230.0, 20.0]}).json()
+    assert all(abs((fit["heading"] - 230.0 + 180) % 360 - 180) <= 20.0 for fit in inside["fits"])
+
+
+def test_a_rolled_trace_comes_back_with_its_roll_unless_held_level(client):
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0, roll=3.0)
+    body = _body(x=x.tolist(), y=y.tolist(), fov=52.0, known=True)
+    assert client.post(URL, json=body).json()["fits"][0]["roll"] == pytest.approx(3.0, abs=0.3)
+    held = client.post(URL, json={**body, "level": True, "roll": 1.0}).json()
+    assert held["fits"][0]["roll"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"within": [0.1, 60.0]},  # no lens that narrow
+        {"within": [30.0]},
+        {"facing": [400.0, 20.0]},
+        {"facing": [40.0, 0.0]},
+        {"reach": 0.0},
+        {"cuts": [{"reach": 5000.0, "skyline": [1.0] * 100}]},  # not the turn's columns
+        {"cuts": [{"reach": 5000.0, "skyline": [None] * 3600}]},
+        {"cuts": [{"reach": 5000.0, "skyline": [1.0] * 3600}] * 9},
+    ],
+)
+def test_hints_the_search_cannot_use_are_refused(client, change):
+    assert client.post(URL, json=_body(**change)).status_code == 422

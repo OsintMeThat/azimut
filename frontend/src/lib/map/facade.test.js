@@ -6,6 +6,7 @@ import {
   exactViewZoom,
   framePadding,
   mapFacade,
+  headingUp,
   normalizeBearing,
   pointsExtent,
   viewZoom,
@@ -120,6 +121,14 @@ describe('the bearing convention', () => {
     // a saved row with no bearing, a half-typed angle
     expect(normalizeBearing(undefined)).toBe(0);
     expect(normalizeBearing('')).toBe(0);
+  });
+
+  it('says which way is up a turned map, and which bearing puts a heading up', () => {
+    // the map turned 107° clockwise: up the screen faces 253°, west-south-west
+    expect(headingUp(107)).toBe(253);
+    expect(headingUp(253)).toBe(107);
+    expect(headingUp(0)).toBe(0);
+    expect(headingUp(-90)).toBe(90);
   });
 
   it('normalises on the way in, so no call site has to', () => {

@@ -93,6 +93,16 @@ export function normalizeBearing(deg) {
 }
 
 /**
+ * The compass direction up the screen of a map turned by the app's `bearing`:
+ * the way an eye stood on it and looking up the map faces. The app turns the
+ * map clockwise, so it is the same turn counted the other way, and the bearing
+ * that puts a heading up is found the same way.
+ */
+export function headingUp(bearing) {
+  return normalizeBearing(-Number(bearing));
+}
+
+/**
  * The engine events one neutral name stands for.
  *
  * Throws on anything else: a typo that silently stopped delivering would read
@@ -146,8 +156,8 @@ const MOVE_CLOSES = ['zoomend', 'rotateend', 'pitchend', 'rollend', 'moveend'];
  * settled view, and each of the engine's markers, which reads the depth of the
  * drawn ground back off the graphics card when a movement ends. Chrome holds
  * the page until the card has drawn everything queued before each such read,
- * and thousands of them a second stalled the map for a tenth of a second at a
- * time. Folded, the gesture opens once, moves at every jump, and ends once when
+ * and thousands of them a second held frames back by tenths of a second.
+ * Folded, the gesture opens once, moves at every jump, and ends once when
  * the last fold is let go, as the engine's own gestures do.
  *
  * Folds may overlap (a wheel burst still settling as a drag starts), in any

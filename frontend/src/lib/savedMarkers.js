@@ -15,8 +15,8 @@ import { CAPTURE_KINDS } from './geoTree.js';
  * The kind a mark is drawn as, from the kinds it holds.
  *
  * One kind draws as itself. A stack of imagery (captures, screenshots, saved
- * comparisons, which the Saved panel files together under Captures) draws as a
- * capture, so zooming out never turns three captures into a pin. A stack holding
+ * comparisons and views, which the Saved panel files together under Captures)
+ * draws as a capture, so zooming out never turns three captures into a pin. A stack holding
  * a place draws as the place.
  */
 export function markKind(kinds) {
@@ -99,7 +99,17 @@ export function pairLabel(row) {
   return `${row.imagery_a ?? 'undated'} → ${row.imagery_b ?? 'undated'}`;
 }
 
-/** How many images were kept in the case from a comparison, or '' for none. */
+/** Which way a saved Horizon view looked, and through what: "facing 95° E · 58° lens". */
+export function lookLabel(row) {
+  if (!Number.isFinite(row?.heading)) return '';
+  const heading = Math.round(row.heading) % 360;
+  const winds = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const facing = `facing ${heading}° ${winds[Math.round(heading / 45) % 8]}`;
+  if (row.projection === 'panorama') return `${facing} · whole turn`;
+  return Number.isFinite(row.fov) ? `${facing} · ${Math.round(row.fov)}° lens` : facing;
+}
+
+/** How many images were kept in the case from a comparison or a view, or '' for none. */
 export function keptLabel(row) {
   const count = row?.kept?.length ?? 0;
   return count ? `${count} image${count > 1 ? 's' : ''} kept` : '';

@@ -151,6 +151,10 @@ class Horizon:
     normal_north: np.ndarray | None = None
     sources: set[str] = field(default_factory=set)
     zooms: set[int] = field(default_factory=set)
+    # The skyline at each cut the sweep was asked for: where the cut fell (metres) and
+    # the angles there, one row per cut
+    cuts: np.ndarray = field(default_factory=lambda: np.empty(0))
+    skyline_cuts: np.ndarray = field(default_factory=lambda: np.empty((0, 0)))
 
 
 def sweep(
@@ -163,12 +167,15 @@ def sweep(
     sampler: terrain.Sampler | None = None,
     near_step: float = NEAR_STEP,
     near: float = 0.0,
+    cuts: Sequence[float] = (),
 ) -> Horizon:
     """March rays at `azimuths` (degrees) and read what they see.
 
     `rows`, elevation angles in degrees from the top of the picture down, turn on
     the picture. `near` starts every ray that far out, which takes away the
-    ground in front, a hill that hides the range behind it.
+    ground in front, a hill that hides the range behind it. `cuts` (metres)
+    also keep the skyline as it stands if the air stopped there: the running
+    highest angle along each ray, read at each cut, as haze would leave it.
     """
     sampler = sampler or terrain.Sampler()
     ground = float(sampler.heights(observer.lat, observer.lon, terrain.MAX_ZOOM))
@@ -184,6 +191,9 @@ def sweep(
 
     skyline = np.empty(az.size)
     skyline_distance = np.empty(az.size)
+    # each cut's last sample: the ray's running highest angle there is that cut's skyline
+    cut_at = [max(0, int(np.searchsorted(distances, cut, side="right")) - 1) for cut in cuts]
+    skyline_cuts = np.empty((len(cut_at), az.size))
     depth = normal_east = normal_north = None
     if row_angles is not None:
         depth = np.full((row_angles.size, az.size), np.nan, dtype=np.float32)
@@ -205,6 +215,8 @@ def sweep(
         last = reach[:, -1]
         skyline[start:start + chunk.size] = np.degrees(last)
         skyline_distance[start:start + chunk.size] = distances[np.argmax(angles, axis=1)]
+        for row, at in enumerate(cut_at):
+            skyline_cuts[row, start:start + chunk.size] = np.degrees(reach[:, at])
         found = _ridges(angles, reach, distances, start)
 
         if row_angles is not None and depth is not None:
@@ -250,6 +262,7 @@ def sweep(
         rows=None if rows is None else np.asarray(rows, dtype=np.float64),
         depth=depth, normal_east=normal_east, normal_north=normal_north,
         sources=set(sampler.sources), zooms=set(sampler.zooms),
+        cuts=np.asarray([float(distances[at]) for at in cut_at]), skyline_cuts=skyline_cuts,
     )
 
 

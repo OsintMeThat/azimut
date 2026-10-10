@@ -1009,6 +1009,7 @@ class Case(CaseStore):
             "inspect-session": ("spec", layout.session_rel, "Inspect"),
             "collage": ("spec", layout.collage_rel, "Collage"),
             "compare-session": ("spec", layout.compare_session_rel, "Comparison"),
+            "horizon-view": ("spec", layout.horizon_view_rel, "View"),
             "post": ("draft", layout.draft_rel, "Post"),
             "sheet": ("path", layout.sheet_rel, "Sheet"),
         }
@@ -1064,6 +1065,12 @@ class Case(CaseStore):
             new_meta = layout.sheet_meta_rel(canonical)
             moves.append((self.resolve_inside(old_meta), self.resolve_inside(new_meta)))
             replacements.append((old_meta, new_meta))
+        if entity["type"] == "horizon-view":
+            # The preview the lists show is named after the view, so it follows it.
+            old_thumb = layout.horizon_thumb_rel(Path(current).stem)
+            new_thumb = layout.horizon_thumb_rel(canonical)
+            moves.append((self.resolve_inside(old_thumb), self.resolve_inside(new_thumb)))
+            replacements.append((old_thumb, new_thumb))
 
         moved: list[tuple[Path, Path]] = []
         applied: list[tuple[str, str]] = []

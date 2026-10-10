@@ -18,7 +18,8 @@
  */
 import { focal, principal, rayFor, turnBetween } from './camera.js';
 import { headingText } from './geometry.js';
-import { heightFor } from './view.js';
+import { skylineWithin } from './panorama.js';
+import { FOV, heightFor } from './view.js';
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 /** A point of the photo, 0 to 1, to a millionth: far under a pixel of any photo laid. */
@@ -48,23 +49,17 @@ export const LOUPE_MAX = 16;
 export const NO_LOUPE = Object.freeze({ zoom: 1, x: 0.5, y: 0.5 });
 
 /**
- * How far a photo pinned to the terrain lets the view go: out to this much
- * wider than the photo, and this many photo widths off its middle, where a
- * straight lens still draws the ground without stretching it past reading.
+ * How far the view may go from the photo: out to this much wider than the
+ * photo, and this many photo widths off its middle, where a straight lens
+ * still draws the ground without stretching it past reading.
  */
-export const FREE_ZOOM_MIN = 0.3;
-export const FREE_REACH = 2;
+export const LOUPE_MIN = 0.3;
+export const LOUPE_REACH = 2;
 
-/**
- * A loupe kept on the photo: never smaller than the frame, never looking past
- * the photo's edges. A photo pinned to the terrain (`free`) lets it go wider
- * and further, the terrain round the photo then showing.
- */
-export function clampLoupe({ zoom, x, y }, { free = false } = {}) {
-  const z = clamp(Number(zoom) || 1, free ? FREE_ZOOM_MIN : 1, LOUPE_MAX);
-  const half = 0.5 / z;
-  const within = (value) =>
-    free ? clamp(Number.isFinite(value) ? value : 0.5, 0.5 - FREE_REACH, 0.5 + FREE_REACH) : clamp(Number(value) || 0.5, half, 1 - half);
+/** A loupe kept within reach of the photo: the terrain round it shows where the photo leaves the screen. */
+export function clampLoupe({ zoom, x, y }) {
+  const z = clamp(Number(zoom) || 1, LOUPE_MIN, LOUPE_MAX);
+  const within = (value) => clamp(Number.isFinite(value) ? value : 0.5, 0.5 - LOUPE_REACH, 0.5 + LOUPE_REACH);
   return { zoom: z, x: within(x), y: within(y) };
 }
 
@@ -79,19 +74,75 @@ export function screenAt(loupe, u, v, size) {
 }
 
 /** The loupe magnified by a factor about a point of the screen, which keeps the point of the photo under it. */
-export function zoomLoupe(loupe, factor, at, size, { free = false } = {}) {
+export function zoomLoupe(loupe, factor, at, size) {
   const under = photoAt(loupe, at.x, at.y, size);
-  const zoom = clamp(loupe.zoom * factor, free ? FREE_ZOOM_MIN : 1, LOUPE_MAX);
-  return clampLoupe({ zoom, x: under.u - (at.x / size.width - 0.5) / zoom, y: under.v - (at.y / size.height - 0.5) / zoom }, { free });
+  const zoom = clamp(loupe.zoom * factor, LOUPE_MIN, LOUPE_MAX);
+  return clampLoupe({ zoom, x: under.u - (at.x / size.width - 0.5) / zoom, y: under.v - (at.y / size.height - 0.5) / zoom });
 }
 
 /** The loupe moved with the hand: the photo follows a drag of `dx`, `dy` CSS pixels. */
-export function panLoupe(loupe, dx, dy, size, { free = false } = {}) {
-  return clampLoupe({ ...loupe, x: loupe.x - dx / size.width / loupe.zoom, y: loupe.y - dy / size.height / loupe.zoom }, { free });
+export function panLoupe(loupe, dx, dy, size) {
+  return clampLoupe({ ...loupe, x: loupe.x - dx / size.width / loupe.zoom, y: loupe.y - dy / size.height / loupe.zoom });
 }
 
 /** Whether a loupe shows anything but the whole photo in the frame. */
 export const loupeMoved = (loupe) => Boolean(loupe) && (loupe.zoom !== 1 || loupe.x !== 0.5 || loupe.y !== 0.5);
+
+// -- the photo moved over a terrain that stays put -------------------------------
+
+/**
+ * The lens turned so that the ground under a point of the screen is the
+ * ground that was there before the loupe moved: `camera` is the view's own
+ * lens, `loupe` the one it was seen through, `next` what changes of the lens
+ * and `nextLoupe` the loupe it is seen through now. Returns `{ heading, tilt }`.
+ */
+function groundKept(camera, loupe, next, nextLoupe, at, size) {
+  const before = rayFor({ ...camera, width: size.width, height: size.height, loupe }, at.x, at.y);
+  const after = { ...camera, ...next, width: size.width, height: size.height, loupe: nextLoupe };
+  for (let pass = 0; pass < 8; pass += 1) {
+    const seen = rayFor(after, at.x, at.y);
+    const turn = turnBetween(seen.azimuth, before.azimuth);
+    const lift = before.elevation - seen.elevation;
+    after.heading += turn;
+    after.tilt += lift;
+    if (Math.abs(turn) + Math.abs(lift) < 1e-9) break;
+  }
+  return { heading: after.heading, tilt: after.tilt };
+}
+
+/**
+ * The photo slid over the terrain by a drag of `dx`, `dy` CSS pixels, the
+ * terrain staying where it is: the loupe follows the hand and the lens turns
+ * the other way, so the ground under `at` stays under it. The photo and the
+ * lens move together, so where the photo lies on the terrain is all that
+ * changes. Returns `{ loupe, heading, tilt }`.
+ */
+export function slidPhoto(camera, loupe, dx, dy, at, size) {
+  const next = panLoupe(loupe, dx, dy, size);
+  return { loupe: next, ...groundKept(camera, loupe, {}, next, at, size) };
+}
+
+/**
+ * The photo grown by `factor` about a point of the screen, the terrain staying
+ * where it is: the loupe magnifies, and the photo's lens widens by as much, so
+ * the terrain keeps its size on screen while the photo covers more of it (a
+ * cropped or zoomed frame is a narrower lens than its file says). Held to
+ * the loupe's reach and to `fov`'s `{ min, max }`. Returns `{ loupe, fov,
+ * heading, tilt }`.
+ */
+export function grownPhoto(camera, loupe, factor, at, size, fov = FOV) {
+  const tan = (degrees) => Math.tan((degrees * Math.PI) / 360);
+  let zoom = clamp(loupe.zoom * factor, LOUPE_MIN, LOUPE_MAX);
+  // the screen keeps its scale: a lens tangent grows with the loupe
+  let wide = (Math.atan(tan(camera.fov) * (zoom / loupe.zoom)) * 360) / Math.PI;
+  const held = clamp(wide, fov.min, fov.max);
+  if (held !== wide) {
+    zoom = loupe.zoom * (tan(held) / tan(camera.fov));
+    wide = held;
+  }
+  const next = zoomLoupe(loupe, zoom / loupe.zoom, at, size);
+  return { loupe: next, fov: wide, ...groundKept(camera, loupe, { fov: wide }, next, at, size) };
+}
 
 
 // -- a lens's curve --------------------------------------------------------------
@@ -235,6 +286,65 @@ export function warpUniform(corners) {
   return [back[0], back[3], back[6], back[1], back[4], back[7], back[2], back[5], back[8]];
 }
 
+/**
+ * The photo's grid as it shows: its edges and `lines` − 1 lines each way
+ * between them, each a polyline of `samples` + 1 points of the frame, taken
+ * through `through` (a point of the photo to where it shows). A grid drawn
+ * over the photo while it is reshaped says what the corners and the curve do
+ * to it.
+ */
+export function photoGrid(through, { lines = 4, samples = 24 } = {}) {
+  const polylines = [];
+  for (let k = 0; k <= lines; k += 1) {
+    const at = k / lines;
+    const across = [];
+    const down = [];
+    for (let i = 0; i <= samples; i += 1) {
+      const along = i / samples;
+      across.push(through({ u: along, v: at }));
+      down.push(through({ u: at, v: along }));
+    }
+    polylines.push(across, down);
+  }
+  return polylines;
+}
+
+/** The middle of each of the photo's edges where its corners put it: top, right, bottom, left. */
+export function edgeMiddles(corners) {
+  return [
+    { u: 0.5, v: 0 },
+    { u: 1, v: 0.5 },
+    { u: 0.5, v: 1 },
+    { u: 0, v: 0.5 },
+  ].map((point) => warped(point, corners));
+}
+
+/**
+ * The corners with one edge moved by `delta` (`{ x, y }` screen pixels; the
+ * photo is `scale` (`{ width, height }`) big on screen): the edge's two
+ * corners move together, which stretches or squeezes the photo that way.
+ * Unless `free`, only the part of the move across the edge is taken, as a
+ * side handle does. Edge 0 is the top, then clockwise.
+ */
+export function edgeMoved(corners, edge, delta, scale, { free = false } = {}) {
+  const a = corners[edge];
+  const b = corners[(edge + 1) % 4];
+  let { x, y } = delta;
+  if (!free) {
+    const along = { x: (b.u - a.u) * scale.width, y: (b.v - a.v) * scale.height };
+    const length = Math.hypot(along.x, along.y);
+    if (length > 0) {
+      const normal = { x: -along.y / length, y: along.x / length };
+      const across = x * normal.x + y * normal.y;
+      x = across * normal.x;
+      y = across * normal.y;
+    }
+  }
+  const du = x / scale.width;
+  const dv = y / scale.height;
+  return corners.map((corner, index) => (index === edge || index === (edge + 1) % 4 ? { u: corner.u + du, v: corner.v + dv } : corner));
+}
+
 /** Whether a point of the frame lies inside the four corners. */
 export function insideCorners(point, corners) {
   let inside = false;
@@ -370,10 +480,12 @@ export function traceSamples(strokes, size, { spacing = 4, most = TRACE_SAMPLES 
 
 /**
  * The terrain's skyline at an azimuth, between the two columns either side:
- * degrees, or null where no ground stands (open sea, off a window).
+ * degrees, or null where no ground stands (open sea, off a window). `reach`
+ * reads the skyline as it stands if the air stops that far out (panorama.js `skylineWithin`).
  */
-export function skylineBetween(panorama, azimuth) {
-  if (!panorama?.skyline?.length) return null;
+export function skylineBetween(panorama, azimuth, reach = null) {
+  const angles = skylineWithin(panorama, reach);
+  if (!angles?.length) return null;
   const { start, step, count, full } = panorama.azimuth;
   const x = ((((azimuth - start) % 360) + 360) % 360) / step;
   const c0 = Math.floor(x);
@@ -381,8 +493,8 @@ export function skylineBetween(panorama, azimuth) {
   const i0 = c0 % turn;
   const i1 = (c0 + 1) % turn;
   if (i0 >= count || i1 >= count) return null;
-  const a = panorama.skyline[i0];
-  const b = panorama.skyline[i1];
+  const a = angles[i0];
+  const b = angles[i1];
   if (!Number.isFinite(a) && !Number.isFinite(b)) return null;
   if (!Number.isFinite(a)) return b;
   if (!Number.isFinite(b)) return a;
@@ -589,17 +701,31 @@ export function tracePlane(samples, camera) {
   };
 }
 
+/** A skyline as JSON carries it: a column without ground is null. */
+const sendable = (angles) => Array.from(angles, (v) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null));
+
 /**
  * What to ask the search: the trace, the camera it starts from, and the turn
  * the view already marched, so it reads the skyline the analyst sees. Null
  * while that turn is not whole (a window of it), when only a fit from here can.
  *
- * @param {{ known?: boolean }} [options] `known`: the photo said its lens, which is then the only one tried
+ * `reach` is how far the photo sees: 'auto' sends the cuts the panorama keeps
+ * up to `autoReach`, the farthest as the turn and the nearer ones beside it,
+ * for the search to try each (the whole turn when it keeps none); a number
+ * sends that cut alone; anything else the whole turn alone. `within` and
+ * `facing` are the hints (lib/horizon/hints.js searchHints).
+ *
+ * @param {{ known?: boolean, reach?: 'auto' | number | null, autoReach?: number, within?: number[], facing?: number[] }} [options]
+ *   `known`: the photo said its lens, which is then the only one tried
  */
-export function matchRequest(samples, camera, panorama, { known = false } = {}) {
+export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing } = {}) {
   if (!panorama?.skyline?.length || panorama.azimuth?.full === false) return null;
+  const tried = reach === 'auto' ? (panorama.cuts ?? []).filter((cut) => cut.reach <= autoReach) : [];
+  const outer = Number.isFinite(reach) && skylineWithin(panorama, reach) !== panorama.skyline ? reach : (tried.at(-1)?.reach ?? null);
   return {
-    skyline: panorama.skyline,
+    skyline: outer === null ? panorama.skyline : sendable(skylineWithin(panorama, outer)),
+    reach: outer,
+    cuts: tried.slice(0, -1).map((cut) => ({ reach: cut.reach, skyline: sendable(cut.skyline) })),
     start: panorama.azimuth.start,
     step: panorama.azimuth.step,
     ...tracePlane(samples, camera),
@@ -607,73 +733,76 @@ export function matchRequest(samples, camera, panorama, { known = false } = {}) 
     known,
     tilt: camera.tilt,
     roll: camera.roll ?? 0,
+    ...(within && !known ? { within } : {}),
+    ...(facing ? { facing } : {}),
   };
 }
 
 /**
  * Each place the search found, brought onto the trace here as Fit brings the
- * analyst's own placing: `{ camera, gap, explained, close }`, best first. A
- * place the refinement cannot improve stays as the search left it.
+ * analyst's own placing: `{ camera, gap, explained, close, reach }`, best
+ * first. A place lies on a cut of the turn (`reach`, metres, null for the
+ * whole), and is refined and measured against that cut: `skyline(azimuth,
+ * reach)` reads it. A place the refinement cannot improve stays as the search
+ * left it.
  *
  * @param {{ fits: object[] }} found the search's answer
  * @param {{ lens?: boolean }} [options] `lens`: whether the field of view may change
  */
 export function searchedPlaces(found, samples, camera, skyline, { lens = true } = {}) {
   return (found?.fits ?? []).map((fit) => {
-    const start = { ...camera, heading: fit.heading, tilt: fit.tilt, fov: lens ? fit.fov : camera.fov };
-    const refined = fitToTrace(samples, start, skyline, { lens });
+    const on = Number.isFinite(fit.reach) ? fit.reach : null;
+    const along = (azimuth) => skyline(azimuth, on);
+    const start = {
+      ...camera,
+      heading: fit.heading,
+      tilt: fit.tilt,
+      roll: Number.isFinite(fit.roll) ? fit.roll : camera.roll,
+      fov: lens ? fit.fov : camera.fov,
+    };
+    const refined = fitToTrace(samples, start, along, { lens });
     const placed = refined?.improved ? refined.camera : start;
-    return { camera: placed, gap: traceGap(samples, placed, skyline), explained: fit.explained, close: fit.close };
+    return { camera: placed, gap: traceGap(samples, placed, along), explained: fit.explained, close: fit.close, reach: on };
   });
-}
-
-/**
- * The place a Fit turns to: the best, unless another about as good lies
- * within half the lens of where the analyst was looking, whose placing then
- * decides between them. -1 when there is none.
- */
-export function placeToTake(places, camera) {
-  let pick = places.length ? 0 : -1;
-  let nearest = Infinity;
-  places.forEach((place, i) => {
-    if (!place.close) return;
-    const away = Math.abs(turnBetween(camera.heading, place.camera.heading));
-    if (away <= camera.fov / 2 && away < nearest) {
-      nearest = away;
-      pick = i;
-    }
-  });
-  return pick;
 }
 
 /**
  * What a Fit does with the search's answer: `take`, the place it turns to (-1
- * for none), `closest`, the place a "Show the closest" offers when it turns to
- * none, and the toast's `text` and `kind`. `before` is the gap the view had.
+ * for none), `here`, the place the view already stands at when it stays (its
+ * reach is still the one to read the trace against), `closest`, the place a
+ * "Show the closest" offers when it turns to none, and the toast's `text` and
+ * `kind`. `before` is the gap the view had; `facing` whether the analyst said
+ * which way the photo faces. The place is always the best one: where the view
+ * happened to look decides nothing, only what the analyst said (`facing`,
+ * which the search already kept to).
  */
-export function searchOutcome(found, places, camera, { lens = true, before = null } = {}) {
-  const at = placeToTake(places, camera);
+export function searchOutcome(found, places, camera, { lens = true, before = null, facing = false } = {}) {
+  const at = places.length ? 0 : -1;
   const place = places[at];
   const where = (p) => headingText(p.camera.heading, p.camera.fov);
+  // a place on a cut of the turn: the farther ridges are left out, as haze would
+  const onCut = (p) => (Number.isFinite(p.reach) ? `, on the ridges within ${Math.round(p.reach / 1000)} km` : '');
   if (found.verdict === 'none' || !place) {
     const [low, high] = found.lenses ?? [];
     const range = lens && low < high ? ` with a lens of ${Math.round(low)}° to ${Math.round(high)}°` : '';
-    return { take: -1, closest: place ? 0 : -1, text: `Nothing on this horizon matches the trace${range}`, kind: 'warn' };
+    return { take: -1, here: -1, closest: place ? 0 : -1, text: `Nothing on this horizon matches the trace${range}`, kind: 'warn' };
   }
   // the view already stands at that place, and the fit would not bring the trace closer
   const stay = isSamePlace(camera, place) && !closer(place.gap, before);
   const take = stay ? -1 : at;
+  const here = stay ? at : -1;
   if (found.verdict === 'ambiguous') {
     const other = places.find((p, i) => i !== at && p.close);
-    const also = other ? `, and ${where(other)} fits about as well` : '';
-    return { take, closest: -1, text: `Fitted at ${where(place)}${also}`, kind: 'warn' };
+    // the hint that would settle it: which way it faces, unless the analyst already said
+    const also = !other ? '' : facing ? `, and ${where(other)} fits about as well` : `, but ${where(other)} fits as well: say which way it faces`;
+    return { take, here, closest: -1, text: `Fitted at ${where(place)}${also}`, kind: 'warn' };
   }
   if (found.verdict === 'loose') {
-    return { take, closest: -1, text: `Loose fit at ${where(place)}: compare the ridges with the photo`, kind: 'warn' };
+    return { take, here, closest: -1, text: `Loose fit at ${where(place)}${onCut(place)}: compare the ridges with the photo`, kind: 'warn' };
   }
-  if (stay) return { take, closest: -1, text: 'The view is already as close to the trace as a fit gets', kind: 'info' };
+  if (stay) return { take, here, closest: -1, text: 'The view is already as close to the trace as a fit gets', kind: 'info' };
   const gaps = before && place.gap ? `: gap ${gapDegrees(before)}° to ${gapDegrees(place.gap)}°` : '';
-  return { take, closest: -1, text: `Fitted at ${where(place)}${gaps}`, kind: 'ok' };
+  return { take, here, closest: -1, text: `Fitted at ${where(place)}${gaps}${onCut(place)}`, kind: 'ok' };
 }
 
 /** Within a tenth of the lens, and never under a degree: the same place on the turn. */

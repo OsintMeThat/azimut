@@ -163,6 +163,10 @@ function stubClasses() {
       this.offset = offset;
       return this;
     }
+    setRotation(rotation) {
+      this.rotation = rotation;
+      return this;
+    }
     addTo() {
       this.added = true;
       return this;
@@ -450,6 +454,15 @@ describe('a mark is HTML at a position', () => {
     surface.set([MARK]);
     expect(surface.element('sky')).toBe(marks[0].element);
     expect(surface.element('nope')).toBeUndefined();
+  });
+
+  it('lays a mark with a bearing on the ground, turning with the map', () => {
+    const surface = createSurface(stubEngine());
+    surface.set([MARK, { ...MARK, id: 'cone', rotation: 95 }]);
+    expect(marks[0].options).not.toHaveProperty('rotation');
+    expect(marks[1].options).toMatchObject({ rotation: 95, rotationAlignment: 'map', pitchAlignment: 'map' });
+    surface.patch('cone', { rotation: 120 });
+    expect(marks[1].rotation).toBe(120);
   });
 });
 

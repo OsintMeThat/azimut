@@ -405,6 +405,26 @@ describe('a lens’s curve undone', () => {
 });
 
 describe('a photo pulled by its corners', () => {
+  it('shows its grid only while its corners are out, through its corners and its curve', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.grid).toEqual([]);
+    photo.setWarping(true);
+    const flat = photo.grid;
+    expect(flat.length).toBeGreaterThan(4);
+    expect(flat[0][0]).toEqual({ u: 0, v: 0 });
+    photo.setCorner(1, { u: 0.9, v: 0.1 });
+    expect(photo.grid[0].at(-1)).toEqual({ u: 0.9, v: 0.1 });
+    photo.setBend(-0.2);
+    // a curve takes the middle of an edge off the corners' straight line
+    const top = photo.grid[0];
+    const middle = top[Math.floor(top.length / 2)];
+    const straight = { u: (top[0].u + top.at(-1).u) / 2, v: (top[0].v + top.at(-1).v) / 2 };
+    expect(Math.hypot(middle.u - straight.u, middle.v - straight.v)).toBeGreaterThan(0.005);
+    photo.setWarping(false);
+    expect(photo.grid).toEqual([]);
+  });
+
   const PULLED = [
     { u: 0.05, v: 0 },
     { u: 0.9, v: 0.1 },
@@ -522,15 +542,10 @@ describe('a photo locked to the terrain', () => {
     expect(view.look).not.toHaveBeenCalled();
   });
 
-  it('moves over the terrain with the photo on it: wider than the photo and past its edges', async () => {
+  it('moves over the terrain with the photo on it, and lets go where it shows', async () => {
     const photo = overlay();
     const screen = { width: 1000, height: 750 };
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
-    // free, the view stays on the photo
-    photo.zoomLoupe(0.5, { x: 500, y: 375 }, screen);
-    expect(photo.loupe.zoom).toBe(1);
-    photo.panLoupe(-300, 0, screen);
-    expect(photo.loupe.x).toBe(0.5);
     photo.setLocked(true);
     photo.zoomLoupe(0.5, { x: 500, y: 375 }, screen);
     expect(photo.loupe.zoom).toBe(0.5);
@@ -540,9 +555,10 @@ describe('a photo locked to the terrain', () => {
     expect(photo.loupe.zoom).toBe(0.3);
     photo.setTracing(true);
     expect(photo.tracing).toBe(true);
-    // let go, it comes back onto the photo
+    // let go, the photo stays where it shows, and what parts the two is taken again
+    const held = photo.loupe;
     photo.setLocked(false);
-    expect(photo.loupe).toEqual({ zoom: 1, x: 0.5, y: 0.5 });
+    expect(photo.loupe).toBe(held);
     photo.setBend(-0.1);
     expect(photo.bend).toBe(-0.1);
   });
@@ -555,6 +571,44 @@ describe('a photo locked to the terrain', () => {
     photo.setLocked(true);
     await photo.openCase('c1', { path: 'media/other.jpg', kind: 'image' });
     expect(photo.locked).toBe(false);
+  });
+});
+
+describe('what a drag and the wheel move', () => {
+  it('moves the terrain by default, the photo or both when asked, and the last one alone after both', async () => {
+    const photo = overlay();
+    photo.setMoves('photo');
+    expect(photo.moves).toBe('terrain');
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.moves).toBe('terrain');
+    photo.setMoves('photo');
+    expect(photo.moves).toBe('photo');
+    expect(photo.locked).toBe(false);
+    photo.setMoves('both');
+    expect(photo.moves).toBe('both');
+    expect(photo.locked).toBe(true);
+    // L lets go back to the one moved alone before
+    photo.setLocked(false);
+    expect(photo.moves).toBe('photo');
+    photo.setMoves('sideways');
+    expect(photo.moves).toBe('photo');
+    photo.setMoves('terrain');
+    expect(photo.moves).toBe('terrain');
+    await photo.openCase('c1', { path: 'media/other.jpg', kind: 'image' });
+    photo.setMoves('photo');
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.moves).toBe('terrain');
+  });
+
+  it('lays a loupe the view worked out, kept within reach of the photo', async () => {
+    const photo = overlay();
+    photo.setLoupe({ zoom: 2, x: 0.4, y: 0.6 });
+    expect(photo.loupe).toEqual({ zoom: 1, x: 0.5, y: 0.5 });
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.setLoupe({ zoom: 2, x: 0.4, y: 0.6 });
+    expect(photo.loupe).toEqual({ zoom: 2, x: 0.4, y: 0.6 });
+    photo.setLoupe({ zoom: 0.01, x: 9, y: 0.5 });
+    expect(photo.loupe).toEqual({ zoom: 0.3, x: 2.5, y: 0.5 });
   });
 });
 
@@ -769,5 +823,47 @@ describe('a photo file opened as a picture', () => {
     const bitmap = await openBitmap('blob', make);
     expect(asked[1]).toMatchObject({ resizeWidth: PHOTO_MAX_PX, resizeHeight: 3072 });
     expect([bitmap.width, bitmap.height]).toEqual([PHOTO_MAX_PX, 3072]);
+  });
+});
+
+describe('what the analyst knows about the photo', () => {
+  it('knows nothing at first, and takes each hint alone', async () => {
+    const photo = overlay();
+    photo.setHints({ zoom: 'zoomed' });
+    expect(photo.hints.zoom).toBe('any'); // nothing laid, nothing to say about it
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.hints).toEqual({ zoom: 'any', facing: null, reach: 'auto' });
+    photo.setHints({ zoom: 'zoomed' });
+    photo.setHints({ facing: { heading: 218 } });
+    expect(photo.hints).toMatchObject({ zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' });
+  });
+
+  it('reads the trace against the reach the analyst set, else the one Fit found', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.reach).toBeNull();
+    photo.setReachFound(20_000);
+    expect(photo.reach).toBe(20_000);
+    photo.setHints({ reach: 10_000 });
+    expect(photo.reach).toBe(10_000);
+    photo.setHints({ reach: 'all' });
+    expect(photo.reach).toBeNull();
+    photo.setHints({ reach: 'auto' });
+    expect(photo.reach).toBe(20_000);
+  });
+
+  it('forgets it all with the photo, and a saved view brings it back', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.setHints({ zoom: 'wide' });
+    photo.setReachFound(50_000);
+    await photo.openCase('c1', { path: 'media/other.jpg', kind: 'image' });
+    expect(photo.hints.zoom).toBe('any');
+    expect(photo.reachFound).toBeNull();
+    photo.restoreWork({ hints: { zoom: 'telephoto', facing: { heading: 12 }, reach: 'auto' }, reach: 10_000 });
+    expect(photo.hints).toMatchObject({ zoom: 'telephoto', facing: { heading: 12 } });
+    expect(photo.reach).toBe(10_000);
+    photo.remove();
+    expect(photo.hints.zoom).toBe('any');
   });
 });

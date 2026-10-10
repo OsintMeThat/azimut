@@ -31,6 +31,7 @@
   import { copernicusNeed } from '../lib/copernicusSetup.js';
   import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { lookFrom, openMapAt } from '../lib/navigate.js';
+  import { headingUp } from '../lib/map/facade.js';
   import { followFullscreen, toggleFullscreen } from '../lib/fullscreen.js';
   import { shareView } from '../lib/map/sharedView.js';
   import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
@@ -449,7 +450,8 @@
     } else if (id === 'centre') {
       engine.setView(point, engine.getZoom());
     } else if (id === 'horizon') {
-      lookFrom({ ...point, heading: bearing });
+      // a turned map faces somewhere: the eye faces the way up the screen
+      lookFrom({ ...point, heading: headingUp(bearing) });
     } else if (id === 'compare') {
       await comparePoint(point, value);
     } else if (id === 'goto') {

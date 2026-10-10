@@ -61,6 +61,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   .inspect/    # each file's Inspect work: its frames and their edits
   .collages/   # collage layouts and their previews; the picture one exports is media
   .compare/    # saved Compare session specs
+  .horizon/    # saved Horizon views and their previews
   .analysis/   # Detect areas, saved detections, runs and the frames behind their results
   .search/     # saved Grid Search state
   .layers/     # added map layers: spec + source as received + its icons; .cache/ is derived
@@ -89,7 +90,7 @@ The entity/link schema has existed since v1. Full vocabulary lives in
   | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
-  | document | proof, post, note, sheet, inspect-session, collage, compare-session, map-layer, analysis-* (Detect), bookmark |
+  | document | proof, post, note, sheet, inspect-session, collage, compare-session, horizon-view, map-layer, analysis-* (Detect), bookmark |
   | place | place |
   | claim | claim |
 

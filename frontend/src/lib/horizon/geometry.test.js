@@ -4,6 +4,7 @@ import {
   bearingBetween,
   cardinal,
   distanceBetween,
+  elsewhere,
   elevationTicks,
   faceTowards,
   footprint,
@@ -167,5 +168,23 @@ describe('the heading caret, the level line and the elevation scale', () => {
     const telephoto = elevationTicks({ ...LENS, width: 1036, height: 725, fov: 18.1 });
     expect(telephoto.length).toBeGreaterThan(5);
     expect(elevationTicks({ ...LENS, width: 0 })).toEqual([]);
+  });
+});
+
+describe('the other maps, looking elsewhere', () => {
+  const EYE = { lat: 46.5586, lon: 7.8353 };
+
+  it('says where they look once it is past a short walk from the eye', () => {
+    const far = { lat: 46.7, lon: 7.9, zoom: 14, bearing: 0, by: 'satellite' };
+    const away = elsewhere(far, EYE);
+    expect(away).toMatchObject({ lat: 46.7, lon: 7.9, zoom: 14 });
+    expect(away.metres).toBeGreaterThan(15_000);
+  });
+
+  it('says nothing nearby, for its own camera, or with no camera at all', () => {
+    expect(elsewhere({ lat: 46.5596, lon: 7.8353, zoom: 17, by: 'satellite' }, EYE)).toBeNull();
+    expect(elsewhere({ lat: 46.7, lon: 7.9, zoom: 14, by: 'horizon' }, EYE)).toBeNull();
+    expect(elsewhere(null, EYE)).toBeNull();
+    expect(elsewhere({ lat: 46.7, lon: 7.9, zoom: 14, by: 'link' }, null)).toBeNull();
   });
 });

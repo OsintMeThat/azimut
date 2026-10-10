@@ -29,11 +29,18 @@
  * The chain in Satellite (`link.js`) carries this camera to other windows and
  * to the extension's map panels while the preference is on, so every tab of
  * the window follows them, not only Satellite.
+ *
+ * **Horizon shares where it stands.** Its camera is an eye, not a map: once the
+ * eye and its look rest, the window looks from the eye, turned to its heading
+ * (`stood`), at whatever zoom the maps had. The eye itself never moves for
+ * another map: placing it costs a landing, and a photo matched on it would be
+ * lost. Horizon's own map, while no eye stands, is a map tab like the others.
  */
+import { headingUp } from './facade.js';
 import { readable, samePlace, sameView } from './link.js';
 
 /**
- * @param {string} tool this tab's id: 'satellite' | 'compare' | 'detect'
+ * @param {string} tool this tab's id: 'satellite' | 'compare' | 'detect' | 'horizon'
  * @param {{ state: { tool: string, mapView: object | null }, enabled: () => boolean }} options
  *   `state` holds the window's camera (`uiState.mapView`) and which tab is on
  *   screen; `enabled` reads the preference.
@@ -67,6 +74,16 @@ export function shareView(tool, { state, enabled }) {
 
   return {
     settled,
+
+    /**
+     * Horizon's eye came to rest: the window looks from it, the map turned so
+     * the way it faces is up, as close as the maps last were (`zoom` when no
+     * map has looked anywhere yet).
+     */
+    stood({ lat, lon, heading }, zoom) {
+      const shared = state.mapView;
+      settled({ lat, lon, zoom: readable(shared) ? shared.zoom : zoom, bearing: headingUp(heading) });
+    },
 
     /**
      * Where this tab should go now that it shows: the window's camera, when

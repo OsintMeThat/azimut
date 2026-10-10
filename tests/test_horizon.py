@@ -243,3 +243,24 @@ def test_normals_of_a_window_of_the_turn_stay_inside_it():
     assert np.abs(normal_east[:, 50:]).max() < 3e-3
 
 
+
+
+def test_a_cut_keeps_the_skyline_haze_would_leave(relief):
+    eye = horizon.Observer(*EYE, "ground", 1.7)
+    found = horizon.sweep(eye, azimuths=[60.0, 200.0], far=60_000.0, sampler=_sampler(relief),
+                          cuts=(15_000.0, 60_000.0))
+    assert found.cuts[0] == pytest.approx(15_000.0, rel=horizon.STEP_RATIO)
+    assert found.skyline_cuts.shape == (2, 2)
+    # toward 60°, inside 15 km only the near peak at 10 km stands; the far one at 30 km rises over it
+    within = horizon.sweep(eye, azimuths=[60.0], far=15_000.0, sampler=_sampler(relief))
+    assert found.skyline_cuts[0, 0] == pytest.approx(float(within.skyline[0]), abs=1e-9)
+    assert found.skyline_cuts[1, 0] == pytest.approx(float(found.skyline[0]), abs=1e-9)
+    assert found.skyline_cuts[1, 0] > found.skyline_cuts[0, 0] + 1.0
+    # toward 200° the lone peak is 20 km out: the cut at 15 km stops short of it
+    assert found.skyline_cuts[0, 1] < found.skyline_cuts[1, 1]
+
+
+def test_a_sweep_without_cuts_has_none(relief):
+    found = horizon.sweep(horizon.Observer(*EYE, "ground", 1.7), azimuths=[60.0], far=20_000.0,
+                          sampler=_sampler(relief))
+    assert found.cuts.size == 0 and found.skyline_cuts.shape[0] == 0

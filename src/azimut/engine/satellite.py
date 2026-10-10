@@ -24,7 +24,7 @@ from typing import Any
 
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
-from . import comparisons, continents
+from . import comparisons, continents, horizon_views
 from . import coords as coords_engine
 from . import countries
 from . import geo as geo_engine
@@ -33,9 +33,10 @@ from . import media as media_engine
 from . import proposals as proposal_engine
 from . import timeline
 
-# Saved work is places, captures and saved comparisons; a screenshot filed by the
-# capture extension is a capture with a different origin, not a type of its own.
-SAVED_TYPES = ["place", "capture", "compare-session"]
+# Saved work is places, captures, saved comparisons and saved Horizon views; a
+# screenshot filed by the capture extension is a capture with a different origin,
+# not a type of its own.
+SAVED_TYPES = ["place", "capture", "compare-session", horizon_views.TYPE]
 
 # One page of the catalog per query while collecting saved entities: bounded
 # memory per round-trip, and the whole set is still tens of KB on the wire.
@@ -491,7 +492,7 @@ def _page_all(case: Case, types: list[str]) -> list[dict[str, Any]]:
 
 
 def saved_entities(case: Case) -> list[dict[str, Any]]:
-    """Every ``place``, ``capture`` and saved comparison, in insertion order."""
+    """Every ``place``, ``capture``, saved comparison and saved view, in insertion order."""
     return _page_all(case, SAVED_TYPES)
 
 
@@ -532,6 +533,7 @@ def _saved_row(
     proofs: int = 0,
     relations: int = 0,
     comparison: dict[str, Any] | None = None,
+    view: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     attrs = entity.get("attrs") or {}
     source = capture or {}
@@ -542,12 +544,20 @@ def _saved_row(
     preview = (comparison or {}).get("preview") or {}
     if comparison is not None:
         kind = "comparison"
+    elif view is not None:
+        kind = "view"
     elif capture is None:
         kind = "place"
     else:
         kind = "screenshot" if source.get("method") == "screenshot" else "capture"
 
-    thumbnail = preview.get("thumbnail") if comparison is not None else source.get("thumbnail")
+    if comparison is not None:
+        thumbnail = preview.get("thumbnail")
+    elif view is not None:
+        # a view's preview sits beside its spec, drawn by the browser at its save
+        thumbnail = attrs.get("thumb")
+    else:
+        thumbnail = source.get("thumbnail")
     # a thumbnail the LRU budget has evicted must read as absent, not as a
     # broken image — the row falls back to its kind glyph
     if thumbnail and not case.resolve_inside(str(thumbnail)).exists():
@@ -614,23 +624,33 @@ def _saved_row(
             # lists them, and none is a mark of its own
             "kept": comparison.get("kept") or [],
         })
+    if view is not None:
+        row.update({
+            # the name Horizon reopens it by, and the cone the map draws
+            "view": horizon_views.view_name(str(attrs.get("spec") or "")),
+            "heading": attrs.get("heading"),
+            "fov": attrs.get("fov"),
+            "projection": attrs.get("projection") or "camera",
+            "kept": view.get("kept") or [],
+        })
     return row
 
 
 def saved_index(case: Case) -> list[dict[str, Any]]:
-    """Places, captures and comparisons as one flat list, newest first.
+    """Places, captures, comparisons and views as one flat list, newest first.
 
     Everything the Saved tree, the search modal and the map overlay read, and
     nothing else: no media rows, no derivation, no edges. Work that hangs off a
     point is a count (proofs, relations) rather than a list, so hundreds of rows
     stay in the tens of KB — which is what lets the panel load the whole set on
     case open instead of paging it. The popup loads the edges themselves from the
-    bounded chain endpoint when it opens. A comparison lists the images kept from
-    it, which are few and are what its card is for.
+    bounded chain endpoint when it opens. A comparison or a view lists the images
+    kept from it, which are few and are what its card is for.
     """
     items = media_engine.list_media(case)
     by_path = {c["path"]: c for c in _captures_of(items)}
     pictures, kept = comparisons.grouped(items)
+    kept_views = horizon_views.grouped(items)
     # two grouped queries for the whole case rather than one per row: this list
     # is read on case open and must not walk the graph row by row
     worked = case.count_dependents(link_type=links.DERIVED_FROM, from_type="proof")
@@ -651,6 +671,8 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
         comparison = ({"preview": pictures.get(str(attrs.get("preview") or "")),
                        "kept": kept.get(str(attrs.get("spec") or ""), [])}
                       if entity["type"] == "compare-session" else None)
+        view = ({"kept": kept_views.get(str(attrs.get("spec") or ""), [])}
+                if entity["type"] == horizon_views.TYPE else None)
         rows.append(
             _saved_row(
                 case,
@@ -659,6 +681,7 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
                 worked.get(entity["id"], 0),
                 related.get(entity["id"], 0),
                 comparison,
+                view,
             )
         )
     # newest first, and within one second the later save wins — saving a place

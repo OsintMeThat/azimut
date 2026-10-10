@@ -79,6 +79,8 @@ class FullCase:
     session: str = ""  # the photo's Inspect work
     compare_session: str = ""
     compare_image: str = ""  # the session's render, a media working file
+    horizon_view: str = ""  # a saved Horizon view, matched on the photo
+    horizon_thumb: str = ""  # its preview, which travels with it
     analyzer_zones: str = ""
     analyzer_area: str = ""
     analyzer_followup: str = ""
@@ -237,6 +239,33 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     )
     assert rendered.status_code == 200, rendered.text
     full.compare_image = rendered.json()["path"]
+
+    view = client.post(
+        f"/api/cases/{case_id}/horizon/views",
+        json={
+            "title": "North ridge",
+            "spec": {
+                "eye": {"lat": 46.5586, "lon": 7.8353, "mode": "ground", "height": 1.7},
+                "look": {"heading": 95, "tilt": 2, "fov": 60},
+                "picture": {"ground": "imagery", "imagery": "esri-world-imagery"},
+                "photo": {
+                    "path": full.photo, "kind": "image", "mix": 0.6,
+                    "strokes": [[{"u": 0.1, "v": 0.4}, {"u": 0.5, "v": 0.35}]],
+                },
+            },
+            "made": {"terrain": [{"label": "Mapterhorn", "attribution": "© Mapterhorn"}],
+                     "resolution_m": 9.6, "refraction": 0.13},
+            "footprint": [[7.8353, 46.5586], [7.95, 46.6], [7.96, 46.5]],
+        },
+    )
+    assert view.status_code == 200, view.text
+    full.horizon_view = view.json()["spec_path"]
+    view_thumb = client.put(
+        f"/api/cases/{case_id}/horizon/views/{view.json()['name']}/thumb",
+        files={"file": ("preview.png", io.BytesIO(_png((160, 80))), "image/png")},
+    )
+    assert view_thumb.status_code == 200, view_thumb.text
+    full.horizon_thumb = view_thumb.json()["thumb"]
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(

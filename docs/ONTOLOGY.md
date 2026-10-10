@@ -140,7 +140,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -169,7 +169,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -193,6 +193,7 @@ answer by omission (`tests/test_entities.py`).
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
 | `collage` | document | annex | ✅ | collage | `spec` (json) | yes |
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
+| `horizon-view` | document | annex | ✅ | horizon | `spec` (json), `thumb?` (webp), `lat`, `lon`, `zoom`, `bearing`, `heading`, `fov`, `projection`, `footprint?`, `geo?` | yes (spec + preview) |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
@@ -538,13 +539,16 @@ A grade is read wherever its source appears, including on a relation row, where 
 sits on the line carrying the entity's name while the edge's own rating sits on the
 line below (§3). Nothing needs one: most bookmarks are never graded.
 
-The file-backed pointers of `proof`, `post`, `inspect-session`, `collage` and
-`compare-session` are not stable: the file's name follows the label, so renaming
+The file-backed pointers of `proof`, `post`, `inspect-session`, `collage`,
+`compare-session` and `horizon-view` are not stable: the file's name follows the label, so renaming
 one in its tool rewrites its `spec`, `draft` or `path` on the same entity. A
 comparison's images follow it: its preview and every image kept from it name it in
 `compare_session`, which a rename rewrites. Each save also restates where the
 comparison stands (`engine/comparisons.py`): its frame's centre, or its view's, with
-the frame as `footprint`, which is what lists it in Saved work beside the captures. An
+the frame as `footprint`, which is what lists it in Saved work beside the captures. A
+`horizon-view` stands at its eye, facing its `heading` through its `fov`, with the
+ground it took in as `footprint` (`engine/horizon_views.py`); its preview and the
+images kept from it (`horizon_view`) follow a rename the same way. An
 `inspect-session` still named after its file is also renamed with that file. Look
 these up by id, or re-read the pointer — never cache one across a save.
 

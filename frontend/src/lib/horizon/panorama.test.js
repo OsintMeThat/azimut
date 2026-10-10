@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { cellAt, decodePanorama, depthAt, inSight, SKY, skylineAt, wrap360 } from './panorama.js';
+import { cellAt, decodePanorama, depthAt, inSight, openCuts, SKY, skylineAt, skylineWithin, wrap360 } from './panorama.js';
 
 /** The app's distance codes (api/horizon.py `depth_codes`). */
 const SCALE = { min: 1, max: 1e6, codes: 65534 };
@@ -68,5 +68,34 @@ describe('a panorama from the app', () => {
     expect(inSight(panorama, { azimuth: 90, angle: 1.1, distance: 9000 }, { below: 0.1 })).toBe(false);
     // its top is in the sky band: nothing under it to read
     expect(inSight(panorama, { azimuth: 90, angle: 2.4, distance: 5000 }, { below: 0.1 })).toBe(false);
+  });
+});
+
+describe('the skyline at each reach haze could leave', () => {
+  const pack = (array) => deflateSync(Buffer.from(array.buffer)).toString('base64');
+
+  it('opens one row per reach, nearest first, NaN where no ground stands', async () => {
+    const rows = Float32Array.from([1, 2, NaN, 4, 5, 6, 7, 8]);
+    const cuts = openCuts(new Uint8Array(rows.buffer), [5_000, 20_000], 4);
+    expect(cuts.map((cut) => cut.reach)).toEqual([5_000, 20_000]);
+    expect(Array.from(cuts[1].skyline)).toEqual([5, 6, 7, 8]);
+    expect(Number.isNaN(cuts[0].skyline[2])).toBe(true);
+    // short of a row, or nothing sent: none
+    expect(openCuts(new Uint8Array(rows.buffer), [5_000, 20_000, 50_000], 4)).toEqual([]);
+    expect(openCuts(null, [5_000], 4)).toEqual([]);
+  });
+
+  it('comes with the panorama, and an answer without them has none', async () => {
+    const base = await decodePanorama({ ...answer(), skyline_cuts: undefined });
+    expect(base.cuts).toEqual([]);
+    const count = base.azimuth.count;
+    const sent = Float32Array.from({ length: 2 * count }, (_, i) => i);
+    const panorama = await decodePanorama({ ...answer(), skyline_cuts: { reach: [5_000, 10_000], skylines: pack(sent) } });
+    expect(panorama.cuts).toHaveLength(2);
+    expect(panorama.cuts[1].skyline[0]).toBe(count);
+    expect(skylineWithin(panorama, 10_000)).toBe(panorama.cuts[1].skyline);
+    // a reach not kept, or none: the whole turn
+    expect(skylineWithin(panorama, 50_000)).toBe(panorama.skyline);
+    expect(skylineWithin(panorama)).toBe(panorama.skyline);
   });
 });

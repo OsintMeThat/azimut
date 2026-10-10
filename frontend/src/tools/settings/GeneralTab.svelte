@@ -103,8 +103,8 @@
     <div class="row-label">
       <span>Share one view</span>
       <span class="row-hint">
-        Satellite, Compare and Detect show the same place. A Detect review and a
-        saved comparison stay where they are.
+        Satellite, Compare, Detect and Horizon show the same place. Horizon's eye
+        moves only when you place it, and a Detect review stays where it is.
       </span>
     </div>
     <input

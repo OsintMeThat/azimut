@@ -516,3 +516,38 @@ def test_a_photo_on_the_computer_is_read_from_its_head_and_forgotten(client, tmp
     # bounded where it is read: a whole file is refused
     whole = "A" * (horizon_api.PHOTO_HEAD_CHARS + 4)
     assert client.post("/api/horizon/photo", json={"head": whole}).status_code == 422
+
+
+def test_a_panorama_keeps_its_skyline_at_each_reach_haze_could_leave(client):
+    body = _ask(client, step=1.0, far=40_000).json()
+    cuts = body["skyline_cuts"]
+    # only the reaches short of the far limit: 80 km is past it
+    assert cuts["reach"] == pytest.approx([5_000.0, 10_000.0, 20_000.0], rel=0.01)
+    rows = _unpack(cuts["skylines"], "<f4", (3, body["azimuth"]["count"]))
+    toward = 90  # the peak stands 15 km east
+    # inside 10 km the peak's summit is not reached yet; by 20 km it is the skyline
+    assert rows[1, toward] < body["skyline"][toward] - 1.0
+    assert rows[2, toward] == pytest.approx(body["skyline"][toward], abs=1e-3)
+    # a cut never stands over the whole turn
+    assert np.all(rows <= np.asarray(body["skyline"]) + 1e-3)
+
+
+def test_a_near_limit_past_a_reach_drops_it(client):
+    body = _ask(client, step=1.0, far=40_000, near=12_000).json()
+    assert body["skyline_cuts"]["reach"] == pytest.approx([20_000.0], rel=0.01)
+
+
+def test_the_browser_offers_the_reaches_the_panorama_keeps():
+    # lib/horizon/hints.js mirrors SKYLINE_CUTS by hand: the menu must not offer a reach the app drops
+    import re
+    from pathlib import Path
+
+    from azimut.api.horizon import SKYLINE_CUTS
+
+    text = (Path(__file__).resolve().parents[1] / "frontend/src/lib/horizon/hints.js").read_text(encoding="utf-8")
+    listed = re.search(r"export const REACHES = \[([^\]]*)\]", text)
+    auto = re.search(r"export const AUTO_REACH = ([\d_]+);", text)
+    assert listed and auto
+    reaches = [float(v.replace("_", "")) for v in listed.group(1).split(",") if v.strip()]
+    assert reaches == list(SKYLINE_CUTS)
+    assert float(auto.group(1).replace("_", "")) in SKYLINE_CUTS
