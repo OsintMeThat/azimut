@@ -70,6 +70,8 @@
     onreorder,
     onpick,
     onadd,
+    /** Make a separate working copy of this source. */
+    oncopy,
     /** `(layer) => index | null`, the days its features carry (`layerDates.js`). */
     dates,
     /** `(layer, period, commit)`: the time strip moved, or was let go. */
@@ -277,6 +279,12 @@
               onclick={() => onrefresh?.(row)}
             >
               <Icon name="reset" size={13} />
+            </button>
+          {/if}
+          {#if oncopy}
+            <button type="button" class="icon-act" aria-label={`Create editable copy of ${row.title}`}
+              title="Create editable copy" onclick={() => oncopy(row)}>
+              <Icon name="copy" size={13} />
             </button>
           {/if}
           <button

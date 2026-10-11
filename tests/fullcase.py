@@ -96,6 +96,8 @@ class FullCase:
     place_id: str = ""
     grid: str = ""
     layer_id: str = ""
+    editable_layer_id: str = ""
+    editable_layer: str = ""
     layer: str = ""  # the spec, which is what the entity points at
     layer_snapshot: str = ""  # the bytes as received, which travel with it
     layer_icons: str = ""  # the source's own pictograms, which travel too
@@ -532,6 +534,21 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     full.layer_cache = layout.layer_cache_rel(layer_name)
     full.layer_id = client.get(
         f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.layer}
+    ).json()["entity"]["id"]
+
+    # A personal layer owns its edited collection as well as the original KMZ.
+    personal = client.post(
+        f"/api/cases/{case_id}/map-layers/{layer_name}/editable-copy",
+        json={"title": "Working checkpoints"},
+    )
+    assert personal.status_code == 200, personal.text
+    personal_name = personal.json()["name"]
+    added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
+                        json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
+    assert added.status_code == 200, added.text
+    full.editable_layer = layout.layer_spec_rel(personal_name)
+    full.editable_layer_id = client.get(
+        f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
     ).json()["entity"]["id"]
 
     # -- the graph as the analyst arranged it ---------------------------------

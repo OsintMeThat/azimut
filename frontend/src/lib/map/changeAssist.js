@@ -156,6 +156,28 @@ function layerReading(side, skipped) {
     });
 }
 
+/**
+ * Why the two sides' layers would make a pixel reading unfair, or ''.
+ *
+ * A and B share one list of layers, so what can differ is a day: the fires or the
+ * night lights drawn for each side's own date, which a reading would take for a
+ * change. Saying which one, and that turning it off is enough, beats asking to
+ * "match the layers" when there is no other list to match.
+ */
+function layerMismatch(a, b, reading, skipped = null) {
+  if (same(layerReading(a, skipped), layerReading(b, skipped))) return '';
+  const ids = (side) => (side?.overlays ?? []).filter((id) => id !== skipped);
+  if (same(ids(a), ids(b))) {
+    if (ids(a).includes('firms') && !same(a.firms, b.firms)) {
+      return `Active fires show different days on A and B. Turn them off to compare ${reading}.`;
+    }
+    if (ids(a).includes('nightlights') && !same(a.nightlights, b.nightlights)) {
+      return `Night lights show different nights on A and B. Turn them off to compare ${reading}.`;
+    }
+  }
+  return `Match the layers on A and B before comparing ${reading}.`;
+}
+
 const refuse = (reason) => ({ ok: false, reason, methods: [], clouds: false });
 const PIXEL_METHODS = ['colour', 'structure', 'brightness'];
 const ESRI = new Set(['esri-world-imagery', 'esri-wayback']);
@@ -215,9 +237,8 @@ export function changeCompatibility(a, b) {
     if (!sameTrack(passA.time, passB.time)) {
       return refuse('Radar compares two passes of one track. Pick passes at the same time of day.');
     }
-    if (!same(layerReading(a), layerReading(b))) {
-      return refuse('Match the reference layers on A and B before comparing pixels.');
-    }
+    const mismatch = layerMismatch(a, b, 'pixels');
+    if (mismatch) return refuse(mismatch);
     return {
       ok: true,
       family: 'sentinel1',
@@ -240,9 +261,8 @@ export function changeCompatibility(a, b) {
       // for a second Wayback release they did not need.
       return refuse('Both sides show the same picture. Pick another Esri release, or two dated Sentinel-2 passes.');
     }
-    if (!same(layerReading(a), layerReading(b))) {
-      return refuse('Match the reference layers on A and B before comparing pixels.');
-    }
+    const mismatch = layerMismatch(a, b, 'pixels');
+    if (mismatch) return refuse(mismatch);
     const mixed = a.provider !== b.provider;
     return {
       ok: true,
@@ -278,9 +298,8 @@ export function changeCompatibility(a, b) {
     if (!same(a.sentinel, b.sentinel) || a.waybackRelease !== b.waybackRelease) {
       return refuse('Match the background imagery on A and B before comparing night lights.');
     }
-    if (!same(layerReading(a, 'nightlights'), layerReading(b, 'nightlights'))) {
-      return refuse('Match every other layer on A and B before comparing night lights.');
-    }
+    const mismatch = layerMismatch(a, b, 'night lights', 'nightlights');
+    if (mismatch) return refuse(mismatch);
     return {
       ok: true,
       family: 'viirs',

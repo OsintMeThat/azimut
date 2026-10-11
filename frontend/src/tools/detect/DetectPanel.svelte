@@ -53,8 +53,6 @@
     markers = $bindable(true),
     outlines = $bindable(true),
     blinking = $bindable(false),
-    /** Whether a run's results are open, which holds the map on them. */
-    reviewing = $bindable(false),
     /** The run being reviewed; the map isolates its overlay without changing saved visibility. */
     focusedRunId = $bindable(null),
     /** Every watched area of the case, for the map to draw while the list is up. */
@@ -171,7 +169,6 @@
   const kindTitle = $derived(draft?.kind === 'routine' ? (draft.followupId ? 'Edit routine' : 'New routine') : 'New pass');
 
   $effect(() => { selectedResult = view === 'review' ? candidateId : null; });
-  $effect(() => { reviewing = view === 'review'; });
   $effect(() => { focusedRunId = view === 'review' ? current?.id ?? null : null; });
   $effect(() => {
     if (view === 'review') return;

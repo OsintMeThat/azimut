@@ -9,7 +9,7 @@
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
   import { createRadarState } from './satellite/state/radar.svelte.js';
   import { createWaybackState } from './satellite/state/wayback.svelte.js';
-  import { createAddedLayersState } from './satellite/state/addedLayers.svelte.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
   import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
@@ -64,26 +64,15 @@
   import { readView, readWindowLabel, viewParams } from '../lib/map/view.js';
   import { createViewLink } from '../lib/map/link.js';
   import { shareView } from '../lib/map/sharedView.js';
-  import {
-    askable,
-    DATED as FIRMS_DATED,
-    firmsNote,
-    keyState,
-    lastDayOf,
-    summary,
-    tileParams,
-    today,
-    WINDOWS as FIRMS_WINDOWS,
-  } from '../lib/map/firms.js';
+  import { askable, firmsNote, keyState, summary, tileParams } from '../lib/map/firms.js';
   import {
     askable as nightCanAsk,
-    COMPOSITE as NIGHT_COMPOSITE,
-    firstNight,
     lastNight,
-    SENSORS as NIGHT_SENSORS,
     summary as nightSummary,
     tileParams as nightParams,
   } from '../lib/map/nightlights.js';
+  import { fireControls, nightControls as nightQuestions } from '../lib/map/eventControls.js';
+  import { layerInfo } from '../lib/map/layerCatalog.js';
   // The map's tools declare themselves once (lib/map/tools.js); the rail, the
   // panel slot, the surface's cursor and the exclusion between modes are all
   // read from that declaration rather than written out here per tool.
@@ -105,6 +94,9 @@
   import RefViewer from './RefViewer.svelte';
   import MapRail from './satellite/MapRail.svelte';
   import AddedLayers from './satellite/AddedLayers.svelte';
+  import MyLayers from './satellite/MyLayers.svelte';
+  import NewLayerDialog from './satellite/NewLayerDialog.svelte';
+  import { createMyLayersState } from './satellite/state/myLayers.svelte.js';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
   import AddLayerDialog from './satellite/AddLayerDialog.svelte';
   import GeoConfirmedDialog from './satellite/GeoConfirmedDialog.svelte';
@@ -194,16 +186,13 @@
   // The case's saved work — both indexes, the panel's filter and the Locate
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
-  // The layers the analyst added themselves: a file they opened, a map they
-  // follow. Its own store, because it owns the one network rule this feature
-  // has — a feed is read when first switched on in a session, on Refresh, and
-  // never otherwise — and the switch itself, which every reload turns off.
-  const addedLayers = createAddedLayersState({
-    api,
-    notify: toast,
-    ensureCase,
-    reloadCase,
-  });
+  const myLayers = createMyLayersState({ api, layers: addedLayers,
+    caseId: () => caseState.current?.id, notify: toast, reloadCase });
+  // The layers the analyst added themselves (a file they opened, a map they
+  // follow) live in the one store every map reads (lib/map/addedLayersState),
+  // because it owns the one network rule this feature has: a feed is read when
+  // first switched on in a session, on Refresh, and never otherwise. This is
+  // where they are added and worked; the other maps only switch them on.
   let savedSearchOpen = $state(false);
   // Map layer: on from the start, on the Media position, so a case opens on its
   // footage already placed. Session-only: the tool stays mounted across tabs, so a
@@ -341,79 +330,10 @@
   }
 
   /** The two questions the fire layer asks, as rows under its switch. */
-  const firmsControls = $derived([
-    {
-      label: 'Sensor',
-      options: fires.sensors.map((entry) => ({
-        id: entry.id,
-        // "VIIRS (S-NPP, NOAA-20, NOAA-21)" does not fit a panel this wide, and the
-        // instrument is the part being chosen between
-        label: entry.label.replace(/\s*\(.*\)\s*$/, ''),
-        title:
-          entry.id === 'modis'
-            ? `${entry.label} · 1 km, back to 2000`
-            : `${entry.label} · 375 m, back to 2012`,
-      })),
-      value: fires.sensor,
-      pick: (id) => (fires.sensor = id),
-    },
-    {
-      label: 'Showing',
-      options: [
-        ...FIRMS_WINDOWS.map((entry) => ({
-          ...entry,
-          title: `Detections from the last ${entry.label.toLowerCase()}`,
-        })),
-        { id: FIRMS_DATED, label: 'Dates', title: 'Detections from a past day or range' },
-      ],
-      value: fires.window,
-      pick: (id) => {
-        fires.window = id;
-        if (id === FIRMS_DATED && !fires.first) fires.first = today();
-      },
-      dates:
-        fires.window === FIRMS_DATED
-          ? {
-              first: fires.first,
-              last: fires.last,
-              today: today(),
-              // FIRMS refuses a longer range, so the input says so rather than
-              // the map failing on a date that was already typed
-              max: lastDayOf(fires.first),
-              setFirst: (value) => (fires.first = value),
-              setLast: (value) => (fires.last = value),
-            }
-          : null,
-    },
-  ]);
+  const firmsControls = $derived(fireControls(fires, fires.sensors, (patch) => Object.assign(fires, patch)));
 
   /** The night layer's question, asked in its row like the fires'. */
-  const nightControls = $derived([
-    {
-      label: 'Showing',
-      options: [
-        ...NIGHT_SENSORS.map((sensor) => ({
-          id: sensor.id,
-          label: sensor.label,
-          title: `${sensor.label} · one night, back to ${sensor.first}`,
-        })),
-        { id: NIGHT_COMPOSITE.id, label: NIGHT_COMPOSITE.label, title: 'Cloud-free composite of 2016' },
-      ],
-      value: night.source,
-      pick: (id) => (night.source = id),
-      day:
-        night.source === NIGHT_COMPOSITE.id
-          ? null
-          : {
-              label: 'Night of',
-              title: 'Night of the pass, around 01:30 local time',
-              value: night.day,
-              min: firstNight(night.source),
-              max: lastNight(),
-              set: (value) => (night.day = value),
-            },
-    },
-  ]);
+  const nightControls = $derived(nightQuestions(night, (patch) => Object.assign(night, patch)));
 
   /** What the surface is asked to lay over the picture (lib/map/basemap.js). */
   const overlays = $derived(
@@ -1221,6 +1141,7 @@
   // then the measure tools. Each mode answers whether it took it.
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
+    if (myLayers.addPoint(at)) return;
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
@@ -1242,6 +1163,12 @@
    * here reads a store until a rail seat is pressed.
    */
   const modes = {
+    layer: {
+      isOn: () => myLayers.placing,
+      open: () => myLayers.start(),
+      close: () => myLayers.stop(),
+      pointing: () => myLayers.placing,
+    },
     profile: {
       isOn: () => profile.on,
       open: () => profile.open(),
@@ -1361,70 +1288,58 @@
    * beside its switch, because hiding a layer and being done with it are two
    * different intentions and used to be the same button.
    */
+  /** A layer's name and what it is, as every map states them (lib/map/layerCatalog.js). */
+  const catalogued = (id) => ({ id, label: layerInfo(id).label, title: layerInfo(id).title });
+
   const layerRows = $derived([
     {
-      id: 'boundaries',
-      label: 'Borders',
+      ...catalogued('boundaries'),
       on: refLayers.boundaries,
-      title: 'Country, region and district borders, from Esri',
       toggle: () => (refLayers.boundaries = !refLayers.boundaries),
     },
     {
-      id: 'placenames',
-      label: 'Place names',
+      ...catalogued('placenames'),
       on: refLayers.placenames,
       disabled: !baseIsImagery,
       detail: baseIsImagery ? '' : 'imagery only',
-      title: baseIsImagery
-        ? 'Towns, villages and hamlets, from OpenStreetMap via OpenFreeMap'
-        : 'Only useful over satellite imagery',
+      ...(baseIsImagery ? {} : { title: 'Only useful over satellite imagery' }),
       toggle: () => (refLayers.placenames = !refLayers.placenames),
     },
     {
-      id: 'roads',
-      label: 'Roads',
+      ...catalogued('roads'),
       on: refLayers.roads,
       disabled: !baseIsImagery,
       detail: baseIsImagery ? '' : 'imagery only',
-      title: baseIsImagery ? 'Road network over the imagery, from Esri' : 'Only useful over satellite imagery',
+      ...(baseIsImagery ? {} : { title: 'Only useful over satellite imagery' }),
       toggle: () => (refLayers.roads = !refLayers.roads),
     },
     {
-      id: 'railway',
-      label: 'Railways',
+      ...catalogued('railway'),
       on: railOverlay,
-      title: 'Tracks, sidings and stations, from OpenRailwayMap',
       toggle: () => (railOverlay = !railOverlay),
     },
     {
-      id: 'power',
-      label: 'Power lines',
+      ...catalogued('power'),
       on: refLayers.power,
-      title: 'Power lines by voltage, towers, substations, pipelines and masts, from Open Infrastructure Map',
       toggle: () => (refLayers.power = !refLayers.power),
       note: refLayers.power ? 'Towers appear from zoom 14.' : '',
     },
     {
-      id: 'seamarks',
-      label: 'Sea marks',
+      ...catalogued('seamarks'),
       on: refLayers.seamarks,
-      title: 'Buoys, lights, harbours and fairways, from OpenSeaMap',
       toggle: () => (refLayers.seamarks = !refLayers.seamarks),
     },
     {
-      id: 'gpstraces',
-      label: 'GPS traces',
+      ...catalogued('gpstraces'),
       on: refLayers.gpstraces,
-      title: 'Raw GPS tracks uploaded to OpenStreetMap, mapped or not',
       toggle: () => (refLayers.gpstraces = !refLayers.gpstraces),
     },
     {
-      id: 'firms',
-      label: 'Active fires',
+      ...catalogued('firms'),
       on: fires.on,
       disabled: !fires.keyed,
       detail: fires.keyed ? firmsSummary : firmsKey.detail,
-      title: fires.keyed ? 'Thermal detections from NASA FIRMS, live or from the archive' : firmsKey.title,
+      ...(fires.keyed ? {} : { title: firmsKey.title }),
       toggle: () => (fires.on = !fires.on),
       // A switch that cannot be pressed says why and where to go, on the row
       // itself rather than only on a greyed-out eye nobody hovers.
@@ -1435,11 +1350,9 @@
       note: fires.on && fires.keyed ? firmsNote(fires, fires.paused) : '',
     },
     {
-      id: 'nightlights',
-      label: 'Night lights',
+      ...catalogued('nightlights'),
       on: night.on,
       detail: night.on ? nightSummary(night) : '',
-      title: 'The ground at night, from NASA’s VIIRS passes',
       toggle: () => (night.on = !night.on),
       controls: night.on ? nightControls : null,
       note: !night.on
@@ -1449,17 +1362,14 @@
           : 'Pick a night inside this sensor’s record.',
     },
     {
-      id: 'saved',
-      label: 'Saved work',
+      ...catalogued('saved'),
       on: savedOverlay,
       // Either index is enough to have something to draw: a case whose footage
       // is placed but which nobody has dropped a pin in is exactly the case the
       // panel opens on Media for.
       disabled: !savedAnything,
       detail: savedWork.shown.length ? String(savedWork.shown.length) : '',
-      title: savedAnything
-        ? "This case's saved work, or its located photos and videos"
-        : 'Nothing is saved or placed in this case yet',
+      ...(savedAnything ? {} : { title: 'Nothing is saved or placed in this case yet' }),
       toggle: () => (savedOverlay = !savedOverlay),
       // Which of them are drawn. The same two answers the Saved panel is asking
       // — what kind, and which folder — so a map read here and a panel read
@@ -1619,16 +1529,41 @@
       sheetPoints = null;
       mediaView = null;
       footprint.cancel();
+      myLayers.close();
+      myLayers.cancelNew();
     }
     const stopSaved = savedWork.load(id);
-    // Reads what is on disk. The only thing that then reaches out is a
-    // subscription that is enabled and asked to be re-read on open.
-    const stopLayers = addedLayers.load(id);
-    return () => {
-      stopSaved?.();
-      stopLayers?.();
-    };
+    // Reads what is on disk, once per reload however many maps ask. The only
+    // thing that then reaches out is a subscription switched on and asked to be
+    // re-read on open.
+    addedLayers.load(id, caseState.rev);
+    return () => stopSaved?.();
   });
+
+  $effect(() => {
+    if (uiState.tool !== 'satellite' || panelTab !== 'layers' || capturesCollapsed) myLayers.stop();
+  });
+
+  function beginMarkers() {
+    closeOthers(modes, 'layer');
+    myLayers.start();
+  }
+
+  async function editMyLayer(row, key = null) {
+    closeOthers(modes, 'layer');
+    panelTab = 'layers';
+    capturesCollapsed = false;
+    if (myLayers.editor?.name !== row.name) await myLayers.open(row);
+    if (key) myLayers.select(key);
+    await tick();
+    engine?.resize();
+  }
+
+  function flyToLayerFeature(feature) {
+    if (feature.geometry?.type !== 'Point') return;
+    const [lon, lat] = feature.geometry.coordinates;
+    engine?.setView({ lat, lon }, Math.max(center.zoom, 15));
+  }
 
   // The media index, read the first time that position is opened.
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
@@ -2424,14 +2359,17 @@
       <!-- Somebody else's map over this one. GL sources rather than the DOM
            markers the case's own pins use: a foreign layer can hold tens of
            thousands of features, which is an order of magnitude past what a
-           `div` each can carry. -->
+           `div` each can carry. Drawn only while this tab is on screen, so a
+           hidden map holds no copy of them; the features stay in the store. -->
       <AddedLayersOverlay
         engine={mapReady ? engine : null}
         caseId={caseState.current?.id ?? ''}
-        layers={addedLayers.drawn}
+        layers={uiState.tool === 'satellite' ? addedLayers.drawn : []}
         drawing={addedLayers.drawing}
         picked={addedLayers.picked}
         onmenu={onMapContextMenu}
+        interactive={!armedCursor}
+        onedit={editMyLayer}
       />
 
       {#if sheetPoints && sheetShown}
@@ -2866,14 +2804,28 @@
           <!-- What is drawn over the imagery. One list: the labels and the saved
                pins used to be buttons in the toolbox, and the handoffs floating
                cards over the map. -->
-          <MapLayers rows={layerRows} bind:open={layersOpen} />
+          {#if !myLayers.editor}
+            <MapLayers rows={layerRows} bind:open={layersOpen} />
+          {/if}
+
+          <MyLayers
+            rows={addedLayers.rows}
+            controller={myLayers}
+            onnew={() => myLayers.newLayer()}
+            onedit={editMyLayer}
+            onstart={beginMarkers}
+            ontoggle={(row) => addedLayers.toggle(caseState.current?.id, row)}
+            ondone={() => myLayers.close()}
+            onfly={flyToLayerFeature}
+          />
 
           <!-- …and under it, what the analyst put there themselves. Two
                sections rather than one list: the line is who chose the layer,
                and an added one carries a source, a freshness and a Remove that
                a curated one has no use for. -->
+          {#if !myLayers.editor}
           <AddedLayers
-            rows={addedLayers.rows}
+            rows={addedLayers.rows.filter((row) => !row.editable)}
             busy={addedLayers.busy}
             refreshing={addedLayers.refreshing}
             opened={addedLayers.justAdded}
@@ -2891,7 +2843,9 @@
             onperiod={(row, period, commit) =>
               addedLayers.setPeriod(caseState.current?.id, row, period, commit)}
             onadd={() => (addedLayers.adding = true)}
+            oncopy={(row) => myLayers.newLayer(row)}
           />
+          {/if}
           {:else if mediaView}
           <!-- A located file, played in place of the list rather than over the
                map it is being compared with. Closing it brings the list back as
@@ -2935,6 +2889,18 @@
     </aside>
   </div>
 </div>
+
+{#if myLayers.dialog}
+  <NewLayerDialog
+    source={myLayers.dialog.source}
+    busy={addedLayers.saving}
+    onclose={() => myLayers.cancelNew()}
+    oncreate={async (title, file) => {
+      await myLayers.create(title, file);
+      if (myLayers.editor) await editMyLayer(myLayers.editor);
+    }}
+  />
+{/if}
 
 {#if addedLayers.adding}
   <AddLayerDialog

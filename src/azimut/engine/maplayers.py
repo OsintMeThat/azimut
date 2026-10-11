@@ -1821,15 +1821,20 @@ def icon(case: "Case", name: str, key: str) -> bytes:
     return buffer.getvalue()
 
 
-def _write_cache(case: "Case", name: str, geojson: dict[str, Any]) -> Path:
+def _write_cache(
+    case: "Case", name: str, geojson: dict[str, Any], *, content_sha256: str = ""
+) -> Path:
     path = case.resolve_inside(layout.layer_cache_rel(name))
     path.parent.mkdir(parents=True, exist_ok=True)
-    stamped = {PARSE_KEY: PARSE_VERSION, **geojson}
-    path.write_text(json.dumps(stamped, ensure_ascii=False), encoding="utf-8")
+    stamped: dict[str, Any] = {PARSE_KEY: PARSE_VERSION}
+    if content_sha256:
+        stamped["azimut_content"] = content_sha256
+    stamped.update(geojson)
+    write_text_atomic(path, json.dumps(stamped, ensure_ascii=False))
     return path
 
 
-def _cache_is_current(path: Path) -> bool:
+def _cache_is_current(path: Path, content_sha256: str = "") -> bool:
     """Whether this cached copy came from the parser running now.
 
     Read from the head of the file: these run to tens of megabytes, and the
@@ -1837,10 +1842,12 @@ def _cache_is_current(path: Path) -> bool:
     """
     try:
         with path.open("rb") as handle:
-            head = handle.read(64).decode("utf-8", "replace")
+            head = handle.read(160 if content_sha256 else 64).decode("utf-8", "replace")
     except OSError:
         return False
-    return f'"{PARSE_KEY}": {PARSE_VERSION}' in head
+    return f'"{PARSE_KEY}": {PARSE_VERSION}' in head and (
+        not content_sha256 or f'"azimut_content": "{content_sha256}"' in head
+    )
 
 
 def drawing(case: "Case", name: str) -> Path:
@@ -1855,8 +1862,14 @@ def drawing(case: "Case", name: str) -> Path:
     """
     spec = _read_spec(case, name)
     path = case.resolve_inside(layout.layer_cache_rel(name))
-    if path.is_file() and _cache_is_current(path):
+    content_sha256 = str(spec.get("content_sha256") or "")
+    if path.is_file() and _cache_is_current(path, content_sha256):
         return path
+    if (spec.get("source") or {}).get("kind") == "editable":
+        from . import layerediting
+
+        return _write_cache(case, name, layerediting.drawing(spec)["geojson"],
+                            content_sha256=content_sha256)
     snapshot = case.resolve_inside(layout.layer_snapshot_rel(name))
     try:
         data = snapshot.read_bytes()
@@ -2176,7 +2189,7 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         # How many of the source's own pictograms are stored, which is also what
         # tells the map whether to ask for any: zero and it draws its own shapes.
         "icons": int(snapshot.get("icons") or 0),
-        "sha256": snapshot.get("sha256") or "",
+        "sha256": spec.get("content_sha256") or snapshot.get("sha256") or "",
         "bytes": int(snapshot.get("bytes") or 0),
         "fetched_at": snapshot.get("at") or "",
         "checked_at": at,
@@ -2184,6 +2197,8 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "created_at": spec.get("created_at") or "",
         "updated_at": spec.get("updated_at") or "",
         "spec": layout.layer_spec_rel(name),
+        "editable": source.get("kind") == "editable",
+        "origin": spec.get("origin"),
     }
 
 

@@ -40,6 +40,15 @@
  */
 export const MAP_MODES = [
   {
+    id: 'layer',
+    label: 'Add layer markers',
+    icon: 'pin',
+    group: 'work',
+    cursor: 'tracing',
+    panel: false,
+    rail: false,
+  },
+  {
     id: 'measure',
     label: 'Measure tools',
     icon: 'ruler',

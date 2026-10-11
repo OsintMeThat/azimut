@@ -1,5 +1,10 @@
 /**
- * The layers the analyst added to this case, as the Map's panel works them.
+ * The layers the analyst added to this case, as every map reads them.
+ *
+ * One store for the whole app (`addedLayers` below), so a layer of a hundred
+ * thousand features is fetched and parsed once however many maps draw it. The
+ * Map's panel is where layers are added and worked; Compare, Detect and Horizon
+ * only switch them on.
  *
  * Holds the list, the acts that change it, and the one thing that decides
  * whether this feature is honest about the network: **nothing here fetches on
@@ -8,10 +13,11 @@
  *
  * **Whether a layer is on lives here and nowhere else**, so every layer starts
  * off when the app or the page is opened again: one heavy enough to take the tab
- * down would otherwise take it down again on every reload. Switching a followed
- * layer on for the first time in the session is what re-reads it, when it asked
- * to be; an off layer never costs a request, and one switched on offline draws
- * the snapshot it holds.
+ * down would otherwise take it down again on every reload. Each map keeps its own
+ * switches (a scope per tool), so a layer is drawn only where it was asked for.
+ * Switching a followed layer on for the first time in the session, in any map, is
+ * what re-reads it, when it asked to be; an off layer never costs a request, and
+ * one switched on offline draws the snapshot it holds.
  *
  * The parsed GeoJSON is kept here rather than in the overlay component so that
  * switching a layer off and on again does not re-read a file the browser already
@@ -23,6 +29,8 @@
  * @param {() => Promise<object>} deps.ensureCase the case to add into, made if needed
  * @param {() => Promise<any>} deps.reloadCase
  */
+import { api as appApi } from '../api.js';
+import { ensureCase as appEnsureCase, reloadCase as appReloadCase, toast } from '../state.svelte.js';
 import {
   drawable,
   followed,
@@ -30,8 +38,11 @@ import {
   renewsOnShow,
   searchFeatures,
   toggleCategory,
-} from '../../../lib/map/addedLayers.js';
-import { active, indexDates, within } from '../../../lib/map/layerDates.js';
+} from './addedLayers.js';
+import { active, indexDates, within } from './layerDates.js';
+
+/** The Map's switches, where layers are added: what `rows`, `drawn` and `toggle` read. */
+const MAP = 'satellite';
 
 export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) {
   let rows = $state([]);
@@ -58,8 +69,10 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   let picked = $state(null);
   let picks = 0;
   let loadedFor = null; // the case every row was read for
-  /** The layers switched on in this page. Never stored: see the header. */
-  let on = $state(new Set());
+  let readFor = ''; // …and the reload it was read at, so four maps ask once
+  let asked = 0; // the latest list read, so an older answer lands nowhere
+  /** scope → the layers switched on in that map. Never stored: see the header. */
+  let on = $state({});
   /** name → the period a strip is being dragged to, ahead of the stored one, so
    *  the map and the counter follow the pointer and the backend hears the end. */
   let drafts = $state({});
@@ -75,22 +88,30 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     drawings.clear();
     held = new Set();
     picked = null;
-    on = new Set();
+    on = {};
     renewed.clear();
   }
 
-  function show(name, visible) {
-    const next = new Set(on);
+  function show(scope, name, visible) {
+    const next = new Set(on[scope]);
     if (visible) next.add(name);
     else next.delete(name);
-    on = next;
+    on = { ...on, [scope]: next };
   }
 
-  /** The rows as the panel and the map read them, each saying whether it is on. */
-  function listed() {
+  /** Off in every map: what a removed layer is. */
+  function hide(name) {
+    on = Object.fromEntries(
+      Object.entries(on).map(([scope, names]) => [scope, new Set([...names].filter((entry) => entry !== name))])
+    );
+  }
+
+  /** The rows as one map reads them, each saying whether it is on there. */
+  function listed(scope = MAP) {
+    const shown = on[scope];
     return rows.map((row) => {
       const period = row.name in drafts ? drafts[row.name] : (row.period ?? null);
-      const listing = { ...row, enabled: on.has(row.name), period };
+      const listing = { ...row, enabled: Boolean(shown?.has(row.name)), period };
       const index = active(period) ? datesOf(row.name) : null;
       if (!index) return listing;
       // what a period leaves on the map, which the counter and the legend state
@@ -129,28 +150,28 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   /**
    * Read this case's layers. Disk only, and every one of them starts off.
    *
-   * Returns the teardown that makes a response arriving after the case changed
-   * land nowhere, as the other panel indexes do.
+   * Every mounted map calls it when the case opens or reloads, so it reads once
+   * per case and reload (`rev`): a layer Detect files from its findings reaches
+   * every map's list from that one read. An answer for a case or a reload that
+   * has since moved on lands nowhere.
    */
-  function load(caseId) {
+  function load(caseId, rev = 0) {
     if (loadedFor !== caseId) {
       loadedFor = caseId;
       reset();
     }
-    if (!caseId) return () => {};
-    let live = true;
+    const key = `${caseId}\u0000${rev}`;
+    if (!caseId || key === readFor) return;
+    readFor = key;
+    const ticket = ++asked;
     api
       .get(`/api/cases/${caseId}/map-layers`)
       .then((list) => {
-        if (!live) return;
-        rows = Array.isArray(list) ? list : [];
+        if (ticket === asked) rows = Array.isArray(list) ? list : [];
       })
       .catch(() => {
-        if (live) rows = [];
+        if (ticket === asked) rows = [];
       });
-    return () => {
-      live = false;
-    };
   }
 
   /**
@@ -229,7 +250,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
       const row = await post(kase.id);
       replace(row);
       // on, since it was added to be looked at, and just read
-      show(row.name, true);
+      show(MAP, row.name, true);
       justAdded = row.name;
       renewed.add(row.name);
       adding = false;
@@ -287,12 +308,37 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     return row;
   }
 
+  /** The eye on a row in one map, which stores nothing. */
+  function toggleIn(scope, caseId, layer) {
+    const visible = !on[scope]?.has(layer.name);
+    show(scope, layer.name, visible);
+    if (visible && !renewed.has(layer.name) && renewsOnShow(layer)) {
+      return renew(caseId, layer);
+    }
+    return Promise.resolve();
+  }
+
   return {
     get rows() {
       return listed();
     },
     get drawn() {
       return drawable(listed());
+    },
+    /**
+     * One map's own switches over the same layers: Compare, Detect and Horizon
+     * each ask with their tool's id, and draw only what they switched on.
+     */
+    scope(name) {
+      return {
+        get rows() {
+          return listed(name);
+        },
+        get drawn() {
+          return drawable(listed(name));
+        },
+        toggle: (caseId, layer) => toggleIn(name, caseId, layer),
+      };
     },
     get open() {
       return open;
@@ -331,6 +377,26 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     load,
     drawing,
     addFile,
+    createEditable(title) {
+      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable`, { title }),
+        'Could not create the layer');
+    },
+    importEditable(file, title) {
+      const body = new FormData();
+      body.append('file', file);
+      body.append('title', title);
+      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable/upload`, body),
+        'Could not import the layer');
+    },
+    copyEditable(layer, title) {
+      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/editable-copy`, { title }),
+        'Could not copy the layer');
+    },
+    edited(caseId, row) {
+      if (loadedFor !== caseId) return;
+      forget(row.name);
+      replace(row);
+    },
     subscribe,
     addGeoConfirmed,
     conflicts,
@@ -404,17 +470,12 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     },
 
     /**
-     * The eye on the row, which stores nothing. Off costs nothing and asks for
-     * nothing; the first time on in the session re-reads a followed layer that
-     * asked for it, while the snapshot already on disk is drawn.
+     * The eye on the Map's row, which stores nothing. Off costs nothing and asks
+     * for nothing; the first time on in the session re-reads a followed layer
+     * that asked for it, while the snapshot already on disk is drawn.
      */
     toggle(caseId, layer) {
-      const visible = !on.has(layer.name);
-      show(layer.name, visible);
-      if (visible && !renewed.has(layer.name) && renewsOnShow(layer)) {
-        return renew(caseId, layer);
-      }
-      return Promise.resolve();
+      return toggleIn(MAP, caseId, layer);
     },
 
     /** One legend row, which hides exactly its own features. */
@@ -488,7 +549,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
         try {
           await api.del(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}`);
           forget(layer.name);
-          show(layer.name, false);
+          hide(layer.name);
           renewed.delete(layer.name);
           rows = rows.filter((entry) => entry.name !== layer.name);
           await reloadCase();
@@ -499,3 +560,11 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     },
   };
 }
+
+/** The one store every map reads, so a layer's features are fetched and held once. */
+export const addedLayers = createAddedLayersState({
+  api: appApi,
+  notify: toast,
+  ensureCase: appEnsureCase,
+  reloadCase: appReloadCase,
+});

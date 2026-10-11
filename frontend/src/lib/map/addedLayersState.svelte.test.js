@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAddedLayersState } from './addedLayers.svelte.js';
+import { createAddedLayersState } from './addedLayersState.svelte.js';
 
 /**
  * The store that owns this feature's one network rule.
@@ -727,5 +727,113 @@ describe('finding a pin', () => {
       { hidden: [] },
     ]);
     expect(layers.picked).toEqual({ name: 'Sightings', index: 9, at: 1 });
+  });
+});
+
+describe('one store, every map', () => {
+  it('reads the list once per case and reload, however many maps ask', async () => {
+    const layers = store();
+    // Satellite, Compare, Detect and Horizon all mounted, all hearing the case open
+    layers.load('c1', 0);
+    layers.load('c1', 0);
+    layers.load('c1', 0);
+    await settle();
+    expect(calls).toEqual([['GET', '/api/cases/c1/map-layers']]);
+
+    layers.load('c1', 1); // the case was reloaded
+    layers.load('c1', 1);
+    await settle();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('lists a layer Detect filed from its findings in every map after the reload', async () => {
+    const layers = store();
+    const detect = layers.scope('detect');
+    layers.load('c1', 0);
+    await settle();
+    expect(detect.rows.map((row) => row.name)).toEqual(['Sightings']);
+
+    // Detect's "Add to the SAT layers" writes the snapshot, then reloads the case
+    rows = [FILE_LAYER, { ...FILE_LAYER, name: 'Strikes', title: 'Strikes', sha256: 'ddd' }];
+    layers.load('c1', 1);
+    await settle();
+
+    expect(detect.rows.map((row) => row.name)).toEqual(['Sightings', 'Strikes']);
+    expect(layers.rows.map((row) => row.name)).toEqual(['Sightings', 'Strikes']);
+    // listed, not drawn: it starts off like every other layer
+    expect(detect.drawn).toEqual([]);
+  });
+
+  it('lets an answer for a reload that moved on land nowhere', async () => {
+    let answer;
+    api.get = vi.fn(() => new Promise((resolve) => (answer = resolve)));
+    const layers = store();
+    layers.load('c1', 0);
+    const first = answer;
+    layers.load('c1', 1);
+    answer([FILE_LAYER, followed()]);
+    first([]);
+    await settle();
+
+    expect(layers.rows.map((row) => row.name)).toEqual(['Sightings', 'Roadblocks']);
+  });
+
+  it('keeps each map its own switches, so a layer is drawn only where it was asked for', async () => {
+    const layers = store();
+    const compare = layers.scope('compare');
+    const horizon = layers.scope('horizon');
+    layers.load('c1');
+    await settle();
+
+    await compare.toggle('c1', compare.rows[0]);
+
+    expect(compare.drawn.map((row) => row.name)).toEqual(['Sightings']);
+    expect(horizon.drawn).toEqual([]);
+    expect(layers.drawn).toEqual([]); // the Map's own switch is untouched
+  });
+
+  it('re-reads a followed layer once in the session, whichever map switched it on first', async () => {
+    rows = [followed()];
+    const layers = store();
+    const detect = layers.scope('detect');
+    layers.load('c1');
+    await settle();
+    calls.length = 0;
+
+    await detect.toggle('c1', detect.rows[0]);
+    await layers.toggle('c1', layers.rows[0]);
+
+    expect(calls).toEqual([['POST', '/api/cases/c1/map-layers/Roadblocks/refresh']]);
+  });
+
+  it('reads the features once for every map that draws them', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    calls.length = 0;
+
+    await layers.drawing('c1', 'Sightings'); // Compare's A
+    await layers.drawing('c1', 'Sightings'); // Compare's B
+    await layers.drawing('c1', 'Sightings'); // Detect
+
+    expect(calls).toEqual([['GET', '/api/cases/c1/map-layers/Sightings/data']]);
+  });
+
+  it('takes a removed layer off in every map', async () => {
+    const layers = store();
+    const detect = layers.scope('detect');
+    layers.load('c1');
+    await settle();
+    await detect.toggle('c1', detect.rows[0]);
+    await layers.toggle('c1', layers.rows[0]);
+
+    await layers.remove('c1', layers.rows[0]);
+    // a layer filed again under the same name comes back off, everywhere
+    layers.load('c1', 1);
+    await settle();
+
+    expect(detect.rows.map((row) => row.name)).toEqual(['Sightings']);
+    expect(detect.drawn).toEqual([]);
+    expect(layers.drawn).toEqual([]);
   });
 });

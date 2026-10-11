@@ -4,6 +4,7 @@ import {
   askable,
   firstNight,
   lastNight,
+  onNight,
   summary,
   tileParams,
   tileTemplate,
@@ -67,5 +68,25 @@ describe('how the row reads', () => {
     expect(summary({ source: 'snpp', day: '2022-02-24' })).toBe('Suomi NPP · 2022-02-24');
     expect(summary({ source: 'noaa20', day: '' })).toBe('NOAA-20 · pick a night');
     expect(summary({ source: COMPOSITE.id })).toBe('composite · 2016');
+  });
+});
+
+describe('a night that follows the picture', () => {
+  it("is the night of the picture's day", () => {
+    expect(onNight({ source: 'noaa20', day: '2025-01-01', follow: true }, '2025-06-02', NOW)).toEqual({
+      source: 'noaa20',
+      day: '2025-06-02',
+    });
+  });
+
+  it('is the last night GIBS holds while the picture has no date', () => {
+    expect(onNight({ source: 'snpp', day: '', follow: true }, '', NOW)).toEqual({ source: 'snpp', day: lastNight(NOW) });
+  });
+
+  it('keeps a picked night', () => {
+    expect(onNight({ source: 'noaa20', day: '2025-01-01', follow: false }, '2025-06-02', NOW)).toEqual({
+      source: 'noaa20',
+      day: '2025-01-01',
+    });
   });
 });

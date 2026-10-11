@@ -6,6 +6,7 @@ import numpy as np
 
 import pytest
 
+from azimut.engine import skymatch
 from skyturns import HALF, RANGE, trace_on
 
 URL = "/api/horizon/match"
@@ -165,7 +166,24 @@ def test_a_rolled_trace_comes_back_with_its_roll_unless_held_level(client):
         {"cuts": [{"reach": 5000.0, "skyline": [1.0] * 100}]},  # not the turn's columns
         {"cuts": [{"reach": 5000.0, "skyline": [None] * 3600}]},
         {"cuts": [{"reach": 5000.0, "skyline": [1.0] * 3600}] * 9},
+        {"anchors": [{"x": 0.0, "y": 0.0, "azimuth": 40.0, "elevation": 2.0, "distance": 0.0}]},
+        {"anchors": [{"x": 99.0, "y": 0.0, "azimuth": 40.0, "elevation": 2.0, "distance": 9000.0}]},
+        {"anchors": [{"x": 0.0, "y": 0.0, "azimuth": 400.0, "elevation": 2.0, "distance": 9000.0}]},
+        {"anchors": [{"x": 0.0, "y": 0.0, "azimuth": 40.0, "elevation": 2.0, "distance": 9000.0}] * 9},
     ],
 )
 def test_hints_the_search_cannot_use_are_refused(client, change):
     assert client.post(URL, json=_body(**change)).status_code == 422
+
+
+def test_a_point_pinned_in_the_photo_keeps_the_search_to_where_it_shows(client):
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    at = 0.3
+    py = float(np.interp(at, x, y))
+    off, up = skymatch.directions(np.array([at]), np.array([py]), fov=52.0)
+    pin = {"x": at, "y": py, "azimuth": (47.0 + float(off[0])) % 360, "elevation": float(up[0]), "distance": 12_000.0}
+    found = client.post(URL, json=_body(x=x.tolist(), y=y.tolist(), fov=52.0, known=True, anchors=[pin])).json()
+    assert found["fits"][0]["heading"] == pytest.approx(47.0, abs=0.3)
+    # the same point said to lie across the turn leaves the trace nowhere to go
+    away = {**pin, "azimuth": (pin["azimuth"] + 180.0) % 360}
+    assert client.post(URL, json=_body(x=x.tolist(), y=y.tolist(), fov=52.0, known=True, anchors=[away])).json()["verdict"] == "none"

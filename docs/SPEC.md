@@ -171,6 +171,7 @@ proof for publication.
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
+| ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare lays one list over both sides, fires and nights on each side's day. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
@@ -311,6 +312,7 @@ stops making sense.
 - **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 - **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
+- **Dated layers by side in Compare:** a GeoConfirmed or other dated layer showing on each side only what was known by that side's date.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
 
 ## 8. Explicit non-goals

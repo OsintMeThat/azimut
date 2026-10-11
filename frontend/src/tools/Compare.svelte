@@ -26,12 +26,10 @@
   import { followFullscreen, toggleFullscreen } from '../lib/fullscreen.js';
   import { wrapLon } from '../lib/coords.js';
   import {
-    COMPARE_LAYERS,
     COMPARE_MODES,
     DIFFERENCE_KEY,
     DEFAULT_DIVIDER,
     DEFAULT_OPACITY,
-    comparisonLayers,
     compareMode,
     percentage,
     DEFAULT_PRESET,
@@ -85,15 +83,25 @@
     readDestinations,
   } from '../lib/exportDest.js';
   import { turnFromKey, turnFromPress } from '../lib/map/gestures.js';
+  import { askable as firmsAskable, keyState, tileParams as firmsTileParams } from '../lib/map/firms.js';
+  import { askable as nightAskable, tileParams as nightTileParams } from '../lib/map/nightlights.js';
+  import { createFireKey } from '../lib/map/fireKey.svelte.js';
+  import { knownLayers, LAYERS } from '../lib/map/layerCatalog.js';
   import {
-    askable as firmsAskable,
-    tileParams as firmsTileParams,
-  } from '../lib/map/firms.js';
-  import {
-    askable as nightAskable,
-    lastNight,
-    tileParams as nightTileParams,
-  } from '../lib/map/nightlights.js';
+    compareFireControls,
+    compareFireNote,
+    compareFireWords,
+    compareNightControls,
+    compareNightNote,
+    compareNightWords,
+    freshFires,
+    freshNight,
+    restoredLayers,
+    sideFires,
+    sideNight,
+    swappedDays,
+  } from '../lib/map/compareLayers.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { isRegistered, sourceRect } from '../lib/screenCrop.js';
   import { deletedToast } from '../lib/trash.js';
   import { assignFolder } from '../lib/filing.js';
@@ -129,7 +137,8 @@
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import PlaceDialog from './satellite/PlaceDialog.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
-  import LayerPane from './compare/LayerPane.svelte';
+  import LayerMenu from '../components/LayerMenu.svelte';
+  import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
   import AnnotationCanvas from './compare/AnnotationCanvas.svelte';
   import AnnotationToolbar from './compare/AnnotationToolbar.svelte';
   import ExportFrame from './compare/ExportFrame.svelte';
@@ -143,11 +152,8 @@
   const imagery = createImageryState({ api });
   let home = $state(null);
   let catalogueError = $state('');
-  let firesKeyed = $state(false);
-  /** Why the fire layer is not usable when it is not: 'missing' | 'off' | 'refused'. */
-  let firesState = $state('missing');
-  /** A spent FIRMS allowance's pause, while it lasts. */
-  let firesPaused = $state(null);
+  /** Whether the fire layer can be used, read from our own backend. */
+  const fireKey = createFireKey({ api });
   let picking = $state(null); // 'a' | 'b' | null
   let mode = $state('side');
   let divider = $state(DEFAULT_DIVIDER);
@@ -167,7 +173,7 @@
   let railFolded = $state(true);
   let rotating = $state(null); // { which, x, y } | null
   let outputBusy = $state(''); // 'capture' | 'png' | 'gif' | 'copy' | ''
-  let rightPanel = $state(null); // 'export' | 'layers' | null
+  let rightPanel = $state(null); // 'export' | null
   let grabbing = $state(false);
   let captureSide = $state(null); // surface visible during an extension frame
   let exportKind = $state('png'); // 'png' | 'blink' | 'slide' | 'evolution' | 'sheet'
@@ -275,13 +281,15 @@
   let bearing = $state(0);
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
 
-  function freshFirms() {
-    return { sensor: 'viirs', window: '24h', first: '', last: '' };
-  }
-
-  function freshNight() {
-    return { source: 'noaa20', day: lastNight() };
-  }
+  /**
+   * The layers over both maps: one list, since a layer on one side only reads as
+   * a change between them (lib/map/compareLayers.js). What differs is the day the
+   * fires and the night lights are drawn for, each side's own by default.
+   */
+  let layers = $state([]);
+  let fires = $state(freshFires());
+  let night = $state(freshNight());
+  let layersOpen = $state(false);
 
   const a = $state({
     present: false,
@@ -292,9 +300,6 @@
     dated: null,
     ready: false,
     refused: false,
-    overlays: [],
-    firms: freshFirms(),
-    night: freshNight(),
   });
   const b = $state({
     present: false,
@@ -305,9 +310,6 @@
     dated: null,
     ready: false,
     refused: false,
-    overlays: [],
-    firms: freshFirms(),
-    night: freshNight(),
   });
 
   const s2a = createSentinelState({
@@ -371,16 +373,28 @@
   const discardable = $derived(sessionDirty && pairSignature() !== pristineSignature);
   // Leaving Azimut with them asks first, as leaving the comparison here does.
   onDestroy(holdsUnsaved('compare', () => discardable));
-  let firmsSensors = $state([]);
+
+  /** The date of the picture on one side, which its fires and night follow. */
+  const pictureDay = (target) => target.dated?.date ?? '';
+  const pictureDays = $derived({ a: pictureDay(a), b: pictureDay(b) });
+  /**
+   * What each side's fires and night ask for. The picture's date is read only
+   * while the layer is on: an Esri date moves with the camera, and a layer that
+   * is off must not make a pan look like a new pair to Difference or the save.
+   */
+  const firesOn = (target) =>
+    sideFires(fires, target === a ? 'a' : 'b', layers.includes('firms') ? pictureDay(target) : '');
+  const nightOn = (target) =>
+    sideNight(night, target === a ? 'a' : 'b', layers.includes('nightlights') ? pictureDay(target) : '');
 
   function changeSide(target, sentinel, wayback, shown, radar) {
     return {
       present: target.present,
       provider: shown.provider?.id ?? target.providerId,
       widget: Boolean(shown.provider?.widget),
-      overlays: comparisonLayers(target.overlays),
-      firms: { ...target.firms },
-      nightlights: { ...target.night },
+      overlays: [...layers],
+      firms: firesOn(target),
+      nightlights: nightOn(target),
       sentinel: {
         layer: sentinel.layer,
         date: sentinel.date,
@@ -445,15 +459,17 @@
   }
 
   function surfaceOverlays(target) {
-    return target.overlays
+    return layers
       .map((id) => {
         if (id === 'firms') {
-          if (!firesKeyed || !firmsAskable(target.firms)) return null;
-          return { id, params: firmsTileParams(target.firms) };
+          const asked = firesOn(target);
+          if (!fireKey.keyed || !firmsAskable(asked)) return null;
+          return { id, params: firmsTileParams(asked) };
         }
         if (id === 'nightlights') {
-          if (!nightAskable(target.night)) return null;
-          return { id, params: nightTileParams(target.night) };
+          const asked = nightOn(target);
+          if (!nightAskable(asked)) return null;
+          return { id, params: nightTileParams(asked) };
         }
         if (id === 'saved') return null;
         return id;
@@ -476,12 +492,11 @@
       if (gone) return;
       // A handoff from the map brings its own pair.
       if (!a.present && !b.present && !uiState.compareAt) void newComparison();
-      await loadFireCatalogue();
+      await fireKey.load();
     })();
     return () => {
       gone = true;
-      clearTimeout(firesPauseTimer);
-      clearTimeout(firesTroubleTimer);
+      fireKey.destroy();
     };
   });
 
@@ -492,34 +507,6 @@
     } catch (error) {
       catalogueError = error?.message ?? 'Could not read imagery providers';
     }
-  }
-
-  async function loadFireCatalogue() {
-    try {
-      const answer = await api.get('/api/firms/sensors');
-      firmsSensors = answer.sensors ?? [];
-      firesKeyed = Boolean(answer.keyed);
-      firesState = answer.state ?? 'missing';
-      firesPaused = answer.paused ?? null;
-    } catch {
-      firmsSensors = [];
-      firesKeyed = false;
-      firesPaused = null;
-    }
-    // A pause ends on its own; the panes hear it then. Our own backend, once.
-    clearTimeout(firesPauseTimer);
-    if (firesPaused) {
-      const left = Date.parse(firesPaused.until) - Date.now();
-      firesPauseTimer = setTimeout(loadFireCatalogue, Math.max(1000, left + 500));
-    }
-  }
-
-  let firesPauseTimer = null;
-  let firesTroubleTimer = null;
-  /** A FIRMS tile failed on either side: ask our backend why, once per burst. */
-  function fireTrouble() {
-    clearTimeout(firesTroubleTimer);
-    firesTroubleTimer = setTimeout(loadFireCatalogue, 800);
   }
 
   function side(which) {
@@ -609,6 +596,9 @@
     const right = sideSpec(b, s2b, wbb, s1b);
     applySide(a, s2a, wba, right, s1a);
     applySide(b, s2b, wbb, left, s1b);
+    // the layers stay; the days picked for each side go with it
+    fires = swappedDays(fires);
+    night = swappedDays(night);
     annotations = annotations.map((mark) => ({ ...mark, side: mark.side === 'a' ? 'b' : mark.side === 'b' ? 'a' : 'both' }));
     invalidateChangeAssist();
   }
@@ -686,9 +676,8 @@
     target.refused = false;
     target.engine = null;
     target.element = null;
-    target.overlays = [];
-    target.firms = freshFirms();
-    target.night = freshNight();
+    // the list is the pair's, so it goes only with the last side
+    if (!a.present && !b.present) resetLayers();
     mode = 'side';
     difference = false;
   }
@@ -756,7 +745,7 @@
     imagery.refreshUsage();
     loadProviders();
     // a FIRMS key pasted into Settings, or tested back to life there
-    loadFireCatalogue();
+    fireKey.load();
     void tick().then(() => {
       a.engine?.resize();
       b.engine?.resize();
@@ -964,9 +953,9 @@
     return {
       present: target.present,
       provider: target.providerId,
-      overlays: comparisonLayers(target.overlays),
-      firms: { ...target.firms },
-      nightlights: { ...target.night },
+      overlays: [...layers],
+      firms: firesOn(target),
+      nightlights: nightOn(target),
       sentinel: {
         layer: sentinel.layer,
         // A difference is only honest over named acquisitions. Freeze a live
@@ -1082,15 +1071,6 @@
       toast(`${saved.provider} is unavailable. Using ${imagery.find(provider)?.label ?? provider}`, 'warn');
     }
     target.providerId = provider;
-    target.overlays = comparisonLayers(saved?.overlays);
-    target.firms = {
-      ...freshFirms(),
-      ...(saved?.firms ?? {}),
-    };
-    target.night = {
-      ...freshNight(),
-      ...(saved?.nightlights ?? {}),
-    };
     sentinel.layer = saved?.sentinel?.layer || sentinel.layer;
     sentinel.date = saved?.sentinel?.date || '';
     sentinel.setMaxcc(saved?.sentinel?.maxcc ?? 100);
@@ -1134,6 +1114,7 @@
       resetAnnotationHistory();
       applySide(a, s2a, wba, spec.a, s1a);
       applySide(b, s2b, wbb, spec.b, s1b);
+      applyLayers(spec.a, spec.b);
       sessionName = saved.title || name;
       openedSession = { name, title: sessionName };
       await tick();
@@ -1175,6 +1156,7 @@
     resetAnnotationHistory();
     applySide(a, s2a, wba, pair.a, s1a);
     applySide(b, s2b, wbb, pair.b, s1b);
+    applyLayers(pair.a, pair.b);
     sessionName = pair.title ?? 'Comparison';
     openedSession = null;
     savedSignature = null;
@@ -1271,12 +1253,7 @@
     pristineSignature = null;
     a.present = false;
     b.present = false;
-    a.overlays = [];
-    b.overlays = [];
-    a.firms = freshFirms();
-    b.firms = freshFirms();
-    a.night = freshNight();
-    b.night = freshNight();
+    resetLayers();
     mode = 'side';
     difference = false;
     divider = DEFAULT_DIVIDER;
@@ -1326,28 +1303,79 @@
     else if (target) void openSession(target.name);
   }
 
-  function toggleLayer(target, layer) {
-    if (!target.present) return;
-    if (layer === 'firms' && !firesKeyed) return;
-    if (layer === 'saved' && !savedWork.rows.length) return;
-    target.overlays = target.overlays.includes(layer)
-      ? target.overlays.filter((id) => id !== layer)
-      : comparisonLayers([...target.overlays, layer]);
+  /** Both sides' layers, read back from what a session or a handoff holds. */
+  function applyLayers(left, right) {
+    ({ layers, fires, night } = restoredLayers(left, right));
+  }
+
+  function resetLayers() {
+    layers = [];
+    fires = freshFires();
+    night = freshNight();
+  }
+
+  function toggleLayer(id) {
+    if (!a.present && !b.present) return;
+    if (id === 'firms' && !fireKey.keyed) return;
+    if (id === 'saved' && !savedWork.rows.length) return;
+    layers = layers.includes(id) ? layers.filter((entry) => entry !== id) : knownLayers([...layers, id]);
     invalidateChangeAssist();
   }
 
-  function copyLayers(source, target) {
-    if (!source.present || !target.present) return;
-    target.overlays = [...source.overlays];
-    target.firms = { ...source.firms };
-    target.night = { ...source.night };
+  function setFires(patch) {
+    fires = { ...fires, ...patch };
     invalidateChangeAssist();
   }
 
-  function patchLayer(target, key, patch) {
-    target[key] = { ...target[key], ...patch };
+  function setNight(patch) {
+    night = { ...night, ...patch };
     invalidateChangeAssist();
   }
+
+  /** The menu's chips: every catalogue layer, over both maps at once. */
+  const layerRows = $derived.by(() => {
+    const present = a.present || b.present;
+    const key = keyState(fireKey);
+    return LAYERS.map((layer) => {
+      const row = {
+        id: layer.id,
+        label: layer.label,
+        group: layer.group,
+        title: layer.title,
+        on: layers.includes(layer.id),
+        disabled: !present,
+        toggle: () => toggleLayer(layer.id),
+      };
+      if (layer.id === 'firms') {
+        if (!key.usable) return { ...row, disabled: true, lock: { text: key.detail, action: key.action, run: openImagerySettings } };
+        return {
+          ...row,
+          summary: compareFireWords(fires, fireKey.sensors, pictureDays),
+          controls: compareFireControls(fires, fireKey.sensors, setFires, pictureDays),
+          note: compareFireNote(fires, pictureDays, fireKey.paused),
+        };
+      }
+      if (layer.id === 'nightlights') {
+        return {
+          ...row,
+          summary: compareNightWords(night, pictureDays),
+          controls: compareNightControls(night, setNight, pictureDays),
+          note: compareNightNote(night, pictureDays),
+        };
+      }
+      if (layer.id === 'saved') {
+        const count = savedWork.rows.length;
+        return { ...row, count, disabled: !present || !count, title: count ? layer.title : 'No saved work in this case' };
+      }
+      return row;
+    });
+  });
+
+  /** The case's own layers in this map's menu, switched on here and nowhere else. */
+  const myLayers = addedLayers.scope('compare');
+  $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
+  /** Drawn only while Compare is on screen: a hidden tab holds no copy on the GPU. */
+  const drawnLayers = $derived(uiState.tool === 'compare' ? myLayers.drawn : []);
 
   async function toggleRightPanel(panel) {
     rightPanel = rightPanel === panel ? null : panel;
@@ -2341,6 +2369,17 @@
     {:else}
       <h2>Compare</h2>
     {/if}
+    <!-- One list over both maps, beside the reading modes: a layer on one side
+         only would read as a change between them. -->
+    {#if a.present || b.present}
+      <LayerMenu
+        rows={layerRows}
+        added={myLayers.rows}
+        ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
+        onmanage={() => (uiState.tool = 'satellite')}
+        bind:open={layersOpen}
+      />
+    {/if}
     {#if !a.present && !b.present}
       <span class="sub">Two imagery views, one shared camera</span>
     {/if}
@@ -2474,14 +2513,12 @@
       <div class="source-bar" aria-label="Compared imagery">
         {#if a.present}
           <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba} s1={s1a}
-            shown={shownA} dated={a.dated} layerCount={a.overlays.length} layersOpen={rightPanel === 'layers'}
-            onlayers={() => toggleRightPanel('layers')} onremove={() => remove('a')} />
+            shown={shownA} dated={a.dated} onremove={() => remove('a')} />
         {:else}<button class="source-add cmp-glass" onclick={() => (picking = 'a')}>A · Add imagery</button>{/if}
         <div class="source-b">
           {#if b.present}
             <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb} s1={s1b}
-              shown={shownB} dated={b.dated} align="right" layerCount={b.overlays.length} layersOpen={rightPanel === 'layers'}
-              onlayers={() => toggleRightPanel('layers')} onremove={() => remove('b')} />
+              shown={shownB} dated={b.dated} align="right" onremove={() => remove('b')} />
           {:else}<button class="source-add cmp-glass" onclick={() => (picking = 'b')}>B · Add imagery</button>{/if}
           <!-- Stacked in the corner as Detect's column is: where to go, then how
                the shared camera stands. -->
@@ -2538,7 +2575,7 @@
           onwidgetload={(meter) => imagery.countLoad(meter)}
           onwidgetauthfailure={onWidgetAuthFailure}
           onwidgetfailed={(provider, error) => onWidgetFailed('a', provider, error)}
-          onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
+          onoverlaytrouble={(id) => id === 'firms' && fireKey.trouble()}
           onviewsettled={(next) => onSurfaceSettled('a', next)}
           onbearingchange={(next) => onSurfaceBearing('a', next)}
           oncontextmenu={(at) => onMapContextMenu('a', at)}
@@ -2557,7 +2594,14 @@
               onclose={closePointMenu}
             />
           {/if}
-          {#if a.overlays.includes('saved')}
+          <AddedLayersOverlay
+            engine={a.ready ? a.engine : null}
+            caseId={caseState.current?.id ?? ''}
+            layers={drawnLayers}
+            drawing={addedLayers.drawing}
+            onmenu={(at) => onMapContextMenu('a', at)}
+          />
+          {#if layers.includes('saved')}
             <SavedOverlay
               engine={a.engine}
               items={savedWork.rows}
@@ -2636,7 +2680,7 @@
           onwidgetload={(meter) => imagery.countLoad(meter)}
           onwidgetauthfailure={onWidgetAuthFailure}
           onwidgetfailed={(provider, error) => onWidgetFailed('b', provider, error)}
-          onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
+          onoverlaytrouble={(id) => id === 'firms' && fireKey.trouble()}
           onviewsettled={(next) => onSurfaceSettled('b', next)}
           onbearingchange={(next) => onSurfaceBearing('b', next)}
           oncontextmenu={(at) => onMapContextMenu('b', at)}
@@ -2655,7 +2699,14 @@
               onclose={closePointMenu}
             />
           {/if}
-          {#if b.overlays.includes('saved')}
+          <AddedLayersOverlay
+            engine={b.ready ? b.engine : null}
+            caseId={caseState.current?.id ?? ''}
+            layers={drawnLayers}
+            drawing={addedLayers.drawing}
+            onmenu={(at) => onMapContextMenu('b', at)}
+          />
+          {#if layers.includes('saved')}
             <SavedOverlay
               engine={b.engine}
               items={savedWork.rows}
@@ -2899,49 +2950,6 @@
     </Modal>
   {/if}
 
-  {#if rightPanel === 'layers'}
-    <Modal title="Layers · A / B" onclose={() => (rightPanel = null)} width="900px">
-      <p class="panel-intro">Each side keeps its own layers. Use the eye to show one, or copy a complete stack across.</p>
-      <div class="layer-columns">
-        <LayerPane
-          letter="A"
-          present={a.present}
-          layers={COMPARE_LAYERS}
-          overlays={a.overlays}
-          firms={a.firms}
-          night={a.night}
-          {firmsSensors}
-          {firesKeyed}
-          {firesState}
-          {firesPaused}
-          savedCount={savedWork.rows.length}
-          ontoggle={(layer) => toggleLayer(a, layer)}
-          onfirms={(patch) => patchLayer(a, 'firms', patch)}
-          onnight={(patch) => patchLayer(a, 'night', patch)}
-          oncopy={() => copyLayers(a, b)}
-          onclear={() => { a.overlays = []; invalidateChangeAssist(); }}
-        />
-        <LayerPane
-          letter="B"
-          present={b.present}
-          layers={COMPARE_LAYERS}
-          overlays={b.overlays}
-          firms={b.firms}
-          night={b.night}
-          {firmsSensors}
-          {firesKeyed}
-          {firesState}
-          {firesPaused}
-          savedCount={savedWork.rows.length}
-          ontoggle={(layer) => toggleLayer(b, layer)}
-          onfirms={(patch) => patchLayer(b, 'firms', patch)}
-          onnight={(patch) => patchLayer(b, 'night', patch)}
-          oncopy={() => copyLayers(b, a)}
-          onclear={() => { b.overlays = []; invalidateChangeAssist(); }}
-        />
-      </div>
-    </Modal>
-  {/if}
 </div>
 
 {#if picking}
@@ -3421,20 +3429,12 @@
   .link { color: var(--accent); font-size: var(--fs-xs); }
   .link.muted { color: var(--text-3); }
   .link.muted:hover { color: var(--text-1); }
-  .panel-note,
-  .panel-intro { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
-  .panel-intro { padding: 0 0 12px; }
+  .panel-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
   .panel-note { display: flex; gap: 7px; align-items: flex-start; }
   .panel-actions { display: flex; gap: 8px; }
   .panel-actions .btn { flex: 1; justify-content: center; }
   .folder-open { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: var(--fs-xs); }
   .folder-open:hover:not(:disabled) { color: var(--text-1); }
-  .layer-columns {
-    height: min(68vh, 690px);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px;
-  }
   .save-form { display: grid; gap: 13px; }
   .save-form label { display: grid; gap: 6px; color: var(--text-2); font-size: var(--fs-sm); }
   .save-form p { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
@@ -3461,6 +3461,5 @@
     .compare-stage:not(.overlay) .source-bar { bottom: 8px; grid-template-rows: 1fr 1fr; row-gap: 17px; }
     .source-b { grid-column: 1; }
     .camera-readout { display: none; }
-    .layer-columns { height: min(72vh, 720px); grid-template-columns: 1fr; overflow: auto; }
   }
 </style>

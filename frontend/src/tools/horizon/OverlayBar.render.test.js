@@ -303,6 +303,32 @@ describe('what the analyst knows about the photo', () => {
     expect(said.querySelector('button[aria-label^="What you know:"]').textContent).toContain('Zoomed · 218° SW · within 20 km');
   });
 
+  it('pins the marked point on a photo, lists the points pinned and lets one go', () => {
+    const onpin = vi.fn();
+    const removeAnchor = vi.fn();
+    const pick = (root) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Pin the marked point on the photo');
+    const open = (overlay, props) => {
+      const root = bar(overlay, { gap, ...props });
+      button(root, overlay.anchors?.length ? `What you know: ${overlay.anchors.length} point` : 'What you know').click();
+      flushSync();
+      return root;
+    };
+    const none = open(told({ source: { kind: 'image', name: 'ridge.jpg' } }));
+    expect(pick(none).disabled).toBe(true);
+    expect(none.textContent).toContain('Click it on the map first');
+    const anchors = [{ u: 0.4, v: 0.3, lat: 46.5775, lon: 7.9853, height: 0 }];
+    const root = open(told({ source: { kind: 'image', name: 'ridge.jpg' }, anchors, removeAnchor }), { marked: { lat: 46.6, lon: 8 }, onpin });
+    pick(root).click();
+    expect(onpin).toHaveBeenCalled();
+    button(root, 'Unpin point 1').click();
+    expect(removeAnchor).toHaveBeenCalledWith(0);
+    // a video's frame is not pinned
+    const video = bar(told({ source: { kind: 'video', name: 'clip.mp4' } }), { gap });
+    button(video, 'What you know').click();
+    flushSync();
+    expect(pick(video)).toBeUndefined();
+  });
+
   it('opens on the three things to say, each starting at not knowing', () => {
     const overlay = told();
     const root = bar(overlay, { gap, heading: 132.4 });

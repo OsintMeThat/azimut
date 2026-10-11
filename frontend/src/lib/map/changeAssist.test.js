@@ -73,6 +73,37 @@ describe('which pairs Difference reads', () => {
     ).toMatchObject({ ok: false, reason: expect.stringContaining('same VIIRS') });
   });
 
+  it('names the layer that differs, and that turning it off is enough', () => {
+    const fires = (first) => ({ overlays: ['firms'], firms: { sensor: 'viirs', window: 'dates', first, last: '' } });
+    expect(changeCompatibility(side(fires('2024-01-01')), side({ ...fires('2025-01-01'), waybackRelease: 2 }))).toMatchObject({
+      ok: false,
+      reason: 'Active fires show different days on A and B. Turn them off to compare pixels.',
+    });
+    // the same day on both sides is no change at all
+    expect(changeCompatibility(side(fires('2024-01-01')), side({ ...fires('2024-01-01'), waybackRelease: 2 }))).toMatchObject({
+      ok: true,
+    });
+    const nights = (day) => ({ overlays: ['nightlights'], nightlights: { source: 'noaa20', day } });
+    expect(changeCompatibility(side(nights('2026-01-01')), side({ ...nights('2026-02-01'), waybackRelease: 2 }))).toMatchObject({
+      ok: false,
+      reason: 'Night lights show different nights on A and B. Turn them off to compare pixels.',
+    });
+  });
+
+  it('asks only the night pair to turn its fires off', () => {
+    const night = (day, first) =>
+      side({
+        provider: 'osm',
+        overlays: ['firms', 'nightlights'],
+        firms: { sensor: 'viirs', window: 'dates', first, last: '' },
+        nightlights: { source: 'noaa20', day },
+      });
+    expect(changeCompatibility(night('2026-01-01', '2026-01-01'), night('2026-02-01', '2026-02-01'))).toMatchObject({
+      ok: false,
+      reason: 'Active fires show different days on A and B. Turn them off to compare night lights.',
+    });
+  });
+
   it('reads two nights of one sensor with brightness first', () => {
     const night = (day) =>
       side({ provider: 'osm', overlays: ['nightlights'], nightlights: { source: 'noaa20', day } });

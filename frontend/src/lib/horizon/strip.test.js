@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  markNear,
+  placeMarks,
   fieldSpans,
   outsideSpans,
   silhouette,
@@ -108,5 +110,25 @@ describe('the 360° strip', () => {
   it('names the eight winds, four of them cardinal', () => {
     expect(WINDS.map((wind) => wind.label)).toEqual(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']);
     expect(WINDS.filter((wind) => wind.cardinal).map((wind) => wind.azimuth)).toEqual([0, 90, 180, 270]);
+  });
+});
+
+describe('the places a Fit found, on the strip', () => {
+  const place = (heading, explained = 0.8) => ({ camera: { heading, tilt: 0, fov: 10 }, explained });
+
+  it('marks each where it faces, the best first, and the one the view stands at', () => {
+    const marks = placeMarks([place(90), place(270)], { heading: 270, tilt: 0, fov: 10 }, 720);
+    expect(marks.map(({ index, x, best, at }) => ({ index, x, best, at }))).toEqual([
+      { index: 0, x: 180, best: true, at: false },
+      { index: 1, x: 540, best: false, at: true },
+    ]);
+    expect(placeMarks([place(90)], { heading: 0, tilt: 0, fov: 10 }, 0)).toEqual([]);
+  });
+
+  it('takes the mark nearest a press, within reach', () => {
+    const marks = placeMarks([place(90), place(93)], { heading: 0, tilt: 0, fov: 10 }, 720);
+    expect(markNear(marks, 183).index).toBe(0);
+    expect(markNear(marks, 186).index).toBe(1);
+    expect(markNear(marks, 200)).toBeNull();
   });
 });

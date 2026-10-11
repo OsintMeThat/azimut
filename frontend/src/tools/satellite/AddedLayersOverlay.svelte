@@ -15,6 +15,7 @@
    * card is laid out lives in `lib/map/layerCard.js`; only its lifecycle lives
    * here.
    */
+  import { untrack } from 'svelte';
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
   import { attribution, UNNAMED } from '../../lib/map/addedLayers.js';
   import { layerCard } from '../../lib/map/layerCard.js';
@@ -31,6 +32,11 @@
     /** `({ lat, lon, x, y, feature?, layer? })`: the map's point menu, opened on
      *  a feature. `feature` and `layer` name a pin whose point the menu is on. */
     onmenu = null,
+    /** False while the map's own tool holds the pointer: a measure, a pin, an
+     *  area being drawn. Its clicks then go to the tool, not to a card. */
+    interactive = true,
+    /** Personal layers can hand a feature to their editor. */
+    onedit = null,
   } = $props();
 
   async function copy(text) {
@@ -91,11 +97,26 @@
       }
       if (existing) drop(row.name);
       const layer = createAddedLayer(engine, {
-        card: layerCard(row.title, { coords: fmtCoords, copy }),
+        card: (properties, point) => {
+          const card = layerCard(row.title, { coords: fmtCoords, copy })(properties, point);
+          if (row.editable && onedit && properties.key) {
+            const edit = document.createElement('button');
+            edit.type = 'button';
+            edit.className = 'btn btn-sm';
+            edit.textContent = 'Edit feature';
+            edit.addEventListener('click', (event) => {
+              event.stopPropagation();
+              onedit(row, properties.key);
+            });
+            card.append(edit);
+          }
+          return card;
+        },
         iconUrl: iconUrlFor(row),
         menu: (at, properties) =>
           onmenu?.(properties ? { ...at, feature: properties.name || UNNAMED, layer: row.title } : at),
       });
+      layer.interactive(untrack(() => interactive));
       live.set(row.name, { layer, sha: row.sha256 });
       drawing(caseId, row.name)
         .then((collection) => {
@@ -112,6 +133,10 @@
         .catch(() => drop(row.name));
     }
     restack();
+  });
+
+  $effect(() => {
+    for (const { layer } of live.values()) layer.interactive(interactive);
   });
 
   /**

@@ -56,6 +56,14 @@ export function photoSpec(overlay) {
     // what was known about the photo, and the reach Fit found its skyline at
     hints: hintsSpec(overlay.hints),
     reach: Number.isFinite(overlay.reachFound) ? overlay.reachFound : null,
+    // the points recognised in it, where they show and where they lie
+    anchors: (overlay.anchors ?? []).map(({ u, v, lat, lon, height }) => ({
+      u: round(u, 6),
+      v: round(v, 6),
+      lat: round(lat, 6),
+      lon: round(lon, 6),
+      height: round(height ?? 0, 1),
+    })),
     pins: (overlay.pins ?? []).map((pin) => ({
       time: round(pin.time, 3),
       heading: turn(pin.heading),

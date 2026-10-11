@@ -14,8 +14,10 @@
  * veiled (`outsideSpans`). Where the skyline is ground nearer than
  * `STRIP_NEAR`, the slope the eye stands on, the strip hatches it (`near`),
  * so a full strip there reads as ground close by and not as a fault. The
- * marked point and the sun and moon sit where they are in the turn.
+ * marked point and the sun and moon sit where they are in the turn, and so
+ * do the places a Fit found when one alone did not stand out (`placeMarks`).
  */
+import { isAtPlace } from './overlay.js';
 import { wrap360 } from './panorama.js';
 
 /** The strip's height in CSS pixels; the skyline is drawn above `STRIP_GROUND`, the winds under it. */
@@ -184,3 +186,31 @@ export const WINDS = [
   { azimuth: 270, label: 'W', cardinal: true },
   { azimuth: 315, label: 'NW', cardinal: false },
 ];
+
+/** How near a press must come to a place's mark to take it, in pixels. */
+export const PLACE_REACH = 6;
+
+/**
+ * The places a Fit found, as marks along a strip `width` pixels wide: where
+ * each faces, whether it is the best one, and whether the view stands at it.
+ */
+export function placeMarks(places, camera, width) {
+  if (!(width > 0)) return [];
+  return (places ?? []).map((place, index) => ({
+    index,
+    x: stripX(place.camera.heading, width),
+    best: index === 0,
+    at: isAtPlace(camera, place),
+    place,
+  }));
+}
+
+/** The mark nearest a point of the strip, within `reach` pixels, or null. */
+export function markNear(marks, x, reach = PLACE_REACH) {
+  let nearest = null;
+  for (const mark of marks) {
+    const off = Math.abs(mark.x - x);
+    if (off <= reach && (!nearest || off < Math.abs(nearest.x - x))) nearest = mark;
+  }
+  return nearest;
+}

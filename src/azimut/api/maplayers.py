@@ -33,9 +33,11 @@ from pydantic import BaseModel, Field, field_validator
 from .. import layout
 from ..engine import artifacts as artifact_engine
 from ..engine import geoconfirmed
+from ..engine import layerediting
 from ..engine import maplayers as layer_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
+from . import events
 
 router = APIRouter(prefix="/api/cases", tags=["map-layers"])
 #: What GeoConfirmed offers, which belongs to no case.
@@ -100,6 +102,38 @@ class UpdateIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 
+class EditableIn(BaseModel):
+    title: str = Field(default="My layer", min_length=1, max_length=200)
+
+
+class MarkerIn(BaseModel):
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    name: str = Field(default="", max_length=layer_engine.MAX_NAME)
+    colour: str = Field(default="#0072b2", pattern=r"^#[0-9a-fA-F]{6}$")
+    symbol: str = "pin"
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str) -> str:
+        if value not in layerediting.SYMBOLS:
+            raise ValueError("choose pin, circle, star or flag")
+        return value
+
+
+class MarkerUpdateIn(BaseModel):
+    name: str | None = Field(default=None, max_length=layer_engine.MAX_NAME)
+    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    symbol: str | None = None
+    description: str | None = Field(default=None, max_length=layer_engine.MAX_DESCRIPTION)
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str | None) -> str | None:
+        return MarkerIn._symbol(value) if value is not None else None
+
+
 def _refused(exc: layer_engine.LayerError) -> HTTPException:
     """A source that will not draw, said in one sentence the panel can show."""
     status = 502 if isinstance(exc, layer_engine.LayerFetchError) else 422
@@ -110,6 +144,66 @@ def _refused(exc: layer_engine.LayerError) -> HTTPException:
 def list_layers(case_id: str) -> list[dict[str, Any]]:
     """Every layer this case holds. Reads disk only — never the network."""
     return layer_engine.listing(get_case(case_id))
+
+
+@router.post("/{case_id}/map-layers/editable")
+def create_editable_layer(case_id: str, body: EditableIn) -> dict[str, Any]:
+    return layerediting.create(get_case(case_id), body.title)
+
+
+@router.post("/{case_id}/map-layers/editable/upload")
+async def import_editable_layer(
+    case_id: str, file: UploadFile, title: str = Form(default="", max_length=200)
+) -> dict[str, Any]:
+    data = await file.read(MAX_UPLOAD + 1)
+    try:
+        return layerediting.from_file(get_case(case_id), data, file.filename or "layer", title)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/editable-copy")
+def copy_editable_layer(case_id: str, name: str, body: EditableIn) -> dict[str, Any]:
+    try:
+        return layerediting.copy_layer(get_case(case_id), _stem(name), body.title)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.get("/{case_id}/map-layers/{name}/edit")
+def editable_layer(case_id: str, name: str) -> dict[str, Any]:
+    try:
+        return layerediting.read(get_case(case_id), _stem(name))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/markers")
+def add_layer_marker(case_id: str, name: str, body: MarkerIn) -> dict[str, Any]:
+    try:
+        return layerediting.add_marker(get_case(case_id), _stem(name), **body.model_dump())
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.patch("/{case_id}/map-layers/{name}/markers/{key}")
+def edit_layer_marker(case_id: str, name: str, key: str, body: MarkerUpdateIn) -> dict[str, Any]:
+    try:
+        return layerediting.update_marker(get_case(case_id), _stem(name), key,
+                                          body.model_dump(exclude_none=True))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/markers/{key}/place")
+def save_marker_place(case_id: str, name: str, key: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        result = layerediting.promote(case, _stem(name), key)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+    events.publish({"type": "saved", "case_id": case.id})
+    return result
 
 
 @router.post("/{case_id}/map-layers/upload")

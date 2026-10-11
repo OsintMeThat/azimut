@@ -5,19 +5,22 @@
    * However narrow the lens, this says where it points: the skyline of the full
    * turn fitted to the strip's height, the slope close by hatched, the lens's
    * field left clear and the rest veiled, the eight winds on a band of their
-   * own under it, the marked point, and the sun and moon while their paths
-   * are on. It sits just under the view's heading ruler, so its lit field
+   * own under it, the marked point, the sun and moon while their paths are
+   * on, and the places a Fit found when one alone did not stand out (a
+   * press on one turns there). It sits just under the view's heading ruler, so its lit field
    * reads as the span that ruler shows. Drag the field to turn; a press
    * elsewhere faces that way and can be dragged on from there. While a laid
    * photo is pinned to the terrain the strip only reads (turning would part
    * them), its field following the view as it moves over the terrain.
    */
   import { rayFor } from '../../lib/horizon/camera.js';
-  import { windOf } from '../../lib/horizon/geometry.js';
+  import { headingText, windOf } from '../../lib/horizon/geometry.js';
   import { wrap360 } from '../../lib/horizon/panorama.js';
   import {
     fieldSpans,
+    markNear,
     outsideSpans,
+    placeMarks,
     silhouette,
     STRIP_GROUND,
     STRIP_HEIGHT,
@@ -41,7 +44,13 @@
     locked = false,
     /** The loupe the view is seen through, or null: the field is what it shows. */
     loupe = null,
+    /** The places a Fit found, best first (`searchedPlaces`), when one alone did not stand out. */
+    places = [],
+    /** Asked to turn to one of them, by its index. */
+    onplace = () => {},
   } = $props();
+
+
 
   /** Under this width the strip keeps the four cardinal winds only. */
   const ALL_WINDS_FROM = 560;
@@ -81,6 +90,9 @@
   const sun = $derived(body(bodies?.sun));
   const moon = $derived(body(bodies?.moon));
 
+  const marks = $derived(placeMarks(places, view.camera, width));
+  const markAt = (x) => markNear(marks, x);
+
   // -- turning from the strip ----------------------------------------------------
 
   const local = (event) => event.clientX - event.currentTarget.getBoundingClientRect().left;
@@ -90,6 +102,12 @@
     if (event.button !== 0 || !view.panorama || !width || locked) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const x = local(event);
+    // a press on a place Fit found turns to it, its tilt, roll and lens with it
+    const mark = markAt(x);
+    if (mark) {
+      onplace(mark.index);
+      return;
+    }
     // a press off the field faces that way first, then drags like the field
     if (!onField(x)) view.look({ heading: stripAzimuth(x, width) });
     press = { x, heading: view.camera.heading };
@@ -116,12 +134,21 @@
   }
 
   const hoverNear = $derived(Boolean(hover && shape?.near.some((span) => hover.x >= span.x && hover.x <= span.x + span.width)));
-  const tag = $derived(hover ? `${Math.round(hover.azimuth) % 360}° ${windOf(hover.azimuth)}${hoverNear ? ' · ground close by' : ''}` : '');
+  const hoverMark = $derived(hover ? markAt(hover.x) : null);
+  const tag = $derived.by(() => {
+    if (!hover) return '';
+    if (hoverMark) {
+      const { place } = hoverMark;
+      return `Fits at ${headingText(place.camera.heading, place.camera.fov)} · explains ${Math.round(Math.max(0, place.explained) * 100)}%`;
+    }
+    return `${Math.round(hover.azimuth) % 360}° ${windOf(hover.azimuth)}${hoverNear ? ' · ground close by' : ''}`;
+  });
 </script>
 
 <div
   class="hz-strip"
   class:locked
+  class:on-place={Boolean(hoverMark) && !locked}
   title={locked ? 'Photo and terrain move together: move one alone to turn' : undefined}
   bind:clientWidth={width}
   role="slider"
@@ -177,6 +204,9 @@
       {#if marked}
         <path class="marked" class:hidden={!marked.seen} d="M{marked.x} 7 l-3.5 -6 h7 Z" />
       {/if}
+      {#each marks as mark (mark.index)}
+        <circle class="place" class:best={mark.best} class:at={mark.at} cx={mark.x} cy={STRIP_GROUND - 6} r="3.5" />
+      {/each}
       {#if moon}<circle class="moon" cx={moon.x} cy={moon.y} r="2.5" />{/if}
       {#if sun}<circle class="sun" cx={sun.x} cy={sun.y} r="3" />{/if}
       {#if hover}
@@ -204,6 +234,9 @@
   }
   .hz-strip.locked {
     cursor: default;
+  }
+  .hz-strip.on-place {
+    cursor: pointer;
   }
   .hz-strip:focus-visible {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -267,6 +300,19 @@
   }
   .marked.hidden {
     fill: var(--hz-hidden);
+  }
+  /* a place a Fit found: a ring, the best one filled, the one the view stands at ringed in the accent */
+  .place {
+    fill: var(--bg-1);
+    stroke: var(--text-1);
+    stroke-width: 1.25;
+  }
+  .place.best {
+    fill: var(--text-1);
+  }
+  .place.at {
+    stroke: var(--accent);
+    stroke-width: 2;
   }
   .sun {
     fill: var(--hz-sun);

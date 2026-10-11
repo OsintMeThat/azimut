@@ -4,6 +4,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 const source = readFileSync(new URL('./Satellite.svelte', import.meta.url), 'utf8');
 const rail = readFileSync(new URL('./satellite/MapRail.svelte', import.meta.url), 'utf8');
 const layers = readFileSync(new URL('./satellite/MapLayers.svelte', import.meta.url), 'utf8');
+// a layer's settings, drawn the same under the Map's rows and in the other maps' menu
+const controls = readFileSync(new URL('../components/LayerControls.svelte', import.meta.url), 'utf8');
+const questions = readFileSync(new URL('../lib/map/eventControls.js', import.meta.url), 'utf8');
 // The sky overlay's geometry moved to `lib/skyOverlay.js`, where it is exercised
 // against real numbers (`skyOverlay.test.js`); the tool hands it to the map.
 const sky = readFileSync(new URL('../lib/skyOverlay.js', import.meta.url), 'utf8');
@@ -64,13 +67,12 @@ describe('Satellite saved work', () => {
   });
 
   it('loads and drops every index with the case, through the store', () => {
-    // Two stores read the case now — its saved work and the layers the analyst
-    // added — and both hand back a teardown, so a response arriving after the
-    // case changed lands nowhere.
+    // Two stores read the case now: its saved work, which hands back a teardown so
+    // a response arriving after the case changed lands nowhere, and the layers the
+    // analyst added, shared by every map and read once per reload.
     expect(source).toContain('const stopSaved = savedWork.load(id);');
-    expect(source).toContain('const stopLayers = addedLayers.load(id);');
-    expect(source).toContain('stopSaved?.();');
-    expect(source).toContain('stopLayers?.();');
+    expect(source).toContain('stopSaved?.()');
+    expect(source).toContain('addedLayers.load(id, caseState.rev);');
     expect(source).toContain('savedWork.loadMode(caseState.current?.id, caseState.rev)');
   });
 
@@ -379,23 +381,24 @@ describe('what is laid over the imagery', () => {
     expect(rows).toContain('toggle: () => (railOverlay = !railOverlay)');
   });
 
-  it('lists its layers in the order Compare, Detect and the proof map use', () => {
+  it('lists its layers in the order Compare, Detect, Horizon and the proof map use', () => {
     // the plain references first, then the specialist networks, the dated
-    // events, and the case last
+    // events, and the case last: the catalogue's order, named as it names them
     const rows = source.slice(source.indexOf('const layerRows = $derived(['), source.indexOf('...(sheetPoints'));
-    const labels = [...rows.matchAll(/^ {6}label: '([^']+)'/gm)].map((match) => match[1]);
-    expect(labels).toEqual([
-      'Borders',
-      'Place names',
-      'Roads',
-      'Railways',
-      'Power lines',
-      'Sea marks',
-      'GPS traces',
-      'Active fires',
-      'Night lights',
-      'Saved work',
+    const ids = [...rows.matchAll(/^ {6}\.\.\.catalogued\('([^']+)'\)/gm)].map((match) => match[1]);
+    expect(ids).toEqual([
+      'boundaries',
+      'placenames',
+      'roads',
+      'railway',
+      'power',
+      'seamarks',
+      'gpstraces',
+      'firms',
+      'nightlights',
+      'saved',
     ]);
+    expect(rows).not.toMatch(/^ {6}label: '/m);
   });
 
   it('gives the railways no rail seat', () => {
@@ -485,15 +488,18 @@ describe('choosing which saved work is drawn', () => {
 
   it('picks folders from a list, since the analyst names them and there can be many', () => {
     expect(source).toContain('list: true');
-    expect(layers).toContain('{#if control.list}');
-    expect(layers).toContain('onchange={(event) => control.pick(event.currentTarget.value)}');
+    expect(layers).toContain('<LayerControls controls={row.controls} />');
+    expect(controls).toContain('{#if control.list}');
+    expect(controls).toContain('onchange={(event) => control.pick(event.currentTarget.value)}');
   });
 
   it('stacks a setting\'s options under their label rather than trailing them', () => {
     // right-aligned wrapping turned a handful of options into a staircase, one
     // per line, in a panel this narrow
-    expect(layers).not.toContain('justify-content: flex-end');
-    expect(layers).not.toContain('justify-content: space-between');
+    for (const sheet of [layers, controls]) {
+      expect(sheet).not.toContain('justify-content: flex-end');
+      expect(sheet).not.toContain('justify-content: space-between');
+    }
   });
 
   it('counts what is drawn rather than what the case holds', () => {
@@ -858,9 +864,10 @@ describe('the key-less reference layers', () => {
   });
 
   it('picks one night from a calendar bounded by the sensor’s record', () => {
-    expect(source).toContain('min: firstNight(night.source)');
-    expect(source).toContain('max: lastNight()');
-    expect(layers).toContain('{#if control.day}');
+    expect(source).toContain('nightQuestions(night, (patch) => Object.assign(night, patch))');
+    expect(questions).toContain('min: firstNight(choice.source)');
+    expect(questions).toContain('max: lastNight()');
+    expect(controls).toContain('{#if control.day}');
   });
 });
 

@@ -37,6 +37,8 @@
     check: 'm4.5 12.5 5 5 10-11',
     note: 'M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6M9 13h6m-6 4h4',
     pin: 'M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+    star: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z',
+    flag: 'M5 21V3m0 1h13l-3 4 3 4H5',
     // A pushpin, and deliberately not the marker above it: `pin` means a point on
     // the ground, so it would read as "this is a place" on a graph where place is
     // a family. This one means "somebody put this here and it stays".

@@ -2,7 +2,8 @@
   /**
    * What one side is showing, over its own picture: the side's letter, its
    * provider and date pickers, the acquisition date under the crosshair, and
-   * the two acts that belong to one side only (its layers, taking it away).
+   * taking it away. Its layers are the pair's, in the one Layers menu above
+   * both maps.
    */
   import Icon from '../../components/Icon.svelte';
   import ImageryChip from '../satellite/ImageryChip.svelte';
@@ -16,10 +17,7 @@
     s1 = null,
     shown,
     dated = null,
-    layerCount = 0,
-    layersOpen = false,
     align = 'left',
-    onlayers = () => {},
     onremove = () => {},
   } = $props();
 
@@ -42,17 +40,6 @@
     </span>
   {/if}
   <span class="rule" aria-hidden="true"></span>
-  <button
-    class="cmp-icon layers"
-    class:active={layersOpen}
-    onclick={onlayers}
-    aria-label={`Layers on imagery ${letter}`}
-    aria-expanded={layersOpen}
-    title="Layers"
-  >
-    <Icon name="layers" size={15} />
-    {#if layerCount}<span class="count">{layerCount}</span>{/if}
-  </button>
   <button class="cmp-icon" onclick={onremove} aria-label={`Remove imagery ${letter}`} title="Remove this side">
     <Icon name="x" size={14} />
   </button>
@@ -117,27 +104,5 @@
     width: 1px;
     height: 18px;
     background: var(--glass-line);
-  }
-  .layers {
-    position: relative;
-    width: auto;
-    min-width: 30px;
-    gap: 4px;
-    padding: 0 6px;
-    display: inline-flex;
-  }
-  .layers.active {
-    color: var(--glass-ink);
-    background: var(--glass-press);
-  }
-  .count {
-    min-width: 16px;
-    padding: 1px 4px;
-    border-radius: 99px;
-    color: #111317;
-    background: var(--glass-ink);
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 14px;
   }
 </style>

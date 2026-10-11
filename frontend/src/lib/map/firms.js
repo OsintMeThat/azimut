@@ -24,6 +24,27 @@ export const WINDOWS = [
 /** Asking by date rather than by how recent. Not a window: a question. */
 export const DATED = 'dates';
 
+/**
+ * Following the picture on screen: the detections of the day it was taken.
+ * Offered by a map that knows its picture's date, since those are the fires the
+ * picture can show.
+ */
+export const PICTURE = 'picture';
+
+/**
+ * The choice as the tiles read it, a followed window turned into its day.
+ *
+ * A picture with no date falls back to the last 24 hours rather than drawing
+ * nothing, and the summary says which of the two is on.
+ */
+export function onDay(choice = {}, day = '') {
+  if (choice.window !== PICTURE) return choice;
+  const start = asDay(day);
+  return start
+    ? { ...choice, window: DATED, first: start, last: '' }
+    : { ...choice, window: '24h', first: '', last: '' };
+}
+
 /** FIRMS refuses a longer range, and counts a long one as several requests. */
 export const MAX_RANGE_DAYS = 31;
 

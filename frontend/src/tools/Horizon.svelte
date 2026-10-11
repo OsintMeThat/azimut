@@ -85,7 +85,11 @@
   import { createViewsState } from './horizon/state/views.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
-  import MapLayers from './satellite/MapLayers.svelte';
+  import LayerChips from '../components/LayerChips.svelte';
+  import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
+  import { createFireKey } from '../lib/map/fireKey.svelte.js';
+  import { createLayerSet } from '../lib/map/layerSet.svelte.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import HorizonView from './horizon/HorizonView.svelte';
@@ -656,11 +660,29 @@
   ];
   const bases = $derived(MAP_BASES.filter((base) => imagery.find(base.id)));
   const baseIsImagery = $derived(imagery.find(providerId)?.imagery ?? true);
-  /** Borders, place names and the case's saved work, on from the start. */
-  const mapLayers = $state({ boundaries: true, placenames: true, saved: true });
-  const overlays = $derived(
-    [mapLayers.boundaries && 'boundaries', mapLayers.placenames && baseIsImagery && 'placenames'].filter(Boolean)
-  );
+  /** Whether the fire layer can be used, read from our own backend. */
+  const fireKey = createFireKey({ api });
+  $effect(() => {
+    if (uiState.tool === 'horizon') void fireKey.load();
+  });
+  $effect(() => () => fireKey.destroy());
+  /**
+   * Every layer the other maps offer (lib/map/layerSet), with borders, place
+   * names and the case's saved work on from the start: they say where one is.
+   */
+  const mapLayers = createLayerSet({
+    fireKey,
+    initial: ['boundaries', 'placenames', 'saved'],
+    imagery: () => baseIsImagery,
+    onsettings: () => {
+      uiState.settingsTab = 'imagery';
+      uiState.tool = 'settings';
+    },
+  });
+  const overlays = $derived(mapLayers.overlays);
+  /** The case's own layers, drawn on this small map only while Horizon is on screen. */
+  const myLayers = addedLayers.scope('horizon');
+  $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
 
   // the case's saved work: places, captures and located photos and videos, read as Satellite reads them
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
@@ -671,33 +693,13 @@
     [...savedWork.rows, ...savedWork.media].filter((row) => row.kind !== 'view' || row.view !== views.current?.name)
   );
 
-  const layerRows = $derived([
-    {
-      id: 'boundaries',
-      label: 'Borders',
-      on: mapLayers.boundaries,
-      title: 'Country, region and district borders, from Esri',
-      toggle: () => (mapLayers.boundaries = !mapLayers.boundaries),
-    },
-    {
-      id: 'placenames',
-      label: 'Place names',
-      on: mapLayers.placenames,
-      disabled: !baseIsImagery,
-      detail: baseIsImagery ? '' : 'imagery only',
-      title: baseIsImagery ? 'Towns, villages and hamlets, from OpenStreetMap via OpenFreeMap' : 'Only useful over satellite imagery',
-      toggle: () => (mapLayers.placenames = !mapLayers.placenames),
-    },
-    {
-      id: 'saved',
-      label: 'Saved work',
-      on: mapLayers.saved,
-      disabled: !savedItems.length,
-      detail: savedItems.length ? String(savedItems.length) : '',
-      title: savedItems.length ? "This case's saved places and captures, and its located photos and videos" : 'Nothing is saved or placed in this case yet',
-      toggle: () => (mapLayers.saved = !mapLayers.saved),
-    },
-  ]);
+  const layerRows = $derived(
+    mapLayers.rows({
+      saved: savedItems.length
+        ? { count: savedItems.length, title: "This case's saved places and captures, and its located photos and videos" }
+        : { disabled: true, title: 'Nothing is saved or placed in this case yet' },
+    })
+  );
 
   /** A saved item picked on the map: the map goes to it. */
   function flyToSaved(row) {
@@ -755,7 +757,7 @@
         className: 'horizon-look',
         html: '<span></span>',
         size: [12, 12],
-        title: held ? 'The photo is locked to the terrain' : 'Drag to turn the view',
+        title: held ? 'Photo and terrain move together: move one alone to turn' : 'Drag to turn the view',
         draggable: !held,
         zIndex: 901,
         onDragStart: () => (aiming = true),
@@ -989,32 +991,38 @@
     const told = overlay.hints;
     // how far the photo sees: left to Fit, every cut is tried; set, that cut alone is the turn
     const reach = told.reach === 'auto' ? 'auto' : overlay.reach;
-    const body = matchRequest(traced, camera, panorama, {
-      known: !lens,
-      reach,
-      autoReach: AUTO_REACH,
-      ...searchHints(told, { lensKnown: !lens }),
-    });
+    fitting = true;
     let found = null;
-    if (body) {
-      fitting = true;
-      try {
-        found = await api.post('/api/horizon/match', body);
-      } catch {
-        found = null;
-      } finally {
-        fitting = false;
-      }
+    let anchors = [];
+    try {
+      anchors = await anchorsFromEye(camera);
       // the view, the eye or the trace moved meanwhile: the answer is for another view
       if (view.camera !== looked || view.panorama !== panorama || overlay.strokesSeen !== strokes) return;
+      const body = matchRequest(traced, camera, panorama, {
+        known: !lens,
+        reach,
+        autoReach: AUTO_REACH,
+        ...searchHints(told, { lensKnown: !lens }),
+        anchors,
+      });
+      if (body) {
+        try {
+          found = await api.post('/api/horizon/match', body);
+        } catch {
+          found = null;
+        }
+        if (view.camera !== looked || view.panorama !== panorama || overlay.strokesSeen !== strokes) return;
+      }
+    } finally {
+      fitting = false;
     }
     if (!found || found.verdict === 'flat') {
-      fitFromHere(traced, camera, before, { lens, flat: found?.verdict === 'flat' });
+      fitFromHere(traced, camera, before, { lens, flat: found?.verdict === 'flat', anchors });
       return;
     }
-    const places = searchedPlaces(found, traced, camera, skyline, { lens });
+    const places = searchedPlaces(found, traced, camera, skyline, { lens, anchors });
     search = { panorama, strokes, verdict: found.verdict, places };
-    const outcome = searchOutcome(found, places, camera, { lens, before, facing: Boolean(told.facing) });
+    const outcome = searchOutcome(found, places, camera, { lens, before, facing: Boolean(told.facing), pinned: anchors.length > 0 });
     // staying put, the view still reads the trace against the reach the place lies on
     if (outcome.here >= 0) takeReach(places[outcome.here]);
     if (outcome.take >= 0) lookAtPlace(places[outcome.take], outcome.text, outcome.kind);
@@ -1023,9 +1031,50 @@
     } else toast(outcome.text, outcome.kind);
   }
 
+  /**
+   * The points pinned in the photo as Fit reads them: where each was clicked
+   * in the frame, in pixels as the trace's samples are, and where it lies from
+   * the eye now (`/api/horizon/target`, the marked point's own question). A
+   * point the terrain cannot place is left out.
+   */
+  async function anchorsFromEye(camera) {
+    const eye = view.observer;
+    const seen = overlay.anchorsSeen;
+    if (!eye || !seen.length) return [];
+    const asked = overlay.anchors.map((anchor) =>
+      api
+        .post('/api/horizon/target', {
+          lat: eye.lat,
+          lon: eye.lon,
+          mode: eye.mode,
+          height: eye.height,
+          target_lat: anchor.lat,
+          target_lon: anchor.lon,
+          target_height: anchor.height ?? 0,
+        })
+        .catch(() => null)
+    );
+    const answers = await Promise.all(asked);
+    return answers.flatMap((answer, i) =>
+      answer && Number.isFinite(answer.azimuth) && Number.isFinite(answer.angle)
+        ? [{ x: seen[i].u * camera.width, y: seen[i].v * camera.height, azimuth: answer.azimuth, elevation: answer.angle, distance: answer.distance }]
+        : []
+    );
+  }
+
+  /** Pin the point marked on the map where the analyst clicks it in the photo. */
+  async function pinMarked() {
+    const marked = view.target;
+    if (!viewPane || !marked || overlay.source?.kind !== 'image') return;
+    const at = await viewPane.choosePoint();
+    if (!at || view.target !== marked) return;
+    overlay.addAnchor(at, { lat: marked.lat, lon: marked.lon, height: marked.height ?? 0 });
+    toast('Point pinned: Fit keeps it where you clicked', 'ok');
+  }
+
   /** The fit from where the analyst left the view, alone: what Fit did before it searched the turn. */
-  function fitFromHere(traced, camera, before, { lens, flat }) {
-    const result = fitToTrace(traced, camera, skyline, { lens });
+  function fitFromHere(traced, camera, before, { lens, flat, anchors = [] }) {
+    const result = fitToTrace(traced, camera, skyline, { lens, anchors });
     if (!result) {
       toast('Trace more of the skyline first', 'warn');
       return;
@@ -1350,6 +1399,8 @@
             places={searched && searched.verdict !== 'match' ? searched.places : []}
             onplace={takePlace}
             ondetect={detect}
+            marked={view.target && !view.target.error ? view.target : null}
+            onpin={pinMarked}
           />
         {/if}
         <div class="frame-slot" bind:clientWidth={slot.width} bind:clientHeight={slot.height}>
@@ -1399,7 +1450,15 @@
       </div>
       <!-- under the view, by its heading: the strip's lit field is the span the ruler above it reads -->
       {#if !swapped}
-        <HorizonStrip {view} {frame} {bodies} locked={Boolean(overlay.source && overlay.locked)} loupe={seenLoupe} />
+        <HorizonStrip
+          {view}
+          {frame}
+          {bodies}
+          locked={Boolean(overlay.source && overlay.locked)}
+          loupe={seenLoupe}
+          places={searched && searched.verdict !== 'match' && searched.places.length > 1 ? searched.places : []}
+          onplace={takePlace}
+        />
       {/if}
       {#if swapped}
         <!-- the view waits in the map's corner, live: a click brings it back -->
@@ -1469,7 +1528,15 @@
             />
           </div>
         {/if}
-        {#if mapLayers.saved && caseState.current}
+        <!-- inert: a click on this map stands the eye or turns it, never a card -->
+        <AddedLayersOverlay
+          engine={ready ? engine : null}
+          caseId={caseState.current?.id ?? ''}
+          layers={uiState.tool === 'horizon' ? myLayers.drawn : []}
+          drawing={addedLayers.drawing}
+          interactive={false}
+        />
+        {#if mapLayers.has('saved') && caseState.current}
           <SavedOverlay
             engine={ready ? engine : null}
             items={savedItems}
@@ -1544,7 +1611,12 @@
               >
             {/each}
           </div>
-          <MapLayers rows={layerRows} />
+          <LayerChips
+            rows={layerRows}
+            added={myLayers.rows}
+            ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
+            onmanage={() => (uiState.tool = 'satellite')}
+          />
         </div>
       {/if}
     {/if}
@@ -2003,7 +2075,9 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    width: 236px;
+    width: 260px;
+    max-height: calc(100% - 50px);
+    overflow-y: auto;
     padding: 10px;
     border-radius: var(--r-md);
     background: var(--bg-1);

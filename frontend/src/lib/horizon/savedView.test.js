@@ -79,6 +79,9 @@ describe('a view as the case keeps it', () => {
     expect(photo.locked).toBe(false);
     expect(photoSpec(fakeOverlay({ locked: true })).locked).toBe(true);
     expect(photoSpec(fakeOverlay()).corners).toBeNull();
+    expect(photoSpec(fakeOverlay()).anchors).toEqual([]);
+    const pinned = photoSpec(fakeOverlay({ anchors: [{ u: 0.4200004, v: 0.31, lat: 46.57750049, lon: 7.9853, height: 12.34 }] }));
+    expect(pinned.anchors).toEqual([{ u: 0.42, v: 0.31, lat: 46.5775, lon: 7.9853, height: 12.3 }]);
     const local = fakeOverlay({ source: { name: 'x.jpg', kind: 'image', caseId: null, path: null } });
     expect(photoSpec(local)).toBeNull();
     expect(photoKept(local)).toBe(false);

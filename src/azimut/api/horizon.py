@@ -548,6 +548,8 @@ def target(body: TargetIn) -> dict[str, Any]:
 MATCH_POINTS_MAX = 2000
 MATCH_SKYLINE_MAX = 72_000
 MATCH_CUTS_MAX = 8
+# Points the analyst may pin in one photo: a few summits say all they can.
+MATCH_ANCHORS_MAX = 8
 # Picture-plane points this far out, in half widths, are off any frame a photo lies in.
 MATCH_PLANE_MAX = 20.0
 
@@ -573,6 +575,21 @@ class CutIn(BaseModel):
     skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
 
 
+class AnchorIn(BaseModel):
+    """A point recognised in the photo: where it was clicked on the picture plane, and where it lies from the eye.
+
+    `azimuth` and `elevation` are `/target`'s for the point, from the same eye;
+    `distance` is how far it lies, which says how much a point a little off on
+    the map may move.
+    """
+
+    x: float = Field(ge=-MATCH_PLANE_MAX, le=MATCH_PLANE_MAX, allow_inf_nan=False)
+    y: float = Field(ge=-MATCH_PLANE_MAX, le=MATCH_PLANE_MAX, allow_inf_nan=False)
+    azimuth: float = Field(ge=0, le=360, allow_inf_nan=False)
+    elevation: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    distance: float = Field(gt=0, le=horizon.FAR_MAX, allow_inf_nan=False)
+
+
 class MatchIn(BaseModel):
     """A traced skyline and the turn of terrain to look for it on.
 
@@ -583,7 +600,8 @@ class MatchIn(BaseModel):
     in half widths of the frame (engine/skymatch.py), and `half_width` is that
     half width on screen. What the analyst knows narrows the search: `within`
     bounds an unknown lens (degrees, low and high), `facing` the heading (the
-    sector's middle and half its width), and `level` holds the roll.
+    sector's middle and half its width), `level` holds the roll, and `anchors`
+    are points recognised in the photo, which pin the heading hardest.
     """
 
     skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
@@ -603,6 +621,7 @@ class MatchIn(BaseModel):
     within: list[float] | None = Field(default=None, min_length=2, max_length=2)
     facing: list[float] | None = Field(default=None, min_length=2, max_length=2)
     level: bool = False
+    anchors: list[AnchorIn] = Field(default_factory=list, max_length=MATCH_ANCHORS_MAX)
 
     @model_validator(mode="after")
     def _sane(self) -> MatchIn:
@@ -650,6 +669,7 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
         np.asarray(body.x), np.asarray(body.y), turns,
         half_width=body.half_width, fov=body.fov, known=body.known, tilt=body.tilt, roll=body.roll,
         within=within, facing=facing, level=body.level,
+        anchors=[skymatch.Anchor(a.x, a.y, a.azimuth % 360.0, a.elevation, a.distance) for a in body.anchors],
     )
     tried = skymatch.lenses(body.fov, known=body.known, within=within)
     best = found.fits[0].explained if found.fits else 0.0

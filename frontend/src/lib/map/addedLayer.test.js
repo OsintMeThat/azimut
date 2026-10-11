@@ -6,12 +6,22 @@ import {
   featureAt,
   featureExtent,
   iconName,
+  markerIcon,
   kindOf,
   periodFilter,
   registerIcons,
   visibilityFilter,
 } from './addedLayer.js';
 import { PALETTE } from './addedLayers.js';
+
+describe('personal marker symbols', () => {
+  it('uses the chosen app symbol on a point and keeps shapes on their own symbols', () => {
+    expect(markerIcon({ type: 'Point' }, 'star')).toBe(iconName('star'));
+    expect(markerIcon({ type: 'Point' }, 'pin')).toBe(iconName('point'));
+    expect(markerIcon({ type: 'Polygon' }, 'star')).toBe(iconName('area'));
+    expect(markerIcon({ type: 'Point' }, 'unknown')).toBe(iconName('point'));
+  });
+});
 
 /**
  * Read off a stubbed map, because what this module has to get right is *which
@@ -634,6 +644,33 @@ describe('a right-click on an added layer', () => {
   it('is claimed from the map, so the ground menu does not open a second time behind it', async () => {
     const { engine } = await rightClick({ lngLat: { lat: 0, lng: 0 }, point: { x: 0, y: 0 }, features: [] });
     expect(engine.claimClicks).toHaveBeenCalled();
+  });
+
+  it("lets the map's own tool have the clicks while it holds the pointer", async () => {
+    // a measure, a pin or an area being drawn over a layer: the click is the tool's
+    const release = vi.fn();
+    const engine = stubEngine();
+    engine.claimClicks = vi.fn(() => release);
+    const card = vi.fn(() => document.createElement('div'));
+    const menu = vi.fn();
+    const { opts } = stubCard();
+    const layer = createAddedLayer(engine, { ...opts, card, menu });
+    await layer.set(COLLECTION, { categories: CATEGORIES });
+    expect(engine.claimClicks).toHaveBeenCalledTimes(1);
+
+    layer.interactive(false);
+    expect(release).toHaveBeenCalled();
+    const handler = (type) => engine.map.handlers.find(([kind]) => kind === type)[2];
+    handler('click')({ lngLat: [2.35, 48.85], features: [COLLECTION.features[0]] });
+    handler('contextmenu')({ lngLat: { lat: 48.85, lng: 2.35 }, point: { x: 1, y: 1 }, features: [COLLECTION.features[0]] });
+    expect(card).not.toHaveBeenCalled();
+    expect(menu).not.toHaveBeenCalled();
+
+    // the tool put down, the layer answers again
+    layer.interactive(true);
+    expect(engine.claimClicks).toHaveBeenCalledTimes(2);
+    handler('click')({ lngLat: [2.35, 48.85], features: [COLLECTION.features[0]] });
+    expect(card).toHaveBeenCalled();
   });
 
   it('opens nothing when nobody asked for a menu, and does not throw', async () => {

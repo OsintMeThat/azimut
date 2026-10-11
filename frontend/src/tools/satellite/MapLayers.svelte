@@ -13,8 +13,8 @@
    * it arrives and leaves when it is closed, so the panel never shows a switch
    * for something that is not there.
    */
-  import DayPicker from '../../components/DayPicker.svelte';
   import Icon from '../../components/Icon.svelte';
+  import LayerControls from '../../components/LayerControls.svelte';
 
   let {
     /**
@@ -62,83 +62,7 @@
              a card floating over the map is what the whole rework took away,
              and a layer's settings are not a mode's panel. -->
         {#if row.controls?.length}
-          <div class="settings">
-            {#each row.controls as control (control.label)}
-              <div class="setting">
-                <span class="setting-label">{control.label}</span>
-                <!-- A fixed handful of short answers reads as chips; an
-                     open-ended list the analyst named themselves does not, and
-                     wrapped one folder per line it stopped reading as a
-                     control at all. -->
-                {#if control.list}
-                  <select
-                    class="select pick"
-                    aria-label={control.label}
-                    value={control.value}
-                    onchange={(event) => control.pick(event.currentTarget.value)}
-                  >
-                    {#each control.options as option (option.id)}
-                      <option value={option.id} title={option.title ?? option.label}
-                        >{option.label}</option
-                      >
-                    {/each}
-                  </select>
-                {:else}
-                  <div class="chips">
-                    {#each control.options as option (option.id)}
-                      <button
-                        class="chip"
-                        class:on={control.value === option.id}
-                        title={option.title ?? option.label}
-                        onclick={() => control.pick(option.id)}
-                      >{option.label}</button>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-              <!-- Stacked, not side by side: two date fields do not fit the
-                   width of this panel. The calendar is ours and opens in flow,
-                   because the browser's own opened over the map and half
-                   outside the window in a panel docked to this edge. -->
-              {#if control.day}
-                <div class="date">
-                  <span>{control.day.label}</span>
-                  <DayPicker
-                    value={control.day.value}
-                    min={control.day.min}
-                    max={control.day.max}
-                    label={control.day.title}
-                    placeholder="Pick a day"
-                    onpick={(day) => control.day.set(day)}
-                  />
-                </div>
-              {/if}
-              {#if control.dates}
-                <div class="date">
-                  <span>From</span>
-                  <DayPicker
-                    value={control.dates.first}
-                    max={control.dates.today}
-                    label="First day of detections to draw"
-                    placeholder="Pick a day"
-                    onpick={(day) => control.dates.setFirst(day)}
-                  />
-                </div>
-                <div class="date">
-                  <span>To</span>
-                  <DayPicker
-                    value={control.dates.last}
-                    min={control.dates.first}
-                    max={control.dates.max}
-                    label="Last day; blank draws the first day alone"
-                    placeholder="That day alone"
-                    clearable
-                    onpick={(day) => control.dates.setLast(day)}
-                  />
-                </div>
-              {/if}
-            {/each}
-          </div>
+          <div class="settings"><LayerControls controls={row.controls} /></div>
         {/if}
         {#if row.note}
           <p class="note">{row.note}</p>
@@ -208,61 +132,7 @@
   /* indented under the switch they belong to, so the list still reads as a
      list of layers rather than as a stack of panels */
   .settings {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
     padding: 2px 0 6px 30px;
-  }
-  .setting {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .setting-label {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  /* the global .select is sized for a form, not for a panel docked over a map,
-     and left to itself it draws in the platform's font beside our own chips */
-  .pick {
-    padding: 4px 7px;
-    font-family: inherit;
-    font-size: 11px;
-  }
-  .chip {
-    padding: 3px 7px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    color: var(--text-2);
-    font-size: 10px;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .chip:hover {
-    border-color: var(--border-strong);
-    color: var(--text-1);
-  }
-  .chip.on {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .date {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .date span {
-    width: 34px;
-    padding-top: 4px;
   }
   .note {
     margin: 0;

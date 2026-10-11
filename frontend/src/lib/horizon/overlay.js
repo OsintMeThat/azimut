@@ -16,7 +16,7 @@
  * A video adds time. A pin keeps the view's alignment at a moment of it, and
  * between two pins the view turns as the camera did (`cameraAt`).
  */
-import { focal, principal, rayFor, turnBetween } from './camera.js';
+import { focal, principal, rayFor, toScreen, turnBetween } from './camera.js';
 import { headingText } from './geometry.js';
 import { skylineWithin } from './panorama.js';
 import { FOV, heightFor } from './view.js';
@@ -575,11 +575,49 @@ function huber(px) {
   return a <= HUBER_PX ? 0.5 * a * a : HUBER_PX * (a - 0.5 * HUBER_PX);
 }
 
+// -- points recognised in the photo -----------------------------------------------
+
+/**
+ * How far a pinned point may show from where it was clicked, in degrees: at
+ * least `ANCHOR_MIN`, a share of the lens, or what being `ANCHOR_METRES` off on
+ * the map comes to at its distance (engine/skymatch.py `_slack`, the same).
+ */
+export const ANCHOR_MIN = 0.3;
+export const ANCHOR_SHARE = 1 / 40;
+export const ANCHOR_METRES = 60;
+export function anchorSlack(anchor, fov) {
+  const offMap = (Math.atan2(ANCHOR_METRES, Math.max(1, anchor.distance ?? 1)) * 180) / Math.PI;
+  return Math.max(ANCHOR_MIN, fov * ANCHOR_SHARE, offMap);
+}
+
+/**
+ * What the pinned points cost a camera: nothing while each shows within its
+ * slack of where it was clicked, the trace's own loss past it, in screen
+ * pixels. Each `{ x, y }` is where it was clicked in the frame, `{ azimuth,
+ * elevation, distance }` where it lies from the eye. The mean over them.
+ */
+function anchorCost(anchors, camera) {
+  if (!anchors?.length) return 0;
+  const perDegree = (focal(camera) * Math.PI) / 180;
+  let sum = 0;
+  for (const anchor of anchors) {
+    const at = toScreen(camera, anchor.azimuth, anchor.elevation);
+    if (!at.visible) {
+      sum += huber(HUBER_PX * 40);
+      continue;
+    }
+    const off = Math.hypot(at.x - anchor.x, at.y - anchor.y) / perDegree;
+    sum += huber(Math.max(0, off - anchorSlack(anchor, camera.fov)) * perDegree);
+  }
+  return sum / anchors.length;
+}
+
 /**
  * The cost of a camera against the trace, in screen pixels so a narrower lens
- * cannot make every point fit by squeezing the trace into one degree.
+ * cannot make every point fit by squeezing the trace into one degree, and
+ * against the points pinned in the photo, which hold it near where they show.
  */
-function costOf(samples, camera, skyline) {
+function costOf(samples, camera, skyline, anchors = []) {
   const found = residuals(samples, camera, skyline);
   if (found.length < GAP_MIN_POINTS) return Infinity;
   const perDegree = (focal(camera) * Math.PI) / 180;
@@ -587,7 +625,7 @@ function costOf(samples, camera, skyline) {
   for (const r of found) sum += huber(r.gap * perDegree);
   // points lost off the terrain count as far off, or a fit could drop the hard ones
   const lost = samples.length - found.length;
-  return (sum + lost * huber(HUBER_PX * 4)) / samples.length;
+  return (sum + lost * huber(HUBER_PX * 4)) / samples.length + anchorCost(anchors, camera);
 }
 
 /** Nelder–Mead over a few numbers: small, derivative-free, enough for four. */
@@ -635,15 +673,16 @@ export const FIT_MIN_SPAN = 4;
  * The camera that brings the terrain's skyline onto the trace, from where the
  * analyst left it: first the heading slid across a third of the lens with the
  * tilt that best centres the trace at each, then heading, tilt, roll (and the
- * lens, unless the photo said it) refined together. Null when the trace meets
- * too little ground to say.
+ * lens, unless the photo said it) refined together, the points pinned in the
+ * photo holding it near where they show (`anchorCost`). Null when the trace
+ * meets too little ground to say.
  *
  * @param {{x:number, y:number}[]} samples
  * @param {object} camera with the frame's width and height
  * @param {(azimuth: number) => number|null} skyline
- * @param {{ lens?: boolean }} [options] `lens`: whether the field of view may change too
+ * @param {{ lens?: boolean, anchors?: object[] }} [options] `lens`: whether the field of view may change too
  */
-export function fitToTrace(samples, camera, skyline, { lens = true } = {}) {
+export function fitToTrace(samples, camera, skyline, { lens = true, anchors = [] } = {}) {
   const before = traceGap(samples, camera, skyline);
   if (!before) return null;
   const at = (heading, tilt, roll, fov) => ({ ...camera, heading, tilt, roll, fov });
@@ -657,7 +696,7 @@ export function fitToTrace(samples, camera, skyline, { lens = true } = {}) {
     if (!tried) continue;
     const tilt = camera.tilt - tried.offset;
     // the nearer of two equal fits wins: the analyst's own placing is a hint
-    const value = costOf(samples, at(heading, tilt, camera.roll, camera.fov), skyline) * (1 + 0.15 * Math.abs(turn / camera.fov));
+    const value = costOf(samples, at(heading, tilt, camera.roll, camera.fov), skyline, anchors) * (1 + 0.15 * Math.abs(turn / camera.fov));
     if (value < slid.value) slid = { heading, tilt, value };
   }
   const wide = before.span >= FIT_MIN_SPAN;
@@ -665,10 +704,14 @@ export function fitToTrace(samples, camera, skyline, { lens = true } = {}) {
   const unpack = (p) => at(p[0], p[1], wide ? p[2] : camera.roll, free ? camera.fov * Math.exp(p[3]) : camera.fov);
   const start = [slid.heading, slid.tilt, ...(wide ? [camera.roll] : []), ...(free ? [0] : [])];
   const steps = [pace * 4, pace * 4, ...(wide ? [1] : []), ...(free ? [0.04] : [])];
-  const best = minimise((p) => costOf(samples, unpack(p), skyline), start, steps);
+  const best = minimise((p) => costOf(samples, unpack(p), skyline, anchors), start, steps);
   const fitted = unpack(best.point);
   const after = traceGap(samples, fitted, skyline);
-  if (!after || after.median > before.median) return { camera: { ...camera }, gap: before, improved: false };
+  // a pinned point may ask for a little more gap on the trace: the whole cost then says
+  const worse = anchors.length
+    ? costOf(samples, fitted, skyline, anchors) >= costOf(samples, camera, skyline, anchors)
+    : after && after.median > before.median;
+  if (!after || worse) return { camera: { ...camera }, gap: before, improved: false };
   return {
     camera: {
       ...camera,
@@ -713,12 +756,14 @@ const sendable = (angles) => Array.from(angles, (v) => (Number.isFinite(v) ? Mat
  * up to `autoReach`, the farthest as the turn and the nearer ones beside it,
  * for the search to try each (the whole turn when it keeps none); a number
  * sends that cut alone; anything else the whole turn alone. `within` and
- * `facing` are the hints (lib/horizon/hints.js searchHints).
+ * `facing` are the hints (lib/horizon/hints.js searchHints); `anchors` the
+ * points pinned in the photo, where each was clicked in the frame (`x`, `y`
+ * in pixels, as the samples are) and where it lies from the eye.
  *
- * @param {{ known?: boolean, reach?: 'auto' | number | null, autoReach?: number, within?: number[], facing?: number[] }} [options]
+ * @param {{ known?: boolean, reach?: 'auto' | number | null, autoReach?: number, within?: number[], facing?: number[], anchors?: object[] }} [options]
  *   `known`: the photo said its lens, which is then the only one tried
  */
-export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing } = {}) {
+export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing, anchors = [] } = {}) {
   if (!panorama?.skyline?.length || panorama.azimuth?.full === false) return null;
   const tried = reach === 'auto' ? (panorama.cuts ?? []).filter((cut) => cut.reach <= autoReach) : [];
   const outer = Number.isFinite(reach) && skylineWithin(panorama, reach) !== panorama.skyline ? reach : (tried.at(-1)?.reach ?? null);
@@ -735,7 +780,20 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
     roll: camera.roll ?? 0,
     ...(within && !known ? { within } : {}),
     ...(facing ? { facing } : {}),
+    ...(anchors.length ? { anchors: anchorsPlane(anchors, camera) } : {}),
   };
+}
+
+/** The pinned points as the search reads them: on the picture plane, with where each lies. */
+function anchorsPlane(anchors, camera) {
+  const plane = tracePlane(anchors, camera);
+  return anchors.map((anchor, i) => ({
+    x: plane.x[i],
+    y: plane.y[i],
+    azimuth: ((anchor.azimuth % 360) + 360) % 360,
+    elevation: anchor.elevation,
+    distance: Math.max(1, anchor.distance),
+  }));
 }
 
 /**
@@ -747,9 +805,10 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
  * left it.
  *
  * @param {{ fits: object[] }} found the search's answer
- * @param {{ lens?: boolean }} [options] `lens`: whether the field of view may change
+ * @param {{ lens?: boolean, anchors?: object[] }} [options] `lens`: whether the field of view may change;
+ *   `anchors`: the points pinned in the photo, which hold each refinement near where they show
  */
-export function searchedPlaces(found, samples, camera, skyline, { lens = true } = {}) {
+export function searchedPlaces(found, samples, camera, skyline, { lens = true, anchors = [] } = {}) {
   return (found?.fits ?? []).map((fit) => {
     const on = Number.isFinite(fit.reach) ? fit.reach : null;
     const along = (azimuth) => skyline(azimuth, on);
@@ -760,7 +819,7 @@ export function searchedPlaces(found, samples, camera, skyline, { lens = true } 
       roll: Number.isFinite(fit.roll) ? fit.roll : camera.roll,
       fov: lens ? fit.fov : camera.fov,
     };
-    const refined = fitToTrace(samples, start, along, { lens });
+    const refined = fitToTrace(samples, start, along, { lens, anchors });
     const placed = refined?.improved ? refined.camera : start;
     return { camera: placed, gap: traceGap(samples, placed, along), explained: fit.explained, close: fit.close, reach: on };
   });
@@ -772,11 +831,12 @@ export function searchedPlaces(found, samples, camera, skyline, { lens = true } 
  * reach is still the one to read the trace against), `closest`, the place a
  * "Show the closest" offers when it turns to none, and the toast's `text` and
  * `kind`. `before` is the gap the view had; `facing` whether the analyst said
- * which way the photo faces. The place is always the best one: where the view
- * happened to look decides nothing, only what the analyst said (`facing`,
- * which the search already kept to).
+ * which way the photo faces, `pinned` whether points were pinned in it. The
+ * place is always the best one: where the view happened to look decides
+ * nothing, only what the analyst said (`facing`, the pinned points, which the
+ * search already kept to).
  */
-export function searchOutcome(found, places, camera, { lens = true, before = null, facing = false } = {}) {
+export function searchOutcome(found, places, camera, { lens = true, before = null, facing = false, pinned = false } = {}) {
   const at = places.length ? 0 : -1;
   const place = places[at];
   const where = (p) => headingText(p.camera.heading, p.camera.fov);
@@ -785,7 +845,8 @@ export function searchOutcome(found, places, camera, { lens = true, before = nul
   if (found.verdict === 'none' || !place) {
     const [low, high] = found.lenses ?? [];
     const range = lens && low < high ? ` with a lens of ${Math.round(low)}° to ${Math.round(high)}°` : '';
-    return { take: -1, here: -1, closest: place ? 0 : -1, text: `Nothing on this horizon matches the trace${range}`, kind: 'warn' };
+    const points = pinned ? ' and the points you pinned' : '';
+    return { take: -1, here: -1, closest: place ? 0 : -1, text: `Nothing on this horizon matches the trace${points}${range}`, kind: 'warn' };
   }
   // the view already stands at that place, and the fit would not bring the trace closer
   const stay = isSamePlace(camera, place) && !closer(place.gap, before);
@@ -794,7 +855,7 @@ export function searchOutcome(found, places, camera, { lens = true, before = nul
   if (found.verdict === 'ambiguous') {
     const other = places.find((p, i) => i !== at && p.close);
     // the hint that would settle it: which way it faces, unless the analyst already said
-    const also = !other ? '' : facing ? `, and ${where(other)} fits about as well` : `, but ${where(other)} fits as well: say which way it faces`;
+    const also = !other ? '' : facing || pinned ? `, and ${where(other)} fits about as well` : `, but ${where(other)} fits as well: say which way it faces`;
     return { take, here, closest: -1, text: `Fitted at ${where(place)}${also}`, kind: 'warn' };
   }
   if (found.verdict === 'loose') {

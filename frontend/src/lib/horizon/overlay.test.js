@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { rayFor, toScreen } from './camera.js';
 import {
+  anchorSlack,
   bendShape,
   bent,
   BEND_MAX,
@@ -267,6 +268,34 @@ describe('a fit to the trace', () => {
 
   it('cannot fit a trace that meets no ground', () => {
     expect(fitToTrace([], TRUE, skyline)).toBeNull();
+  });
+
+  // a point recognised in the photo: clicked where the true camera shows it
+  const pinnedAt = (x, y, turn = 0) => {
+    const seen = rayFor(TRUE, x, y);
+    return { x, y, azimuth: seen.azimuth + turn, elevation: seen.elevation, distance: 20_000 };
+  };
+
+  it('keeps a pinned point near where it was clicked, and costs nothing within its slack', () => {
+    const rough = { ...TRUE, heading: 98, tilt: 0.2, roll: 0, fov: 64 };
+    const fit = fitToTrace(samples, rough, skyline, { anchors: [pinnedAt(700, 300)] });
+    expect(fit.improved).toBe(true);
+    expect(fit.camera.heading).toBeCloseTo(95, 0);
+    // a point said a hair off where it shows still lets the trace lie where it fits
+    const hair = fitToTrace(samples, rough, skyline, { anchors: [pinnedAt(700, 300, 0.5)] });
+    expect(hair.camera.heading).toBeCloseTo(95, 0);
+  });
+
+  it('holds the fit away from a trace that disagrees with a point pinned far off', () => {
+    const rough = { ...TRUE, heading: 98, tilt: 0.2, roll: 0, fov: 64 };
+    const pulled = fitToTrace(samples, rough, skyline, { anchors: [pinnedAt(700, 300, 6)] });
+    expect(Math.abs(pulled.camera.heading - 95)).toBeGreaterThan(1);
+  });
+
+  it('gives a pinned point the slack its click, its lens and its place on the map leave', () => {
+    expect(anchorSlack({ distance: 50_000 }, 5)).toBeCloseTo(0.3, 9);
+    expect(anchorSlack({ distance: 50_000 }, 60)).toBeCloseTo(1.5, 9);
+    expect(anchorSlack({ distance: 500 }, 5)).toBeCloseTo((Math.atan2(60, 500) * 180) / Math.PI, 9);
   });
 });
 
@@ -565,6 +594,13 @@ describe('a fit searched over the whole turn', () => {
     expect(body.x).toHaveLength(samples.length);
     expect(matchRequest(samples, TRUE, { ...PANORAMA, azimuth: { ...PANORAMA.azimuth, full: false } })).toBeNull();
     expect(matchRequest(samples, TRUE, null)).toBeNull();
+    // a pinned point travels on the picture plane as the trace does, with where it lies
+    const pinned = matchRequest(samples, TRUE, PANORAMA, { anchors: [{ x: 750, y: 375, azimuth: -10, elevation: 2, distance: 0 }] });
+    expect(pinned.anchors).toHaveLength(1);
+    expect(pinned.anchors[0].x).toBeCloseTo(0.5, 6);
+    expect(pinned.anchors[0].y).toBeCloseTo(0, 6);
+    expect(pinned.anchors[0]).toMatchObject({ azimuth: 350, elevation: 2, distance: 1 });
+    expect(matchRequest(samples, TRUE, PANORAMA)).not.toHaveProperty('anchors');
   });
 
   // the same turn, as haze 20 km out leaves it, and the whole turn with a far range standing over the ridge

@@ -99,6 +99,7 @@ export function createViewsState({ api, view, overlay, caseId, snapshot = async 
           pins: photo.pins,
           hints: photo.hints,
           reach: photo.reach,
+          anchors: photo.anchors,
         });
         // opening the photo set its lens and its lines: the view's own come back over them
         view.look(kept.look);

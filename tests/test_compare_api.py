@@ -284,7 +284,26 @@ def test_change_assist_accepts_comparable_pairs(client, a, b, method):
             _side("esri-wayback", wayback_release=145, overlays=["roads"]),
             _side("esri-wayback", wayback_release=146),
             "colour",
-            "reference layers",
+            "Match the layers",
+        ),
+        (
+            # one list on both sides, but the fires follow each side's own day
+            _side("esri-wayback", wayback_release=145, overlays=["firms"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2024-01-01", "last": ""}),
+            _side("esri-wayback", wayback_release=146, overlays=["firms"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2025-01-01", "last": ""}),
+            "colour",
+            "Active fires show different days on A and B. Turn them off",
+        ),
+        (
+            _side("osm", overlays=["firms", "nightlights"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2026-01-01", "last": ""},
+                  nightlights={"source": "noaa20", "day": "2026-01-01"}),
+            _side("osm", overlays=["firms", "nightlights"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2026-02-01", "last": ""},
+                  nightlights={"source": "noaa20", "day": "2026-02-01"}),
+            "brightness",
+            "Turn them off to compare night lights",
         ),
         (
             _side("sentinel2", sentinel={"layer": "TRUE_COLOR", "date": "2026-05-01", "maxcc": 100}),

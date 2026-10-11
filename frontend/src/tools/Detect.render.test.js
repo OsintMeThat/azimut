@@ -59,6 +59,9 @@ const get = vi.fn(async (path) => {
       input: { title: 'Earthworks', zones: area, recipe, note: '', a, b, offline: false, date_rule: 'manual', followup_id: null } };
   }
   if (path.startsWith('/api/cases/case-a/analysis/')) return [];
+  // the case's saved work and added layers, which the Layers menu offers
+  if (path.includes('/satellite/index') || path.includes('/satellite/media') || path.endsWith('/map-layers')) return [];
+  if (path === '/api/firms/sensors') return { keyed: false, state: 'missing', sensors: [] };
   if (path.startsWith('/api/settings')) return { usage: {}, month: '2026-09' };
   return {};
 });
@@ -142,6 +145,8 @@ const settle = async () => { for (let i = 0; i < 80; i++) await Promise.resolve(
 const button = (text) => [...target.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
 const starts = (text) => [...target.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 const labelled = (label) => target.querySelector(`button[aria-label="${label}"]`);
+/** A switch in the Layers menu, named by its text. */
+const chip = (label) => [...target.querySelectorAll('.layer-menu .chip')].find((b) => b.textContent.trim() === label);
 
 async function open() {
   target = document.createElement('div');
@@ -230,10 +235,27 @@ describe('Detect', () => {
   it('keeps the drawn areas in the map\'s own layer list', async () => {
     await open();
     starts('Layers').click(); await settle();
-    const row = target.querySelector('[aria-label="Watched areas"]');
+    const row = chip('Watched areas');
     expect(row.getAttribute('aria-pressed')).toBe('true');
     row.click(); await settle();
     expect(target.querySelectorAll('.detect-areas polygon:not(.hit)')).toHaveLength(0);
+  });
+
+  it('offers every layer the other maps do, with its own findings under the case', async () => {
+    await open();
+    starts('Layers').click(); await settle();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    expect([...menu.querySelectorAll('h4')].map((entry) => entry.textContent)).toEqual(['Reference', 'Events', 'Case']);
+    expect([...menu.querySelectorAll('.chip')].map((entry) => entry.textContent.trim())).toEqual([
+      'Borders', 'Place names', 'Roads', 'Railways', 'Power lines', 'Sea marks', 'GPS traces',
+      'Active fires', 'Night lights', 'Saved work', 'Saved detections', 'Watched areas',
+    ]);
+    // no key: the fire layer stays listed, locked, with the way to unlock it
+    expect(chip('Active fires').disabled).toBe(true);
+    expect(menu.textContent).toContain('Active fires: needs a free key.');
+    expect(menu.textContent).toContain('Add a FIRMS key');
+    // and the case's own layers are added in Satellite
+    expect(menu.textContent).toContain('Add your own layers in Satellite');
   });
 
   it('opens on Esri with Borders and saved work, with the search over the map and no header strip', async () => {
@@ -243,7 +265,9 @@ describe('Detect', () => {
     expect(showBasemap).toHaveBeenCalledWith(expect.objectContaining({ id: 'esri-world-imagery' }), 'esri-world-imagery', expect.anything());
     expect(setOverlay).toHaveBeenCalledWith('boundaries', true, null);
     starts('Layers').click(); await settle();
-    expect(target.querySelector('[aria-label="Saved work"]').getAttribute('aria-pressed')).toBe('true');
+    // Detect's own findings on, the case's saved places left to the other maps
+    expect(chip('Saved detections').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('Saved work').getAttribute('aria-pressed')).toBe('false');
     expect(get.mock.calls.some(([path]) => path.includes('/sentinel/'))).toBe(false);
     expect(post).not.toHaveBeenCalled();
   });
@@ -582,8 +606,36 @@ describe('one camera for the map tabs', () => {
     expect(uiState.mapPoint).toEqual({ lat: SATELLITE.lat, lon: SATELLITE.lon, zoom: 18 });
   });
 
-  it('keeps a run under review where it is', async () => {
+  it('takes the shared camera while reviewing a result, keeping its candidate and pass', async () => {
     prefs.mapSync = true;
+    await open();
+    uiState.openAnalyzer = `runs-${PAIR_RUN}`;
+    flushSync();
+    await settle();
+    const focusCalls = engines[0].setView.mock.calls.length;
+    const pass = target.querySelector('.pass-chip').textContent;
+    uiState.tool = 'satellite';
+    uiState.mapView = { ...SATELLITE };
+    flushSync();
+    uiState.tool = 'detect';
+    flushSync();
+    await settle();
+    expect(engines[0].setCamera).toHaveBeenLastCalledWith(expect.objectContaining(SATELLITE));
+    expect(uiState.mapView).toMatchObject({ zoom: 20, by: 'satellite' });
+    expect(engines[0].setView).toHaveBeenCalledTimes(focusCalls);
+    expect(target.querySelector('.pass-chip').textContent).toBe(pass);
+    expect(target.textContent).toContain('1 of 1');
+    // A linked window can also move the camera while this review is visible.
+    const linked = { ...SATELLITE, lat: 13, lon: 44, zoom: 15, bearing: 45, by: 'chain' };
+    uiState.mapView = linked;
+    flushSync();
+    await settle();
+    expect(engines[0].camera()).toMatchObject({ lat: 13, lon: 44, zoom: 15, bearing: 45 });
+    expect(engines[0].setView).toHaveBeenCalledTimes(focusCalls);
+    expect(target.querySelector('.pass-chip').textContent).toBe(pass);
+  });
+
+  it('keeps a review on its own camera when map sync is off', async () => {
     await open();
     uiState.openAnalyzer = `runs-${PAIR_RUN}`;
     flushSync();
@@ -593,6 +645,7 @@ describe('one camera for the map tabs', () => {
     flushSync();
     uiState.tool = 'detect';
     flushSync();
+    await settle();
     expect(engines[0].setCamera).not.toHaveBeenCalled();
   });
 

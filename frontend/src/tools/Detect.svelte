@@ -17,7 +17,11 @@
    */
   import { onMount, tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
-  import { caseState, dismissToast, prefs, prefsReady, toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, dismissToast, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { assignFolder } from '../lib/filing.js';
+  import { createFireKey } from '../lib/map/fireKey.svelte.js';
+  import { createLayerSet } from '../lib/map/layerSet.svelte.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { copyText } from '../lib/clipboard.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
   import { blinkable } from '../lib/map/detectReview.js';
@@ -40,7 +44,10 @@
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import ImageryChip from './satellite/ImageryChip.svelte';
-  import MapLayers from './satellite/MapLayers.svelte';
+  import LayerMenu from '../components/LayerMenu.svelte';
+  import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
+  import SavedOverlay from './satellite/SavedOverlay.svelte';
+  import { createSavedState } from './satellite/state/saved.svelte.js';
   import Compass from '../components/Compass.svelte';
   import TurnGuide from '../components/TurnGuide.svelte';
   import Icon from '../components/Icon.svelte';
@@ -75,7 +82,6 @@
   let savedDockWidth = $state(380);
   let toolEl = $state(null);
   let fullscreen = $state(false);
-  let overlays = $state(['boundaries', 'placenames']);
   let savedVisible = $state(true);
   let readingPass = $state(false);
   let layersOpen = $state(false);
@@ -87,16 +93,50 @@
    *  its Copernicus layer and day, but none is remembered as the basemap: Detect
    *  opens on free imagery every time. */
   const PASSES = [SENTINEL, RADAR_ID];
-  const OVERLAY_ROWS = [['boundaries', 'Borders'], ['placenames', 'Place names'], ['roads', 'Roads'], ['railway', 'Railways'],
-    ['power', 'Power lines'], ['seamarks', 'Sea marks'], ['gpstraces', 'GPS traces']];
+  /** Whether the fire layer can be used, read from our own backend. */
+  const fireKey = createFireKey({ api });
+  /**
+   * The map's layers, every one the catalogue offers (lib/map/layerSet). The
+   * fires and the night lights start on the day of the picture on screen, which
+   * is a pass's own day when one is read.
+   */
+  const mapLayers = createLayerSet({
+    fireKey,
+    initial: ['boundaries', 'placenames'],
+    follow: "Picture's day",
+    pictureDay: () => dated?.date ?? '',
+    imagery: () => imagery.find(providerId)?.imagery ?? true,
+    onsettings: () => {
+      uiState.settingsTab = 'imagery';
+      uiState.tool = 'settings';
+    },
+  });
+  // The case's saved places, captures and located files, as the other maps draw
+  // them. Off at first: Detect opens on its own findings.
+  const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
+  $effect(() => savedWork.load(caseState.current?.id ?? null));
+  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
+  const savedItems = $derived([...savedWork.rows, ...savedWork.media]);
+  const myLayers = addedLayers.scope('detect');
+  // a FIRMS key pasted into Settings, or tested back to life there
+  $effect(() => {
+    if (uiState.tool === 'detect') void fireKey.load();
+  });
+  $effect(() => () => fireKey.destroy());
+  // a snapshot filed from these findings ("Add to the SAT layers") reaches this
+  // menu with the reload that follows it
+  $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
   const layerRows = $derived([
-    ...OVERLAY_ROWS.map(([id, label]) => ({
-      id, label, on: overlays.includes(id), toggle: () => {
-        overlays = overlays.includes(id) ? overlays.filter((value) => value !== id) : [...overlays, id];
-      },
-    })),
-    { id: 'saved', label: 'Saved work', on: savedVisible, toggle: () => (savedVisible = !savedVisible) },
-    { id: 'areas', label: 'Watched areas', on: showZones, toggle: () => (showZones = !showZones) },
+    ...mapLayers.rows({
+      saved: savedItems.length
+        ? { count: savedItems.length }
+        : { disabled: true, title: 'Nothing is saved or placed in this case yet' },
+    }),
+    // Detect's own, under the case's: what its runs found, and where it watches
+    { id: 'detections', group: 'case', label: 'Saved detections', title: 'What saved runs found, drawn over the map',
+      on: savedVisible, toggle: () => (savedVisible = !savedVisible) },
+    { id: 'areas', group: 'case', label: 'Watched areas', title: 'The areas your routines watch',
+      on: showZones, toggle: () => (showZones = !showZones) },
   ]);
   let searchText = $state('');
   let searching = $state(false);
@@ -272,7 +312,7 @@
       providerId = chosenBasemap;
       // Only the layers still offered: a retired one (Labels) would be sent back
       // with the next save and refused.
-      overlays = (saved?.overlays ?? ['boundaries', 'placenames']).filter((id) => OVERLAY_ROWS.some(([row]) => row === id));
+      mapLayers.restore(saved?.overlays ?? ['boundaries', 'placenames']);
       savedVisible = saved?.saved ?? true;
       prefsLoaded = true;
       home = { ...prefs.homeView };
@@ -305,7 +345,7 @@
   $effect(() => {
     if (!prefsLoaded) return;
     const value = { collapsed, width: savedDockWidth, basemap: chosenBasemap,
-      overlays: [...overlays], saved: savedVisible };
+      overlays: mapLayers.kept, saved: savedVisible };
     const key = JSON.stringify(value);
     if (!lastPrefs) { lastPrefs = key; return; }
     if (key === lastPrefs) return;
@@ -400,6 +440,12 @@
     actionsFor(pointMenu?.areaId ? ['lookup', 'candidate', 'measure', 'horizon', 'centre'] : ['lookup', 'measure', 'horizon', 'centre'])
   );
   const pointTools = otherMapTools('detect');
+
+  /** A saved item picked on the map: the map goes to it. */
+  function flyToSaved(row) {
+    if (row.lat == null || row.lon == null || !engine) return;
+    engine.setView({ lat: Number(row.lat), lon: Number(row.lon) }, Math.max(engine.getZoom(), Number(row.zoom) || 13));
+  }
 
   function onMapContextMenu(at) {
     pointLookupSeq += 1;
@@ -543,17 +589,14 @@
 
   /**
    * The camera this window's map tabs share (`lib/map/sharedView.js`), taken
-   * when this tab shows. A candidate under review keeps the map on it: the
-   * analyst stepping out to look at the ground around it comes back to it.
+   * when this tab shows, including while a candidate is under review.
    */
   const share = shareView('detect', { state: uiState, enabled: () => prefs.mapSync });
-  let reviewing = $state(false);
 
   $effect(() => {
     uiState.mapView;
     if (uiState.tool !== 'detect' || !ready) return;
     untrack(() => {
-      if (reviewing) return;
       const next = share.pending(engine.camera());
       if (next) engine.setCamera(next);
     });
@@ -671,9 +714,15 @@
     <div class="map-choices">
       <!-- The passes under an analyzer being built are its check's (the console), so the provider is not offered. -->
       {#if !builder}<ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />{/if}
-      <div class="layer-picker cmp-glass">
-        <MapLayers rows={layerRows} bind:open={layersOpen} />
-      </div>
+      <LayerMenu
+        rows={layerRows}
+        added={myLayers.rows}
+        ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
+        onmanage={() => (uiState.tool = 'satellite')}
+        buttonClass="layers-chip cmp-glass"
+        align="right"
+        bind:open={layersOpen}
+      />
       <!-- While an analyzer is built, the console over the map holds its passes. -->
       {#if blinkPair && !builder}
         <!-- Which of the two is on screen, in Compare's letters and colours. -->
@@ -714,7 +763,7 @@
           {s2}
           {wayback}
           {s1}
-          {overlays}
+          overlays={mapLayers.overlays}
           chrome={false}
           {home}
           resetToHome={false}
@@ -729,8 +778,29 @@
           oncontextmenu={onMapContextMenu}
           onimageryfallback={() => builder ? builder.setBasemap(true) : leavePass()}
         />
+        <!-- The case's own layers, under Detect's findings. Drawn only while this
+             tab is on screen, and inert while a tool holds the pointer, so a pin
+             or an area is never a card opened instead. -->
+        <AddedLayersOverlay
+          engine={ready ? engine : null}
+          caseId={caseState.current?.id ?? ''}
+          layers={uiState.tool === 'detect' && !bare ? myLayers.drawn : []}
+          drawing={addedLayers.drawing}
+          onmenu={onMapContextMenu}
+          interactive={!measuring && drawing === 'select' && !manual && !builder?.pinning}
+        />
+        {#if mapLayers.has('saved') && !bare && caseState.current}
+          <SavedOverlay
+            engine={ready ? engine : null}
+            items={savedItems}
+            caseId={caseState.current.id}
+            coords={(item) => fmtCoords(item.lat, item.lon)}
+            onopen={flyToSaved}
+            onrefresh={reloadCase}
+          />
+        {/if}
         {#if builder?.split}
-          <SecondPass {imagery} primary={engine} source={builder.imagery.b} {view} {bearing} {home} {overlays}
+          <SecondPass {imagery} primary={engine} source={builder.imagery.b} {view} {bearing} {home} overlays={mapLayers.overlays}
             imperial={prefs.units === 'imperial'} armed={measuring ? 'measuring' : builder.pinning ? 'selecting' : null}
             divider={builder.divider} bind:engine={secondEngine} bind:element={secondElement}
             onsplit={(percent) => builder.setDivider(percent)} onclick={onMapClick} oncontextmenu={onMapContextMenu}
@@ -852,7 +922,6 @@
       bind:highlight
       bind:bare
       bind:blinking
-      bind:reviewing
       onpair={(pair) => (reviewPair = pair)}
       {opening}
       onopened={() => (opening = null)}
@@ -881,10 +950,10 @@
   .search { position: absolute; top: 12px; left: 12px; z-index: 650; display: flex; width: min(280px, 42%); padding: 4px; }
   .search :global(.place-search) { flex: 1; }
   .map-choices { position: absolute; top: 12px; right: 12px; z-index: 650; display: grid; justify-items: end; gap: 8px; }
-  .layer-picker { padding: 3px 8px; min-width: 112px; max-width: 250px; max-height: 50vh; overflow: auto; }
-  .layer-picker :global(.sub-head) { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 22px; padding: 0 2px; font-size: var(--fs-xs); color: var(--text-2); }
-  .layer-picker :global(.count) { margin-left: auto; color: var(--text-3); }
-  .layer-picker :global(.layers) { min-width: 190px; margin-top: 8px; }
+  /* the closed menu is as tall as the imagery chip over it */
+  .map-choices :global(.layers-chip) { display: flex; align-items: center; gap: 6px; height: 30px; box-sizing: border-box;
+    padding: 0 10px; font-size: var(--fs-xs); cursor: pointer; }
+  .map-choices :global(.layers-chip:hover), .map-choices :global(.layers-chip.active) { color: var(--accent); }
   .ruler { position: absolute; top: 66px; left: 12px; z-index: 650; display: flex; padding: 2px; }
   .blink-chip { padding: 2px 2px 2px 4px; }
   .blink-chip .cmp-icon { width: 22px; height: 22px; }

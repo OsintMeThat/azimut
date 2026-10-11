@@ -45,10 +45,14 @@
     onsetup = () => {},
     /** Where the view looks now, which "roughly this way" takes. */
     heading = 0,
+    /** The point marked on the map, which can be pinned where it shows in the photo, or null. */
+    marked = null,
+    /** Asked to pin the marked point on the photo. */
+    onpin = () => {},
   } = $props();
 
   /** What is known about the photo, in the band's words; '' while nothing is. */
-  const told = $derived(hintsSummary(overlay.hints, overlay.reach));
+  const told = $derived(hintsSummary(overlay.hints, overlay.reach, overlay.anchors?.length ?? 0));
 
   const terrainShare = $derived(Math.round((1 - overlay.mix) * 100));
   const what = $derived(overlay.source?.kind === 'video' ? 'Video' : 'Photo');
@@ -425,7 +429,15 @@
   {#if hintsOpen}
     <div bind:this={hintsBox} class="pop hints-pop" id="hz-photo-hints" role="dialog" aria-label="What you know about the photo">
       <h3>What you know about the photo</h3>
-      <PhotoHints {overlay} {heading} />
+      <PhotoHints
+        {overlay}
+        {heading}
+        {marked}
+        onpin={() => {
+          hintsOpen = false;
+          onpin();
+        }}
+      />
     </div>
   {/if}
 

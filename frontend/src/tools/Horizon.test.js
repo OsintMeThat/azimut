@@ -57,3 +57,19 @@ describe('the Horizon layout', () => {
     expect(style).not.toMatch(/\b250px\b/);
   });
 });
+
+describe('the small map\'s layers', () => {
+  it('offers every layer the other maps do, from the shared catalogue and store', () => {
+    expect(source).toContain("const mapLayers = createLayerSet({");
+    expect(source).toContain("initial: ['boundaries', 'placenames', 'saved']");
+    expect(source).toContain("const myLayers = addedLayers.scope('horizon');");
+    expect(markup).toContain('<LayerChips');
+    expect(markup).toContain('added={myLayers.rows}');
+  });
+
+  it('draws the case\'s own layers only on screen, and never lets one take the click that stands the eye', () => {
+    const overlay = markup.slice(markup.indexOf('<AddedLayersOverlay'), markup.indexOf('/>', markup.indexOf('<AddedLayersOverlay')));
+    expect(overlay).toContain("layers={uiState.tool === 'horizon' ? myLayers.drawn : []}");
+    expect(overlay).toContain('interactive={false}');
+  });
+});

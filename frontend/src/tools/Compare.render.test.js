@@ -671,37 +671,81 @@ describe('Compare', () => {
     expect(target.querySelector('.source-card .cmp-letter').textContent).toBe('B');
   });
 
-  it('gives each source its own layers and keeps export choices in one modal', async () => {
+  it('lays one list of layers over both maps, from a menu that leaves them in view', async () => {
     await open();
     await add('A');
     await add('B');
 
-    target.querySelector('[aria-label="Layers on imagery A"]').click();
+    // no Layers button on either side's card: one, above both maps
+    expect(target.querySelector('.source-card [aria-label^="Layers on imagery"]')).toBeNull();
+    const trigger = () => target.querySelector('.layer-menu > button');
+    trigger().click();
     flushSync();
-    const layers = document.querySelector('[role="dialog"]');
-    expect(layers.getAttribute('aria-label')).toBe('Layers · A / B');
-    expect(layers.querySelectorAll('.layer-pane')).toHaveLength(2);
-    expect(layers.querySelectorAll('.layer-row')).toHaveLength(20);
-    expect(layers.textContent).toContain('Active fires');
-    expect(layers.textContent).toContain('Night lights');
-    expect(layers.textContent).toContain('Saved work');
-    const paneA = layers.querySelector('.layer-pane');
-    paneA.querySelector('button[aria-label="Show Roads on imagery A"]').click();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    expect(menu.getAttribute('aria-label')).toBe('Layers');
+    // a menu, not a modal: the maps stay on screen behind it
+    expect(document.querySelector('.modal')).toBeNull();
+    const chip = (label) => [...menu.querySelectorAll('.chip')].find((entry) => entry.textContent.trim() === label);
+    expect([...menu.querySelectorAll('h4')].map((entry) => entry.textContent)).toEqual(['Reference', 'Events', 'Case']);
+    expect(menu.querySelectorAll('.chip')).toHaveLength(10);
+
+    chip('Roads').click();
     flushSync();
-    expect(target.querySelectorAll('.source-card .layers')[0].textContent).toContain('1');
-    paneA.querySelector('button[aria-label="Show Night lights on imagery A"]').click();
+    expect(chip('Roads').getAttribute('aria-pressed')).toBe('true');
+    expect(trigger().textContent).toContain('1');
+
+    // The fires follow each side's picture: World Imagery dates both to 2024-01-02,
+    // once each surface has asked (half a second after it settles).
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await settle();
+    chip('Active fires').click();
     flushSync();
-    expect(target.querySelectorAll('.source-card .layers')[0].textContent).toContain('2');
-    expect(paneA.textContent).toContain('NOAA-20');
-    expect(paneA.querySelectorAll('.day-picker')).toHaveLength(1);
-    paneA.querySelector('button[aria-label="Show Active fires on imagery A"]').click();
+    expect(menu.textContent).toContain('Active fires: VIIRS · A 2024-01-02 · B 2024-01-02');
+    button('Change', menu).click();
     flushSync();
-    expect(paneA.textContent).toContain('VIIRS');
-    expect(paneA.textContent).toContain('24 h');
-    const dates = [...paneA.querySelectorAll('.chips button')].find((entry) => entry.textContent.trim() === 'Custom');
-    dates.click();
+    expect(button("Each side's day", menu).getAttribute('aria-pressed')).toBe('true');
+    expect(menu.querySelectorAll('.day-picker')).toHaveLength(0);
+    button('Pick days', menu).click();
     flushSync();
-    expect(paneA.querySelectorAll('.day-picker')).toHaveLength(3);
+    // one day per side, starting on the day each was showing
+    expect(menu.querySelectorAll('.day-picker')).toHaveLength(2);
+
+    // Escape closes it, as it closes any overlay
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(target.querySelector('.layer-menu [role="dialog"]')).toBeNull();
+
+    saveButton().click();
+    flushSync();
+    button('Save comparison', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    const saved = post.mock.calls.findLast(([path]) => path === '/api/cases/case-a/compare/sessions')[1].spec;
+    // one list, kept on each side as sessions always held it
+    expect(saved.a.overlays).toEqual(['roads', 'firms']);
+    expect(saved.b.overlays).toEqual(['roads', 'firms']);
+    expect(saved.a.firms).toMatchObject({ sensor: 'viirs', window: 'dates', first: '2024-01-02' });
+    expect(saved.b.firms).toMatchObject({ sensor: 'viirs', window: 'dates', first: '2024-01-02' });
+  });
+
+  it('opens a session saved with a layer on one side only with it on both', async () => {
+    await open();
+    button('Open', target).click();
+    await settle();
+    button('Harbour change', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    const on = [...menu.querySelectorAll('.chip[aria-pressed="true"]')].map((entry) => entry.textContent.trim());
+    expect(on).toEqual(['Roads', 'Railways']);
+    // reopening is not an edit
+    expect(target.querySelector('.badge')).toBeNull();
+  });
+
+  it('keeps export choices in one modal', async () => {
+    await open();
+    await add('A');
+    await add('B');
 
     button('Export', target).click();
     await settle();

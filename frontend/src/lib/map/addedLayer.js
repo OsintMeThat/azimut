@@ -42,7 +42,13 @@ import { categoryColour } from './addedLayers.js';
 
 /** The pictogram per geometry kind. Three shapes is the whole vocabulary, and
  *  what every feature falls back to when the source drew no icon of its own. */
-const GLYPHS = { point: 'pin', line: 'line', area: 'polygon' };
+const GLYPHS = { point: 'pin', line: 'line', area: 'polygon', circle: 'circle', star: 'star', flag: 'flag' };
+const BASE_KINDS = ['point', 'line', 'area'];
+
+export function markerIcon(geometry, symbol) {
+  return iconName(geometry?.type === 'Point' && ['circle', 'star', 'flag'].includes(symbol)
+    ? symbol : kindOf(geometry));
+}
 
 /** How big an icon is drawn into its own image, before the engine scales it. */
 const ICON_PIXELS = 64;
@@ -233,8 +239,8 @@ function sdf(data, size, spread = ICON_SPREAD) {
 }
 
 /** Register the three pictograms once on a map, if they are not there already. */
-export function registerIcons(map, build = iconImage) {
-  for (const kind of Object.keys(GLYPHS)) {
+export function registerIcons(map, build = iconImage, kinds = BASE_KINDS) {
+  for (const kind of kinds) {
     const name = iconName(kind);
     if (map.hasImage?.(name)) continue;
     const image = build(kind);
@@ -320,6 +326,9 @@ export function createAddedLayer(
   let collection = null; // what was last drawn, so a feature can be found by number
   let open = null; // the read-only card, so it can be closed by name
   let releaseClicks = null;
+  // Off while the map's own tool holds the pointer (a measure, a pin, an area
+  // being drawn): a click there is the tool's, not a card's.
+  let interactive = true;
   // Bumped by every `set` and by `destroy`, so a set whose icons were still
   // loading when the layer moved on lands nowhere.
   let generation = 0;
@@ -457,11 +466,11 @@ export function createAddedLayer(
     };
     bind('click', (event) => {
       const feature = event.features?.[0];
-      if (!feature) return;
+      if (!feature || !interactive) return;
       showCard(feature, event.lngLat);
     });
     bind('contextmenu', (event) => {
-      if (!menu) return;
+      if (!menu || !interactive) return;
       const features = event.features ?? [];
       // a pin drawn over an area is the pin that was meant
       const feature = features.find((one) => pointOf(one)) ?? features[0];
@@ -471,12 +480,12 @@ export function createAddedLayer(
       menu({ ...at, x: event.point.x, y: event.point.y }, point ? (feature.properties ?? {}) : null);
     });
     bind('mouseenter', () => {
-      map.getCanvas().style.cursor = 'pointer';
+      if (interactive) map.getCanvas().style.cursor = 'pointer';
     });
     bind('mouseleave', () => {
-      map.getCanvas().style.cursor = '';
+      if (interactive) map.getCanvas().style.cursor = '';
     });
-    releaseClicks = engine.claimClicks?.(PAINTED) ?? null;
+    if (interactive) releaseClicks = engine.claimClicks?.(PAINTED) ?? null;
   }
 
   /**
@@ -581,12 +590,15 @@ export function createAddedLayer(
           // Resolved into the data rather than expressed per layer, because the
           // icon has to be chosen per feature and the colour has to fall back
           // per feature when the source painted only some of them.
-          $icon: iconName(kindOf(feature.geometry)),
+          $icon: markerIcon(feature.geometry, feature.properties?.symbol),
           ...(ready.has(feature.properties?.icon)
             ? { $own: sourceIconName(feature.properties.icon) }
             : null),
         },
       }));
+      const symbols = [...new Set(features.map((feature) => feature.properties.symbol))]
+        .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
+      registerIcons(map, iconImage, symbols);
       map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
       for (const layer of PAINTED) {
         if (layer === OWN || !map.getLayer(layer)) continue;
@@ -675,6 +687,22 @@ export function createAddedLayer(
       if (!built) return;
       applyVisibility();
       if (!on) closeCard();
+    },
+
+    /**
+     * Whether a feature answers a click. Off, its clicks reach the map's own
+     * tool underneath, as if the layer were a picture; on, a click opens its card.
+     */
+    interactive(on) {
+      if (on === interactive) return;
+      interactive = on;
+      if (!built) return;
+      if (on) releaseClicks ??= engine.claimClicks?.(PAINTED) ?? null;
+      else {
+        releaseClicks?.();
+        releaseClicks = null;
+        closeCard();
+      }
     },
 
     /** What the legend is painting, so a caller can read it back. */

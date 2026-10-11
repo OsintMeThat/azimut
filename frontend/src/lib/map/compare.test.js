@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COMPARE_LAYERS,
   COMPARE_MODES,
   DIFFERENCE_KEY,
   availablePresets,
   compareMode,
-  comparisonLayers,
   percentage,
   providerKind,
 } from './compare.js';
@@ -22,18 +20,6 @@ describe('compare helpers', () => {
     expect(compareMode('change')).toBe('side');
     expect(compareMode('analysis')).toBe('side');
     expect(compareMode(undefined)).toBe('side');
-  });
-
-  it('keeps layers ordered, unique and supported', () => {
-    // 'labels' is a layer that was retired: a session saved with it opens without it
-    expect(comparisonLayers(['saved', 'roads', 'roads', 'buildings', 'labels'])).toEqual([
-      'roads',
-      'saved',
-    ]);
-    expect(comparisonLayers(null)).toEqual([]);
-    expect(new Set(COMPARE_LAYERS.map((layer) => layer.group))).toEqual(
-      new Set(['reference', 'events', 'case'])
-    );
   });
 
   it('clamps percentages for CSS', () => {

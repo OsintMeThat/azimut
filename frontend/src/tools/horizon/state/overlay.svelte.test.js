@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fovFromFocal35 } from '../../../lib/horizon/camera.js';
-import { BLINK_MS, createOverlayState, FRAME_DELAY, openBitmap, PHOTO_MAX_PX, SNAP_PX, UNDO_STEPS } from './overlay.svelte.js';
+import { ANCHORS_MAX, BLINK_MS, createOverlayState, FRAME_DELAY, openBitmap, PHOTO_MAX_PX, SNAP_PX, UNDO_STEPS } from './overlay.svelte.js';
 
 /** A video player that does what the test tells it, when it tells it. */
 class FakeVideo {
@@ -571,6 +571,49 @@ describe('a photo locked to the terrain', () => {
     photo.setLocked(true);
     await photo.openCase('c1', { path: 'media/other.jpg', kind: 'image' });
     expect(photo.locked).toBe(false);
+  });
+});
+
+describe('points recognised in the photo', () => {
+  const PEAK = { lat: 46.5775, lon: 7.9853, height: 0 };
+
+  it('pins a point of the map where it shows, moves it when pinned again, and lets it go', async () => {
+    const photo = overlay();
+    photo.addAnchor({ u: 0.4, v: 0.3 }, PEAK);
+    expect(photo.anchors).toEqual([]);
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addAnchor({ u: 0.4, v: 0.3 }, PEAK);
+    expect(photo.anchors).toEqual([{ u: 0.4, v: 0.3, ...PEAK }]);
+    expect(photo.anchorsSeen).toEqual([{ u: 0.4, v: 0.3 }]);
+    photo.addAnchor({ u: 0.5, v: 0.32 }, PEAK);
+    expect(photo.anchors).toEqual([{ u: 0.5, v: 0.32, ...PEAK }]);
+    photo.addAnchor({ u: 0.2, v: 0.4 }, { lat: 46.6, lon: 8.0, height: -5 });
+    expect(photo.anchors[1]).toEqual({ u: 0.2, v: 0.4, lat: 46.6, lon: 8.0, height: 0 });
+    photo.addAnchor({ u: Number.NaN, v: 0.4 }, PEAK);
+    expect(photo.anchors).toHaveLength(2);
+    photo.removeAnchor(0);
+    expect(photo.anchors.map((a) => a.lat)).toEqual([46.6]);
+    await photo.openCase('c1', { path: 'media/other.jpg', kind: 'image' });
+    expect(photo.anchors).toEqual([]);
+  });
+
+  it('keeps a point where it shows on the photo when the photo is reshaped, and takes no more than the most', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.setCorners([{ u: 0.1, v: 0 }, { u: 1, v: 0 }, { u: 1, v: 1 }, { u: 0.1, v: 1 }]);
+    photo.addAnchor({ u: 0.55, v: 0.5 }, PEAK);
+    // clicked where the reshaped photo shows it: the photo's own point is half way across
+    expect(photo.anchors[0].u).toBeCloseTo(0.5, 6);
+    expect(photo.anchorsSeen[0].u).toBeCloseTo(0.55, 6);
+    for (let i = 0; i < 12; i += 1) photo.addAnchor({ u: 0.5, v: 0.5 }, { lat: 40 + i, lon: 8 });
+    expect(photo.anchors).toHaveLength(ANCHORS_MAX);
+  });
+
+  it('comes back with the view that kept it, odd points left out', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.restoreWork({ anchors: [{ u: 0.4, v: 0.3, ...PEAK }, { u: 0.4, v: null, lat: 1, lon: 2 }] });
+    expect(photo.anchors).toEqual([{ u: 0.4, v: 0.3, ...PEAK }]);
   });
 });
 

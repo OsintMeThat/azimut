@@ -330,19 +330,25 @@ def _validated_spec(spec: CompareSpec) -> dict[str, Any]:
     return cleaned
 
 
-def _same_layers(a: dict[str, Any], b: dict[str, Any], *, skip: str | None = None) -> bool:
+def _layer_mismatch(a: dict[str, Any], b: dict[str, Any], reading: str, *, skip: str | None = None) -> str | None:
+    """Why the two sides' layers would make a pixel reading unfair, or None.
+
+    A and B share one list, so what can differ is a day: the fires or the night
+    lights drawn for each side's own date. Mirrors ``layerMismatch`` in
+    ``lib/map/changeAssist.js``.
+    """
     left = set(a["overlays"])
     right = set(b["overlays"])
     if skip:
         left.discard(skip)
         right.discard(skip)
     if left != right:
-        return False
+        return f"Match the layers on A and B before comparing {reading}"
     if "firms" in left and a["firms"] != b["firms"]:
-        return False
+        return f"Active fires show different days on A and B. Turn them off to compare {reading}"
     if "nightlights" in left and a["nightlights"] != b["nightlights"]:
-        return False
-    return True
+        return f"Night lights show different nights on A and B. Turn them off to compare {reading}"
+    return None
 
 
 _ESRI_CHAIN = frozenset({"esri-world-imagery", "esri-wayback"})
@@ -372,8 +378,8 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             return "Choose two different Sentinel-2 passes"
         if a["sentinel"]["layer"] != b["sentinel"]["layer"]:
             return "Sentinel-2 needs the same layer on both sides"
-        if not _same_layers(a, b):
-            return "Match the reference layers on A and B"
+        if mismatch := _layer_mismatch(a, b, "pixels"):
+            return mismatch
         return None
     if a["provider"] == b["provider"] == sentinel.RADAR_ID:
         radar_a, radar_b = a.get("radar") or {}, b.get("radar") or {}
@@ -383,8 +389,8 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             return "Choose two different Sentinel-1 passes"
         if not sentinel.same_track(radar_a.get("time", ""), radar_b.get("time", "")):
             return "Radar compares two passes of one track, at the same time of day"
-        if not _same_layers(a, b):
-            return "Match the reference layers on A and B"
+        if mismatch := _layer_mismatch(a, b, "pixels"):
+            return mismatch
         return None
     if {a["provider"], b["provider"]} <= _ESRI_CHAIN:
         same_picture = (
@@ -396,8 +402,8 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
                 "Both sides show the same picture. Pick another Esri release, "
                 "or two dated Sentinel-2 passes"
             )
-        if not _same_layers(a, b):
-            return "Match the reference layers on A and B"
+        if mismatch := _layer_mismatch(a, b, "pixels"):
+            return mismatch
         return None
     night_a = "nightlights" in a["overlays"]
     night_b = "nightlights" in b["overlays"]
@@ -416,8 +422,8 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             return "Choose two different nights"
         if a["sentinel"] != b["sentinel"] or a["wayback_release"] != b["wayback_release"]:
             return "Match the background imagery on A and B"
-        if not _same_layers(a, b, skip="nightlights"):
-            return "Match every other layer on A and B"
+        if mismatch := _layer_mismatch(a, b, "night lights", skip="nightlights"):
+            return mismatch
         return None
     return ("Difference reads Sentinel-2, Sentinel-1 on one track, Esri imagery releases or "
             "VIIRS night-light pairs")

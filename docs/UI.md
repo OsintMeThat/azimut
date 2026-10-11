@@ -1655,10 +1655,10 @@ nothing unsaved, and Save still takes it. **New** starts over from a menu of
 starting pairs, the same ones a removed pair offers above its empty slots, and
 **Revert** shows only on an edited saved comparison, taking it back to the saved
 version. Each
-side keeps its provider, Wayback release, Sentinel-2 day and reference layers.
+side keeps its provider, Wayback release and Sentinel-2 day.
 The source cards and mode controls use the application's shared theme, buttons
 and spacing. The date is a chip beside the provider, reading the same for
-Wayback and for Sentinel-2 on every map tab, so the card's layers icon means one thing.
+Wayback and for Sentinel-2 on every map tab.
 The Sentinel-2 chip's menu also writes layers of your own — **Composite** puts
 three bands on red, green and blue, **Index** measures `(A − B) / (A + B)` on a
 colour ramp and **Custom script** is the evalscript itself, with each form
@@ -1670,8 +1670,15 @@ the list. A
 Wayback chip names the release, so the day its pixels were taken sits beside it,
 as it does under the chip on Satellite. The
 cards float over the maps they describe, one per pane, so no bar takes the maps'
-height; the place search and the camera sit in B's corner. Both Layers buttons open the same A/B sheet, including each
-side's FIRMS period, VIIRS night and saved case work.
+height; the place search and the camera sit in B's corner.
+
+**Layers** is one menu for both maps, in the row above them: a layer on one side
+only would read as a change. The fires and the night lights follow each side's
+picture, so A shows the fires of its day and B those of its own; **Change** picks a
+day for each side instead. A comparison saved while each side had its own list
+reopens with every layer of either side on both. When the fires or the nights
+differ between A and B, Difference names that layer and says turning it off is
+enough.
 
 One row sits above the maps. With a pair on screen the mode dock takes the
 title's place there, beside the name, **All dates**, **Export** and **Save**, and
@@ -2372,9 +2379,9 @@ ends after you switched tab, and a map tab that shows takes it in one move, turn
 included. A hidden map never moves, so it loads no tiles and asks Copernicus nothing
 for ground nobody is looking at.
 A map whose imagery stops short of the shared zoom lands at its own ceiling and
-leaves the deeper zoom standing for the tab that has it. A Detect run under
-review keeps its ground. A saved comparison follows like the rest, and moving it
-leaves it saved; Save keeps the new view.
+leaves the deeper zoom standing for the tab that has it. Detect follows while a
+result is under review, keeping its candidate and imagery. A saved comparison
+follows like the rest, and moving it leaves it saved; Save keeps the new view.
 Horizon shares where it stands: once its eye and its look rest, the other maps
 look from the eye, turned to its heading, at the zoom they had, and Coords & Sky
 reads the eye. Satellite draws that eye with a dashed cone. The eye itself never
@@ -2384,6 +2391,17 @@ large map on that ground for a click to stand. While no eye stands, Horizon's ma
 follows the others like any map tab.
 Switching case leaves the camera where it is, since a view is not case state.
 Settings → General → Map tabs turns it off, and each tab keeps its own camera again.
+
+**Every map offers the same layers.** Satellite works them in its panel. Compare,
+Detect and Horizon's small map list them in a **Layers** menu, as chips under
+Reference, Events, Case and Added layers. Each map keeps its own switches, so a
+layer is drawn only where it was switched on. A layer that asks a question says
+its answer in one line once it is on, and **Change** opens its settings. The fires
+and the night lights start on the day of the picture on screen where the map
+knows it, and on the last 24 hours and the last night where it does not. Added
+layers are added and worked in Satellite; the app reads each one once, and only
+the tab on screen draws it. While a tool holds the pointer (a measure, a pin, an
+area being drawn, Horizon's eye), a click on one of their features goes to the tool.
 
 **Every map turns the same way.** A middle-drag, or Shift and the left button,
 turns it like a wheel about the point grabbed: a dashed circle marks that point,
@@ -2476,7 +2494,7 @@ the key, which brings its layers with it, and the Sentinel-1 layer added to it b
 hand for the radar analyzers, field by field — and one press opens the Copernicus
 card in Settings. The panel still opens on what the case already holds.
 
-Detect opens on Esri World Imagery, with Borders, Place names and saved results
+Detect opens on Esri World Imagery, with Borders, Place names and saved detections
 visible, framed on the areas this case watches — once, after which the camera is yours. That
 framing waits for the tab to show. Arriving from another map tab while they share
 one view, Detect opens where that map was instead, since that is the ground in hand.
@@ -2509,9 +2527,9 @@ controls. Routines, Saved and Areas sit in a tab row below it, with New detectio
 at the top of the content. A second heading appears inside a routine, review,
 wizard or library, where it carries Back. Full screen includes the dock. The
 collapse button or `]` reduces the dock to an icon rail; pressing a tab reopens it and resizes the
-map. Detect's basemap, overlays, saved-work visibility and collapsed state are
-viewer preferences carried by Settings → Backup. **Watched areas** is a row of the
-map's own layer list, beside Saved work.
+map. Detect's basemap, reference layers, saved detections switch and collapsed
+state are viewer preferences carried by Settings → Backup. **Saved detections** and
+**Watched areas** are chips of the map's Layers menu, under the case's saved work.
 
 Areas belong to the case. Each has a name, colour and polygon; its map label
 appears when there is room, in the area's own colour. An area is grabbed by its
@@ -2967,7 +2985,9 @@ found it, and a thing present on one pass — a hull, a fire — against today's
 high-resolution picture, where a platform or a flare stack is still standing and a
 ship is not. Nothing is fetched to decide it; the candidate names its passes. Chips above the candidate
 narrow that queue to what is still to review, what was kept, or what was pinned. **Keep** marks the
-candidate in its run without creating a place or image. **Dismiss** removes it
+candidate in its run without creating a place or image. **Keep all** asks for confirmation
+with the number of candidates still to review, then keeps them in the open run.
+Kept candidates can still be dismissed individually. **Dismiss** removes a candidate
 from the run. **Pin** opens the standard dialog for a name, optional description,
 after-only image and Point/Area geometry. Single-image methods default to after-only
 and Point; change methods default to paired images and Area. Pinning creates a

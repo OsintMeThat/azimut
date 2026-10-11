@@ -331,22 +331,35 @@
 
   // -- an area of the view to capture ------------------------------------------------
 
-  /** The area being chosen: what answers once it is (`{ answer }`), and the box drawn so far, in CSS pixels. */
+  /**
+   * What is being chosen on the view: an `area` to capture, or a `point` of
+   * the photo to pin; what answers once it is (`{ kind, answer }`), and the
+   * box drawn so far, in CSS pixels.
+   */
   let choosing = $state(null);
   let chosen = $state(null);
+
+  function ask(kind) {
+    choosing?.answer(null);
+    return new Promise((answer) => {
+      chosen = null;
+      choosing = { kind, answer };
+      box?.focus({ preventScroll: true });
+    });
+  }
 
   /**
    * Ask for an area of the view: a box dragged over it, answered as
    * `{ x, y, width, height }` in CSS pixels, or null when Escape gives up.
    */
-  export function chooseArea() {
-    choosing?.answer(null);
-    return new Promise((answer) => {
-      chosen = null;
-      choosing = { answer };
-      box?.focus({ preventScroll: true });
-    });
-  }
+  export const chooseArea = () => ask('area');
+
+  /**
+   * Ask for a point of the photo: a click on it, answered as a point of the
+   * frame as it shows (`{ u, v }`), or null when Escape gives up. A click off
+   * the photo is no answer.
+   */
+  export const choosePoint = () => ask('point');
 
   function endChoosing(area) {
     const asked = choosing;
@@ -648,6 +661,8 @@
   const edgesAt = $derived(warping && size.width ? edgeMiddles(overlay.corners).map((middle) => screenAt(shownLoupe, middle.u, middle.v, size)) : []);
   /** The photo's grid on screen, as it shows. */
   const gridLines = $derived(warping && size.width ? overlay.grid.map(onScreen) : []);
+  /** The points pinned in the photo, on screen, numbered as the menu lists them. */
+  const anchorsAt = $derived(laid && size.width ? overlay.anchorsSeen.map((p) => screenAt(shownLoupe, p.u, p.v, size)) : []);
   /** Over the photo while its corners are out: a drag there moves it. */
   let overPhoto = $state(false);
 
@@ -719,8 +734,14 @@
     if (!view.observer || onControl(event)) return;
     if (choosing) {
       if (event.button !== 0) return;
-      box.setPointerCapture(event.pointerId);
       const at = local(event);
+      if (choosing.kind === 'point') {
+        const point = photoAt(shownLoupe, at.x, at.y, size);
+        const onPhoto = overlay?.warped ? insideCorners(point, overlay.corners) : point.u >= 0 && point.u <= 1 && point.v >= 0 && point.v <= 1;
+        if (onPhoto) endChoosing(point);
+        return;
+      }
+      box.setPointerCapture(event.pointerId);
       press = { choosing: true, from: at };
       chosen = { x: at.x, y: at.y, width: 0, height: 0 };
       return;
@@ -1371,6 +1392,13 @@
     {#if rubberAt}
       <circle class="rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
     {/if}
+    {#each anchorsAt as at, index (index)}
+      <g class="anchor" transform="translate({at.x} {at.y})">
+        <circle class="under" r="8.5" />
+        <circle class="over" r="7" />
+        <text y="3.5" text-anchor="middle">{index + 1}</text>
+      </g>
+    {/each}
     {#if chosen}
       {@const x = Math.min(chosen.x, chosen.x + chosen.width)}
       {@const y = Math.min(chosen.y, chosen.y + chosen.height)}
@@ -1412,7 +1440,7 @@
   {#each edgesAt as at, index (index)}
     <button
       type="button"
-      class="warp-side hz-control"
+      class="warp-side hz-control s{index}"
       class:across={index % 2 === 1}
       style:left="{at.x}px"
       style:top="{at.y}px"
@@ -1478,7 +1506,9 @@
     </div>
   {/if}
 
-  {#if shown && choosing}
+  {#if shown && choosing?.kind === 'point'}
+    <p class="glass hint">Click where the marked point shows in the photo · Esc to cancel</p>
+  {:else if shown && choosing}
     <p class="glass hint">Drag a box over the view to capture it · Esc to cancel</p>
   {:else if shown && warping}
     <p class="glass hint">Pull a corner to slant the photo, an edge to stretch it · Drag inside it to move it · Esc when done</p>
@@ -1678,6 +1708,19 @@
     stroke-width: 1.5;
     stroke-dasharray: 6 4;
   }
+  /* a point pinned in the photo: numbered, in the mark's yellow on a dark ring */
+  .anchor .under {
+    fill: rgba(0, 0, 0, 0.55);
+  }
+  .anchor .over {
+    fill: var(--hz-mark);
+  }
+  .anchor text {
+    fill: #14181d;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+  }
   /* the area being chosen for a capture, drawn as the photo's edge is */
   .area {
     fill: none;
@@ -1732,7 +1775,7 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
-  /* an edge's handle is a short bar along it, as a crop's side is */
+  /* an edge's handle is a short bar along it on the photo's side, as a crop's side is, so the frame's edge never hides it */
   .warp-side {
     position: absolute;
     z-index: 4;
@@ -1743,13 +1786,24 @@
     border-radius: 4px;
     background: color-mix(in srgb, var(--accent) 30%, transparent);
     filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.7));
-    transform: translate(-50%, -50%);
     cursor: ns-resize;
+  }
+  .warp-side.s0 {
+    transform: translate(-50%, 2px);
+  }
+  .warp-side.s2 {
+    transform: translate(-50%, calc(-100% - 2px));
   }
   .warp-side.across {
     width: 8px;
     height: 26px;
     cursor: ew-resize;
+  }
+  .warp-side.s1 {
+    transform: translate(calc(-100% - 2px), -50%);
+  }
+  .warp-side.s3 {
+    transform: translate(2px, -50%);
   }
   .warp-side:hover,
   .warp-side:active {

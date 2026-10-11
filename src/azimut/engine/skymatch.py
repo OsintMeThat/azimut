@@ -39,6 +39,13 @@ holds, so the skyline a photo shows is often a nearer one than the turn's
 outermost. Each cut is searched and the place says which reach explained the
 trace, which tells how far the photo sees.
 
+A point the analyst recognises in the photo pins the search hardest: a summit,
+a mast, marked on the map and clicked where it shows (`Anchor`). Through each
+lens it puts the heading within a little of one value, the slack its click and
+its place on the map leave (`_slack`); two of them agree only through the lens
+that sets them the right angle apart, so they bound the lens too. A place whose
+camera does not show every pinned point near where it was clicked is dropped.
+
 The verdict is a hint, not a proof. With the lens free, a weak trace finds a
 coincidence somewhere on most turns: measured over real relief (the Schilthorn,
 and a desert in Yemen with a real photo), the right heading came first at the
@@ -102,6 +109,13 @@ APART_MIN = 5.0
 # Places kept per lens, places refined, and places returned. The cheapest
 # `CANDIDATES` headings of a slide are enough to find a lens's places apart.
 CANDIDATES = 400
+# A pinned point leaves the heading this slack at least, a share of the lens, or what
+# being this many metres off on the map comes to at its distance, whichever is most;
+# a place is kept while every pinned point shows within `ANCHOR_KEEP` slacks of its click.
+ANCHOR_MIN = 0.3
+ANCHOR_SHARE = 1 / 40
+ANCHOR_METRES = 60.0
+ANCHOR_KEEP = 2.0
 PER_LENS = 6
 REFINED = 8
 KEPT = 3
@@ -203,6 +217,17 @@ class Fit:
     points: int  # trace points against the terrain
     roll: float = 0.0
     reach: float | None = None  # the cut of the turn it was found on, metres; None for the whole
+
+
+@dataclass(frozen=True)
+class Anchor:
+    """A point recognised in the photo: where it was clicked on the picture plane, and where it lies from the eye."""
+
+    x: float
+    y: float
+    azimuth: float
+    elevation: float
+    distance: float  # metres from the eye, which sets how far off the map may have put it
 
 
 @dataclass(frozen=True)
@@ -340,6 +365,43 @@ def _headings(step: float, facing: tuple[float, float] | None) -> np.ndarray:
     return (np.arange(centre - half, centre + half + step / 2, step)) % 360.0
 
 
+def _slack(anchor: Anchor, fov: float) -> float:
+    """How far, in degrees, a pinned point may show from where it was clicked through this lens."""
+    off_map = math.degrees(math.atan2(ANCHOR_METRES, max(1.0, anchor.distance)))
+    return max(ANCHOR_MIN, fov * ANCHOR_SHARE, off_map)
+
+
+def _anchored(
+    anchors: list[Anchor], fov: float, tilt: float, roll: float,
+) -> tuple[float, float] | None:
+    """The sector of headings the pinned points leave a lens, as `_headings` takes it, or None when they disagree."""
+    centre = half = 0.0
+    for index, anchor in enumerate(anchors):
+        off, _ = directions(np.array([anchor.x]), np.array([anchor.y]), fov=fov, tilt=tilt, roll=roll)
+        implied = (anchor.azimuth - float(off[0])) % 360.0
+        slack = _slack(anchor, fov)
+        if index == 0:
+            centre, half = implied, slack
+            continue
+        # the arc both leave: this one's about its own heading, the others' about the centre
+        d = (implied - centre + 180.0) % 360.0 - 180.0
+        low, high = max(-half, d - slack), min(half, d + slack)
+        if low > high:
+            return None
+        centre, half = (centre + (low + high) / 2) % 360.0, (high - low) / 2
+    return centre, half
+
+
+def _holds(fit: Fit, anchors: list[Anchor]) -> bool:
+    """Whether the camera shows every pinned point near where it was clicked."""
+    for anchor in anchors:
+        off, up = directions(np.array([anchor.x]), np.array([anchor.y]), fov=fit.fov, tilt=fit.tilt, roll=fit.roll)
+        keep = ANCHOR_KEEP * _slack(anchor, fit.fov)
+        if _apart(fit.heading + float(off[0]), anchor.azimuth) > keep or abs(float(up[0]) - anchor.elevation) > keep:
+            return False
+    return True
+
+
 def _rolls(start: float, centre: float, ease: float | None) -> list[float]:
     """The rolls one round of the refinement tries: steps about the place's, then about the best so far."""
     tried = [centre + d for d in ROLL_STEPS] if ease is None else [centre - ease, centre, centre + ease]
@@ -403,7 +465,7 @@ def match(
     x: np.ndarray, y: np.ndarray, turn: Turn | list[Turn], *, half_width: float, fov: float,
     known: bool = False, tilt: float = 0.0, roll: float = 0.0,
     within: tuple[float, float] | None = None, facing: tuple[float, float] | None = None,
-    level: bool = False,
+    level: bool = False, anchors: list[Anchor] | None = None,
 ) -> Match:
     """The headings, lenses and tilts that bring `turn` onto the trace (x, y), and a verdict.
 
@@ -414,7 +476,9 @@ def match(
     `level` holds it. `within` bounds an unknown lens (degrees, low and high),
     `facing` the heading to a sector (its middle and half its width). `turn`
     may be several cuts of the same turn (`Turn.reach`): each place says which
-    one it lies on.
+    one it lies on. `anchors` are points recognised in the photo: each lens is
+    searched only where they leave its heading, a lens they disagree through is
+    passed over, and a place must show each near where it was clicked.
     """
     turns = [turn] if isinstance(turn, Turn) else list(turn)
     x = np.asarray(x, dtype=np.float64)
@@ -424,13 +488,20 @@ def match(
     pick = np.unique(np.linspace(0, x.size - 1, min(x.size, SLIDE_POINTS)).round().astype(int))
     xs, ys = x[pick], y[pick]
 
+    pinned = list(anchors or [])
     rows: list[_Row] = []
     widths: dict[float, float] = {}
     for lens in lenses(fov, known=known, within=within):
+        sector = facing
+        if pinned:
+            # the points the analyst pinned leave this lens a narrow sector, or none at all
+            sector = _anchored(pinned, lens, tilt, roll)
+            if sector is None:
+                continue
         seen = _through(xs, ys, lens, tilt, roll, half_width, twist=not level)
         widths[lens] = float(seen.azimuth.max() - seen.azimuth.min())
         for index, one in enumerate(turns):
-            headings = _headings(max(_step(lens), COARSE_MIN, one.step), facing)
+            headings = _headings(max(_step(lens), COARSE_MIN, one.step), sector)
             cost, change, turned = _slide(seen, one, headings)
             order = [
                 (float(cost[i]), float(headings[i]), lens, tilt + float(change[i]), index, roll + float(turned[i]))
@@ -451,6 +522,8 @@ def match(
     found = sorted((fit for fit in refined if fit is not None), key=lambda fit: -fit.explained)
     if facing is not None:
         found = [fit for fit in found if _apart(fit.heading, facing[0]) <= facing[1]]
+    if pinned:
+        found = [fit for fit in found if _holds(fit, pinned)]
     fits: list[Fit] = []
     for fit in found:
         if all(_apart(fit.heading, k.heading) >= apart for k in fits):
