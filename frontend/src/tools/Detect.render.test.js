@@ -60,13 +60,17 @@ const get = vi.fn(async (path) => {
   }
   if (path.startsWith('/api/cases/case-a/analysis/')) return [];
   // the case's saved work and added layers, which the Layers menu offers
-  if (path.includes('/satellite/index') || path.includes('/satellite/media') || path.endsWith('/map-layers')) return [];
+  if (path.includes('/satellite/index')) return structuredClone(savedIndex);
+  if (path.includes('/satellite/media')) return structuredClone(savedMedia);
+  if (path.endsWith('/map-layers')) return [];
   if (path === '/api/firms/sensors') return { keyed: false, state: 'missing', sensors: [] };
   if (path.startsWith('/api/settings')) return { usage: {}, month: '2026-09' };
   return {};
 });
 const post = vi.fn(async () => ({}));
 const put = vi.fn(async () => ({}));
+let savedIndex = [];
+let savedMedia = [];
 vi.mock('../lib/api.js', () => ({ api: { get, post, put, patch: vi.fn(), del: vi.fn() } }));
 
 const toast = vi.fn();
@@ -128,6 +132,12 @@ function fakeEngine(view) {
 vi.mock('../lib/map/engine.js', () => ({
   createMapEngine: vi.fn(async (element, { view }) => fakeEngine(view)),
 }));
+// the saved layer's marks, on a map the fake engine does not have
+vi.mock('../lib/map/surface.js', () => ({
+  createSurface: () => ({
+    set: vi.fn(), element: () => document.createElement('div'), closePopup: vi.fn(), clear: vi.fn(), destroy: vi.fn(),
+  }),
+}));
 const showBasemap = vi.fn();
 const setOverlay = vi.fn();
 const setAlternate = vi.fn();
@@ -145,8 +155,8 @@ const settle = async () => { for (let i = 0; i < 80; i++) await Promise.resolve(
 const button = (text) => [...target.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
 const starts = (text) => [...target.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 const labelled = (label) => target.querySelector(`button[aria-label="${label}"]`);
-/** A switch in the Layers menu, named by its text. */
-const chip = (label) => [...target.querySelectorAll('.layer-menu .chip')].find((b) => b.textContent.trim() === label);
+/** A layer's eye in the Layers menu. */
+const chip = (label) => target.querySelector(`.layer-menu button.eye[aria-label="${label}"]`);
 
 async function open() {
   target = document.createElement('div');
@@ -158,6 +168,8 @@ async function open() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  savedIndex = [];
+  savedMedia = [];
   engines.length = 0;
   uiState.tool = 'detect';
   uiState.openAnalyzer = null;
@@ -245,17 +257,20 @@ describe('Detect', () => {
     await open();
     starts('Layers').click(); await settle();
     const menu = target.querySelector('.layer-menu [role="dialog"]');
-    expect([...menu.querySelectorAll('h4')].map((entry) => entry.textContent)).toEqual(['Reference', 'Events', 'Case']);
-    expect([...menu.querySelectorAll('.chip')].map((entry) => entry.textContent.trim())).toEqual([
+    expect([...menu.querySelectorAll('.sub-head > span:first-of-type')].map((entry) => entry.textContent)).toEqual([
+      'Reference', 'Events', 'Case', 'My layers', 'Added layers',
+    ]);
+    expect([...menu.querySelectorAll('button.eye')].map((entry) => entry.getAttribute('aria-label'))).toEqual([
       'Borders', 'Place names', 'Roads', 'Railways', 'Power lines', 'Sea marks', 'GPS traces',
       'Active fires', 'Night lights', 'Saved work', 'Saved detections', 'Watched areas',
     ]);
     // no key: the fire layer stays listed, locked, with the way to unlock it
     expect(chip('Active fires').disabled).toBe(true);
-    expect(menu.textContent).toContain('Active fires: needs a free key.');
+    expect(menu.textContent).toContain('needs a free key');
     expect(menu.textContent).toContain('Add a FIRMS key');
     // and the case's own layers are added in Satellite
-    expect(menu.textContent).toContain('Add your own layers in Satellite');
+    expect(menu.textContent).toContain('Nothing added yet.');
+    expect(menu.textContent).toContain('Add a layer in Satellite');
   });
 
   it('opens on Esri with Borders and saved work, with the search over the map and no header strip', async () => {
@@ -265,8 +280,9 @@ describe('Detect', () => {
     expect(showBasemap).toHaveBeenCalledWith(expect.objectContaining({ id: 'esri-world-imagery' }), 'esri-world-imagery', expect.anything());
     expect(setOverlay).toHaveBeenCalledWith('boundaries', true, null);
     starts('Layers').click(); await settle();
-    // Detect's own findings on, the case's saved places left to the other maps
+    // Detect's own findings and areas on, the case's saved places left to the other maps
     expect(chip('Saved detections').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('Watched areas').getAttribute('aria-pressed')).toBe('true');
     expect(chip('Saved work').getAttribute('aria-pressed')).toBe('false');
     expect(get.mock.calls.some(([path]) => path.includes('/sentinel/'))).toBe(false);
     expect(post).not.toHaveBeenCalled();
@@ -289,7 +305,7 @@ describe('Detect', () => {
   });
 
   it('restores the Detect basemap and overlays without requesting a pass', async () => {
-    prefs.detectView = { collapsed: false, basemap: 'osm', overlays: ['roads'], saved: false };
+    prefs.detectView = { collapsed: false, basemap: 'osm', overlays: ['roads'] };
     await open();
     expect(showBasemap).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'osm' }), 'osm', expect.anything());
     expect(setOverlay).toHaveBeenCalledWith('roads', true, null);
@@ -297,8 +313,38 @@ describe('Detect', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it('asks Media, Places or Captures under Saved work once it is on, Media first', async () => {
+    savedIndex = [{ id: 'p1', kind: 'place', title: 'Gate', lat: 14.81, lon: 42.95 }];
+    savedMedia = [{ id: 'm1', key: 'm1@14.8,42.9', kind: 'media', media_kind: 'video', path: 'media/clip.mp4', title: 'clip', lat: 14.8, lon: 42.9 }];
+    await open();
+    starts('Layers').click(); await settle();
+    const menu = target.querySelector('.layer-menu [role="dialog"]');
+    expect(menu.textContent).not.toContain('Captures');
+    chip('Saved work').click(); await settle();
+    const row = () => chip('Saved work').closest('li');
+    const choices = () => [...row().querySelectorAll('.settings button')];
+    const choice = (label) => choices().find((entry) => entry.textContent.trim() === label);
+    expect(choices().map((entry) => entry.textContent.trim())).toEqual(['Media', 'Places', 'Captures']);
+    expect(choice('Media').getAttribute('aria-pressed')).toBe('true');
+    expect(row().querySelector('.detail')?.textContent).toBe('1');
+    choice('Captures').click(); await settle();
+    expect(choice('Captures').getAttribute('aria-pressed')).toBe('true');
+    // no capture in the case: nothing to count
+    expect(row().querySelector('.detail')).toBeNull();
+  });
+
+  it('opens on the saved detections whatever an earlier visit left', async () => {
+    // an older version remembered the switch; it is no longer read or written
+    prefs.detectView = { collapsed: false, basemap: 'esri-world-imagery', overlays: ['boundaries'], saved: false };
+    await open();
+    starts('Layers').click(); await settle();
+    expect(chip('Saved detections').getAttribute('aria-pressed')).toBe('true');
+    target.querySelector('[aria-label="Collapse Detect panel"]').click(); await settle();
+    expect(put.mock.lastCall[1].detect_view).not.toHaveProperty('saved');
+  });
+
   it('drops a retired layer from the saved overlays, so the next save is not refused', async () => {
-    prefs.detectView = { collapsed: false, basemap: 'esri-world-imagery', overlays: ['labels', 'roads'], saved: true };
+    prefs.detectView = { collapsed: false, basemap: 'esri-world-imagery', overlays: ['labels', 'roads'] };
     await open();
     expect(setOverlay).not.toHaveBeenCalledWith('labels', true, expect.anything());
     target.querySelector('[aria-label="Collapse Detect panel"]').click(); await settle();

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import LayerChips from './LayerChips.svelte';
+import LayerList from './LayerList.svelte';
 import LayerMenu from './LayerMenu.svelte';
 
 let live;
@@ -21,71 +21,108 @@ function show(component, props) {
   return target;
 }
 
-const chip = (target, text) => [...target.querySelectorAll('.chip')].find((entry) => entry.textContent.trim() === text);
+const eye = (target, label) => target.querySelector(`button.eye[aria-label="${label}"]`);
+const heading = (target, label) =>
+  [...target.querySelectorAll('.sub-head')].find((entry) => entry.textContent.trim().startsWith(label));
 
-describe('the layer chips', () => {
-  it('lists the layers under their headings, in the catalogue’s order, with the case’s own last', () => {
-    const target = show(LayerChips, {
+describe('the layer list', () => {
+  it('lists the layers under the catalogue’s headings, with the case’s own last, each with its eye', () => {
+    const target = show(LayerList, {
       rows: [row('Saved work', 'case'), row('Borders', 'reference', { on: true }), row('Active fires', 'events')],
       added: [{ name: 'ua', title: 'GeoConfirmed UA', enabled: true }],
     });
-    expect([...target.querySelectorAll('h4')].map((entry) => entry.textContent)).toEqual([
-      'Reference', 'Events', 'Case', 'Added layers',
+    expect([...target.querySelectorAll('.sub-head')].map((entry) => entry.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      'Reference 1', 'Events 0', 'Case 0', 'Added layers 1',
     ]);
-    expect(chip(target, 'Borders').getAttribute('aria-pressed')).toBe('true');
-    expect(chip(target, 'GeoConfirmed UA').getAttribute('aria-pressed')).toBe('true');
+    expect(eye(target, 'Borders').getAttribute('aria-pressed')).toBe('true');
+    expect(eye(target, 'GeoConfirmed UA').getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('switches a layer from its chip, and an added one through the store', () => {
+  it('lists the layers drawn in the case under My layers, apart from the imported ones, as the Map does', () => {
+    const target = show(LayerList, {
+      rows: [row('Borders', 'reference')],
+      added: [
+        { name: 'ua', title: 'GeoConfirmed UA', enabled: false },
+        { name: 'mine', title: 'Yemen MP', enabled: true, editable: true },
+      ],
+    });
+    expect([...target.querySelectorAll('.sub-head')].map((entry) => entry.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      'Reference 0', 'My layers 1', 'Added layers 0',
+    ]);
+    const section = (label) => target.querySelector(`section[aria-label="${label}"]`);
+    expect(eye(section('My layers'), 'Yemen MP')).not.toBeNull();
+    expect(eye(section('Added layers'), 'GeoConfirmed UA')).not.toBeNull();
+    expect(eye(section('Added layers'), 'Yemen MP')).toBeNull();
+  });
+
+  it('switches a layer from its eye, and an added one through the store', () => {
     const ontoggleadded = vi.fn();
     const roads = row('Roads', 'reference');
     const layer = { name: 'ua', title: 'GeoConfirmed UA', enabled: false };
-    const target = show(LayerChips, { rows: [roads], added: [layer], ontoggleadded });
-    chip(target, 'Roads').click();
-    chip(target, 'GeoConfirmed UA').click();
+    const target = show(LayerList, { rows: [roads], added: [layer], ontoggleadded });
+    eye(target, 'Roads').click();
+    eye(target, 'GeoConfirmed UA').click();
     expect(roads.toggle).toHaveBeenCalled();
     expect(ontoggleadded).toHaveBeenCalledWith(layer);
   });
 
-  it('says what a layer that asks a question shows, and opens its settings only on Change', () => {
-    const target = show(LayerChips, {
-      rows: [row('Night lights', 'events', {
-        on: true,
-        summary: 'NOAA-20 · 2025-06-02',
-        controls: [{ label: 'Showing', options: [{ id: 'noaa20', label: 'NOAA-20' }], value: 'noaa20', pick: vi.fn() }],
-      })],
-    });
-    expect(target.textContent).toContain('Night lights: NOAA-20 · 2025-06-02');
-    expect(target.querySelector('.settings')).toBeNull();
-    const change = [...target.querySelectorAll('button')].find((entry) => entry.textContent === 'Change');
-    change.click();
+  it('folds a heading away and keeps the rest', () => {
+    const target = show(LayerList, { rows: [row('Borders', 'reference'), row('Night lights', 'events')] });
+    heading(target, 'Reference').click();
     flushSync();
-    expect(target.querySelector('.settings').textContent).toContain('Showing');
-    expect(change.textContent).toBe('Done');
+    expect(heading(target, 'Reference').getAttribute('aria-expanded')).toBe('false');
+    expect(eye(target, 'Borders')).toBeNull();
+    expect(eye(target, 'Night lights')).not.toBeNull();
   });
 
-  it('keeps a locked layer listed, greyed, with the way to unlock it', () => {
+  it('shows a layer’s settings under its row and the reason a switch is locked', () => {
     const run = vi.fn();
-    const target = show(LayerChips, {
-      rows: [row('Active fires', 'events', { disabled: true, lock: { text: 'needs a free key', action: 'Add a FIRMS key', run } })],
+    const target = show(LayerList, {
+      rows: [
+        row('Night lights', 'events', {
+          on: true,
+          detail: 'NOAA-20 · 2025-06-02',
+          controls: [{ label: 'Showing', options: [{ id: 'noaa20', label: 'NOAA-20' }], value: 'noaa20', pick: vi.fn() }],
+        }),
+        row('Active fires', 'events', {
+          disabled: true,
+          detail: 'needs a free key',
+          actions: [{ label: 'Add a FIRMS key', quiet: true, run }],
+        }),
+      ],
     });
-    expect(chip(target, 'Active fires').disabled).toBe(true);
-    expect(target.textContent).toContain('Active fires: needs a free key.');
+    expect(target.textContent).toContain('NOAA-20 · 2025-06-02');
+    expect(target.querySelector('.settings').textContent).toContain('Showing');
+    expect(eye(target, 'Active fires').disabled).toBe(true);
+    expect(target.textContent).toContain('needs a free key');
     [...target.querySelectorAll('button')].find((entry) => entry.textContent === 'Add a FIRMS key').click();
     expect(run).toHaveBeenCalled();
   });
 
-  it('points to Satellite for adding a layer, only where it was asked to', () => {
+  it('says nothing was added yet, and points to Satellite for adding one', () => {
     const onmanage = vi.fn();
-    const target = show(LayerChips, { rows: [], added: [], onmanage });
+    const target = show(LayerList, { rows: [], added: [], onmanage });
+    expect(target.textContent).toContain('Nothing added yet.');
     const link = [...target.querySelectorAll('button')].find((entry) => entry.textContent.includes('Satellite'));
-    expect(link.textContent.trim()).toBe('Add your own layers in Satellite');
+    expect(link.textContent.trim()).toBe('Add a layer in Satellite');
     link.click();
     expect(onmanage).toHaveBeenCalled();
   });
 });
 
 describe('the Layers menu', () => {
+  it('opens personal editing and creation from compact controls in the current workspace', () => {
+    const oneditadded = vi.fn(), onnewpersonal = vi.fn();
+    const personal = { name: 'own', title: 'Working map', editable: true, enabled: false };
+    const target = show(LayerMenu, { added: [personal, { name: 'source', title: 'Source map' }], oneditadded, onnewpersonal });
+    target.querySelector('.layer-menu > button').click(); flushSync();
+    const edit = target.querySelector('[aria-label="Edit Working map"]');
+    expect(edit.textContent.trim()).toBe(''); edit.click();
+    expect(oneditadded).toHaveBeenCalledWith(personal);
+    expect(target.querySelector('[aria-label="Edit Source map"]')).toBeNull();
+    [...target.querySelectorAll('button')].find((button) => button.textContent.trim() === 'New layer').click();
+    expect(onnewpersonal).toHaveBeenCalledOnce();
+  });
   it('counts what is on, and opens beside the map rather than over it', () => {
     const target = show(LayerMenu, {
       rows: [row('Borders', 'reference', { on: true }), row('Roads', 'reference', { on: true, disabled: true })],
@@ -101,12 +138,26 @@ describe('the Layers menu', () => {
     expect(target.querySelector('[role="dialog"]').getAttribute('aria-label')).toBe('Layers');
   });
 
+  it('keeps a folded heading folded the next time it opens', () => {
+    const target = show(LayerMenu, { rows: [row('Borders', 'reference')] });
+    const trigger = target.querySelector('.layer-menu > button');
+    trigger.click();
+    flushSync();
+    heading(target, 'Reference').click();
+    flushSync();
+    trigger.click();
+    flushSync();
+    trigger.click();
+    flushSync();
+    expect(heading(target, 'Reference').getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('closes on Escape and on a press outside, and stays open for a press inside', () => {
     const target = show(LayerMenu, { rows: [row('Borders', 'reference')] });
     const trigger = target.querySelector('.layer-menu > button');
     trigger.click();
     flushSync();
-    target.querySelector('.chip').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    eye(target, 'Borders').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
     flushSync();
     expect(target.querySelector('[role="dialog"]')).not.toBeNull();
 

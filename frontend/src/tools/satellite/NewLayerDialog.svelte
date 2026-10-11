@@ -29,7 +29,7 @@
         <input type="file" accept={ACCEPTS} disabled={busy}
           onchange={(event) => { file = event.currentTarget.files?.[0] ?? null; }} />
       </label>
-      <p class="note">Keeps the source file. External icons are left out.</p>
+      <p class="note">Keeps the original file and its bundled icons.</p>
     {/if}
   {/if}
   <div class="actions">

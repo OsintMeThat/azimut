@@ -140,7 +140,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `map-view`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -169,7 +169,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `map-layer`, `map-view`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -187,7 +187,7 @@ answer by omission (`tests/test_entities.py`).
 |---|---|---|---|---|---|---|
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
-| `place` | place | subject | ✅ | satellite, ingest, enrich | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
+| `place` | place | subject | ✅ | satellite, ingest, enrich, map layers | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, `layer_origin?`, plus the precision fields below | no (a point) |
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
@@ -195,6 +195,7 @@ answer by omission (`tests/test_entities.py`).
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
 | `horizon-view` | document | annex | ✅ | horizon | `spec` (json), `thumb?` (webp), `lat`, `lon`, `zoom`, `bearing`, `heading`, `fov`, `projection`, `footprint?`, `geo?` | yes (spec + preview) |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
+| `map-view` | document | annex | ✅ | map compositions | `spec` (json): camera, provider, visible layer references, groups and legend | yes (`.map-views/<id>.json`) |
 | `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
 | `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
@@ -228,15 +229,43 @@ Three modelling calls the table alone does not show:
   minting the day a value turns up without its object.
 - **`registration` and `icao24` belong to an airframe; a callsign belongs to a
   flight**, which is a dated statement rather than an attribute.
-- **A `map-layer` is a source the case consults, not a source it quotes.** It is
-  `annex` beside `note` and `sheet` rather than `attestation`, because an
-  attestation folds into the edge carrying its provenance and a layer that nothing
-  links to would fold into nothing. Its `source` is a path *or* a URL, which is
-  what makes a dropped KMZ, a followed My Maps and a GeoConfirmed query one type
-  instead of three. Its
-  features never enter the graph: they are what somebody else claims, and the day
-  one of them becomes a `place` of this case (SPEC §6) the layer is what that
-  place cites — which is the reason it is an entity at all.
+- **A `map-layer` is a consulted source or a personal working map.** It is
+  `annex` beside `note` and `sheet`. A file or followed URL keeps its source
+  snapshot; an `editable` layer also owns a working FeatureCollection in its
+  spec. Copying a source preserves the original bytes, bundled pictograms and
+  origin. Its drawing is derived from the working collection and content hash.
+  Every working feature has a stable `key`; its optional `place_id` is a
+  presentation reference, not a graph edge. Features stay outside the graph
+  until **Save as case place** explicitly creates or reuses a `place`. A new
+  place carries `layer_origin` with the spec, feature key and copied origin.
+  Marker edits do not change that place or attach proof and media relations.
+  Deleting a layer does not delete its promoted places. Specs, snapshots and
+  icons use the existing artifact, Trash and bundle lifecycle.
+  A working spec also owns ordered `groups` with stable IDs, uniform or
+  individual styles, icon scales from 0.5 to 3 and line widths from 0.5 to 12 pixels.
+  The first group draws on top. Batch moves and style changes are atomic; the last
+  batch removal can be undone without changing case entities.
+  Group overrides do not overwrite individual styles. Editable geometry is a
+  Point, LineString or Polygon, bounded to 4,096 coordinates; moving it never
+  changes a referenced case place. Polygon holes remain in the working collection.
+  Opening the editor stores a trusted `edit_checkpoint` in the owned spec.
+  **Done** ends that session; **Back** can restore its working collection, groups,
+  hidden groups, serials and removal journal. A revision guard refuses stale
+  finishes. The checkpoint travels through the existing bundle and Trash lifecycle.
+  Discarding a layer session does not delete separately promoted case places.
+- **A `map-view` stores a presentation, not evidence.** Its case-owned spec keeps
+  the camera, provider, built-in overlays, ordered layer references, hidden groups,
+  legend title, note and visibility. Opening uses each layer's current data and
+  reports missing references. Deleting a composition leaves its layers untouched;
+  its spec follows the artifact, Trash and bundle lifecycle. Layer downloads strip
+  case identities and provenance references. KML and GeoJSON retain geometry and
+  style fields; KMZ also bundles locally drawn or already imported pictograms.
+  **Add case places** shares existing place IDs across layers, with a saved point
+  and presentation per layer. Removing a feature only changes that layer and
+  journals the last twenty removals for Undo. Deleting a case place keeps those
+  saved points; its stored membership IDs become active again on Trash restore.
+  The delete preview lists graph relations and layer memberships. Proof coordinates
+  stay in their specs, independently of any place entity.
 
 Retired: `event` (replaced by the claim node), `alias` (see above), and `panorama`
 (a collage's auto-stitch export is a derived `media`). Still coming from the roadmap,

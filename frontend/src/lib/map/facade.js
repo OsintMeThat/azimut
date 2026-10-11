@@ -143,6 +143,79 @@ export function framePadding(padding) {
   return { left: x, right: x, top: y, bottom: y };
 }
 
+/**
+ * The paint properties that make each kind of layer see-through, for a picture
+ * taken without it (`snapshot`'s `keep`). A layer with none of its own stays.
+ */
+const SEE_THROUGH = {
+  raster: ['raster-opacity'],
+  fill: ['fill-opacity'],
+  line: ['line-opacity'],
+  circle: ['circle-opacity', 'circle-stroke-opacity'],
+  symbol: ['icon-opacity', 'text-opacity'],
+  heatmap: ['heatmap-opacity'],
+  'fill-extrusion': ['fill-extrusion-opacity'],
+};
+
+/** A copy of what the map's canvas holds this instant, which only the frame just drawn has. */
+function copyOf(source) {
+  const copy = document.createElement('canvas');
+  copy.width = source.width;
+  copy.height = source.height;
+  const context = copy.getContext('2d');
+  if (!context) throw new Error('this browser cannot capture the map');
+  context.drawImage(source, 0, 0);
+  return copy;
+}
+
+/** The operators that read a feature, which make an expression data-driven. */
+const FEATURE_READS = new Set(['get', 'has', 'properties', 'feature-state', 'geometry-type', 'id']);
+
+/** Whether a paint value is worked out per feature, and so built into the tiles. */
+function readsFeatures(value) {
+  return Array.isArray(value) && (FEATURE_READS.has(value[0]) || value.some(readsFeatures));
+}
+
+/**
+ * The map drawn without the layers `keep` turns down, copied, then put back.
+ *
+ * Drawn and read in one task, the frame without them never reaches the screen.
+ * A layer is made see-through with no transition, both ways, so nothing fades
+ * back in once the copy is taken, and no tile is cut again. One whose opacity is
+ * read off each feature has it built into its tiles, where only hiding it takes
+ * effect at once.
+ */
+function drawnWithout(map, keep) {
+  const faded = []; // [id, property, value, transition]
+  const hidden = []; // [id, visibility]
+  for (const id of map.getLayersOrder()) {
+    if (keep(id) || map.getLayoutProperty(id, 'visibility') === 'none') continue;
+    const properties = SEE_THROUGH[map.getLayer(id)?.type] ?? [];
+    const values = properties.map((property) => map.getPaintProperty(id, property));
+    if (values.some(readsFeatures)) {
+      hidden.push([id, map.getLayoutProperty(id, 'visibility')]);
+      map.setLayoutProperty(id, 'visibility', 'none');
+      continue;
+    }
+    properties.forEach((property, index) => {
+      faded.push([id, property, values[index], map.getPaintProperty(id, `${property}-transition`)]);
+      map.setPaintProperty(id, `${property}-transition`, { duration: 0, delay: 0 });
+      map.setPaintProperty(id, property, 0);
+    });
+  }
+  try {
+    map.redraw();
+    return copyOf(map.getCanvas());
+  } finally {
+    if (faded.length || hidden.length) {
+      for (const [id, property, value] of faded) map.setPaintProperty(id, property, value);
+      for (const [id, visibility] of hidden) map.setLayoutProperty(id, 'visibility', visibility ?? 'visible');
+      map.redraw();
+      for (const [id, property, , transition] of faded) map.setPaintProperty(id, `${property}-transition`, transition);
+    }
+  }
+}
+
 /** The engine events that open a movement, and those that close it, in the order it closes one. */
 const MOVE_OPENS = new Set(['movestart', 'zoomstart', 'rotatestart', 'pitchstart', 'rollstart']);
 const MOVE_CLOSES = ['zoomend', 'rotateend', 'pitchend', 'rollend', 'moveend'];
@@ -549,8 +622,12 @@ export function mapFacade(map, container, mapId = '') {
      * read at any other moment is transparent. The copy is taken inside the
      * engine's own `render` event, which runs in the same frame as the draw.
      * `complete` is false when the wait gave up with tiles still loading.
+     *
+     * `keep`, a test on a layer's id, takes the picture with only the layers it
+     * passes: Difference reads the ground, not the borders or the case's marks
+     * laid over one side.
      */
-    async snapshot({ timeout = 12000 } = {}) {
+    async snapshot({ timeout = 12000, keep = null } = {}) {
       const complete = await new Promise((resolve) => {
         if (!map.isMoving() && map.areTilesLoaded()) {
           resolve(true);
@@ -566,17 +643,11 @@ export function mapFacade(map, container, mapId = '') {
         };
         map.once('idle', idle);
       });
+      if (keep) return { canvas: drawnWithout(map, keep), complete };
       const canvas = await new Promise((resolve, reject) => {
         map.once('render', () => {
           try {
-            const source = map.getCanvas();
-            const copy = document.createElement('canvas');
-            copy.width = source.width;
-            copy.height = source.height;
-            const context = copy.getContext('2d');
-            if (!context) throw new Error('this browser cannot capture the map');
-            context.drawImage(source, 0, 0);
-            resolve(copy);
+            resolve(copyOf(map.getCanvas()));
           } catch (error) {
             reject(error);
           }

@@ -1672,13 +1672,17 @@ as it does under the chip on Satellite. The
 cards float over the maps they describe, one per pane, so no bar takes the maps'
 height; the place search and the camera sit in B's corner.
 
-**Layers** is one menu for both maps, in the row above them: a layer on one side
-only would read as a change. The fires and the night lights follow each side's
-picture, so A shows the fires of its day and B those of its own; **Change** picks a
-day for each side instead. A comparison saved while each side had its own list
-reopens with every layer of either side on both. When the fires or the nights
-differ between A and B, Difference names that layer and says turning it off is
-enough.
+**Layers** is one menu for both maps, in the row above them, and one list. A new
+pair starts on Borders and Place names. A switcher heads the list, **A | B | AB**,
+on AB, and says which map draws it: on B, every layer that is on, the case's own
+included, is drawn on B and none on A. The fires and the night lights follow each
+side's picture, so A shows the fires of its day and B those of its own; their
+settings pick a day for each side instead. A saved comparison reopens on the side
+that held its layers. One saved with a different list on each side, before the
+switcher, reopens with both lists on both sides. Difference reads the pictures
+without the layers, so they may stay on A alone while it is on; night lights are
+the one layer it reads, when it compares two nights. A pair it cannot read says
+why in full where its legend stands.
 
 One row sits above the maps. With a pair on screen the mode dock takes the
 title's place there, beside the name, **All dates**, **Export** and **Save**, and
@@ -1890,6 +1894,80 @@ work is also reachable from the sidebar and the Board, while what is switched on
 over the imagery is reachable from nowhere else. Each section states its own
 count, so the strip carries none — folded shut, the panel shows the active half's
 name and its number.
+
+**My layers** is a section inside **Layers**. **New layer** starts blank or from a
+local KMZ, KML, GeoJSON or GPX file. An added source layer also offers **Create
+editable copy**. Both routes keep the original file and its bundled pictograms;
+external icons are not fetched, and a followed source is not refreshed for a copy.
+
+The section and its rows fold like **Added layers**; the pencil opens the editor,
+the trash removes a layer, and the grip changes its stacking order. Keyboard users
+can move a focused grip with Up and Down. Each section keeps the other's order.
+
+**Add markers** accepts repeated map clicks; Escape stops adding. **New group**
+creates a foldable group with **Uniform style** or **Individual styles**. The icon
+palette opens from the pictogram and its chevron, with four plain symbols and
+fifty-two round pictograms drawn locally in the chosen colour. Search covers
+infrastructure, vehicles, aircraft, conflict observations and evidence. Palettes,
+group settings and pickers close on a click outside. **Done** uses an accent button.
+Individual styles survive a temporary group override. A
+selected feature opens a compact name and style form; its note stays folded until
+opened. A group selector moves it between groups. Group grips support dragging or
+Up/Down keys to reorder; the first group draws on top. Each group's **Icon size**
+slider runs from 50% to 300%, including individually styled groups.
+Pins and round markers use comparable painted heights. **Line width** runs from
+0.5 to 12 pixels. The checkbox beside each feature adds it to a selection; Shift
+click selects a range, and Ctrl/Cmd click toggles a row. **Select all** checks a
+whole group. A selection can move together, change style, change group, or be
+removed with Undo. Groups initially show 100 features, with **Show 100 more** and
+**Show all**. Their lists scroll within the editor so editing controls remain
+reachable.
+Removing a group moves its features to the first remaining group.
+
+The same editor opens from **Layers → My layers** in Map, Detect, Compare and
+Horizon. Switching tools keeps the editing session and feature form. **Move marker**
+adjusts a point by dragging its handle or clicking the new position. **Draw line**
+and **Draw area** collect map clicks; Enter or **Save geometry** saves, Esc cancels.
+**Edit geometry** offers movable corners and midpoint buttons to insert corners;
+Delete removes a selected corner. Existing polygon holes stay intact. Editable
+shapes hold at most 4,096 coordinates. These edits only change the layer's geometry.
+
+**Done** saves the selected feature form and any complete geometry draft, then ends
+the session. The small **Back** arrow asks before discarding changes and restores
+the layer to its state when editing started. Separately saved case places remain
+in the case. The checkpoint survives a reload, so reopening can still discard.
+
+The download icon on a personal layer or its editor offers **KMZ**, **KML** and
+**GeoJSON**. KMZ carries bundled icons for use in Google Earth or My Maps; the
+single-file formats carry geometry, groups and style fields. Downloads include
+hidden groups and omit case entity IDs. Reimporting retains Azimut symbols, group
+sizes and line widths. Source bitmaps travel in KMZ.
+
+**My maps**, below **My layers**, saves a named camera, basemap, overlays, layer
+order and visibility, plus a legend note. Opening a saved map restores those
+choices using current layer data. Missing layers are reported. Its pencil updates
+the composition with the current view; its trash moves only the composition to
+Trash. The legend follows visible groups and can be hidden on the map. Saved maps
+also reopen from the case sidebar.
+
+A personal marker belongs to its layer. **Save as case place** explicitly creates
+a place, or reuses a place already at that point, and records the layer's origin.
+Editing a layer marker changes its label, style or layer position without changing
+the case place's coordinates. The layer's working
+collection, original file and icons travel with case bundles and Trash.
+
+**Add case places** offers a searchable selection of existing places. A place can
+belong to several layers without adding another case entity; each layer keeps its
+own label, style and saved point. The link icon marks a case-place membership.
+**Remove from this layer** in the popup or editor removes that membership or marker
+and offers **Undo**. Popup actions use compact icons with accessible names and
+hover labels. The last twenty removed features are kept in the layer spec.
+**Delete case place** previews direct relations and the layers using it before
+moving the place and its relations to Trash. Layer points survive as independent
+markers; restoring the place restores their membership. Proofs retain their own
+coordinates, so media placements derived from proofs survive the place deletion.
+Media located only through the deleted place lose that map position; the preview
+says so when a media item is linked directly.
 
 Saved work — places, captures, screenshots filed by the extension and saved
 comparisons — lives in the **Saved** half, grouped by geography rather than by
@@ -2116,7 +2194,8 @@ or GPX file opened from the computer, a public My Maps or map URL followed, or a
 GeoConfirmed conflict. All of them land in the same section, because the question the row answers is who put
 this on my map. **A layer is drawn and never adopted** — clicking a feature opens
 what the source says about it, its name, its group and its description, with
-nothing to confirm and no way from there into the case. A pin's card also states
+nothing to confirm. **Create editable copy** opens the source's saved features in
+**My layers**, where a chosen point can be saved as a case place. A pin's card also states
 its point in the analyst's format, pressed to copy: read from the file rather
 than from what the map drew, which a tile rounds by tens of metres far out. A
 right-click on a pin opens the map's own point menu on that point, headed by the
@@ -2393,10 +2472,13 @@ Switching case leaves the camera where it is, since a view is not case state.
 Settings → General → Map tabs turns it off, and each tab keeps its own camera again.
 
 **Every map offers the same layers.** Satellite works them in its panel. Compare,
-Detect and Horizon's small map list them in a **Layers** menu, as chips under
-Reference, Events, Case and Added layers. Each map keeps its own switches, so a
-layer is drawn only where it was switched on. A layer that asks a question says
-its answer in one line once it is on, and **Change** opens its settings. The fires
+Detect and Horizon's small map list them in a **Layers** menu with the Map's own
+rows, an eye each, under headings that fold: Reference, Events, Case, then the
+Map's own two, My layers (drawn in the case, listed once there is one) and Added
+layers (imported). A folded heading stays folded the next time the menu opens. Each map keeps
+its own switches, so a layer is drawn only where it was switched on. A layer that
+asks a question shows its settings under its row once it is on: Saved work asks
+Media, Places or Captures, on Media first as on the Map. The fires
 and the night lights start on the day of the picture on screen where the map
 knows it, and on the last 24 hours and the last night where it does not. Added
 layers are added and worked in Satellite; the app reads each one once, and only
@@ -2527,9 +2609,9 @@ controls. Routines, Saved and Areas sit in a tab row below it, with New detectio
 at the top of the content. A second heading appears inside a routine, review,
 wizard or library, where it carries Back. Full screen includes the dock. The
 collapse button or `]` reduces the dock to an icon rail; pressing a tab reopens it and resizes the
-map. Detect's basemap, reference layers, saved detections switch and collapsed
-state are viewer preferences carried by Settings → Backup. **Saved detections** and
-**Watched areas** are chips of the map's Layers menu, under the case's saved work.
+map. Detect's basemap, reference layers and collapsed state are viewer preferences
+carried by Settings → Backup. **Saved detections** and **Watched areas** are rows of
+the map's Layers menu, under the case's saved work, and both are on at every visit.
 
 Areas belong to the case. Each has a name, colour and polygon; its map label
 appears when there is room, in the area's own colour. An area is grabbed by its

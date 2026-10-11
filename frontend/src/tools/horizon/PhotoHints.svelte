@@ -1,33 +1,22 @@
 <script>
   /**
    * What the analyst knows about the photo, told to Fit: how zoomed it looks,
-   * roughly which way it faces, how far it sees, and the points recognised in
-   * it, each a point marked on the map pinned where it shows in the photo.
-   * Each line is optional and starts at "don't know"; each narrows the search
-   * the way a human would (lib/horizon/hints.js holds the words and what they
-   * stand for).
+   * roughly which way it faces and how far it sees. Each line is optional and
+   * starts at "don't know"; each narrows the search the way a human would
+   * (lib/horizon/hints.js holds the words and what they stand for).
    */
   import { AUTO_REACH, FACING_HALF, REACHES, reachText, ZOOMS } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { ANCHORS_MAX } from './state/overlay.svelte.js';
-  import { fmtCoords } from '../../lib/state.svelte.js';
 
   let {
     /** The overlay (state/overlay.svelte.js): its hints, and the reach the last Fit found. */
     overlay,
     /** Where the view looks now, which "roughly this way" takes. */
     heading = 0,
-    /** The point marked on the map (`{ lat, lon }`), which can be pinned on the photo, or null. */
-    marked = null,
-    /** Asked to pin the marked point where it shows in the photo. */
-    onpin = () => {},
   } = $props();
 
   const hints = $derived(overlay.hints);
   const lens = $derived(overlay.lens);
-  const anchors = $derived(overlay.anchors ?? []);
-  const isPhoto = $derived(overlay.source?.kind === 'image');
-  const full = $derived(anchors.length >= ANCHORS_MAX && !anchors.some((a) => a.lat === marked?.lat && a.lon === marked?.lon));
 </script>
 
 <div class="hints">
@@ -111,36 +100,6 @@
     {/if}
   </div>
 
-  {#if isPhoto}
-    <div class="row">
-      <span class="name">Points you recognise</span>
-      {#if anchors.length}
-        <ol class="pinned">
-          {#each anchors as anchor, index (index)}
-            <li>
-              <span class="number mono">{index + 1}</span>
-              <span class="mono">{fmtCoords(anchor.lat, anchor.lon)}</span>
-              <button type="button" class="unpin" title="Unpin it" aria-label="Unpin point {index + 1}" onclick={() => overlay.removeAnchor(index)}
-                >×</button
-              >
-            </li>
-          {/each}
-        </ol>
-      {/if}
-      <div>
-        <button
-          type="button"
-          class="btn btn-sm"
-          disabled={!marked || full}
-          title={full ? `${ANCHORS_MAX} points at most` : marked ? 'Then click where it shows in the photo' : 'Mark it on the map first'}
-          onclick={onpin}>Pin the marked point on the photo</button
-        >
-      </div>
-      <p class="said">
-        {marked ? 'A summit, a mast, a building: click where it shows in the photo.' : 'Click it on the map first: a summit, a mast, a building.'}
-      </p>
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -195,44 +154,5 @@
     margin: 0;
     color: var(--text-3);
     font-size: var(--fs-xs);
-  }
-  .pinned {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    font-size: var(--fs-xs);
-  }
-  .pinned li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-1);
-  }
-  .number {
-    display: inline-grid;
-    place-items: center;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--hz-mark);
-    color: #14181d;
-    font-size: 10px;
-    font-weight: 700;
-  }
-  .unpin {
-    margin-left: auto;
-    padding: 0 6px;
-    border: none;
-    border-radius: var(--r-sm);
-    background: transparent;
-    color: var(--text-3);
-    font: inherit;
-    cursor: pointer;
-  }
-  .unpin:hover {
-    color: var(--text-1);
-    background: color-mix(in srgb, var(--text-1) 7%, transparent);
   }
 </style>

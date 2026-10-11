@@ -63,7 +63,7 @@ async function openCard(page) {
 /** Arm tracing from the place's own card, which is the only way in. */
 async function armTrace(page) {
   const fixture = await openCard(page);
-  await page.locator('.saved-popup').getByText('Trace footprint').click();
+  await page.locator('.saved-popup').getByRole('button', { name: 'Trace footprint', exact: true }).click();
   const panel = page.locator('.footprint-panel');
   await expect(panel).toContainText('checkpoint north');
   // it says what it is about to take the place of, before anything is written
@@ -117,7 +117,7 @@ test('writes a shape around the pin, and drops the circle it replaces', async ({
 
 test('opens the full editor on a place from the map', async ({ page }) => {
   await openCard(page);
-  await page.locator('.saved-popup').getByText('Edit', { exact: true }).click();
+  await page.locator('.saved-popup').getByRole('button', { name: 'Edit', exact: true }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Edit place' });
   await expect(dialog).toBeVisible();
@@ -136,7 +136,7 @@ test('opens the full editor on a place from the map', async ({ page }) => {
 
 test('asks before handing over would drop what the short form holds', async ({ page }) => {
   await openCard(page);
-  await page.locator('.saved-popup').getByText('Edit', { exact: true }).click();
+  await page.locator('.saved-popup').getByRole('button', { name: 'Edit', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit place' });
   await dialog.getByLabel('Title').fill('checkpoint north, gate');
 

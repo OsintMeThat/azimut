@@ -34,7 +34,16 @@ describe('one map’s layers', () => {
   it('leaves the case’s saved work to the tool, which draws it itself', () => {
     const layers = createLayerSet({ fireKey: keyed(), initial: ['saved'] });
     expect(layers.overlays).toEqual([]);
-    expect(layers.rows({ saved: { count: 4 } }).find((row) => row.id === 'saved')).toMatchObject({ on: true, count: 4 });
+    expect(layers.rows({ saved: { detail: '4' } }).find((row) => row.id === 'saved')).toMatchObject({ on: true, detail: '4' });
+  });
+
+  it('asks a layer’s questions under its row only once it is on, as the Map does', () => {
+    const layers = createLayerSet({ fireKey: keyed() });
+    const fires = () => layers.rows().find((row) => row.id === 'firms');
+    // what it would show is on the row, switched on or not
+    expect(fires()).toMatchObject({ detail: 'VIIRS · 24 h', controls: null });
+    layers.toggle('firms');
+    expect(fires().controls.map((control) => control.label)).toEqual(['Sensor', 'Showing']);
   });
 
   it('keeps the fire layer locked and says how to unlock it while there is no key', () => {
@@ -42,8 +51,9 @@ describe('one map’s layers', () => {
     const layers = createLayerSet({ fireKey: keyed({ keyed: false, state: 'missing' }), initial: ['firms'], onsettings });
     const row = layers.rows().find((entry) => entry.id === 'firms');
     expect(row.disabled).toBe(true);
-    expect(row.lock).toMatchObject({ text: 'needs a free key', action: 'Add a FIRMS key' });
-    row.lock.run();
+    expect(row.detail).toBe('needs a free key');
+    expect(row.actions[0]).toMatchObject({ label: 'Add a FIRMS key', quiet: true });
+    row.actions[0].run();
     expect(onsettings).toHaveBeenCalled();
     expect(layers.overlays).toEqual([]);
   });
@@ -55,10 +65,10 @@ describe('one map’s layers', () => {
     expect(layers.overlays).toEqual([
       { id: 'firms', params: { sensor: 'viirs', window: 'dates', first: '2024-03-12', last: '2024-03-12' } },
     ]);
-    expect(layers.rows().find((row) => row.id === 'firms').summary).toBe("VIIRS · 2024-03-12, the picture's day");
+    expect(layers.rows().find((row) => row.id === 'firms').detail).toBe('VIIRS · 2024-03-12');
     day = '';
     expect(layers.overlays[0].params.window).toBe('24h');
-    expect(layers.rows().find((row) => row.id === 'firms').summary).toBe('VIIRS · 24 h, the picture has no date');
+    expect(layers.rows().find((row) => row.id === 'firms').detail).toBe('VIIRS · 24 h');
   });
 
   it('asks for the last day on a map with no picture date to follow', () => {

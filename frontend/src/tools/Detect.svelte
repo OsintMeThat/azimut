@@ -22,6 +22,7 @@
   import { createFireKey } from '../lib/map/fireKey.svelte.js';
   import { createLayerSet } from '../lib/map/layerSet.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { savedRow } from '../lib/geoTree.js';
   import { copyText } from '../lib/clipboard.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
   import { blinkable } from '../lib/map/detectReview.js';
@@ -46,6 +47,9 @@
   import ImageryChip from './satellite/ImageryChip.svelte';
   import LayerMenu from '../components/LayerMenu.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
+  import LayerGeometry from './satellite/LayerGeometry.svelte';
+  import PersonalLayerPanel from './satellite/PersonalLayerPanel.svelte';
+  import { personalLayers, personalPlaceDeletion } from '../lib/map/personalLayers.svelte.js';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import Compass from '../components/Compass.svelte';
@@ -82,6 +86,8 @@
   let savedDockWidth = $state(380);
   let toolEl = $state(null);
   let fullscreen = $state(false);
+  // on at every visit, like the watched areas: what the case already found is
+  // the first thing to see over the map
   let savedVisible = $state(true);
   let readingPass = $state(false);
   let layersOpen = $state(false);
@@ -116,7 +122,8 @@
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   $effect(() => savedWork.load(caseState.current?.id ?? null));
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
-  const savedItems = $derived([...savedWork.rows, ...savedWork.media]);
+  // the position picked under the layer's row, Media first as on the Map
+  const savedItems = $derived(savedWork.shown);
   const myLayers = addedLayers.scope('detect');
   // a FIRMS key pasted into Settings, or tested back to life there
   $effect(() => {
@@ -128,9 +135,7 @@
   $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
   const layerRows = $derived([
     ...mapLayers.rows({
-      saved: savedItems.length
-        ? { count: savedItems.length }
-        : { disabled: true, title: 'Nothing is saved or placed in this case yet' },
+      saved: savedRow(savedWork, mapLayers.has('saved')),
     }),
     // Detect's own, under the case's: what its runs found, and where it watches
     { id: 'detections', group: 'case', label: 'Saved detections', title: 'What saved runs found, drawn over the map',
@@ -313,7 +318,6 @@
       // Only the layers still offered: a retired one (Labels) would be sent back
       // with the next save and refused.
       mapLayers.restore(saved?.overlays ?? ['boundaries', 'placenames']);
-      savedVisible = saved?.saved ?? true;
       prefsLoaded = true;
       home = { ...prefs.homeView };
       // Where the other map tabs left the window, when they share a camera.
@@ -345,7 +349,7 @@
   $effect(() => {
     if (!prefsLoaded) return;
     const value = { collapsed, width: savedDockWidth, basemap: chosenBasemap,
-      overlays: mapLayers.kept, saved: savedVisible };
+      overlays: mapLayers.kept };
     const key = JSON.stringify(value);
     if (!lastPrefs) { lastPrefs = key; return; }
     if (key === lastPrefs) return;
@@ -402,6 +406,7 @@
 
   /** A click on either map: a candidate to add, a pin to drop, or a point to read the rules at. */
   function onMapClick({ lon, lat }) {
+    if (personalLayers.armed) return;
     if (manual?.kind === 'point') void panel?.addManual({ type: 'Point', coordinates: [lon, lat] });
     else if (builder?.pinning && !measuring) builder.dropPin({ lon, lat });
     else if (builder && !measuring) void builder.probeAt({ lon, lat });
@@ -413,6 +418,7 @@
     measureTool = 'measure';
   }
   function toggleMeasure() {
+    personalLayers.stop();
     if (measuring) measureTool = 'select';
     else armMeasure();
   }
@@ -719,6 +725,10 @@
         added={myLayers.rows}
         ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
         onmanage={() => (uiState.tool = 'satellite')}
+        oneditadded={(row) => { layersOpen = false; personalLayers.open(row); }}
+        onnewpersonal={() => { layersOpen = false; personalLayers.newLayer(); }}
+        ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
+        onmaps={() => { layersOpen = false; personalLayers.openMaps(); }}
         buttonClass="layers-chip cmp-glass"
         align="right"
         bind:open={layersOpen}
@@ -768,7 +778,7 @@
           {home}
           resetToHome={false}
           imperial={prefs.units === 'imperial'}
-          armed={measuring ? 'measuring' : drawing !== 'select' || builder?.pinning ? 'selecting' : null}
+          armed={personalLayers.armed ? 'selecting' : measuring ? 'measuring' : drawing !== 'select' || builder?.pinning ? 'selecting' : null}
           onclick={onMapClick}
           controlsTop={108}
           {alternate}
@@ -781,15 +791,18 @@
         <!-- The case's own layers, under Detect's findings. Drawn only while this
              tab is on screen, and inert while a tool holds the pointer, so a pin
              or an area is never a card opened instead. -->
+        <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'detect'} />
         <AddedLayersOverlay
           engine={ready ? engine : null}
           caseId={caseState.current?.id ?? ''}
           layers={uiState.tool === 'detect' && !bare ? myLayers.drawn : []}
           drawing={addedLayers.drawing}
           onmenu={onMapContextMenu}
-          interactive={!measuring && drawing === 'select' && !manual && !builder?.pinning}
+          interactive={!personalLayers.armed && !measuring && drawing === 'select' && !manual && !builder?.pinning}
+          onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
+          onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
         />
-        {#if mapLayers.has('saved') && !bare && caseState.current}
+        {#if mapLayers.has('saved') && !bare && caseState.current && !personalLayers.armed}
           <SavedOverlay
             engine={ready ? engine : null}
             items={savedItems}
@@ -814,16 +827,16 @@
           {/if}
           {#if previewLayer.length && !builder.hideOverlays}
             <AnalysisOverlay {engine} layers={previewLayer} markers={builder.markers} outlines={builder.outlines}
-              interactive={!builder.pinning && !measuring} onpick={(_, id) => {
+              interactive={!personalLayers.armed && !builder.pinning && !measuring} onpick={(_, id) => {
               const row = builder.detail.candidates.find((candidate) => candidate.id === id);
               if (row) void builder.probeAt({ lon: row.coordinates[0], lat: row.coordinates[1] });
             }} />
           {/if}
           {#if builder.checkPins && !builder.hideOverlays}
-            <CheckMarks {engine} pins={builder.pins} armed={!!builder.pinning} selected={builder.probe?.pin ?? null}
+            <CheckMarks {engine} pins={builder.pins} armed={!!builder.pinning || personalLayers.armed} selected={builder.probe?.pin ?? null}
               onpick={(index) => builder.probePin(index)} />
           {/if}
-          {#if builder.probe}
+          {#if builder.probe && !personalLayers.armed}
             <RuleProbe {engine} probe={builder.probe} rules={builder.recipe.rules} colours={builder.colours} single={builder.single}
               width={element?.clientWidth ?? 0} height={(element?.clientHeight ?? 0) - builder.reach} onclose={() => builder.closeProbe()}
               onmark={(expect) => builder.markProbe(expect)} pin={probedPin}
@@ -833,10 +846,10 @@
         {:else if !bare && (focusedRunId || savedVisible) && visibleRunLayers.some((layer) => layer.visible)}
           <AnalysisOverlay {engine} layers={visibleRunLayers} selected={selectedResult} active={!manual}
             markers={resultMarkers} outlines={resultOutlines}
-            interactive={!measuring && drawing === 'select'}
+            interactive={!personalLayers.armed && !measuring && drawing === 'select'}
             onpick={(run, result) => panel?.pick(run, result)} />
         {/if}
-        {#if areaGroups.length && !manual && !bare && !builder}
+        {#if areaGroups.length && !manual && !bare && !builder && !personalLayers.armed}
           <DetectAreas {engine} groups={areaGroups} {highlight} onpick={(id) => panel?.openArea(id)} />
         {/if}
         {#if manual?.kind === 'polygon'}
@@ -850,11 +863,13 @@
             }} />
         {:else if showZones && !manual && !bare && !builder}
           <AnnotationCanvas annotations={marks} {engine} letter="a" editVertices={true} edgeOnly={true}
+            active={!personalLayers.armed}
             bind:tool={drawing} bind:selectedId={selectedZone} colour="#38bdf8" fillOpacity={0.08}
             onchange={(next) => (zones = marksToZones(next, zones))} />
         {/if}
         <!-- Over the areas, so a measure started inside one takes the press. -->
         <AnnotationCanvas bind:this={measureCanvas} annotations={measures} {engine} letter="a" units={prefs.units}
+          active={!personalLayers.armed}
           editVertices={true} bind:tool={measureTool} bind:selectedId={selectedMeasure} colour="#f5a623"
           strokeWidth={2} stampSize={14} onchange={(next) => (measures = next)} />
         {#if pointMenu}
@@ -881,7 +896,7 @@
       {#if builder}
         <CheckBench bench={builder} />
       {/if}
-      {#if needs}
+      {#if needs && !personalLayers.editor}
         <div class="need-over">
           <CopernicusNeeded need={needs} tool="Detect" />
         </div>
@@ -937,10 +952,15 @@
       onfly={({ lon, lat, zoom, bounds }) => (bounds ? engine?.fitBounds(bounds, { padding: 40 }) : engine?.setView({ lon, lat }, zoom))}
     />
   </div>
+  <PersonalLayerPanel tool="detect" scope={myLayers} {engine}
+    provider={providerId} rows={layerRows} onprovider={(id) => { providerId = id; }}
+    places={savedWork.rows.filter((row) => row.kind === 'place')}
+    onarm={() => { drawing = 'select'; manual = null; measureTool = 'select'; if (builder?.pinning) builder.escape(); }} />
 </div>
 
 <style>
   .detect-tool {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;

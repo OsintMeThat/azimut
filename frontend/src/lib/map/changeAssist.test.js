@@ -18,7 +18,7 @@ const sentinel = (date, patch = {}) =>
   });
 
 describe('which pairs Difference reads', () => {
-  it('reads two Wayback releases as matched when unrelated layers agree', () => {
+  it('reads two Wayback releases as matched, whatever is laid over either side', () => {
     expect(changeCompatibility(side(), side({ waybackRelease: 2 }))).toMatchObject({
       ok: true,
       grade: 'matched',
@@ -28,9 +28,11 @@ describe('which pairs Difference reads', () => {
       clouds: false,
       methods: ['colour', 'structure', 'brightness'],
     });
+    // the reading takes the picture alone, so a layer on one side is no change
+    expect(changeCompatibility(side({ overlays: ['roads'] }), side({ waybackRelease: 2 }))).toMatchObject({ ok: true });
     expect(
-      changeCompatibility(side({ overlays: ['roads'] }), side({ waybackRelease: 2 }))
-    ).toMatchObject({ ok: false, reason: expect.stringContaining('layers') });
+      changeCompatibility(side({ overlays: ['roads'] }), side({ overlays: ['railway', 'saved'], waybackRelease: 2 }))
+    ).toMatchObject({ ok: true });
     expect(changeCompatibility(side(), side())).toMatchObject({ ok: false });
   });
 
@@ -73,24 +75,20 @@ describe('which pairs Difference reads', () => {
     ).toMatchObject({ ok: false, reason: expect.stringContaining('same VIIRS') });
   });
 
-  it('names the layer that differs, and that turning it off is enough', () => {
+  it('reads releases under fires and nights of each side’s own day, which it leaves out', () => {
     const fires = (first) => ({ overlays: ['firms'], firms: { sensor: 'viirs', window: 'dates', first, last: '' } });
     expect(changeCompatibility(side(fires('2024-01-01')), side({ ...fires('2025-01-01'), waybackRelease: 2 }))).toMatchObject({
-      ok: false,
-      reason: 'Active fires show different days on A and B. Turn them off to compare pixels.',
-    });
-    // the same day on both sides is no change at all
-    expect(changeCompatibility(side(fires('2024-01-01')), side({ ...fires('2024-01-01'), waybackRelease: 2 }))).toMatchObject({
       ok: true,
+      family: 'esri',
     });
     const nights = (day) => ({ overlays: ['nightlights'], nightlights: { source: 'noaa20', day } });
     expect(changeCompatibility(side(nights('2026-01-01')), side({ ...nights('2026-02-01'), waybackRelease: 2 }))).toMatchObject({
-      ok: false,
-      reason: 'Night lights show different nights on A and B. Turn them off to compare pixels.',
+      ok: true,
+      family: 'esri',
     });
   });
 
-  it('asks only the night pair to turn its fires off', () => {
+  it('reads two nights whatever fires are laid over them', () => {
     const night = (day, first) =>
       side({
         provider: 'osm',
@@ -99,8 +97,8 @@ describe('which pairs Difference reads', () => {
         nightlights: { source: 'noaa20', day },
       });
     expect(changeCompatibility(night('2026-01-01', '2026-01-01'), night('2026-02-01', '2026-02-01'))).toMatchObject({
-      ok: false,
-      reason: 'Active fires show different days on A and B. Turn them off to compare night lights.',
+      ok: true,
+      family: 'viirs',
     });
   });
 

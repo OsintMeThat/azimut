@@ -24,7 +24,7 @@ export const prefs = $state({
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
   mapSync: true, // Satellite, Compare, Detect and Horizon share one camera
-  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'], saved: true },
+  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'] },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
@@ -261,6 +261,7 @@ export const uiState = $state({
   openCollage: null, // collage name to reopen in the Collage tool
   openCompare: null, // compare-session name to reopen in the Compare tool
   openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
+  openMapView: null,
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
@@ -648,6 +649,7 @@ function clearCaseHandoffs() {
   uiState.openCollage = null;
   uiState.openCompare = null;
   uiState.openHorizonView = null;
+  uiState.openMapView = null;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;

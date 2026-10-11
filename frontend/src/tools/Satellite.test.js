@@ -4,6 +4,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 const source = readFileSync(new URL('./Satellite.svelte', import.meta.url), 'utf8');
 const rail = readFileSync(new URL('./satellite/MapRail.svelte', import.meta.url), 'utf8');
 const layers = readFileSync(new URL('./satellite/MapLayers.svelte', import.meta.url), 'utf8');
+// the rows themselves, drawn the same in the Map's panel and the other maps' menu
+const layerRows = readFileSync(new URL('../components/LayerRows.svelte', import.meta.url), 'utf8');
 // a layer's settings, drawn the same under the Map's rows and in the other maps' menu
 const controls = readFileSync(new URL('../components/LayerControls.svelte', import.meta.url), 'utf8');
 const questions = readFileSync(new URL('../lib/map/eventControls.js', import.meta.url), 'utf8');
@@ -104,11 +106,12 @@ describe('Satellite saved work', () => {
     // it is a layer, listed with the other layers rather than sitting in the
     // toolbox: nothing about it changes what the pointer does
     expect(source).toContain('toggle: () => (savedOverlay = !savedOverlay)');
-    expect(layers).toContain('aria-pressed={Boolean(row.on)}');
+    expect(layers).toContain('<LayerRows {rows} />');
+    expect(layerRows).toContain('aria-pressed={Boolean(row.on)}');
     // one eye for both states: only its colour says whether the layer is on
-    expect(layers).toContain('<Icon name="eye" size={13} />');
-    expect(layers).not.toContain("'ghost'");
-    expect(layers).toMatch(/\.eye\.on \{\s*color: var\(--accent\);/);
+    expect(layerRows).toContain('<Icon name="eye" size={13} />');
+    expect(layerRows).not.toContain("'ghost'");
+    expect(layerRows).toMatch(/\.eye\.on \{\s*color: var\(--accent\);/);
     expect(rail).not.toContain('savedOverlay');
     // nothing about the overlay is written back to the case — session only
     expect(source).not.toContain('savedOverlay:');
@@ -464,12 +467,8 @@ describe('what is laid over the imagery', () => {
 
   it('asks its two questions in the row rather than in a card over the map', () => {
     expect(source).toContain('controls: fires.on && fires.keyed ? firmsControls : null');
-    const layersPanel = readFileSync(
-      new URL('./satellite/MapLayers.svelte', import.meta.url),
-      'utf8'
-    );
-    expect(layersPanel).toContain('{#if row.controls?.length}');
-    expect(layersPanel).not.toContain('position: absolute');
+    expect(layerRows).toContain('{#if row.controls?.length}');
+    expect(layerRows).not.toContain('position: absolute');
   });
 });
 
@@ -478,7 +477,8 @@ describe('choosing which saved work is drawn', () => {
     // the same state the Saved panel binds, so a map read here and a panel read
     // beside it cannot disagree about what the case holds
     expect(source).toContain('controls: savedOverlay && savedAnything ? savedFilters : null');
-    expect(source).toContain('pick: (id) => (savedWork.kind = id)');
+    // the kind question is the one every map's Layers menu asks (lib/geoTree.js)
+    expect(source).toContain('const rows = [kindControl(savedWork)];');
     expect(source).toContain("pick: (id) => (savedWork.folder = id === 'all' ? null : id)");
   });
 
@@ -488,7 +488,7 @@ describe('choosing which saved work is drawn', () => {
 
   it('picks folders from a list, since the analyst names them and there can be many', () => {
     expect(source).toContain('list: true');
-    expect(layers).toContain('<LayerControls controls={row.controls} />');
+    expect(layerRows).toContain('<LayerControls controls={row.controls} />');
     expect(controls).toContain('{#if control.list}');
     expect(controls).toContain('onchange={(event) => control.pick(event.currentTarget.value)}');
   });
@@ -496,7 +496,7 @@ describe('choosing which saved work is drawn', () => {
   it('stacks a setting\'s options under their label rather than trailing them', () => {
     // right-aligned wrapping turned a handful of options into a staircase, one
     // per line, in a panel this narrow
-    for (const sheet of [layers, controls]) {
+    for (const sheet of [layerRows, controls]) {
       expect(sheet).not.toContain('justify-content: flex-end');
       expect(sheet).not.toContain('justify-content: space-between');
     }

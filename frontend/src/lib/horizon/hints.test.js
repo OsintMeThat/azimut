@@ -44,8 +44,6 @@ describe('what the analyst knows about a photo', () => {
     expect(hintsSummary({ reach: 'all' }, null)).toBe('clear air');
     // a reach Fit found reads like one the analyst set
     expect(hintsSummary(NO_HINTS, 10_000)).toBe('within 10 km');
-    expect(hintsSummary(NO_HINTS, null, 1)).toBe('1 point');
-    expect(hintsSummary({ zoom: 'zoomed' }, null, 3)).toBe('Zoomed · 3 points');
   });
 
   it('tells the search the lenses and the sector, the lens left out when the photo says it', () => {

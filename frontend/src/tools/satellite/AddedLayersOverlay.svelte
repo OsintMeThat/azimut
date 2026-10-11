@@ -6,10 +6,8 @@
    * lifecycle — which layers are drawn right now, which have to be torn down,
    * and what a click or a right-click on one of their features opens.
    *
-   * That card is **read-only, by construction rather than by restraint**: it is
-   * built from the strings the source stated, and its one control copies the
-   * feature's point. There is no route from a feature into the case, because a
-   * feature here is somebody else's claim and the case is this analyst's work.
+   * Source cards show their saved fields and copy the feature's point. A
+   * personal layer also offers an explicit handoff to its feature editor.
    * The right-click opens the map's own point menu on the pin's point: a place
    * saved from it is the analyst's, and carries nothing of the feature. How the
    * card is laid out lives in `lib/map/layerCard.js`; only its lifecycle lives
@@ -21,6 +19,7 @@
   import { layerCard } from '../../lib/map/layerCard.js';
   import { fmtCoords, toast } from '../../lib/state.svelte.js';
   import { copyText } from '../../lib/clipboard.js';
+  import { paths } from '../../components/Icon.svelte';
 
   let {
     engine = null,
@@ -37,6 +36,8 @@
     interactive = true,
     /** Personal layers can hand a feature to their editor. */
     onedit = null,
+    onremovefeature = null,
+    ondeleteplace = null,
   } = $props();
 
   async function copy(text) {
@@ -97,18 +98,42 @@
       }
       if (existing) drop(row.name);
       const layer = createAddedLayer(engine, {
+        editable: !!row.editable,
         card: (properties, point) => {
           const card = layerCard(row.title, { coords: fmtCoords, copy })(properties, point);
-          if (row.editable && onedit && properties.key) {
-            const edit = document.createElement('button');
-            edit.type = 'button';
-            edit.className = 'btn btn-sm';
-            edit.textContent = 'Edit feature';
-            edit.addEventListener('click', (event) => {
-              event.stopPropagation();
-              onedit(row, properties.key);
-            });
-            card.append(edit);
+          if (row.editable && properties.key) {
+            const actions = document.createElement('div');
+            actions.className = 'layer-card-actions';
+            const action = (label, icon, run) => {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'layer-card-action';
+              button.setAttribute('aria-label', label);
+              button.title = label;
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              svg.setAttribute('viewBox', '0 0 24 24');
+              svg.setAttribute('width', '12'); svg.setAttribute('height', '12');
+              svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor');
+              svg.setAttribute('stroke-width', '1.8');
+              svg.setAttribute('aria-hidden', 'true');
+              const path = document.createElementNS(svg.namespaceURI, 'path');
+              path.setAttribute('d', paths[icon]);
+              svg.append(path);
+              button.append(svg);
+              button.addEventListener('click', (event) => { event.stopPropagation(); run(); });
+              actions.append(button);
+            };
+            if (onedit) action('Edit feature', 'edit', () => onedit(row, properties.key));
+            if (onremovefeature) action('Remove from this layer', 'trash', () => onremovefeature(row, properties.key));
+            if (properties.place_id && ondeleteplace) {
+              action('Delete case place', 'link', () => ondeleteplace(properties.place_id));
+            }
+            const footer = document.createElement('div');
+            footer.className = 'layer-card-footer';
+            footer.append(actions);
+            const from = card.querySelector('.layer-card-from');
+            if (from) footer.append(from);
+            card.append(footer);
           }
           return card;
         },
@@ -130,13 +155,14 @@
           });
           restack();
         })
-        .catch(() => drop(row.name));
+        .catch(() => { if (live.get(row.name)?.layer === layer) drop(row.name); });
     }
     restack();
   });
 
   $effect(() => {
-    for (const { layer } of live.values()) layer.interactive(interactive);
+    const enabled = interactive;
+    for (const { layer } of live.values()) layer.interactive(enabled);
   });
 
   /**
@@ -159,6 +185,12 @@
 </script>
 
 <style>
+  :global(.layer-card-footer) { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  :global(.layer-card-actions) { display: flex; align-items: center; gap: 3px; }
+  :global(.layer-card-action) { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-1); background: transparent; color: var(--text-2); cursor: pointer; }
+  :global(.layer-card-action:hover) { background: var(--bg-3); color: var(--accent); }
+  :global(.layer-card-action[aria-label='Remove from this layer']:hover), :global(.layer-card-action[aria-label='Delete case place']:hover) { color: var(--danger); }
+  :global(.layer-card-footer .layer-card-from) { margin: 0 0 0 auto; }
   /* The card is built outside this component's markup, so its rules are global.
      Only what is inside it: the card's own surface is the one every mark on this
      map opens on, and it is dressed once in `lib/map/engine.css`.

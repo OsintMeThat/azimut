@@ -79,11 +79,9 @@ class Named(Companion):
 class Derived(Named):
     """A companion the tool rebuilds from one that travels.
 
-    A map layer's parsed GeoJSON is the case: the snapshot beside it is the
-    bytes as received, and parsing them again is the whole of what it takes to
-    get this file back. So it is dropped on delete and left out of the bundle,
-    and every reader has to be able to rebuild it — which is what keeps the
-    snapshot, not this, the thing the case actually holds.
+    A map layer's drawing is rebuilt from its original snapshot or the working
+    collection in its spec. The drawing is dropped on delete and left out of
+    bundles; its authoritative source travels with the case.
     """
 
     travels: ClassVar[bool] = False
@@ -140,6 +138,7 @@ KINDS: dict[str, Kind] = {
     # The images made from a view are media of their own, as a comparison's are;
     # its preview travels with it, since only the open view can draw it again.
     "horizon-view": Kind(path_attr="spec", companions=(Named(layout.horizon_thumb_rel),)),
+    "map-view": Kind(path_attr="spec"),
     "analysis-zones": Kind(path_attr="spec"),
     "analysis-area": Kind(path_attr="spec"),
     "analysis-follow-up": Kind(path_attr="spec"),

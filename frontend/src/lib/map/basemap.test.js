@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   OVERLAY_IDS,
   imageryError,
+  isGround,
   rasterSource,
   readableReason,
   sourceMaxZoom,
@@ -840,5 +841,22 @@ describe('billed tiles on a map that can tilt', () => {
     expect(rasterSource({ ...CUSTOM_XYZ, meter: 'x' }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');
     // without a map to read the view from, the plain proxy address
     expect(rasterSource(SENTINEL, 'sentinel2', 512).tiles).toEqual(['/api/tiles/sentinel2/{z}/{x}/{y}']);
+  });
+});
+
+describe('the picture itself, apart from what is laid over it', () => {
+  it('counts the imagery and the second picture Blink lays on it as the ground', () => {
+    expect(isGround('basemap-imagery')).toBe(true);
+    expect(isGround('basemap-alternate')).toBe(true);
+    expect(isGround('basemap-boundaries')).toBe(false);
+    expect(isGround('basemap-placenames-labels')).toBe(false);
+    // the case's marks and added layers are laid over it too
+    expect(isGround('sfc-3-fill')).toBe(false);
+  });
+
+  it('counts an overlay in when the reading is made of it, every one of its layers', () => {
+    expect(isGround('basemap-nightlights', ['nightlights'])).toBe(true);
+    expect(isGround('basemap-firms-marks', ['firms'])).toBe(true);
+    expect(isGround('basemap-firms-marks', ['nightlights'])).toBe(false);
   });
 });

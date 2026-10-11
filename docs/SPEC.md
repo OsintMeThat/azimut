@@ -65,6 +65,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   .analysis/   # Detect areas, saved detections, runs and the frames behind their results
   .search/     # saved Grid Search state
   .layers/     # added map layers: spec + source as received + its icons; .cache/ is derived
+  .map-views/  # named map compositions, layer visibility and legends
   .trash/      # recoverable artifact payloads, in numbered slots
 ```
 
@@ -90,7 +91,7 @@ The entity/link schema has existed since v1. Full vocabulary lives in
   | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
-  | document | proof, post, note, sheet, inspect-session, collage, compare-session, horizon-view, map-layer, analysis-* (Detect), bookmark |
+  | document | proof, post, note, sheet, inspect-session, collage, compare-session, horizon-view, map-layer, map-view, analysis-* (Detect), bookmark |
   | place | place |
   | claim | claim |
 
@@ -171,7 +172,9 @@ proof for publication.
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
-| ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare lays one list over both sides, fires and nights on each side's day. |
+| ✅ **Personal map layers** | Edit across maps, copy local sources, select and move features, style and reorder groups, draw shapes, share places, and discard edits. |
+| ✅ **Map compositions & downloads** | Save named views with live layers and legends; download personal layers as KMZ with icons, KML or GeoJSON. |
+| ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
@@ -248,7 +251,6 @@ supplies, since a ridge ends the day well before the flat horizon does.
 | Tool | What it does |
 |------|--------------|
 | **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
-| **Map Board (MyMaps-style)** | Edits case-owned pins, notes, links and shapes, groups them into analyst-made layers, binds pins to `place` and exports the finished map as KML/KMZ/GeoJSON. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
 | **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |

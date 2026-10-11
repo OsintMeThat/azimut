@@ -203,9 +203,12 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
    */
   async function drawing(caseId, name) {
     if (drawings.has(name)) return drawings.get(name);
+    const owner = loadedFor;
+    const version = rows.find((row) => row.name === name)?.sha256;
     const data = await api.get(`/api/cases/${caseId}/map-layers/${encodeURIComponent(name)}/data`, {
       cache: 'no-cache',
     });
+    if (loadedFor !== owner || rows.find((row) => row.name === name)?.sha256 !== version) return data;
     drawings.set(name, data);
     held = new Set(held).add(name);
     return data;
@@ -529,30 +532,32 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
       const before = rows;
       const at = new Map(rows.map((row) => [row.name, row]));
       const kept = names.filter((name) => at.has(name));
-      rows = [
-        ...kept.map((name) => at.get(name)),
-        ...rows.filter((row) => !kept.includes(row.name)),
-      ];
+      const positions = new Set(kept);
+      let index = 0;
+      rows = rows.map((row) => positions.has(row.name) ? at.get(kept[index++]) : row);
       try {
         const list = await api.put(`/api/cases/${caseId}/map-layers/order`, {
           names: rows.map((row) => row.name),
         });
         if (loadedFor === caseId && Array.isArray(list)) rows = list;
+        return true;
       } catch (error) {
         if (loadedFor === caseId) rows = before;
         notify(error?.message || 'That order could not be kept', 'error');
+        return false;
       }
     },
 
     async remove(caseId, layer) {
       return act(layer.name, async () => {
         try {
-          await api.del(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}`);
+          const result = await api.del(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}`);
           forget(layer.name);
           hide(layer.name);
           renewed.delete(layer.name);
           rows = rows.filter((entry) => entry.name !== layer.name);
           await reloadCase();
+          return result;
         } catch (error) {
           notify(error?.message || 'That layer could not be removed', 'error');
         }

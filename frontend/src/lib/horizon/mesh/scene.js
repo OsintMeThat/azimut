@@ -20,6 +20,7 @@
  */
 import { rayFor } from '../camera.js';
 import { distanceBetween } from '../geometry.js';
+import { burnRoofs } from './buildingMesh.js';
 import { RAD, eyeAltitude, eyeFrame } from './geo.js';
 import { createMeshRenderer } from './renderer.js';
 import { createTiles } from './tiles.js';
@@ -39,6 +40,10 @@ export const MOTION_MAX = 6;
 export const REST_MS = 250;
 /** How sharply a picture seen edge-on may be read (renderer.js `sharpen`). */
 const SHARPEN = 4;
+/** Tiles of buildings sent to a worker in one message. */
+const BUILDINGS_BATCH = 4;
+/** ms the shadows wait for more buildings before their grid is raised again. */
+const BURN_DELAY = 250;
 
 /** Workers building tiles: one per four threads, three at most, so the page and the app keep theirs. */
 export function workerCount(threads = globalThis.navigator?.hardwareConcurrency || 4) {
@@ -107,10 +112,55 @@ export function createScene(
   let lastFrame = 0;
   let motion = SHARP;
 
+  // the buildings asked for (`setBuildings`): key → { x, y, bytes, version }, how unknown
+  // heights are drawn, each built tile's outlines for the shadows, and the terrain's own grids
+  let buildingTiles = new Map();
+  let buildingOptions = { unknown: 'draw', unknownHeight: undefined };
+  const roofs = new Map();
+  let terrainGrids = null;
+  let burnTimer = 0;
+
+  /** The buildings' tiles built in the eye's frame, a few to each worker. */
+  function buildBuildings(entries) {
+    if (!eye?.frame || !entries.length) return;
+    for (let i = 0; i < entries.length; i += BUILDINGS_BATCH) {
+      const chunks = entries
+        .slice(i, i + BUILDINGS_BATCH)
+        .map(([key, t]) => ({ key, x: t.x, y: t.y, bytes: t.bytes, version: t.version }));
+      next().postMessage({ type: 'buildings', id: eye.id, chunks, ...buildingOptions });
+    }
+  }
+
+  /** The shadows' grids, the finest one with the buildings raised in it. */
+  function sendGrids() {
+    clearTimeout(burnTimer);
+    burnTimer = 0;
+    if (!terrainGrids || !renderer) return;
+    const list = terrainGrids.map((grid, i) => ({ ...GRIDS[i], heights: grid.heights }));
+    let top = Math.max(...terrainGrids.map((grid) => grid.top));
+    if (roofs.size) {
+      const burnt = burnRoofs(list[0].heights, list[0].size, list[0].reach, [...roofs.values()]);
+      list[0] = { ...list[0], heights: burnt.heights };
+      top = Math.max(top, burnt.top);
+    }
+    renderer.setGrids({ list, top: top + 5 });
+    onChange();
+  }
+
+  function burnSoon() {
+    if (!terrainGrids || burnTimer) return;
+    burnTimer = setTimeout(sendGrids, BURN_DELAY);
+  }
+
   function land({ lat, lon, mode, height }, far) {
     eyeId += 1;
     tiles?.dispose();
     renderer.setGrids(null);
+    renderer.clearBuildingChunks();
+    roofs.clear();
+    terrainGrids = null;
+    clearTimeout(burnTimer);
+    burnTimer = 0;
     const id = eyeId;
     eye = { id, lat, lon, mode, height, far, frame: null, ground: 0, offset: [0, 0, 0], at: { lat, lon }, grids: 'none', laid: false, failed: false };
     tiles = createTiles({
@@ -188,6 +238,7 @@ export function createScene(
         eye.frame = eyeFrame({ lat: eye.lat, lon: eye.lon, alt: data.alt });
         eye.ground = data.ground;
         eye.underfoot = data.ground;
+        buildBuildings([...buildingTiles]);
       }
     } else if (data.type === 'tile') {
       const range = data.failed ? null : { low: data.low, high: data.high };
@@ -197,12 +248,16 @@ export function createScene(
     } else if (data.type === 'grids') {
       if (data.failed) eye.grids = 'failed';
       else {
-        renderer.setGrids({
-          list: data.grids.map((grid, i) => ({ ...GRIDS[i], heights: grid.heights })),
-          top: Math.max(...data.grids.map((grid) => grid.top)) + 5,
-        });
+        terrainGrids = data.grids;
+        sendGrids();
         eye.grids = 'ready';
       }
+    } else if (data.type === 'building-chunk') {
+      // a tile let go meanwhile, or asked for again since, is not drawn
+      if (buildingTiles.get(data.key)?.version !== data.version) return;
+      renderer.addBuildingChunk(data.key, data);
+      roofs.set(data.key, data.roofs);
+      burnSoon();
     }
     onChange();
   }
@@ -237,6 +292,41 @@ export function createScene(
         return;
       }
       land(observer, far);
+    },
+
+    /**
+     * The buildings round the eye, `[{ key, x, y, bytes, version }]` (engine/buildings/wire.py
+     * tiles at buildingMesh.js CHUNK_Z), or null for none. Tiles kept from the last call
+     * under the same version are not built again.
+     */
+    setBuildings(list) {
+      const nextTiles = new Map((list ?? []).map((t) => [t.key, t]));
+      const fresh = [];
+      for (const [key, t] of nextTiles) {
+        if (buildingTiles.get(key)?.version !== t.version) fresh.push([key, t]);
+      }
+      let dropped = false;
+      for (const key of buildingTiles.keys()) {
+        if (!nextTiles.has(key)) {
+          renderer?.dropBuildingChunk(key);
+          roofs.delete(key);
+          dropped = true;
+        }
+      }
+      buildingTiles = nextTiles;
+      buildBuildings(fresh);
+      if (dropped) {
+        burnSoon();
+        onChange();
+      }
+    },
+
+    /** How a building nobody knows the height of is drawn: `{ unknown: 'draw'|'hide', unknownHeight }`. */
+    setBuildingOptions(options) {
+      const next = { unknown: options?.unknown ?? 'draw', unknownHeight: options?.unknownHeight };
+      if (next.unknown === buildingOptions.unknown && next.unknownHeight === buildingOptions.unknownHeight) return;
+      buildingOptions = next;
+      buildBuildings([...buildingTiles]);
     },
 
     /** The imagery the ground is drawn in, `{ provider, near: { provider, reach } | null }`, or null for none. */

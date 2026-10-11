@@ -98,6 +98,8 @@ class FullCase:
     layer_id: str = ""
     editable_layer_id: str = ""
     editable_layer: str = ""
+    map_view: str = ""
+    map_view_id: str = ""
     layer: str = ""  # the spec, which is what the entity points at
     layer_snapshot: str = ""  # the bytes as received, which travel with it
     layer_icons: str = ""  # the source's own pictograms, which travel too
@@ -121,7 +123,9 @@ class FullCase:
     entity_types: set[str] = field(default_factory=set)
 
 
-def build_full_case(client, name: str = "Full case", *, subject_changes: bool = True) -> FullCase:
+def build_full_case(
+    client, name: str = "Full case", *, subject_changes: bool = True, personal_layers: bool = True,
+) -> FullCase:
     """Fill one case through every tool that files an artifact.
 
     Returns once the background queue is idle, so a caller can move or delete the
@@ -537,19 +541,52 @@ def build_full_case(client, name: str = "Full case", *, subject_changes: bool = 
     ).json()["entity"]["id"]
 
     # A personal layer owns its edited collection as well as the original KMZ.
-    personal = client.post(
-        f"/api/cases/{case_id}/map-layers/{layer_name}/editable-copy",
-        json={"title": "Working checkpoints"},
-    )
-    assert personal.status_code == 200, personal.text
-    personal_name = personal.json()["name"]
-    added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
-                        json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
-    assert added.status_code == 200, added.text
-    full.editable_layer = layout.layer_spec_rel(personal_name)
-    full.editable_layer_id = client.get(
-        f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
-    ).json()["entity"]["id"]
+    if personal_layers:
+        personal = client.post(
+            f"/api/cases/{case_id}/map-layers/{layer_name}/editable-copy",
+            json={"title": "Working checkpoints"},
+        )
+        assert personal.status_code == 200, personal.text
+        personal_name = personal.json()["name"]
+        group = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/groups",
+                            json={"name": "Reviewed"})
+        assert group.status_code == 200, group.text
+        group_id = group.json()["group"]["id"]
+        styled = client.patch(f"/api/cases/{case_id}/map-layers/{personal_name}/groups/{group_id}",
+                              json={"colour": "#009e73", "symbol": "badge-building", "size": 1.75, "stroke": 4})
+        assert styled.status_code == 200, styled.text
+        shared = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/places",
+                             json={"ids": [full.place_id], "group": group_id})
+        assert shared.status_code == 200, shared.text
+        added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
+                            json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
+        assert added.status_code == 200, added.text
+        ordered = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/groups/order",
+                              json={"ids": [group_id, *[g["id"] for g in styled.json()["groups"]
+                                                        if g["id"] != group_id]]})
+        assert ordered.status_code == 200, ordered.text
+        shape = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/shapes", json={
+            "geometry": {"type": "Polygon", "coordinates": [[[2.3, 48.8], [2.4, 48.8],
+                                                               [2.4, 48.9], [2.3, 48.8]]]},
+            "name": "Review area", "group": group_id,
+        })
+        assert shape.status_code == 200, shape.text
+        checkpoint = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/edit")
+        assert checkpoint.status_code == 200, checkpoint.text
+        full.editable_layer = layout.layer_spec_rel(personal_name)
+        full.editable_layer_id = client.get(
+            f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
+        ).json()["entity"]["id"]
+
+    view = client.post(f"/api/cases/{case_id}/map-views", json={
+        "title": "Review map", "provider": "esri", "camera": {"lat": 48.85, "lon": 2.35, "zoom": 12},
+        "layers": [{"name": layer_name, "hidden": []}], "note": "Working map legend",
+        "legend": [{"label": "Checkpoints", "colour": "#009e73"}],
+    })
+    assert view.status_code == 200, view.text
+    full.map_view = layout.map_view_rel(view.json()["id"])
+    full.map_view_id = client.get(f"/api/cases/{case_id}/entities/lookup",
+                                params={"attr": "spec", "value": full.map_view}).json()["entity"]["id"]
 
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one

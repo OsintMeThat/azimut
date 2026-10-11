@@ -36,7 +36,7 @@ function fakeOverlay(over = {}) {
     setWarping: vi.fn(),
     resetWarp: vi.fn(),
     setLocked: vi.fn(),
-    setMoves: vi.fn(),
+    pressHand: vi.fn(),
     ...over,
   };
 }
@@ -94,7 +94,7 @@ describe('the band over a photo', () => {
     const list = root.querySelector('#hz-photo-keys');
     const rows = [...list.querySelectorAll('dt')].map((dt) => `${dt.textContent.trim()} → ${dt.nextElementSibling.textContent}`);
     for (const row of [
-      'Drag → Move what Move says: the photo, the terrain or both',
+      'Drag → Move what a hand is lit beside: the photo, the terrain or both',
       'Wheel → Zoom it, or pinch',
       'Shift+wheel → Change the lens',
       'Shift+drag → Roll the terrain about the pivot',
@@ -203,6 +203,38 @@ describe('the band over a photo', () => {
     expect(button(root, 'Blink')).not.toBeNull();
   });
 
+  it('gives up its words a step at a time, by what overflows, until its last button fits', async () => {
+    const steps = (el) => [1, 2, 3, 4, 5, 6].filter((n) => el.classList.contains(`t${n}`)).length;
+    let full = 1200;
+    const isBar = (el) => el.classList?.contains('overlay-bar');
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
+      return isBar(this) ? 800 : 0;
+    });
+    // each step takes 150 px of words away
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function () {
+      return isBar(this) ? full - 150 * steps(this) : 0;
+    });
+    try {
+      const settle = () => new Promise((done) => setTimeout(done, 0));
+      const wide = bar(fakeOverlay());
+      await settle();
+      const toolbar = wide.querySelector('.overlay-bar');
+      // 1200 → 1050 → 900 → 750: the third step is the first that fits in 800
+      expect(steps(toolbar)).toBe(3);
+      // past every step the band takes a second row rather than hide a button
+      full = 2000;
+      const crowded = bar(fakeOverlay());
+      await settle();
+      expect(steps(crowded.querySelector('.overlay-bar'))).toBe(6);
+      full = 700;
+      const roomy = bar(fakeOverlay());
+      await settle();
+      expect(steps(roomy.querySelector('.overlay-bar'))).toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('keeps the fit whole however narrow the band, its neighbours giving up their words first', () => {
     const source = readFileSync(resolve('src/tools/horizon/OverlayBar.svelte'), 'utf8');
     const style = source.slice(source.indexOf('<style>'));
@@ -211,76 +243,46 @@ describe('the band over a photo', () => {
     expect(reading).not.toContain('overflow: hidden');
   });
 
-  it('keeps how the ground is drawn in a menu of its own, off the photo', () => {
-    const view = { ground: 'relief', lines: true, setGround: vi.fn(), setLines: vi.fn(), releases: [], placed: null };
-    const root = bar(fakeOverlay(), { view });
-    const open = [...root.querySelectorAll('button')].find((b) => b.getAttribute('aria-controls') === 'hz-photo-ground');
-    expect(open.textContent).toContain('Relief');
-    expect(root.querySelector('#hz-photo-ground')).toBeNull();
-    open.click();
-    flushSync();
-    const menu = root.querySelector('#hz-photo-ground');
-    [...menu.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Plain').click();
-    expect(view.setGround).toHaveBeenCalledWith('plain');
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    flushSync();
-    expect(root.querySelector('#hz-photo-ground')).toBeNull();
-    // without the view's state the band offers no such menu
-    const bare = bar(fakeOverlay());
-    expect([...bare.querySelectorAll('button')].some((b) => b.getAttribute('aria-controls') === 'hz-photo-ground')).toBe(false);
-    expect([...bare.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Ridge lines')).toBe(false);
-  });
-
-  it('keeps the ridge lines on the band itself, and the imagery open in the ground menu', () => {
-    const view = {
-      ground: 'imagery',
-      lines: true,
-      setGround: vi.fn(),
-      setLines: vi.fn(),
-      drapeSource: 'esri-world-imagery',
-      releases: [],
-      releasesBusy: false,
-      nearOn: false,
-      nearReach: 5000,
-      nearEstimate: null,
-      nearPasses: [],
-      placed: null,
-    };
-    const root = bar(fakeOverlay(), { view });
-    const lines = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Ridge lines');
-    expect(lines.getAttribute('aria-pressed')).toBe('true');
-    // ticked like the switch on the view without a photo, so it reads as one
-    expect(lines.querySelector('.box svg')).not.toBeNull();
-    lines.click();
-    expect(view.setLines).toHaveBeenCalledWith(false);
-    [...root.querySelectorAll('button')].find((b) => b.getAttribute('aria-controls') === 'hz-photo-ground').click();
-    flushSync();
-    const menu = root.querySelector('#hz-photo-ground');
-    // one switch for the lines, the band's: the menu is how the ground is drawn
-    expect([...menu.querySelectorAll('button')].some((b) => b.textContent.includes('Ridge lines'))).toBe(false);
-    // already a menu, it lays the imagery open rather than folding it under another button
-    expect(menu.querySelector('[aria-label="Which imagery"]')).not.toBeNull();
-    expect(menu.querySelector('[aria-controls="hz-imagery"]')).toBeNull();
-  });
-
-  it('says what a drag moves, and moving both offers no fit and no reshape', () => {
+  it('names the photo and the terrain once, a hand beside each saying which a drag moves', () => {
     const overlay = fakeOverlay();
     const root = bar(overlay);
-    const group = root.querySelector('[role="radiogroup"][aria-label="What a drag moves"]');
-    expect([...group.querySelectorAll('[role="radio"]')].map((radio) => radio.textContent.trim())).toEqual(['Photo', 'Terrain', 'Both']);
-    expect(button(root, 'Move the terrain').getAttribute('aria-checked')).toBe('true');
-    expect(button(root, 'Move the photo').getAttribute('aria-checked')).toBe('false');
+    // the slider's two ends, each with its hand outside it
+    const order = [...root.querySelectorAll('.overlay-bar > button, .overlay-bar > .zone.fade > button')].map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent.trim()
+    );
+    expect(order.slice(1, 5)).toEqual(['Move the photo', 'Photo', 'Terrain', 'Move the terrain']);
+    expect(root.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(button(root, 'Move the terrain').getAttribute('aria-pressed')).toBe('true');
+    expect(button(root, 'Move the terrain').title).toBe('Drag and the wheel move the terrain');
+    expect(button(root, 'Move the photo').getAttribute('aria-pressed')).toBe('false');
+    expect(button(root, 'Move the photo').title).toMatch(/^Move the photo too, both held together \(L\)/);
     button(root, 'Move the photo').click();
-    expect(overlay.setMoves).toHaveBeenCalledWith('photo');
-    button(root, 'Move both').click();
-    expect(overlay.setMoves).toHaveBeenCalledWith('both');
-    const video = bar(fakeOverlay({ source: { kind: 'video', name: 'clip.mp4' } }));
-    expect(button(video, 'Move the video').textContent.trim()).toBe('Video');
+    expect(overlay.pressHand).toHaveBeenCalledWith('photo');
+    button(root, 'Move the terrain').click();
+    expect(overlay.pressHand).toHaveBeenCalledWith('terrain');
+    // a press on a name still shows that side alone
+    [...root.querySelectorAll('.end')].find((b) => b.textContent.trim() === 'Terrain').click();
+    expect(overlay.setMix).toHaveBeenCalledWith(0);
+    const video = bar(fakeOverlay({ source: { kind: 'video', name: 'clip.mp4' }, moves: 'photo' }));
+    expect(button(video, 'Move the video').getAttribute('aria-pressed')).toBe('true');
+    expect(button(video, 'Move the terrain').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('lights both hands to move both, which offers no fit and no reshape', () => {
     const held = bar(fakeOverlay({ locked: true, moves: 'both', warped: true }), { gap: { median: 0.4, span: 52, offset: 0.1, points: 40 } });
-    expect(button(held, 'Move both').getAttribute('aria-checked')).toBe('true');
+    expect(button(held, 'Move the photo').getAttribute('aria-pressed')).toBe('true');
+    expect(button(held, 'Move the terrain').getAttribute('aria-pressed')).toBe('true');
+    expect(button(held, 'Move the photo').title).toBe('Drag and the wheel move both, held together (L)');
     expect(button(held, 'Fit to trace').disabled).toBe(true);
     expect(button(held, 'Reshape the photo').disabled).toBe(true);
     expect(button(held, 'Square the photo again').disabled).toBe(true);
+  });
+
+  it('leaves how the ground is drawn to the view', () => {
+    const view = { camera: { heading: 0, tilt: 0, fov: 60 }, ground: 'relief', lines: true, setGround: vi.fn(), setLines: vi.fn() };
+    const root = bar(fakeOverlay(), { view, gap: { median: 0.4, span: 52, offset: 0.1, points: 40 } });
+    const words = [...root.querySelectorAll('button')].map((b) => b.textContent.trim());
+    for (const word of ['Ridge lines', 'Relief', 'Satellite', 'Plain']) expect(words).not.toContain(word);
   });
 });
 
@@ -301,32 +303,6 @@ describe('what the analyst knows about the photo', () => {
     expect(button(plain, 'What you know').textContent).toContain('What you know');
     const said = bar(told({ hints: { zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' }, reach: 20_000 }), { gap });
     expect(said.querySelector('button[aria-label^="What you know:"]').textContent).toContain('Zoomed · 218° SW · within 20 km');
-  });
-
-  it('pins the marked point on a photo, lists the points pinned and lets one go', () => {
-    const onpin = vi.fn();
-    const removeAnchor = vi.fn();
-    const pick = (root) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Pin the marked point on the photo');
-    const open = (overlay, props) => {
-      const root = bar(overlay, { gap, ...props });
-      button(root, overlay.anchors?.length ? `What you know: ${overlay.anchors.length} point` : 'What you know').click();
-      flushSync();
-      return root;
-    };
-    const none = open(told({ source: { kind: 'image', name: 'ridge.jpg' } }));
-    expect(pick(none).disabled).toBe(true);
-    expect(none.textContent).toContain('Click it on the map first');
-    const anchors = [{ u: 0.4, v: 0.3, lat: 46.5775, lon: 7.9853, height: 0 }];
-    const root = open(told({ source: { kind: 'image', name: 'ridge.jpg' }, anchors, removeAnchor }), { marked: { lat: 46.6, lon: 8 }, onpin });
-    pick(root).click();
-    expect(onpin).toHaveBeenCalled();
-    button(root, 'Unpin point 1').click();
-    expect(removeAnchor).toHaveBeenCalledWith(0);
-    // a video's frame is not pinned
-    const video = bar(told({ source: { kind: 'video', name: 'clip.mp4' } }), { gap });
-    button(video, 'What you know').click();
-    flushSync();
-    expect(pick(video)).toBeUndefined();
   });
 
   it('opens on the three things to say, each starting at not knowing', () => {

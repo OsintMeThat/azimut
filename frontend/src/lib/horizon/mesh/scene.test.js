@@ -21,6 +21,9 @@ function fakeRenderer() {
     pick: vi.fn(() => 1000),
     pickSoon: vi.fn(async () => 1000),
     dispose: vi.fn(),
+    addBuildingChunk: vi.fn(),
+    dropBuildingChunk: vi.fn(),
+    clearBuildingChunks: vi.fn(),
   };
 }
 
@@ -206,5 +209,96 @@ describe('the scene', () => {
     s.scene.dispose();
     expect(s.workers.every((worker) => worker.terminate.mock.calls.length === 1)).toBe(true);
     expect(s.renderer.dispose).toHaveBeenCalled();
+  });
+});
+
+describe('the buildings round the eye', () => {
+  const tile = (key, version = 'v1') => {
+    const [, x, y] = key.split('/').map(Number);
+    return { key, x, y, bytes: new ArrayBuffer(8), version };
+  };
+  const built = (s, message, extra = {}) =>
+    s.answer({
+      type: 'building-chunk', id: message.id, key: message.chunks[0].key, version: message.chunks[0].version,
+      x: 0, y: 0, vertices: new Float32Array(9), indices: new Uint32Array(3), cells: new Uint16Array(1),
+      cellStart: new Uint32Array(2), roofs: new Float32Array([4, 50, -5, -5, 5, -5, 5, 5, -5, 5]), count: 1, ...extra,
+    });
+
+  it('waits for the eye before building any, then builds each tile once in its frame', () => {
+    const s = setUp();
+    s.scene.setBuildings([tile('14/1/2')]);
+    expect(s.sent('buildings')).toEqual([]);
+    s.scene.place(EYE, FAR);
+    const id = landed(s);
+    const [message] = s.sent('buildings');
+    expect(message).toMatchObject({ id, unknown: 'draw', chunks: [{ key: '14/1/2', x: 1, y: 2, version: 'v1' }] });
+    // the same tile at the same version is not built twice
+    s.scene.setBuildings([tile('14/1/2')]);
+    expect(s.sent('buildings')).toHaveLength(1);
+    built(s, message);
+    expect(s.renderer.addBuildingChunk).toHaveBeenCalledWith('14/1/2', expect.objectContaining({ count: 1 }));
+  });
+
+  it('builds a tile again when it changes, and lets go of one no longer asked for', () => {
+    const s = setUp();
+    s.scene.place(EYE, FAR);
+    landed(s);
+    s.scene.setBuildings([tile('14/1/2'), tile('14/1/3')]);
+    s.scene.setBuildings([tile('14/1/2', 'v2')]);
+    expect(s.sent('buildings').at(-1).chunks.map((c) => [c.key, c.version])).toEqual([['14/1/2', 'v2']]);
+    expect(s.renderer.dropBuildingChunk).toHaveBeenCalledWith('14/1/3');
+  });
+
+  it('draws no tile built for a version since replaced', () => {
+    const s = setUp();
+    s.scene.place(EYE, FAR);
+    landed(s);
+    s.scene.setBuildings([tile('14/1/2')]);
+    const stale = s.sent('buildings').at(-1);
+    s.scene.setBuildings([tile('14/1/2', 'v2')]);
+    built(s, stale);
+    expect(s.renderer.addBuildingChunk).not.toHaveBeenCalled();
+  });
+
+  it('builds every tile again when unknown heights are drawn differently', () => {
+    const s = setUp();
+    s.scene.place(EYE, FAR);
+    landed(s);
+    s.scene.setBuildings([tile('14/1/2')]);
+    s.scene.setBuildingOptions({ unknown: 'hide' });
+    expect(s.sent('buildings').at(-1)).toMatchObject({ unknown: 'hide', chunks: [{ key: '14/1/2' }] });
+    s.scene.setBuildingOptions({ unknown: 'hide' });
+    expect(s.sent('buildings')).toHaveLength(2);
+  });
+
+  it('starts over in a new frame when the eye lands somewhere else', () => {
+    const s = setUp();
+    s.scene.place(EYE, FAR);
+    landed(s);
+    s.scene.setBuildings([tile('14/1/2')]);
+    const frame = eyeFrame({ lat: EYE.lat, lon: EYE.lon, alt: 0 });
+    const [farLat] = frame.destination(0, WALK_REACH + 100);
+    s.scene.place({ ...EYE, lat: farLat }, FAR);
+    expect(s.renderer.clearBuildingChunks).toHaveBeenCalled();
+    const id = landed(s);
+    expect(s.sent('buildings').at(-1)).toMatchObject({ id, chunks: [{ key: '14/1/2' }] });
+  });
+
+  it('raises the buildings in the shadows\' finest grid, a moment after they come', () => {
+    vi.useFakeTimers();
+    const s = setUp();
+    s.scene.place(EYE, FAR);
+    const id = landed(s);
+    s.scene.draw(CAMERA, { shaded: true });
+    s.answer({ type: 'grids', id, grids: GRIDS.map((g) => ({ heights: new Float32Array(g.size * g.size), top: 10 })) });
+    expect(s.renderer.setGrids).toHaveBeenLastCalledWith(expect.objectContaining({ top: 15 }));
+    s.scene.setBuildings([tile('14/1/2')]);
+    built(s, s.sent('buildings').at(-1));
+    vi.advanceTimersByTime(300);
+    const raised = s.renderer.setGrids.mock.calls.at(-1)[0];
+    expect(raised.top).toBe(55);
+    const finest = raised.list[0];
+    const middle = (finest.size / 2) * finest.size + finest.size / 2;
+    expect(finest.heights[middle]).toBe(50);
   });
 });

@@ -80,8 +80,6 @@ import { paintWarped } from '../../../lib/horizon/warpPicture.js';
 export const BLINK_MS = 800;
 /** ms a scrub must rest before the app is asked for the frame there, for a video the browser cannot play. */
 export const FRAME_DELAY = 150;
-/** The most points a photo may have pinned: the search takes as many (api/horizon.py MATCH_ANCHORS_MAX). */
-export const ANCHORS_MAX = 8;
 /** Bytes of a file on the computer sent to read its lens: the EXIF block is at its head (api/horizon.py). */
 export const HEAD_BYTES = 256 * 1024;
 /** The largest side a photo is drawn at: past it, it is shrunk once on opening. */
@@ -230,11 +228,6 @@ export function createOverlayState({
   let hints = $state.raw(NO_HINTS);
   /** The cut of the terrain's skyline the last Fit found the trace on, metres, or null for the whole turn. */
   let reachFound = $state(null);
-  /**
-   * Points recognised in the photo: where each shows in the photo's own
-   * coordinates, and where it lies on the map, `{ u, v, lat, lon, height }`.
-   */
-  let anchors = $state.raw([]);
 
   let opened = 0;
   let blinkTimer = null;
@@ -334,7 +327,6 @@ export function createOverlayState({
     moving = 'terrain';
     hints = NO_HINTS;
     reachFound = null;
-    anchors = [];
     if (loupe !== NO_LOUPE) setLoupe(NO_LOUPE);
   }
 
@@ -642,35 +634,6 @@ export function createOverlayState({
     get reachFound() {
       return reachFound;
     },
-
-    /** Points recognised in the photo (`{ u, v, lat, lon, height }`), which Fit keeps where they show. */
-    get anchors() {
-      return anchors;
-    },
-    /** …where each shows in the frame, through the photo's corners and curve: `{ u, v }`. */
-    get anchorsSeen() {
-      return anchors.map((anchor) => {
-        const seen = toSeen(anchor);
-        return { u: seen.u, v: seen.v };
-      });
-    },
-    /**
-     * Pin a point of the map (`{ lat, lon, height }`, metres above its ground)
-     * where it shows in the photo: `at` a point of the frame as it shows. A
-     * place already pinned moves to the new point; `ANCHORS_MAX` at most.
-     */
-    addAnchor(at, place) {
-      if (!source || !Number.isFinite(at?.u) || !Number.isFinite(at?.v)) return;
-      if (!Number.isFinite(place?.lat) || !Number.isFinite(place?.lon)) return;
-      const own = roundPoint(toPhoto(at));
-      const pinned = { ...own, lat: place.lat, lon: place.lon, height: Math.max(0, Number(place.height) || 0) };
-      const others = anchors.filter((a) => a.lat !== place.lat || a.lon !== place.lon);
-      if (others.length >= ANCHORS_MAX) return;
-      anchors = [...others, pinned];
-    },
-    removeAnchor(index) {
-      if (index >= 0 && index < anchors.length) anchors = anchors.filter((_, i) => i !== index);
-    },
     setReachFound(reach) {
       reachFound = Number.isFinite(reach) ? reach : null;
     },
@@ -916,6 +879,18 @@ export function createOverlayState({
       moving = which;
       this.setLocked(false);
     },
+    /**
+     * A press on the hand beside the `photo` or the `terrain`: one hand lit
+     * says that side moves, both lit move both. An unlit hand lights beside
+     * the other; a lit one goes out and the other keeps moving, so the hand a
+     * drag holds is never empty, and a press on the only one lit hands over.
+     */
+    pressHand(side) {
+      if (!['terrain', 'photo'].includes(side)) return;
+      const other = side === 'photo' ? 'terrain' : 'photo';
+      const moves = this.moves;
+      this.setMoves(moves === other ? 'both' : other);
+    },
     /** The moment of the video the trace was drawn on, null for a photo. */
     get traceTime() {
       return traceTime;
@@ -1093,8 +1068,7 @@ export function createOverlayState({
      * The work a saved view kept on this photo, laid back once the photo is
      * open (state/views.svelte.js): how much shows, its lens curve and pulled
      * corners, the trace and, for a video, the moment it was drawn on and the
-     * pins, what was known about it, the points pinned in it and the reach Fit
-     * found the trace on.
+     * pins, what was known about it and the reach Fit found the trace on.
      * Nothing to take back: it is where the view starts again.
      */
     restoreWork({
@@ -1106,14 +1080,9 @@ export function createOverlayState({
       pins: kept = [],
       hints: told = NO_HINTS,
       reach: found = null,
-      anchors: points = [],
     } = {}) {
       if (!source) return;
       hints = cleanHints(told);
-      anchors = (points ?? [])
-        .filter((a) => [a?.u, a?.v, a?.lat, a?.lon].every(Number.isFinite))
-        .slice(0, ANCHORS_MAX)
-        .map((a) => ({ u: a.u, v: a.v, lat: a.lat, lon: a.lon, height: Math.max(0, Number(a.height) || 0) }));
       reachFound = Number.isFinite(found) ? found : null;
       mix = Math.min(1, Math.max(0, Number(share) || 0));
       bend = Math.round(Math.min(BEND_MAX, Math.max(-BEND_MAX, Number(k) || 0)) * 1000) / 1000;

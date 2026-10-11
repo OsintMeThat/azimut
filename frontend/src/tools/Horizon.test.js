@@ -46,6 +46,20 @@ describe('the Horizon layout', () => {
     expect(markup.indexOf('<HorizonStrip')).toBeGreaterThan(markup.indexOf('<OverlayTransport'));
   });
 
+  it('keeps how the ground is drawn on the view with a photo laid, out of the pen\'s way', () => {
+    const view = readFileSync(new URL('./horizon/HorizonView.svelte', import.meta.url), 'utf8');
+    expect(view).toContain(
+      'const controlsShown = $derived(Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping)));'
+    );
+    expect(view).toContain('{#if controlsShown}\n    <div class="controls">');
+    // the names keep clear of the corner only while the controls are in it
+    expect(view).toContain('controls.width && controlsShown');
+    // the band has no ground of its own any more
+    const band = readFileSync(new URL('./horizon/OverlayBar.svelte', import.meta.url), 'utf8');
+    expect(band).not.toContain('PictureControls');
+    expect(markup.slice(markup.indexOf('<OverlayBar'), markup.indexOf('/>', markup.indexOf('<OverlayBar')))).not.toContain('copernicus');
+  });
+
   it('lets the inspector be dragged wider, and sizes every box beside it from that width', () => {
     expect(markup).toContain('onpointerdown={startSideResize}');
     expect(markup).toContain('ondblclick={resetSideWidth}');
@@ -63,13 +77,16 @@ describe('the small map\'s layers', () => {
     expect(source).toContain("const mapLayers = createLayerSet({");
     expect(source).toContain("initial: ['boundaries', 'placenames', 'saved']");
     expect(source).toContain("const myLayers = addedLayers.scope('horizon');");
-    expect(markup).toContain('<LayerChips');
+    expect(markup).toContain('<LayerList');
+    expect(markup).toContain('bind:folded={layersFolded}');
     expect(markup).toContain('added={myLayers.rows}');
   });
 
-  it('draws the case\'s own layers only on screen, and never lets one take the click that stands the eye', () => {
+  it('draws case layers only on screen and allows their cards only while editing', () => {
     const overlay = markup.slice(markup.indexOf('<AddedLayersOverlay'), markup.indexOf('/>', markup.indexOf('<AddedLayersOverlay')));
     expect(overlay).toContain("layers={uiState.tool === 'horizon' ? myLayers.drawn : []}");
-    expect(overlay).toContain('interactive={false}');
+    expect(overlay).toContain('interactive={!!personalLayers.editor && !personalLayers.armed}');
+    expect(source).toContain('if (personalLayers.editor) return;');
+    expect(markup).toContain('<PersonalLayerPanel');
   });
 });

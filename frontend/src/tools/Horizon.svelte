@@ -81,18 +81,24 @@
   import { createImageryState } from './satellite/state/imagery.svelte.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createHorizonState } from './horizon/state/horizon.svelte.js';
+  import { createBuildingsState } from './horizon/state/buildings.svelte.js';
   import { createOverlayState } from './horizon/state/overlay.svelte.js';
   import { createViewsState } from './horizon/state/views.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
-  import LayerChips from '../components/LayerChips.svelte';
+  import LayerList from '../components/LayerList.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
+  import LayerGeometry from './satellite/LayerGeometry.svelte';
+  import PersonalLayerPanel from './satellite/PersonalLayerPanel.svelte';
+  import { personalLayers, personalPlaceDeletion } from '../lib/map/personalLayers.svelte.js';
   import { createFireKey } from '../lib/map/fireKey.svelte.js';
   import { createLayerSet } from '../lib/map/layerSet.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { savedRow } from '../lib/geoTree.js';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import HorizonView from './horizon/HorizonView.svelte';
+  import BuildingsPanel from './horizon/BuildingsPanel.svelte';
   import HorizonStrip from './horizon/HorizonStrip.svelte';
   import HorizonPanel from './horizon/HorizonPanel.svelte';
   import OverlayBar from './horizon/OverlayBar.svelte';
@@ -106,6 +112,13 @@
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
 
   const view = createHorizonState({ api });
+  // buildings round the eye: nothing is asked of the app until their row is on
+  const buildings = createBuildingsState({ api });
+  $effect(() => {
+    const placed = view.placed;
+    untrack(() => buildings.follow(placed));
+  });
+  onDestroy(() => buildings.destroy());
   const imagery = createImageryState({ api });
   const overlay = createOverlayState({ api, view });
   /** The view on screen, which draws the saved work's preview. */
@@ -147,6 +160,7 @@
   let mapLarge = $state(false);
   /** The small map's Layers menu, open. */
   let layersOpen = $state(false);
+  $effect(() => { if (uiState.tool === 'horizon' && personalLayers.editor) mapLarge = true; });
   /** How to set Copernicus up, shown over the view when its locked switch is pressed. */
   let copernicusHelp = $state(false);
   const copernicus = $derived(Boolean(imagery.providers?.length && imagery.find('sentinel2')));
@@ -680,6 +694,8 @@
     },
   });
   const overlays = $derived(mapLayers.overlays);
+  /** The menu's folded headings, kept while it is closed and opened again. */
+  let layersFolded = $state({});
   /** The case's own layers, drawn on this small map only while Horizon is on screen. */
   const myLayers = addedLayers.scope('horizon');
   $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
@@ -688,18 +704,19 @@
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   $effect(() => savedWork.load(caseState.current?.id ?? null));
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
-  // the view open here is the eye the map already draws: its saved row would sit on it twice
+  // the position picked under the layer's row, Media first as on the Map. The
+  // view open here is the eye the map already draws: its saved row would sit on it twice
   const savedItems = $derived(
-    [...savedWork.rows, ...savedWork.media].filter((row) => row.kind !== 'view' || row.view !== views.current?.name)
+    savedWork.shown.filter((row) => row.kind !== 'view' || row.view !== views.current?.name)
   );
 
-  const layerRows = $derived(
-    mapLayers.rows({
-      saved: savedItems.length
-        ? { count: savedItems.length, title: "This case's saved places and captures, and its located photos and videos" }
-        : { disabled: true, title: 'Nothing is saved or placed in this case yet' },
-    })
-  );
+  const layerRows = $derived([
+    ...mapLayers.rows({
+      saved: savedRow(savedWork, mapLayers.has('saved'), savedItems),
+    }),
+    // the view's own: buildings raised round the eye
+    buildings.layerRow,
+  ]);
 
   /** A saved item picked on the map: the map goes to it. */
   function flyToSaved(row) {
@@ -871,6 +888,7 @@
   });
 
   function onMapClick(at) {
+    if (personalLayers.editor) return;
     if (layout === 'looking') view.mark(at);
     else standAt(at);
   }
@@ -993,36 +1011,28 @@
     const reach = told.reach === 'auto' ? 'auto' : overlay.reach;
     fitting = true;
     let found = null;
-    let anchors = [];
     try {
-      anchors = await anchorsFromEye(camera);
-      // the view, the eye or the trace moved meanwhile: the answer is for another view
-      if (view.camera !== looked || view.panorama !== panorama || overlay.strokesSeen !== strokes) return;
       const body = matchRequest(traced, camera, panorama, {
         known: !lens,
         reach,
         autoReach: AUTO_REACH,
         ...searchHints(told, { lensKnown: !lens }),
-        anchors,
       });
-      if (body) {
-        try {
-          found = await api.post('/api/horizon/match', body);
-        } catch {
-          found = null;
-        }
-        if (view.camera !== looked || view.panorama !== panorama || overlay.strokesSeen !== strokes) return;
-      }
+      if (body) found = await api.post('/api/horizon/match', body);
+    } catch {
+      found = null;
     } finally {
       fitting = false;
     }
+    // the view, the eye or the trace moved meanwhile: the answer is for another view
+    if (view.camera !== looked || view.panorama !== panorama || overlay.strokesSeen !== strokes) return;
     if (!found || found.verdict === 'flat') {
-      fitFromHere(traced, camera, before, { lens, flat: found?.verdict === 'flat', anchors });
+      fitFromHere(traced, camera, before, { lens, flat: found?.verdict === 'flat' });
       return;
     }
-    const places = searchedPlaces(found, traced, camera, skyline, { lens, anchors });
+    const places = searchedPlaces(found, traced, camera, skyline, { lens });
     search = { panorama, strokes, verdict: found.verdict, places };
-    const outcome = searchOutcome(found, places, camera, { lens, before, facing: Boolean(told.facing), pinned: anchors.length > 0 });
+    const outcome = searchOutcome(found, places, camera, { lens, before, facing: Boolean(told.facing) });
     // staying put, the view still reads the trace against the reach the place lies on
     if (outcome.here >= 0) takeReach(places[outcome.here]);
     if (outcome.take >= 0) lookAtPlace(places[outcome.take], outcome.text, outcome.kind);
@@ -1031,50 +1041,9 @@
     } else toast(outcome.text, outcome.kind);
   }
 
-  /**
-   * The points pinned in the photo as Fit reads them: where each was clicked
-   * in the frame, in pixels as the trace's samples are, and where it lies from
-   * the eye now (`/api/horizon/target`, the marked point's own question). A
-   * point the terrain cannot place is left out.
-   */
-  async function anchorsFromEye(camera) {
-    const eye = view.observer;
-    const seen = overlay.anchorsSeen;
-    if (!eye || !seen.length) return [];
-    const asked = overlay.anchors.map((anchor) =>
-      api
-        .post('/api/horizon/target', {
-          lat: eye.lat,
-          lon: eye.lon,
-          mode: eye.mode,
-          height: eye.height,
-          target_lat: anchor.lat,
-          target_lon: anchor.lon,
-          target_height: anchor.height ?? 0,
-        })
-        .catch(() => null)
-    );
-    const answers = await Promise.all(asked);
-    return answers.flatMap((answer, i) =>
-      answer && Number.isFinite(answer.azimuth) && Number.isFinite(answer.angle)
-        ? [{ x: seen[i].u * camera.width, y: seen[i].v * camera.height, azimuth: answer.azimuth, elevation: answer.angle, distance: answer.distance }]
-        : []
-    );
-  }
-
-  /** Pin the point marked on the map where the analyst clicks it in the photo. */
-  async function pinMarked() {
-    const marked = view.target;
-    if (!viewPane || !marked || overlay.source?.kind !== 'image') return;
-    const at = await viewPane.choosePoint();
-    if (!at || view.target !== marked) return;
-    overlay.addAnchor(at, { lat: marked.lat, lon: marked.lon, height: marked.height ?? 0 });
-    toast('Point pinned: Fit keeps it where you clicked', 'ok');
-  }
-
   /** The fit from where the analyst left the view, alone: what Fit did before it searched the turn. */
-  function fitFromHere(traced, camera, before, { lens, flat, anchors = [] }) {
-    const result = fitToTrace(traced, camera, skyline, { lens, anchors });
+  function fitFromHere(traced, camera, before, { lens, flat }) {
+    const result = fitToTrace(traced, camera, skyline, { lens });
     if (!result) {
       toast('Trace more of the skyline first', 'warn');
       return;
@@ -1390,8 +1359,6 @@
             {overlay}
             {gap}
             {view}
-            {copernicus}
-            onsetup={() => (copernicusHelp = true)}
             onchange={() => (photoDialog = true)}
             onfit={fit}
             {fitting}
@@ -1399,8 +1366,6 @@
             places={searched && searched.verdict !== 'match' ? searched.places : []}
             onplace={takePlace}
             ondetect={detect}
-            marked={view.target && !view.target.error ? view.target : null}
-            onpin={pinMarked}
           />
         {/if}
         <div class="frame-slot" bind:clientWidth={slot.width} bind:clientHeight={slot.height}>
@@ -1425,7 +1390,13 @@
               {credits}
               {copernicus}
               onsetup={() => (copernicusHelp = true)}
+              {buildings}
             />
+            {#if buildings.on && buildings.panelOpen}
+              <div class="hz-buildings">
+                <BuildingsPanel {buildings} onclose={() => (buildings.panelOpen = false)} />
+              </div>
+            {/if}
           </div>
           {#if dropping}
             <div class="drop" aria-hidden="true">
@@ -1529,14 +1500,17 @@
           </div>
         {/if}
         <!-- inert: a click on this map stands the eye or turns it, never a card -->
+        <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'horizon'} />
         <AddedLayersOverlay
           engine={ready ? engine : null}
           caseId={caseState.current?.id ?? ''}
           layers={uiState.tool === 'horizon' ? myLayers.drawn : []}
           drawing={addedLayers.drawing}
-          interactive={false}
+          interactive={!!personalLayers.editor && !personalLayers.armed}
+          onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
+          onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
         />
-        {#if mapLayers.has('saved') && caseState.current}
+        {#if mapLayers.has('saved') && caseState.current && !personalLayers.armed}
           <SavedOverlay
             engine={ready ? engine : null}
             items={savedItems}
@@ -1611,15 +1585,23 @@
               >
             {/each}
           </div>
-          <LayerChips
+          <LayerList
             rows={layerRows}
             added={myLayers.rows}
             ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
             onmanage={() => (uiState.tool = 'satellite')}
+            oneditadded={(row) => { layersOpen = false; mapLarge = true; personalLayers.open(row); }}
+            onnewpersonal={() => { layersOpen = false; mapLarge = true; personalLayers.newLayer(); }}
+            ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
+            onmaps={() => { layersOpen = false; personalLayers.openMaps(); }}
+            bind:folded={layersFolded}
           />
         </div>
       {/if}
     {/if}
+    <PersonalLayerPanel tool="horizon" scope={myLayers} {engine}
+      provider={providerId} rows={layerRows} onprovider={(id) => { providerId = id; }}
+      places={savedWork.rows.filter((row) => row.kind === 'place')} />
   </div>
 </div>
 
@@ -1815,6 +1797,21 @@
   }
   .frame.boxed {
     inset: auto;
+  }
+  /* the buildings' settings over the view, where their effect is watched while they change */
+  .hz-buildings {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    z-index: 7;
+    width: 280px;
+    max-height: calc(100% - 110px);
+    overflow-y: auto;
+    border-radius: var(--r-md);
+    background: var(--bg-1);
+    box-shadow:
+      0 0 0 1px var(--border),
+      0 8px 24px rgba(0, 0, 0, 0.35);
   }
   .drop {
     position: absolute;

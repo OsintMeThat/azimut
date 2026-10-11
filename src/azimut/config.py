@@ -54,7 +54,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sentinel1_layer": "",
     "detect_view": {
         "collapsed": False, "width": 380, "basemap": "esri-world-imagery",
-        "overlays": ["boundaries", "placenames"], "saved": True,
+        "overlays": ["boundaries", "placenames"],
     },
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.

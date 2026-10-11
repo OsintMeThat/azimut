@@ -639,3 +639,59 @@ describe('capturing the drawn pixels', () => {
     }
   });
 });
+
+describe('a picture of the ground alone', () => {
+  /** A style of four layers, which records what each draw sees. */
+  function styledMap() {
+    const paint = {
+      'basemap-imagery': {},
+      'basemap-roads': { 'raster-opacity-transition': { duration: 300 } },
+      'sfc-1-fill': { 'fill-opacity': ['to-number', ['get', 'fillOpacity']] },
+      'place-labels': {},
+    };
+    const layout = { 'place-labels': { visibility: 'none' } };
+    const types = { 'basemap-imagery': 'raster', 'basemap-roads': 'raster', 'sfc-1-fill': 'fill', 'place-labels': 'symbol' };
+    const draws = [];
+    const map = stubMap({
+      isMoving: () => false,
+      areTilesLoaded: () => true,
+      getLayersOrder: () => Object.keys(types),
+      getLayer: (id) => ({ id, type: types[id] }),
+      getPaintProperty: (id, name) => paint[id][name],
+      setPaintProperty: (id, name, value) => (paint[id][name] = value),
+      getLayoutProperty: (id, name) => layout[id]?.[name],
+      setLayoutProperty: (id, name, value) => ((layout[id] ??= {})[name] = value),
+      redraw: () => draws.push(structuredClone({ paint, layout })),
+      getCanvas: () => ({ width: 4, height: 3 }),
+    });
+    return { map, paint, layout, draws };
+  }
+
+  it('draws one frame without the layers laid over the picture, copies it, and puts them back as they were', async () => {
+    const drawn = [];
+    vi.stubGlobal('document', {
+      createElement: () => ({ getContext: () => ({ drawImage: (source) => drawn.push(source) }) }),
+    });
+    try {
+      const { map, paint, layout, draws } = styledMap();
+      const shot = await mapFacade(map).snapshot({ keep: (id) => id === 'basemap-imagery' });
+      expect(shot).toMatchObject({ complete: true, canvas: { width: 4, height: 3 } });
+      expect(drawn).toHaveLength(1);
+      const [without, back] = draws;
+      // a constant opacity goes to nothing at once; one read off each feature is
+      // built into the tiles, so that layer is hidden instead
+      expect(without.paint['basemap-roads']).toMatchObject({ 'raster-opacity': 0, 'raster-opacity-transition': { duration: 0, delay: 0 } });
+      expect(without.layout['sfc-1-fill'].visibility).toBe('none');
+      expect(without.paint['basemap-imagery']).toEqual({});
+      // the frame after it is the map as it was, drawn before any fade is given back
+      expect(back.paint['basemap-roads']['raster-opacity']).toBeUndefined();
+      expect(back.layout['sfc-1-fill'].visibility).toBe('visible');
+      expect(paint['basemap-roads']).toEqual({ 'raster-opacity': undefined, 'raster-opacity-transition': { duration: 300 } });
+      expect(paint['sfc-1-fill']['fill-opacity']).toEqual(['to-number', ['get', 'fillOpacity']]);
+      // a layer already hidden is left alone
+      expect(layout['place-labels']).toEqual({ visibility: 'none' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

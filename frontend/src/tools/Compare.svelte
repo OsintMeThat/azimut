@@ -64,6 +64,7 @@
     changeCompatibility,
     changeNeedsFrames,
     changeSettings,
+    readSide,
   } from '../lib/map/changeAssist.js';
   import {
     ANNOTATION_COLOURS,
@@ -86,7 +87,7 @@
   import { askable as firmsAskable, keyState, tileParams as firmsTileParams } from '../lib/map/firms.js';
   import { askable as nightAskable, tileParams as nightTileParams } from '../lib/map/nightlights.js';
   import { createFireKey } from '../lib/map/fireKey.svelte.js';
-  import { knownLayers, LAYERS } from '../lib/map/layerCatalog.js';
+  import { LAYERS } from '../lib/map/layerCatalog.js';
   import {
     compareFireControls,
     compareFireNote,
@@ -95,13 +96,21 @@
     compareNightNote,
     compareNightWords,
     freshFires,
+    freshLayers,
     freshNight,
+    LAYER_SIDES,
+    reaches,
     restoredLayers,
     sideFires,
+    sideLayers,
     sideNight,
-    swappedDays,
+    toggledLayer,
+    tradedSide,
+    tradedSides,
   } from '../lib/map/compareLayers.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { savedRow } from '../lib/geoTree.js';
+  import { isGround } from '../lib/map/basemap.js';
   import { isRegistered, sourceRect } from '../lib/screenCrop.js';
   import { deletedToast } from '../lib/trash.js';
   import { assignFolder } from '../lib/filing.js';
@@ -139,6 +148,9 @@
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import LayerMenu from '../components/LayerMenu.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
+  import LayerGeometry from './satellite/LayerGeometry.svelte';
+  import PersonalLayerPanel from './satellite/PersonalLayerPanel.svelte';
+  import { personalLayers, personalPlaceDeletion } from '../lib/map/personalLayers.svelte.js';
   import AnnotationCanvas from './compare/AnnotationCanvas.svelte';
   import AnnotationToolbar from './compare/AnnotationToolbar.svelte';
   import ExportFrame from './compare/ExportFrame.svelte';
@@ -282,11 +294,16 @@
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
 
   /**
-   * The layers over both maps: one list, since a layer on one side only reads as
-   * a change between them (lib/map/compareLayers.js). What differs is the day the
-   * fires and the night lights are drawn for, each side's own by default.
+   * One list of layers (lib/map/compareLayers.js), drawn on both sides by default,
+   * or on A or B alone from the switcher over the list. The switcher moves the
+   * whole list, the case's added layers with it. What differs by default is the
+   * day the fires and the night lights are drawn for, each side's own.
    */
-  let layers = $state([]);
+  let layerIds = $state(freshLayers().ids);
+  /** Which map draws the list: 'a' | 'b' | 'ab'. */
+  let layerSide = $state('ab');
+  /** The list as each side draws it. */
+  const layers = $derived(sideLayers(layerIds, layerSide));
   let fires = $state(freshFires());
   let night = $state(freshNight());
   let layersOpen = $state(false);
@@ -352,6 +369,8 @@
     caseState.rev;
     return savedWork.load(caseId);
   });
+  // the located files, for the Media position the saved layer opens on
+  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
 
   const both = $derived(a.present && b.present);
   const activeView = $derived(view);
@@ -382,17 +401,18 @@
    * while the layer is on: an Esri date moves with the camera, and a layer that
    * is off must not make a pan look like a new pair to Difference or the save.
    */
+  const sideOf = (target) => (target === a ? 'a' : 'b');
   const firesOn = (target) =>
-    sideFires(fires, target === a ? 'a' : 'b', layers.includes('firms') ? pictureDay(target) : '');
+    sideFires(fires, sideOf(target), layers[sideOf(target)].includes('firms') ? pictureDay(target) : '');
   const nightOn = (target) =>
-    sideNight(night, target === a ? 'a' : 'b', layers.includes('nightlights') ? pictureDay(target) : '');
+    sideNight(night, sideOf(target), layers[sideOf(target)].includes('nightlights') ? pictureDay(target) : '');
 
   function changeSide(target, sentinel, wayback, shown, radar) {
     return {
       present: target.present,
       provider: shown.provider?.id ?? target.providerId,
       widget: Boolean(shown.provider?.widget),
-      overlays: [...layers],
+      overlays: [...layers[sideOf(target)]],
       firms: firesOn(target),
       nightlights: nightOn(target),
       sentinel: {
@@ -459,7 +479,7 @@
   }
 
   function surfaceOverlays(target) {
-    return layers
+    return layers[sideOf(target)]
       .map((id) => {
         if (id === 'firms') {
           const asked = firesOn(target);
@@ -596,9 +616,10 @@
     const right = sideSpec(b, s2b, wbb, s1b);
     applySide(a, s2a, wba, right, s1a);
     applySide(b, s2b, wbb, left, s1b);
-    // the layers stay; the days picked for each side go with it
-    fires = swappedDays(fires);
-    night = swappedDays(night);
+    // the list stays on the picture it was on, and each side's picked days go with it
+    layerSide = tradedSide(layerSide);
+    fires = tradedSides(fires);
+    night = tradedSides(night);
     annotations = annotations.map((mark) => ({ ...mark, side: mark.side === 'a' ? 'b' : mark.side === 'b' ? 'a' : 'both' }));
     invalidateChangeAssist();
   }
@@ -676,8 +697,10 @@
     target.refused = false;
     target.engine = null;
     target.element = null;
-    // the list is the pair's, so it goes only with the last side
+    // the list is the pair's, so it goes only with the last side, and the side
+    // left draws it whatever the switcher said, since the switcher leaves with B
     if (!a.present && !b.present) resetLayers();
+    else layerSide = 'ab';
     mode = 'side';
     difference = false;
   }
@@ -953,7 +976,7 @@
     return {
       present: target.present,
       provider: target.providerId,
-      overlays: [...layers],
+      overlays: [...layers[sideOf(target)]],
       firms: firesOn(target),
       nightlights: nightOn(target),
       sentinel: {
@@ -1303,13 +1326,13 @@
     else if (target) void openSession(target.name);
   }
 
-  /** Both sides' layers, read back from what a session or a handoff holds. */
+  /** The list and the switcher, read back from what a session or a handoff holds. */
   function applyLayers(left, right) {
-    ({ layers, fires, night } = restoredLayers(left, right));
+    ({ ids: layerIds, side: layerSide, fires, night } = restoredLayers(left, right));
   }
 
   function resetLayers() {
-    layers = [];
+    ({ ids: layerIds, side: layerSide } = freshLayers());
     fires = freshFires();
     night = freshNight();
   }
@@ -1317,22 +1340,27 @@
   function toggleLayer(id) {
     if (!a.present && !b.present) return;
     if (id === 'firms' && !fireKey.keyed) return;
-    if (id === 'saved' && !savedWork.rows.length) return;
-    layers = layers.includes(id) ? layers.filter((entry) => entry !== id) : knownLayers([...layers, id]);
-    invalidateChangeAssist();
+    if (id === 'saved' && !savedWork.rows.length && !savedWork.media.length) return;
+    layerIds = toggledLayer(layerIds, id);
+  }
+
+  // None of these asks Difference to read again: it reads the picture without
+  // the layers (`readSide`), and the night lights it does read are in its key.
+
+  /** The switcher moves the whole list onto A, B or both. */
+  function drawLayersOn(side) {
+    layerSide = side;
   }
 
   function setFires(patch) {
     fires = { ...fires, ...patch };
-    invalidateChangeAssist();
   }
 
   function setNight(patch) {
     night = { ...night, ...patch };
-    invalidateChangeAssist();
   }
 
-  /** The menu's chips: every catalogue layer, over both maps at once. */
+  /** The menu's rows: every catalogue layer, as the Map lists them. */
   const layerRows = $derived.by(() => {
     const present = a.present || b.present;
     const key = keyState(fireKey);
@@ -1342,30 +1370,40 @@
         label: layer.label,
         group: layer.group,
         title: layer.title,
-        on: layers.includes(layer.id),
+        on: layerIds.includes(layer.id),
         disabled: !present,
         toggle: () => toggleLayer(layer.id),
       };
+      const shown = row.on && present;
       if (layer.id === 'firms') {
-        if (!key.usable) return { ...row, disabled: true, lock: { text: key.detail, action: key.action, run: openImagerySettings } };
+        if (!key.usable) {
+          return {
+            ...row,
+            disabled: true,
+            detail: key.detail,
+            title: key.title,
+            actions: [{ label: key.action, quiet: true, run: openImagerySettings }],
+          };
+        }
         return {
           ...row,
-          summary: compareFireWords(fires, fireKey.sensors, pictureDays),
-          controls: compareFireControls(fires, fireKey.sensors, setFires, pictureDays),
-          note: compareFireNote(fires, pictureDays, fireKey.paused),
+          detail: compareFireWords(fires, fireKey.sensors, pictureDays),
+          controls: shown ? compareFireControls(fires, fireKey.sensors, setFires, pictureDays) : null,
+          note: shown ? compareFireNote(fires, pictureDays, fireKey.paused) : '',
         };
       }
       if (layer.id === 'nightlights') {
+        if (!shown) return row;
         return {
           ...row,
-          summary: compareNightWords(night, pictureDays),
+          detail: compareNightWords(night, pictureDays),
           controls: compareNightControls(night, setNight, pictureDays),
           note: compareNightNote(night, pictureDays),
         };
       }
       if (layer.id === 'saved') {
-        const count = savedWork.rows.length;
-        return { ...row, count, disabled: !present || !count, title: count ? layer.title : 'No saved work in this case' };
+        const saved = savedRow(savedWork, shown);
+        return { ...row, ...saved, disabled: !present || Boolean(saved.disabled) };
       }
       return row;
     });
@@ -1374,8 +1412,11 @@
   /** The case's own layers in this map's menu, switched on here and nowhere else. */
   const myLayers = addedLayers.scope('compare');
   $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
-  /** Drawn only while Compare is on screen: a hidden tab holds no copy on the GPU. */
+  /** Drawn only while Compare is on screen, a hidden tab holding no copy on the
+   *  GPU, and on the sides the switcher names, like the rest of the list. */
   const drawnLayers = $derived(uiState.tool === 'compare' ? myLayers.drawn : []);
+  const drawnOn = (which) => (reaches(layerSide, which) ? drawnLayers
+    : drawnLayers.filter((row) => row.name === personalLayers.editor?.name));
 
   async function toggleRightPanel(panel) {
     rightPanel = rightPanel === panel ? null : panel;
@@ -1398,6 +1439,7 @@
 
   const changeFrames = $derived(changeNeedsFrames(changeSettings(changeOptions), changeStatus));
   // What Read can honestly say: its move ("due"), the reading's, or nothing left to do.
+  const changeRefused = $derived(Boolean(changeError) && !changeTiles && !changeBusy && !changePending);
   const changeState = $derived(
     changeTiles ? 'tiles'
       : changeBusy || changePending ? 'reading'
@@ -1407,7 +1449,8 @@
   /** What a reading reads, the camera aside: the pair and the analysis settings. */
   function changeScope() {
     const { opacity, base, blink, zones, ...analysis } = changeSettings(changeOptions);
-    return JSON.stringify([changeSide(a, s2a, wba, shownA, s1a), changeSide(b, s2b, wbb, shownB, s1b), analysis]);
+    const read = (...side) => readSide(changeSide(...side));
+    return JSON.stringify([read(a, s2a, wba, shownA, s1a), read(b, s2b, wbb, shownB, s1b), analysis]);
   }
 
   function changeKey() {
@@ -1477,7 +1520,7 @@
       while (!sources) {
         changeTiles = tilesLoading();
         try {
-          sources = await sourceCanvases();
+          sources = await sourceCanvases({ ground: true });
         } catch (error) {
           if (!(error instanceof TilesLoading) || !canWaitForTiles()) throw error;
         }
@@ -1904,13 +1947,21 @@
     }
   }
 
-  async function sourceCanvases() {
+  /**
+   * Both maps as pictures. An export takes them as they are on screen; a
+   * Difference reading takes the `ground` alone, so the layers laid over one side
+   * and not the other are not read as change. Night lights stay in when they are
+   * what is being read.
+   */
+  async function sourceCanvases({ ground = false } = {}) {
     if (!both || !a.ready || !b.ready) {
       throw new Error('both maps must be ready before they can be exported');
     }
     if (!hasWidget) {
       const frames = [surfaceFrame(a), surfaceFrame(b)];
-      const captures = await Promise.all([a.engine.snapshot(), b.engine.snapshot()]);
+      const read = changeStatus.family === 'viirs' ? ['nightlights'] : [];
+      const options = ground ? { keep: (id) => isGround(id, read) } : {};
+      const captures = await Promise.all([a.engine.snapshot(options), b.engine.snapshot(options)]);
       if (captures.some((capture) => !capture.complete)) throw new TilesLoading();
       if ([a, b].some((target, index) => JSON.stringify(surfaceFrame(target)) !== JSON.stringify(frames[index]))) {
         throw new Error('The map moved during capture. Settle it and try again');
@@ -2369,16 +2420,34 @@
     {:else}
       <h2>Compare</h2>
     {/if}
-    <!-- One list over both maps, beside the reading modes: a layer on one side
-         only would read as a change between them. -->
+    <!-- One list over both maps, beside the reading modes. Difference reads the
+         picture without it, so it may sit on one side alone. -->
     {#if a.present || b.present}
       <LayerMenu
         rows={layerRows}
         added={myLayers.rows}
         ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
         onmanage={() => (uiState.tool = 'satellite')}
+        oneditadded={(row) => { layersOpen = false; personalLayers.open(row); }}
+        onnewpersonal={() => { layersOpen = false; personalLayers.newLayer(); }}
+        ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
+        onmaps={() => { layersOpen = false; personalLayers.openMaps(); }}
+        header={both ? layerSides : null}
         bind:open={layersOpen}
       />
+      {#snippet layerSides()}
+        <div class="layer-sides cmp-seg fill" role="group" aria-label="Which map draws the layers">
+          {#each LAYER_SIDES as option (option.id)}
+            <button
+              type="button"
+              class:on={layerSide === option.id}
+              aria-pressed={layerSide === option.id}
+              title={option.title}
+              onclick={() => drawLayersOn(option.id)}>{option.label}</button
+            >
+          {/each}
+        </div>
+      {/snippet}
     {/if}
     {#if !a.present && !b.present}
       <span class="sub">Two imagery views, one shared camera</span>
@@ -2594,17 +2663,21 @@
               onclose={closePointMenu}
             />
           {/if}
+          <LayerGeometry engine={a.ready ? a.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} />
           <AddedLayersOverlay
             engine={a.ready ? a.engine : null}
             caseId={caseState.current?.id ?? ''}
-            layers={drawnLayers}
+            layers={drawnOn('a')}
             drawing={addedLayers.drawing}
             onmenu={(at) => onMapContextMenu('a', at)}
+            interactive={!personalLayers.armed}
+            onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
+            onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
           />
-          {#if layers.includes('saved')}
+          {#if layers.a.includes('saved') && !personalLayers.armed}
             <SavedOverlay
               engine={a.engine}
-              items={savedWork.rows}
+              items={savedWork.shown}
               caseId={caseState.current?.id}
               coords={savedCoords}
               {fullscreen}
@@ -2613,14 +2686,15 @@
               onrefresh={reloadCase}
             />
           {/if}
+          <!-- The mask is ground, not screen: it is laid on each map through that
+               map's own frame, so "Both" shows one reading over two pictures.
+               Inside the map, under its zoom buttons rather than over them. -->
+          {#if both && difference && changeOver('a') && changeUrl && changeVisible}
+            <img class="change-map" class:stale={changeState === 'due'} src={changeUrl} alt="Pixel-change heatmap over imagery A"
+              style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
+              style:transform={changeTransform.a} />
+          {/if}
         </MapSurface>
-        <!-- The mask is ground, not screen: it is laid on each map through that
-             map's own frame, so "Both" shows one reading over two pictures. -->
-        {#if both && difference && changeOver('a') && changeUrl && changeVisible}
-          <img class="change-map" class:stale={changeState === 'due'} src={changeUrl} alt="Pixel-change heatmap over imagery A"
-            style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
-            style:transform={changeTransform.a} />
-        {/if}
         <!-- Side by side has two coordinate spaces, so A owns the editable
              frame and B shows the matching ground read-only. -->
         {#if both && !grabbing && mode === 'side' && (framing || exportFrame)}
@@ -2629,7 +2703,7 @@
         {/if}
         {#if both && !grabbing}
           <AnnotationCanvas bind:this={canvasA} {annotations} engine={a.engine} letter="a" units={prefs.units}
-            active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
+            active={uiState.tool === 'compare' && !personalLayers.editor} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
             glyph={annotationGlyph} stampSize={annotationStampSize}
             editVertices={true} {annotationSide} {bearing} turnable={true} onchange={setAnnotations} />
@@ -2699,17 +2773,21 @@
               onclose={closePointMenu}
             />
           {/if}
+          <LayerGeometry engine={b.ready ? b.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} />
           <AddedLayersOverlay
             engine={b.ready ? b.engine : null}
             caseId={caseState.current?.id ?? ''}
-            layers={drawnLayers}
+            layers={drawnOn('b')}
             drawing={addedLayers.drawing}
             onmenu={(at) => onMapContextMenu('b', at)}
+            interactive={!personalLayers.armed}
+            onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
+            onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
           />
-          {#if layers.includes('saved')}
+          {#if layers.b.includes('saved') && !personalLayers.armed}
             <SavedOverlay
               engine={b.engine}
-              items={savedWork.rows}
+              items={savedWork.shown}
               caseId={caseState.current?.id}
               coords={savedCoords}
               {fullscreen}
@@ -2718,18 +2796,18 @@
               onrefresh={reloadCase}
             />
           {/if}
+          {#if both && difference && changeOver('b') && changeUrl && changeVisible}
+            <img class="change-map" class:stale={changeState === 'due'} src={changeUrl} alt="Pixel-change heatmap over imagery B"
+              style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
+              style:transform={changeTransform.b} />
+          {/if}
         </MapSurface>
-        {#if both && difference && changeOver('b') && changeUrl && changeVisible}
-          <img class="change-map" class:stale={changeState === 'due'} src={changeUrl} alt="Pixel-change heatmap over imagery B"
-            style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
-            style:transform={changeTransform.b} />
-        {/if}
         {#if both && !grabbing && mode === 'side' && exportFrame}
           <ExportFrame engine={b.engine} frame={exportFrame} readonly={true} units={prefs.units} {bearing} />
         {/if}
         {#if both && !grabbing}
           <AnnotationCanvas bind:this={canvasB} {annotations} engine={b.engine} letter="b" units={prefs.units}
-            active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
+            active={uiState.tool === 'compare' && !personalLayers.editor} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
             glyph={annotationGlyph} stampSize={annotationStampSize}
             editVertices={true} {annotationSide} {bearing} turnable={true} onchange={setAnnotations} />
@@ -2786,15 +2864,19 @@
     {/if}
 
     {#if both && difference}
-      <div class="change-legend" style={changeSwatches}>
+      <div class="change-legend" class:refused={changeRefused} style={changeSwatches}>
+        <!-- a reading that cannot be made says why in full, in the swatches'
+             place: there is nothing highlighted for them to explain -->
+        {#if changeRefused}<em class="warn" role="status">{changeError}</em>
+        {:else}
         <span><i class="gain"></i> Appeared / stronger in B</span>
         <span><i class="loss"></i> Disappeared / weaker from A</span>
         <span><i class="changed"></i> Other evolution</span>
         {#if changeState === 'tiles'}<em>Waiting for the tiles…</em>
         {:else if changeState === 'reading'}<em>Reading…</em>
-        {:else if changeError}<em class="warn">{changeError}</em>
         {:else if changeState === 'due'}<em class="warn">{changeCounts ? `${changeShare(changeCounts)}% highlighted · out of date, press Read` : 'Not read yet, press Read'}</em>
         {:else if changeCounts}<em>{changeShare(changeCounts)}% highlighted</em>{/if}
+        {/if}
       </div>
     {/if}
     {#if differenceDocked}
@@ -2950,6 +3032,10 @@
     </Modal>
   {/if}
 
+  <PersonalLayerPanel tool="compare" scope={myLayers} engine={primeEngine}
+    provider={a.engine ? a.providerId : b.providerId} rows={layerRows} onprovider={(id) => { if (a.engine) a.providerId = id; else b.providerId = id; }}
+    places={savedWork.rows.filter((row) => row.kind === 'place')}
+    onarm={() => { annotationTool = 'select'; framing = false; }} />
 </div>
 
 {#if picking}
@@ -3237,13 +3323,15 @@
   .compare-stage.overlay .surface-shell { position: absolute; inset: 0; }
   /* A transparent B surface must reveal A at 0%, rather than its own empty
      shell background painting a gray rectangle over the image underneath. */
-  .compare-stage.overlay .surface-shell { background: transparent; }
+  .compare-stage.overlay .surface-shell,
+  .compare-stage.overlay .secondary :global(.map-wrap) { background: transparent; }
   .compare-stage.overlay .primary { z-index: 1; }
   .compare-stage.overlay .secondary { z-index: 2; }
   .compare-stage.swipe .secondary { clip-path: inset(0 0 0 var(--divider)); }
-  /* Blend the pixels, not the provider/date controls that explain them. */
-  .compare-stage.blended .secondary :global(.map),
-  .compare-stage.blended .secondary :global(.map-glass) { opacity: var(--opacity); }
+  /* Blend the pixels, not the provider/date controls that explain them, nor
+     the zoom buttons: faded, the map would become a stacking context again and
+     shut its buttons under the highlights (see MapSurface's `.map-wrap`). */
+  .compare-stage.blended .secondary { --map-fade: var(--opacity); }
   .compare-stage.overlay .secondary.blink-hidden { opacity: 0; pointer-events: none; }
   .change-map {
     position: absolute;
@@ -3293,6 +3381,7 @@
   .change-legend .loss { background: var(--loss); }
   .change-legend .changed { background: var(--changed); }
   .change-legend em.warn { color: var(--warn); }
+  .change-legend.refused em { max-width: 360px; white-space: normal; }
   .change-legend em { max-width: 260px; overflow: hidden; color: #c4c9cf; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
   /* the rail's tab lies over map A's edge, inside the frame being grabbed */
   .compare-tool.grabbing :global(.rail-tab) { visibility: hidden; }
@@ -3301,8 +3390,7 @@
   .compare-stage.capture-a .secondary,
   .compare-stage.capture-b .primary { visibility: hidden; }
   .compare-stage.capturing.swipe .secondary { clip-path: none; }
-  .compare-stage.capturing.blended .secondary :global(.map),
-  .compare-stage.capturing.blended .secondary :global(.map-glass) { opacity: 1; }
+  .compare-stage.capturing.blended .secondary { --map-fade: 1; }
   .compare-stage.capturing.overlay .secondary.blink-hidden { opacity: 1; pointer-events: auto; }
   .swipe-line {
     position: absolute;
@@ -3430,6 +3518,8 @@
   .link.muted { color: var(--text-3); }
   .link.muted:hover { color: var(--text-1); }
   .panel-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
+  /* the switcher heads the Layers menu, over the list it acts on */
+  .layer-sides { margin: 2px 0 2px; }
   .panel-note { display: flex; gap: 7px; align-items: flex-start; }
   .panel-actions { display: flex; gap: 8px; }
   .panel-actions .btn { flex: 1; justify-content: center; }

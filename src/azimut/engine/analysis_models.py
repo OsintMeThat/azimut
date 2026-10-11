@@ -119,7 +119,6 @@ class DetectPrefs(Model):
     basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
     overlays: list[Literal["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]] = (
         Field(default=["boundaries", "placenames"], max_length=7))
-    saved: bool = True
 
     @field_validator("overlays", mode="before")
     @classmethod

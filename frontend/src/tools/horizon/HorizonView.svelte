@@ -21,7 +21,7 @@
    * bottom says so until the first drag.
    *
    * A photo or a video laid over the view (state/overlay.svelte.js) is drawn
-   * on the GPU too, and a drag and the wheel move what the band says
+   * on the GPU too, and a drag and the wheel move what the band's hands say
    * (`overlay.moves`): the terrain under the photo (the wheel is then the
    * lens), the photo over the terrain (the view turns and widens the lens the
    * other way, so the ground under the hand stays put), or both, the photo
@@ -91,6 +91,8 @@
     onsetup = () => {},
     /** A photo or a video laid over the view (state/overlay.svelte.js), or null. */
     overlay = null,
+    /** The buildings round the eye (state/buildings.svelte.js), or null. */
+    buildings = null,
   } = $props();
 
   /** Where this browser remembers that the gesture lines were understood, without and with a photo. */
@@ -149,6 +151,12 @@
   }
 
   const laid = $derived(Boolean(overlay?.source));
+  /**
+   * How the ground is drawn sits in the view's corner, a photo laid or not; it
+   * steps away while the pen, the rubber or the photo's corners are out, which
+   * want the whole photo under the hand.
+   */
+  const controlsShown = $derived(Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping)));
   /** The loupe over the photo while it shows anything but the whole photo, which the camera is then seen through. */
   const loupe = $derived(laid && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null);
 
@@ -162,9 +170,12 @@
   let shownFrame = -1;
   /** What the renderer draws the view with, as the tab stands. */
   function drawOptions() {
+    const raised = buildings?.on ? buildings.drawOptions(view.placed?.lat) : null;
     return {
+      ...raised,
       ground: view.ground,
-      lines: view.lines,
+      // buildings drawn as edges are traced by the lines
+      lines: view.lines || raised?.buildings === 'outline',
       sky,
       shaded: view.shaded,
       keep: shadowKeep(view.shadowDepth),
@@ -206,6 +217,7 @@
     // read everything a frame depends on, then draw on the next one
     void [view.shadowDepth, view.ground, view.lines, view.ridges, view.visibility, view.near, view.shaded, camera, sky];
     void [overlay?.picture, overlay?.frame, overlay?.shown, overlay?.bend];
+    void [buildings?.on, buildings?.settings];
     redraw();
   });
 
@@ -217,6 +229,15 @@
   $effect(() => {
     const imagery = view.imagery;
     scene?.setImagery(imagery);
+  });
+  // the buildings' tiles and how unknown heights are drawn, raised in the scene's frame
+  $effect(() => {
+    const tiles = buildings?.sceneTiles ?? null;
+    scene?.setBuildings(tiles);
+  });
+  $effect(() => {
+    const options = buildings?.sceneOptions;
+    if (options) scene?.setBuildingOptions(options);
   });
   // the turn the app marched says what nearer ground hides, which is not sharpened
   $effect(() => {
@@ -254,6 +275,10 @@
     observer.observe(box);
     fit();
     if (view.placed) scene?.place(view.placed, view.placed.far);
+    if (buildings) {
+      scene?.setBuildingOptions(buildings.sceneOptions);
+      scene?.setBuildings(buildings.sceneTiles);
+    }
     scene?.setImagery(view.imagery);
     scene?.setOccluder(view.panorama);
     redraw();
@@ -331,35 +356,22 @@
 
   // -- an area of the view to capture ------------------------------------------------
 
-  /**
-   * What is being chosen on the view: an `area` to capture, or a `point` of
-   * the photo to pin; what answers once it is (`{ kind, answer }`), and the
-   * box drawn so far, in CSS pixels.
-   */
+  /** The area being chosen: what answers once it is (`{ answer }`), and the box drawn so far, in CSS pixels. */
   let choosing = $state(null);
   let chosen = $state(null);
-
-  function ask(kind) {
-    choosing?.answer(null);
-    return new Promise((answer) => {
-      chosen = null;
-      choosing = { kind, answer };
-      box?.focus({ preventScroll: true });
-    });
-  }
 
   /**
    * Ask for an area of the view: a box dragged over it, answered as
    * `{ x, y, width, height }` in CSS pixels, or null when Escape gives up.
    */
-  export const chooseArea = () => ask('area');
-
-  /**
-   * Ask for a point of the photo: a click on it, answered as a point of the
-   * frame as it shows (`{ u, v }`), or null when Escape gives up. A click off
-   * the photo is no answer.
-   */
-  export const choosePoint = () => ask('point');
+  export function chooseArea() {
+    choosing?.answer(null);
+    return new Promise((answer) => {
+      chosen = null;
+      choosing = { answer };
+      box?.focus({ preventScroll: true });
+    });
+  }
 
   function endChoosing(area) {
     const asked = choosing;
@@ -472,9 +484,9 @@
     return mergePeaks(view.peaks.filter((peak) => peak.distance <= reach && inSight(view.panorama, peak)));
   });
 
-  /** The corner the picture controls cover, which no name may; with a photo laid they sit in its band instead. */
+  /** The corner the picture controls cover, which no name may. */
   const reserved = $derived(
-    controls.width && !laid
+    controls.width && controlsShown
       ? [{ left: size.width - controls.width - 18, top: 0, right: size.width, bottom: controls.height + 18 }]
       : []
   );
@@ -616,6 +628,12 @@
 
   /** The hover reading asked last: an older one coming back late is dropped. */
   let hoverAsked = 0;
+  /** The building under the pointer is asked of the app once the pointer rests. */
+  let inspectTimer = 0;
+  function inspectSoon(ground) {
+    clearTimeout(inspectTimer);
+    inspectTimer = setTimeout(() => buildings?.inspect(ground), 250);
+  }
 
   /** Controls laid over the view keep their own clicks and keys. */
   const onControl = (event) => Boolean(event.target?.closest?.('.hz-control'));
@@ -661,8 +679,6 @@
   const edgesAt = $derived(warping && size.width ? edgeMiddles(overlay.corners).map((middle) => screenAt(shownLoupe, middle.u, middle.v, size)) : []);
   /** The photo's grid on screen, as it shows. */
   const gridLines = $derived(warping && size.width ? overlay.grid.map(onScreen) : []);
-  /** The points pinned in the photo, on screen, numbered as the menu lists them. */
-  const anchorsAt = $derived(laid && size.width ? overlay.anchorsSeen.map((p) => screenAt(shownLoupe, p.u, p.v, size)) : []);
   /** Over the photo while its corners are out: a drag there moves it. */
   let overPhoto = $state(false);
 
@@ -734,14 +750,8 @@
     if (!view.observer || onControl(event)) return;
     if (choosing) {
       if (event.button !== 0) return;
-      const at = local(event);
-      if (choosing.kind === 'point') {
-        const point = photoAt(shownLoupe, at.x, at.y, size);
-        const onPhoto = overlay?.warped ? insideCorners(point, overlay.corners) : point.u >= 0 && point.u <= 1 && point.v >= 0 && point.v <= 1;
-        if (onPhoto) endChoosing(point);
-        return;
-      }
       box.setPointerCapture(event.pointerId);
+      const at = local(event);
       press = { choosing: true, from: at };
       chosen = { x: at.x, y: at.y, width: 0, height: 0 };
       return;
@@ -819,7 +829,10 @@
       pointer = { ...at, ground: pointer?.ground ?? null };
       const ask = ++hoverAsked;
       scene?.groundSoon(camera, at.x, at.y).then((ground) => {
-        if (ground !== undefined && ask === hoverAsked && pointer) pointer = { ...pointer, ground };
+        if (ground !== undefined && ask === hoverAsked && pointer) {
+          pointer = { ...pointer, ground };
+          if (buildings?.on) inspectSoon(ground);
+        }
       });
       return;
     }
@@ -1392,13 +1405,6 @@
     {#if rubberAt}
       <circle class="rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
     {/if}
-    {#each anchorsAt as at, index (index)}
-      <g class="anchor" transform="translate({at.x} {at.y})">
-        <circle class="under" r="8.5" />
-        <circle class="over" r="7" />
-        <text y="3.5" text-anchor="middle">{index + 1}</text>
-      </g>
-    {/each}
     {#if chosen}
       {@const x = Math.min(chosen.x, chosen.x + chosen.width)}
       {@const y = Math.min(chosen.y, chosen.y + chosen.height)}
@@ -1481,7 +1487,7 @@
     </button>
   {/each}
 
-  {#if view.observer && !laid}
+  {#if controlsShown}
     <div class="controls">
       <PictureControls {view} {copernicus} {onsetup} bind:width={controls.width} bind:height={controls.height} />
     </div>
@@ -1489,6 +1495,9 @@
 
   {#if readout}
     <div class="glass readout mono" style:left="{readout.x}px" style:top="{readout.y}px">{readout.text}</div>
+    {#if buildings?.on && buildings.info}
+      <div class="glass readout mono" style:left="{readout.x}px" style:top="{readout.y + 24}px">{buildings.info}</div>
+    {/if}
   {/if}
 
   {#if heightNote}
@@ -1506,9 +1515,7 @@
     </div>
   {/if}
 
-  {#if shown && choosing?.kind === 'point'}
-    <p class="glass hint">Click where the marked point shows in the photo · Esc to cancel</p>
-  {:else if shown && choosing}
+  {#if shown && choosing}
     <p class="glass hint">Drag a box over the view to capture it · Esc to cancel</p>
   {:else if shown && warping}
     <p class="glass hint">Pull a corner to slant the photo, an edge to stretch it · Drag inside it to move it · Esc when done</p>
@@ -1707,19 +1714,6 @@
     stroke: var(--accent);
     stroke-width: 1.5;
     stroke-dasharray: 6 4;
-  }
-  /* a point pinned in the photo: numbered, in the mark's yellow on a dark ring */
-  .anchor .under {
-    fill: rgba(0, 0, 0, 0.55);
-  }
-  .anchor .over {
-    fill: var(--hz-mark);
-  }
-  .anchor text {
-    fill: #14181d;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 700;
   }
   /* the area being chosen for a capture, drawn as the photo's edge is */
   .area {

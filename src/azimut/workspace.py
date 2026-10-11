@@ -1516,6 +1516,7 @@ def open_workspace() -> None:
     at import time would close the circle.
     """
     from .engine import bundles, scrapers, terrain, tilecache, workqueue
+    from .engine.buildings import service as buildings_service
 
     config.ensure_workspace()
     scrapers.activate()
@@ -1530,6 +1531,7 @@ def open_workspace() -> None:
     # Off the startup path: a cache months of Detect sweeps filled is a long walk.
     threading.Thread(target=tilecache.sweep, name="tile-cache-sweep", daemon=True).start()
     threading.Thread(target=terrain.sweep, name="terrain-cache-sweep", daemon=True).start()
+    threading.Thread(target=buildings_service.sweep, name="buildings-cache-sweep", daemon=True).start()
 
 
 def _one_work_per_file(case: Case) -> None:

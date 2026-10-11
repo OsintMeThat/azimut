@@ -27,11 +27,13 @@ analyst asking what they are looking at.
 
 from __future__ import annotations
 
+import datetime
 import functools
 import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -228,20 +230,44 @@ def _tile_template(fresh: bool = False) -> str:
         return template
 
 
-def _ask_tile(key: Key) -> list[Peak]:
-    """One tile's named summits, inside the tile itself."""
-    z, x, y = key
+def fetch_vector_tile(z: int, x: int, y: int) -> tuple[bytes | None, str]:
+    """One OpenFreeMap tile's raw body (None when the build has no such tile) and the build it came from."""
     template = _tile_template()
     status, body = _get(template.format(z=z, x=x, y=y))
     if status == 404:
         # the build it named may be gone: the TileJSON names the new one
         newer = _tile_template(fresh=True)
         if newer != template:
-            status, body = _get(newer.format(z=z, x=x, y=y))
+            template = newer
+            status, body = _get(template.format(z=z, x=x, y=y))
     if status == 404:
-        return []
+        return None, template
     if status != 200:
         raise PeaksUnavailable(f"OpenFreeMap answered {status}")
+    return body, template
+
+
+_BUILD_DATE = re.compile(r"/(\d{8})_\d{6}_pt/")
+
+
+def build_date(template: str) -> str:
+    """The day a build was made, as 2026-10-04, from its tile address; '' when the address does not say."""
+    match = _BUILD_DATE.search(template)
+    if not match:
+        return ""
+    digits = match.group(1)
+    try:
+        return datetime.date(int(digits[:4]), int(digits[4:6]), int(digits[6:])).isoformat()
+    except ValueError:
+        return ""
+
+
+def _ask_tile(key: Key) -> list[Peak]:
+    """One tile's named summits, inside the tile itself."""
+    z, x, y = key
+    body, _template = fetch_vector_tile(z, x, y)
+    if body is None:
+        return []
     found = []
     for fx, fy, tags in mvt.read_points(body, LAYER):
         name = str(tags.get("name") or "").strip()

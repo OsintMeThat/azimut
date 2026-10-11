@@ -126,3 +126,104 @@ def test_a_tile_cut_short_or_not_a_tile_is_refused():
         mvt.read_points(tile[:-3], "mountain_peak")
     with pytest.raises(ValueError):
         mvt.read_points(b"\x1f\x8b not gzip at all", "mountain_peak")
+
+
+# -- reading polygons -----------------------------------------------------------
+
+SQUARE = [(0, 0), (100, 0), (100, 100), (0, 100)]  # clockwise on screen: an exterior ring
+HOLE = [(30, 30), (30, 70), (70, 70), (70, 30)]  # counter-clockwise: a hole in it
+
+
+def _zigzag(d: int) -> int:
+    return (d << 1) ^ (d >> 63)
+
+
+def _polygon_geometry(*rings: list[tuple[int, int]]) -> bytes:
+    """Rings written by hand as the specification has them: MoveTo the first point,
+    LineTo the rest, ClosePath. The cursor carries from one ring to the next."""
+    commands: list[int] = []
+    cx = cy = 0
+    for ring in rings:
+        for index, (px, py) in enumerate(ring):
+            if index == 0:
+                commands.append(mvt._command(1, 1))
+            elif index == 1:
+                commands.append(mvt._command(2, len(ring) - 1))
+            commands += [_zigzag(px - cx), _zigzag(py - cy)]
+            cx, cy = px, py
+        commands.append(mvt._command(7, 1))
+    return b"".join(mvt._varint(c) for c in commands)
+
+
+def _layer(name: str, *features: tuple[int, bytes, dict]) -> mvt.Layer:
+    layer = mvt.Layer(name)
+    layer.features.extend(features)
+    return layer
+
+
+def _fractions(points: list[tuple[int, int]]) -> list[tuple[float, float]]:
+    return [(x / mvt.EXTENT, y / mvt.EXTENT) for x, y in points]
+
+
+def test_one_square_is_one_polygon_with_its_open_ring():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE), {"render_height": 12}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [
+        ([_fractions(SQUARE)], {"render_height": 12}),
+    ]
+
+
+def test_a_square_with_a_hole_is_one_polygon_of_two_rings():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE, HOLE), {"render_height": 12}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [
+        ([_fractions(SQUARE), _fractions(HOLE)], {"render_height": 12}),
+    ]
+
+
+def test_two_polygons_in_one_feature_are_two_entries_with_its_properties():
+    shifted = [(x + 200, y) for x, y in SQUARE]
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE, shifted), {"render_height": 9}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [
+        ([_fractions(SQUARE)], {"render_height": 9}),
+        ([_fractions(shifted)], {"render_height": 9}),
+    ]
+
+
+def test_a_hole_before_any_exterior_and_a_zero_area_ring_are_dropped():
+    flat = [(0, 0), (50, 50), (100, 100)]
+    geometry = _polygon_geometry(HOLE, flat, SQUARE)
+    layer = _layer("buildings", (3, geometry, {}))
+    assert mvt.read_polygons(mvt.encode([layer]), "buildings") == [([_fractions(SQUARE)], {})]
+
+
+def test_other_layers_and_points_are_ignored():
+    roads = _layer("roads", (3, _polygon_geometry(SQUARE), {"class": "road"}))
+    point = mvt.points_geometry(np.array([5]), np.array([5]))
+    beside = [(x + 200, y) for x, y in SQUARE]
+    buildings = _layer("buildings", (1, point, {"name": "a point"}), (3, _polygon_geometry(beside), {"render_height": 3}))
+    tile = mvt.encode([roads, buildings])
+    assert mvt.read_polygons(tile, "buildings") == [([_fractions(beside)], {"render_height": 3})]
+    assert mvt.read_polygons(tile, "roads") == [([_fractions(SQUARE)], {"class": "road"})]
+    assert mvt.read_polygons(tile, "water") == []
+
+
+def test_a_gzipped_tile_is_opened_first():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE), {"render_height": 12}))
+    tile = mvt.encode([layer])
+    assert mvt.read_polygons(gzip.compress(tile), "buildings") == mvt.read_polygons(tile, "buildings")
+
+
+def test_a_polygon_tile_cut_short_or_not_a_tile_is_refused():
+    layer = _layer("buildings", (3, _polygon_geometry(SQUARE, HOLE), {"render_height": 12}))
+    tile = mvt.encode([layer])
+    with pytest.raises(ValueError):
+        mvt.read_polygons(tile[:-3], "buildings")
+    with pytest.raises(ValueError):
+        mvt.read_polygons(b"\x1f\x8b not gzip at all", "buildings")
+
+
+def test_a_point_in_the_buffer_comes_out_below_zero():
+    beyond = [(-20, 0), (100, 0), (100, 100), (-20, 100)]
+    layer = _layer("buildings", (3, _polygon_geometry(beyond), {}))
+    [(rings, _props)] = mvt.read_polygons(mvt.encode([layer]), "buildings")
+    assert rings[0][0] == (-20 / mvt.EXTENT, 0.0)
+    assert rings[0][0][0] < 0

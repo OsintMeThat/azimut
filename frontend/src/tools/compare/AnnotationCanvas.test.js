@@ -72,6 +72,17 @@ function stage(props) {
 beforeEach(() => { target = document.createElement('div'); document.body.append(target); });
 afterEach(() => { if (live) unmount(live); target.remove(); });
 
+it('leaves inactive outlines visible while disabling selection and dragging', () => {
+  const onchange = vi.fn();
+  const svg = stage({ annotations: [area()], active: false, editVertices: true, selectedId: 'z1', tool: 'select', onchange });
+  expect(svg.classList.contains('inactive')).toBe(true);
+  expect(target.querySelector('.edge')).toBeTruthy();
+  expect(target.querySelector('.vertex')).toBeNull();
+  press(target.querySelector('.edge'), 'pointerdown', 20, 20);
+  press(svg, 'pointermove', 60, 20); press(svg, 'pointerup', 60, 20);
+  expect(onchange).not.toHaveBeenCalled();
+});
+
 it('keeps the corner handles on their ground when the camera moves', () => {
   stage({ annotations: [area()], editVertices: true, selectedId: 'z1', tool: 'select' });
   const handle = () => target.querySelectorAll('.vertex rect:last-child')[0];

@@ -14,12 +14,16 @@
  * - `{ type: 'grids', id, grids: [{ reach, size, zoom }] }` → `{ type: 'grids', id, grids: [{ heights, top }] }`
  *   (or `failed: true`).
  * - `{ type: 'height', id, ask, lat, lon }` → `{ type: 'height', id, ask, ground }`.
+ * - `{ type: 'buildings', id, chunks: [{ key, x, y, bytes, version }], unknown, unknownHeight }` → one
+ *   `{ type: 'building-chunk', id, key, version, x, y, vertices, indices, cells, cellStart, roofs, count }`
+ *   a tile of buildings (buildingMesh.js), raised on the finest terrain there.
  *
  * And `{ type: 'refused', provider, status, message }` when the app refuses a
  * provider's imagery (a paused quota, a key gone), said once a provider.
  */
 import { buildGrid, buildMesh, createTerrain, demRange } from './build.js';
-import { DEM_TILE, eyeAltitude, eyeFrame, terrarium } from './geo.js';
+import { CHUNK_Z, buildChunk, decodeChunk } from './buildingMesh.js';
+import { DEM_MAX, DEM_TILE, eyeAltitude, eyeFrame, terrarium } from './geo.js';
 
 const TERRAIN = '/api/horizon/tiles/terrain';
 const IMAGERY = '/api/horizon/tiles/imagery';
@@ -192,6 +196,38 @@ async function grids(id, list) {
   self.postMessage({ type: 'grids', id, grids: built }, built.map((g) => g.heights.buffer));
 }
 
+// -- buildings ----------------------------------------------------------------------
+
+/** How far past its own tile a building of the tile may reach, in tiles: its terrain is read that far. */
+const BUILDING_REACH = 0.15;
+
+async function buildings(id, chunks, { unknown = 'draw', unknownHeight } = {}) {
+  const frame = (await eye.standing)?.frame;
+  if (id !== eye.id || !frame) return;
+  for (const { key, x, y, bytes, version } of chunks) {
+    const zooms = await terrain.zoomsFor([{ z: CHUNK_Z, x, y }], () => DEM_MAX);
+    if (id !== eye.id) return;
+    const zd = zooms?.[0] ?? -1;
+    const keys = zd >= 0 ? demRange(CHUNK_Z, x - BUILDING_REACH, y - BUILDING_REACH, x + 1 + BUILDING_REACH, y + 1 + BUILDING_REACH, zd) : [];
+    await terrain.pinning(keys, async () => {
+      const held = keys.length ? await terrain.load(keys) : true;
+      if (id !== eye.id) return;
+      let ground = () => 0;
+      if (zd >= 0 && held) {
+        const s = 2 ** (zd - CHUNK_Z);
+        const home = [Math.floor((x + 0.5) * s), Math.floor((y + 0.5) * s)];
+        ground = (fx, fy) => terrain.heightAt(zd, (x + fx) * s * DEM_TILE, (y + fy) * s * DEM_TILE, home);
+      }
+      const { buildings: list } = decodeChunk(bytes);
+      const built = buildChunk({ x, y, buildings: list, frame, ground, unknown, unknownHeight });
+      self.postMessage(
+        { type: 'building-chunk', id, key, version, x, y, ...built },
+        [built.vertices.buffer, built.indices.buffer, built.cells.buffer, built.cellStart.buffer, built.roofs.buffer]
+      );
+    });
+  }
+}
+
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'eye') {
@@ -203,6 +239,7 @@ self.onmessage = async ({ data }) => {
     } else if (data.type === 'tiles') await tiles(data.id, data.tiles);
     else if (data.type === 'images') await images(data.id, data.tiles);
     else if (data.type === 'grids') await grids(data.id, data.grids);
+    else if (data.type === 'buildings') await buildings(data.id, data.chunks, data);
     else if (data.type === 'height') {
       self.postMessage({ type: 'height', id: data.id, ask: data.ask, ground: await terrain.groundAt(data.lat, data.lon) });
     }

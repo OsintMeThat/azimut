@@ -158,7 +158,8 @@ def test_saved_analyzers_and_detect_view_survive_dropped_fields_in_settings_and_
     config.update_settings(old)
     assert [r["name"] for r in client.get("/api/compare/analyzers").json()["custom"]] == ["Harbour boats"]
     view = client.get("/api/settings").json()["detect_view"]
-    assert "retired" not in view and view["basemap"] == "osm"
+    # "saved" was Detect's remembered Saved detections switch, which now opens on
+    assert "retired" not in view and "saved" not in view and view["basemap"] == "osm"
     assert client.put("/api/settings/prefs", json={"detect_view": view}).status_code == 200
 
     backup = client.get("/api/settings/export").json()

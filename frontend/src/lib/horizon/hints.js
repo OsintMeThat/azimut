@@ -60,18 +60,16 @@ export function cleanHints(hints) {
 
 /**
  * The band's words for what is known, or '' when nothing is: "Zoomed · 218° SW
- * · within 20 km · 2 points". `reach` is the cut the trace is read against
- * now, which Fit found on its own when the analyst left it to Auto; `pinned`
- * how many points are pinned in the photo.
+ * · within 20 km". `reach` is the cut the trace is read against now, which Fit
+ * found on its own when the analyst left it to Auto.
  */
-export function hintsSummary(hints, reach = null, pinned = 0) {
+export function hintsSummary(hints, reach = null) {
   const h = cleanHints(hints);
   const parts = [];
   if (h.zoom !== 'any') parts.push(ZOOMS.find((z) => z.id === h.zoom).label);
   if (h.facing) parts.push(headingText(h.facing.heading, 60));
   if (Number.isFinite(reach)) parts.push(`within ${reachText(reach)}`);
   else if (h.reach === 'all') parts.push('clear air');
-  if (pinned > 0) parts.push(pinned === 1 ? '1 point' : `${pinned} points`);
   return parts.join(' · ');
 }
 

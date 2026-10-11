@@ -49,7 +49,7 @@ from ..engine.sheets import replace_atomic
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 from ..engine import horizon
-from .horizon import HEIGHT_LIMITS, MATCH_ANCHORS_MAX, SKYLINE_CUTS
+from .horizon import HEIGHT_LIMITS, SKYLINE_CUTS
 from .naming import case_only, holders, read_created_at, slugify
 from .satellite import locate_on_save, saved_changed
 
@@ -153,17 +153,6 @@ class PhotoPoint(BaseModel):
     v: float = Field(ge=-1, le=2, allow_inf_nan=False)
 
 
-class Anchor(BaseModel):
-    """A point recognised in the photo: where it shows (the photo's own 0 to 1) and where it lies on the map."""
-
-    u: float = Field(ge=0, le=1, allow_inf_nan=False)
-    v: float = Field(ge=0, le=1, allow_inf_nan=False)
-    lat: float = Field(ge=-85, le=85, allow_inf_nan=False)
-    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
-    #: Metres above its ground, as a marked point's.
-    height: float = Field(default=0, ge=0, le=10_000, allow_inf_nan=False)
-
-
 class Pin(BaseModel):
     """The view's alignment at a moment of a video."""
 
@@ -222,8 +211,6 @@ class Photo(BaseModel):
     hints: Hints = Field(default_factory=Hints)
     #: The reach Fit found the trace's skyline at, metres; None for the whole turn.
     reach: float | None = Field(default=None, gt=0, le=horizon.FAR_MAX, allow_inf_nan=False)
-    #: Points recognised in the photo, which Fit keeps where they show.
-    anchors: list[Anchor] = Field(default_factory=list, max_length=MATCH_ANCHORS_MAX)
 
     @field_validator("strokes")
     @classmethod

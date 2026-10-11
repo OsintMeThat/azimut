@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture, restingCamera } from './app.fixture.js';
+import { awaitMapReady, CASE_ID, installAppFixture, restingCamera } from './app.fixture.js';
 
-async function openCompare(page, providerB = 'Esri World Imagery') {
+async function openCompare(page, providerB = 'Esri World Imagery', { routes } = {}) {
   const fixture = await installAppFixture(page);
+  // a spec's own answers, over the fixture's, before the page asks
+  await routes?.(page);
   const errors = [];
   const saved = [];
   await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [
@@ -646,5 +648,125 @@ test('takes the whole screen with both maps, and gives it up to the tab it hands
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
   await expect(page.locator('.tabstrip .tab-btn.active')).toHaveText('Satellite');
   await expect(page.locator('.tool-host:not(.hidden) .hud-coords')).toContainText('z17');
+  expect(errors).toEqual([]);
+});
+
+/**
+ * The case's own layers: one imported, one drawn in the case. Each is an area
+ * over the whole view, hatched with red lines close enough to paint most of it
+ * in a colour no fixture tile has: a faint tint alone would pass under
+ * Difference's threshold and prove nothing about what it reads.
+ */
+async function routeCaseLayers(page) {
+  const stamp = '2026-09-20T10:00:00Z';
+  const layer = (name, title, extra = {}) => ({
+    name, title, source: { kind: 'file', format: 'geojson', filename: `${name}.geojson` }, hidden: [], period: null,
+    refresh: {}, features: 1, categories: [{ name, count: 1, colour: '#e04040' }], bbox: [2.2, 48.8, 2.4, 48.9],
+    format: 'geojson', icons: 0, sha256: 'a'.repeat(64), bytes: 256, fetched_at: stamp, checked_at: stamp,
+    stale: false, created_at: stamp, updated_at: stamp, spec: `.layers/${name}/layer.json`, ...extra,
+  });
+  const properties = (name, index) => ({ name, category: name, colour: '#e04040', index });
+  const hatching = Array.from({ length: 600 }, (_, index) => {
+    const lat = 48.85 + index * 0.00003;
+    return { type: 'Feature', geometry: { type: 'LineString', coordinates: [[2.27, lat], [2.32, lat]] },
+      properties: properties(`line ${index}`, index + 1) };
+  });
+  const area = (name) => ({ type: 'FeatureCollection', features: [{ type: 'Feature',
+    geometry: { type: 'Polygon', coordinates: [[[2.2, 48.8], [2.4, 48.8], [2.4, 48.9], [2.2, 48.9], [2.2, 48.8]]] },
+    properties: properties(name, 0) }, ...hatching] });
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: [layer('front', 'Front lines'), layer('mine', 'My sites', { editable: true })] })
+      : route.fallback()
+  );
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/*/data`, (route) =>
+    route.fulfill({ json: area(new URL(route.request().url()).pathname.split('/').at(-2)) })
+  );
+}
+
+/** The middle of each map, clear of its card, its buttons and its credits,
+ *  which name the layers drawn there and so change with them. */
+async function mapMiddle(page, index) {
+  const box = await page.locator('.compare-stage .map').nth(index).boundingBox();
+  return page.screenshot({
+    clip: { x: box.x + box.width * 0.3, y: box.y + box.height * 0.3, width: box.width * 0.4, height: box.height * 0.4 },
+  });
+}
+
+test('the Layers switcher moves the whole list onto A, B or both, the case’s own layers with it', async ({ page }) => {
+  const { errors } = await openCompare(page, 'Esri World Imagery', { routes: () => routeCaseLayers(page) });
+  await expect(page.locator('.compare-stage .map')).toHaveCount(2);
+  const picture = (index) => mapMiddle(page, index);
+  const bare = [await picture(0), await picture(1)];
+  const drawn = async (index) => !(await picture(index)).equals(bare[index]);
+
+  // the menu lies over A, so each picture is taken with it closed
+  const menu = page.getByRole('dialog', { name: 'Layers' });
+  const sides = menu.getByRole('group', { name: 'Which map draws the layers' });
+  const inMenu = async (act) => {
+    await page.locator('.layer-menu > button').click();
+    await act();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  };
+
+  await inMenu(async () => {
+    // the case's own layers sit under the Map's two headings
+    await expect(menu.getByRole('region', { name: 'My layers' }).getByRole('button', { name: 'My sites', exact: true })).toBeVisible();
+    await expect(menu.getByRole('region', { name: 'Added layers' }).getByRole('button', { name: 'Front lines', exact: true })).toBeVisible();
+    await expect(sides.getByRole('button', { name: 'AB', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await menu.getByRole('button', { name: 'Front lines', exact: true }).click();
+  });
+  await expect.poll(() => drawn(0)).toBe(true);
+  await expect.poll(() => drawn(1)).toBe(true);
+
+  // on B, the list leaves A and stays on B
+  await inMenu(async () => {
+    await sides.getByRole('button', { name: 'B', exact: true }).click();
+    await expect(menu.getByRole('button', { name: 'Front lines', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  });
+  await expect.poll(() => drawn(0)).toBe(false);
+  await expect.poll(() => drawn(1)).toBe(true);
+
+  // and on A, the other way round
+  await inMenu(() => sides.getByRole('button', { name: 'A', exact: true }).click());
+  await expect.poll(() => drawn(1)).toBe(false);
+  await expect.poll(() => drawn(0)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('Difference reads the pictures without the layers, so one may stay on A alone', async ({ page }) => {
+  // the same fixture picture on both sides: nothing to highlight but a layer
+  const { errors } = await openCompare(page, 'Esri Wayback', { routes: () => routeCaseLayers(page) });
+  const bare = await mapMiddle(page, 0);
+  const menu = page.getByRole('dialog', { name: 'Layers' });
+  await page.locator('.layer-menu > button').click();
+  await menu.getByRole('button', { name: 'Front lines', exact: true }).click();
+  await menu.getByRole('group', { name: 'Which map draws the layers' }).getByRole('button', { name: 'A', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => !(await mapMiddle(page, 0)).equals(bare)).toBe(true);
+
+  await page.getByRole('button', { name: 'Difference', exact: true }).click();
+  const legend = page.locator('.change-legend');
+  await expect(legend).toContainText('highlighted', { timeout: 20000 });
+  await expect(legend.locator('.warn')).toHaveCount(0);
+  // read with the area over A, the whole view would have lit up
+  const share = Number((await legend.locator('em').textContent()).match(/(\d+)%/)[1]);
+  expect(share).toBeLessThan(5);
+  // the highlights lie under the map's zoom buttons: made hittable for a moment,
+  // the mask still loses the point to the button
+  const zoomIn = await page.locator('.surface-shell.primary .maplibregl-ctrl-zoom-in').boundingBox();
+  const onTop = await page.evaluate(({ x, y }) => {
+    const mask = document.querySelector('.surface-shell.primary .change-map');
+    mask.style.pointerEvents = 'auto';
+    const top = document.elementFromPoint(x, y);
+    mask.style.pointerEvents = '';
+    return top?.closest('.maplibregl-ctrl-zoom-in') ? 'zoom in' : top?.className;
+  }, { x: zoomIn.x + zoomIn.width / 2, y: zoomIn.y + zoomIn.height / 2 });
+  expect(onTop).toBe('zoom in');
+  // and the area is back on A once the picture is taken
+  await page.getByRole('button', { name: 'Difference', exact: true }).click();
+  await expect(legend).toHaveCount(0);
+  await expect.poll(async () => !(await mapMiddle(page, 0)).equals(bare)).toBe(true);
   expect(errors).toEqual([]);
 });

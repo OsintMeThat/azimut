@@ -379,22 +379,6 @@ def test_a_view_keeps_what_was_known_about_the_photo_and_the_reach_fit_found(cli
     assert _save(client, cid, "Plain", plain).status_code == 200
     kept = client.get(f"/api/cases/{cid}/horizon/views/Plain").json()["spec"]["photo"]
     assert kept["hints"] == {"zoom": "any", "facing": None, "reach": "auto"} and kept["reach"] is None
-    assert kept["anchors"] == []
-
-
-def test_a_view_keeps_the_points_pinned_in_its_photo_and_refuses_odd_ones(client):
-    cid = _case(client, "Pinned views")
-    photo = _photo(client, cid)
-    spec = _spec(photo)
-    spec["photo"]["anchors"] = [{"u": 0.42, "v": 0.31, "lat": 46.5775, "lon": 7.9853, "height": 0}]
-    assert _save(client, cid, "Pinned", spec).status_code == 200
-    kept = client.get(f"/api/cases/{cid}/horizon/views/Pinned").json()["spec"]["photo"]
-    assert kept["anchors"] == [{"u": 0.42, "v": 0.31, "lat": 46.5775, "lon": 7.9853, "height": 0}]
-    for odd in ({"u": 1.4, "v": 0.3, "lat": 46.5, "lon": 7.9}, {"u": 0.4, "v": 0.3, "lat": 91, "lon": 7.9}):
-        spec["photo"]["anchors"] = [odd]
-        assert _save(client, cid, "Pinned", spec).status_code == 422
-    spec["photo"]["anchors"] = [{"u": 0.4, "v": 0.3, "lat": 46.5, "lon": 7.9}] * 9
-    assert _save(client, cid, "Pinned", spec).status_code == 422
 
 
 @pytest.mark.parametrize(

@@ -62,12 +62,11 @@ HORIZON_DIR = ".horizon"
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
 SEARCH_DIR = ".search"
-#: Map layers the analyst added themselves: a file they opened, a URL they
-#: subscribed to, or a GeoConfirmed query. Hidden because they did not author the
-#: data — the row in the Layers panel is where it is worked with.
+#: Source and personal map layers, managed through the Layers panel.
 LAYERS_DIR = ".layers"
-#: The parsed GeoJSON a layer is drawn from. Derived from the snapshot beside
-#: it, so it is dropped on delete and rebuilt on demand rather than carried.
+MAP_VIEWS_DIR = ".map-views"
+#: The parsed GeoJSON a layer is drawn from. Derived from the snapshot or spec
+#: beside it, dropped on delete and rebuilt on demand rather than carried.
 LAYER_CACHE_DIR = ".cache"
 #: Machinery that belongs to a visible sibling: `media/.meta/` holds sidecars,
 #: `proofs/.meta/` holds the editable specs and pasted assets.
@@ -96,6 +95,7 @@ CASE_SUBDIRS = (
     ANALYSIS_DIR,
     SEARCH_DIR,
     LAYERS_DIR,
+    MAP_VIEWS_DIR,
 )
 
 #: Deleted artifacts wait here, hidden at the case root. Outside `CASE_SUBDIRS`
@@ -543,6 +543,10 @@ def layer_spec_rel(name: str) -> str:
     return f"{LAYERS_DIR}/{name}.json"
 
 
+def map_view_rel(name: str) -> str:
+    return f"{MAP_VIEWS_DIR}/{name}.json"
+
+
 def layer_snapshot_rel(name: str) -> str:
     """The bytes as they arrived, under one extension whatever the format.
 
@@ -566,7 +570,7 @@ def layer_icons_rel(name: str) -> str:
 
 
 def layer_cache_rel(name: str) -> str:
-    """The parsed GeoJSON the browser consumes, rebuilt from the snapshot."""
+    """Drawing rebuilt from a source snapshot or the spec's working collection."""
     return f"{LAYERS_DIR}/{LAYER_CACHE_DIR}/{name}.geojson"
 
 

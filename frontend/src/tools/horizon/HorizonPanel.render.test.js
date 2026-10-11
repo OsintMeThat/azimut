@@ -210,16 +210,6 @@ describe('the Horizon inspector', () => {
     expect(view.observer).toMatchObject({ lat: 46.6, lon: 7.95 });
   });
 
-  it('marks the ground clicked in the view, so it can be pinned on a photo', async () => {
-    const view = state();
-    view.standAt(EYE);
-    await settle();
-    view.point({ lat: 46.6, lon: 7.95, azimuth: 60, elevation: -1, distance: 9010 });
-    const root = render(HorizonPanel, { view });
-    button(root, 'Mark it').click();
-    expect(view.target).toMatchObject({ lat: 46.6, lon: 7.95 });
-  });
-
   it('clears the ground clicked in the view, and says again how to read it', async () => {
     const view = state();
     view.standAt(EYE);
@@ -527,14 +517,5 @@ describe('the picture controls on the view', () => {
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     flushSync();
     expect(root.querySelector('#hz-imagery')).toBeNull();
-  });
-
-  it('lay the imagery open, without the lines, inside a menu that has them elsewhere', () => {
-    const view = state();
-    view.setGround('imagery');
-    const root = render(PictureControls, { view, lines: false, menu: false });
-    expect([...root.querySelectorAll('button')].some((b) => b.textContent.includes('Ridge lines'))).toBe(false);
-    expect(root.querySelector('[aria-controls="hz-imagery"]')).toBeNull();
-    expect(root.querySelector('[aria-label="Which imagery"]')).not.toBeNull();
   });
 });

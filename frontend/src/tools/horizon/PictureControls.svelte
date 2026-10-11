@@ -6,16 +6,15 @@
    *
    * The lines are their own switch because Phase 5 lays them alone over a
    * photo; plain ground has nothing else to show, so picking it turns them on.
+   * The controls stay on the view with a photo laid, as without one.
    *
    * With satellite imagery, Sentinel-2 can be laid on the ground near the eye,
    * from the analyst's Copernicus quota, Esri beyond: what that costs is said
    * beside the switch before anything is asked. Without a Copernicus key the
    * switch stays, locked, and says how to get one.
    *
-   * On the view those imagery settings fold under one button that names the
-   * release drawn, so they keep off the sky; in the photo band's Ground menu,
-   * already a list of its own, they lie open, and the band has its own switch
-   * for the lines.
+   * Those imagery settings fold under one button that names the release
+   * drawn, so they keep off the sky.
    */
   import Icon from '../../components/Icon.svelte';
   import { DRAPE_PROVIDER, NEAR_REACHES, waybackSource } from './state/horizon.svelte.js';
@@ -27,10 +26,6 @@
     copernicus = false,
     /** Asked to show how to set Copernicus up. */
     onsetup = () => {},
-    /** Whether the ridge-line switch sits here. */
-    lines = true,
-    /** Whether the imagery settings fold under a button, rather than lie open. */
-    menu = true,
     /** The box these controls cover, reported out so summit names keep clear of it. */
     width = $bindable(0),
     height = $bindable(0),
@@ -109,22 +104,20 @@
         >
       {/each}
     </div>
-    {#if lines}
-      <!-- a switch, not a fourth ground: it says so with its own box and tick -->
-      <button
-        type="button"
-        class="toggle"
-        class:on={view.lines}
-        aria-pressed={view.lines}
-        title="Outline every ridge, coloured by distance"
-        onclick={() => view.setLines(!view.lines)}
-      >
-        <span class="box" aria-hidden="true">
-          {#if view.lines}<svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5.2 4 7.6 8.6 2.4" /></svg>{/if}
-        </span>Ridge lines
-      </button>
-    {/if}
-    {#if menu && view.ground === 'imagery'}
+    <!-- a switch, not a fourth ground: it says so with its own box and tick -->
+    <button
+      type="button"
+      class="toggle"
+      class:on={view.lines}
+      aria-pressed={view.lines}
+      title="Outline every ridge, coloured by distance"
+      onclick={() => view.setLines(!view.lines)}
+    >
+      <span class="box" aria-hidden="true">
+        {#if view.lines}<svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5.2 4 7.6 8.6 2.4" /></svg>{/if}
+      </span>Ridge lines
+    </button>
+    {#if view.ground === 'imagery'}
       <button
         bind:this={imageryButton}
         type="button"
@@ -141,15 +134,8 @@
       </button>
     {/if}
   </div>
-  {#if view.ground === 'imagery' && (!menu || imageryOpen)}
-    <div
-      bind:this={imageryBox}
-      class="imagery"
-      class:pop={menu}
-      id={menu ? 'hz-imagery' : undefined}
-      role={menu ? 'dialog' : undefined}
-      aria-label={menu ? 'Imagery' : undefined}
-    >
+  {#if view.ground === 'imagery' && imageryOpen}
+    <div bind:this={imageryBox} class="imagery pop" id="hz-imagery" role="dialog" aria-label="Imagery">
       <div class="row">
         <select
           class="release"

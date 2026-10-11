@@ -7,11 +7,15 @@ import {
   compareNightNote,
   compareNightWords,
   freshFires,
+  freshLayers,
   freshNight,
   restoredLayers,
   sideFires,
+  sideLayers,
   sideNight,
-  swappedDays,
+  toggledLayer,
+  tradedSide,
+  tradedSides,
 } from './compareLayers.js';
 import { lastNight } from './nightlights.js';
 
@@ -38,15 +42,52 @@ describe('what each side of a pair draws', () => {
     expect(sideNight(night, 'b', DAYS.b)).toEqual({ source: 'snpp', day: '2022-03-03' });
   });
 
-  it('trades the picked days when A and B trade places', () => {
-    expect(swappedDays({ follow: false, a: 'x', b: 'y' })).toEqual({ follow: false, a: 'y', b: 'x' });
+  it('trades what each side held when A and B trade places', () => {
+    expect(tradedSides({ follow: false, a: 'x', b: 'y' })).toEqual({ follow: false, a: 'y', b: 'x' });
+  });
+});
+
+describe('the switcher over the list', () => {
+  it('starts a new pair on borders and place names, drawn on both sides', () => {
+    expect(freshLayers()).toEqual({ ids: ['boundaries', 'placenames'], side: 'ab' });
+  });
+
+  it('moves the whole list onto the side it names', () => {
+    const ids = ['boundaries', 'roads'];
+    expect(sideLayers(ids, 'ab')).toEqual({ a: ids, b: ids });
+    expect(sideLayers(ids, 'a')).toEqual({ a: ids, b: [] });
+    expect(sideLayers(ids, 'b')).toEqual({ a: [], b: ids });
+  });
+
+  it('switches a layer in or out of the one list, in the catalogue’s order', () => {
+    expect(toggledLayer(['roads'], 'boundaries')).toEqual(['boundaries', 'roads']);
+    expect(toggledLayer(['boundaries', 'roads'], 'roads')).toEqual(['boundaries']);
+  });
+
+  it('keeps the list on its picture when A and B trade places', () => {
+    expect(tradedSide('a')).toBe('b');
+    expect(tradedSide('b')).toBe('a');
+    expect(tradedSide('ab')).toBe('ab');
   });
 });
 
 describe('a saved comparison read back', () => {
-  it('puts a layer saved on one side only on both', () => {
-    const { layers } = restoredLayers({ overlays: ['roads'] }, { overlays: ['railway', 'labels'] });
-    expect(layers).toEqual(['roads', 'railway']);
+  it('starts a handed-over pair, which names no layer, as a new one', () => {
+    expect(restoredLayers({ provider: 'esri-wayback' }, { provider: 'esri-world-imagery' })).toMatchObject(freshLayers());
+  });
+
+  it('reopens on the side that alone held layers, or on both', () => {
+    expect(restoredLayers({ overlays: ['roads'] }, { overlays: [] })).toMatchObject({ ids: ['roads'], side: 'a' });
+    expect(restoredLayers({ overlays: [] }, { overlays: ['railway', 'labels'] })).toMatchObject({ ids: ['railway'], side: 'b' });
+    expect(restoredLayers({ overlays: ['roads'] }, { overlays: ['roads'] })).toMatchObject({ ids: ['roads'], side: 'ab' });
+    expect(restoredLayers({ overlays: [] }, { overlays: [] })).toMatchObject({ ids: [], side: 'ab' });
+  });
+
+  it('draws two different lists saved before the switcher on both sides, so nothing goes missing', () => {
+    expect(restoredLayers({ overlays: ['roads'] }, { overlays: ['railway'] })).toMatchObject({
+      ids: ['roads', 'railway'],
+      side: 'ab',
+    });
   });
 
   it('keeps each side’s saved fire and night days, picked rather than followed', () => {
@@ -96,9 +137,11 @@ describe('the fire layer’s questions in Compare', () => {
     expect(set).toHaveBeenCalledWith({ b: { window: 'dates', first: '2025-01-01', last: '' } });
   });
 
-  it('says what each side draws on one line', () => {
-    expect(compareFireWords(freshFires(), SENSORS, DAYS)).toBe('VIIRS · A 2024-03-12 · B 2025-06-02');
-    expect(compareFireWords(freshFires(), SENSORS, { a: DAYS.a, b: '' })).toBe('VIIRS · A 2024-03-12 · B 24 h');
+  it('says what each side draws in the room a row has', () => {
+    expect(compareFireWords(freshFires(), SENSORS, DAYS)).toBe('A 2024-03-12 · B 2025-06-02');
+    expect(compareFireWords(freshFires(), SENSORS, { a: DAYS.a, b: '' })).toBe('A 2024-03-12 · B 24 h');
+    // one day for both sides is said once
+    expect(compareFireWords(freshFires(), SENSORS, { a: DAYS.a, b: DAYS.a })).toBe('VIIRS · 2024-03-12');
   });
 
   it('asks for a day on a side picked with none', () => {
@@ -123,7 +166,8 @@ describe('the night layer’s questions in Compare', () => {
   });
 
   it('names the side whose picture predates the sensor', () => {
-    expect(compareNightWords(freshNight(), DAYS)).toBe('NOAA-20 · A 2024-03-12 · B 2025-06-02');
+    expect(compareNightWords(freshNight(), DAYS)).toBe('A 2024-03-12 · B 2025-06-02');
+    expect(compareNightWords(freshNight(), { a: DAYS.b, b: DAYS.b })).toBe('NOAA-20 · 2025-06-02');
     expect(compareNightNote(freshNight(), DAYS)).toBe("A: the picture's day is outside NOAA-20's record.");
     expect(compareNightNote({ ...freshNight(), source: 'snpp' }, DAYS)).toBe('');
   });

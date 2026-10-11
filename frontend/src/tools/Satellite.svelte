@@ -27,7 +27,7 @@
   import { setAnalysisPeriod } from '../lib/analysisSearch.svelte.js';
   import { temporalMapQuery } from '../lib/temporalMap.js';
   import { windowWords } from '../lib/timeline.js';
-  import { isMode, KINDS } from '../lib/geoTree.js';
+  import { kindControl } from '../lib/geoTree.js';
   import { stackOf } from '../lib/mediaViewer.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
@@ -96,7 +96,11 @@
   import AddedLayers from './satellite/AddedLayers.svelte';
   import MyLayers from './satellite/MyLayers.svelte';
   import NewLayerDialog from './satellite/NewLayerDialog.svelte';
-  import { createMyLayersState } from './satellite/state/myLayers.svelte.js';
+  import { personalLayers as myLayers, personalPlaceDeletion as placeDeletion } from '../lib/map/personalLayers.svelte.js';
+  import LayerGeometry from './satellite/LayerGeometry.svelte';
+  import PlaceDeleteDialog from './satellite/PlaceDeleteDialog.svelte';
+  import LayerExportDialog from './satellite/LayerExportDialog.svelte';
+  import MapViews from './satellite/MapViews.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
   import AddLayerDialog from './satellite/AddLayerDialog.svelte';
   import GeoConfirmedDialog from './satellite/GeoConfirmedDialog.svelte';
@@ -186,8 +190,6 @@
   // The case's saved work — both indexes, the panel's filter and the Locate
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
-  const myLayers = createMyLayersState({ api, layers: addedLayers,
-    caseId: () => caseState.current?.id, notify: toast, reloadCase });
   // The layers the analyst added themselves (a file they opened, a map they
   // follow) live in the one store every map reads (lib/map/addedLayersState),
   // because it owns the one network rule this feature has: a feed is read when
@@ -1141,7 +1143,7 @@
   // then the measure tools. Each mode answers whether it took it.
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
-    if (myLayers.addPoint(at)) return;
+    if (myLayers.armed) return;
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
@@ -1164,10 +1166,10 @@
    */
   const modes = {
     layer: {
-      isOn: () => myLayers.placing,
+      isOn: () => myLayers.armed,
       open: () => myLayers.start(),
       close: () => myLayers.stop(),
-      pointing: () => myLayers.placing,
+      pointing: () => myLayers.armed,
     },
     profile: {
       isOn: () => profile.on,
@@ -1250,14 +1252,7 @@
    */
   const savedFilters = $derived.by(() => {
     const folders = savedWork.folders;
-    const rows = [
-      {
-        label: 'Show',
-        value: savedWork.kind,
-        options: KINDS.map((entry) => ({ id: entry.id, label: entry.label })),
-        pick: (id) => (savedWork.kind = id),
-      },
-    ];
+    const rows = [kindControl(savedWork)];
     if (folders.length > 1) {
       rows.push({
         label: 'Folder',
@@ -1518,6 +1513,7 @@
       hoveredSavedId = null;
       revealSavedId = null;
       deleteTarget = null;
+      placeDeletion.cancel();
       notesItem = null;
       placeModal = null;
       detailsEntityId = null;
@@ -1529,20 +1525,27 @@
       sheetPoints = null;
       mediaView = null;
       footprint.cancel();
-      myLayers.close();
-      myLayers.cancelNew();
+      if (myLayers.editor && myLayers.editor.caseId !== id) { myLayers.close(); myLayers.cancelNew(); }
+      if (myLayers.exporting?.caseId !== id) myLayers.cancelDownload();
+      if (myLayers.maps?.caseId && myLayers.maps.caseId !== id) myLayers.closeMaps();
+      if (myLayers.legend?.caseId !== id) myLayers.setLegend(null);
     }
     const stopSaved = savedWork.load(id);
     // Reads what is on disk, once per reload however many maps ask. The only
     // thing that then reaches out is a subscription switched on and asked to be
     // re-read on open.
     addedLayers.load(id, caseState.rev);
+    untrack(() => {
+      if (myLayers.editor?.caseId === id) myLayers.refresh().catch((error) => toast(error.message, 'danger'));
+    });
     return () => stopSaved?.();
   });
 
   $effect(() => {
-    if (uiState.tool !== 'satellite' || panelTab !== 'layers' || capturesCollapsed) myLayers.stop();
+    if (uiState.tool === 'satellite' && (panelTab !== 'layers' || capturesCollapsed)) myLayers.stop();
   });
+
+  $effect(() => { if (uiState.tool === 'satellite' && myLayers.armed) untrack(() => closeOthers(modes, 'layer')); });
 
   function beginMarkers() {
     closeOthers(modes, 'layer');
@@ -1560,13 +1563,23 @@
   }
 
   function flyToLayerFeature(feature) {
-    if (feature.geometry?.type !== 'Point') return;
-    const [lon, lat] = feature.geometry.coordinates;
-    engine?.setView({ lat, lon }, Math.max(center.zoom, 15));
+    if (!engine || !feature.geometry) return;
+    const walk = (node) => typeof node?.[0] === 'number' ? [node] : (node ?? []).flatMap(walk);
+    const points = walk(feature.geometry.coordinates);
+    if (!points.length) return;
+    if (points.length === 1) engine.setView({ lon: points[0][0], lat: points[0][1] }, Math.max(center.zoom, 15));
+    else engine.fitBounds(points.reduce((bounds, [lon, lat]) => ({ west: Math.min(bounds.west, lon), east: Math.max(bounds.east, lon),
+      south: Math.min(bounds.south, lat), north: Math.max(bounds.north, lat) }),
+      { west: Infinity, east: -Infinity, south: Infinity, north: -Infinity }), { padding: 40 });
   }
 
   // The media index, read the first time that position is opened.
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
+  $effect(() => {
+    if (uiState.tool !== 'satellite' || !uiState.openMapView || !mapReady) return;
+    const name = uiState.openMapView;
+    untrack(() => { myLayers.openMaps(name); uiState.openMapView = null; });
+  });
 
   // A reloaded media index re-reads the stack being played: a file deleted or
   // unplaced elsewhere leaves it, and the viewer closes once nothing is left.
@@ -2347,6 +2360,7 @@
           activeKey={mediaView ? mediaView.items[mediaView.index]?.key : null}
           onopen={openSaved}
           onedit={editSaved}
+          ondelete={(row) => placeDeletion.open(row.id)}
           onrefresh={reloadCase}
           ontrace={startTrace}
           onmedia={openMedia}
@@ -2361,6 +2375,7 @@
            thousands of features, which is an order of magnitude past what a
            `div` each can carry. Drawn only while this tab is on screen, so a
            hidden map holds no copy of them; the features stay in the store. -->
+      <LayerGeometry engine={mapReady ? engine : null} controller={myLayers} active={uiState.tool === 'satellite'} />
       <AddedLayersOverlay
         engine={mapReady ? engine : null}
         caseId={caseState.current?.id ?? ''}
@@ -2370,6 +2385,8 @@
         onmenu={onMapContextMenu}
         interactive={!armedCursor}
         onedit={editMyLayer}
+        onremovefeature={(row, key) => myLayers.remove(key, row)}
+        ondeleteplace={placeDeletion.open}
       />
 
       {#if sheetPoints && sheetShown}
@@ -2808,16 +2825,20 @@
             <MapLayers rows={layerRows} bind:open={layersOpen} />
           {/if}
 
-          <MyLayers
+          {#if uiState.tool === 'satellite'}<MyLayers
             rows={addedLayers.rows}
             controller={myLayers}
+            places={savedWork.rows.filter((row) => row.kind === 'place')}
             onnew={() => myLayers.newLayer()}
             onedit={editMyLayer}
             onstart={beginMarkers}
             ontoggle={(row) => addedLayers.toggle(caseState.current?.id, row)}
-            ondone={() => myLayers.close()}
             onfly={flyToLayerFeature}
-          />
+            onremove={(row) => (removingLayer = row)}
+            onreorder={(names) => addedLayers.reorder(caseState.current?.id, names)}
+            oncategory={(row, name) => addedLayers.toggleCategory(caseState.current?.id, row, name)}
+            ondeleteplace={placeDeletion.open}
+          />{/if}
 
           <!-- …and under it, what the analyst put there themselves. Two
                sections rather than one list: the line is who chose the layer,
@@ -2876,7 +2897,7 @@
             locating={savedWork.locating}
             onopen={openSaved}
             onedit={editSaved}
-            ondelete={(row) => (deleteTarget = row)}
+            ondelete={(row) => row.kind === 'place' ? placeDeletion.open(row.id) : (deleteTarget = row)}
             onproof={sendToComposer}
             onaccept={acceptSaved}
             onbrowse={() => (savedSearchOpen = true)}
@@ -2890,7 +2911,7 @@
   </div>
 </div>
 
-{#if myLayers.dialog}
+{#if myLayers.dialog && uiState.tool === 'satellite'}
   <NewLayerDialog
     source={myLayers.dialog.source}
     busy={addedLayers.saving}
@@ -2937,12 +2958,24 @@
     tone="default"
     busy={addedLayers.busy === removingLayer.name}
     onconfirm={async () => {
-      await addedLayers.remove(caseState.current?.id, removingLayer);
-      removingLayer = null;
+      const owner = caseState.current?.id;
+      const row = removingLayer;
+      const result = await addedLayers.remove(owner, row);
+      if (result) {
+        removingLayer = null;
+        deletedToast(owner, result, row.title);
+      }
     }}
     oncancel={() => (removingLayer = null)}
   />
 {/if}
+
+{#if uiState.tool === 'satellite'}
+  <PlaceDeleteDialog controller={placeDeletion} />
+  {#if myLayers.exporting}<LayerExportDialog target={myLayers.exporting} onclose={() => myLayers.cancelDownload()} />{/if}
+{/if}
+<MapViews tool="satellite" {engine} provider={providerId} rows={layerRows} scope={addedLayers.scope('satellite')}
+  onprovider={(id) => { providerId = id; }} />
 
 <!-- delete confirm: a capture drops its image file, a place or a comparison its entity -->
 {#if deleteTarget}
@@ -2986,7 +3019,7 @@
     onclose={() => (savedSearchOpen = false)}
     onopen={openSaved}
     onedit={editSaved}
-    ondelete={(row) => (deleteTarget = row)}
+    ondelete={(row) => row.kind === 'place' ? placeDeletion.open(row.id) : (deleteTarget = row)}
     onproof={sendToComposer}
     onaccept={acceptSaved}
   />

@@ -308,3 +308,51 @@ def test_the_route_says_what_could_not_be_read_and_tries_again_when_told(client,
     again = client.get("/api/horizon/peaks", params={**params, "retry": "true"}).json()
     assert again["failed"] == 0 and again["pending"] == body["failed"]
     assert peaks.wait_idle()
+
+
+# -- the raw tile, for the buildings source -----------------------------------------
+
+def test_a_vector_tile_comes_back_with_the_build_that_served_it(tmp_workspace, monkeypatch):
+    body = _tile(12, 2100, 1400, [_summit("Eiger", 46.5776, 8.0053, 3967)])
+
+    def get(url):
+        if url == peaks.TILEJSON:
+            return 200, json.dumps({"tiles": [TEMPLATE]}).encode()
+        return 200, body
+
+    monkeypatch.setattr(peaks, "_get", get)
+    assert peaks.fetch_vector_tile(12, 2100, 1400) == (body, TEMPLATE)
+
+
+def test_a_tile_the_build_lacks_is_none_and_a_newer_build_is_tried(tmp_workspace, monkeypatch):
+    newer = TEMPLATE.replace("20261004_test", "20261011_test")
+    body = _tile(12, 2100, 1400, [])
+    monkeypatch.setattr(peaks, "TEMPLATE_FRESH", 0.0)
+
+    def get(url):
+        if url == peaks.TILEJSON:
+            return 200, json.dumps({"tiles": [newer if peaks._template else TEMPLATE]}).encode()
+        if "20261004_test" in url:
+            return 404, b""
+        return 200, body
+
+    monkeypatch.setattr(peaks, "_get", get)
+    assert peaks.fetch_vector_tile(12, 2100, 1400) == (body, newer)
+
+
+def test_a_tile_missing_from_every_build_is_none(tmp_workspace, monkeypatch):
+    _source(monkeypatch, [], tile_status=404)
+    assert peaks.fetch_vector_tile(12, 2100, 1400) == (None, TEMPLATE)
+
+
+def test_another_status_on_a_vector_tile_is_unavailable(tmp_workspace, monkeypatch):
+    _source(monkeypatch, [], tile_status=500)
+    with pytest.raises(peaks.PeaksUnavailable, match="500"):
+        peaks.fetch_vector_tile(12, 2100, 1400)
+
+
+def test_a_build_names_its_day_from_its_tile_address():
+    assert peaks.build_date("https://tiles.openfreemap.org/planet/20261004_113936_pt/{z}/{x}/{y}.pbf") == "2026-10-04"
+    # a build address that is not the weekly one says nothing
+    assert peaks.build_date(TEMPLATE) == ""
+    assert peaks.build_date("https://tiles.openfreemap.org/planet/20261340_113936_pt/{z}/{x}/{y}.pbf") == ""

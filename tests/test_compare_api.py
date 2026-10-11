@@ -266,6 +266,29 @@ def _pair(a: dict, b: dict, difference: bool = True, method: str = "colour") -> 
             _side("osm", overlays=["nightlights"], nightlights={"source": "noaa20", "day": "2026-02-01"}),
             "brightness",
         ),
+        # The layers laid over either side are not read: the browser reads the
+        # picture without them, so a layer may stay on A alone.
+        (
+            _side("esri-wayback", wayback_release=145, overlays=["roads"]),
+            _side("esri-wayback", wayback_release=146),
+            "colour",
+        ),
+        (
+            _side("esri-wayback", wayback_release=145, overlays=["firms"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2024-01-01", "last": ""}),
+            _side("esri-wayback", wayback_release=146, overlays=["firms"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2025-01-01", "last": ""}),
+            "colour",
+        ),
+        (
+            _side("osm", overlays=["firms", "nightlights"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2026-01-01", "last": ""},
+                  nightlights={"source": "noaa20", "day": "2026-01-01"}),
+            _side("osm", overlays=["firms", "nightlights"],
+                  firms={"sensor": "viirs", "window": "dates", "first": "2026-02-01", "last": ""},
+                  nightlights={"source": "noaa20", "day": "2026-02-01"}),
+            "brightness",
+        ),
     ],
 )
 def test_change_assist_accepts_comparable_pairs(client, a, b, method):
@@ -280,31 +303,6 @@ def test_change_assist_accepts_comparable_pairs(client, a, b, method):
     [
         (_side("esri-world-imagery"), _side("osm"), "colour", "reads Sentinel-2"),
         (_side("esri-wayback", wayback_release=146), _side("esri-wayback", wayback_release=146), "colour", "same picture"),
-        (
-            _side("esri-wayback", wayback_release=145, overlays=["roads"]),
-            _side("esri-wayback", wayback_release=146),
-            "colour",
-            "Match the layers",
-        ),
-        (
-            # one list on both sides, but the fires follow each side's own day
-            _side("esri-wayback", wayback_release=145, overlays=["firms"],
-                  firms={"sensor": "viirs", "window": "dates", "first": "2024-01-01", "last": ""}),
-            _side("esri-wayback", wayback_release=146, overlays=["firms"],
-                  firms={"sensor": "viirs", "window": "dates", "first": "2025-01-01", "last": ""}),
-            "colour",
-            "Active fires show different days on A and B. Turn them off",
-        ),
-        (
-            _side("osm", overlays=["firms", "nightlights"],
-                  firms={"sensor": "viirs", "window": "dates", "first": "2026-01-01", "last": ""},
-                  nightlights={"source": "noaa20", "day": "2026-01-01"}),
-            _side("osm", overlays=["firms", "nightlights"],
-                  firms={"sensor": "viirs", "window": "dates", "first": "2026-02-01", "last": ""},
-                  nightlights={"source": "noaa20", "day": "2026-02-01"}),
-            "brightness",
-            "Turn them off to compare night lights",
-        ),
         (
             _side("sentinel2", sentinel={"layer": "TRUE_COLOR", "date": "2026-05-01", "maxcc": 100}),
             _side("sentinel2", sentinel={"layer": "SWIR", "date": "2026-06-01", "maxcc": 100}),

@@ -119,6 +119,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .search/      # saved Grid Search state
     .layers/      # added map layers: spec, snapshot, icons
       .cache/     #   parsed GeoJSON, rebuilt from the snapshot
+    .map-views/   # saved cameras, layer references and legends
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
 
@@ -146,7 +147,7 @@ and the work folder. It no longer holds the graph, so the case switcher can iden
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
 `proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.horizon/`, `.analysis/`,
-`.layers/` and `notes/` are the source of truth for their own content.
+`.layers/`, `.map-views/` and `notes/` are the source of truth for their own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
 `settings.json`, `templates.json`, `signature.png` and the optional

@@ -1,11 +1,15 @@
 /**
- * Compare's layers: one list over both sides, and fire and night layers that read
- * each side's own date.
+ * Compare's layers: one list, a switcher that says which map draws it, and fire
+ * and night layers that read each side's date.
  *
- * Each side used to keep a list of its own, set in a sheet that hid both maps. A
- * layer on one side only reads as a change between them, though, so a pair now
- * shares one list, and what differs between A and B is the day: the fires and the
- * night lights follow each side's picture, or the days picked for each.
+ * Each side used to keep a list of its own, set in a sheet that hid both maps.
+ * The menu now has one list and a switcher over it, **A | B | AB**, on AB by
+ * default. Difference reads the picture without them, so either way is fair to
+ * it (`snapshot`'s `keep` in `facade.js`). The switcher
+ * moves the whole list: on B, every layer that is on is drawn on B and none on A,
+ * the case's added layers included. What differs between A and B by default is
+ * the day: the fires and the night lights follow each side's picture, or the days
+ * picked for each.
  *
  * A saved comparison keeps the two sides as it always did (`overlays`, `firms`,
  * `nightlights` on each), with the days each side was showing, so it reopens as
@@ -25,6 +29,35 @@ import {
 } from './nightlights.js';
 
 const SIDES = ['a', 'b'];
+
+/** Which map draws the list, both by default. */
+export const LAYER_SIDES = Object.freeze([
+  { id: 'a', label: 'A', title: 'Draw the layers on A only' },
+  { id: 'b', label: 'B', title: 'Draw the layers on B only' },
+  { id: 'ab', label: 'AB', title: 'Draw the layers on both sides' },
+]);
+
+/** What a new pair starts with, as Detect does: borders and place names. */
+export const DEFAULT_LAYERS = Object.freeze(['boundaries', 'placenames']);
+
+/** Whether the switcher has a side draw the list. */
+export const reaches = (side, which) => side === 'ab' || side === which;
+
+/** The list as each side draws it: all of it where the switcher reaches, nothing elsewhere. */
+export function sideLayers(ids, side) {
+  return { a: reaches(side, 'a') ? [...ids] : [], b: reaches(side, 'b') ? [...ids] : [] };
+}
+
+/** A layer switched from the menu: in the list or out of it, wherever the list is drawn. */
+export function toggledLayer(ids, id) {
+  return ids.includes(id) ? ids.filter((entry) => entry !== id) : knownLayers([...ids, id]);
+}
+
+/** A new pair's list. */
+export const freshLayers = () => ({ ids: [...DEFAULT_LAYERS], side: 'ab' });
+
+/** The switcher after A and B trade places, so the list stays on the picture it was on. */
+export const tradedSide = (side) => (side === 'a' ? 'b' : side === 'b' ? 'a' : side);
 const letter = (which) => which.toUpperCase();
 const pickedDay = (day = '') => ({ window: DATED, first: day, last: '' });
 
@@ -52,15 +85,25 @@ export function sideNight(night, which, pictureDay = '') {
 }
 
 /**
- * The layers of a saved comparison or a handed-over pair, read back.
- *
- * A session saved while each side had a list of its own may hold a layer on one
- * side only; it comes back on both. Fire and night days come back as each side
- * held them, picked rather than followed, so the pair shows what was saved.
+ * The list and the switcher of a saved comparison or a handed-over pair. A pair
+ * that says nothing of layers (a handoff) starts as a new one does. A side alone
+ * holding layers sets the switcher on it. Two different lists, saved before the
+ * switcher, are both drawn on both sides, so nothing saved goes missing. Fire and
+ * night days come back as each side held them, picked rather than followed, so
+ * the pair shows what was saved.
  */
 export function restoredLayers(left = {}, right = {}) {
-  const layers = knownLayers([...(left?.overlays ?? []), ...(right?.overlays ?? [])]);
-  const fires = layers.includes('firms')
+  const fresh = !Array.isArray(left?.overlays) && !Array.isArray(right?.overlays);
+  const layers = { a: knownLayers(left?.overlays), b: knownLayers(right?.overlays) };
+  const either = (id) => layers.a.includes(id) || layers.b.includes(id);
+  const list = fresh
+    ? freshLayers()
+    : layers.a.length && !layers.b.length
+      ? { ids: layers.a, side: 'a' }
+      : layers.b.length && !layers.a.length
+        ? { ids: layers.b, side: 'b' }
+        : { ids: knownLayers([...layers.a, ...layers.b]), side: 'ab' };
+  const fires = either('firms')
     ? {
         sensor: left?.firms?.sensor || right?.firms?.sensor || 'viirs',
         follow: false,
@@ -68,7 +111,7 @@ export function restoredLayers(left = {}, right = {}) {
         b: firesDays(right?.firms),
       }
     : freshFires();
-  const night = layers.includes('nightlights')
+  const night = either('nightlights')
     ? {
         source: left?.nightlights?.source || right?.nightlights?.source || 'noaa20',
         follow: false,
@@ -76,15 +119,15 @@ export function restoredLayers(left = {}, right = {}) {
         b: right?.nightlights?.day || lastNight(),
       }
     : freshNight();
-  return { layers, fires, night };
+  return { ...list, fires, night };
 }
 
 function firesDays(firms = {}) {
   return { window: firms?.window || DATED, first: firms?.first || '', last: firms?.last || '' };
 }
 
-/** A and B traded places: the days picked for each go with them. */
-export function swappedDays(choice) {
+/** A and B traded places: the days each side held go with it. */
+export function tradedSides(choice) {
   return { ...choice, a: choice.b, b: choice.a };
 }
 
@@ -170,19 +213,22 @@ export function compareNightControls(night, set, pictureDays) {
   ];
 }
 
-/** The fire layer's line in the menu: the instrument, then what each side draws. */
+/**
+ * What the fire row shows on its right: the instrument and the day, once when
+ * both sides draw the same, else each side's, which is what the row has room for.
+ */
 export function compareFireWords(fires, sensors, pictureDays) {
   const name = sensors.find((entry) => entry.id === fires.sensor)?.label ?? fires.sensor;
-  const side = (which) => firesSummary({ ...sideFires(fires, which, pictureDays[which]), sensor: '' });
-  return `${name.replace(/\s*\(.*\)\s*$/, '')} · A ${side('a')} · B ${side('b')}`;
+  const [a, b] = SIDES.map((which) => firesSummary({ ...sideFires(fires, which, pictureDays[which]), sensor: '' }));
+  return a === b ? `${name.replace(/\s*\(.*\)\s*$/, '')} · ${a}` : `A ${a} · B ${b}`;
 }
 
-/** The night layer's line in the menu. */
+/** What the night row shows on its right, by the same rule. */
 export function compareNightWords(night, pictureDays) {
   if (night.source === COMPOSITE.id) return nightSummary({ source: night.source });
   const label = NIGHT_SENSORS.find((entry) => entry.id === night.source)?.label ?? night.source;
-  const side = (which) => sideNight(night, which, pictureDays[which]).day || 'pick a night';
-  return `${label} · A ${side('a')} · B ${side('b')}`;
+  const [a, b] = SIDES.map((which) => sideNight(night, which, pictureDays[which]).day || 'pick a night');
+  return a === b ? `${label} · ${a}` : `A ${a} · B ${b}`;
 }
 
 /** Why the fire layer draws nothing on a side, or how its colours read; '' when there is nothing to say. */

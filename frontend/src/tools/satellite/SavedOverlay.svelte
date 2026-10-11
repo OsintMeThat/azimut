@@ -23,6 +23,7 @@
     activeKey = null,
     onopen,
     onedit,
+    ondelete,
     onrefresh,
     ontrace,
     onmedia,
@@ -88,6 +89,7 @@
         onopen: close(onopen),
         // a map that cannot edit a saved item (Horizon's) offers no Edit
         onedit: onedit && close(onedit),
+        ondelete: ondelete && close(ondelete),
         // tracing takes over the map, so the card that armed it gets out of
         // the way first — the same rule as every other act here
         ontrace: ontrace && close(ontrace),

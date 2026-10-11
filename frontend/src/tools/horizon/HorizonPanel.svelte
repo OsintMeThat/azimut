@@ -268,12 +268,6 @@
                 title={locked ? LOCKED_TITLE : undefined}
                 onclick={() => view.standAt(view.pointed)}>Stand here</button
               >
-              <button
-                type="button"
-                class="btn btn-sm"
-                title="Make it the marked point, which can then be pinned on the photo"
-                onclick={() => view.mark(view.pointed)}>Mark it</button
-              >
               <button type="button" class="btn btn-ghost btn-sm" onclick={() => view.point(null)}>Clear</button>
             </span>
           {/if}

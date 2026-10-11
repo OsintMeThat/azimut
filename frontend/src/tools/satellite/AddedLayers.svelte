@@ -51,6 +51,11 @@
   let {
     /** The rows as the backend returned them. */
     rows = [],
+    heading = 'Added layers',
+    headingIcon = 'compass',
+    addLabel = 'Add a layer',
+    onedit = null,
+    ondownload = null,
     /** The layer an act is running on, so its buttons can say so. */
     busy = '',
     /** The head's Refresh is going through every followed layer. */
@@ -191,8 +196,8 @@
 <div class="head">
   <button type="button" class="sub-head" onclick={() => (open = !open)}>
     <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
-    <Icon name="compass" size={13} />
-    <span>Added layers</span>
+    <Icon name={headingIcon} size={13} />
+    <span>{heading}</span>
     <span class="count">{live}</span>
   </button>
   {#if anyFollowed}
@@ -287,6 +292,13 @@
               <Icon name="copy" size={13} />
             </button>
           {/if}
+          {#if onedit}
+            <button type="button" class="icon-act" aria-label={`Edit ${row.title}`}
+              title="Edit this layer" onclick={() => onedit(row)}>
+              <Icon name="edit" size={13} />
+            </button>
+          {/if}
+          {#if ondownload}<button class="icon-act" aria-label={`Download ${row.title}`} title="Download layer" onclick={() => ondownload(row)}><Icon name="download" size={13} /></button>{/if}
           <button
             type="button"
             class="icon-act danger"
@@ -311,6 +323,8 @@
               rel="noreferrer"
               title="Open this map at its source"
             >{sourceLabel(row)} <Icon name="external" size={9} /></a>
+          {:else if row.editable}
+            <span>{row.origin ? `Copy of ${row.origin.source.name || row.origin.source.url}` : 'Personal layer'}</span>
           {:else}
             <span>{sourceLabel(row)}</span>
           {/if}
@@ -431,7 +445,7 @@
   </ul>
   <button type="button" class="add" onclick={() => onadd?.()}>
     <Icon name="plus" size={12} />
-    <span>Add a layer</span>
+    <span>{addLabel}</span>
   </button>
 {/if}
 

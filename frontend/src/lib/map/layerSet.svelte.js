@@ -62,34 +62,33 @@ export function createLayerSet({
   const nightAsked = () => onNight(night, pictureDay());
   const usable = (id) => imagery() || !layerInfo(id)?.imageryOnly;
 
-  function fireWords() {
-    const words = firmsSummary(firesAsked(), fireKey.sensors);
-    if (fires.window !== PICTURE) return words;
-    return pictureDay() ? `${words}, the picture's day` : `${words}, the picture has no date`;
-  }
-
-  function nightWords() {
-    const words = nightSummary(nightAsked());
-    if (!night.follow || night.source === COMPOSITE.id) return words;
-    return pictureDay() ? `${words}, the picture's night` : `${words}, the picture has no date`;
-  }
-
   function nightNote() {
     if (night.source === COMPOSITE.id || nightAskable(nightAsked())) return '';
     const sensor = NIGHT_SENSORS.find((entry) => entry.id === night.source)?.label ?? 'this sensor';
     return night.follow ? `The picture's day is outside ${sensor}'s record.` : 'Pick a night inside this sensor’s record.';
   }
 
-  function fireRow() {
+  /**
+   * The fire row as the Map draws it: what it shows on the right, its questions
+   * under it once it is on. A switch that cannot be pressed says why and where to
+   * go, on the row itself rather than only on a greyed-out eye nobody hovers.
+   */
+  function fireRow(shown) {
     const key = keyState(fireKey);
-    if (!key.usable) return { disabled: true, lock: { text: key.detail, action: key.action, run: onsettings } };
+    if (!key.usable) {
+      return {
+        disabled: true,
+        detail: key.detail,
+        title: key.title,
+        actions: [{ label: key.action, quiet: true, run: onsettings }],
+      };
+    }
     return {
-      summary: fireWords(),
-      controls: fireControls(fires, fireKey.sensors, (patch) => Object.assign(fires, patch), {
-        follow,
-        pictureDay: pictureDay(),
-      }),
-      note: firmsNote(firesAsked(), fireKey.paused),
+      detail: firmsSummary(firesAsked(), fireKey.sensors),
+      controls: shown
+        ? fireControls(fires, fireKey.sensors, (patch) => Object.assign(fires, patch), { follow, pictureDay: pictureDay() })
+        : null,
+      note: shown ? firmsNote(firesAsked(), fireKey.paused) : '',
     };
   }
 
@@ -97,9 +96,10 @@ export function createLayerSet({
     on = on.includes(id) ? on.filter((entry) => entry !== id) : knownLayers([...on, id]);
   }
 
-  function nightRow() {
+  function nightRow(shown) {
+    if (!shown) return {};
     return {
-      summary: nightWords(),
+      detail: nightSummary(nightAsked()),
       controls: nightControls(night, (patch) => Object.assign(night, patch), { follow, pictureDay: pictureDay() }),
       note: nightNote(),
     };
@@ -143,7 +143,7 @@ export function createLayerSet({
     },
 
     /**
-     * The chips the menu lists, one per catalogue layer. `patch` merges a tool's
+     * The rows the menu lists, one per catalogue layer. `patch` merges a tool's
      * own facts into a row by id: how many saved items there are, say.
      */
     rows(patch = {}) {
@@ -157,8 +157,8 @@ export function createLayerSet({
           toggle: () => toggle(layer.id),
         };
         if (!usable(layer.id)) Object.assign(row, { disabled: true, title: 'Only useful over satellite imagery' });
-        if (layer.id === 'firms') Object.assign(row, fireRow());
-        if (layer.id === 'nightlights') Object.assign(row, nightRow());
+        if (layer.id === 'firms') Object.assign(row, fireRow(row.on));
+        if (layer.id === 'nightlights') Object.assign(row, nightRow(row.on));
         return { ...row, ...patch[layer.id] };
       });
     },

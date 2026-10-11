@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   colourExpression,
+  badgeImage,
   createAddedLayer,
   featureAt,
   featureExtent,
@@ -13,13 +14,85 @@ import {
   visibilityFilter,
 } from './addedLayer.js';
 import { PALETTE } from './addedLayers.js';
+import symbols from './layerSymbols.json';
+import { paths } from '../../components/Icon.svelte';
 
 describe('personal marker symbols', () => {
+  it('draws every round pictogram using its catalogue path, including compound symbol names', () => {
+    const drawn = [];
+    vi.stubGlobal('Path2D', class { constructor(path) { drawn.push(path); } });
+    const context = { clearRect: vi.fn(), beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(),
+      stroke: vi.fn(), setTransform: vi.fn(), getImageData: vi.fn(() => ({ width: 64 })) };
+    try {
+      for (const symbol of symbols.filter((entry) => entry.id.startsWith('badge-'))) {
+        expect(badgeImage(symbol.id, '#009e73', () => ({ getContext: () => context }))).toEqual({ width: 64 });
+        expect(drawn.at(-1)).toBe(paths[symbol.icon]);
+      }
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('uses the chosen app symbol on a point and keeps shapes on their own symbols', () => {
     expect(markerIcon({ type: 'Point' }, 'star')).toBe(iconName('star'));
     expect(markerIcon({ type: 'Point' }, 'pin')).toBe(iconName('point'));
     expect(markerIcon({ type: 'Polygon' }, 'star')).toBe(iconName('area'));
     expect(markerIcon({ type: 'Point' }, 'unknown')).toBe(iconName('point'));
+  });
+
+  it('registers a round icon in its colour and gives personal points a filtered click target', async () => {
+    const engine = stubEngine();
+    const buildBadge = vi.fn(() => ({ width: 64, height: 64, data: new Uint8Array(64 * 64 * 4) }));
+    const layer = createAddedLayer(engine, { editable: true, buildBadge });
+    await layer.set({ type: 'FeatureCollection', features: [{ type: 'Feature',
+      geometry: { type: 'Point', coordinates: [2, 48] },
+      properties: { index: 0, category: 'Reviewed', colour: '#009e73', symbol: 'badge-building' } }] });
+    expect(buildBadge).toHaveBeenCalledWith('badge-building', '#009e73');
+    const source = [...engine.map.sources.values()][0].data.features[0];
+    expect(source.properties.$badge).toBe(true);
+    expect(source.properties.$own).toContain('badge-building-009e73');
+    const hit = [...engine.map.layers.values()].find((entry) => entry.id.endsWith('-hit-own'));
+    expect(hit.paint['circle-radius']).toEqual(['max', 10, ['*', ['case', ['has', '$native'], 22, 13], ['coalesce', ['get', 'icon_scale'], 1]]]);
+    layer.filter(['Reviewed']);
+    expect(engine.map.getLayer(hit.id).filter).toContainEqual(['!', ['in', ['get', 'category'], ['literal', ['Reviewed']]]]);
+    expect([...engine.map.layers.values()].find((entry) => entry.id.endsWith('-mark')).layout['icon-allow-overlap']).toBe(true);
+  });
+
+  it('opens only the upper layer when two personal layers share a point', async () => {
+    const engine = stubEngine();
+    const first = stubCard(), second = stubCard();
+    const a = createAddedLayer(engine, { ...first.opts, editable: true });
+    const b = createAddedLayer(engine, { ...second.opts, editable: true });
+    const point = { type: 'Feature', geometry: { type: 'Point', coordinates: [2, 48] },
+      properties: { index: 0, name: 'Shared gate' } };
+    await a.set({ type: 'FeatureCollection', features: [point] });
+    await b.set({ type: 'FeatureCollection', features: [point] });
+    const ids = [...engine.map.layers.keys()].filter((id) => id.endsWith('-hit'));
+    let top = ids[1];
+    engine.map.queryRenderedFeatures = vi.fn(() => [{ ...point, layer: { id: top } }]);
+    const click = () => {
+      for (const [type, , handler] of engine.map.handlers) if (type === 'click') {
+        handler({ features: [point], point: { x: 10, y: 10 }, lngLat: { lat: 48, lng: 2 } });
+      }
+    };
+    click();
+    expect(first.card).not.toHaveBeenCalled(); expect(second.card).toHaveBeenCalledOnce();
+    top = ids[0]; click();
+    expect(first.card).toHaveBeenCalledOnce(); expect(second.card).toHaveBeenCalledOnce();
+    a.destroy(); b.destroy();
+  });
+
+  it('puts plain pins and round markers in one ordered bitmap layer', async () => {
+    const engine = stubEngine(), pixels = { width: 64, height: 64, data: new Uint8Array(64 * 64 * 4) };
+    const buildPersonal = vi.fn(() => pixels), buildBadge = vi.fn(() => pixels);
+    const layer = createAddedLayer(engine, { editable: true, buildPersonal, buildBadge });
+    await layer.set({ type: 'FeatureCollection', features: ['badge-house', 'pin'].map((symbol, index) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [2, 48] }, properties: { index, symbol, colour: '#0072b2' },
+    })) });
+    const features = [...engine.map.sources.values()][0].data.features;
+    expect(features.every((feature) => feature.properties.$own)).toBe(true);
+    expect(features[0].properties.$badge).toBe(true); expect(features[1].properties.$native).toBe(true);
+    expect(buildPersonal).toHaveBeenCalledWith('pin', '#0072b2');
+    const own = [...engine.map.layers.values()].find((entry) => entry.id.endsWith('-own'));
+    expect(own.layout['symbol-sort-key']).toEqual(['get', 'index']);
+    expect(own.layout['icon-anchor']).toEqual(['case', ['has', '$native'], 'bottom', 'center']);
   });
 });
 

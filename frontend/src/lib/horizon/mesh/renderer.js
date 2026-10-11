@@ -39,6 +39,7 @@
  */
 import { basis, focal, principal } from '../camera.js';
 import { MAP_LIGHT } from '../sky.js';
+import { CHUNK_Z, chunkSpan, runOver } from './buildingMesh.js';
 
 const GROUND_CODES = { relief: 0, imagery: 1, plain: 2 };
 const NEAR = 0.5;
@@ -98,10 +99,12 @@ const GROUND_VS = `#version 300 es
 in vec3 pos; in vec3 nrm; in vec2 uv;
 uniform vec3 eye; uniform vec3 fwd; uniform vec3 rgt; uniform vec3 upv;
 uniform vec2 focalNdc; uniform vec2 shiftNdc; uniform float near; uniform float far;
+// the ground and its picture moved together, metres east and north, to meet the buildings
+uniform vec2 groundShift;
 out vec3 vPos; out vec3 vN; out vec2 vUv;
 void main() {
-  vPos = pos; vN = nrm; vUv = uv;
-  vec3 p = pos - eye;
+  vPos = pos + vec3(groundShift, 0.0); vN = nrm; vUv = uv;
+  vec3 p = vPos - eye;
   float cz = dot(p, fwd);
   // clipped against a true near plane; the depth itself is written per pixel
   gl_Position = vec4(dot(p, rgt) * focalNdc.x + shiftNdc.x * cz, dot(p, upv) * focalNdc.y + shiftNdc.y * cz,
@@ -187,6 +190,92 @@ void main() {
   colour = vec4(mix(c, air, fog), 1.0);
 }`;
 
+// --- 1b. the buildings: footprints pushed up (buildingMesh.js), drawn over each ground
+// tile in that tile's own picture, so a roof shows what the satellite saw of it ---
+const BUILD_VS = `#version 300 es
+in vec3 pos; in vec2 merc; in vec2 cen; in float above; in float kind;
+uniform vec3 eye; uniform vec3 fwd; uniform vec3 rgt; uniform vec3 upv;
+uniform vec2 focalNdc; uniform vec2 shiftNdc; uniform float near; uniform float far;
+out vec3 vPos; out vec2 vMerc; out vec2 vCen; out float vAbove; flat out int vKind;
+void main() {
+  vPos = pos; vMerc = merc; vCen = cen; vAbove = above; vKind = int(kind + 0.5);
+  vec3 p = pos - eye;
+  float cz = dot(p, fwd);
+  gl_Position = vec4(dot(p, rgt) * focalNdc.x + shiftNdc.x * cz, dot(p, upv) * focalNdc.y + shiftNdc.y * cz,
+                     (cz * (far + near) - 2.0 * far * near) / (far - near), cz);
+}`;
+
+const BUILD_FS = `#version 300 es
+precision highp float;
+precision highp int;
+${COMMON}
+in vec3 vPos; in vec2 vMerc; in vec2 vCen; in float vAbove; flat in int vKind;
+uniform sampler2D img; uniform int hasImage; uniform int ground;
+// the ground tile drawn now, in the building tile's Mercator metres (x east, y south)
+uniform vec4 bounds;
+uniform vec3 eye; uniform vec3 fwd; uniform float near; uniform float far;
+uniform float nearCut; uniform float visibility;
+uniform vec3 light; uniform vec3 tint; uniform float strength; uniform float ambient; uniform float keep;
+uniform int shadows; uniform sampler2D light0; uniform sampler2D light1; uniform sampler2D light2; uniform vec3 reach;
+uniform int distanceMode;
+// roofs in their photo or one tint; doubtful heights tinted; where the picture is looked up
+// for a roof: moved with the ground, and by a lean for each metre of height
+uniform int roofPhoto; uniform int showKinds; uniform vec2 imgShift; uniform vec2 imgLean;
+out vec4 colour;
+
+vec2 gridUv(vec2 xy, float r) { return vec2((xy.x + r) / (2.0 * r), (r - xy.y) / (2.0 * r)); }
+float shadeAt(vec2 xy) {
+  if (shadows == 0) return 1.0;
+  float m = max(abs(xy.x), abs(xy.y));
+  if (m < reach.x * 0.97) return texture(light0, gridUv(xy, reach.x)).r;
+  if (m < reach.y * 0.97) return texture(light1, gridUv(xy, reach.y)).r;
+  if (m < reach.z * 0.97) return texture(light2, gridUv(xy, reach.z)).r;
+  return 1.0;
+}
+vec3 skyOn(float shade) {
+  return ambient * mix(keep, 1.0, shade) * mix(vec3(0.75, 0.82, 1.0), vec3(1.0), skyLight);
+}
+vec2 tileUv(vec2 m) { return (m - bounds.xy) / (bounds.zw - bounds.xy); }
+
+void main() {
+  // each ground tile draws the part of a building that stands over it
+  if (vMerc.x < bounds.x || vMerc.x >= bounds.z || vMerc.y < bounds.y || vMerc.y >= bounds.w) discard;
+  vec3 p = vPos - eye;
+  float d = length(p);
+  if (d < nearCut) discard;
+  gl_FragDepth = log(max(dot(p, fwd), near) / near) / log(far / near);
+  if (distanceMode == 1) { colour = vec4(d, 0.0, 0.0, 1.0); return; }
+  vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+  if (dot(n, -p) < 0.0) n = -n;
+  bool roof = n.z > 0.6;
+  // a wall's shade is read just outside it, on the side it faces
+  float shade = shadeAt(vPos.xy + (roof ? vec2(0.0) : n.xy * 4.0));
+  float facing = max(dot(n, light), 0.0);
+  bool pictured = ground == 1 && hasImage == 1;
+  vec2 moved = imgShift + imgLean * max(vAbove, 0.0);
+  // the roof seen from above, averaged over about a house: what the walls are tinted with
+  float texel = (bounds.z - bounds.x) / float(textureSize(img, 0).x);
+  vec3 body = pictured ? textureLod(img, tileUv(vCen + moved), clamp(log2(10.0 / texel), 0.0, 10.0)).rgb : vec3(0.70, 0.66, 0.58);
+  vec3 c;
+  if (roof) {
+    vec3 pic = pictured && roofPhoto == 1 ? texture(img, tileUv(vMerc + moved)).rgb : mix(body, vec3(0.74, 0.68, 0.58), 0.25);
+    float sun = strength * (0.28 + 0.28 * facing) * shade;
+    c = pic * (0.58 / 0.22 * skyOn(shade) + sun * tint);
+  } else {
+    vec3 stone = mix(body, vec3(0.74, 0.68, 0.58), 0.4);
+    // a height that is only a range of storeys (amber), or nobody's (red)
+    if (showKinds == 1 && vKind == 2) stone = mix(stone, vec3(0.98, 0.70, 0.20), 0.7);
+    if (showKinds == 1 && vKind == 3) stone = mix(stone, vec3(0.92, 0.25, 0.22), 0.75);
+    float ao = mix(0.62, 1.0, clamp(vAbove / 4.0, 0.0, 1.0));
+    c = stone * ao * (0.45 / 0.22 * skyOn(shade) + 0.85 * strength * facing * shade * tint);
+  }
+  if (ground == 2) c = mix(vec3(0.16, 0.18, 0.21), vec3(0.32, 0.34, 0.37), roof ? 1.0 : 0.6 + 0.4 * facing);
+  float veil = 1.0 - exp(-d / 60000.0);
+  c = mix(c, skyColour(0.0), veil * 0.75 * mix(0.35, 1.0, skyLight));
+  float fog = visibility > 0.0 ? 1.0 - exp(-3.0 * d / visibility) : 0.0;
+  colour = vec4(mix(c, ground == 2 ? plainSky(0.0) : skyColour(0.0), fog), 1.0);
+}`;
+
 // --- 2. the light on the grids ---
 const LIGHT_FS = `#version 300 es
 precision highp float;
@@ -223,7 +312,9 @@ void main() {
   vec3 p = vec3(-ownReach + (float(cr.x) + 0.5) * cell, ownReach - (float(cr.y) + 0.5) * cell, texelFetch(own, cr, 0).r);
   if (light.z < -0.01) { color = vec4(0.0); return; }
   float least = 1.0;
-  float t = 3.0 * cell;
+  // the finest grid starts one cell out, so a house's short shadow is caught; the others
+  // three, clear of their own slope
+  float t = (ownReach < 10000.0 ? 1.0 : 3.0) * cell;
   for (int k = 0; k < 400; k++) {
     vec3 s = p + light * t;
     if (s.z > gridTop) break;
@@ -391,7 +482,70 @@ export function createMeshRenderer(canvas) {
   gl.bindAttribLocation(groundPass.program, 1, 'nrm');
   gl.bindAttribLocation(groundPass.program, 2, 'uv');
   gl.linkProgram(groundPass.program);
+  const buildPass = compile(BUILD_VS, BUILD_FS, 'buildings');
+  ['pos', 'merc', 'cen', 'above', 'kind'].forEach((name, i) => gl.bindAttribLocation(buildPass.program, i, name));
+  gl.linkProgram(buildPass.program);
   gl.bindVertexArray(null);
+
+  // ---------- buildings ----------
+  /** key → a built tile of buildings on the GPU: `{ x, y, vao, buffers, cells, cellStart, count }` */
+  const chunks = new Map();
+  const STRIDE_BYTES = 9 * 4;
+
+  /** A tile of buildings built by buildingMesh.js `buildChunk`; replaces one under the same key. */
+  function addBuildingChunk(key, { x, y, vertices, indices, cells, cellStart }) {
+    dropBuildingChunk(key);
+    if (!indices.length) return;
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    for (const [at, count, offset] of [[0, 3, 0], [1, 2, 12], [2, 2, 20], [3, 1, 28], [4, 1, 32]]) {
+      gl.enableVertexAttribArray(at);
+      gl.vertexAttribPointer(at, count, gl.FLOAT, false, STRIDE_BYTES, offset);
+    }
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    chunks.set(key, { x, y, vao, buffers: [vertexBuffer, indexBuffer], cells, cellStart, count: indices.length });
+  }
+
+  function dropBuildingChunk(key) {
+    const chunk = chunks.get(key);
+    if (!chunk) return;
+    gl.deleteVertexArray(chunk.vao);
+    for (const buffer of chunk.buffers) gl.deleteBuffer(buffer);
+    chunks.delete(key);
+  }
+
+  function clearBuildingChunks() {
+    for (const key of [...chunks.keys()]) dropBuildingChunk(key);
+  }
+
+  /** The building tiles under a ground tile, each with the run of its triangles there and the tile's bounds in its metres. */
+  function buildingRuns(tile) {
+    if (tile.z == null || !chunks.size) return [];
+    const span = chunkSpan();
+    const tileSpan = span * 2 ** (CHUNK_Z - tile.z);
+    const runs = [];
+    const add = (chunk) => {
+      const run = runOver(chunk, tile.z, tile.x, tile.y);
+      if (!run) return;
+      const x0 = tile.x * tileSpan - chunk.x * span;
+      const y0 = tile.y * tileSpan - chunk.y * span;
+      runs.push({ chunk, start: run[0], count: run[1], bounds: [x0, y0, x0 + tileSpan, y0 + tileSpan] });
+    };
+    if (tile.z >= CHUNK_Z) {
+      const s = tile.z - CHUNK_Z;
+      const chunk = chunks.get(`${CHUNK_Z}/${tile.x >> s}/${tile.y >> s}`);
+      if (chunk) add(chunk);
+    } else {
+      for (const chunk of chunks.values()) add(chunk);
+    }
+    return runs;
+  }
 
   // ---------- tiles ----------
   const meshes = new Map();
@@ -421,7 +575,7 @@ export function createMeshRenderer(canvas) {
     return mesh;
   }
 
-  function addTile({ data, size, image }) {
+  function addTile({ data, size, image, key }) {
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     const buffer = gl.createBuffer();
@@ -434,7 +588,8 @@ export function createMeshRenderer(canvas) {
     const mesh = indicesOf(size);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.buffer);
     gl.bindVertexArray(null);
-    const tile = { vao, buffer, texture: null, count: mesh.count };
+    const [z, x, y] = String(key ?? '').split('/').map(Number);
+    const tile = { vao, buffer, texture: null, count: mesh.count, z, x, y };
     setImage(tile, image);
     return tile;
   }
@@ -664,6 +819,7 @@ export function createMeshRenderer(canvas) {
     gl.uniform2fv(at('shiftNdc'), view.shiftNdc);
     gl.uniform1f(at('near'), NEAR);
     gl.uniform1f(at('far'), FAR);
+    gl.uniform2fv(at('groundShift'), o.groundShift);
     gl.uniform1i(at('ground'), GROUND_CODES[o.ground] ?? 0);
     gl.uniform1f(at('nearCut'), o.near);
     gl.uniform1f(at('farLimit'), o.far);
@@ -692,6 +848,56 @@ export function createMeshRenderer(canvas) {
       gl.bindTexture(gl.TEXTURE_2D, tile.texture);
       gl.bindVertexArray(tile.vao);
       gl.drawElements(gl.TRIANGLES, tile.count, gl.UNSIGNED_SHORT, 0);
+    }
+    gl.bindVertexArray(null);
+    // drawn as edges only, they are in the distances (the lines, the readings) and not in the colours
+    if (chunks.size && (distanceMode || o.buildings !== 'outline')) paintBuildings(view, tiles, o, distanceMode, shading);
+  }
+
+  function paintBuildings(view, tiles, o, distanceMode, shading) {
+    const { program, at } = buildPass;
+    gl.useProgram(program);
+    gl.uniform1i(at('distanceMode'), distanceMode ? 1 : 0);
+    gl.uniform3fv(at('eye'), o.eye);
+    gl.uniform3fv(at('fwd'), view.fwd);
+    gl.uniform3fv(at('rgt'), view.rgt);
+    gl.uniform3fv(at('upv'), view.upv);
+    gl.uniform2fv(at('focalNdc'), view.focalNdc);
+    gl.uniform2fv(at('shiftNdc'), view.shiftNdc);
+    gl.uniform1f(at('near'), NEAR);
+    gl.uniform1f(at('far'), FAR);
+    gl.uniform1i(at('ground'), GROUND_CODES[o.ground] ?? 0);
+    gl.uniform1f(at('nearCut'), o.near);
+    gl.uniform1f(at('visibility'), o.visibility > 0 ? o.visibility : 0);
+    gl.uniform3fv(at('light'), lightVector(o.sky.azimuth, o.sky.altitude));
+    gl.uniform3fv(at('tint'), o.sky.tint);
+    gl.uniform1f(at('strength'), o.sky.strength);
+    gl.uniform1f(at('ambient'), o.sky.ambient);
+    gl.uniform1f(at('skyLight'), o.sky.sky);
+    gl.uniform1f(at('keep'), o.keep);
+    gl.uniform1i(at('roofPhoto'), o.roofs === 'photo' ? 1 : 0);
+    gl.uniform1i(at('showKinds'), o.showKinds ? 1 : 0);
+    gl.uniform2fv(at('imgShift'), o.imageShift);
+    gl.uniform2fv(at('imgLean'), o.imageLean);
+    gl.uniform1i(at('shadows'), shading ? 1 : 0);
+    if (shading) {
+      grids.list.forEach((g, i) => {
+        gl.activeTexture(gl.TEXTURE1 + i);
+        gl.bindTexture(gl.TEXTURE_2D, g.light);
+        gl.uniform1i(at(`light${i}`), 1 + i);
+      });
+      gl.uniform3f(at('reach'), ...grids.list.map((g) => g.reach));
+    }
+    gl.uniform1i(at('img'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    for (const tile of tiles) {
+      for (const run of buildingRuns(tile)) {
+        gl.uniform1i(at('hasImage'), tile.texture ? 1 : 0);
+        gl.bindTexture(gl.TEXTURE_2D, tile.texture);
+        gl.uniform4fv(at('bounds'), run.bounds);
+        gl.bindVertexArray(run.chunk.vao);
+        gl.drawElements(gl.TRIANGLES, run.count, gl.UNSIGNED_INT, run.start * 4);
+      }
     }
     gl.bindVertexArray(null);
   }
@@ -781,12 +987,19 @@ export function createMeshRenderer(canvas) {
    * and `near` in metres (0 for none), `far` the view's far limit, `photo`
    * (0 to 1), `bend` its lens curve (overlay.js `bend`, `[k, across, down]`), `eye`
    * the eye's offset in the frame the tiles were built in, `sharpen` (see the
-   * ground shader).
+   * ground shader). Buildings: `buildings` ('solid', or 'outline' to draw them
+   * only in the distances, so the lines trace them over a photo), `roofs` ('tint'
+   * or 'photo'), `showKinds` (tint walls whose height is a range or nobody's),
+   * `groundShift` (metres east and north the ground and its picture are moved to
+   * meet the buildings), and where a roof's photo is looked up: `imageShift`
+   * plus `imageLean` per metre of height, in Mercator metres east and south.
    */
   function draw(camera, tiles, options = {}) {
     const o = {
       ground: 'relief', lines: false, sky: MAP_LIGHT, shaded: false, keep: 1, visibility: 0, near: 0,
-      far: 200000, photo: 1, eye: [0, 0, 0], sharpen: 4, jump: 0.12, bend: [0, 1, 1], ...options,
+      far: 200000, photo: 1, eye: [0, 0, 0], sharpen: 4, jump: 0.12, bend: [0, 1, 1],
+      buildings: 'solid', roofs: 'tint', showKinds: true, groundShift: [0, 0], imageShift: [0, 0], imageLean: [0, 0],
+      ...options,
     };
     const width = canvas.width;
     const height = canvas.height;
@@ -925,7 +1138,8 @@ export function createMeshRenderer(canvas) {
   /** Everything on the GPU let go, and the context with it, for a view that closes. */
   function dispose() {
     setGrids(null);
-    for (const pass of [skyPass, groundPass, lightPass, screenPass]) gl.deleteProgram(pass.program);
+    clearBuildingChunks();
+    for (const pass of [skyPass, groundPass, buildPass, lightPass, screenPass]) gl.deleteProgram(pass.program);
     for (const mesh of meshes.values()) gl.deleteBuffer(mesh.buffer);
     meshes.clear();
     gl.deleteBuffer(corners);
@@ -956,5 +1170,8 @@ export function createMeshRenderer(canvas) {
     gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 
-  return { addTile, setImage, dropTile, setGrids, setPhoto, draw, pick, pickSoon, dispose };
+  return {
+    addTile, setImage, dropTile, setGrids, setPhoto, draw, pick, pickSoon, dispose,
+    addBuildingChunk, dropBuildingChunk, clearBuildingChunks,
+  };
 }

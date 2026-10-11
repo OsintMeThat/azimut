@@ -52,6 +52,22 @@ it('keeps the engine’s own controls above everything drawn on the ground', () 
   }
 });
 
+it('lets the map’s controls out of the map, where the ground overlays are', () => {
+  // The engine isolates its map for the widget basemap's negative layer. Left
+  // so, the 580 above means nothing: the corners stay inside the map, and every
+  // overlay laid beside it paints over the whole map, buttons included. The
+  // surface lifts that isolation and holds the stacking context itself.
+  const surface = read('tools/satellite/MapSurface.svelte');
+  const lifted = /\n  \.map \{([^}]*)\}/.exec(surface);
+  expect(lifted, 'MapSurface no longer styles its map').not.toBe(null);
+  expect(lifted[1]).toMatch(/isolation:\s*auto/);
+  expect(/\.map-wrap \{[^}]*isolation:\s*isolate/.test(surface)).toBe(true);
+  // a fade goes through the engine's own rule, which leaves the corners whole,
+  // since a faded map would be a stacking context again
+  expect(read('lib/map/engine.css')).toMatch(/:not\(\.maplibregl-control-container\) \{\s*opacity: var\(--map-fade, 1\)/);
+  expect(read('tools/Compare.svelte')).not.toMatch(/:global\(\.map\)[^{]*\{[^}]*opacity/);
+});
+
 it('keeps the split handle level with the controls, not with the ground', () => {
   // Inside the second map's own layer the handle was trapped in that stacking
   // context, and every overlay painted over it. It rides in its own rail.

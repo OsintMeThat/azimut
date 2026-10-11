@@ -172,6 +172,38 @@ describe('switching a layer on', () => {
 });
 
 describe('drawing', () => {
+  it('keeps a late drawing from overwriting a personal layer edit', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    let release;
+    api.get.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const old = layers.drawing('c1', 'Sightings');
+    layers.edited('c1', { ...FILE_LAYER, editable: true, sha256: 'edited' });
+    const updated = { type: 'FeatureCollection', features: [{ properties: { key: 'new-marker' } }] };
+    api.get.mockResolvedValueOnce(updated);
+    expect(await layers.drawing('c1', 'Sightings')).toBe(updated);
+    release(collection);
+    await old;
+    expect(await layers.drawing('c1', 'Sightings')).toBe(updated);
+  });
+
+  it('keeps a late drawing out of another case with the same layer name', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    let release;
+    api.get.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const old = layers.drawing('c1', 'Sightings');
+    layers.load('c2');
+    await settle();
+    release(collection);
+    await old;
+    const updated = { type: 'FeatureCollection', features: [{ properties: { key: 'other-case' } }] };
+    api.get.mockResolvedValueOnce(updated);
+    expect(await layers.drawing('c2', 'Sightings')).toBe(updated);
+  });
+
   it('reads a layer once and keeps it, however often it is switched', async () => {
     const layers = store();
     layers.load('c1');
@@ -329,6 +361,15 @@ describe('the acts on a row', () => {
       ['PUT', '/api/cases/c1/map-layers/order', { names: ['Roadblocks', 'Sightings'] }],
     ]);
     expect(layers.rows.map((row) => row.name)).toEqual(['Roadblocks', 'Sightings']);
+  });
+
+  it('restacks one section without moving rows from the other section', async () => {
+    rows = [FILE_LAYER, { ...FILE_LAYER, name: 'first', editable: true }, followed(),
+      { ...FILE_LAYER, name: 'second', editable: true }];
+    api.put = vi.fn(async () => null);
+    const layers = store(); layers.load('c1'); await settle();
+    await layers.reorder('c1', ['second', 'first']);
+    expect(layers.rows.map((row) => row.name)).toEqual(['Sightings', 'second', 'Roadblocks', 'first']);
   });
 
   it('puts the order back when it could not be kept', async () => {

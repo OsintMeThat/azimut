@@ -159,6 +159,18 @@ const OVERLAYS = [
 export const OVERLAY_IDS = OVERLAYS.map((overlay) => overlay.id);
 
 /**
+ * Whether a style layer is the picture itself rather than something laid over
+ * it: the imagery, the second picture Blink lays on it, and the overlays named,
+ * which a reading may be made of (Difference reads VIIRS night lights).
+ */
+export function isGround(layerId, overlays = []) {
+  if (layerId === IMAGERY || layerId === ALTERNATE) return true;
+  return OVERLAYS.some(
+    (overlay) => overlays.includes(overlay.id) && (layerId === overlay.layer || layerId.startsWith(`${overlay.layer}-`))
+  );
+}
+
+/**
  * The engine layers one overlay is drawn as, lowest first. A raster overlay is
  * one; a vector overlay is one per entry of its style.
  */

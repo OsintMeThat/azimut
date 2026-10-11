@@ -327,7 +327,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<svg class="annotation-canvas" class:drawing={active && tool !== 'select'}
+<svg class="annotation-canvas" class:drawing={active && tool !== 'select'} class:inactive={!active}
   bind:this={svg} aria-label={`Annotations on imagery ${letter.toUpperCase()}`}
   onpointerdown={begin} onpointermove={move} onpointerup={finish}
   onpointercancel={finish} ondblclick={finishPolygon} onwheel={relay}>
@@ -413,6 +413,7 @@
   .mark .body { pointer-events: visibleStroke; }
   .mark .edge { pointer-events: stroke; cursor: move; }
   .mark .hit { pointer-events: all; cursor: move; }
+  .inactive .mark, .inactive .mark .body, .inactive .mark .edge, .inactive .mark .hit { pointer-events: none; }
   .mark.area { pointer-events: none; }
   .drawing .mark, .drawing .mark .body, .drawing .mark .edge { pointer-events: none; }
   .vertex { pointer-events: auto; cursor: crosshair; }

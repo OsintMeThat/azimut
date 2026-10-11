@@ -563,11 +563,21 @@
        them, and the widget basemap on a negative layer below) to itself, so a
        dialog portalled into the fullscreen tool still lands on top of it */
     isolation: isolate;
+    /* the ground's colour before a tile lands: here rather than on the map,
+       which has to stay see-through (below) */
+    background: var(--bg-2);
   }
+  /* The engine makes its map a stacking context of its own (engine.css), for
+     the widget basemap's negative layer. Here the wrap is that context instead,
+     so the map's zoom buttons and credits (580) rise over what a tool lays on
+     the ground beside the map (500–579, lib/map/mapStacking.test.js), rather
+     than sinking under it with the whole map. The map stays see-through, for
+     the widget layer to show under its canvas. */
   .map {
     position: absolute;
     inset: 0;
-    background: var(--bg-2);
+    isolation: auto;
+    background: transparent;
   }
   /* Over relief, ground the engine has not drawn yet (far tiles still on their
      way toward the horizon) shows through the canvas: in the haze of the sky's
