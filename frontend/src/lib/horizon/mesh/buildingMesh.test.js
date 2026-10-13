@@ -164,8 +164,10 @@ describe('buildings in the shadows', () => {
     // a 30 m square centred 15 m east and north of the eye, roof at 40; a 2 m hut far west
     const big = new Float32Array([4, 40, 0, 0, 30, 0, 30, 30, 0, 30]);
     const hut = new Float32Array([4, 12, -81, 9, -79, 9, -79, 11, -81, 11]);
-    const { heights, top } = burnRoofs(ground, size, 100, [big, hut]);
+    const { heights, top, reach } = burnRoofs(ground, size, 100, [big, hut]);
     expect(top).toBe(40);
+    // the hut's far side, 81 m west, is the farthest a roof reaches
+    expect(reach).toBeCloseTo(81, 4);
     // cells are 20 m: centres at -90, -70 … 90; the square covers the cells centred at 10
     expect(heights[4 * size + 5]).toBe(40);
     expect(heights[3 * size + 5]).toBe(5);
@@ -176,6 +178,13 @@ describe('buildings in the shadows', () => {
   it('leaves the grid alone for buildings beyond it', () => {
     const ground = new Float32Array(16).fill(1);
     const far = new Float32Array([3, 50, 1000, 1000, 1010, 1000, 1000, 1010]);
-    expect(Array.from(burnRoofs(ground, 4, 100, [far]).heights)).toEqual(Array.from(ground));
+    const burnt = burnRoofs(ground, 4, 100, [far]);
+    expect(Array.from(burnt.heights)).toEqual(Array.from(ground));
+    expect(burnt.reach).toBe(0);
+  });
+
+  it('says a roof across the grid’s edge reaches only as far as the grid', () => {
+    const across = new Float32Array([4, 30, 80, -10, 150, -10, 150, 10, 80, 10]);
+    expect(burnRoofs(new Float32Array(16), 4, 100, [across]).reach).toBe(100);
   });
 });

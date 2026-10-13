@@ -168,6 +168,7 @@ def sweep(
     near_step: float = NEAR_STEP,
     near: float = 0.0,
     cuts: Sequence[float] = (),
+    workers: int = WORKERS,
 ) -> Horizon:
     """March rays at `azimuths` (degrees) and read what they see.
 
@@ -176,6 +177,7 @@ def sweep(
     ground in front, a hill that hides the range behind it. `cuts` (metres)
     also keep the skyline as it stands if the air stopped there: the running
     highest angle along each ray, read at each cut, as haze would leave it.
+    `workers` bounds the threads it reads and marches on.
     """
     sampler = sampler or terrain.Sampler()
     ground = float(sampler.heights(observer.lat, observer.lon, terrain.MAX_ZOOM))
@@ -200,7 +202,7 @@ def sweep(
         normal_east = np.zeros((row_angles.size, az.size), dtype=np.float32)
         normal_north = np.zeros((row_angles.size, az.size), dtype=np.float32)
 
-    ground_all = _ground(observer, az, distances, bands, sampler)
+    ground_all = _ground(observer, az, distances, bands, sampler, workers)
     if row_angles is not None:
         pixel = np.array([terrain.metres_per_pixel(observer.lat, int(z)) for z in zooms])
         east_all, north_all = _normals(ground_all, distances, az, pixel)
@@ -249,7 +251,7 @@ def sweep(
     # while it works, so they run side by side
     starts = range(0, az.size, CHUNK)
     if len(starts) > 1:
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             ridges = list(pool.map(march, starts))
     else:
         ridges = [march(start) for start in starts]
@@ -268,7 +270,7 @@ def sweep(
 
 def _ground(
     observer: Observer, azimuths: np.ndarray, distances: np.ndarray,
-    bands: list[tuple[int, slice]], sampler: terrain.Sampler,
+    bands: list[tuple[int, slice]], sampler: terrain.Sampler, workers: int = WORKERS,
 ) -> np.ndarray:
     """The ground height under every sample of every ray, (azimuths, distances).
 
@@ -287,7 +289,7 @@ def _ground(
         ground[:, band] = sampler.heights(lat, lon, zoom)
 
     if len(bands) > 1 and azimuths.size > 1:
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             list(pool.map(read, bands))
     else:
         for item in bands:

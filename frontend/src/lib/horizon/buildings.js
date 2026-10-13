@@ -9,9 +9,28 @@
 /** The sources, in the order the app's rule ranks them (engine/buildings/merge.py). */
 export const SOURCES = [
   { id: 'ign', label: 'IGN (France)', title: 'BD TOPO®: footprints and heights the IGN measured, France only' },
+  { id: 'nl3dbag', label: '3D BAG (Netherlands)', title: 'Every Dutch building, its height measured by airborne lidar' },
+  { id: 'nrw', label: 'LoD2 (NRW, Germany)', title: 'Every building of North Rhine-Westphalia, its height measured by airborne lidar' },
+  { id: 'nyc', label: 'NYC footprints', title: 'Every building of New York City, its roof height measured from the air' },
   { id: 'osm', label: 'OpenStreetMap', title: 'Footprints mapped by hand, and the heights mappers gave' },
+  {
+    id: 'overture',
+    label: 'Overture Maps',
+    title: 'OpenStreetMap’s footprints with those Google and Microsoft traced by machine, where mappers have not been',
+  },
   { id: 'globfp', label: '3D-GloBFP', title: 'Worldwide footprints with a height a model estimated, as of about 2020' },
+  {
+    id: 'google',
+    label: 'Google 2.5D',
+    title: 'Heights read off Google’s 2023 rasters, about 1.5 m off: Africa, Asia, Latin America',
+  },
 ];
+/** What each downloadable source says it is, in the question before a download. */
+const DOWNLOADED = {
+  google: { name: 'Google 2.5D', what: '2023, about 1.5 m off' },
+  globfp: { name: '3D-GloBFP', what: 'about 2020' },
+  overture: { name: 'Overture Maps', what: 'footprints traced by machine' },
+};
 
 /** Radii offered, metres. */
 export const RADII = [1000, 2000, 5000, 10000];
@@ -19,8 +38,19 @@ export const RADII = [1000, 2000, 5000, 10000];
 export const DEFAULTS = Object.freeze({
   on: false,
   radius: 2000,
-  sources: Object.freeze({ ign: true, osm: true, globfp: true }),
+  sources: Object.freeze({
+    ign: true,
+    nl3dbag: true,
+    nrw: true,
+    nyc: true,
+    osm: true,
+    overture: true,
+    globfp: true,
+    google: true,
+  }),
   unknown: 'draw',
+  // metres a building of unknown height is drawn at: one storey
+  unknownHeight: 3,
   roofs: 'tint',
   look: 'solid',
   showKinds: true,
@@ -50,11 +80,73 @@ export function readSettings(raw) {
     radius: pick(saved.radius, RADII, DEFAULTS.radius),
     sources,
     unknown: pick(saved.unknown, ['draw', 'hide'], DEFAULTS.unknown),
+    unknownHeight:
+      Number.isFinite(saved.unknownHeight) && saved.unknownHeight >= 1 && saved.unknownHeight <= 60
+        ? saved.unknownHeight
+        : DEFAULTS.unknownHeight,
     roofs: pick(saved.roofs, ['tint', 'photo'], DEFAULTS.roofs),
     look: pick(saved.look, ['solid', 'outline'], DEFAULTS.look),
     showKinds: typeof saved.showKinds === 'boolean' ? saved.showKinds : DEFAULTS.showKinds,
     shift: pair(saved.shift),
     lean: pair(saved.lean),
+  };
+}
+
+/** The buildings as a saved view keeps them (api/horizon_views.py `Buildings`), or null while off. */
+export function buildingsSpec(settings) {
+  if (!settings?.on) return null;
+  const pair = (value, digits) => value.map((v) => Math.round(v * 10 ** digits) / 10 ** digits);
+  return {
+    radius: settings.radius,
+    sources: SOURCES.filter(({ id }) => settings.sources[id]).map(({ id }) => id),
+    unknown: settings.unknown,
+    unknown_height: settings.unknownHeight,
+    roofs: settings.roofs,
+    look: settings.look,
+    kinds: settings.showKinds,
+    shift: pair(settings.shift, 2),
+    lean: pair(settings.lean, 3),
+  };
+}
+
+/** The settings a saved view's buildings stand for; off when it kept none. */
+export function settingsOfSpec(spec) {
+  if (!spec) return { on: false };
+  const sources = Object.fromEntries(SOURCES.map(({ id }) => [id, (spec.sources ?? []).includes(id)]));
+  const { on: _on, ...settings } = readSettings(
+    JSON.stringify({
+      radius: spec.radius,
+      sources,
+      unknown: spec.unknown,
+      unknownHeight: spec.unknown_height,
+      roofs: spec.roofs,
+      look: spec.look,
+      showKinds: spec.kinds,
+      shift: spec.shift,
+      lean: spec.lean,
+    })
+  );
+  return { ...settings, on: true };
+}
+
+/** Where the buildings on show came from and how old, for what a saved view was made of; null with none. */
+export function builtOf(status) {
+  if (!status) return null;
+  const counts = status.counts ?? {};
+  return {
+    sources: (status.sources ?? []).map(({ id, label = '', licence = '', oldest = '', newest = '' }) => ({
+      id,
+      label,
+      licence,
+      oldest: oldest ?? '',
+      newest: newest ?? '',
+    })),
+    counts: {
+      measured: counts.measured ?? 0,
+      estimated: counts.estimated ?? 0,
+      range: counts.range ?? 0,
+      unknown: counts.unknown ?? 0,
+    },
   };
 }
 
@@ -110,6 +202,20 @@ export function summary(status) {
   return `${total.toLocaleString('en')} buildings · heights ${heights.join(', ')}`;
 }
 
+/**
+ * The note under the view while buildings show, or null with none: the summary's
+ * shares, what an unknown height is drawn as, and that open data can be wrong.
+ */
+export function caveat(status, settings) {
+  const counts = status?.counts;
+  if (!counts || !(counts.measured + counts.estimated + counts.range + counts.unknown)) return null;
+  const unknown = !counts.unknown ? '' : settings.unknown === 'hide' ? ' (hidden)' : ` (drawn at ${settings.unknownHeight} m)`;
+  return {
+    heights: `${summary(status)}${unknown}`,
+    note: 'Open data: heights and footprints can be wrong or out of date.',
+  };
+}
+
 /** The sources drawn, with their licence and how old their data is: `BD TOPO® (IGN), Licence Ouverte 2.0, 2010–2026`. */
 export function credits(status) {
   return (status?.sources ?? []).map((s) => {
@@ -126,15 +232,30 @@ export function formatSize(bytes) {
   return `${Math.max(1, Math.round(bytes / 1e3))} kB`;
 }
 
-/** The grids the analyst is asked about: those the app needs and they have not declined. */
+/**
+ * The files the analyst is asked about, those the app needs and they have not
+ * declined, by source: `{ groups: [{ source, name, grids, size }], grids, text }`.
+ */
 export function question(status, declined) {
-  const grids = (status?.needs ?? []).filter((need) => !declined.has(need.grid));
-  if (!grids.length) return null;
-  const size = grids.reduce((sum, need) => sum + need.size, 0);
+  const needs = (status?.needs ?? []).filter((need) => !declined.has(need.grid));
+  if (!needs.length) return null;
+  const groups = [];
+  for (const need of needs) {
+    const source = need.source ?? 'globfp';
+    let group = groups.find((g) => g.source === source);
+    if (!group) {
+      group = { source, name: DOWNLOADED[source]?.name ?? need.label ?? source, grids: [], size: 0 };
+      groups.push(group);
+    }
+    group.grids.push(need.grid);
+    group.size += need.size;
+  }
+  const said = groups.map((g) => `${g.name} (${DOWNLOADED[g.source]?.what ?? ''}) ${formatSize(g.size)}`.replace(' () ', ' '));
   return {
-    grids: grids.map((need) => need.grid),
-    size,
-    text: `Estimated heights here come from 3D-GloBFP: ${formatSize(size)} to download once, kept on this machine.`,
+    groups,
+    grids: groups.flatMap((g) => g.grids),
+    size: groups.reduce((sum, g) => sum + g.size, 0),
+    text: `To download here: ${said.join(', ')}. Each is downloaded once and kept on this machine.`,
   };
 }
 
@@ -144,7 +265,8 @@ export function downloading(status) {
   if (!live.length) return '';
   const done = live.reduce((sum, d) => sum + d.done, 0);
   const total = live.reduce((sum, d) => sum + d.total, 0);
-  return `3D-GloBFP ${formatSize(done)} of ${formatSize(total)}`;
+  const names = [...new Set(live.map((d) => DOWNLOADED[d.source]?.name ?? '3D-GloBFP'))].join(' and ');
+  return `${names} ${formatSize(done)} of ${formatSize(total)}`;
 }
 
 /** What could not be read, one sentence each. */

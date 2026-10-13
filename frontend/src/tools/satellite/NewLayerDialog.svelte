@@ -5,6 +5,7 @@
 
   let { source = null, busy = false, onclose, oncreate } = $props();
   let title = $state(untrack(() => source ? `${source.title} copy` : 'My layer'));
+  let description = $state(untrack(() => source?.description ?? ''));
   let from = $state('blank');
   let file = $state(null);
 </script>
@@ -13,6 +14,10 @@
   <label class="field">
     <span>Name</span>
     <input type="text" bind:value={title} maxlength="200" disabled={busy} />
+  </label>
+  <label class="field">
+    <span>Description (optional)</span>
+    <textarea bind:value={description} maxlength="4000" rows="2" disabled={busy}></textarea>
   </label>
   {#if source}
     <p class="note">The original layer stays unchanged.</p>
@@ -35,7 +40,7 @@
   <div class="actions">
     <button class="btn" disabled={busy} onclick={onclose}>Cancel</button>
     <button class="btn btn-primary" disabled={busy || !title.trim() || (!source && from === 'file' && !file)}
-      onclick={() => oncreate(title.trim(), !source && from === 'file' ? file : null)}>
+      onclick={() => oncreate(title.trim(), !source && from === 'file' ? file : null, description.trim())}>
       {busy ? 'Creating…' : 'Create layer'}
     </button>
   </div>
@@ -44,6 +49,7 @@
 <style>
   .field { display: grid; gap: 5px; margin-bottom: 14px; }
   .field span, .note { color: var(--text-3); font-size: var(--fs-sm); }
+  textarea { resize: vertical; }
   .choices { display: flex; gap: 6px; margin-bottom: 14px; }
   .chosen { border-color: var(--accent); color: var(--accent); }
   .note { margin: 8px 0 0; }

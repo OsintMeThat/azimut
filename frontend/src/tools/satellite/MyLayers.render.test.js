@@ -13,15 +13,56 @@ function show(component, props) {
 afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; });
 
 describe('personal layers', () => {
-  it('expands a long group explicitly and offers individual checks and Shift range selection', () => {
+  it('expands a long group explicitly and selects rows with Shift instead of checkboxes', () => {
     const features = Array.from({ length: 250 }, (_, index) => ({ properties: { key: `m${index}`, group: 'g1', name: `Point ${index}` }, geometry: { type: 'Point' } }));
     const toggleSelected = vi.fn();
     show(MyLayers, { controller: { editor: { title: 'Working' }, features, groups: [{ id: 'g1', name: 'Markers' }], toggleSelected } });
     expect(document.querySelectorAll('.features li')).toHaveLength(100);
     byText('Show 100 more (250)').click(); flushSync(); expect(document.querySelectorAll('.features li')).toHaveLength(200);
     byText('Show all 250').click(); flushSync(); expect(document.querySelectorAll('.features li')).toHaveLength(250);
-    document.querySelector('[aria-label="Select Point 0"]').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    expect(document.querySelector('.features input[type="checkbox"]')).toBeNull();
+    document.querySelector('[data-feature-key="m0"] .feature-row').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
     expect(toggleSelected).toHaveBeenCalledWith('m0', features.toReversed().map((feature) => feature.properties.key), true);
+  });
+  it('drags selected features together into another group and cancels an outside drop', () => {
+    const features = ['one', 'two'].map((key) => ({ properties: { key, name: key, group: 'first' }, geometry: { type: 'Point' } }));
+    const reorderFeatures = vi.fn();
+    show(MyLayers, { controller: { editor: { title: 'Working' }, features,
+      groups: [{ id: 'first', name: 'First' }, { id: 'second', name: 'Second' }], selection: ['one', 'two'], reorderFeatures } });
+    const transfer = { setData: vi.fn() };
+    const drag = (name) => {
+      const event = new MouseEvent(name, { bubbles: true });
+      Object.defineProperty(event, 'dataTransfer', { value: transfer }); return event;
+    };
+    const handle = document.querySelector('[aria-label="Move one"]'), target = document.querySelector('[data-feature-group="second"] .group-head');
+    handle.dispatchEvent(drag('dragstart')); target.dispatchEvent(drag('dragover')); target.dispatchEvent(drag('drop'));
+    expect(reorderFeatures).toHaveBeenCalledExactlyOnceWith(['one', 'two'], 'second', null);
+    handle.dispatchEvent(drag('dragstart')); target.dispatchEvent(drag('dragover')); document.body.dispatchEvent(drag('drop'));
+    expect(reorderFeatures).toHaveBeenCalledOnce();
+    expect(document.querySelector('[aria-label="Selected features group"]')).toBeTruthy();
+  });
+  it('reorders a focused feature with the keyboard without changing its geometry', () => {
+    const features = ['one', 'two'].map((key) => ({ properties: { key, name: key, group: 'first' }, geometry: { type: 'LineString' } }));
+    const reorderFeatures = vi.fn();
+    show(MyLayers, { controller: { editor: { title: 'Working' }, features, groups: [{ id: 'first', name: 'First' }], reorderFeatures } });
+    document.querySelector('[aria-label="Move one"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(reorderFeatures).toHaveBeenCalledWith(['one'], 'first', 'two');
+  });
+  it('saves layer details on Done and keeps an invalid name or refused save open', async () => {
+    const updateDetails = vi.fn(async () => null), finish = vi.fn();
+    show(MyLayers, { controller: { editor: { title: 'Working' }, features: [], updateDetails, finish } });
+    document.querySelector('[aria-label="Edit layer details"]').click(); flushSync();
+    const name = document.querySelector('[aria-label="Layer name"]'), description = document.querySelector('[aria-label="Layer description"]');
+    name.value = ' '; name.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(byText('Done').disabled).toBe(true);
+    name.value = 'Renamed'; name.dispatchEvent(new Event('input', { bubbles: true }));
+    description.value = 'Context'; description.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    document.body.click(); flushSync(); expect(document.querySelector('.layer-details')).toBeNull();
+    byText('Done').click(); await Promise.resolve();
+    expect(updateDetails).toHaveBeenCalledWith({ title: 'Renamed', description: 'Context' });
+    expect(finish).not.toHaveBeenCalled();
+    document.querySelector('[aria-label="Back from layer editor"]').click(); flushSync();
+    expect(document.querySelector('[role="alertdialog"]')).toBeTruthy();
   });
   it('reorders groups from a native drop and cancels a drop outside the list', () => {
     const groups = [{ id: 'first', name: 'First' }, { id: 'second', name: 'Second' }];
@@ -230,8 +271,16 @@ describe('new layer', () => {
     const oncreate = vi.fn();
     show(NewLayerDialog, { oncreate, onclose: vi.fn() });
     byText('Create layer').click();
-    expect(oncreate).toHaveBeenCalledWith('My layer', null);
+    expect(oncreate).toHaveBeenCalledWith('My layer', null, '');
     expect(byText('From a file')).toBeTruthy();
+  });
+
+  it('creates a layer with an optional description', () => {
+    const oncreate = vi.fn();
+    show(NewLayerDialog, { oncreate, onclose: vi.fn() });
+    const description = document.querySelector('textarea'); description.value = 'Layer context';
+    description.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    byText('Create layer').click(); expect(oncreate).toHaveBeenCalledWith('My layer', null, 'Layer context');
   });
 
   it('requires a file when starting from a file', () => {

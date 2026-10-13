@@ -172,7 +172,7 @@ proof for publication.
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
-| ✅ **Personal map layers** | Edit across maps, copy local sources, select and move features, style and reorder groups, draw shapes, share places, and discard edits. |
+| ✅ **Personal map layers** | Edit across maps, name and describe layers, copy sources, drag features, style groups, draw shapes, share places, and discard edits. |
 | ✅ **Map compositions & downloads** | Save named views with live layers and legends; download personal layers as KMZ with icons, KML or GeoJSON. |
 | ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
@@ -202,7 +202,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
+| **3D map** | Pitch and public DEM terrain on the MapLibre map; an oblique capture records its pitch beside the bearing, so the view can be reproduced. Buildings stand in Horizon round the eye, from open sources merged by a stated rule (national surveys, OpenStreetMap, Overture, 3D-GloBFP, Google's 2.5D heights), each saying where its height comes from; a saved view keeps them. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
@@ -477,7 +477,15 @@ stops making sense.
   the Firefox copy, which Mozilla signs and the browser therefore updates itself:
   it polls the release's update manifest on its own schedule, past any switch the
   app has, and is recorded here as an accepted risk for the only permanent
-  Firefox install that exists. Remote images embedded in a
+  Firefox install that exists. Horizon's buildings reach their hosts only while
+  their switch is on: OpenFreeMap, the Géoplateforme's WFS, source.coop (the 3D
+  BAG), NRW's OGC API, NYC Open Data, Overture's catalog and tiles, figshare
+  (3D-GloBFP) and Google's public bucket (2.5D heights). A 3D-GloBFP grid,
+  Google's heights or Overture's footprints are read only after the analyst says
+  yes to their size. They are third-party binaries parsed locally (a zip, a
+  shapefile, a PMTiles archive, a GeoTIFF), an accepted risk bounded by fixed hosts and readers
+  that refuse what they do not know: zip members are written by their stem only,
+  never by their path. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview

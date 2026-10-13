@@ -18,7 +18,13 @@ export const SKIRT_MIN = 3;
 export const SKIRT_SCALE = 3;
 export const SKIRT_SPACING = 0.1;
 
-const keyOf = (z, x, y) => `${z}/${x}/${y}`;
+/** A terrain tile's key, its column taken round the antimeridian: the grid's last column has its first beside it. */
+const keyOf = (z, x, y) => {
+  const n = 2 ** z;
+  return `${z}/${((x % n) + n) % n}/${y}`;
+};
+/** Whether a row lies in the grid of zoom z: past the poles' edge there is no tile to ask. */
+const inGrid = (z, y) => y >= 0 && y < 2 ** z;
 
 /**
  * Terrain tiles held for the meshes. `read(keys)` resolves to a Map of key to
@@ -163,16 +169,20 @@ export function createTerrain(read, { keep = DEM_KEEP } = {}) {
   return { load, pinning, zoomsFor, heightAt, groundAt, tile: (key) => held.get(key), get size() { return held.size; } };
 }
 
-/** The terrain tiles a rectangle of tile units at zoom z touches at zoom zd, a pixel round. */
+/**
+ * The terrain tiles a rectangle of tile units at zoom z touches at zoom zd, a
+ * pixel round: across the antimeridian, the columns on its other side.
+ */
 export function demRange(z, x0, y0, x1, y1, zd) {
   const s = 2 ** (zd - z) * DEM_TILE;
-  const keys = [];
+  const keys = new Set();
   for (let ty = Math.floor((y0 * s - 2) / DEM_TILE); ty <= Math.floor((y1 * s + 2) / DEM_TILE); ty += 1) {
+    if (!inGrid(zd, ty)) continue;
     for (let tx = Math.floor((x0 * s - 2) / DEM_TILE); tx <= Math.floor((x1 * s + 2) / DEM_TILE); tx += 1) {
-      keys.push(keyOf(zd, tx, ty));
+      keys.add(keyOf(zd, tx, ty));
     }
   }
-  return keys;
+  return [...keys];
 }
 
 /** Vertices a side for a tile at zoom z over terrain of zoom zd: no closer than the terrain's own pixels. */
@@ -274,8 +284,11 @@ export async function buildGrid(frame, terrain, { reach, size, zoom }) {
   const ty0 = Math.floor(latToY(frame.lat + dLat, zd));
   const cols = Math.floor(lonToX(frame.lon + dLon, zd)) - tx0 + 1;
   const rows = Math.floor(latToY(frame.lat - dLat, zd)) - ty0 + 1;
-  const keys = [];
-  for (let ty = 0; ty < rows; ty += 1) for (let tx = 0; tx < cols; tx += 1) keys.push(keyOf(zd, tx0 + tx, ty0 + ty));
+  const found = new Set();
+  for (let ty = 0; ty < rows; ty += 1) {
+    if (inGrid(zd, ty0 + ty)) for (let tx = 0; tx < cols; tx += 1) found.add(keyOf(zd, tx0 + tx, ty0 + ty));
+  }
+  const keys = [...found];
   return terrain.pinning(keys, async () => {
     if (!(await terrain.load(keys))) return null;
     const world = 2 ** zd * DEM_TILE;

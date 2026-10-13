@@ -217,6 +217,51 @@ def test_a_view_refuses_what_it_could_not_open_again(client, mutate):
     assert _save(client, cid, "Refused", spec).status_code == 422
 
 
+def test_a_view_keeps_its_buildings_and_where_their_heights_came_from(client):
+    cid = _case(client, "Built views")
+    spec = _spec()
+    spec["buildings"] = {
+        "radius": 5000, "sources": ["ign", "osm"], "unknown": "hide", "unknown_height": 4.5,
+        "roofs": "photo", "look": "outline", "kinds": False, "shift": [1.5, -2], "lean": [0.02, 0],
+    }
+    made = {
+        "terrain": [],
+        "buildings": {
+            "sources": [{"id": "ign", "label": "BD TOPO® (IGN)", "licence": "Licence Ouverte 2.0",
+                         "oldest": "2010-07-15", "newest": "2026-05-29"}],
+            "counts": {"measured": 90, "estimated": 0, "range": 0, "unknown": 10},
+        },
+    }
+    saved = client.post(f"/api/cases/{cid}/horizon/views", json={"title": "Old town", "spec": spec, "made": made})
+    assert saved.status_code == 200, saved.text
+
+    loaded = client.get(f"/api/cases/{cid}/horizon/views/Old town").json()
+    assert loaded["spec"]["buildings"] == {**spec["buildings"], "shift": [1.5, -2], "lean": [0.02, 0]}
+    assert loaded["made"]["buildings"]["sources"][0]["newest"] == "2026-05-29"
+    assert loaded["made"]["buildings"]["counts"]["unknown"] == 10
+    # a view saved without them keeps none
+    assert _save(client, cid, "Bare").status_code == 200
+    bare = client.get(f"/api/cases/{cid}/horizon/views/Bare").json()
+    assert bare["spec"]["buildings"] is None and bare["made"]["buildings"] is None
+
+
+@pytest.mark.parametrize(
+    "buildings",
+    [
+        {"radius": 3000},
+        {"sources": ["obm"]},
+        {"unknown_height": 0},
+        {"shift": [80, 0]},
+        {"roofs": "glass"},
+    ],
+)
+def test_a_view_refuses_buildings_it_could_not_raise_again(client, buildings):
+    cid = _case(client, "Refused buildings")
+    spec = _spec()
+    spec["buildings"] = buildings
+    assert _save(client, cid, "Refused", spec).status_code == 422
+
+
 def test_a_footprint_is_points_on_the_earth(client):
     cid = _case(client, "Footprints")
     assert _save(client, cid, "Off", footprint=[[7.8, 46.5], [200, 46.6], [8.0, 46.5]]).status_code == 422
@@ -368,23 +413,24 @@ def test_a_view_keeps_what_was_known_about_the_photo_and_the_reach_fit_found(cli
     cid = _case(client, "Hinted views")
     photo = _photo(client, cid)
     spec = _spec(photo)
-    spec["photo"]["hints"] = {"zoom": "telephoto", "facing": {"heading": 218.4}, "reach": 10_000}
+    spec["photo"]["hints"] = {"picture": "panorama", "zoom": "telephoto", "facing": {"heading": 218.4}, "reach": 10_000}
     spec["photo"]["reach"] = 20_000
     assert _save(client, cid, "Hinted", spec).status_code == 200
     kept = client.get(f"/api/cases/{cid}/horizon/views/Hinted").json()["spec"]["photo"]
-    assert kept["hints"] == {"zoom": "telephoto", "facing": {"heading": 218.4}, "reach": 10_000}
+    assert kept["hints"] == {"picture": "panorama", "zoom": "telephoto", "facing": {"heading": 218.4}, "reach": 10_000}
     assert kept["reach"] == 20_000
     # a view saved before hints existed knows nothing about its photo
     plain = _spec(photo)
     assert _save(client, cid, "Plain", plain).status_code == 200
     kept = client.get(f"/api/cases/{cid}/horizon/views/Plain").json()["spec"]["photo"]
-    assert kept["hints"] == {"zoom": "any", "facing": None, "reach": "auto"} and kept["reach"] is None
+    assert kept["hints"] == {"picture": "photo", "zoom": "any", "facing": None, "reach": "auto"} and kept["reach"] is None
 
 
 @pytest.mark.parametrize(
     "hints",
     [
         {"zoom": "huge"},
+        {"picture": "fisheye"},
         {"reach": 12_345},  # not a reach the panorama keeps its skyline at
         {"reach": "far"},
         {"facing": {"heading": 360}},

@@ -2223,6 +2223,7 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
     return {
         "name": name,
         "title": spec.get("title") or name,
+        "description": spec.get("description", ""),
         "source": source,
         "hidden": list(spec.get("hidden") or []),
         # the time filter, `{start, end}`, either bound "" when open

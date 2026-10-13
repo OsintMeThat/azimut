@@ -36,7 +36,12 @@ MIN_AREA = 6.0
 
 Kind = Literal["measured", "estimated", "range", "unknown"]
 KINDS: tuple[Kind, ...] = ("measured", "estimated", "range", "unknown")
-SOURCES = ("ign", "osm", "globfp")
+# In the order they are settled for a tile: national surveys first, then OpenStreetMap, then
+# Overture's footprints, then the estimates (3D-GloBFP's footprints and heights, Google's heights)
+SOURCES = ("ign", "nl3dbag", "nrw", "nyc", "osm", "overture", "globfp", "google")
+# National (or state, or city) surveys, whose footprints and measured heights come first
+# where they cover a tile.
+NATIONAL = ("ign", "nl3dbag", "nrw", "nyc")
 
 Point = tuple[float, float]  # (lon, lat)
 Ring = tuple[Point, ...]

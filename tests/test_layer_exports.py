@@ -39,6 +39,27 @@ def png(size=(64, 64)):
 
 
 @pytest.mark.parametrize("fmt", ["geojson", "kml", "kmz"])
+def test_download_includes_the_layer_name_and_optional_description(client, work, fmt):
+    _, _, url, _ = work
+    details = {"title": "Reviewed map", "description": "Context & notes\nSecond line"}
+    assert client.patch(f"{url}/edit", json=details).status_code == 200
+    response = client.post(f"{url}/export/{fmt}", json={})
+    assert response.status_code == 200, response.text
+    if fmt == "geojson":
+        content = response.json()
+        assert content["name"] == details["title"]
+        assert content["description"] == details["description"]
+    else:
+        data = response.content
+        if fmt == "kmz":
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                data = archive.read("doc.kml")
+        root = ET.fromstring(data)
+        assert root.find("{*}Document/{*}name").text == details["title"]
+        assert root.find("{*}Document/{*}description").text == details["description"]
+
+
+@pytest.mark.parametrize("fmt", ["geojson", "kml", "kmz"])
 def test_download_round_trip_keeps_geometry_and_style_without_case_references(client, work, fmt):
     owner, layer, url, geometry = work
     case = Case.open(owner)
@@ -73,6 +94,27 @@ def test_download_round_trip_keeps_geometry_and_style_without_case_references(cl
     assert imported[0]["properties"]["icon_scale"] == 1.75
     assert imported[1]["properties"]["stroke_width"] == 5.5
     assert case.resolve_inside(layout.layer_spec_rel(layer["name"])).read_bytes() == before
+
+
+@pytest.mark.parametrize("fmt", ["geojson", "kml", "kmz"])
+def test_group_order_survives_download_and_reimport(client, work, fmt):
+    owner, _, url, _ = work
+    base = client.get(f"{url}/edit").json()["groups"][0]
+    top = client.post(f"{url}/groups", json={"name": "Upper"}).json()["group"]
+    lower = client.post(f"{url}/groups", json={"name": "Lower"}).json()["group"]
+    for index, group in enumerate((top, lower)):
+        response = client.post(f"{url}/markers", json={"lat": 48.8, "lon": 2.3 + index / 10,
+                                                      "group": group["id"], "name": group["name"]})
+        assert response.status_code == 200, response.text
+    ordered = [top["id"], lower["id"], base["id"]]
+    assert client.post(f"{url}/groups/order", json={"ids": ordered}).status_code == 200
+    exported = client.post(f"{url}/export/{fmt}", json={})
+    assert exported.status_code == 200, exported.text
+    imported = client.post(f"/api/cases/{owner}/map-layers/editable/upload",
+                           files={"file": (f"groups.{fmt}", exported.content)})
+    assert imported.status_code == 200, imported.text
+    groups = client.get(f"/api/cases/{owner}/map-layers/{imported.json()['name']}/edit").json()["groups"]
+    assert [group["name"] for group in groups] == ["Upper", "Lower", "Markers"]
 
 
 def test_hidden_group_is_exported_with_its_visibility(client, work):

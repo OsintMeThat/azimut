@@ -16,7 +16,7 @@ async function clickCard(page, x, y) {
   }).toBe(true);
 }
 
-test('long imported groups expand explicitly and a checked range moves and removes together', async ({ page }) => {
+test('long imported groups expand explicitly and a selected range moves and removes together', async ({ page }) => {
   const fixture = await personalFixture(page, { imported: true, count: 250 });
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
   await page.getByRole('button', { name: 'Create editable copy of Source map', exact: true }).click();
@@ -25,8 +25,8 @@ test('long imported groups expand explicitly and a checked range moves and remov
   await expect(panel.locator('.features li')).toHaveCount(100);
   await panel.getByRole('button', { name: 'Show all 250', exact: true }).click();
   await expect(panel.locator('.features li')).toHaveCount(250);
-  await panel.getByRole('checkbox', { name: 'Select Point 250', exact: true }).click();
-  await panel.getByRole('checkbox', { name: 'Select Point 241', exact: true }).click({ modifiers: ['Shift'] });
+  await panel.getByRole('button', { name: 'Point 250', exact: true }).click();
+  await panel.getByRole('button', { name: 'Point 241', exact: true }).click({ modifiers: ['Shift'] });
   await expect(panel.getByText('10 selected', { exact: true })).toBeVisible();
   const own = fixture.rows.find((row) => row.editable), features = fixture.collections.get(own.name);
   const before = structuredClone(features);
@@ -65,8 +65,8 @@ test('personal layers download their styles and saved maps restore the camera an
   const icons = fixture.exports.find((entry) => entry.format === 'kmz').body.icons;
   expect(Object.keys(icons)).toEqual(['badge-tank-0072b2']);
   expect(Buffer.from(icons['badge-tank-0072b2'], 'base64').subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  await page.getByRole('button', { name: 'My maps', exact: true }).click();
-  const maps = page.getByRole('dialog', { name: 'My maps', exact: true });
+  await page.getByRole('button', { name: 'Saved maps', exact: true }).click();
+  const maps = page.getByRole('dialog', { name: 'Saved maps', exact: true });
   await maps.getByLabel('Map name', { exact: true }).fill('Review view');
   await maps.getByLabel('Legend note', { exact: true }).fill('Working markers');
   await maps.getByRole('button', { name: 'Save this map', exact: true }).click();
@@ -75,10 +75,20 @@ test('personal layers download their styles and saved maps restore the camera an
   await maps.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Map legend' })).toContainText('Working markers');
   await page.reload(); await awaitMapReady(page);
-  await page.getByRole('button', { name: 'My maps', exact: true }).click();
+  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await expect(page.getByRole('button', { name: /\bz15\b/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Saved maps', exact: true }).click();
   await maps.getByRole('button', { name: 'Review view', exact: true }).click();
   await expect(maps).not.toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Map legend' })).toContainText('Review view');
+  await expect(page.getByRole('button', { name: /\bz16\b/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide map legend', exact: true }).click();
+  await page.evaluate(async (id) => {
+    const { openEntity } = await import('/src/lib/navigate.js');
+    openEntity({ type: 'map-view', attrs: { spec: `.map-views/${id}.json` } });
+  }, fixture.maps[0].id);
+  await expect(page.getByRole('complementary', { name: 'Map legend' })).toContainText('Review view');
+  await expect(maps).not.toBeVisible();
   await page.screenshot({ path: test.info().outputPath('saved-map-legend.png') });
 });
 
@@ -133,6 +143,66 @@ async function createPersonalLayer(page, title) {
   await expect(page.getByRole('region', { name: 'Layer editor', exact: true })).toBeVisible();
   return page.getByRole('region', { name: 'Layer editor', exact: true });
 }
+
+test('feature grips reorder rows, move selected rows into groups and retain the group menu', async ({ page }) => {
+  const fixture = await personalFixture(page, { imported: true, count: 4 });
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  await page.getByRole('button', { name: 'Create editable copy of Source map', exact: true }).click();
+  await page.getByRole('button', { name: 'Create layer', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Layer editor', exact: true });
+  await expect(panel.locator('.features input[type="checkbox"]')).toHaveCount(0);
+  const grip = panel.getByRole('button', { name: 'Move group Markers', exact: true });
+  const svg = grip.locator('svg'); await expect(svg).toBeVisible();
+  expect(await svg.evaluate((node) => ({ width: node.getBoundingClientRect().width, stroke: getComputedStyle(node).strokeWidth }))).toEqual({ width: 14, stroke: '2.5px' });
+  await panel.getByRole('button', { name: 'Move Point 1', exact: true }).dragTo(panel.getByRole('button', { name: 'Point 4', exact: true }), { targetPosition: { x: 35, y: 2 } });
+  await expect(panel.locator('.feature-row .name')).toHaveText(['Point 1', 'Point 4', 'Point 3', 'Point 2']);
+  await panel.getByRole('button', { name: 'New group', exact: true }).click();
+  await panel.getByLabel('New group name').fill('Reviewed');
+  await panel.getByRole('button', { name: 'Create group', exact: true }).click();
+  await panel.getByRole('button', { name: 'Point 1', exact: true }).click();
+  await panel.getByRole('button', { name: 'Point 4', exact: true }).click({ modifiers: ['Shift'] });
+  await expect(panel.getByText('2 selected', { exact: true })).toBeVisible();
+  const before = structuredClone(fixture.collections.get(fixture.rows[0].name).map((feature) => feature.geometry));
+  await panel.getByRole('button', { name: 'Move Point 1', exact: true }).dragTo(panel.getByRole('button', { name: 'Move group Reviewed', exact: true }));
+  const reviewed = panel.locator('.group').filter({ has: page.getByRole('button', { name: 'Move group Reviewed', exact: true }) });
+  await expect(reviewed.locator('.feature-row .name')).toHaveText(['Point 1', 'Point 4']);
+  await panel.getByLabel('Selected features group').selectOption('markers');
+  await expect(reviewed.locator('.feature-row')).toHaveCount(0);
+  const current = fixture.collections.get(fixture.rows[0].name).map((feature) => feature.geometry);
+  expect(current.sort((a, b) => a.coordinates[0] - b.coordinates[0])).toEqual(before.sort((a, b) => a.coordinates[0] - b.coordinates[0]));
+  await page.screenshot({ path: test.info().outputPath('layer-feature-grips.png') });
+});
+
+test('layer names and optional descriptions save, reopen and restore through Back', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  await page.getByRole('button', { name: 'New layer', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'New layer', exact: true });
+  await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill('Original map');
+  await dialog.getByRole('textbox', { name: 'Description (optional)', exact: true }).fill('Initial context');
+  await dialog.getByRole('button', { name: 'Create layer', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Layer editor', exact: true });
+  await expect(panel.getByText('Initial context', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Original map', exact: true }).click();
+  await panel.getByRole('button', { name: 'Edit layer details', exact: true }).click();
+  await panel.getByLabel('Layer name', { exact: true }).fill('Renamed map');
+  await panel.getByLabel('Layer description', { exact: true }).fill('Updated context');
+  await panel.getByRole('button', { name: 'Save layer details', exact: true }).click();
+  await expect(panel.getByText('Updated context', { exact: true })).toBeVisible();
+  expect(fixture.rows[0].title).toBe('Renamed map');
+  await panel.getByRole('button', { name: 'Back from layer editor' }).click();
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Original map', exact: true }).click();
+  await expect(panel.getByText('Initial context', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Edit layer details', exact: true }).click();
+  await panel.getByLabel('Layer name', { exact: true }).fill('Final map');
+  await panel.getByLabel('Layer description', { exact: true }).fill('Final context');
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Final map', exact: true }).click();
+  await expect(panel.getByText('Final context', { exact: true })).toBeVisible();
+  expect(fixture.rows[0].description).toBe('Final context');
+});
 
 test('group size and native dragging persist, while Back restores the session baseline', async ({ page }) => {
   const fixture = await personalFixture(page);
@@ -301,11 +371,11 @@ async function personalFixture(page, { imported = false, shared = false, count =
     rows.push(source);
     collections.set('source', sourceFeatures);
   }
-  const create = (title, fromSource = false) => {
+  const create = (title, fromSource = false, description = '') => {
     const name = `working-${++serial}`;
     const features = fromSource ? sourceFeatures.map((feature) => ({ ...feature,
       properties: { ...feature.properties, key: count === 1 ? 'imported-marker' : `imported-${feature.properties.index}`, group: 'markers' } })) : [];
-    const row = { name, title, editable: true, source: { kind: 'editable' },
+    const row = { name, title, description, editable: true, source: { kind: 'editable' },
       origin: fromSource ? { source: source.source } : null,
       features: features.length, categories: [], icons: 0, hidden: [], refresh: {}, sha256: String(serial).repeat(64), edit_revision: '0'.repeat(64), edit_changed: false };
     collections.set(name, features);
@@ -327,13 +397,15 @@ async function personalFixture(page, { imported = false, shared = false, count =
     const path = new URL(route.request().url()).pathname.split('/map-layers/')[1];
     const method = route.request().method();
     if (path === 'editable' && method === 'POST') {
-      return route.fulfill({ json: create(route.request().postDataJSON().title) });
+      const body = route.request().postDataJSON();
+      return route.fulfill({ json: create(body.title, false, body.description) });
     }
     if (path === 'editable/upload' && method === 'POST') {
       const payload = route.request().postDataBuffer();
       uploads.push(payload);
       const title = payload.toString().match(/name="title"\r\n\r\n([^\r]+)/)?.[1] || 'My layer';
-      return route.fulfill({ json: create(title, true) });
+      const description = payload.toString().match(/name="description"\r\n\r\n([^\r]*)/)?.[1] || '';
+      return route.fulfill({ json: create(title, true, description) });
     }
     if (path === 'order' && method === 'PUT') {
       const ordered = route.request().postDataJSON().names.map((name) => rows.find((row) => row.name === name));
@@ -348,7 +420,10 @@ async function personalFixture(page, { imported = false, shared = false, count =
     }
     const [name, action, key, last] = path.split('/');
     const row = rows.find((entry) => entry.name === name);
-    if (action === 'editable-copy') return route.fulfill({ json: create(route.request().postDataJSON().title, true) });
+    if (action === 'editable-copy') {
+      const body = route.request().postDataJSON();
+      return route.fulfill({ json: create(body.title, true, body.description) });
+    }
     if (!row) return route.fallback();
     const features = collections.get(name);
     const ownGroups = groups.get(name);
@@ -365,12 +440,14 @@ async function personalFixture(page, { imported = false, shared = false, count =
       if (route.request().postDataJSON().discard) {
         const before = checkpoints.get(name);
         features.splice(0, features.length, ...before.features); ownGroups.splice(0, ownGroups.length, ...before.groups); row.hidden = before.hidden;
+        row.title = before.title; row.description = before.description;
       }
       checkpoints.delete(name); changed(); row.edit_changed = false;
       return route.fulfill({ json: answer() });
     }
     if (action === 'edit') {
-      if (method === 'POST' && !checkpoints.has(name)) checkpoints.set(name, { features: structuredClone(features), groups: structuredClone(ownGroups), hidden: [...row.hidden] });
+      if (method === 'POST' && !checkpoints.has(name)) checkpoints.set(name, { features: structuredClone(features), groups: structuredClone(ownGroups), hidden: [...row.hidden], title: row.title, description: row.description });
+      if (method === 'PATCH') { Object.assign(row, route.request().postDataJSON()); changed(); }
       return route.fulfill({ json: answer() });
     }
     if (action === 'data') return route.fulfill({ json: { type: 'FeatureCollection', features: visibleFeatures().map((feature) => {
@@ -379,6 +456,15 @@ async function personalFixture(page, { imported = false, shared = false, count =
         ...(group?.mode === 'uniform' ? { category: group.name, colour: group.colour, symbol: group.symbol, icon: '' } : {}) } };
     }).sort((a, b) => (ownGroups?.findIndex((group) => group.id === b.properties.group) ?? 0) - (ownGroups?.findIndex((group) => group.id === a.properties.group) ?? 0))
       .map((feature, index) => ({ ...feature, id: index, properties: { ...feature.properties, index } })) } });
+    if (action === 'features' && key === 'order') {
+      const body = route.request().postDataJSON(), moving = new Set(body.keys), order = features.toReversed();
+      const block = order.filter((feature) => moving.has(feature.properties.key));
+      const target = order.filter((feature) => feature.properties.group === body.group && !moving.has(feature.properties.key));
+      const at = body.before ? target.findIndex((feature) => feature.properties.key === body.before) : target.length;
+      block.forEach((feature) => { feature.properties.group = body.group; }); target.splice(at, 0, ...block);
+      const sorted = ownGroups.toReversed().flatMap((group) => (group.id === body.group ? target : order.filter((feature) => feature.properties.group === group.id && !moving.has(feature.properties.key))).toReversed());
+      features.splice(0, features.length, ...sorted); changed(); return route.fulfill({ json: answer() });
+    }
     if (action === 'groups' && key === 'order') {
       const sorted = route.request().postDataJSON().ids.map((id) => ownGroups.find((group) => group.id === id));
       ownGroups.splice(0, ownGroups.length, ...sorted); changed(); return route.fulfill({ json: answer() });

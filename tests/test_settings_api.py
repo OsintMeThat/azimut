@@ -1279,10 +1279,21 @@ def test_detect_prefs_keep_the_place_names(client):
 
 def test_a_source_run_has_every_part_a_binary_can_lose(client):
     """What the release smoke test asks a binary: zones, PDF faces, the extension,
-    the scrapers' metadata."""
+    the scrapers' metadata, the buildings' decoders."""
     assert client.get("/api/settings/bundled").json() == {
-        "zones": True, "pdf_fonts": True, "extension": True, "scrapers": True,
+        "zones": True, "pdf_fonts": True, "extension": True, "scrapers": True, "buildings": True,
     }
+
+
+def test_a_build_that_cannot_decode_buildings_is_reported(monkeypatch):
+    """A frozen build missing a decoder still starts; only the self-check says so."""
+    from azimut.engine import cog, diagnostics
+
+    def broken(*_args):
+        raise ImportError("no zlib in this build")
+
+    monkeypatch.setattr(cog, "_decompress", broken)
+    assert diagnostics.bundled_parts()["buildings"] is False
 
 
 def test_a_build_without_the_scrapers_metadata_is_reported(monkeypatch):

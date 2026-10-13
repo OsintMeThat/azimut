@@ -71,21 +71,35 @@ describe('the Buildings settings panel', () => {
     expect(box.checked).toBe(true);
     box.checked = false;
     box.dispatchEvent(new Event('change', { bubbles: true }));
-    expect(state.set).toHaveBeenCalledWith({ sources: { ign: true, osm: false, globfp: true } });
+    expect(state.set).toHaveBeenCalledWith({ sources: { ign: true, nl3dbag: true, nrw: true, nyc: true, osm: false, overture: true, globfp: true, google: true } });
   });
 
   it('says the Fit and the source rule in plain lines', () => {
     const root = render({ buildings: buildings() });
     expect(root.textContent).toContain('The Fit ignores buildings for now.');
-    expect(root.textContent).toContain('Footprints come from the IGN where it has them');
+    expect(root.textContent).toContain('Footprints come from a national survey where one has them');
   });
 
   it('hides the unknown heights', () => {
     const state = buildings();
     const root = render({ buildings: state });
-    expect(button(root, 'Draw at 6 m').getAttribute('aria-pressed')).toBe('true');
+    expect(button(root, 'Draw them').getAttribute('aria-pressed')).toBe('true');
     button(root, 'Hide').click();
     expect(state.set).toHaveBeenCalledWith({ unknown: 'hide' });
+  });
+
+  it('draws unknown heights at a storey unless another height is chosen', () => {
+    const state = buildings();
+    const root = render({ buildings: state });
+    const height = root.querySelector('input[aria-label="Height an unknown building is drawn at"]');
+    expect(height.value).toBe('3');
+    height.value = '9';
+    height.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(state.set).toHaveBeenCalledWith({ unknownHeight: 9 });
+    const hiding = buildings();
+    hiding.settings.unknown = 'hide';
+    const hidden = render({ buildings: hiding });
+    expect(hidden.querySelector('input[aria-label="Height an unknown building is drawn at"]')).toBeNull();
   });
 
   it('tints doubtful heights, with a legend for both kinds', () => {

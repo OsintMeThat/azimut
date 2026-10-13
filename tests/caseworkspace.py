@@ -51,7 +51,9 @@ def build_workspace_case(client) -> WorkspaceCase:
     from azimut.engine import workqueue
 
     # This fixture represents 0.3.1, before retyping, merge journals and personal layers.
-    full = build_full_case(client, name="Case workspace", subject_changes=False, personal_layers=False)
+    full = build_full_case(
+        client, name="Case workspace", subject_changes=False, personal_layers=False, horizon_find=False,
+    )
     ws = WorkspaceCase(full=full)
     case_id = full.case_id
     base = f"/api/cases/{case_id}"

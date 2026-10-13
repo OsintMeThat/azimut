@@ -15,7 +15,7 @@
     <AddedLayers rows={personal} heading="My layers" headingIcon="stack" addLabel="New layer"
       ondownload={(row) => controller.download(row)}
       {ontoggle} {onedit} {onremove} {onreorder} {oncategory} onadd={onnew} />
-    <button class="my-maps" onclick={() => controller.openMaps()}><Icon name="compass" size={12} /> My maps</button>
+    <button class="my-maps" onclick={() => controller.openMaps()}><Icon name="compass" size={12} /> Saved maps</button>
   {/if}
 </section>
 

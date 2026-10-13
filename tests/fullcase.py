@@ -81,6 +81,7 @@ class FullCase:
     compare_image: str = ""  # the session's render, a media working file
     horizon_view: str = ""  # a saved Horizon view, matched on the photo
     horizon_thumb: str = ""  # its preview, which travels with it
+    horizon_find: str = ""  # a search for where the photo was taken, run to its end
     analyzer_zones: str = ""
     analyzer_area: str = ""
     analyzer_followup: str = ""
@@ -125,6 +126,7 @@ class FullCase:
 
 def build_full_case(
     client, name: str = "Full case", *, subject_changes: bool = True, personal_layers: bool = True,
+    horizon_find: bool = True,
 ) -> FullCase:
     """Fill one case through every tool that files an artifact.
 
@@ -272,6 +274,10 @@ def build_full_case(
     )
     assert view_thumb.status_code == 200, view_thumb.text
     full.horizon_thumb = view_thumb.json()["thumb"]
+
+    # A search for where the photo was taken, run on flat relief drawn here: no network.
+    if horizon_find:
+        _add_horizon_find(client, case_id, full)
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(
@@ -578,15 +584,15 @@ def build_full_case(
             f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
         ).json()["entity"]["id"]
 
-    view = client.post(f"/api/cases/{case_id}/map-views", json={
-        "title": "Review map", "provider": "esri", "camera": {"lat": 48.85, "lon": 2.35, "zoom": 12},
-        "layers": [{"name": layer_name, "hidden": []}], "note": "Working map legend",
-        "legend": [{"label": "Checkpoints", "colour": "#009e73"}],
-    })
-    assert view.status_code == 200, view.text
-    full.map_view = layout.map_view_rel(view.json()["id"])
-    full.map_view_id = client.get(f"/api/cases/{case_id}/entities/lookup",
-                                params={"attr": "spec", "value": full.map_view}).json()["entity"]["id"]
+        view = client.post(f"/api/cases/{case_id}/map-views", json={
+            "title": "Review map", "provider": "esri", "camera": {"lat": 48.85, "lon": 2.35, "zoom": 12},
+            "layers": [{"name": layer_name, "hidden": []}], "note": "Working map legend",
+            "legend": [{"label": "Checkpoints", "colour": "#009e73"}],
+        })
+        assert view.status_code == 200, view.text
+        full.map_view = layout.map_view_rel(view.json()["id"])
+        full.map_view_id = client.get(f"/api/cases/{case_id}/entities/lookup",
+                                    params={"attr": "spec", "value": full.map_view}).json()["entity"]["id"]
 
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one
@@ -685,3 +691,33 @@ def build_full_case(
     ).json()["items"]
     full.entity_types = {e["type"] for e in entities}
     return full
+
+
+def _add_horizon_find(client, case_id: str, full: FullCase) -> None:
+    """A search for where the photo was taken, run to its end on flat relief drawn here: no network."""
+    from azimut.engine import terrain, workqueue
+    from fakerelief import Relief
+
+    terrain.forget_decoded()
+
+    fetch, terrain.tile = terrain.tile, Relief(peaks=(), plain=500.0)
+    try:
+        ring = [(46.0, 7.0), (46.0, 7.008), (46.006, 7.008), (46.006, 7.0)]
+        searched = client.post(
+            f"/api/cases/{case_id}/horizon/finds",
+            json={
+                "title": "North ridge search",
+                "photo": {"path": full.photo, "kind": "image", "title": "summit"},
+                "trace": {"x": [-0.8, -0.4, 0.0, 0.3, 0.6, 0.9], "y": [0.1, 0.12, 0.15, 0.11, 0.09, 0.1],
+                          "half_width": 600, "fov": 60, "known": True},
+                "area": [{"lat": lat, "lon": lon} for lat, lon in ring],
+                "reach": 5000,
+                "spacing": 500,
+            },
+        )
+        assert searched.status_code == 200, searched.text
+        workqueue.wait_until_idle(timeout=60)
+    finally:
+        terrain.tile = fetch
+        terrain.forget_decoded()
+    full.horizon_find = f".horizon/finds/{searched.json()['name']}.json"

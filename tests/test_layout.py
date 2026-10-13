@@ -250,6 +250,7 @@ def test_content_dirs_covers_every_subdir_and_its_meta(tmp_path: Path) -> None:
         layout.subdir(root, "proofs") / layout.META_DIR,
         layout.subdir(root, "sheets") / layout.META_DIR,
         layout.subdir(root, layout.LAYERS_DIR) / layout.LAYER_CACHE_DIR,
+        layout.subdir(root, layout.HORIZON_DIR) / layout.HORIZON_FINDS_DIR,
     }
     assert layout.trash(root).name not in CASE_SUBDIRS
 

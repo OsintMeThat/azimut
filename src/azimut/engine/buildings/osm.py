@@ -52,12 +52,12 @@ def fetch_tile(z: int, x: int, y: int) -> list[model.Building]:
     for rings, properties in polygons:
         if properties.get("hide_3d") in (True, 1):
             continue
-        clipped = _clip_rings(rings)
+        clipped = clip_rings(rings)
         if not clipped:
             continue
         height, kind = _height(properties.get("render_height"))
         building = model.Building(
-            rings=tuple(_lonlat(ring, x, y, z) for ring in clipped),
+            rings=tuple(to_lonlat(ring, x, y, z) for ring in clipped),
             height=height,
             kind=kind,
             source=SOURCE,
@@ -128,7 +128,7 @@ def _clip(ring: Ring) -> Ring:
     return points
 
 
-def _clip_rings(rings: list[Ring]) -> list[Ring]:
+def clip_rings(rings: list[Ring]) -> list[Ring]:
     """The polygon's rings cut to the tile, each kept with at least three points.
 
     Nothing is kept when the exterior ring is gone: its holes have nothing to sit in.
@@ -140,7 +140,7 @@ def _clip_rings(rings: list[Ring]) -> list[Ring]:
     return [exterior, *holes]
 
 
-def _lonlat(ring: Ring, x: int, y: int, z: int) -> tuple[model.Point, ...]:
+def to_lonlat(ring: Ring, x: int, y: int, z: int) -> tuple[model.Point, ...]:
     """A ring of tile fractions as (lon, lat) points of the map."""
     points = []
     for fx, fy in ring:

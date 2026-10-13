@@ -59,7 +59,7 @@
       </label>
     {/each}
     <p class="hint">
-      Footprints come from the IGN where it has them, else OpenStreetMap where it maps most of the ground, else 3D-GloBFP. Heights: measured first, then estimated.
+      Footprints come from a national survey where one has them, else OpenStreetMap where it maps most of the ground, else Overture, else 3D-GloBFP. Heights: measured first, then estimated.
     </p>
   </div>
 
@@ -71,7 +71,7 @@
         class:on={settings.unknown === 'draw'}
         aria-pressed={settings.unknown === 'draw'}
         onclick={() => buildings.set({ unknown: 'draw' })}
-      >Draw at 6 m</button>
+      >Draw them</button>
       <button
         class="chip"
         class:on={settings.unknown === 'hide'}
@@ -79,6 +79,21 @@
         onclick={() => buildings.set({ unknown: 'hide' })}
       >Hide</button>
     </div>
+    {#if settings.unknown === 'draw'}
+      <label class="slide">
+        <span class="name">Drawn at</span>
+        <input
+          type="range"
+          min="1"
+          max="30"
+          step="1"
+          value={settings.unknownHeight}
+          aria-label="Height an unknown building is drawn at"
+          oninput={(event) => buildings.set({ unknownHeight: Number(event.currentTarget.value) })}
+        />
+        <output>{settings.unknownHeight} m</output>
+      </label>
+    {/if}
     <label class="check">
       <input
         type="checkbox"

@@ -575,6 +575,12 @@ function huber(px) {
   return a <= HUBER_PX ? 0.5 * a * a : HUBER_PX * (a - 0.5 * HUBER_PX);
 }
 
+/** Screen pixels a degree spans at the lens's middle: everywhere along a panorama's strip. */
+function pixelsPerDegree(camera) {
+  if (camera.projection === 'panorama') return camera.width / camera.fov;
+  return (focal(camera) * Math.PI) / 180;
+}
+
 /**
  * The cost of a camera against the trace, in screen pixels so a narrower lens
  * cannot make every point fit by squeezing the trace into one degree.
@@ -582,7 +588,7 @@ function huber(px) {
 function costOf(samples, camera, skyline) {
   const found = residuals(samples, camera, skyline);
   if (found.length < GAP_MIN_POINTS) return Infinity;
-  const perDegree = (focal(camera) * Math.PI) / 180;
+  const perDegree = pixelsPerDegree(camera);
   let sum = 0;
   for (const r of found) sum += huber(r.gap * perDegree);
   // points lost off the terrain count as far off, or a fit could drop the hard ones
@@ -662,9 +668,12 @@ export function fitToTrace(samples, camera, skyline, { lens = true } = {}) {
   }
   const wide = before.span >= FIT_MIN_SPAN;
   const free = lens && wide;
-  const unpack = (p) => at(p[0], p[1], wide ? p[2] : camera.roll, free ? camera.fov * Math.exp(p[3]) : camera.fov);
-  const start = [slid.heading, slid.tilt, ...(wide ? [camera.roll] : []), ...(free ? [0] : [])];
-  const steps = [pace * 4, pace * 4, ...(wide ? [1] : []), ...(free ? [0.04] : [])];
+  // a panorama's strip has no roll to give
+  const rolls = wide && camera.projection !== 'panorama';
+  const unpack = (p) =>
+    at(p[0], p[1], rolls ? p[2] : camera.roll, free ? camera.fov * Math.exp(p[rolls ? 3 : 2]) : camera.fov);
+  const start = [slid.heading, slid.tilt, ...(rolls ? [camera.roll] : []), ...(free ? [0] : [])];
+  const steps = [pace * 4, pace * 4, ...(rolls ? [1] : []), ...(free ? [0.04] : [])];
   const best = minimise((p) => costOf(samples, unpack(p), skyline), start, steps);
   const fitted = unpack(best.point);
   const after = traceGap(samples, fitted, skyline);
@@ -689,11 +698,13 @@ export function fitToTrace(samples, camera, skyline, { lens = true } = {}) {
  * (`/api/horizon/match`, engine/skymatch.py): each point right and up from the
  * lens's middle in half widths of the frame, and that half width on screen.
  * A lens F degrees wide sees a point (x, y) along tangents (x, y)·tan(F/2), so
- * the search can try other lenses on the same points.
+ * the search can try other lenses on the same points; on a panorama's strip,
+ * half a width is half its degrees, across and up.
  */
 export function tracePlane(samples, camera) {
-  const half = focal(camera) * Math.tan((camera.fov * Math.PI) / 360);
-  const centre = principal(camera);
+  const panorama = camera.projection === 'panorama';
+  const half = panorama ? camera.width / 2 : focal(camera) * Math.tan((camera.fov * Math.PI) / 360);
+  const centre = panorama ? { x: camera.width / 2, y: camera.height / 2 } : principal(camera);
   return {
     x: samples.map((s) => (s.x - centre.x) / half),
     y: samples.map((s) => -(s.y - centre.y) / half),
@@ -735,6 +746,7 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
     roll: camera.roll ?? 0,
     ...(within && !known ? { within } : {}),
     ...(facing ? { facing } : {}),
+    ...(camera.projection === 'panorama' ? { projection: 'panorama' } : {}),
   };
 }
 

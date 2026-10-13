@@ -32,6 +32,19 @@ beforeEach(() => {
 });
 
 describe('personal layer editing', () => {
+  it('keeps draft layer details during unrelated saves and updates the shared row on saving', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.details.title = 'Renamed'; editor.details.description = 'Context';
+    expect(editor.changed).toBe(true);
+    await editor.reorderFeatures(['one'], 'markers', 'two');
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/features/order', { keys: ['one'], group: 'markers', before: 'two' });
+    expect(editor.details).toEqual({ title: 'Renamed', description: 'Context' });
+    api.patch.mockResolvedValueOnce({ layer: { ...ROW, title: 'Renamed', description: 'Context' } });
+    await editor.updateDetails({ title: 'Renamed', description: 'Context' });
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/edit', { title: 'Renamed', description: 'Context' });
+    expect(layers.edited).toHaveBeenLastCalledWith('first', expect.objectContaining({ name: 'working', title: 'Renamed', description: 'Context' }));
+    expect(editor.changed).toBe(false);
+  });
   it('selects individual checks and an inclusive Shift range, then moves the selection in one request', async () => {
     const points = ['one', 'two', 'three', 'four'].map((key) => feature(key));
     api.get.mockResolvedValue({ layer: ROW, document: { features: points } });
@@ -59,6 +72,15 @@ describe('personal layer editing', () => {
     api.patch.mockResolvedValueOnce({ layer: ROW, marker: feature('m1', { name: 'Draft title' }) });
     await editor.update('m1', { name: 'Draft title' });
     expect(editor.changed).toBe(false);
+  });
+  it('keeps a draft name while accepting its new group after a direct drop', async () => {
+    const original = feature('one', { group: 'first' });
+    api.get.mockResolvedValueOnce({ layer: ROW, document: { features: [original] } });
+    const editor = store(); await editor.open(ROW); editor.select('one'); editor.form.name = 'Draft name';
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [feature('one', { group: 'second' })] } });
+    await editor.reorderFeatures(['one'], 'second');
+    expect(editor.form.name).toBe('Draft name'); expect(editor.form.group).toBe('second');
+    expect(editor.selection).toEqual(['one']);
   });
   it('starts a trusted checkpoint and commits the latest queued revision on Done', async () => {
     api.post.mockResolvedValueOnce({ layer: { ...ROW, edit_revision: 'a'.repeat(64), edit_changed: false },
@@ -236,7 +258,7 @@ describe('personal layer editing', () => {
     const source = { name: 'source', title: 'Source map' };
     editor.newLayer(source);
     await editor.create('My copy');
-    expect(layers.copyEditable).toHaveBeenCalledWith(expect.objectContaining(source), 'My copy');
+    expect(layers.copyEditable).toHaveBeenCalledWith(expect.objectContaining(source), 'My copy', '');
     expect(editor.dialog).toBe(null);
     expect(editor.editor.name).toBe(ROW.name);
   });
@@ -246,7 +268,7 @@ describe('personal layer editing', () => {
     const file = new File(['kmz'], 'source.kmz');
     editor.newLayer();
     await editor.create('My copy', file);
-    expect(layers.importEditable).toHaveBeenCalledWith(file, 'My copy');
+    expect(layers.importEditable).toHaveBeenCalledWith(file, 'My copy', '');
     expect(layers.createEditable).not.toHaveBeenCalled();
   });
 

@@ -32,7 +32,8 @@ export const GRIDS = [
   { reach: 200000, size: 1024, zoom: 8 },
 ];
 /** Metres the eye may walk from where it landed before the ground is laid round it again. */
-export const WALK_REACH = 1500;
+// Five aircraft steps, fifty of a drone's: a walk round one place never reads it all again.
+export const WALK_REACH = 5000;
 /** Screen pixels a picture pixel may cover in the lens at rest, and at most while the hand moves on a slow card. */
 export const SHARP = 1.5;
 export const MOTION_MAX = 6;
@@ -40,6 +41,12 @@ export const MOTION_MAX = 6;
 export const REST_MS = 250;
 /** How sharply a picture seen edge-on may be read (renderer.js `sharpen`). */
 const SHARPEN = 4;
+/**
+ * Pictures kept from tiles let go, on the GPU, for the same tiles built again
+ * for a new eye: a step past the walk's reach or a jump nearby reads the ground
+ * again but not its imagery. About 50 MB of 256-pixel pictures at most.
+ */
+export const KEEP_PICTURES = 160;
 /** Tiles of buildings sent to a worker in one message. */
 const BUILDINGS_BATCH = 4;
 /** ms the shadows wait for more buildings before their grid is raised again. */
@@ -116,13 +123,17 @@ export function createScene(
   // heights are drawn, each built tile's outlines for the shadows, and the terrain's own grids
   let buildingTiles = new Map();
   let buildingOptions = { unknown: 'draw', unknownHeight: undefined };
+  // switched off, the buildings are hidden, not let go: switched on again, they show at once
+  let buildingsShown = true;
+  // the version each tile was built at for this eye
+  const builtFor = new Map();
   const roofs = new Map();
   let terrainGrids = null;
   let burnTimer = 0;
 
   /** The buildings' tiles built in the eye's frame, a few to each worker. */
   function buildBuildings(entries) {
-    if (!eye?.frame || !entries.length) return;
+    if (!buildingsShown || !eye?.frame || !eye.groundIn || !entries.length) return;
     for (let i = 0; i < entries.length; i += BUILDINGS_BATCH) {
       const chunks = entries
         .slice(i, i + BUILDINGS_BATCH)
@@ -138,12 +149,14 @@ export function createScene(
     if (!terrainGrids || !renderer) return;
     const list = terrainGrids.map((grid, i) => ({ ...GRIDS[i], heights: grid.heights }));
     let top = Math.max(...terrainGrids.map((grid) => grid.top));
-    if (roofs.size) {
+    let buildings = 0;
+    if (roofs.size && buildingsShown) {
       const burnt = burnRoofs(list[0].heights, list[0].size, list[0].reach, [...roofs.values()]);
       list[0] = { ...list[0], heights: burnt.heights };
       top = Math.max(top, burnt.top);
+      buildings = burnt.reach;
     }
-    renderer.setGrids({ list, top: top + 5 });
+    renderer.setGrids({ list, top: top + 5, buildings });
     onChange();
   }
 
@@ -152,11 +165,45 @@ export function createScene(
     burnTimer = setTimeout(sendGrids, BURN_DELAY);
   }
 
+  // pictures kept from tiles let go (`provider|key` → texture), oldest first, and the tiles of
+  // this eye asked without a picture because one is kept (key → provider)
+  const keptPictures = new Map();
+  let reusing = new Map();
+
+  function keepPicture(tile, keep) {
+    if (!keep || !renderer) {
+      renderer?.dropTile(tile);
+      return;
+    }
+    const texture = renderer.dropTile(tile, true);
+    if (!texture) return;
+    renderer.deleteTexture(keptPictures.get(keep));
+    keptPictures.delete(keep);
+    keptPictures.set(keep, texture);
+    while (keptPictures.size > KEEP_PICTURES) {
+      const [oldest, gone] = keptPictures.entries().next().value;
+      keptPictures.delete(oldest);
+      renderer.deleteTexture(gone);
+    }
+  }
+
+  /** Mesh asks, a tile whose picture is kept asked without one. */
+  function sendTiles(id, list) {
+    const asked = list.map((t) => {
+      if (!t.provider || !keptPictures.has(`${t.provider}|${t.key}`)) return t;
+      reusing.set(t.key, t.provider);
+      return { ...t, provider: null };
+    });
+    next().postMessage({ type: 'tiles', id, tiles: asked });
+  }
+
   function land({ lat, lon, mode, height }, far) {
     eyeId += 1;
     tiles?.dispose();
+    reusing = new Map();
     renderer.setGrids(null);
     renderer.clearBuildingChunks();
+    builtFor.clear();
     roofs.clear();
     terrainGrids = null;
     clearTimeout(burnTimer);
@@ -168,9 +215,9 @@ export function createScene(
       lon,
       far,
       imagery,
-      send: (list) => next().postMessage({ type: 'tiles', id, tiles: list }),
+      send: (list) => sendTiles(id, list),
       sendImages: (list) => next().postMessage({ type: 'images', id, tiles: list }),
-      release: (tile) => renderer.dropTile(tile),
+      release: keepPicture,
       attach: (tile, image) => renderer.setImage(tile, image),
     });
     tiles.setOccluder(marched);
@@ -242,7 +289,17 @@ export function createScene(
       }
     } else if (data.type === 'tile') {
       const range = data.failed ? null : { low: data.low, high: data.high };
-      tiles.arrived(data.key, data.failed ? null : renderer.addTile(data), data.provider ?? null, range);
+      const tile = data.failed ? null : renderer.addTile(data);
+      let provider = data.provider ?? null;
+      const reused = reusing.get(data.key);
+      reusing.delete(data.key);
+      const kept = reused && keptPictures.get(`${reused}|${data.key}`);
+      if (tile && kept) {
+        keptPictures.delete(`${reused}|${data.key}`);
+        renderer.adoptTexture(tile, kept);
+        provider = reused;
+      }
+      tiles.arrived(data.key, tile, provider, range);
     } else if (data.type === 'image') {
       tiles.imaged(data.key, data.provider, data.image);
     } else if (data.type === 'grids') {
@@ -256,6 +313,7 @@ export function createScene(
       // a tile let go meanwhile, or asked for again since, is not drawn
       if (buildingTiles.get(data.key)?.version !== data.version) return;
       renderer.addBuildingChunk(data.key, data);
+      builtFor.set(data.key, data.version);
       roofs.set(data.key, data.roofs);
       burnSoon();
     }
@@ -271,7 +329,9 @@ export function createScene(
     lost = false;
     renderer = makeRenderer(canvas);
     if (renderer && photo) renderer.setPhoto(photo);
-    // every tile held was on the lost context: the eye lands again
+    // every tile held, and every picture kept, was on the lost context: the eye lands again
+    tiles = null;
+    keptPictures.clear();
     if (renderer && eye) land(standing(), eye.far);
   }
   canvas.addEventListener('webglcontextlost', onLost);
@@ -284,8 +344,15 @@ export function createScene(
      */
     place(observer, far) {
       if (!renderer) return;
-      const near = eye?.frame && !eye.failed && eye.far === far ? eye.frame.inverse(observer.lat, observer.lon)[0] : Infinity;
+      const near = eye?.frame && !eye.failed ? eye.frame.inverse(observer.lat, observer.lon)[0] : Infinity;
       if (near <= WALK_REACH) {
+        // a new reach (an aircraft sees farther) keeps every tile held and adds the farther ones
+        if (eye.far !== far) {
+          eye.far = far;
+          tiles.setFar(far);
+          eye.laid = false;
+          onChange();
+        }
         if (observer.lat !== eye.at.lat || observer.lon !== eye.at.lon || observer.mode !== eye.mode || observer.height !== eye.height) {
           shift(observer);
         }
@@ -309,6 +376,7 @@ export function createScene(
       for (const key of buildingTiles.keys()) {
         if (!nextTiles.has(key)) {
           renderer?.dropBuildingChunk(key);
+          builtFor.delete(key);
           roofs.delete(key);
           dropped = true;
         }
@@ -326,7 +394,20 @@ export function createScene(
       const next = { unknown: options?.unknown ?? 'draw', unknownHeight: options?.unknownHeight };
       if (next.unknown === buildingOptions.unknown && next.unknownHeight === buildingOptions.unknownHeight) return;
       buildingOptions = next;
+      builtFor.clear();
       buildBuildings([...buildingTiles]);
+    },
+
+    /**
+     * Whether the buildings show. Hidden ones are kept, built, in the scene: shown again,
+     * only the tiles that changed meanwhile are built.
+     */
+    setBuildingsShown(shown) {
+      if (Boolean(shown) === buildingsShown) return;
+      buildingsShown = Boolean(shown);
+      if (buildingsShown) buildBuildings([...buildingTiles].filter(([key, t]) => builtFor.get(key) !== t.version));
+      if (terrainGrids) burnSoon();
+      onChange();
     },
 
     /** The imagery the ground is drawn in, `{ provider, near: { provider, reach } | null }`, or null for none. */
@@ -401,6 +482,11 @@ export function createScene(
       }
       renderer.draw(camera, drawn, { ...common, shaded: wantsShade && eye.grids === 'ready', eye: eye.offset });
       progress = progressOf({ landed: true, base, sharpening, shadows: wantsShade && eye.grids === 'loading' });
+      // the buildings once the ground all round and its pictures are in: they never hold the relief up
+      if (!eye.groundIn && base.meshed === base.total && base.done === base.total) {
+        eye.groundIn = true;
+        buildBuildings([...buildingTiles]);
+      }
       return progress;
     },
 
@@ -455,6 +541,8 @@ export function createScene(
       for (const worker of workers) worker.terminate();
       if (renderer) {
         tiles?.dispose();
+        for (const texture of keptPictures.values()) renderer.deleteTexture(texture);
+        keptPictures.clear();
         renderer.dispose();
       }
       renderer = null;

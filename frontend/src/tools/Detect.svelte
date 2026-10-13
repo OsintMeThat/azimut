@@ -967,7 +967,8 @@
     min-height: 0;
     background: var(--bg-0);
   }
-  .search { position: absolute; top: 12px; left: 12px; z-index: 650; display: flex; width: min(280px, 42%); padding: 4px; }
+  /* one over the chips under it, so the suggestions open over the ruler */
+  .search { position: absolute; top: 12px; left: 12px; z-index: 651; display: flex; width: min(280px, 42%); padding: 4px; }
   .search :global(.place-search) { flex: 1; }
   .map-choices { position: absolute; top: 12px; right: 12px; z-index: 650; display: grid; justify-items: end; gap: 8px; }
   /* the closed menu is as tall as the imagery chip over it */

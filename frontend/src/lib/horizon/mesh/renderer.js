@@ -19,7 +19,9 @@
  * 2. **Light**: once per position of the sun, how much of it reaches each cell of
  *    three height grids round the eye (6, 30 and 200 km), marched toward it with
  *    an edge as soft as its disc. Cast shadows are read from these by the ground
- *    pass, so turning or zooming costs nothing for them.
+ *    pass, so turning or zooming costs nothing for them. With buildings, the
+ *    cells round them also keep the height under which a point is in the
+ *    shadow, so each wall and roof is lit by its own height.
  * 3. **Screen**: the ridge lines read off the distances at the screen's pixels,
  *    the photo laid over (through the loupe, its lens curve undone), the fog
  *    over the lines.
@@ -45,6 +47,10 @@ const GROUND_CODES = { relief: 0, imagery: 1, plain: 2 };
 const NEAR = 0.5;
 const FAR = 2e6;
 const CUBE_MAX = 1536;
+/** Half the sun's disc in radians (0.53° across), in the shaders' own spelling. */
+const SUN_HALF = '0.004625';
+/** Cells the shadows' tops reach past the outermost roof: a wall's ray leaves it by up to five, the read round that point takes one, two spare. */
+const TOPS_MARGIN = 8;
 
 const COMMON = `
 uniform float skyLight;
@@ -221,6 +227,8 @@ uniform int distanceMode;
 // roofs in their photo or one tint; doubtful heights tinted; where the picture is looked up
 // for a roof: moved with the ground, and by a lean for each metre of height
 uniform int roofPhoto; uniform int showKinds; uniform vec2 imgShift; uniform vec2 imgLean;
+// the shadows' tops round the buildings (TOPS_FS) and their grid: how far it reaches, its cell
+uniform int hasTops; uniform sampler2D tops; uniform vec2 topsGrid;
 out vec4 colour;
 
 vec2 gridUv(vec2 xy, float r) { return vec2((xy.x + r) / (2.0 * r), (r - xy.y) / (2.0 * r)); }
@@ -231,6 +239,19 @@ float shadeAt(vec2 xy) {
   if (m < reach.y * 0.97) return texture(light1, gridUv(xy, reach.y)).r;
   if (m < reach.z * 0.97) return texture(light2, gridUv(xy, reach.z)).r;
   return 1.0;
+}
+// the light reaching a point z high over xy, its edge as soft as the sun's disc seen from
+// the point asked for, before metres back along the light; -1 where the tops do not reach
+float lightOver(vec2 xy, float z, float before) {
+  if (hasTops == 0) return -1.0;
+  float n = float(textureSize(tops, 0).x);
+  vec2 f = vec2((xy.x + topsGrid.x) / topsGrid.y - 0.5, (topsGrid.x - xy.y) / topsGrid.y - 0.5);
+  if (min(f.x, f.y) < 0.0 || max(f.x, f.y) > n - 1.0) return -1.0;
+  ivec2 a = ivec2(floor(f));
+  vec2 w = f - floor(f);
+  vec2 top = mix(mix(texelFetch(tops, a, 0).rg, texelFetch(tops, a + ivec2(1, 0), 0).rg, w.x),
+                 mix(texelFetch(tops, a + ivec2(0, 1), 0).rg, texelFetch(tops, a + ivec2(1, 1), 0).rg, w.x), w.y);
+  return clamp(0.5 + (z - top.x + 1.0) / (2.0 * ${SUN_HALF} * (before + top.y)), 0.0, 1.0);
 }
 vec3 skyOn(float shade) {
   return ambient * mix(keep, 1.0, shade) * mix(vec3(0.75, 0.82, 1.0), vec3(1.0), skyLight);
@@ -248,8 +269,21 @@ void main() {
   vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
   if (dot(n, -p) < 0.0) n = -n;
   bool roof = n.z > 0.6;
-  // a wall's shade is read just outside it, on the side it faces
-  float shade = shadeAt(vPos.xy + (roof ? vec2(0.0) : n.xy * 4.0));
+  float shade = 1.0;
+  if (shadows == 1 && roof) {
+    shade = lightOver(vPos.xy, vPos.z, 0.0);
+    if (shade < 0.0) shade = shadeAt(vPos.xy);
+  } else if (shadows == 1) {
+    // a wall turned from the light is in its own shade; one facing it is lit by its height,
+    // read where its ray to the light has left it by a cell, the finest the heights know
+    float level = max(length(light.xy), 1e-3);
+    vec2 toward = light.xy / level;
+    float across = dot(normalize(n.xy), toward);
+    float gap = topsGrid.y / max(across, 0.2);
+    shade = lightOver(vPos.xy + toward * gap, vPos.z + gap * light.z / level, gap / level);
+    // beyond the tops, as far buildings are, the ground's light just outside the wall
+    shade = shade < 0.0 ? shadeAt(vPos.xy + n.xy * 4.0) : shade * smoothstep(0.0, 0.1, across);
+  }
   float facing = max(dot(n, light), 0.0);
   bool pictured = ground == 1 && hasImage == 1;
   vec2 moved = imgShift + imgLean * max(vAbove, 0.0);
@@ -277,13 +311,10 @@ void main() {
 }`;
 
 // --- 2. the light on the grids ---
-const LIGHT_FS = `#version 300 es
-precision highp float;
-precision highp int;
+// the heights the light is marched over, for the light on the grids and the shadows' tops
+const MARCH = `
 uniform sampler2D grid0; uniform sampler2D grid1; uniform sampler2D grid2;
 uniform vec3 reach; uniform vec3 cells; uniform float gridTop; uniform vec3 light;
-uniform sampler2D own; uniform float ownReach; uniform float ownSize;
-out vec4 color;
 float gridHeight(sampler2D g, float r, float n, vec2 xy) {
   float cell = 2.0 * r / n;
   vec2 f = vec2((xy.x + r) / cell - 0.5, (r - xy.y) / cell - 0.5);
@@ -303,10 +334,17 @@ float heightAt(vec2 xy, out float cell) {
   if (m < reach.z * 0.98) { cell = 2.0 * reach.z / cells.z; return gridHeight(grid2, reach.z, cells.z, xy); }
   cell = -1.0;
   return 0.0;
-}
+}`;
+
+const LIGHT_FS = `#version 300 es
+precision highp float;
+precision highp int;
+${MARCH}
+uniform sampler2D own; uniform float ownReach; uniform float ownSize;
+out vec4 color;
 void main() {
   // the sun's disc is 0.53 degrees across: half of it over the ridge is half the light
-  const float SUN = 0.004625;
+  const float SUN = ${SUN_HALF};
   float cell = 2.0 * ownReach / ownSize;
   ivec2 cr = ivec2(gl_FragCoord.xy);
   vec3 p = vec3(-ownReach + (float(cr.x) + 0.5) * cell, ownReach - (float(cr.y) + 0.5) * cell, texelFetch(own, cr, 0).r);
@@ -326,6 +364,38 @@ void main() {
     t += max(step * 0.8, t * 0.04);
   }
   color = vec4(clamp(0.5 + least / (2.0 * SUN), 0.0, 1.0), 0.0, 0.0, 1.0);
+}`;
+
+// --- 2b. the shadows' tops round the buildings: for each cell of the finest grid near them, the
+// height under which a point there is in the shadow, and how far along the light what casts it
+// stands. A wall or a roof is lit by its own height from these, where the light on the grid is
+// only the ground's: a tower's sunny face stays lit over a street in the shade. ---
+const TOPS_FS = `#version 300 es
+precision highp float;
+precision highp int;
+${MARCH}
+uniform float topsReach; uniform float topsSize;
+out vec4 color;
+void main() {
+  float cell = 2.0 * topsReach / topsSize;
+  vec2 xy = vec2(-topsReach + gl_FragCoord.x * cell, topsReach - gl_FragCoord.y * cell);
+  float step;
+  float top = heightAt(xy, step);
+  float topAt = cell;
+  // the light under the horizon: the whole column is in the shadow
+  if (light.z < -0.01) { color = vec4(1e6, cell, 0.0, 1.0); return; }
+  // one cell out, as the finest grid's light starts
+  float t = cell;
+  for (int k = 0; k < 400; k++) {
+    // past this, nothing the grids hold rises over the shadow's top any more
+    if (top + light.z * t > gridTop) break;
+    float h = heightAt(xy + light.xy * t, step);
+    if (step < 0.0) break;
+    float over = h - light.z * t;
+    if (over > top) { top = over; topAt = t; }
+    t += max(step * 0.8, t * 0.04);
+  }
+  color = vec4(top, topAt, 0.0, 1.0);
 }`;
 
 // --- 3. the screen ---
@@ -438,6 +508,17 @@ export function lightVector(azimuth, altitude) {
   return [Math.sin(a) * Math.cos(h), Math.cos(a) * Math.cos(h), Math.sin(h)];
 }
 
+/**
+ * Where the shadows' tops are kept: on the finest grid's own cells (`finest` as scene.js
+ * `GRIDS[0]`), out past the outermost roof, `buildings` metres from the centre, by the margin
+ * a wall's ray needs, and never past that grid. `{ reach, size, cell }`, in metres and cells.
+ */
+export function topsGrid(finest, buildings) {
+  const cell = (2 * finest.reach) / finest.size;
+  const half = Math.min(finest.size / 2, Math.ceil(buildings / cell) + TOPS_MARGIN);
+  return { reach: half * cell, size: 2 * half, cell };
+}
+
 /** A renderer on a canvas, or null where the browser lacks WebGL2 or float targets. */
 export function createMeshRenderer(canvas) {
   const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true, alpha: false });
@@ -467,6 +548,7 @@ export function createMeshRenderer(canvas) {
   const skyPass = compile(FULL_VS, SKY_FS, 'sky');
   const groundPass = compile(GROUND_VS, GROUND_FS, 'ground');
   const lightPass = compile(FULL_VS, LIGHT_FS, 'light');
+  const topsPass = compile(FULL_VS, TOPS_FS, 'tops');
   const screenPass = compile(FULL_VS, SCREEN_FS, 'screen');
 
   const corners = gl.createBuffer();
@@ -476,8 +558,8 @@ export function createMeshRenderer(canvas) {
   gl.bindVertexArray(fullVao);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  for (const pass of [skyPass, lightPass, screenPass]) gl.bindAttribLocation(pass.program, 0, 'corner');
-  for (const pass of [skyPass, lightPass, screenPass]) gl.linkProgram(pass.program);
+  for (const pass of [skyPass, lightPass, topsPass, screenPass]) gl.bindAttribLocation(pass.program, 0, 'corner');
+  for (const pass of [skyPass, lightPass, topsPass, screenPass]) gl.linkProgram(pass.program);
   gl.bindAttribLocation(groundPass.program, 0, 'pos');
   gl.bindAttribLocation(groundPass.program, 1, 'nrm');
   gl.bindAttribLocation(groundPass.program, 2, 'uv');
@@ -613,11 +695,22 @@ export function createMeshRenderer(canvas) {
     image.close?.();
   }
 
-  function dropTile(tile) {
+  /** A tile let go; with `keepTexture` its picture is handed back instead, for a tile built again later. */
+  function dropTile(tile, keepTexture = false) {
     gl.deleteVertexArray(tile.vao);
     gl.deleteBuffer(tile.buffer);
+    if (keepTexture) return tile.texture;
     if (tile.texture) gl.deleteTexture(tile.texture);
+    return null;
   }
+
+  /** A picture kept from a tile let go, given to the same tile built again for a new eye. */
+  function adoptTexture(tile, texture) {
+    if (tile.texture && tile.texture !== texture) gl.deleteTexture(tile.texture);
+    tile.texture = texture;
+  }
+
+  const deleteTexture = (texture) => texture && gl.deleteTexture(texture);
 
   // ---------- targets ----------
   function texture2D(format, width, height, filter) {
@@ -707,13 +800,30 @@ export function createMeshRenderer(canvas) {
   // ---------- shadows ----------
   let grids = null;
   let lightKey = '';
+  /**
+   * The height grids the light is marched over (`list`, as scene.js `GRIDS` with their
+   * `heights`), the highest ground or roof they hold (`top`), and how far from their centre the
+   * buildings raised in the finest one reach (`buildings`, metres; 0 or none for no buildings).
+   */
   function setGrids(next) {
-    if (grids) for (const g of grids.list) gl.deleteTexture(g.height), gl.deleteTexture(g.light), gl.deleteFramebuffer(g.fbo);
+    if (grids) {
+      for (const g of grids.list) gl.deleteTexture(g.height), gl.deleteTexture(g.light), gl.deleteFramebuffer(g.fbo);
+      if (grids.tops) gl.deleteTexture(grids.tops.texture), gl.deleteFramebuffer(grids.tops.fbo);
+    }
     grids = null;
     lightKey = '';
     if (!next) return;
+    let tops = null;
+    if (next.buildings > 0) {
+      tops = topsGrid(next.list[0], next.buildings);
+      tops.texture = texture2D(gl.RG32F, tops.size, tops.size, gl.NEAREST);
+      tops.fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, tops.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tops.texture, 0);
+    }
     grids = {
       top: next.top,
+      tops,
       list: next.list.map((g) => {
         const height = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, height);
@@ -756,6 +866,22 @@ export function createMeshRenderer(canvas) {
       gl.uniform1f(at('ownSize'), g.size);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     });
+    if (grids.tops) {
+      // the grids are still bound to their units
+      const { tops } = grids;
+      const t = topsPass.at;
+      gl.useProgram(topsPass.program);
+      grids.list.forEach((g, i) => gl.uniform1i(t(`grid${i}`), 1 + i));
+      gl.uniform3f(t('reach'), ...grids.list.map((g) => g.reach));
+      gl.uniform3f(t('cells'), ...grids.list.map((g) => g.size));
+      gl.uniform1f(t('gridTop'), grids.top);
+      gl.uniform3fv(t('light'), lightVector(azimuth, altitude));
+      gl.uniform1f(t('topsReach'), tops.reach);
+      gl.uniform1f(t('topsSize'), tops.size);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, tops.fbo);
+      gl.viewport(0, 0, tops.size, tops.size);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     lightKey = key;
   }
@@ -851,7 +977,10 @@ export function createMeshRenderer(canvas) {
     }
     gl.bindVertexArray(null);
     // drawn as edges only, they are in the distances (the lines, the readings) and not in the colours
-    if (chunks.size && (distanceMode || o.buildings !== 'outline')) paintBuildings(view, tiles, o, distanceMode, shading);
+    // hidden ('none'), they are kept built but drawn nowhere
+    if (chunks.size && o.buildings !== 'none' && (distanceMode || o.buildings !== 'outline')) {
+      paintBuildings(view, tiles, o, distanceMode, shading);
+    }
   }
 
   function paintBuildings(view, tiles, o, distanceMode, shading) {
@@ -887,6 +1016,15 @@ export function createMeshRenderer(canvas) {
         gl.uniform1i(at(`light${i}`), 1 + i);
       });
       gl.uniform3f(at('reach'), ...grids.list.map((g) => g.reach));
+    }
+    // a unit of their own: the screen's targets sit on 3 to 7, and the distances are drawn into one
+    const tops = shading ? grids.tops : null;
+    gl.uniform1i(at('hasTops'), tops ? 1 : 0);
+    gl.uniform1i(at('tops'), 8);
+    if (tops) {
+      gl.activeTexture(gl.TEXTURE8);
+      gl.bindTexture(gl.TEXTURE_2D, tops.texture);
+      gl.uniform2f(at('topsGrid'), tops.reach, tops.cell);
     }
     gl.uniform1i(at('img'), 0);
     gl.activeTexture(gl.TEXTURE0);
@@ -1139,7 +1277,7 @@ export function createMeshRenderer(canvas) {
   function dispose() {
     setGrids(null);
     clearBuildingChunks();
-    for (const pass of [skyPass, groundPass, buildPass, lightPass, screenPass]) gl.deleteProgram(pass.program);
+    for (const pass of [skyPass, groundPass, buildPass, lightPass, topsPass, screenPass]) gl.deleteProgram(pass.program);
     for (const mesh of meshes.values()) gl.deleteBuffer(mesh.buffer);
     meshes.clear();
     gl.deleteBuffer(corners);
@@ -1171,7 +1309,7 @@ export function createMeshRenderer(canvas) {
   }
 
   return {
-    addTile, setImage, dropTile, setGrids, setPhoto, draw, pick, pickSoon, dispose,
+    addTile, setImage, dropTile, adoptTexture, deleteTexture, setGrids, setPhoto, draw, pick, pickSoon, dispose,
     addBuildingChunk, dropBuildingChunk, clearBuildingChunks,
   };
 }

@@ -49,7 +49,7 @@
   {/if}
   {#if personalLayers.dialog}
     <NewLayerDialog source={personalLayers.dialog.source} busy={addedLayers.saving}
-      onclose={() => personalLayers.cancelNew()} oncreate={(title, file) => personalLayers.create(title, file)} />
+      onclose={() => personalLayers.cancelNew()} oncreate={(title, file, description) => personalLayers.create(title, file, description)} />
   {/if}
   <PlaceDeleteDialog controller={personalPlaceDeletion} />
   {#if personalLayers.exporting}<LayerExportDialog target={personalLayers.exporting} onclose={() => personalLayers.cancelDownload()} />{/if}

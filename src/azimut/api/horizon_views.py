@@ -5,13 +5,15 @@ which way it looked through which lens, how the picture was drawn (the ground,
 its imagery or the Wayback release, the ridge lines, the air, the hour), the
 point marked, and the photo or the video laid over it with what was done to
 match it (how much of it shows, its lens curve and corners, the skyline traced
-on it, the pins of a video). It lives under ``.horizon/``, beside the small
-preview the saved work lists show.
+on it, the pins of a video), and the buildings raised round the eye with how
+they were drawn. It lives under ``.horizon/``, beside the small preview the
+saved work lists show.
 
 What the terrain was when the view was saved is kept beside the reading
 (`made`): who the heights came from, the finest ground they were read at, the
-refraction, and where the eye stood above the sea. A view opened again is drawn
-from today's tiles; this is what it was claimed on.
+refraction, where the eye stood above the sea, and the buildings' sources with
+the dates of what they gave. A view opened again is drawn from today's tiles;
+this is what it was claimed on.
 
 A saved view stands on the map as saved work, at its eye, facing its heading,
 and is listed with the captures and the comparisons in the Saved panel
@@ -35,7 +37,7 @@ import re
 import warnings
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from PIL import Image
@@ -176,6 +178,8 @@ REACHES = tuple(int(reach) for reach in SKYLINE_CUTS)
 class Hints(BaseModel):
     """What the analyst knows about the photo, told to Fit (frontend lib/horizon/hints.js)."""
 
+    #: A photo, or a panorama read through the view's strip.
+    picture: Literal["photo", "panorama"] = "photo"
     zoom: Literal["any", "wide", "normal", "zoomed", "telephoto"] = "any"
     facing: Facing | None = None
     #: How far the photo sees: left to Fit, clear air, or one of the reaches.
@@ -222,6 +226,32 @@ class Photo(BaseModel):
         return [stroke for stroke in strokes if stroke]
 
 
+#: A building source (engine/buildings/model.py SOURCES).
+BuildingSource = Literal["ign", "nl3dbag", "nrw", "nyc", "osm", "overture", "globfp", "google"]
+#: Metres the roofs' image may be moved, east and north; and its lean per metre of height.
+_Shift = tuple[
+    Annotated[float, Field(ge=-50, le=50, allow_inf_nan=False)],
+    Annotated[float, Field(ge=-50, le=50, allow_inf_nan=False)],
+]
+
+
+class Buildings(BaseModel):
+    """The buildings raised round the eye and how (frontend lib/horizon/buildings.js).
+
+    Opening the view switches them on with these settings; a download they need
+    is still asked for."""
+
+    radius: Literal[1000, 2000, 5000, 10000] = 2000
+    sources: list[BuildingSource] = Field(default_factory=list, max_length=8)
+    unknown: Literal["draw", "hide"] = "draw"
+    unknown_height: float = Field(default=3, ge=1, le=60)
+    roofs: Literal["tint", "photo"] = "tint"
+    look: Literal["solid", "outline"] = "solid"
+    kinds: bool = True
+    shift: _Shift = (0, 0)
+    lean: _Shift = (0, 0)
+
+
 class ViewSpec(BaseModel):
     version: Literal[1] = 1
     eye: Eye
@@ -230,6 +260,8 @@ class ViewSpec(BaseModel):
     sky: Sky = Field(default_factory=Sky)
     target: Target | None = None
     photo: Photo | None = None
+    #: None while no building is raised.
+    buildings: Buildings | None = None
 
 
 class Credit(BaseModel):
@@ -237,10 +269,36 @@ class Credit(BaseModel):
     attribution: str = Field(default="", max_length=300)
 
 
+class BuildingCredit(BaseModel):
+    """A source the buildings came from, and how old what it gave is."""
+
+    id: BuildingSource
+    label: str = Field(default="", max_length=200)
+    licence: str = Field(default="", max_length=200)
+    oldest: str = Field(default="", max_length=32)
+    newest: str = Field(default="", max_length=32)
+
+
+class BuildingCounts(BaseModel):
+    """How many buildings stood on each kind of height."""
+
+    measured: int = Field(default=0, ge=0)
+    estimated: int = Field(default=0, ge=0)
+    range: int = Field(default=0, ge=0)
+    unknown: int = Field(default=0, ge=0)
+
+
+class BuildingsMade(BaseModel):
+    sources: list[BuildingCredit] = Field(default_factory=list, max_length=8)
+    counts: BuildingCounts = Field(default_factory=BuildingCounts)
+
+
 class Made(BaseModel):
-    """What the terrain was when the view was saved, as the browser read it off the turn."""
+    """What the terrain was when the view was saved, as the browser read it off the turn,
+    and the buildings raised on it, if any."""
 
     terrain: list[Credit] = Field(default_factory=list, max_length=8)
+    buildings: BuildingsMade | None = None
     #: The finest ground the heights were read at, in metres.
     resolution_m: float | None = Field(default=None, gt=0, le=10_000)
     refraction: float | None = Field(default=None, ge=0, le=0.3)

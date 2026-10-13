@@ -10,7 +10,7 @@ function memoryStorage(seed = {}) {
 }
 
 const area = (extra = {}) => ({
-  tiles: [], pending: 0, counts: { measured: 0, estimated: 0, range: 0, unknown: 0 }, footprints: {}, sources: [],
+  tiles: [], pending: 0, working: 0, counts: { measured: 0, estimated: 0, range: 0, unknown: 0 }, footprints: {}, sources: [],
   failed: [], retry_in: 0, needs: [], downloads: [], ...extra,
 });
 
@@ -54,7 +54,8 @@ describe('Horizon buildings', () => {
     s.state.follow(EYE);
     await s.run();
     expect(s.api.get).not.toHaveBeenCalled();
-    expect(s.state.sceneTiles).toBeNull();
+    expect(s.state.sceneTiles).toEqual([]);
+    expect(s.state.banner).toBeNull();
   });
 
   it('asks for the area once the eye rests, then fetches each ready tile once', async () => {
@@ -64,8 +65,8 @@ describe('Horizon buildings', () => {
     s.state.follow(EYE);
     expect(s.timers[0].ms).toBe(MOVE_DELAY);
     await s.run();
-    expect(s.api.get.mock.calls[0][0]).toBe('/api/horizon/buildings?lat=13.578000&lon=44.018000&radius=2000&sources=ign,osm,globfp');
-    expect(s.bytes.mock.calls[0][0]).toBe('/api/horizon/buildings/tiles?t=14/1/2&sources=ign,osm,globfp');
+    expect(s.api.get.mock.calls[0][0]).toBe('/api/horizon/buildings?lat=13.578000&lon=44.018000&radius=2000&sources=ign,nl3dbag,nrw,nyc,osm,overture,globfp,google');
+    expect(s.bytes.mock.calls[0][0]).toBe('/api/horizon/buildings/tiles?t=14/1/2&sources=ign,nl3dbag,nrw,nyc,osm,overture,globfp,google');
     expect(s.state.sceneTiles.map((t) => [t.key, t.x, t.y, t.version])).toEqual([['14/1/2', 1, 2, 'a']]);
     // a tile still coming: asked again a moment later, the one held not fetched twice
     expect(s.timers[0].ms).toBe(POLL_MS);
@@ -114,13 +115,50 @@ describe('Horizon buildings', () => {
     expect(s.state.drawOptions(0)).toMatchObject({ buildings: 'outline', roofs: 'photo', groundShift: [0, 0] });
   });
 
-  it('lets go of everything when switched off', async () => {
-    const s = setUp({ answers: [area({ tiles: [{ key: '14/1/2', ready: true, version: 'a' }] })] });
+  it('keeps what it holds when switched off, so switched on again nothing is fetched twice', async () => {
+    const s = setUp({
+      answers: [area({ tiles: [{ key: '14/1/2', ready: true, version: 'a' }] }), area({ tiles: [{ key: '14/1/2', ready: true, version: 'a' }] })],
+    });
     s.state.follow(EYE);
     await s.run();
     s.state.toggle();
-    expect(s.state.sceneTiles).toBeNull();
-    expect(s.state.status).toBeNull();
+    expect(s.state.on).toBe(false);
+    expect(s.state.sceneTiles.map((t) => t.key)).toEqual(['14/1/2']);
+    s.state.toggle();
+    await s.run();
+    expect(s.api.get).toHaveBeenCalledTimes(2);
+    expect(s.bytes).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps asking while the app is still raising tiles', async () => {
+    const s = setUp({ answers: [area({ tiles: [{ key: '14/1/2', ready: true, version: 'a' }], working: 1 })] });
+    s.state.follow(EYE);
+    await s.run();
+    expect(s.timers.at(-1).ms).toBe(POLL_MS);
+    expect(s.state.banner).toMatchObject({ kind: 'progress', text: 'Raising the buildings…', share: null });
+  });
+
+  it('shows a download over the view with how far along it is', async () => {
+    const s = setUp({
+      answers: [area({ downloads: [{ grid: 'google', source: 'google', done: 13e6, total: 39e6, error: '' }] })],
+    });
+    s.state.follow(EYE);
+    await s.run();
+    expect(s.state.banner).toMatchObject({ kind: 'progress', text: 'Downloading Google 2.5D 13 MB of 39 MB' });
+    expect(s.state.banner.share).toBeCloseTo(1 / 3);
+  });
+
+  it('notes under the view what the heights rest on while buildings show, nothing once off', async () => {
+    const s = setUp({ answers: [area({ counts: { measured: 3, estimated: 0, range: 0, unknown: 1 } })] });
+    expect(s.state.caveat).toBeNull();
+    s.state.follow(EYE);
+    await s.run();
+    expect(s.state.caveat).toEqual({
+      heights: '4 buildings · heights 75% measured, 25% unknown (drawn at 3 m)',
+      note: 'Open data: heights and footprints can be wrong or out of date.',
+    });
+    s.state.toggle();
+    expect(s.state.caveat).toBeNull();
   });
 
   it('says so when every source is switched off, rather than asking', async () => {
@@ -161,12 +199,17 @@ describe('the Buildings row in the Layers menu', () => {
     await s.run();
     const row = s.state.layerRow;
     expect(row).toMatchObject({ id: 'buildings', label: 'Buildings', on: true });
-    expect(row.note).toBe(
-      '100 buildings · heights 90% measured, 10% unknown · Estimated heights here come from 3D-GloBFP: 40 MB to download once, kept on this machine.'
-    );
-    expect(row.actions.map((a) => a.label)).toEqual(['Download 40 MB', 'Not now', 'Settings']);
-    row.actions[1].run();
-    expect(s.state.layerRow.actions.map((a) => a.label)).toEqual(['Settings']);
+    expect(row.note).toBe('100 buildings · heights 90% measured, 10% unknown');
+    expect(row.actions.map((a) => a.label)).toEqual(['Settings']);
+    // the question is asked over the view
+    const banner = s.state.banner;
+    expect(banner).toMatchObject({
+      kind: 'ask',
+      text: 'To download here: 3D-GloBFP (about 2020) 40 MB. Each is downloaded once and kept on this machine.',
+    });
+    expect(banner.actions.map((a) => a.label)).toEqual(['Download 3D-GloBFP (40 MB)', 'Not now']);
+    banner.actions[1].run();
+    expect(s.state.banner).toBeNull();
     s.state.layerRow.actions[0].run();
     expect(s.state.panelOpen).toBe(true);
     row.toggle();

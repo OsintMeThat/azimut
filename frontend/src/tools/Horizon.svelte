@@ -83,6 +83,8 @@
   import { createHorizonState } from './horizon/state/horizon.svelte.js';
   import { createBuildingsState } from './horizon/state/buildings.svelte.js';
   import { createOverlayState } from './horizon/state/overlay.svelte.js';
+  import { createFindState } from './horizon/state/find.svelte.js';
+  import { facingFrom } from '../lib/horizon/find.js';
   import { createViewsState } from './horizon/state/views.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
@@ -96,7 +98,7 @@
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { savedRow } from '../lib/geoTree.js';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
-  import PlaceSearch from './satellite/PlaceSearch.svelte';
+  import MapNavigation from './horizon/MapNavigation.svelte';
   import HorizonView from './horizon/HorizonView.svelte';
   import BuildingsPanel from './horizon/BuildingsPanel.svelte';
   import HorizonStrip from './horizon/HorizonStrip.svelte';
@@ -110,6 +112,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import Icon from '../components/Icon.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
+  import Find from './horizon/Find.svelte';
 
   const view = createHorizonState({ api });
   // buildings round the eye: nothing is asked of the app until their row is on
@@ -121,6 +124,8 @@
   onDestroy(() => buildings.destroy());
   const imagery = createImageryState({ api });
   const overlay = createOverlayState({ api, view });
+  /** Find where the photo was taken: its own screen over the tab, sharing the photo and its trace. */
+  const finder = createFindState({ api, overlay, view });
   /** The view on screen, which draws the saved work's preview. */
   let viewPane = $state(null);
   const views = createViewsState({
@@ -133,6 +138,7 @@
       step: Math.max(0.5, Math.min(view.camera.fov, 360) / 90),
       limit: view.visibility ?? Infinity,
     }),
+    buildings,
   });
 
   let providerId = $state('esri-world-imagery');
@@ -175,6 +181,7 @@
     seenLoupe ? { ...view.camera, ...seenLens({ ...view.camera, width: frame.width, height: frame.height, loupe: seenLoupe }) } : view.camera
   );
   const swapped = $derived(mapLarge && layout === 'looking');
+  const mapNavigation = $derived(layout !== 'looking' || swapped);
 
   // -- opening ------------------------------------------------------------------
 
@@ -646,6 +653,8 @@
   }
 
   function onKey(event) {
+    // Find has the keys while it is open
+    if (finder.open) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && uiState.tool === 'horizon' && layout === 'looking') {
       event.preventDefault();
       saveView();
@@ -710,13 +719,11 @@
     savedWork.shown.filter((row) => row.kind !== 'view' || row.view !== views.current?.name)
   );
 
-  const layerRows = $derived([
-    ...mapLayers.rows({
+  const layerRows = $derived(
+    mapLayers.rows({
       saved: savedRow(savedWork, mapLayers.has('saved'), savedItems),
-    }),
-    // the view's own: buildings raised round the eye
-    buildings.layerRow,
-  ]);
+    })
+  );
 
   /** A saved item picked on the map: the map goes to it. */
   function flyToSaved(row) {
@@ -896,38 +903,6 @@
   // -- the place search and the right-click menu, on the map ------------------------------
 
   let searchText = $state('');
-  let searching = $state(false);
-
-  /** Coordinates stand there at once; a place name flies the map there to pick the spot. */
-  async function goTo() {
-    const text = searchText.trim();
-    if (!text || searching) return;
-    searching = true;
-    try {
-      try {
-        const parsed = await api.post('/api/geo/parse', { text });
-        standAt(parsed);
-        return;
-      } catch {
-        // not coordinates: a place name
-      }
-      const place = await api.get(`/api/geo/geocode?q=${encodeURIComponent(text)}`);
-      engine?.setView(place, Math.max(engine.getZoom(), 13));
-    } catch {
-      toast('No match. Try coordinates ("50.4501, 30.5234"), DMS, or a place name', 'danger');
-    } finally {
-      searching = false;
-    }
-  }
-
-  function goToSuggestion(item) {
-    if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
-    if (item.group === 'coords') {
-      standAt(item);
-      return;
-    }
-    engine?.setView(item, item.zoom ?? Math.max(engine.getZoom(), 13));
-  }
 
   let pointMenu = $state(null);
   const pointTools = otherMapTools('horizon');
@@ -1099,6 +1074,90 @@
     else toast('Skyline found: rub out what is not the ridge', 'ok', 8000, { label: 'Undo', onClick: () => overlay.undoStroke() });
   }
 
+  /** Open Find, asking for the photo first when none is laid. */
+  function openFind() {
+    finder.show();
+    if (caseState.current) finder.refreshList(caseState.current.id);
+    if (!overlay.source) photoDialog = true;
+  }
+
+  // the case's searches, for Find and the Open menu, read again when the case changes
+  $effect(() => {
+    const id = caseState.current?.id ?? null;
+    untrack(() => finder.refreshList(id));
+  });
+
+  /** Start Find's search, in a case made first when none is open. */
+  async function searchFromFind() {
+    try {
+      const owner = await ensureCase();
+      await finder.start(owner.id);
+    } catch (failure) {
+      toast(failure.message || 'The search could not start', 'danger');
+    }
+  }
+
+  /** Look from a place the search found, the view turned and the lens set as it found them. */
+  function lookFromPlace(place) {
+    finder.hide();
+    view.standAt(place, { mode: finder.who.mode, height: place.height ?? finder.who.low });
+    if (Number.isFinite(place.heading)) {
+      view.look({ heading: place.heading, tilt: place.tilt ?? 0, roll: place.roll ?? 0, fov: place.fov ?? view.camera.fov });
+    }
+    if (Number.isFinite(place.reach)) overlay.setReachFound(place.reach);
+  }
+
+  /** Open a search the case keeps in Find, with its photo and its trace when another is laid. */
+  async function openSearch(name) {
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    try {
+      finder.show();
+      const record = await finder.openSearch(caseId, name);
+      const photo = record.ask?.photo;
+      if (photo?.path && overlay.source?.path !== photo.path) {
+        await overlay.openCase(caseId, { path: photo.path, kind: photo.kind, title: photo.title });
+        overlay.restoreWork({ strokes: photo.strokes ?? [], hints: record.ask?.hints });
+      }
+    } catch (failure) {
+      toast(failure.message || 'The search could not be opened', 'danger');
+    }
+  }
+
+  async function removeSearch(name) {
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    try {
+      await finder.remove(caseId, name);
+      toast('Search moved to the Trash', 'ok');
+    } catch (failure) {
+      toast(failure.message || 'The search could not be deleted', 'danger');
+    }
+  }
+
+  /** Stand at a place Find gave, facing as its first alignment says (the lens known), else towards its near point. */
+  function standFromFind(point) {
+    const first = finder.alignments[0];
+    finder.hide();
+    view.standAt(point);
+    if (!first) return;
+    const heading = facingFrom(first, point, finder.lens ?? {}) ?? bearingBetween(point, first.map.near);
+    view.look({ heading });
+  }
+
+  /** Where Find's map opens: its area, else the viewpoint, else where the photo says, else where Horizon's map is. */
+  const findHome = $derived.by(() => {
+    const area = finder.area;
+    if (area.length) {
+      return { lat: area.reduce((sum, p) => sum + p.lat, 0) / area.length, lon: area.reduce((sum, p) => sum + p.lon, 0) / area.length, zoom: 11 };
+    }
+    const eye = view.observer;
+    if (eye) return { lat: eye.lat, lon: eye.lon, zoom: 12 };
+    const gps = overlay.facts?.gps;
+    if (gps) return { lat: gps.lat, lon: gps.lon, zoom: 12 };
+    return mapView ?? { lat: 20, lon: 0, zoom: 2 };
+  });
+
   function layCase(item) {
     photoDialog = false;
     const caseId = caseState.current?.id;
@@ -1236,7 +1295,8 @@
   style:--hz-side="{sideW}px"
   style:--hz-map-h="{mapH}px"
 >
-  <div class="hz-main">
+  <!-- Find covers the tab: what lies under it takes no focus and no click -->
+  <div class="hz-main" inert={finder.open}>
     <header class="tool-header hz-head">
       {#if layout === 'looking'}
         <!-- the view's name, read as a title until it is clicked; where the eye stands is in its tooltip -->
@@ -1300,6 +1360,18 @@
           <Icon name="image" size={14} /><span class="hz-act-label">Add a photo or video</span>
         </button>
       {/if}
+      {#if layout === 'picking' || (layout === 'looking' && overlay.source)}
+        <button
+          type="button"
+          class="btn btn-sm hz-act"
+          class:btn-primary={layout === 'picking'}
+          onclick={openFind}
+          title="Search an area of the map for where the photo was taken, from its skyline and what lines up in it"
+          aria-label={layout === 'picking' ? 'Find where a photo was taken' : 'Find where it was taken'}
+        >
+          <Icon name="search" size={14} /><span class="hz-act-label">{layout === 'picking' ? 'Find where a photo was taken' : 'Find'}</span>
+        </button>
+      {/if}
       {#if caseState.current && layout !== 'moving'}
         <ViewsMenu
           {views}
@@ -1308,6 +1380,8 @@
           onopen={openView}
           onnew={layout === 'looking' ? newView : null}
           onrevert={layout === 'looking' ? () => openView(views.current?.name) : null}
+          searches={finder.list}
+          onopensearch={openSearch}
         />
       {/if}
       {#if layout === 'looking'}
@@ -1454,14 +1528,22 @@
     ></button>
   {/if}
 
-  <aside class="hz-inspector" aria-label="Map and settings">
+  <aside class="hz-inspector" aria-label="Map and settings" inert={finder.open}>
     <div class="hz-slot"></div>
     <div class="hz-groups">
-      <HorizonPanel {view} {overlay} units={prefs.units} {aspect} onmove={layout === 'looking' ? startMove : null} onturn={turnTo} />
+      <HorizonPanel
+        {view}
+        {overlay}
+        {buildings}
+        units={prefs.units}
+        {aspect}
+        onmove={layout === 'looking' ? startMove : null}
+        onturn={turnTo}
+      />
     </div>
   </aside>
 
-  <div class="hz-map" bind:this={mapBox}>
+  <div class="hz-map" bind:this={mapBox} inert={finder.open}>
     {#if mapView}
       <MapSurface
         bind:this={surface}
@@ -1478,7 +1560,7 @@
         chrome={false}
         imperial={prefs.units === 'imperial'}
         armed={layout === 'looking' ? 'measuring' : 'selecting'}
-        controlsTop={layout === 'looking' ? 10 : 60}
+        controlsTop={mapNavigation ? 60 : 10}
         onclick={onMapClick}
         oncontextmenu={onMapContextMenu}
         onusage={() => imagery.refreshUsage()}
@@ -1486,18 +1568,16 @@
           if (layout === 'picking') share.settled(camera, engine?.maxZoom());
         }}
       >
-        {#if layout !== 'looking'}
-          <div class="hz-search">
-            <PlaceSearch
-              bind:value={searchText}
-              centre={mapView ? { lat: mapView.lat, lon: mapView.lon } : null}
-              units={prefs.units}
-              {searching}
-              listId="horizon-suggestions"
-              onpick={goToSuggestion}
-              onsubmit={goTo}
-            />
-          </div>
+        {#if mapNavigation}
+          <MapNavigation
+            {engine}
+            view={mapView}
+            {bearing}
+            units={prefs.units}
+            active={!finder.open}
+            bind:value={searchText}
+            oncoordinates={layout !== 'looking' ? standAt : null}
+          />
         {/if}
         <!-- inert: a click on this map stands the eye or turns it, never a card -->
         <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'horizon'} />
@@ -1603,6 +1683,23 @@
       provider={providerId} rows={layerRows} onprovider={(id) => { providerId = id; }}
       places={savedWork.rows.filter((row) => row.kind === 'place')} />
   </div>
+  {#if finder.open}
+    <Find
+      find={finder}
+      {overlay}
+      {imagery}
+      {overlays}
+      home={findHome}
+      units={prefs.units}
+      standing={Boolean(view.observer)}
+      onpick={() => (photoDialog = true)}
+      onstand={standFromFind}
+      onsearch={searchFromFind}
+      onplace={lookFromPlace}
+      onopensearch={openSearch}
+      onremovesearch={removeSearch}
+    />
+  {/if}
 </div>
 
 {#if photoDialog}
@@ -2119,12 +2216,5 @@
   .looking:not(.swapped) .hz-map :global(.maplibregl-ctrl-attrib:hover) {
     max-width: 320px;
     white-space: normal;
-  }
-  .hz-search {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 660;
-    width: min(380px, calc(100% - 20px));
   }
 </style>

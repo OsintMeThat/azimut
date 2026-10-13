@@ -29,14 +29,14 @@ def skyturn(bumps, base=1.0, nan_between=None):
 RANGE = skyturn([(40, 6, 3), (52, 3.5, 1.5), (61, 4.5, 4), (150, 2, 8), (230, 5, 2), (300, 3, 6)])
 
 
-def trace_on(turn, heading, fov, tilt=0.0, roll=0.0, count=200, reach=0.95):
+def trace_on(turn, heading, fov, tilt=0.0, roll=0.0, count=200, reach=0.95, projection="camera"):
     """Picture-plane points along the skyline a camera sees: for each x, the y where the
     ray's elevation meets the terrain's skyline under it."""
     x = np.linspace(-reach, reach, count)
     low, high = np.full(count, -3.0), np.full(count, 3.0)
     for _ in range(60):
         y = (low + high) / 2
-        azimuth, elevation = skymatch.directions(x, y, fov=fov, tilt=tilt, roll=roll)
+        azimuth, elevation = skymatch.directions(x, y, fov=fov, tilt=tilt, roll=roll, projection=projection)
         above = elevation > turn.at(heading + azimuth)
         high = np.where(above, y, high)
         low = np.where(above, low, y)

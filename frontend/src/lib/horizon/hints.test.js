@@ -6,6 +6,9 @@ import {
   FACING_HALF,
   hintsSummary,
   NO_HINTS,
+  PANORAMA_WITHIN,
+  panoramaOffered,
+  panoramaWidth,
   REACHES,
   reachText,
   searchHints,
@@ -50,5 +53,26 @@ describe('what the analyst knows about a photo', () => {
     expect(searchHints(NO_HINTS)).toEqual({ within: [1.5, 120] });
     expect(searchHints({ zoom: 'zoomed', facing: { heading: 200 } })).toEqual({ within: [10, 35], facing: [200, FACING_HALF] });
     expect(searchHints({ zoom: 'zoomed' }, { lensKnown: true })).toEqual({});
+  });
+
+  it('offers a panorama for a wide picture or a stitched collage, never a video', () => {
+    expect(panoramaOffered({ kind: 'image', aspect: 4 / 3 })).toBe(false);
+    expect(panoramaOffered({ kind: 'image', aspect: 3.5 })).toBe(true);
+    expect(panoramaOffered({ kind: 'image', aspect: 2.1, stitched: { degrees: 47 } })).toBe(true);
+    expect(panoramaOffered({ kind: 'video', aspect: 3.5 })).toBe(false);
+    expect(cleanHints({ picture: 'fisheye' }).picture).toBe('photo');
+  });
+
+  it('takes a panorama as wide as its stitch says, else as its shape suggests, within reason', () => {
+    expect(panoramaWidth({ aspect: 2, stitched: { degrees: 47.4 } })).toBe(47.4);
+    expect(panoramaWidth({ aspect: 3.5 })).toBe(210);
+    expect(panoramaWidth({ aspect: 9 })).toBe(PANORAMA_WITHIN[1]);
+    expect(panoramaWidth({ aspect: 0.5 })).toBe(PANORAMA_WITHIN[0]);
+  });
+
+  it('searches a panorama across the widths a panorama has, and says it is one', () => {
+    expect(searchHints({ picture: 'panorama', zoom: 'zoomed' })).toEqual({ within: PANORAMA_WITHIN });
+    expect(searchHints({ picture: 'panorama' }, { lensKnown: true })).toEqual({});
+    expect(hintsSummary({ picture: 'panorama', zoom: 'zoomed', facing: { heading: 90 } })).toBe('Panorama · 90° E');
   });
 });

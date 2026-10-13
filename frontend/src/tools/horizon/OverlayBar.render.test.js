@@ -337,4 +337,50 @@ describe('what the analyst knows about the photo', () => {
     expect([...menu.querySelectorAll('[role="radio"]')].some((b) => b.textContent.trim() === 'Zoomed')).toBe(false);
     expect(menu.textContent).toContain('Fit found the skyline within 20 km.');
   });
+
+  it('asks what kind of picture it is only when it may be a panorama, and says what a panorama is searched across', () => {
+    const plain = bar(told(), { gap });
+    button(plain, 'What you know').click();
+    flushSync();
+    expect(plain.textContent).not.toContain('Picture');
+    const overlay = told({ panoramaOffered: true, stitched: null, isPanorama: false });
+    const root = bar(overlay, { gap });
+    button(root, 'What you know').click();
+    flushSync();
+    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
+    expect(menu.textContent).toContain('A phone’s panorama reads better as Panorama.');
+    [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Panorama').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ picture: 'panorama' });
+    // read as one, the zoom words give way to the widths it is searched across
+    const strip = bar(told({ panoramaOffered: true, stitched: null, isPanorama: true, hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' } }), { gap });
+    button(strip, 'What you know: Panorama').click();
+    flushSync();
+    const stripMenu = strip.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
+    expect(stripMenu.textContent).toContain('Fit tries 60° to 360° across.');
+    expect([...stripMenu.querySelectorAll('[role="radio"]')].some((b) => b.textContent.trim() === 'Zoomed')).toBe(false);
+  });
+
+  it('says a stitched collage’s width, kept by Fit', () => {
+    const stitched = { degrees: 47.4, stitched: 15, by_hand: 4, warp: 'cylindrical', collage: 'Collage 9' };
+    const root = bar(
+      told({ panoramaOffered: true, stitched, isPanorama: true, lens: { fov: 47.4, stitched: true }, hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' } }),
+      { gap }
+    );
+    button(root, 'What you know: Panorama').click();
+    flushSync();
+    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
+    expect(menu.textContent).toContain('Stitched by Azimut from Collage 9.');
+    expect(menu.textContent).toContain('47° across: Fit keeps it.');
+  });
+});
+
+describe('a panorama on the band', () => {
+  it('holds the photo’s hand and Reshape: a panorama turns with the terrain alone', () => {
+    const root = bar(fakeOverlay({ isPanorama: true }));
+    expect(button(root, 'Move the photo').disabled).toBe(true);
+    expect(button(root, 'Move the photo').title).toBe('A panorama stays put: turn the terrain under it');
+    expect(button(root, 'Move the terrain').disabled).toBe(false);
+    expect(button(root, 'Reshape the photo').disabled).toBe(true);
+    expect(button(root, 'Reshape the photo').title).toBe('A panorama keeps its shape');
+  });
 });

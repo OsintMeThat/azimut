@@ -56,7 +56,8 @@ def check_application(base_url: str) -> None:
     # What the frozen build drops without a word when the spec forgets it: the zone
     # database (local times silently read as UTC on Windows), the PDF fonts, the
     # capture extension the Settings install button and the zip route hand out, and
-    # the scrapers' metadata (a stale workspace copy would shadow the shipped one).
+    # the scrapers' metadata (a stale workspace copy would shadow the shipped one), and
+    # the decoders Horizon reads buildings with, checked offline.
     status, _content_type, body = _request(f"{base_url}/api/settings/bundled")
     smoke: dict[str, Any] = json.loads(body)
     missing = [name for name, ok in smoke.items() if not ok]

@@ -12,13 +12,15 @@
  * drawn, marks its point, and lays its photo again with the work on it, held
  * to the terrain when it was. Billed
  * imagery is never switched back on by opening a view: its reach and its pass
- * wait on the switch. A photo the case no longer holds is said, and the view
+ * wait on the switch. Its buildings are raised again with their settings, and a
+ * download they need is still asked for. A photo the case no longer holds is said, and the view
  * opens without it.
  *
  * The preview the saved work lists show is drawn from the view on screen at
  * each save (`snapshot`), and a preview that cannot be drawn costs the save
  * nothing.
  */
+import { settingsOfSpec } from '../../../lib/horizon/buildings.js';
 import {
   footprintRing,
   madeOf,
@@ -37,8 +39,17 @@ import {
  * @param {() => string|null} deps.caseId the open case
  * @param {() => Promise<Blob|null>} [deps.snapshot] the view on screen, small, for the lists
  * @param {() => Array<{lat:number, lon:number}>} [deps.footprint] the ground the lens takes in
+ * @param {object} [deps.buildings] the buildings round the eye (state/buildings.svelte.js)
  */
-export function createViewsState({ api, view, overlay, caseId, snapshot = async () => null, footprint = () => [] }) {
+export function createViewsState({
+  api,
+  view,
+  overlay,
+  caseId,
+  snapshot = async () => null,
+  footprint = () => [],
+  buildings = null,
+}) {
   let list = $state.raw([]);
   let current = $state.raw(null);
   // what the open view was saved or opened as: its signature, its trace and its pins
@@ -48,13 +59,14 @@ export function createViewsState({ api, view, overlay, caseId, snapshot = async 
   let listed = 0;
   let opened = 0;
 
-  const spec = $derived(viewSpec(view, overlay));
+  const built = () => buildings?.settings ?? null;
+  const spec = $derived(viewSpec(view, overlay, built()));
   const now = $derived(signature(spec));
 
   const base = (id) => `/api/cases/${encodeURIComponent(id)}/horizon/views`;
 
   function hold() {
-    saved = { signature: signature(viewSpec(view, overlay)), strokes: overlay.strokes, pins: overlay.pins };
+    saved = { signature: signature(viewSpec(view, overlay, built())), strokes: overlay.strokes, pins: overlay.pins };
   }
 
   async function load(id = caseId()) {
@@ -84,6 +96,7 @@ export function createViewsState({ api, view, overlay, caseId, snapshot = async 
       const kept = answer.spec;
       if (overlay.source) overlay.remove();
       view.restore(restoredView(kept));
+      buildings?.set(settingsOfSpec(kept.buildings));
       if (kept.target) view.mark(kept.target, { height: kept.target.height ?? 0 });
       else view.clearTarget();
       const photo = kept.photo;
@@ -154,10 +167,10 @@ export function createViewsState({ api, view, overlay, caseId, snapshot = async 
     /** Keep the view in the case under `title`; a new title renames the view open. */
     async save(title) {
       const id = caseId();
-      const kept = viewSpec(view, overlay);
+      const kept = viewSpec(view, overlay, built());
       if (!id || !kept || busy) return null;
       const name = String(title ?? '').trim() || suggestedTitle(view, overlay);
-      const body = { title: name, spec: kept, made: madeOf(view.panorama), footprint: footprintRing(footprint()) };
+      const body = { title: name, spec: kept, made: madeOf(view.panorama, kept.buildings ? buildings.status : null), footprint: footprintRing(footprint()) };
       if (current) {
         if (name === current.title) body.overwrite = true;
         else body.rename_from = current.name;

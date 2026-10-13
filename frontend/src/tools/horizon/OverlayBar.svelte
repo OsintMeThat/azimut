@@ -58,10 +58,13 @@
   function hand(side) {
     const name = side === 'photo' ? what.toLowerCase() : 'terrain';
     const on = overlay.moves === side || overlay.moves === 'both';
+    // a panorama turns with the terrain alone
+    const held = overlay.isPanorama && side === 'photo';
     let title = `Move the ${name} too, both held together (L)`;
-    if (overlay.moves === 'both') title = 'Drag and the wheel move both, held together (L)';
+    if (held) title = 'A panorama stays put: turn the terrain under it';
+    else if (overlay.moves === 'both') title = 'Drag and the wheel move both, held together (L)';
     else if (on) title = `Drag and the wheel move the ${name}`;
-    return { side, on, title, label: `Move the ${name}` };
+    return { side, on, title, label: `Move the ${name}`, held };
   }
   const hands = $derived({ photo: hand('photo'), terrain: hand('terrain') });
 
@@ -195,6 +198,7 @@
     class="act icon hand"
     class:on={one.on}
     aria-pressed={one.on}
+    disabled={one.held}
     onclick={() => overlay.pressHand(side)}
     title={one.title}
     aria-label={one.label}
@@ -330,9 +334,13 @@
         class="act"
         class:on={overlay.warping}
         aria-pressed={overlay.warping}
-        disabled={overlay.locked}
+        disabled={overlay.locked || overlay.isPanorama}
         onclick={() => overlay.setWarping(!overlay.warping)}
-        title={overlay.locked ? 'Move one alone to reshape the photo' : 'Pull the photo by its corners or edges, to square a slanted photo or squeeze a stretched one (W)'}
+        title={overlay.isPanorama
+          ? 'A panorama keeps its shape'
+          : overlay.locked
+            ? 'Move one alone to reshape the photo'
+            : 'Pull the photo by its corners or edges, to square a slanted photo or squeeze a stretched one (W)'}
         aria-label="Reshape the photo"
       >
         <Icon name="polygon" size={14} /><span class="word minor">Reshape</span>

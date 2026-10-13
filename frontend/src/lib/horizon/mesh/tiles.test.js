@@ -109,6 +109,19 @@ describe('the tile tree', () => {
     expect(out.base.total).toBeLessThanOrEqual(60);
   });
 
+  it('lays and sharpens the ground across the antimeridian as near as it is', () => {
+    // Taveuni, Fiji, looking east over the 180th meridian a few kilometres off
+    const t = tree({ lat: -16.8, lon: 179.95 });
+    const east = { ...CAMERA, heading: 90 };
+    t.tiles.land(east);
+    const out = t.settle(east);
+    const keys = out.drawn.map((tile) => tile.key.split('/').map(Number));
+    expect(keys.every(([z, x, y]) => x >= 0 && x < 2 ** z && y >= 0 && y < 2 ** z)).toBe(true);
+    const across = keys.filter(([z, x]) => tileLon(x, z) < 0);
+    expect(across.length).toBeGreaterThan(0);
+    expect(Math.max(...across.map(([z]) => z))).toBeGreaterThan(ROOT_Z + 2);
+  });
+
   it('lets the tiles a turned-away lens sharpened go past its budget, never what the last frame drew', () => {
     const base = tree();
     base.tiles.land(CAMERA);

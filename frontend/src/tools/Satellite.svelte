@@ -2916,8 +2916,8 @@
     source={myLayers.dialog.source}
     busy={addedLayers.saving}
     onclose={() => myLayers.cancelNew()}
-    oncreate={async (title, file) => {
-      await myLayers.create(title, file);
+    oncreate={async (title, file, description) => {
+      await myLayers.create(title, file, description);
       if (myLayers.editor) await editMyLayer(myLayers.editor);
     }}
   />

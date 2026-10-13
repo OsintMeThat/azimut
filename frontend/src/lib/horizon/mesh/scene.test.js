@@ -14,7 +14,9 @@ function fakeRenderer() {
   return {
     addTile: vi.fn((data) => ({ key: data.key, texture: data.image ?? null })),
     setImage: vi.fn(),
-    dropTile: vi.fn(),
+    dropTile: vi.fn((tile, keep) => (keep ? tile.texture : null)),
+    adoptTexture: vi.fn((tile, texture) => (tile.texture = texture)),
+    deleteTexture: vi.fn(),
     setGrids: vi.fn(),
     setPhoto: vi.fn(),
     draw: vi.fn(),
@@ -120,8 +122,9 @@ describe('the scene', () => {
     s.scene.place({ ...EYE, lat: farLat }, FAR);
     expect(s.sent('eye')).toHaveLength(2 * s.workers.length);
     landed(s);
+    // a farther reach (an aircraft) keeps the tiles held: no new landing
     s.scene.place({ ...EYE, lat: farLat }, 300000);
-    expect(s.sent('eye')).toHaveLength(3 * s.workers.length);
+    expect(s.sent('eye')).toHaveLength(2 * s.workers.length);
   });
 
   it('reads the shadows\' grids ahead once the turn is in, so a sun switched on later casts them at once', () => {
@@ -212,6 +215,24 @@ describe('the scene', () => {
   });
 });
 
+/** Every tile the ground all round asks for, answered: the base is in. */
+function groundIn(s, id) {
+  for (let round = 0; round < 80; round += 1) {
+    s.scene.draw(CAMERA);
+    let asked = 0;
+    for (const worker of s.workers) {
+      for (const ask of worker.sent.filter((message) => message.type === 'tiles' && !message.answered)) {
+        ask.answered = true;
+        for (const t of ask.tiles) {
+          asked += 1;
+          s.answer({ type: 'tile', id, key: t.key, data: new Float32Array(8), size: 4, low: 0, high: 10 }, worker);
+        }
+      }
+    }
+    if (!asked && s.scene.draw(CAMERA).phase !== 'landing') return;
+  }
+}
+
 describe('the buildings round the eye', () => {
   const tile = (key, version = 'v1') => {
     const [, x, y] = key.split('/').map(Number);
@@ -224,12 +245,15 @@ describe('the buildings round the eye', () => {
       cellStart: new Uint32Array(2), roofs: new Float32Array([4, 50, -5, -5, 5, -5, 5, 5, -5, 5]), count: 1, ...extra,
     });
 
-  it('waits for the eye before building any, then builds each tile once in its frame', () => {
+  it('waits for the ground all round before building any, then builds each tile once in its frame', () => {
     const s = setUp();
     s.scene.setBuildings([tile('14/1/2')]);
     expect(s.sent('buildings')).toEqual([]);
     s.scene.place(EYE, FAR);
     const id = landed(s);
+    // the relief comes first
+    expect(s.sent('buildings')).toEqual([]);
+    groundIn(s, id);
     const [message] = s.sent('buildings');
     expect(message).toMatchObject({ id, unknown: 'draw', chunks: [{ key: '14/1/2', x: 1, y: 2, version: 'v1' }] });
     // the same tile at the same version is not built twice
@@ -242,7 +266,7 @@ describe('the buildings round the eye', () => {
   it('builds a tile again when it changes, and lets go of one no longer asked for', () => {
     const s = setUp();
     s.scene.place(EYE, FAR);
-    landed(s);
+    groundIn(s, landed(s));
     s.scene.setBuildings([tile('14/1/2'), tile('14/1/3')]);
     s.scene.setBuildings([tile('14/1/2', 'v2')]);
     expect(s.sent('buildings').at(-1).chunks.map((c) => [c.key, c.version])).toEqual([['14/1/2', 'v2']]);
@@ -252,7 +276,7 @@ describe('the buildings round the eye', () => {
   it('draws no tile built for a version since replaced', () => {
     const s = setUp();
     s.scene.place(EYE, FAR);
-    landed(s);
+    groundIn(s, landed(s));
     s.scene.setBuildings([tile('14/1/2')]);
     const stale = s.sent('buildings').at(-1);
     s.scene.setBuildings([tile('14/1/2', 'v2')]);
@@ -260,10 +284,27 @@ describe('the buildings round the eye', () => {
     expect(s.renderer.addBuildingChunk).not.toHaveBeenCalled();
   });
 
+  it('hides the buildings without letting them go, and shown again builds only what changed', () => {
+    const s = setUp();
+    s.scene.place(EYE, FAR);
+    groundIn(s, landed(s));
+    s.scene.setBuildings([tile('14/1/2'), tile('14/1/3')]);
+    built(s, s.sent('buildings').at(-1));
+    s.scene.setBuildingsShown(false);
+    expect(s.renderer.dropBuildingChunk).not.toHaveBeenCalled();
+    expect(s.renderer.clearBuildingChunks).toHaveBeenCalledTimes(1); // the landing's only
+    // a tile that changes while hidden is not built until they show
+    s.scene.setBuildings([tile('14/1/2'), tile('14/1/3', 'v2')]);
+    const asked = s.sent('buildings').length;
+    s.scene.setBuildingsShown(true);
+    expect(s.sent('buildings')).toHaveLength(asked + 1);
+    expect(s.sent('buildings').at(-1).chunks.map((c) => [c.key, c.version])).toEqual([['14/1/3', 'v2']]);
+  });
+
   it('builds every tile again when unknown heights are drawn differently', () => {
     const s = setUp();
     s.scene.place(EYE, FAR);
-    landed(s);
+    groundIn(s, landed(s));
     s.scene.setBuildings([tile('14/1/2')]);
     s.scene.setBuildingOptions({ unknown: 'hide' });
     expect(s.sent('buildings').at(-1)).toMatchObject({ unknown: 'hide', chunks: [{ key: '14/1/2' }] });
@@ -274,13 +315,14 @@ describe('the buildings round the eye', () => {
   it('starts over in a new frame when the eye lands somewhere else', () => {
     const s = setUp();
     s.scene.place(EYE, FAR);
-    landed(s);
+    groundIn(s, landed(s));
     s.scene.setBuildings([tile('14/1/2')]);
     const frame = eyeFrame({ lat: EYE.lat, lon: EYE.lon, alt: 0 });
     const [farLat] = frame.destination(0, WALK_REACH + 100);
     s.scene.place({ ...EYE, lat: farLat }, FAR);
     expect(s.renderer.clearBuildingChunks).toHaveBeenCalled();
     const id = landed(s);
+    groundIn(s, id);
     expect(s.sent('buildings').at(-1)).toMatchObject({ id, chunks: [{ key: '14/1/2' }] });
   });
 
@@ -289,16 +331,48 @@ describe('the buildings round the eye', () => {
     const s = setUp();
     s.scene.place(EYE, FAR);
     const id = landed(s);
+    groundIn(s, id);
     s.scene.draw(CAMERA, { shaded: true });
     s.answer({ type: 'grids', id, grids: GRIDS.map((g) => ({ heights: new Float32Array(g.size * g.size), top: 10 })) });
-    expect(s.renderer.setGrids).toHaveBeenLastCalledWith(expect.objectContaining({ top: 15 }));
+    expect(s.renderer.setGrids).toHaveBeenLastCalledWith(expect.objectContaining({ top: 15, buildings: 0 }));
     s.scene.setBuildings([tile('14/1/2')]);
     built(s, s.sent('buildings').at(-1));
     vi.advanceTimersByTime(300);
     const raised = s.renderer.setGrids.mock.calls.at(-1)[0];
     expect(raised.top).toBe(55);
+    // how far the roofs reach, for the shadows' tops kept round them
+    expect(raised.buildings).toBeGreaterThan(0);
+    expect(raised.buildings).toBeLessThanOrEqual(raised.list[0].reach);
     const finest = raised.list[0];
     const middle = (finest.size / 2) * finest.size + finest.size / 2;
     expect(finest.heights[middle]).toBe(50);
+  });
+});
+
+
+describe('a new eye nearby', () => {
+  it('builds the ground again but keeps the pictures it held, asking none of them again', () => {
+    const s = setUp();
+    s.scene.setImagery({ provider: 'esri', near: null });
+    s.scene.place(EYE, FAR);
+    const first = landed(s);
+    s.scene.draw(CAMERA);
+    const ask = s.sent('tiles')[0];
+    const t = ask.tiles[0];
+    expect(t.provider).toBe('esri');
+    s.answer({ type: 'tile', id: first, key: t.key, data: new Float32Array(8), size: 4, low: 0, high: 10, image: 'picture', provider: 'esri' });
+    // past the walk's reach: a new landing
+    const frame = eyeFrame({ lat: EYE.lat, lon: EYE.lon, alt: 0 });
+    const [farLat] = frame.destination(0, WALK_REACH + 100);
+    s.scene.place({ ...EYE, lat: farLat }, FAR);
+    const second = landed(s);
+    s.scene.draw(CAMERA);
+    const again = s.sent('tiles').flatMap((m) => m.tiles).filter((x) => x.key === t.key).at(-1);
+    expect(again.provider).toBeNull();
+    s.answer({ type: 'tile', id: second, key: t.key, data: new Float32Array(8), size: 4, low: 0, high: 10, provider: null });
+    expect(s.renderer.adoptTexture).toHaveBeenCalledWith(expect.anything(), 'picture');
+    // the tile counts as pictured: no picture is asked for it
+    s.scene.draw(CAMERA);
+    expect(s.sent('images').flatMap((m) => m.tiles).some((x) => x.key === t.key)).toBe(false);
   });
 });

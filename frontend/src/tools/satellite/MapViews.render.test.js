@@ -5,17 +5,18 @@ const mocks = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), del: vi.fn() }, caseState: { current: { id: 'case' } }, uiState: { tool: 'satellite' },
   personalLayers: { maps: { caseId: 'case', name: '' }, legend: null, editor: null, whenSaved: vi.fn(async () => {}), setLegend: vi.fn(), closeMaps: vi.fn() },
   ensureCase: vi.fn(async () => ({ id: 'case' })), reloadCase: vi.fn(), toast: vi.fn(), applyMapView: vi.fn(async () => []), deletedToast: vi.fn(),
+  whenLoaded: vi.fn(async () => {}),
 }));
 vi.mock('../../lib/api.js', () => ({ api: mocks.api }));
 vi.mock('../../lib/state.svelte.js', () => ({ caseState: mocks.caseState, uiState: mocks.uiState, ensureCase: mocks.ensureCase, reloadCase: mocks.reloadCase, toast: mocks.toast }));
 vi.mock('../../lib/map/personalLayers.svelte.js', () => ({ personalLayers: mocks.personalLayers }));
-vi.mock('../../lib/map/addedLayersState.svelte.js', () => ({ addedLayers: {} }));
+vi.mock('../../lib/map/addedLayersState.svelte.js', () => ({ addedLayers: { whenLoaded: mocks.whenLoaded } }));
 vi.mock('../../lib/map/mapViews.js', async (actual) => ({ ...await actual(), applyMapView: mocks.applyMapView }));
 vi.mock('../../lib/trash.js', () => ({ deletedToast: mocks.deletedToast }));
 import MapViews from './MapViews.svelte';
 let held;
 const button = (name) => [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === name);
-const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); flushSync(); };
+const settle = async () => { await new Promise((resolve) => setTimeout(resolve, 0)); flushSync(); };
 const item = { id: 'a'.repeat(32), title: 'Saved view', note: 'Legend note', show_legend: true, layers: [], provider: 'esri', camera: { lat: 48, lon: 2, zoom: 10 }, overlays: [] };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.caseState.current = { id: 'case' }; mocks.uiState.tool = 'satellite';
@@ -47,6 +48,13 @@ describe('saved map controls', () => {
     expect(button('Saved view').disabled).toBe(true);
     button('Update with this view').click(); await settle();
     expect(mocks.api.post).toHaveBeenCalledWith('/api/cases/case/map-views', expect.objectContaining({ id: item.id }));
+  });
+  it('reopens a sidebar map after its layer list has loaded', async () => {
+    mocks.personalLayers.maps.name = item.id;
+    await show();
+    expect(mocks.whenLoaded).toHaveBeenCalledWith('case');
+    expect(mocks.applyMapView).toHaveBeenCalledWith(item, expect.objectContaining({ caseId: 'case' }));
+    expect(mocks.personalLayers.closeMaps).toHaveBeenCalledOnce();
   });
   it('keeps the chosen title when saving creates the first case', async () => {
     mocks.caseState.current = null; mocks.personalLayers.maps.caseId = null;

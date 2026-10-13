@@ -1916,9 +1916,11 @@ opened. A group selector moves it between groups. Group grips support dragging o
 Up/Down keys to reorder; the first group draws on top. Each group's **Icon size**
 slider runs from 50% to 300%, including individually styled groups.
 Pins and round markers use comparable painted heights. **Line width** runs from
-0.5 to 12 pixels. The checkbox beside each feature adds it to a selection; Shift
-click selects a range, and Ctrl/Cmd click toggles a row. **Select all** checks a
-whole group. A selection can move together, change style, change group, or be
+0.5 to 12 pixels. Click a feature row to select it; Shift-click selects a range,
+and Ctrl/Cmd-click toggles a row. Feature grips reorder rows or move them into
+another group, including the whole selection when its grip is dragged. Up/Down
+keys move a focused grip. **Move to group** remains available for a selection.
+**Select all** selects a whole group. A selection can move together, change style, change group, or be
 removed with Undo. Groups initially show 100 features, with **Show 100 more** and
 **Show all**. Their lists scroll within the editor so editing controls remain
 reachable.
@@ -1932,8 +1934,12 @@ and **Draw area** collect map clicks; Enter or **Save geometry** saves, Esc canc
 Delete removes a selected corner. Existing polygon holes stay intact. Editable
 shapes hold at most 4,096 coordinates. These edits only change the layer's geometry.
 
-**Done** saves the selected feature form and any complete geometry draft, then ends
-the session. The small **Back** arrow asks before discarding changes and restores
+Click the layer name and pencil to rename it or add an optional description.
+**New layer** also accepts a description. Both fields travel with the layer;
+renaming keeps its saved-map references and case memberships.
+
+**Done** saves layer details, the selected feature form and any complete geometry
+draft, then ends the session. The small **Back** arrow asks before discarding changes and restores
 the layer to its state when editing started. Separately saved case places remain
 in the case. The checkpoint survives a reload, so reopening can still discard.
 
@@ -1943,7 +1949,7 @@ single-file formats carry geometry, groups and style fields. Downloads include
 hidden groups and omit case entity IDs. Reimporting retains Azimut symbols, group
 sizes and line widths. Source bitmaps travel in KMZ.
 
-**My maps**, below **My layers**, saves a named camera, basemap, overlays, layer
+**Saved maps**, below **My layers**, saves a named camera, basemap, overlays, layer
 order and visibility, plus a legend note. Opening a saved map restores those
 choices using current layer data. Missing layers are reported. Its pencil updates
 the composition with the current view; its trash moves only the composition to
@@ -2493,6 +2499,12 @@ north it settles on north, and Ctrl held lays the turn on 15° steps. A middle c
 Shift+← and Shift+→ turn a step. The Move the point dialog in Geo Proof turns
 the same way, and Inspect's frame viewer takes the same drag, with a middle
 click standing the frame upright.
+
+Horizon offers these controls and the place search on its large map and in
+**Find where it was taken**, including its three-column view. The small map
+at the top right keeps its compact controls. Searching in an enlarged map or
+in Find moves the map; choosing coordinates while picking or moving a viewpoint
+stands there.
 
 **Compare here…** and **Open in…** are the two rows that open a list, and they
 open it *beside* the menu. A list unfolding inside would make the menu taller, and a menu already

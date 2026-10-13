@@ -87,9 +87,10 @@ describe('a view as the case keeps it', () => {
   });
 
   it('keeps what was known about the photo and the reach Fit found its skyline at', () => {
-    expect(photoSpec(fakeOverlay())).toMatchObject({ hints: { zoom: 'any', facing: null, reach: 'auto' }, reach: null });
+    expect(photoSpec(fakeOverlay())).toMatchObject({ hints: { picture: 'photo', zoom: 'any', facing: null, reach: 'auto' }, reach: null });
     const told = photoSpec(fakeOverlay({ hints: { zoom: 'telephoto', facing: { heading: 218.444, half: 30 }, reach: 10_000 }, reachFound: 20_000 }));
-    expect(told.hints).toEqual({ zoom: 'telephoto', facing: { heading: 218.4 }, reach: 10_000 });
+    expect(told.hints).toEqual({ picture: 'photo', zoom: 'telephoto', facing: { heading: 218.4 }, reach: 10_000 });
+    expect(photoSpec(fakeOverlay({ hints: { picture: 'panorama' } })).hints.picture).toBe('panorama');
     expect(told.reach).toBe(20_000);
   });
 });
@@ -169,5 +170,50 @@ describe('back from the case', () => {
   it('offers the photo as a new view\'s name, else where it stands', () => {
     expect(suggestedTitle(fakeView(), fakeOverlay())).toBe('Ridge at dusk');
     expect(suggestedTitle(fakeView(), { source: null })).toBe('View from 46.5586, 7.8353');
+  });
+});
+
+describe('buildings in a saved view', () => {
+  const settings = {
+    on: true,
+    radius: 5000,
+    sources: { ign: true, nl3dbag: false, osm: true, globfp: false, google: true },
+    unknown: 'draw',
+    unknownHeight: 3,
+    roofs: 'tint',
+    look: 'solid',
+    showKinds: true,
+    shift: [1.23456, -2],
+    lean: [0.01234, 0],
+  };
+
+  it('are kept only while they are raised', () => {
+    expect(viewSpec(fakeView()).buildings).toBeNull();
+    expect(viewSpec(fakeView(), null, { ...settings, on: false }).buildings).toBeNull();
+    expect(viewSpec(fakeView(), null, settings).buildings).toEqual({
+      radius: 5000,
+      sources: ['ign', 'osm', 'google'],
+      unknown: 'draw',
+      unknown_height: 3,
+      roofs: 'tint',
+      look: 'solid',
+      kinds: true,
+      shift: [1.23, -2],
+      lean: [0.012, 0],
+    });
+  });
+
+  it('say where their heights came from and how old, beside the terrain', () => {
+    const status = {
+      counts: { measured: 90, unknown: 10 },
+      sources: [{ id: 'ign', label: 'BD TOPO® (IGN)', licence: 'Licence Ouverte 2.0', link: 'x', oldest: '2010-07-15', newest: null }],
+    };
+    expect(madeOf(null, status)).toEqual({
+      buildings: {
+        sources: [{ id: 'ign', label: 'BD TOPO® (IGN)', licence: 'Licence Ouverte 2.0', oldest: '2010-07-15', newest: '' }],
+        counts: { measured: 90, estimated: 0, range: 0, unknown: 10 },
+      },
+    });
+    expect(madeOf(null)).toEqual({});
   });
 });

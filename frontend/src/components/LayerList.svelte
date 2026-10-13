@@ -73,7 +73,7 @@
         {#if group.id === 'mine' && onnewpersonal}
           <button type="button" class="manage" onclick={onnewpersonal}><Icon name="plus" size={12} /> New layer</button>
         {/if}
-        {#if group.id === 'mine' && onmaps}<button class="manage" onclick={onmaps}><Icon name="compass" size={12} /> My maps</button>{/if}
+        {#if group.id === 'mine' && onmaps}<button class="manage" onclick={onmaps}><Icon name="compass" size={12} /> Saved maps</button>{/if}
       {/if}
     </section>
   {/each}

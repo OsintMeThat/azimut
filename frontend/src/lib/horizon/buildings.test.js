@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULTS, aligned, alignment, credits, describeBuilding, downloading, formatSize, problems, question, readSettings,
-  sourcesParam, splitBatch, summary, tilesToFetch,
+  DEFAULTS, aligned, alignment, buildingsSpec, caveat, credits, describeBuilding, downloading, formatSize, problems, question,
+  readSettings, settingsOfSpec, sourcesParam, splitBatch, summary, tilesToFetch,
 } from './buildings.js';
+
+describe('buildings as a saved view keeps them', () => {
+  it('come back as the settings they were saved from', () => {
+    const settings = { ...readSettings(null), on: true, radius: 10000, unknownHeight: 6, roofs: 'photo', shift: [2, -1] };
+    expect(settingsOfSpec(buildingsSpec(settings))).toEqual(settings);
+  });
+
+  it('are off for a view that kept none, and out-of-range values fall back to the defaults', () => {
+    expect(settingsOfSpec(null)).toEqual({ on: false });
+    const back = settingsOfSpec({ radius: 3000, sources: ['osm'], unknown_height: 900, shift: [99, 0] });
+    expect(back).toMatchObject({ on: true, radius: DEFAULTS.radius, unknownHeight: DEFAULTS.unknownHeight, shift: [0, 0] });
+    expect(back.sources).toEqual({ ign: false, nl3dbag: false, nrw: false, nyc: false, osm: true, overture: false, globfp: false, google: false });
+  });
+});
 
 describe('the buildings settings kept in this browser', () => {
   it('fall back on the defaults for anything missing, unknown or out of range', () => {
@@ -10,14 +24,14 @@ describe('the buildings settings kept in this browser', () => {
     expect(readSettings('{not json')).toMatchObject({ on: false, radius: 2000 });
     const kept = readSettings(JSON.stringify({
       on: true, radius: 5000, sources: { ign: false }, unknown: 'hide', roofs: 'photo', look: 'outline',
-      showKinds: false, shift: [3.5, -1], lean: [0.2, 0],
+      showKinds: false, shift: [3.5, -1], lean: [0.2, 0], unknownHeight: 7,
     }));
     expect(kept).toEqual({
-      on: true, radius: 5000, sources: { ign: false, osm: true, globfp: true }, unknown: 'hide', roofs: 'photo',
+      on: true, radius: 5000, sources: { ign: false, nl3dbag: true, nrw: true, nyc: true, osm: true, overture: true, globfp: true, google: true }, unknown: 'hide', unknownHeight: 7, roofs: 'photo',
       look: 'outline', showKinds: false, shift: [3.5, -1], lean: [0.2, 0],
     });
-    expect(readSettings(JSON.stringify({ radius: 3333, roofs: 'gold', shift: [1e9, 0], lean: 'x' }))).toMatchObject({
-      radius: 2000, roofs: 'tint', shift: [0, 0], lean: [0, 0],
+    expect(readSettings(JSON.stringify({ radius: 3333, roofs: 'gold', shift: [1e9, 0], lean: 'x', unknownHeight: 900 }))).toMatchObject({
+      radius: 2000, roofs: 'tint', shift: [0, 0], lean: [0, 0], unknownHeight: 3,
     });
   });
 
@@ -58,6 +72,22 @@ describe('what the Layers row says about the area', () => {
     expect(summary(null)).toBe('');
   });
 
+  it('notes under the view what the heights rest on, with what an unknown one is drawn as', () => {
+    const mixed = status({ counts: { measured: 30, estimated: 50, range: 10, unknown: 10 } });
+    expect(caveat(mixed, DEFAULTS)).toEqual({
+      heights: '100 buildings · heights 30% measured, 50% estimated, 10% a range of storeys, 10% unknown (drawn at 3 m)',
+      note: 'Open data: heights and footprints can be wrong or out of date.',
+    });
+    expect(caveat(mixed, { ...DEFAULTS, unknown: 'hide' }).heights).toMatch(/10% unknown \(hidden\)$/);
+    expect(caveat(mixed, { ...DEFAULTS, unknownHeight: 6 }).heights).toMatch(/\(drawn at 6 m\)$/);
+    // every height measured: nothing to say of unknown ones, the open-data note still stands
+    const measured = caveat(status({ counts: { measured: 8, estimated: 0, range: 0, unknown: 0 } }), DEFAULTS);
+    expect(measured.heights).toBe('8 buildings · heights 100% measured');
+    expect(measured.note).toMatch(/^Open data/);
+    expect(caveat(status(), DEFAULTS)).toBeNull();
+    expect(caveat(null, DEFAULTS)).toBeNull();
+  });
+
   it('credits each source with its licence and the years its data spans', () => {
     const lines = credits(status({
       sources: [
@@ -69,12 +99,22 @@ describe('what the Layers row says about the area', () => {
   });
 
   it('asks before a download, with its size, and stops asking once declined', () => {
-    const asking = status({ needs: [{ grid: 'a.zip', size: 40_363_448 }, { grid: 'b.zip', size: 5e6 }] });
-    expect(question(asking, new Set())).toEqual({
-      grids: ['a.zip', 'b.zip'], size: 45_363_448,
-      text: 'Estimated heights here come from 3D-GloBFP: 45 MB to download once, kept on this machine.',
+    const asking = status({
+      needs: [
+        { grid: 'a.zip', size: 40_363_448, source: 'globfp' },
+        { grid: 'b.zip', size: 5e6, source: 'globfp' },
+        { grid: 'r.tif', size: 25e6, source: 'google' },
+      ],
     });
-    expect(question(asking, new Set(['a.zip', 'b.zip']))).toBeNull();
+    const asked = question(asking, new Set());
+    expect(asked.groups).toEqual([
+      { source: 'globfp', name: '3D-GloBFP', grids: ['a.zip', 'b.zip'], size: 45_363_448 },
+      { source: 'google', name: 'Google 2.5D', grids: ['r.tif'], size: 25e6 },
+    ]);
+    expect(asked.text).toBe(
+      'To download here: 3D-GloBFP (about 2020) 45 MB, Google 2.5D (2023, about 1.5 m off) 25 MB. Each is downloaded once and kept on this machine.'
+    );
+    expect(question(asking, new Set(['a.zip', 'b.zip', 'r.tif']))).toBeNull();
     expect(formatSize(1_949_000_000)).toBe('1.9 GB');
     expect(formatSize(400)).toBe('1 kB');
   });

@@ -7,6 +7,8 @@ views rendered through a camera turned by known angles — built by direct sampl
 in `stitchscene.py`, so nothing under test is used to make its own input.
 """
 
+import math
+
 import pytest
 from PIL import Image
 
@@ -516,3 +518,39 @@ def _mean(img):
     import numpy as np
 
     return float(np.asarray(img).mean())
+
+
+def _stitched(heading, middle, warp="cylindrical", width=400):
+    """A collage piece the rotation model placed: its camera turned `heading` degrees, centred at `middle`."""
+    h = math.radians(heading)
+    r = [math.cos(h), 0.0, math.sin(h), 0.0, 1.0, 0.0, -math.sin(h), 0.0, math.cos(h)]
+    remap = {"op": "remap", "params": {"warp": warp, "focal": 1.2, "aspect": 1, "ppx": 0.5, "ppy": 0.5, "r": r,
+                                       "scale": 1.2, "gain": 1}}
+    x0 = middle - width / 2
+    return {"save": {"path": "media/clip.mp4", "time": 1.0, "ops": [remap]},
+            "quad": [[x0, 10], [x0 + width, 10], [x0 + width, 300], [x0, 300]]}
+
+
+def test_a_stitched_strip_says_how_many_pixels_a_degree_spans():
+    # 30 px a degree, the pieces 12° apart, one laid by hand beside them
+    nodes = [_stitched(h, 500 + 30 * h) for h in (-12, 0, 12, 24)]
+    nodes.append({"save": {"path": "media/clip.mp4", "ops": []}, "quad": [[0, 0], [100, 0], [100, 50], [0, 50]]})
+    scale = stitch.strip_scale(nodes)
+    assert scale["per_degree"] == pytest.approx(30.0)
+    assert (scale["stitched"], scale["by_hand"], scale["warp"]) == (4, 1, "cylindrical")
+    # a turn read the other way round is the same scale
+    assert stitch.strip_scale([_stitched(h, 500 - 30 * h) for h in (-12, 0, 12)])["per_degree"] == pytest.approx(30.0)
+    # across north, the headings are read as one turn
+    across = [_stitched(170, 30 * 170), _stitched(178, 30 * 178), _stitched(-174, 30 * 186)]
+    assert stitch.strip_scale(across)["per_degree"] == pytest.approx(30.0)
+
+
+def test_a_strip_moved_by_hand_after_the_stitch_says_nothing():
+    nodes = [_stitched(h, 500 + 30 * h) for h in (-12, 0, 12, 24)]
+    nodes[2]["quad"] = [[x + 90, y] for x, y in nodes[2]["quad"]]  # dragged 3° off where its turn puts it
+    assert stitch.strip_scale(nodes) is None
+    # one stitched piece, pieces that do not turn, or warps that differ say nothing either
+    assert stitch.strip_scale([_stitched(0, 500)]) is None
+    assert stitch.strip_scale([_stitched(5, 500), _stitched(5.2, 900)]) is None
+    assert stitch.strip_scale([_stitched(0, 500), _stitched(10, 800, warp="spherical")]) is None
+    assert stitch.strip_scale([]) is None

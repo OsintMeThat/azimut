@@ -236,3 +236,43 @@ def test_the_turn_reads_the_same_with_and_without_holes():
     # exactly round north, the last column meets the first
     assert plain.at(360.0) == pytest.approx(plain.at(0.0))
     assert plain.at(359.95) == pytest.approx((plain.angles[-1] + plain.angles[0]) / 2)
+
+
+def test_a_panorama_strip_reads_its_degrees_straight_off_the_picture():
+    # camera.js's panorama strip: half a width is half the field, across and up
+    az, el = skymatch.directions(np.array([0.5, -1.0]), np.array([0.1, -0.05]), fov=200.0, tilt=2.0,
+                                 projection="panorama")
+    assert az.tolist() == pytest.approx([50.0, -100.0])
+    assert el.tolist() == pytest.approx([12.0, -3.0])
+    # the roll a camera has, a strip has not
+    _, rolled = skymatch.directions(np.array([0.5]), np.array([0.1]), fov=200.0, roll=5.0, projection="panorama")
+    assert rolled[0] == pytest.approx(10.0)
+
+
+def test_a_panorama_may_span_the_whole_turn():
+    assert max(skymatch.lenses(300.0, known=False, projection="panorama")) == skymatch.PANORAMA_FOV_MAX
+    assert max(skymatch.lenses(300.0, known=False)) == skymatch.FOV_MAX
+    assert skymatch.lenses(200.0, known=False, within=(120.0, 300.0), projection="panorama")[-1] == pytest.approx(300.0)
+
+
+def test_a_panorama_is_found_at_its_heading_and_width():
+    x, y = trace_on(RANGE, heading=60.0, fov=180.0, tilt=1.5, projection="panorama")
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=150.0, within=(100.0, 260.0), projection="panorama")
+    assert found.verdict == "match"
+    best = found.fits[0]
+    assert best.heading == pytest.approx(60.0, abs=0.5)
+    assert best.fov == pytest.approx(180.0, rel=0.03)
+    assert best.tilt == pytest.approx(1.5, abs=0.3)
+    # held level, whatever roll the search was handed
+    assert best.roll == 0.0
+    level = skymatch.match(x, y, RANGE, half_width=HALF, fov=180.0, known=True, roll=4.0, projection="panorama")
+    assert level.fits[0].roll == 0.0
+    assert level.fits[0].heading == pytest.approx(60.0, abs=0.5)
+
+
+def test_a_panorama_read_as_a_photo_explains_less_of_itself():
+    # a strip wide enough to bend a straight lens: its own projection explains it better
+    x, y = trace_on(RANGE, heading=60.0, fov=140.0, tilt=1.0, projection="panorama")
+    strip = skymatch.match(x, y, RANGE, half_width=HALF, fov=140.0, known=True, projection="panorama")
+    photo = skymatch.match(x, y, RANGE, half_width=HALF, fov=140.0, known=True)
+    assert strip.fits[0].explained > photo.fits[0].explained

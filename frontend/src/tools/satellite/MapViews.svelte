@@ -26,7 +26,10 @@
         if (cancelled || personalLayers.maps !== dialog || caseState.current?.id !== owner) return;
         items = list;
         const item = list.find((row) => row.id === dialog.name);
-        if (item) { editing = item.id; title = item.title; note = item.note; showLegend = item.show_legend; }
+        if (item) {
+          editing = item.id; title = item.title; note = item.note; showLegend = item.show_legend;
+          if (!personalLayers.editor && engine) await open(item);
+        }
       }
       catch (error) { if (!cancelled) toast(error.message, 'danger'); }
     });
@@ -37,6 +40,8 @@
     const dialog = personalLayers.maps;
     try {
       await personalLayers.whenSaved();
+      await addedLayers.whenLoaded(caseState.current?.id);
+      if (personalLayers.maps !== dialog) return;
       const body = captureMapView({ engine, provider, rows, layers: scope.rows, title, note, showLegend });
       const owner = await ensureCase();
       if (dialog.caseId && dialog.caseId !== owner.id) return;
@@ -54,6 +59,8 @@
     busy = true;
     const owner = caseState.current?.id;
     try {
+      await addedLayers.whenLoaded(owner);
+      if (caseState.current?.id !== owner) return;
       const missing = await applyMapView(item, { caseId: owner, api, layers: addedLayers, scope, rows, engine, onprovider, currentCase: () => caseState.current?.id });
       personalLayers.setLegend(item, owner); personalLayers.closeMaps();
       if (missing.length) toast(`${missing.length} layers are no longer in this case`, 'warn');
@@ -73,7 +80,7 @@
 </script>
 
 {#if active && personalLayers.maps}
-  <Modal title="My maps" onclose={() => { if (!busy) personalLayers.closeMaps(); }} width="400px">
+  <Modal title="Saved maps" onclose={() => { if (!busy) personalLayers.closeMaps(); }} width="400px">
     <p class="note">Save this camera, visible layers and legend. Layers keep their current data.</p>
     <label>Name<input aria-label="Map name" bind:value={title} maxlength="200" /></label>
     <label>Legend note<textarea aria-label="Legend note" bind:value={note} maxlength="2000" rows="2"></textarea></label>

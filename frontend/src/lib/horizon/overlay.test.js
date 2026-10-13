@@ -269,6 +269,17 @@ describe('a fit to the trace', () => {
     expect(fitToTrace([], TRUE, skyline)).toBeNull();
   });
 
+  it('fits a panorama along its strip, with no roll to give', () => {
+    const strip = { heading: 95, tilt: 1, roll: 0, fov: 120, projection: 'panorama', ...SIZE };
+    const along = traceSamples(traced(strip), SIZE);
+    const fit = fitToTrace(along, { ...strip, heading: 99, tilt: 0.3, fov: 126 }, skyline);
+    expect(fit.improved).toBe(true);
+    expect(fit.camera.heading).toBeCloseTo(95, 0);
+    expect(fit.camera.fov).toBeCloseTo(120, 0);
+    expect(fit.camera.roll).toBe(0);
+    expect(fit.gap.median).toBeLessThan(0.05);
+  });
+
 });
 
 describe('the skyline between two columns', () => {
@@ -557,6 +568,20 @@ describe('a fit searched over the whole turn', () => {
     const [x] = tracePlane([{ x: 800, y: 375 }], level).x;
     const ray = rayFor(level, 800, 375);
     expect(Math.atan(x * Math.tan(Math.PI / 6)) * (180 / Math.PI)).toBeCloseTo(ray.azimuth, 9);
+  });
+
+  it('sends a panorama’s trace in its own degrees, and says it is one', () => {
+    const strip = { heading: 95, tilt: 1, roll: 0, fov: 120, projection: 'panorama', ...SIZE };
+    const plane = tracePlane([{ x: 500, y: 375 }, { x: 1000, y: 0 }, { x: 250, y: 750 }], strip);
+    expect(plane.half_width).toBe(500);
+    expect(plane.x).toEqual([0, 1, -0.5]);
+    expect(plane.y).toEqual([-0, 0.75, -0.75]);
+    // half a width is half the strip's degrees, up as across
+    const ray = rayFor(strip, 1000, 0);
+    expect(ray.azimuth - strip.heading).toBeCloseTo(plane.x[1] * 60, 9);
+    expect(ray.elevation - strip.tilt).toBeCloseTo(plane.y[1] * 60, 9);
+    expect(matchRequest(samples, strip, PANORAMA).projection).toBe('panorama');
+    expect(matchRequest(samples, TRUE, PANORAMA)).not.toHaveProperty('projection');
   });
 
   it('asks about the turn the view marched, and only a whole one', () => {

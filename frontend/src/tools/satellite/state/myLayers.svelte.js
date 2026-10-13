@@ -18,12 +18,16 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   let selection = $state([]);
   let anchor = null;
   let form = $state(null);
+  let details = $state(null);
   let draft = $state({ name: '', colour: '#0072b2', symbol: 'pin' });
   let generation = 0;
   let tail = Promise.resolve();
   const formOf = (feature) => feature ? { name: feature.properties.name ?? '', description: feature.properties.description ?? '',
     colour: feature.properties.colour || '#0072b2', symbol: feature.properties.symbol || 'pin', group: feature.properties.group ?? '' } : null;
   const sameForm = (first, second) => JSON.stringify(first) === JSON.stringify(second);
+  const detailsOf = (row) => row ? { title: row.title ?? '', description: row.description ?? '' } : null;
+  const mergeDraft = (draft, before, after) => after ? Object.fromEntries(Object.entries(after).map(([key, value]) =>
+    [key, !draft || draft[key] === before?.[key] ? value : draft[key]])) : null;
 
   const base = (owner, name) => `/api/cases/${owner}/map-layers/${encodeURIComponent(name)}`;
   const current = (owner, name, stamp) =>
@@ -38,6 +42,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     selected = null;
     selection = []; anchor = null;
     form = null;
+    details = null;
     features = [];
     groups = [];
     group = '';
@@ -55,6 +60,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       const answer = await beginSession(base(owner, row.name));
       if (!current(owner, row.name, stamp)) return;
       editor = { ...answer.layer, caseId: owner };
+      details = detailsOf(editor);
       features = answer.document.features;
       groups = answer.groups ?? [];
       group = groups[0]?.id ?? '';
@@ -70,12 +76,12 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     }
   }
 
-  async function create(title, file = null) {
+  async function create(title, file = null, description = '') {
     const source = dialog?.source;
     const owner = caseId();
     const row = source
-      ? await layers.copyEditable(source, title)
-      : file ? await layers.importEditable(file, title) : await layers.createEditable(title);
+      ? await layers.copyEditable(source, title, description)
+      : file ? await layers.importEditable(file, title, description) : await layers.createEditable(title, description);
     // Creating a first case is allowed; switching an existing case meanwhile is not.
     if (!row || (owner && owner !== caseId())) return;
     dialog = null;
@@ -85,7 +91,9 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   function settle(owner, name, stamp, answer) {
     if (caseId() === owner) layers.edited(owner, answer.layer);
     if (!current(owner, name, stamp)) return;
+    const beforeDetails = detailsOf(editor);
     editor = { ...answer.layer, caseId: owner };
+    details = mergeDraft(details, beforeDetails, detailsOf(editor));
     if (answer.groups) {
       groups = answer.groups;
       if (!groups.some((item) => item.id === group)) group = groups[0]?.id ?? '';
@@ -94,9 +102,9 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       features = answer.document.features;
       const available = new Set(features.map((feature) => feature.properties.key));
       selection = selection.filter((key) => available.has(key));
-      const clean = sameForm(form, formOf(selected));
+      const before = formOf(selected);
       selected = features.find((item) => item.properties.key === selected?.properties.key) ?? null;
-      if (!selected || clean) form = formOf(selected);
+      form = mergeDraft(form, before, formOf(selected));
       return;
     }
     if (!answer.marker) return;
@@ -105,9 +113,9 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     features = at < 0 ? [...features, answer.marker]
       : features.map((feature, index) => index === at ? answer.marker : feature);
     if (selected?.properties.key === key) {
-      const clean = sameForm(form, formOf(selected));
+      const before = formOf(selected);
       selected = answer.marker;
-      if (clean) form = formOf(selected);
+      form = mergeDraft(form, before, formOf(selected));
     }
   }
 
@@ -181,13 +189,14 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     get placing() { return placing; },
     get sketch() { return sketch; },
     get armed() { return placing || !!sketch; },
-    get changed() { return !!editor?.edit_changed || !!sketch || !sameForm(form, formOf(selected)); },
+    get changed() { return !!editor?.edit_changed || !!sketch || !sameForm(form, formOf(selected)) || !sameForm(details, detailsOf(editor)); },
     get loading() { return loading; },
     get pending() { return pending; },
     get draft() { return draft; },
     get selected() { return selected; },
     get selection() { return selection; },
     get form() { return form; },
+    get details() { return details; },
     newLayer(source = null) { dialog = { source }; },
     cancelNew() { dialog = null; },
     create,
@@ -295,6 +304,10 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       return enqueue((path) => api.del(`${path}/groups/${key}`));
     },
     reorderGroups(ids) { return enqueue((path) => api.post(`${path}/groups/order`, { ids })); },
+    reorderFeatures(keys, group, before = null) {
+      return enqueue((path) => api.post(`${path}/features/order`, { keys, group, before }));
+    },
+    updateDetails(changes) { return enqueue((path) => api.patch(`${path}/edit`, changes)); },
     toggleGroup(target) {
       return enqueue(async (path) => {
         const fresh = await api.get(`${path}/edit`);

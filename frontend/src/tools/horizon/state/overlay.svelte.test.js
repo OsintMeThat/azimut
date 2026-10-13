@@ -87,7 +87,7 @@ function fakeView() {
   };
 }
 
-function overlay() {
+function overlay(extra = {}) {
   return createOverlayState({
     api,
     view,
@@ -120,6 +120,7 @@ function overlay() {
     },
     nextFrame: () => {},
     warpPicture: (picture, corners, options) => ({ pulledFrom: picture, corners, ...options }),
+    ...extra,
   });
 }
 
@@ -858,7 +859,7 @@ describe('what the analyst knows about the photo', () => {
     photo.setHints({ zoom: 'zoomed' });
     expect(photo.hints.zoom).toBe('any'); // nothing laid, nothing to say about it
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
-    expect(photo.hints).toEqual({ zoom: 'any', facing: null, reach: 'auto' });
+    expect(photo.hints).toEqual({ picture: 'photo', zoom: 'any', facing: null, reach: 'auto' });
     photo.setHints({ zoom: 'zoomed' });
     photo.setHints({ facing: { heading: 218 } });
     expect(photo.hints).toMatchObject({ zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' });
@@ -891,5 +892,62 @@ describe('what the analyst knows about the photo', () => {
     expect(photo.reach).toBe(10_000);
     photo.remove();
     expect(photo.hints.zoom).toBe('any');
+  });
+});
+
+describe('a panorama', () => {
+  const wide = { fetchBlob: async (url) => ({ url, width: 4000, height: 1000 }) };
+  const stitched = { degrees: 47.4, stitched: 15, by_hand: 4, warp: 'cylindrical', collage: 'Collage 9' };
+
+  it('is offered for a wide picture alone, and a photo stays a photo', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.panoramaOffered).toBe(false);
+    photo.setHints({ picture: 'panorama' });
+    expect(photo.hints.picture).toBe('photo');
+    expect(view.camera.projection).toBe('camera');
+  });
+
+  it('reads a wide picture through the strip once asked, as wide as its shape suggests', async () => {
+    api.get.mockImplementation(async () => ({ kind: 'image', width: 4000, height: 1000 }));
+    const photo = overlay(wide);
+    await photo.openCase('c1', { path: 'media/sweep.jpg', kind: 'image' });
+    expect(photo.panoramaOffered).toBe(true);
+    expect(photo.hints.picture).toBe('photo');
+    photo.setMoves('photo');
+    photo.setBend(0.1);
+    photo.setHints({ picture: 'panorama' });
+    expect(photo.isPanorama).toBe(true);
+    // a phone's frame is about 60° tall: four times wider is about 240° across
+    expect(view.camera).toMatchObject({ projection: 'panorama', fov: 240, roll: 0 });
+    expect(photo.lens).toBeNull();
+    // it turns with the terrain alone, with no curve, corners or hold
+    expect(photo.moves).toBe('terrain');
+    expect(photo.bend).toBe(0);
+    photo.pressHand('photo');
+    photo.setLocked(true);
+    photo.setWarping(true);
+    photo.setBend(0.2);
+    photo.setPivot({ u: 0.5, v: 0.5 });
+    expect([photo.moves, photo.locked, photo.warping, photo.bend, photo.pivot]).toEqual(['terrain', false, false, 0, null]);
+    // and back to a photo, through a camera again
+    photo.setHints({ picture: 'photo' });
+    expect(view.camera).toMatchObject({ projection: 'camera', fov: 120 });
+  });
+
+  it('reads a collage Azimut stitched as a panorama of known width, unless a saved view said otherwise', async () => {
+    api.get.mockImplementation(async () => ({ kind: 'image', width: 4000, height: 1000, panorama: stitched }));
+    const photo = overlay(wide);
+    await photo.openCase('c1', { path: 'media/Collage 9.png', kind: 'image' });
+    expect(photo.hints.picture).toBe('panorama');
+    expect(photo.stitched.collage).toBe('Collage 9');
+    expect(photo.lens).toEqual({ fov: 47.4, stitched: true });
+    expect(view.camera).toMatchObject({ projection: 'panorama', fov: 47.4 });
+    // what a saved view kept wins over the stitch
+    const again = overlay(wide);
+    await again.openCase('c1', { path: 'media/Collage 9.png', kind: 'image' });
+    again.restoreWork({ hints: { picture: 'photo', zoom: 'wide' } });
+    expect(again.hints).toMatchObject({ picture: 'photo', zoom: 'wide' });
+    expect(again.isPanorama).toBe(false);
   });
 });

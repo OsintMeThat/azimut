@@ -21,6 +21,13 @@
  * What the photo says about its place and time is offered, never applied:
  * the analyst decides (`facts`).
  *
+ * A wide picture, or one exported from a collage Azimut stitched on a cylinder,
+ * may be read as a panorama (`hints.picture`): the view then draws its strip,
+ * the same degrees per pixel all along, as wide as the stitch says or as the
+ * picture's shape suggests. A stitched collage is read so unless the analyst
+ * says otherwise. A panorama turns with the terrain alone: it has no loupe, no
+ * roll, no curve and no corners to pull.
+ *
  * A drag and the wheel move one thing at a time (`moves`): the terrain under
  * the photo, the photo over the terrain (the view turns and widens its lens
  * the other way, so the terrain stays put), or both together. Moving both
@@ -52,7 +59,7 @@
  */
 import { fileUrl } from '../../../lib/fileUrl.js';
 import { fovFromFocal35 } from '../../../lib/horizon/camera.js';
-import { cleanHints, NO_HINTS } from '../../../lib/horizon/hints.js';
+import { cleanHints, NO_HINTS, panoramaOffered, panoramaWidth } from '../../../lib/horizon/hints.js';
 import {
   BEND_MAX,
   bendShape,
@@ -226,6 +233,8 @@ export function createOverlayState({
   let moving = $state('terrain');
   /** What the analyst knows about the photo, told to Fit (lib/horizon/hints.js). */
   let hints = $state.raw(NO_HINTS);
+  /** Whether the analyst (or a saved view) said what kind of picture it is: a stitched collage is a panorama until then. */
+  let pictureSaid = false;
   /** The cut of the terrain's skyline the last Fit found the trace on, metres, or null for the whole turn. */
   let reachFound = $state(null);
 
@@ -266,16 +275,49 @@ export function createOverlayState({
   function settleView() {
     if (linesBefore === null) linesBefore = view.lines;
     view.setLines(true);
+    lookThrough();
+  }
+
+  /** The view through the picture's own kind: a panorama's strip, else a camera with the photo's lens. */
+  function lookThrough() {
+    if (hints.picture === 'panorama') {
+      view.look({ projection: 'panorama', fov: panoramaWidth({ aspect: aspect(), stitched: facts.panorama }), roll: 0 });
+      return;
+    }
     const lens = lensOf();
     if (lens) view.look({ projection: 'camera', fov: lens.fov });
     else if (view.camera.projection !== 'camera') view.look({ projection: 'camera', fov: Math.min(view.camera.fov, 120) });
   }
 
+  /** What a panorama cannot have put away: the loupe, the hold, the curve, the corners. */
+  function asPanorama() {
+    locked = false;
+    moving = 'terrain';
+    warping = false;
+    pulling = false;
+    warp = null;
+    bend = 0;
+    pivot = null;
+    if (loupe !== NO_LOUPE) setLoupe(NO_LOUPE);
+  }
+
+  /**
+   * The lens the picture says: a photo's from its EXIF, `{ mm, fov, workedOut }`;
+   * a panorama's from its stitch, `{ fov, stitched: true }`; null when it says none.
+   */
   function lensOf() {
-    const mm = facts.focal35_mm;
     const ratio = aspect();
+    if (hints.picture === 'panorama') {
+      const stitched = facts.panorama;
+      return stitched?.degrees > 0 ? { fov: panoramaWidth({ aspect: ratio, stitched }), stitched: true } : null;
+    }
+    const mm = facts.focal35_mm;
     if (!(mm > 0) || !(ratio > 0)) return null;
     return { mm, fov: fovFromFocal35(mm, ratio), workedOut: Boolean(facts.focal35_worked_out) };
+  }
+
+  function offeredPanorama() {
+    return panoramaOffered({ kind: source?.kind, aspect: aspect(), stitched: facts.panorama });
   }
 
   function setLoupe(next) {
@@ -326,6 +368,7 @@ export function createOverlayState({
     locked = false;
     moving = 'terrain';
     hints = NO_HINTS;
+    pictureSaid = false;
     reachFound = null;
     if (loupe !== NO_LOUPE) setLoupe(NO_LOUPE);
   }
@@ -478,8 +521,15 @@ export function createOverlayState({
       const said = await readFacts(next, file);
       if (mine !== opened || !said) return;
       facts = said;
+      // a collage Azimut stitched is a panorama of known width, unless the analyst said otherwise
+      if (said.panorama && !pictureSaid && offeredPanorama()) {
+        hints = { ...hints, picture: 'panorama' };
+        asPanorama();
+        lookThrough();
+        return;
+      }
       const lens = lensOf();
-      if (lens) view.look({ projection: 'camera', fov: lens.fov });
+      if (lens) view.look({ projection: hints.picture === 'panorama' ? 'panorama' : 'camera', fov: lens.fov });
     } catch (failure) {
       if (mine === opened) error = failure.message;
     } finally {
@@ -592,6 +642,14 @@ export function createOverlayState({
     get picture() {
       return video ?? pulledPicture ?? still;
     },
+    /** The photo as it was taken, or the video's frame on show: what a trace's points are measured on. */
+    get rawPicture() {
+      return video ?? still;
+    },
+    /** A point of the photo as it was taken (`{ u, v }`), in the frame as the view shows it: what a stroke is handed in. */
+    seenOf(point) {
+      return toSeen(point);
+    },
     /** Bumped each time a new frame is on show. */
     get frame() {
       return frame;
@@ -618,7 +676,25 @@ export function createOverlayState({
     /** Say more, or less, about the photo: only the hints named change. */
     setHints(change) {
       if (!source) return;
+      const before = hints.picture;
       hints = cleanHints({ ...hints, ...change });
+      if (hints.picture === 'panorama' && !offeredPanorama()) hints = { ...hints, picture: 'photo' };
+      if ('picture' in (change ?? {})) pictureSaid = true;
+      if (hints.picture === before) return;
+      if (hints.picture === 'panorama') asPanorama();
+      lookThrough();
+    },
+    /** Whether the picture may be read as a panorama: wide, or a stitched collage. */
+    get panoramaOffered() {
+      return offeredPanorama();
+    },
+    /** Whether it is read as one now. */
+    get isPanorama() {
+      return Boolean(source) && hints.picture === 'panorama';
+    },
+    /** What the stitch says of a collage's picture: `{ degrees, stitched, by_hand, warp, collage }`, or null. */
+    get stitched() {
+      return facts.panorama ?? null;
     },
     /**
      * How far out the terrain's skyline is read against the trace, metres, or
@@ -642,7 +718,7 @@ export function createOverlayState({
     useLens() {
       if (locked) return;
       const lens = lensOf();
-      if (lens) view.look({ projection: 'camera', fov: lens.fov });
+      if (lens) view.look({ projection: hints.picture === 'panorama' ? 'panorama' : 'camera', fov: lens.fov });
     },
 
     /** How much of the photo shows over the terrain, 0 to 1. */
@@ -734,7 +810,7 @@ export function createOverlayState({
       return pivot;
     },
     setPivot(point) {
-      pivot = source && point ? { u: Math.min(1, Math.max(0, point.u)), v: Math.min(1, Math.max(0, point.v)) } : null;
+      pivot = source && point && hints.picture !== 'panorama' ? { u: Math.min(1, Math.max(0, point.u)), v: Math.min(1, Math.max(0, point.v)) } : null;
     },
 
     /** Whether a dropped or picked file is something that can be laid over the view. */
@@ -802,7 +878,7 @@ export function createOverlayState({
     },
     setBend(k) {
       const next = Number(k);
-      if (!source || locked || !Number.isFinite(next)) return;
+      if (!source || locked || hints.picture === 'panorama' || !Number.isFinite(next)) return;
       bend = Math.round(Math.min(BEND_MAX, Math.max(-BEND_MAX, next)) * 1000) / 1000;
     },
     /** The photo's shape as the curve is measured in (`bendShape`). */
@@ -814,7 +890,7 @@ export function createOverlayState({
       return warping;
     },
     setWarping(on) {
-      warping = Boolean(on) && source?.kind === 'image' && !locked;
+      warping = Boolean(on) && source?.kind === 'image' && !locked && hints.picture !== 'panorama';
       if (!warping) return;
       tracing = false;
       erasing = false;
@@ -837,7 +913,7 @@ export function createOverlayState({
     },
     /** All four corners at once (`[{ u, v }]` in the frame), each kept within reach of it. */
     setCorners(next) {
-      if (source?.kind !== 'image' || locked || next?.length !== 4 || !next.every((p) => Number.isFinite(p?.u) && Number.isFinite(p?.v))) return;
+      if (source?.kind !== 'image' || locked || hints.picture === 'panorama' || next?.length !== 4 || !next.every((p) => Number.isFinite(p?.u) && Number.isFinite(p?.v))) return;
       const kept = next.map((p) => roundPoint(clampCorner(p)));
       warp = isFlat(kept) ? null : kept;
     },
@@ -858,7 +934,7 @@ export function createOverlayState({
     },
     /** Hold the photo to the terrain, or let it go; holding it puts the corners away. The photo stays where it shows. */
     setLocked(on) {
-      locked = Boolean(on) && Boolean(source);
+      locked = Boolean(on) && Boolean(source) && hints.picture !== 'panorama';
       if (!locked) return;
       warping = false;
       pulling = false;
@@ -872,6 +948,8 @@ export function createOverlayState({
     },
     setMoves(which) {
       if (!source || !['terrain', 'photo', 'both'].includes(which)) return;
+      // a panorama turns with the terrain alone
+      if (hints.picture === 'panorama' && which !== 'terrain') return;
       if (which === 'both') {
         this.setLocked(true);
         return;
@@ -1083,6 +1161,8 @@ export function createOverlayState({
     } = {}) {
       if (!source) return;
       hints = cleanHints(told);
+      if (hints.picture === 'panorama' && !offeredPanorama()) hints = { ...hints, picture: 'photo' };
+      pictureSaid = true;
       reachFound = Number.isFinite(found) ? found : null;
       mix = Math.min(1, Math.max(0, Number(share) || 0));
       bend = Math.round(Math.min(BEND_MAX, Math.max(-BEND_MAX, Number(k) || 0)) * 1000) / 1000;
@@ -1092,6 +1172,7 @@ export function createOverlayState({
       traceTime = source.kind === 'video' && strokes.length && Number.isFinite(at) ? at : null;
       history = [];
       pins = source.kind === 'video' ? [...kept].sort((a, b) => a.time - b.time) : [];
+      if (hints.picture === 'panorama') asPanorama();
     },
 
     destroy() {

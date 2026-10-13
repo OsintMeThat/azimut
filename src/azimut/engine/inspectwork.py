@@ -431,6 +431,36 @@ def _outline(spec: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def strip_of(case: "Case", path: str) -> dict[str, Any] | None:
+    """How many degrees of turn a picture exported from a stitched collage spans.
+
+    The export is the pieces trimmed to their bounds, so its width is the
+    layout's in canvas pixels, however sharply it was drawn: the stitch's scale
+    (`stitch.strip_scale`) turns that into degrees. Only for the picture the
+    collage last exported while it is still that layout; None for any other.
+    Returns ``{"degrees", "stitched", "by_hand", "warp", "collage"}``.
+    """
+    from . import stitch
+
+    for rel, spec in _collage_specs(case):
+        exported = spec.get("exported")
+        if not isinstance(exported, dict) or exported.get("path") != path or not _export_current(case, spec):
+            continue
+        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+        scale = stitch.strip_scale(nodes)
+        outline = _outline(spec)
+        if scale is None or outline is None or not outline["width"] > 0:
+            return None
+        return {
+            "degrees": round(outline["width"] / scale["per_degree"], 2),
+            "stitched": scale["stitched"],
+            "by_hand": scale["by_hand"],
+            "warp": scale["warp"],
+            "collage": Path(rel).stem,
+        }
+    return None
+
+
 def load_collage(case: "Case", name: str) -> dict[str, Any] | None:
     rel = layout.collage_rel(layout.slugify(name, "Collage"))
     spec = _read(case.resolve_inside(rel))

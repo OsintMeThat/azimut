@@ -21,7 +21,7 @@
  *   URL, no sprite and no glyphs (`engine.js`), and this must not be the reason
  *   it starts. Each pictogram is drawn to a canvas here and handed to
  *   `map.addImage` as an **SDF**, which is what lets one image per shape be
- *   tinted to any colour a source asked for. Round personal icons use coloured
+ *   tinted to any colour a source asked for. Personal icons use coloured
  *   images instead, with one image per symbol and colour shared by their points.
  * - **A source's own icons are a second symbol layer, not a second option on the
  *   first.** They arrive as real PNGs the backend composed
@@ -656,7 +656,7 @@ export function createAddedLayer(
 
       const colour = colourExpression(groups);
       const features = (data?.features ?? []).map((feature) => {
-        const symbol = feature.properties?.symbol;
+        const symbol = feature.properties?.symbol || 'pin';
         const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
         const colour = feature.properties?.colour || categoryColour(groups[groupAt], groupAt);
         let badge = null;

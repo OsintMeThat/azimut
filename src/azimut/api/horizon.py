@@ -41,7 +41,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 
 from .. import config
-from ..engine import horizon, peaks, sentinel as sentinel_engine, skymatch, terrain
+from ..engine import alignment, horizon, peaks, sentinel as sentinel_engine, skymatch, terrain
 
 router = APIRouter(prefix="/api/horizon", tags=["horizon"])
 
@@ -583,7 +583,8 @@ class MatchIn(BaseModel):
     in half widths of the frame (engine/skymatch.py), and `half_width` is that
     half width on screen. What the analyst knows narrows the search: `within`
     bounds an unknown lens (degrees, low and high), `facing` the heading (the
-    sector's middle and half its width) and `level` holds the roll.
+    sector's middle and half its width) and `level` holds the roll. A
+    `panorama` is read through the view's strip, its lens the degrees it spans.
     """
 
     skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
@@ -595,7 +596,7 @@ class MatchIn(BaseModel):
     x: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
     y: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
     half_width: float = Field(gt=0, le=20_000)
-    fov: float = Field(ge=skymatch.FOV_MIN, le=skymatch.FOV_MAX)
+    fov: float = Field(ge=skymatch.FOV_MIN, le=skymatch.PANORAMA_FOV_MAX)
     # the photo says its lens: no other is tried
     known: bool = False
     tilt: float = Field(default=0.0, ge=-89, le=89)
@@ -603,9 +604,13 @@ class MatchIn(BaseModel):
     within: list[float] | None = Field(default=None, min_length=2, max_length=2)
     facing: list[float] | None = Field(default=None, min_length=2, max_length=2)
     level: bool = False
+    projection: Literal["camera", "panorama"] = "camera"
 
     @model_validator(mode="after")
     def _sane(self) -> MatchIn:
+        top = skymatch.widest(self.projection)
+        if self.fov > top:
+            raise ValueError(f"lenses run from {skymatch.FOV_MIN:g}° to {top:g}°")
         if len(self.x) != len(self.y):
             raise ValueError("the trace needs as many x as y")
         if abs(len(self.skyline) * self.step - 360.0) > self.step / 2:
@@ -620,8 +625,8 @@ class MatchIn(BaseModel):
             _sane_skyline(cut.skyline)
         if self.within is not None:
             low, high = sorted(self.within)
-            if not (skymatch.FOV_MIN <= low and high <= skymatch.FOV_MAX):
-                raise ValueError(f"lenses run from {skymatch.FOV_MIN:g}° to {skymatch.FOV_MAX:g}°")
+            if not (skymatch.FOV_MIN <= low and high <= top):
+                raise ValueError(f"lenses run from {skymatch.FOV_MIN:g}° to {top:g}°")
         if self.facing is not None:
             centre, half = self.facing
             if not (0 <= centre < 360 and 0 < half <= 180):
@@ -649,9 +654,9 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
     found = skymatch.match(
         np.asarray(body.x), np.asarray(body.y), turns,
         half_width=body.half_width, fov=body.fov, known=body.known, tilt=body.tilt, roll=body.roll,
-        within=within, facing=facing, level=body.level,
+        within=within, facing=facing, level=body.level, projection=body.projection,
     )
-    tried = skymatch.lenses(body.fov, known=body.known, within=within)
+    tried = skymatch.lenses(body.fov, known=body.known, within=within, projection=body.projection)
     best = found.fits[0].explained if found.fits else 0.0
     return {
         "verdict": found.verdict,
@@ -671,6 +676,55 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
         ],
         "lenses": [round(tried[0], 1), round(tried[-1], 1)],
     }
+
+
+class TopIn(BaseModel):
+    """One end of an alignment, and how far its top stands over the ground (0: a summit or a ridge)."""
+
+    lat: float = Field(ge=-terrain.MAX_LAT, le=terrain.MAX_LAT)
+    lon: float = Field(ge=-180, le=180)
+    height: float = Field(default=0.0, ge=0, le=1000)
+
+
+class AlignmentIn(BaseModel):
+    """Two things one behind the other in a photo, their tops touching, and who took it.
+
+    `bearing` is the alignment's line from the near point out to the camera's
+    side (frontend lib/horizon/find.js). `low` and `high` bound the eye's
+    height over the ground (a person, a drone) or its altitude (an aircraft).
+    """
+
+    near: TopIn
+    far: TopIn
+    bearing: float = Field(ge=0, lt=360)
+    mode: Literal["ground", "drone", "aircraft"] = "ground"
+    low: float = Field(default=horizon.EYE_HEIGHT, ge=0, le=15000)
+    high: float = Field(default=horizon.EYE_HEIGHT, ge=0, le=15000)
+    reach: float = Field(default=40_000.0, ge=1000, le=100_000)
+
+    @model_validator(mode="after")
+    def _sane(self) -> AlignmentIn:
+        if self.low > self.high:
+            raise ValueError("the lowest height must not be above the highest")
+        floor, ceiling = HEIGHT_LIMITS[self.mode]
+        if self.low < floor or self.high > ceiling:
+            raise ValueError(f"a {self.mode} eye is {floor:g} to {ceiling:g} m high")
+        if (self.near.lat, self.near.lon) == (self.far.lat, self.far.lon):
+            raise ValueError("the two ends of an alignment must be two places")
+        return self
+
+
+@router.post("/alignment")
+def alignment_tops(body: AlignmentIn) -> dict[str, Any]:
+    """Where along an alignment the eye lays the near top on the far one (engine/alignment.py)."""
+    try:
+        return alignment.tops_touch(
+            alignment.Top(body.near.lat, body.near.lon, body.near.height),
+            alignment.Top(body.far.lat, body.far.lon, body.far.height),
+            bearing=body.bearing, mode=body.mode, low=body.low, high=body.high, reach=body.reach,
+        )
+    except terrain.TerrainUnavailable as exc:
+        raise HTTPException(status_code=502, detail=f"Terrain could not be loaded: {exc}") from exc
 
 
 # The sun and the moon against the ridges: sampled this often over the local day.
@@ -825,8 +879,10 @@ def _photo_facts(source_for: Any) -> dict[str, Any]:
 def photo_facts(case: str = Query(min_length=1), path: str = Query(min_length=1)) -> dict[str, Any]:
     """What a case's photo or video says about its lens, place and time, read for
     the overlay laid over the view. A video's place and time come from its
-    container; its lens is never written there."""
-    from ..engine import enrich, media as media_engine
+    container; its lens is never written there. A picture exported from a
+    collage Azimut stitched on a cylinder or a sphere says how many degrees of
+    turn it spans (`panorama`), which the tab reads it through."""
+    from ..engine import enrich, inspectwork, media as media_engine
     from ..workspace import CaseError
     from .cases import get_case
 
@@ -839,7 +895,11 @@ def photo_facts(case: str = Query(min_length=1), path: str = Query(min_length=1)
         raise HTTPException(status_code=404, detail="no such file in the case")
     kind = media_engine.media_kind(file.name)
     if kind == "image":
-        return {"kind": kind, **_photo_facts(lambda: file)}
+        facts = {"kind": kind, **_photo_facts(lambda: file)}
+        strip = inspectwork.strip_of(owner, path)
+        if strip is not None:
+            facts["panorama"] = strip
+        return facts
     if kind == "video":
         found = enrich.video_facts(file) or {}
         return {"kind": kind, **{key: found[key] for key in ("gps", "taken_at") if key in found}}

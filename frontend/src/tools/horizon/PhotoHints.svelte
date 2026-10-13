@@ -1,11 +1,12 @@
 <script>
   /**
-   * What the analyst knows about the photo, told to Fit: how zoomed it looks,
-   * roughly which way it faces and how far it sees. Each line is optional and
+   * What the analyst knows about the photo, told to Fit: what kind of picture
+   * it is when it may be a panorama, how zoomed it looks, roughly which way it
+   * faces and how far it sees. Each line is optional and
    * starts at "don't know"; each narrows the search the way a human would
    * (lib/horizon/hints.js holds the words and what they stand for).
    */
-  import { AUTO_REACH, FACING_HALF, REACHES, reachText, ZOOMS } from '../../lib/horizon/hints.js';
+  import { AUTO_REACH, FACING_HALF, PANORAMA_WITHIN, PICTURES, REACHES, reachText, ZOOMS } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
 
   let {
@@ -13,16 +14,46 @@
     overlay,
     /** Where the view looks now, which "roughly this way" takes. */
     heading = 0,
+    /** Whether "which way it faces" is asked: not where no view looks yet. */
+    facing = true,
   } = $props();
 
   const hints = $derived(overlay.hints);
   const lens = $derived(overlay.lens);
+  const panorama = $derived(hints.picture === 'panorama');
 </script>
 
 <div class="hints">
+  {#if overlay.panoramaOffered}
+    <div class="row">
+      <span class="name" id="hz-hint-picture">Picture</span>
+      <div class="pills" role="radiogroup" aria-labelledby="hz-hint-picture">
+        {#each PICTURES as picture (picture.id)}
+          <button
+            type="button"
+            role="radio"
+            class:on={hints.picture === picture.id}
+            aria-checked={hints.picture === picture.id}
+            title={picture.title}
+            onclick={() => overlay.setHints({ picture: picture.id })}>{picture.label}</button
+          >
+        {/each}
+      </div>
+      {#if panorama && overlay.stitched}
+        <p class="said">Stitched by Azimut from {overlay.stitched.collage}.</p>
+      {:else if !panorama && !overlay.stitched}
+        <p class="said">A phone’s panorama reads better as Panorama.</p>
+      {/if}
+    </div>
+  {/if}
+
   <div class="row">
-    <span class="name" id="hz-hint-zoom">Zoom</span>
-    {#if lens}
+    <span class="name" id="hz-hint-zoom">{panorama ? 'Width' : 'Zoom'}</span>
+    {#if panorama}
+      <p class="said">
+        {#if lens}{Math.round(lens.fov)}° across: Fit keeps it.{:else}Fit tries {PANORAMA_WITHIN[0]}° to {PANORAMA_WITHIN[1]}° across.{/if}
+      </p>
+    {:else if lens}
       <p class="said">The photo says {Math.round(lens.mm)} mm, {Math.round(lens.fov)}° across: Fit keeps it.</p>
     {:else}
       <div class="pills" role="radiogroup" aria-labelledby="hz-hint-zoom">
@@ -40,6 +71,7 @@
     {/if}
   </div>
 
+  {#if facing}
   <div class="row">
     <span class="name" id="hz-hint-facing">Facing</span>
     <div class="pills" role="radiogroup" aria-labelledby="hz-hint-facing">
@@ -64,6 +96,7 @@
       <p class="said">{headingText(hints.facing.heading, 60)}, give or take {FACING_HALF}°</p>
     {/if}
   </div>
+  {/if}
 
   <div class="row">
     <span class="name" id="hz-hint-reach">Sees as far as</span>

@@ -345,14 +345,16 @@ def bundled_parts() -> dict[str, bool]:
     """Whether the parts a frozen build drops without a word when its spec forgets
     them are here: the zone database (Windows has none of its own, and local times
     would quietly read as UTC), the PDF faces and the font subsetter, the capture
-    extension that Settings installs, and the scrapers' metadata, without which a
-    stale copy updated into the workspace shadows the newer one the build ships. The
-    release smoke test asks for all of them."""
+    extension that Settings installs, the scrapers' metadata, without which a
+    stale copy updated into the workspace shadows the newer one the build ships, and
+    the decoders Horizon's buildings are read with. The release smoke test asks for
+    all of them."""
     import importlib.metadata
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
     from . import extinstall, pdffonts, scrapers
+    from .buildings import service as buildings
 
     try:
         zones = ZoneInfo("Asia/Tokyo").utcoffset(datetime(2026, 1, 1)) == timedelta(hours=9)
@@ -374,6 +376,7 @@ def bundled_parts() -> dict[str, bool]:
         "pdf_fonts": faces and subsetter,
         "extension": bool(extinstall.bundled_version()) and bool(extinstall.payload_digest()),
         "scrapers": versions,
+        "buildings": buildings.self_check(),
     }
 
 

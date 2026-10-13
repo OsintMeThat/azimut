@@ -70,6 +70,8 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   let picks = 0;
   let loadedFor = null; // the case every row was read for
   let readFor = ''; // …and the reload it was read at, so four maps ask once
+  let reading = Promise.resolve();
+  let readError = '';
   let asked = 0; // the latest list read, so an older answer lands nowhere
   /** scope → the layers switched on in that map. Never stored: see the header. */
   let on = $state({});
@@ -164,13 +166,14 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     if (!caseId || key === readFor) return;
     readFor = key;
     const ticket = ++asked;
-    api
+    readError = '';
+    reading = api
       .get(`/api/cases/${caseId}/map-layers`)
       .then((list) => {
         if (ticket === asked) rows = Array.isArray(list) ? list : [];
       })
-      .catch(() => {
-        if (ticket === asked) rows = [];
+      .catch((error) => {
+        if (ticket === asked) { rows = []; readError = error?.message || 'This case’s layers could not be read'; }
       });
   }
 
@@ -378,21 +381,29 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
       return picked;
     },
     load,
+    async whenLoaded(caseId) {
+      if (!caseId) return;
+      if (loadedFor !== caseId) load(caseId);
+      await reading;
+      if (loadedFor !== caseId) throw new Error('The case changed while reading its layers');
+      if (readError) throw new Error(readError);
+    },
     drawing,
     addFile,
-    createEditable(title) {
-      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable`, { title }),
+    createEditable(title, description = '') {
+      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable`, { title, description }),
         'Could not create the layer');
     },
-    importEditable(file, title) {
+    importEditable(file, title, description = '') {
       const body = new FormData();
       body.append('file', file);
       body.append('title', title);
+      body.append('description', description);
       return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable/upload`, body),
         'Could not import the layer');
     },
-    copyEditable(layer, title) {
-      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/editable-copy`, { title }),
+    copyEditable(layer, title, description = '') {
+      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/editable-copy`, { title, description }),
         'Could not copy the layer');
     },
     edited(caseId, row) {

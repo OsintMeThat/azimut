@@ -28,6 +28,7 @@ export const FILE_BACKED = new Set([
   'collage',
   'compare-session',
   'horizon-view',
+  'horizon-find',
   'map-view',
   'analysis-zones',
   'analysis-area',

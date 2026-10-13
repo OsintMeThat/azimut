@@ -68,6 +68,15 @@ it('lets the map’s controls out of the map, where the ground overlays are', ()
   expect(read('tools/Compare.svelte')).not.toMatch(/:global\(\.map\)[^{]*\{[^}]*opacity/);
 });
 
+it('opens a place search’s suggestions over the controls stacked under it', () => {
+  // At the same z-index, the control later in the page paints over the list.
+  const horizon = read('tools/horizon/MapNavigation.svelte');
+  expect(zOf(horizon, '.map-search {')).toBeGreaterThan(zOf(horizon, '.map-compass {'));
+  const detect = read('tools/Detect.svelte');
+  expect(zOf(detect, '.search {')).toBeGreaterThan(zOf(detect, '.ruler {'));
+  expect(zOf(detect, '.search {')).toBeGreaterThan(zOf(detect, '.map-choices {'));
+});
+
 it('keeps the split handle level with the controls, not with the ground', () => {
   // Inside the second map's own layer the handle was trapped in that stacking
   // context, and every overlay painted over it. It rides in its own rail.

@@ -39,6 +39,12 @@ holds, so the skyline a photo shows is often a nearer one than the turn's
 outermost. Each cut is searched and the place says which reach explained the
 trace, which tells how far the photo sees.
 
+A panorama is read through the view's other projection (`projection="panorama"`,
+camera.js's strip): the same number of degrees per pixel along and up, so the
+trace's x is its azimuth and its y its elevation, a phone's panorama or a collage
+Azimut stitched on a cylinder. Its lens is how many degrees the whole strip spans,
+up to the whole turn, and it is held level: the strip has no roll to give.
+
 The verdict is a hint, not a proof. With the lens free, a weak trace finds a
 coincidence somewhere on most turns: measured over real relief (the Schilthorn,
 and a desert in Yemen with a real photo), the right heading came first at the
@@ -97,6 +103,8 @@ SLIDE_ROLL = 4.0
 SLIDE_ROLL_PX = 3 * LOST_PX
 FOV_MIN = 1.0
 FOV_MAX = 150.0
+# A panorama's strip may span the whole turn.
+PANORAMA_FOV_MAX = 360.0
 # Headings closer than this, or than half the trace's width, are one place.
 APART_MIN = 5.0
 # Places kept per lens, places refined, and places returned. The cheapest
@@ -105,6 +113,12 @@ CANDIDATES = 400
 PER_LENS = 6
 REFINED = 8
 KEPT = 3
+# Places a quick search refines.
+QUICK_REFINED = 2
+# A rough search, for ranking many points before the best are searched in full: fewer trace
+# points slid, lenses this much wider than the last across a range, one place refined.
+ROUGH_POINTS = 80
+ROUGH_RATIO = 1.25
 # The verdict. A trace whose points all stand within this many screen pixels of
 # a level line, but for a stray few, has no shape to place: one clear peak is
 # enough, so the stray few are a fiftieth of the trace.
@@ -119,6 +133,7 @@ LOOSE_BELOW = 0.5
 AMBIGUOUS_SHARE = 0.75
 
 Verdict = Literal["match", "loose", "ambiguous", "none", "flat"]
+Projection = Literal["camera", "panorama"]
 
 
 @dataclass(frozen=True)
@@ -158,12 +173,17 @@ class Turn:
 
 def directions(
     x: np.ndarray, y: np.ndarray, *, fov: float, tilt: float = 0.0, roll: float = 0.0,
+    projection: Projection = "camera",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Azimuth from the heading and elevation, in degrees, of picture-plane points.
 
     camera.js `rayFor` at heading 0: forward tilted up by `tilt`, the frame
-    turned clockwise by `roll`.
+    turned clockwise by `roll`; on the panorama strip, half a width is half the
+    field across and as many degrees up, and the strip has no roll.
     """
+    if projection == "panorama":
+        half = float(fov) / 2
+        return np.asarray(x, dtype=np.float64) * half, np.asarray(y, dtype=np.float64) * half + tilt
     t, r = math.radians(tilt), math.radians(roll)
     scale = math.tan(math.radians(fov) / 2)
     sx = np.asarray(x, dtype=np.float64) * scale
@@ -175,19 +195,28 @@ def directions(
     return np.degrees(np.arctan2(east, north)), np.degrees(np.arctan2(up, np.hypot(east, north)))
 
 
-def lenses(fov: float, *, known: bool, within: tuple[float, float] | None = None) -> list[float]:
+def widest(projection: Projection) -> float:
+    """The widest lens a projection has."""
+    return PANORAMA_FOV_MAX if projection == "panorama" else FOV_MAX
+
+
+def lenses(
+    fov: float, *, known: bool, within: tuple[float, float] | None = None, projection: Projection = "camera",
+    ratio: float = RANGE_RATIO,
+) -> list[float]:
     """The fields of view tried: the photo's own when it says one, else every step
     across `within` when the analyst bounds it, else a range about the view's."""
-    fov = min(FOV_MAX, max(FOV_MIN, float(fov)))
+    top = widest(projection)
+    fov = min(top, max(FOV_MIN, float(fov)))
     if known:
         return [fov]
     if within is not None:
-        low, high = (min(FOV_MAX, max(FOV_MIN, float(v))) for v in sorted(within))
-        count = max(1, int(math.ceil(math.log(high / low) / math.log(RANGE_RATIO))))
+        low, high = (min(top, max(FOV_MIN, float(v))) for v in sorted(within))
+        count = max(1, int(math.ceil(math.log(high / low) / math.log(ratio))))
         return sorted({low * (high / low) ** (i / count) for i in range(count + 1)}) if high > low else [low]
     steps = int(math.floor(math.log(LENS_REACH) / math.log(LENS_RATIO)))
     # clipped at either end of the lenses a view has, where several steps then meet
-    tried = {min(FOV_MAX, max(FOV_MIN, fov * LENS_RATIO**i)) for i in range(-steps, steps + 1)}
+    tried = {min(top, max(FOV_MIN, fov * LENS_RATIO**i)) for i in range(-steps, steps + 1)}
     return sorted(tried)
 
 
@@ -220,8 +249,10 @@ def _loss(px: np.ndarray) -> np.ndarray:
     return np.minimum(huber, LOST_LOSS)
 
 
-def _per_degree(fov: float, half_width: float) -> float:
-    """Screen pixels a degree spans at the lens's middle."""
+def _per_degree(fov: float, half_width: float, projection: Projection = "camera") -> float:
+    """Screen pixels a degree spans at the lens's middle: everywhere, on a panorama."""
+    if projection == "panorama":
+        return half_width / (fov / 2)
     return half_width / math.tan(math.radians(fov) / 2) * math.pi / 180
 
 
@@ -241,23 +272,26 @@ class _Seen:
     per_degree: float
     # each point's rise per degree of roll, when the slide lays a roll too
     twist: np.ndarray | None = None
+    projection: Projection = "camera"
 
 
 def _through(
     x: np.ndarray, y: np.ndarray, fov: float, tilt: float, roll: float, half_width: float,
-    *, twist: bool = False,
+    *, twist: bool = False, projection: Projection = "camera",
 ) -> _Seen:
-    azimuth, elevation = directions(x, y, fov=fov, tilt=tilt, roll=roll)
-    _, above = directions(x, y, fov=fov, tilt=tilt + 0.5, roll=roll)
-    _, below = directions(x, y, fov=fov, tilt=tilt - 0.5, roll=roll)
+    azimuth, elevation = directions(x, y, fov=fov, tilt=tilt, roll=roll, projection=projection)
+    _, above = directions(x, y, fov=fov, tilt=tilt + 0.5, roll=roll, projection=projection)
+    _, below = directions(x, y, fov=fov, tilt=tilt - 0.5, roll=roll, projection=projection)
     # a point never rises less than a tenth as fast as the middle, short of a lens wider than any
     lift = np.maximum(above - below, 0.1)
     turned = None
     if twist:
-        _, right = directions(x, y, fov=fov, tilt=tilt, roll=roll + 0.5)
-        _, left = directions(x, y, fov=fov, tilt=tilt, roll=roll - 0.5)
+        _, right = directions(x, y, fov=fov, tilt=tilt, roll=roll + 0.5, projection=projection)
+        _, left = directions(x, y, fov=fov, tilt=tilt, roll=roll - 0.5, projection=projection)
         turned = right - left
-    return _Seen(fov, tilt, azimuth, elevation, lift, _per_degree(fov, half_width), turned)
+    return _Seen(
+        fov, tilt, azimuth, elevation, lift, _per_degree(fov, half_width, projection), turned, projection,
+    )
 
 
 def _median_tilt(asked: np.ndarray, lost: np.ndarray, found: np.ndarray) -> np.ndarray:
@@ -349,7 +383,7 @@ def _rolls(start: float, centre: float, ease: float | None) -> list[float]:
 def _refine(
     x: np.ndarray, y: np.ndarray, turn: Turn, *, heading: float, tilt: float, fov: float,
     roll: float, half_width: float, free: bool, level: bool, widen: float = 1.03,
-    start: float | None = None,
+    start: float | None = None, projection: Projection = "camera",
 ) -> Fit | None:
     """A coarse place made exact: heading searched finely, tilt laid onto the trace, lens and roll eased.
 
@@ -363,9 +397,9 @@ def _refine(
         best: tuple[float, float, float, float, float] | None = None
         rolls = [roll] if level else _rolls(start, roll, ease)
         for lens in ([fov / widen, fov, fov * widen] if free else [fov]):
-            lens = min(FOV_MAX, max(FOV_MIN, lens))
+            lens = min(widest(projection), max(FOV_MIN, lens))
             for turned in rolls:
-                seen = _through(x, y, lens, tilt, turned, half_width)
+                seen = _through(x, y, lens, tilt, turned, half_width, projection=projection)
                 headings = heading + np.linspace(-2 * step, 2 * step, 17)
                 cost, change, _ = _slide(seen, turn, headings)
                 i = int(np.argmin(cost))
@@ -378,7 +412,7 @@ def _refine(
         step /= 4
         widen = 1 + (widen - 1) / 2
         ease = ROLL_EASE if ease is None else ease / 2
-    seen = _through(x, y, fov, tilt, roll, half_width)
+    seen = _through(x, y, fov, tilt, roll, half_width, projection=projection)
     gap = seen.elevation - turn.at(heading + seen.azimuth)
     hit = ~np.isnan(gap)
     if hit.sum() < MIN_POINTS:
@@ -403,7 +437,7 @@ def match(
     x: np.ndarray, y: np.ndarray, turn: Turn | list[Turn], *, half_width: float, fov: float,
     known: bool = False, tilt: float = 0.0, roll: float = 0.0,
     within: tuple[float, float] | None = None, facing: tuple[float, float] | None = None,
-    level: bool = False,
+    level: bool = False, projection: Projection = "camera", quick: bool = False, rough: bool = False,
 ) -> Match:
     """The headings, lenses and tilts that bring `turn` onto the trace (x, y), and a verdict.
 
@@ -414,20 +448,26 @@ def match(
     `level` holds it. `within` bounds an unknown lens (degrees, low and high),
     `facing` the heading to a sector (its middle and half its width). `turn`
     may be several cuts of the same turn (`Turn.reach`): each place says which
-    one it lies on.
+    one it lies on. `projection` is the picture's: a panorama strip is held level.
+    `quick` refines only the two best places, for a search that asks it at many
+    points and only needs the best one's score; `rough` slides fewer points over
+    fewer lenses too, to rank a grid before its best points are searched again.
     """
+    if projection == "panorama":
+        level, roll = True, 0.0
     turns = [turn] if isinstance(turn, Turn) else list(turn)
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
     if x.size < MIN_POINTS or not turns:
         return Match("none", [])
-    pick = np.unique(np.linspace(0, x.size - 1, min(x.size, SLIDE_POINTS)).round().astype(int))
+    slid = ROUGH_POINTS if rough else SLIDE_POINTS
+    pick = np.unique(np.linspace(0, x.size - 1, min(x.size, slid)).round().astype(int))
     xs, ys = x[pick], y[pick]
 
     rows: list[_Row] = []
     widths: dict[float, float] = {}
-    for lens in lenses(fov, known=known, within=within):
-        seen = _through(xs, ys, lens, tilt, roll, half_width, twist=not level)
+    for lens in lenses(fov, known=known, within=within, projection=projection, ratio=ROUGH_RATIO if rough else RANGE_RATIO):
+        seen = _through(xs, ys, lens, tilt, roll, half_width, twist=not level, projection=projection)
         widths[lens] = float(seen.azimuth.max() - seen.azimuth.min())
         for index, one in enumerate(turns):
             headings = _headings(max(_step(lens), COARSE_MIN, one.step), facing)
@@ -445,8 +485,8 @@ def match(
     refined = [
         _refine(x, y, turns[index], heading=h, tilt=float(np.clip(t, -89.0, 89.0)), fov=f, roll=r,
                 half_width=half_width, free=not known, level=level, start=roll,
-                widen=RANGE_EASE if within is not None else 1.03)
-        for _, h, f, t, index, r in _spread_out(rows, apart, REFINED)
+                widen=RANGE_EASE if within is not None else 1.03, projection=projection)
+        for _, h, f, t, index, r in _spread_out(rows, apart, 1 if rough else QUICK_REFINED if quick else REFINED)
     ]
     found = sorted((fit for fit in refined if fit is not None), key=lambda fit: -fit.explained)
     if facing is not None:
@@ -458,7 +498,7 @@ def match(
     fits = fits[:KEPT]
     if not fits:
         return Match("none", [])
-    return Match(_verdict(x, y, fits, half_width), fits)
+    return Match(_verdict(x, y, fits, half_width, projection), fits)
 
 
 def _off_level(x: np.ndarray, y: np.ndarray, seen: _Seen, roll: float) -> np.ndarray:
@@ -468,19 +508,19 @@ def _off_level(x: np.ndarray, y: np.ndarray, seen: _Seen, roll: float) -> np.nda
     show, at any tilt.
     """
     middle = np.full(x.size, float(np.median(y)))
-    _, level = directions(x, middle, fov=seen.fov, tilt=seen.tilt, roll=roll)
+    _, level = directions(x, middle, fov=seen.fov, tilt=seen.tilt, roll=roll, projection=seen.projection)
     return seen.elevation - level
 
 
-def _shape(x: np.ndarray, y: np.ndarray, fit: Fit, half_width: float) -> float:
+def _shape(x: np.ndarray, y: np.ndarray, fit: Fit, half_width: float, projection: Projection) -> float:
     """How far the trace rises or falls from a level line, in pixels, but for a stray few points."""
-    seen = _through(x, y, fit.fov, fit.tilt, fit.roll, half_width)
+    seen = _through(x, y, fit.fov, fit.tilt, fit.roll, half_width, projection=projection)
     return float(np.quantile(np.abs(_off_level(x, y, seen, fit.roll)), FLAT_SHARE)) * seen.per_degree
 
 
-def _verdict(x: np.ndarray, y: np.ndarray, fits: list[Fit], half_width: float) -> Verdict:
+def _verdict(x: np.ndarray, y: np.ndarray, fits: list[Fit], half_width: float, projection: Projection) -> Verdict:
     best = fits[0]
-    if _shape(x, y, best, half_width) < FLAT_PX:
+    if _shape(x, y, best, half_width, projection) < FLAT_PX:
         return "flat"
     if best.explained < NONE_BELOW:
         return "none"

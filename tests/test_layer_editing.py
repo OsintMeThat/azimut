@@ -45,6 +45,116 @@ def layer_url(owner, row):
     return f"/api/cases/{owner}/map-layers/{row['name']}"
 
 
+def test_dragging_features_reorders_a_block_and_moves_it_without_changing_case_places(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    points = [marker(client, owner, row, name=name) for name in ("One", "Two", "Three", "Four")]
+    keys = [point["properties"]["key"] for point in points]
+    place = client.post(f"{url}/markers/{keys[1]}/place").json()["place"]
+    group = read(client, owner, row)["groups"][0]["id"]
+    other = client.post(f"{url}/groups", json={"name": "Other"}).json()["group"]
+    moved = client.post(f"{url}/features/order", json={"keys": [keys[0]], "group": group, "before": keys[3]})
+    assert moved.status_code == 200, moved.text
+    assert [feature["properties"]["key"] for feature in reversed(moved.json()["document"]["features"])] == [keys[0], keys[3], keys[2], keys[1]]
+    # Selection click order does not reverse the visual order of the dragged block.
+    moved = client.post(f"{url}/features/order", json={"keys": [keys[1], keys[0]], "group": other["id"]})
+    assert moved.status_code == 200, moved.text
+    document = moved.json()["document"]["features"]
+    block = [feature for feature in reversed(document) if feature["properties"]["group"] == other["id"]]
+    assert [feature["properties"]["key"] for feature in block] == [keys[0], keys[1]]
+    for feature in document:
+        original = points[keys.index(feature["properties"]["key"])]
+        assert feature["geometry"] == original["geometry"]
+        assert feature["properties"]["colour"] == original["properties"]["colour"]
+    assert next(feature for feature in document if feature["properties"]["key"] == keys[1])["properties"]["place_id"] == place["id"]
+    assert Case.open(owner).get_entity(place["id"]) == place
+
+
+@pytest.mark.parametrize("changes", [
+    {"keys": []}, {"keys": ["missing"]}, {"keys": ["first", "first"]},
+    {"group": "missing"}, {"before": "first"}, {"before": "missing"}, {"before": "elsewhere"},
+])
+def test_feature_drops_validate_the_whole_request_before_writing(client, owner, changes):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    first = marker(client, owner, row)
+    other = client.post(f"{url}/groups", json={"name": "Other"}).json()["group"]
+    elsewhere = marker(client, owner, row, group=other["id"])
+    before = read(client, owner, row)
+    group = before["groups"][0]["id"]
+    replacements = {"first": first["properties"]["key"], "elsewhere": elsewhere["properties"]["key"]}
+    body = {"keys": [replacements["first"]], "group": group, "before": None, **changes}
+    body["keys"] = [replacements.get(key, key) for key in body["keys"]]
+    body["before"] = replacements.get(body["before"], body["before"])
+    assert client.post(f"{url}/features/order", json=body).status_code == 422
+    assert read(client, owner, row) == before
+
+
+def test_layer_details_and_feature_order_restore_on_discard(client, owner):
+    response = client.post(f"/api/cases/{owner}/map-layers/editable", json={"title": "Original", "description": "Initial note"})
+    assert response.status_code == 200
+    row = response.json()
+    url = layer_url(owner, row)
+    points = [marker(client, owner, row, name=name) for name in ("First", "Second")]
+    baseline = read(client, owner, row)
+    session = client.post(f"{url}/edit").json()
+    changed = client.patch(f"{url}/edit", json={"title": " Renamed ", "description": " Context\nSecond line "})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["layer"]["title"] == "Renamed"
+    assert changed.json()["layer"]["description"] == "Context\nSecond line"
+    assert changed.json()["layer"]["name"] == row["name"]
+    case = Case.open(owner)
+    entity = case.find_entity(attr="spec", value=layout.layer_spec_rel(row["name"]))
+    assert entity["label"] == "Renamed"
+    changed = client.post(f"{url}/features/order", json={"keys": [points[0]["properties"]["key"]],
+                          "group": baseline["groups"][0]["id"], "before": points[1]["properties"]["key"]}).json()
+    assert changed["layer"]["edit_changed"] is True
+    restored = client.post(f"{url}/edit/finish", json={"token": session["checkpoint"],
+                           "revision": changed["layer"]["edit_revision"], "discard": True})
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["document"] == baseline["document"]
+    assert restored.json()["layer"]["title"] == "Original"
+    assert restored.json()["layer"]["description"] == "Initial note"
+    assert Case.open(owner).get_entity(entity["id"])["label"] == "Original"
+    assert client.patch(f"{url}/edit", json={"description": ""}).json()["layer"]["description"] == ""
+
+
+@pytest.mark.parametrize("changes", [{"title": " "}, {"title": ""}, {"title": "x" * 201}, {"description": "x" * 4001}])
+def test_layer_details_reject_invalid_values_without_changing_the_layer(client, owner, changes):
+    row = create(client, owner)
+    before = read(client, owner, row)
+    assert client.patch(f"{layer_url(owner, row)}/edit", json=changes).status_code == 422
+    assert read(client, owner, row) == before
+
+
+def test_old_edit_checkpoint_keeps_its_name_when_discarded(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    client.post(f"{url}/edit")
+    case = Case.open(owner)
+    spec = maplayers._read_spec(case, row["name"])
+    for field in ("title", "description"):
+        spec["edit_checkpoint"]["before"].pop(field, None)
+    maplayers._write_spec(case, row["name"], spec)
+    current = read(client, owner, row)
+    assert current["layer"]["edit_changed"] is False
+    restored = client.post(f"{url}/edit/finish", json={"token": current["checkpoint"],
+                           "revision": current["layer"]["edit_revision"], "discard": True})
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["layer"]["title"] == row["title"]
+
+
+def test_feature_edits_keep_a_label_changed_from_the_case_board(client, owner):
+    row = create(client, owner)
+    case = Case.open(owner)
+    entity = case.find_entity(attr="spec", value=layout.layer_spec_rel(row["name"]))
+    case.update_entity(entity["id"], {"label": "Board label"})
+    marker(client, owner, row)
+    assert Case.open(owner).get_entity(entity["id"])["label"] == "Board label"
+    assert client.patch(f"{layer_url(owner, row)}/edit", json={"description": "Context"}).status_code == 200
+    assert Case.open(owner).get_entity(entity["id"])["label"] == "Board label"
+
+
 def test_group_styles_override_without_destroying_individual_styles(client, owner):
     row = create(client, owner)
     point = marker(client, owner, row, colour="#d55e00", symbol="star")

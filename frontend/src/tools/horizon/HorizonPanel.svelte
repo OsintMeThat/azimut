@@ -55,6 +55,8 @@
     onturn = () => {},
     /** A photo or a video laid over the view (state/overlay.svelte.js), or null. */
     overlay = null,
+    /** The buildings round the eye (state/buildings.svelte.js), or null. */
+    buildings = null,
   } = $props();
 
   const observer = $derived(view.observer);
@@ -189,7 +191,10 @@
   const lensGist = $derived(
     camera.projection === 'panorama' ? `Panorama · ${Math.round(camera.fov)}°` : `${Math.round(camera.fov)}° · ${focal} mm`
   );
-  const onViewGist = $derived([view.peaksOn && 'Summits', view.skyOn && `Sun ${view.skyTime}`].filter(Boolean).join(' · ') || 'Nothing');
+  const onViewGist = $derived(
+    [view.peaksOn && 'Summits', view.skyOn && `Sun ${view.skyTime}`, buildings?.on && 'Buildings'].filter(Boolean).join(' · ') ||
+      'Nothing'
+  );
   const moreGist = $derived(
     [(camera.tilt || camera.roll) && 'Leaning', view.visibility && seeing, view.near && `Hidden under ${formatDistance(view.near, units)}`]
       .filter(Boolean)
@@ -310,7 +315,7 @@
       <span class="key">Lens</span>
       {#if lens}
         <span class="value with-act">
-          <span>{Math.round(lens.mm)} mm → {lens.fov.toFixed(1)}°</span>
+          <span>{lens.stitched ? `Panorama, ${lens.fov.toFixed(1)}° across` : `${Math.round(lens.mm)} mm → ${lens.fov.toFixed(1)}°`}</span>
           {#if lensOff}
             <button
               type="button"
@@ -332,12 +337,12 @@
           max={BEND_MAX}
           step="0.005"
           value={overlay.bend}
-          disabled={locked}
+          disabled={locked || overlay.isPanorama}
           oninput={(event) => overlay.setBend(event.currentTarget.value)}
           ondblclick={() => overlay.setBend(0)}
           aria-label="Lens distortion"
           aria-valuetext={bendText}
-          title="Straightens the curve a wide lens gives the edges; double-click for none"
+          title={overlay.isPanorama ? 'A panorama has no lens curve to undo' : 'Straightens the curve a wide lens gives the edges; double-click for none'}
         />
         <span class="end mono">{bendText}</span>
       </span>
@@ -565,6 +570,22 @@
         {#each skyLines(view.sky) as line (line)}
           <p class="fact wide">{line}</p>
         {/each}
+      {/if}
+      {#if buildings}
+        <label class="check wide" title="Buildings round the eye, raised from open data, read once this is on">
+          <input type="checkbox" checked={buildings.on} onchange={(event) => buildings.set({ on: event.currentTarget.checked })} />
+          <span>Buildings</span>
+          <span class="source">Open data</span>
+        </label>
+        {#if buildings.on}
+          {@const said = buildings.layerRow}
+          {#if said.note}<p class="fact wide">{said.note}</p>{/if}
+          <span class="wide acts">
+            {#each said.actions as act (act.label)}
+              <button type="button" class="btn btn-sm" class:btn-ghost={act.quiet} onclick={act.run}>{act.label}</button>
+            {/each}
+          </span>
+        {/if}
       {/if}
     {/snippet}
     {@render group('view', 'On the view', onViewGist, onViewBody)}
@@ -926,6 +947,11 @@
   }
   .source {
     color: var(--text-3);
+  }
+  .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
   }
   .day :global(.date-field) {
     flex: 1;

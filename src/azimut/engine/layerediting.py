@@ -17,7 +17,7 @@ from ..workspace import Case
 from . import maplayers, satellite
 
 EDITABLE = "editable"
-WORK_FIELDS = ("document", "groups", "hidden", "marker_serial", "shape_serial", "removed_features", "removed_batch")
+WORK_FIELDS = ("title", "description", "document", "groups", "hidden", "marker_serial", "shape_serial", "removed_features", "removed_batch")
 SYMBOLS = ("pin", "circle", "star", "flag") + tuple(f"badge-{icon}" for icon in (
     "image", "video", "audio", "user", "building", "car", "plane", "ship", "note", "alert",
     "shield", "flame", "crosshair", "compass", "bookmark", "globe", "phone", "mail", "clock", "flag",
@@ -42,6 +42,10 @@ def _spec(case: Case, name: str) -> dict[str, Any]:
     if not isinstance(spec["document"].get("features"), list):
         raise maplayers.LayerError("this layer's working copy is invalid")
     _groups(spec)
+    if checkpoint := spec.get("edit_checkpoint"):
+        # Older checkpoints predate layer details; retain their current values.
+        for field in ("title", "description"):
+            checkpoint["before"].setdefault(field, spec.get(field, ""))
     return spec
 
 
@@ -105,7 +109,8 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
 
 
 def _work(spec: dict[str, Any]) -> dict[str, Any]:
-    return {field: copy.deepcopy(spec[field]) for field in WORK_FIELDS if field in spec}
+    return {field: copy.deepcopy(spec.get(field, "")) for field in WORK_FIELDS
+            if field in spec or field == "description"}
 
 
 def _revision(spec: dict[str, Any]) -> str:
@@ -133,6 +138,7 @@ def begin_edit(case: Case, name: str) -> dict[str, Any]:
 def end_edit(case: Case, name: str, token: str, revision: str, *, discard: bool) -> dict[str, Any]:
     with case.lock:
         spec = _spec(case, name)
+        title = spec["title"]
         checkpoint = spec.get("edit_checkpoint")
         if not checkpoint or checkpoint["id"] != token:
             raise maplayers.LayerError("this editing session is no longer available")
@@ -144,6 +150,8 @@ def end_edit(case: Case, name: str, token: str, revision: str, *, discard: bool)
             spec.update(checkpoint["before"])
         spec.pop("edit_checkpoint", None)
         _save(case, name, spec)
+        if spec["title"] != title:
+            _sync_title(case, name, spec["title"])
         return read(case, name)
 
 
@@ -177,6 +185,12 @@ def _save(case: Case, name: str, spec: dict[str, Any]) -> dict[str, Any]:
     return _row(case, name, spec)
 
 
+def _sync_title(case: Case, name: str, title: str) -> None:
+    entity = case.find_entity(attr="spec", value=layout.layer_spec_rel(name))
+    if entity and entity["label"] != title:
+        case.update_entity(entity["id"], {"label": title})
+
+
 def _create(
     case: Case,
     *,
@@ -185,6 +199,7 @@ def _create(
     original: bytes,
     origin: dict[str, Any] | None = None,
     images: dict[str, bytes] | None = None,
+    description: str = "",
 ) -> dict[str, Any]:
     title = title.strip() or "My layer"
     features = copy.deepcopy(features)
@@ -199,6 +214,7 @@ def _create(
         spec: dict[str, Any] = {
             "azimut_layer": maplayers.SPEC_VERSION,
             "title": title,
+            "description": description.strip(),
             "source": {"kind": EDITABLE, "name": "working.geojson", "format": "geojson"},
             "origin": origin,
             "document": parsed["geojson"],
@@ -215,12 +231,12 @@ def _create(
     return maplayers.row(name, spec, case=case)
 
 
-def create(case: Case, title: str) -> dict[str, Any]:
+def create(case: Case, title: str, description: str = "") -> dict[str, Any]:
     original = b'{"type":"FeatureCollection","features":[]}'
-    return _create(case, title=title, features=[], original=original)
+    return _create(case, title=title, description=description, features=[], original=original)
 
 
-def from_file(case: Case, data: bytes, filename: str, title: str = "") -> dict[str, Any]:
+def from_file(case: Case, data: bytes, filename: str, title: str = "", description: str = "") -> dict[str, Any]:
     """Import a working copy without fetching external icons."""
     parsed = maplayers.parse(data, filename=filename, title=title)
     images = maplayers._pictograms(parsed, data, icons=True, web=False)
@@ -229,12 +245,12 @@ def from_file(case: Case, data: bytes, filename: str, title: str = "") -> dict[s
         "sha256": maplayers.digest(data),
         "copied_at": maplayers._now(),
     }
-    return _create(case, title=title or parsed["summary"]["title"],
+    return _create(case, title=title or parsed["summary"]["title"], description=description,
                    features=parsed["geojson"]["features"], original=data,
                    origin=origin, images=images)
 
 
-def copy_layer(case: Case, name: str, title: str = "") -> dict[str, Any]:
+def copy_layer(case: Case, name: str, title: str = "", description: str = "") -> dict[str, Any]:
     """Copy the saved source and pictograms locally; never refresh its feed."""
     with case.lock:
         source = maplayers._read_spec(case, name)
@@ -255,7 +271,7 @@ def copy_layer(case: Case, name: str, title: str = "") -> dict[str, Any]:
             "sha256": source["snapshot"]["sha256"],
             "copied_at": maplayers._now(),
         }
-        return _create(case, title=title or f'{source["title"]} copy',
+        return _create(case, title=title or f'{source["title"]} copy', description=description,
                        features=collection["features"], original=original,
                        origin=origin, images=images)
 
@@ -400,6 +416,57 @@ def update_group(case: Case, layer: str, key: str, changes: dict[str, Any]) -> d
         for field in ("mode", "colour", "symbol", "size", "stroke"):
             if field in changes:
                 group[field] = changes[field]
+        _save(case, layer, spec)
+        return read(case, layer)
+
+
+def update_details(case: Case, layer: str, changes: dict[str, Any]) -> dict[str, Any]:
+    with case.lock:
+        spec = _spec(case, layer)
+        before = spec["title"]
+        if "title" in changes:
+            title = changes["title"].strip()
+            if not title:
+                raise maplayers.LayerError("enter a layer name")
+            spec["title"] = title
+        if "description" in changes:
+            spec["description"] = changes["description"].strip()
+        _save(case, layer, spec)
+        if spec["title"] != before:
+            _sync_title(case, layer, spec["title"])
+        return read(case, layer)
+
+
+def reorder_features(case: Case, layer: str, keys: list[str], group: str,
+                     before: str | None = None) -> dict[str, Any]:
+    """Move a visual-order block into a group without changing its geometry."""
+    with case.lock:
+        spec = _spec(case, layer)
+        target = _group(spec, group)
+        by_group: dict[str, list[dict[str, Any]]] = {item["id"]: [] for item in _groups(spec)}
+        for feature in reversed(spec["document"]["features"]):
+            by_group[feature["properties"]["group"]].append(feature)
+        ordered = [feature for item in _groups(spec) for feature in by_group[item["id"]]]
+        indexed = {feature["properties"]["key"]: feature for feature in ordered}
+        moving = set(keys)
+        if not moving or len(moving) != len(keys) or not moving <= indexed.keys():
+            raise maplayers.LayerError("choose existing features exactly once")
+        remaining = [feature for feature in ordered if feature["properties"]["group"] == group
+                     and feature["properties"]["key"] not in moving]
+        if before is not None and before not in {feature["properties"]["key"] for feature in remaining}:
+            raise maplayers.LayerError("the drop position is no longer in this group")
+        block = [feature for feature in ordered if feature["properties"]["key"] in moving]
+        at = next((index for index, feature in enumerate(remaining)
+                   if feature["properties"]["key"] == before), len(remaining))
+        for feature in block:
+            feature["properties"].update(group=group, category=target["name"])
+        by_group = {item["id"]: [] for item in _groups(spec)}
+        for feature in ordered:
+            if feature["properties"]["key"] not in moving:
+                by_group[feature["properties"]["group"]].append(feature)
+        by_group[group] = remaining[:at] + block + remaining[at:]
+        spec["document"]["features"] = [feature for item in reversed(_groups(spec))
+                                        for feature in reversed(by_group[item["id"]])]
         _save(case, layer, spec)
         return read(case, layer)
 

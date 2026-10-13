@@ -12,10 +12,9 @@
  * The settings are kept in this browser, as the summit names switch is.
  */
 import {
-  alignment, credits, describeBuilding, downloading, formatSize, keyNumbers, problems, question, readSettings,
+  alignment, caveat, credits, describeBuilding, downloading, formatSize, keyNumbers, problems, question, readSettings,
   sourcesParam, splitBatch, summary, tilesToFetch,
 } from '../../../lib/horizon/buildings.js';
-import { UNKNOWN_HEIGHT } from '../../../lib/horizon/mesh/buildingMesh.js';
 
 export const BUILDINGS_KEY = 'azimut.horizon.buildings';
 /** ms between two askings while the area fills. */
@@ -96,7 +95,13 @@ export function createBuildingsState({ api, bytes = fetchBytes, storage = browse
 
   async function refresh() {
     stop();
-    if (!settings.on || !eye) {
+    if (!settings.on) {
+      // off: nothing more is asked, and what is held stays for the next time it is switched on
+      asked += 1;
+      busy = false;
+      return;
+    }
+    if (!eye) {
       clear();
       return;
     }
@@ -127,7 +132,11 @@ export function createBuildingsState({ api, bytes = fetchBytes, storage = browse
         tiles = new Map(kept);
       }
       tiles = kept;
-      const live = answer.pending > 0 || answer.downloads.some((d) => !d.error) || kept.size < answer.tiles.filter((t) => t.ready).length;
+      const live =
+        answer.pending > 0 ||
+        answer.working > 0 ||
+        answer.downloads.some((d) => !d.error) ||
+        kept.size < answer.tiles.filter((t) => t.ready).length;
       if (live) timer = later(refresh, POLL_MS);
       else if (answer.failed.length && answer.retry_in > 0) timer = later(refresh, answer.retry_in * 1000 + 250);
     } catch (failure) {
@@ -148,8 +157,8 @@ export function createBuildingsState({ api, bytes = fetchBytes, storage = browse
       before.radius !== settings.radius ||
       sourcesParam(before.sources) !== sourcesParam(settings.sources)
     ) {
-      if (!settings.on) clear();
-      else refresh();
+      if (!settings.on) info = '';
+      refresh();
     }
   }
 
@@ -198,13 +207,11 @@ export function createBuildingsState({ api, bytes = fetchBytes, storage = browse
      * holds or waits for, and the yes or no to a download.
      */
     get layerRow() {
-      const asking = question(status, declined);
       const said = [
         busy && !status ? 'Reading the area…' : summary(status),
         downloading(status),
         ...problems(status),
         ...(error ? [error] : []),
-        asking?.text ?? '',
       ].filter(Boolean);
       return {
         id: 'buildings',
@@ -215,25 +222,61 @@ export function createBuildingsState({ api, bytes = fetchBytes, storage = browse
         toggle: () => set({ on: !settings.on }),
         note: settings.on ? said.join(' · ') : '',
         actions: settings.on
-          ? [
-              ...(asking
-                ? [
-                    { label: `Download ${formatSize(asking.size)}`, run: () => this.allow() },
-                    { label: 'Not now', quiet: true, run: () => this.decline() },
-                  ]
-                : []),
-              { label: panelOpen ? 'Hide settings' : 'Settings', quiet: true, run: () => (panelOpen = !panelOpen) },
-            ]
+          ? [{ label: panelOpen ? 'Hide settings' : 'Settings', quiet: true, run: () => (panelOpen = !panelOpen) }]
           : [],
       };
     },
-    /** The tiles for the scene (mesh/scene.js `setBuildings`), or null while off. */
+    /**
+     * What the view says over the picture, or null: the question before a download, with
+     * its buttons, else a download or the area being raised, with how far along it is
+     * (`share`, 0 to 1, or null when that is not known).
+     */
+    get banner() {
+      if (!settings.on) return null;
+      const asking = question(status, declined);
+      if (asking) {
+        return {
+          kind: 'ask',
+          text: asking.text,
+          share: null,
+          actions: [
+            ...asking.groups.map((g) => ({
+              label: `Download ${g.name} (${formatSize(g.size)})`,
+              run: () => this.allow(g.source),
+            })),
+            { label: 'Not now', quiet: true, run: () => this.decline() },
+          ],
+        };
+      }
+      const live = (status?.downloads ?? []).filter((d) => !d.error);
+      if (live.length) {
+        const total = live.reduce((sum, d) => sum + d.total, 0);
+        const done = live.reduce((sum, d) => sum + d.done, 0);
+        return { kind: 'progress', text: `Downloading ${downloading(status)}`, share: total ? done / total : null, actions: [] };
+      }
+      const all = status?.tiles?.length ?? 0;
+      if ((busy && !status) || status?.pending || status?.working) {
+        const ready = status?.tiles?.filter((t) => t.ready).length ?? 0;
+        return {
+          kind: 'progress',
+          text: 'Raising the buildings…',
+          share: status?.pending && all ? ready / all : null,
+          actions: [],
+        };
+      }
+      return null;
+    },
+    /** What the view notes under the picture while buildings show: where their heights come from, and that they can be wrong. */
+    get caveat() {
+      return settings.on ? caveat(status, settings) : null;
+    },
+    /** The tiles held for the scene (mesh/scene.js `setBuildings`), drawn or not. */
     get sceneTiles() {
-      return settings.on ? [...tiles.values()] : null;
+      return [...tiles.values()];
     },
     /** How the scene draws a building nobody knows the height of. */
     get sceneOptions() {
-      return { unknown: settings.unknown, unknownHeight: UNKNOWN_HEIGHT };
+      return { unknown: settings.unknown, unknownHeight: settings.unknownHeight };
     },
     /** What the renderer draws the buildings with, at the eye's latitude. */
     drawOptions(lat) {
@@ -262,12 +305,14 @@ export function createBuildingsState({ api, bytes = fetchBytes, storage = browse
       moveTimer = later(refresh, MOVE_DELAY);
     },
     refresh,
-    /** The analyst said yes to the grids the question named. */
-    async allow() {
+    /** The analyst said yes to the files the question named: one source's, or all of them. */
+    async allow(source = null) {
       const asking = question(status, declined);
       if (!asking) return;
+      const grids = source ? (asking.groups.find((g) => g.source === source)?.grids ?? []) : asking.grids;
+      if (!grids.length) return;
       try {
-        await api.post('/api/horizon/buildings/allow', { grids: asking.grids });
+        await api.post('/api/horizon/buildings/allow', { grids });
       } catch (failure) {
         error = failure?.message ?? String(failure);
         return;

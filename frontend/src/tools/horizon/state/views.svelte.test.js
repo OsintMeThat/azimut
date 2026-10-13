@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createBuildingsState } from './buildings.svelte.js';
 import { createHorizonState } from './horizon.svelte.js';
 import { createOverlayState } from './overlay.svelte.js';
 import { createViewsState } from './views.svelte.js';
@@ -63,7 +64,8 @@ function makeApi() {
   };
 }
 
-function setup() {
+function setup({ withBuildings = false } = {}) {
+  const buildings = withBuildings ? createBuildingsState({ api, storage: null, later: () => 0, cancel: () => {} }) : null;
   const view = createHorizonState({ api, decode: async (answer) => answer, later: () => 0, cancel: () => {}, storage: null });
   const overlay = createOverlayState({
     api,
@@ -82,8 +84,9 @@ function setup() {
     caseId: () => caseId,
     snapshot: () => snapshot(),
     footprint: () => [EYE, { lat: 46.6, lon: 7.95 }, { lat: 46.5, lon: 7.96 }],
+    buildings,
   });
-  return { view, overlay, views };
+  return { view, overlay, views, buildings };
 }
 
 const posted = () => requests.filter((r) => r.method === 'POST' && r.path.endsWith('/horizon/views'));
@@ -173,6 +176,38 @@ describe('saving a view', () => {
     expect(views.dirty).toBe(true);
     overlay.undoStroke();
     expect(views.dirty).toBe(false);
+  });
+
+  it('keeps the buildings and how they were drawn, and a change to them is a change', async () => {
+    const { view, views, buildings } = setup({ withBuildings: true });
+    view.standAt(EYE);
+    buildings.set({ on: true, radius: 5000, unknownHeight: 4.5, sources: { ...buildings.settings.sources, google: false } });
+    await views.save('Old town');
+    expect(posted()[0].body.spec.buildings).toMatchObject({
+      radius: 5000,
+      unknown_height: 4.5,
+      sources: ['ign', 'nl3dbag', 'nrw', 'nyc', 'osm', 'overture', 'globfp'],
+    });
+    expect(views.dirty).toBe(false);
+    buildings.set({ roofs: 'photo' });
+    expect(views.dirty).toBe(true);
+  });
+
+  it('raises the buildings again on opening, and a view kept without them takes them down', async () => {
+    const { view, views, buildings } = setup({ withBuildings: true });
+    view.standAt(EYE);
+    buildings.set({ on: true, radius: 1000, look: 'outline' });
+    await views.save('Old town');
+    buildings.set({ on: false, radius: 2000, look: 'solid' });
+    views.fresh();
+    await views.save('Bare');
+    expect(posted()[1].body.spec.buildings).toBeNull();
+
+    expect(await views.open('Old town')).toBe(true);
+    expect(buildings.settings).toMatchObject({ on: true, radius: 1000, look: 'outline' });
+    expect(views.dirty).toBe(false);
+    expect(await views.open('Bare')).toBe(true);
+    expect(buildings.settings.on).toBe(false);
   });
 
   it('cannot be saved with no case open', async () => {

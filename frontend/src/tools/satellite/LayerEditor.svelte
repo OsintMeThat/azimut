@@ -23,6 +23,10 @@
   let root = $state(null);
   let discard = $state(false);
   let dragged = $state('');
+  let draggedFeatures = $state([]);
+  let featureDrop = $state(null);
+  let editingDetails = $state(false);
+  let layerDetails = $state({ title: '', description: '' });
   let gap = $state(-1);
   let groupList = $state(null);
   let sizes = $state({});
@@ -38,9 +42,10 @@
       || !target.closest('.group-settings, [data-group-menu-trigger]'))) editingGroup = '';
     if (picking && (!inside || !target.closest('.place-picker, [data-place-picker-trigger], .destination-field'))) picking = false;
     if (newGroup && (!inside || !target.closest('.new-group, [data-new-group-trigger]'))) newGroup = false;
+    if (editingDetails && (!inside || !target.closest('.layer-details, [data-layer-details-trigger]'))) editingDetails = false;
   }
   $effect(() => {
-    if (!editingGroup && !picking && !newGroup) return;
+    if (!editingGroup && !picking && !newGroup && !editingDetails) return;
     window.addEventListener('click', dismissMenus, true);
     return () => window.removeEventListener('click', dismissMenus, true);
   });
@@ -63,6 +68,20 @@
     foldedFor = name;
     folded = new Set(groups.length > 5 ? groups.slice(1).map((group) => group.id) : []);
   });
+
+  $effect(() => {
+    layerDetails = controller.details ?? { title: controller.editor.title ?? '', description: controller.editor.description ?? '' };
+  });
+  const detailsChanged = $derived(layerDetails.title.trim() !== (controller.editor.title ?? '')
+    || layerDetails.description.trim() !== (controller.editor.description ?? ''));
+  async function saveDetails() {
+    if (!detailsChanged) return;
+    if (!layerDetails.title.trim()) return null;
+    layerDetails.title = layerDetails.title.trim(); layerDetails.description = layerDetails.description.trim();
+    const patch = Object.fromEntries(Object.entries(layerDetails).map(([key, value]) => [key, value.trim()])
+      .filter(([key, value]) => value !== (controller.editor[key] ?? '')));
+    return controller.updateDetails(patch);
+  }
 
   $effect(() => {
     const props = selected?.properties;
@@ -88,11 +107,12 @@
   async function done() {
     if (controller.sketch && controller.complete && !(await controller.saveGeometry())) return;
     if (formChanged && await saveSelected() === null) return;
+    if (detailsChanged && await saveDetails() === null) return;
     if (controller.finish) { if (await controller.finish()) ondone?.(); }
     else ondone?.();
   }
   async function back() {
-    if (controller.changed || formChanged) discard = true;
+    if (controller.changed || formChanged || detailsChanged) discard = true;
     else if (await controller.finish?.(false)) ondone?.();
     else if (!controller.finish) ondone?.();
   }
@@ -100,6 +120,30 @@
     if (await controller.finish(true)) { discard = false; ondone?.(); }
   }
   function dragOver(event) {
+    if (draggedFeatures.length) {
+      const target = event.target instanceof Element ? event.target.closest('[data-feature-group]') : null;
+      if (!target || !groupList?.contains(target)) { featureDrop = null; return; }
+      const id = target.dataset.featureGroup;
+      const list = target.querySelector('.features');
+      const moving = new Set(draggedFeatures);
+      let before = null;
+      if (list?.contains(event.target)) {
+        const box = list.getBoundingClientRect();
+        if (event.clientY < box.top + 20) list.scrollTop -= 12;
+        else if (event.clientY > box.bottom - 20) list.scrollTop += 12;
+        const nodes = [...list.children].filter((node) => !moving.has(node.dataset.featureKey));
+        const next = nodes.find((node) => { const rect = node.getBoundingClientRect(); return event.clientY < rect.top + rect.height / 2; });
+        if (next) before = next.dataset.featureKey;
+        else if (nodes.length) {
+          const order = (membersByGroup.get(id) ?? []).toReversed().filter((feature) => !moving.has(feature.properties.key));
+          const last = order.findIndex((feature) => feature.properties.key === nodes.at(-1).dataset.featureKey);
+          before = order[last + 1]?.properties.key ?? null;
+        }
+      }
+      featureDrop = { group: id, before };
+      event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+      return;
+    }
     if (!dragged) return;
     const box = groupList?.getBoundingClientRect();
     if (!box || event.clientX < box.left - 32 || event.clientX > box.right + 32
@@ -110,10 +154,42 @@
     event.preventDefault(); event.dataTransfer.dropEffect = 'move';
   }
   function drop(event) {
+    if (draggedFeatures.length) {
+      const target = event.target instanceof Element ? event.target.closest('[data-feature-group]') : null;
+      if (featureDrop && target?.dataset.featureGroup === featureDrop.group && groupList?.contains(target)) {
+        event.preventDefault();
+        controller.reorderFeatures([...draggedFeatures], featureDrop.group, featureDrop.before);
+      }
+      draggedFeatures = []; featureDrop = null;
+      return;
+    }
     if (!dragged) return;
     event.preventDefault();
     if (gap >= 0) controller.reorderGroups(moveName(groups.map((group) => group.id), dragged, gap));
     dragged = ''; gap = -1;
+  }
+  function startFeatureDrag(event, feature) {
+    const key = feature.properties.key;
+    dragged = ''; gap = -1;
+    draggedFeatures = selection.includes(key) ? [...selection] : [key];
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', draggedFeatures.join(','));
+  }
+  async function nudgeFeature(event, feature) {
+    const step = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const key = feature.properties.key, id = feature.properties.group;
+    const keys = selection.includes(key) ? [...selection] : [key];
+    const moving = new Set(keys), order = (membersByGroup.get(id) ?? []).toReversed().map((feature) => feature.properties.key);
+    const rest = order.filter((key) => !moving.has(key));
+    const first = order.findIndex((key) => moving.has(key));
+    const last = order.findLastIndex((key) => moving.has(key));
+    const neighbour = step < 0 ? order[first - 1] : order[last + 1];
+    if (!neighbour) return;
+    const before = step < 0 ? neighbour : rest[rest.indexOf(neighbour) + 1] ?? null;
+    await controller.reorderFeatures(keys, id, before);
+    await tick(); root?.querySelector(`[data-feature-grip="${CSS.escape(key)}"]`)?.focus();
   }
   async function nudge(event, group, index) {
     const step = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
@@ -164,12 +240,25 @@
 <section class="editor" aria-label="Layer editor" bind:this={root}>
   <header class="editor-head">
     <Icon name="stack" size={13} />
-    <span class="editor-title">{controller.editor.title}</span>
+    <button class="editor-title layer-title" aria-label="Edit layer details" title="Rename layer or add a description"
+      data-layer-details-trigger aria-expanded={editingDetails} onclick={() => (editingDetails = !editingDetails)}>
+      <span>{controller.editor.title}</span><Icon name="edit" size={11} />
+    </button>
     <button class="icon-act" aria-label="Download this layer" title="Download layer" disabled={controller.pending > 0 || controller.loading || !!controller.sketch}
-      onclick={async () => { if (formChanged && await saveSelected() === null) return; controller.download(controller.editor); }}><Icon name="download" size={14} /></button>
+      onclick={async () => { if (formChanged && await saveSelected() === null) return; if (detailsChanged && await saveDetails() === null) return; controller.download(controller.editor); }}><Icon name="download" size={14} /></button>
     <button class="icon-act back" aria-label="Back from layer editor" title="Back" disabled={controller.pending > 0 || controller.loading} onclick={back}><Icon name="chevronLeft" size={14} /></button>
-    <button class="btn btn-primary btn-sm done" disabled={controller.loading || controller.pending > 0 || (controller.sketch && !controller.complete)} onclick={done}><Icon name="check" size={12} /> Done</button>
+    <button class="btn btn-primary btn-sm done" disabled={controller.loading || controller.pending > 0 || !layerDetails.title.trim() || (controller.sketch && !controller.complete)} onclick={done}><Icon name="check" size={12} /> Done</button>
   </header>
+  {#if editingDetails && !controller.loading}
+    <div class="layer-details">
+      <label><span>Name</span><input aria-label="Layer name" bind:value={layerDetails.title} maxlength="200" /></label>
+      <label><span>Description (optional)</span><textarea aria-label="Layer description" bind:value={layerDetails.description} maxlength="4000" rows="2"></textarea></label>
+      <button class="btn btn-sm" disabled={controller.pending > 0 || !layerDetails.title.trim() || !detailsChanged}
+        onclick={async () => { if (await saveDetails() !== null) editingDetails = false; }}>Save layer details</button>
+    </div>
+  {:else if controller.editor.description}
+    <p class="note layer-description">{controller.editor.description}</p>
+  {/if}
   {#if controller.editor.origin}
     <p class="note">Copy of {controller.editor.origin.source.name || controller.editor.origin.source.url}</p>
   {/if}
@@ -310,13 +399,14 @@
       {#each groups as group, index (group.id)}
         {@const members = membersByGroup.get(group.id) ?? []}
         {@const hidden = controller.editor.hidden?.includes(group.name)}
-        <div class="group" class:active-group={controller.group === group.id} class:drop-before={gap === index} class:drop-after={gap === groups.length && index === groups.length - 1}>
+        <div class="group" data-feature-group={group.id} class:active-group={controller.group === group.id}
+          class:feature-target={featureDrop?.group === group.id} class:drop-before={gap === index} class:drop-after={gap === groups.length && index === groups.length - 1}>
           <div class="group-controls" data-group-id={group.id}>
           <div class="group-head">
             <button class="icon-act group-grip" draggable="true" aria-label={`Move group ${group.name}`} title="Drag to reorder" data-group-grip={group.id}
               onkeydown={(event) => nudge(event, group, index)}
-              ondragstart={(event) => { dragged = group.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', group.name); }}
-              ondragend={() => { dragged = ''; gap = -1; }}><Icon name="grip" size={11} /></button>
+              ondragstart={(event) => { draggedFeatures = []; featureDrop = null; dragged = group.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', group.name); }}
+              ondragend={() => { dragged = ''; gap = -1; }}><Icon name="grip" size={14} stroke={2.5} /></button>
             <button class="icon-act eye" class:on={!hidden} aria-label={`Show group ${group.name}`}
               aria-pressed={!hidden} title={hidden ? 'Show this group' : 'Hide this group'}
               onclick={() => controller.toggleGroup(group)}><Icon name="eye" size={12} /></button>
@@ -364,11 +454,18 @@
           </div>
           {#if !folded.has(group.id)}
             {#if members.length > 1}<button class="text-act select-group" onclick={() => controller.selectGroup(group.id)}>Select all {members.length}</button>{/if}
-            <ul class="features">
+            <ul class="features" class:drop-end={featureDrop?.group === group.id && !featureDrop.before}>
               {#each members.slice(-(limits[group.id] ?? 100)).toReversed() as feature (feature.properties.key)}
-                <li><input type="checkbox" aria-label={`Select ${feature.properties.name || 'Unnamed feature'}`} checked={selection.includes(feature.properties.key)}
-                  onclick={(event) => { controller.toggleSelected(feature.properties.key, members.toReversed().map((feature) => feature.properties.key), event.shiftKey); }} />
-                <button class:active={selection.includes(feature.properties.key) || selected?.properties.key === feature.properties.key}
+                <li data-feature-key={feature.properties.key}
+                  class:dragging={draggedFeatures.includes(feature.properties.key)}
+                  class:drop-before={featureDrop?.group === group.id && featureDrop.before === feature.properties.key}>
+                <button class="icon-act feature-grip" draggable="true" data-feature-grip={feature.properties.key}
+                  aria-label={`Move ${feature.properties.name || 'Unnamed feature'}`} title="Drag to reorder or move to a group"
+                  disabled={controller.pending > 0 || !!controller.sketch} onkeydown={(event) => nudgeFeature(event, feature)}
+                  ondragstart={(event) => startFeatureDrag(event, feature)} ondragend={() => { draggedFeatures = []; featureDrop = null; }}>
+                  <Icon name="grip" size={14} stroke={2.5} /></button>
+                <button class="feature-row" aria-pressed={selection.includes(feature.properties.key)}
+                  class:active={selection.includes(feature.properties.key) || selected?.properties.key === feature.properties.key}
                   onclick={async (event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) controller.toggleSelected(feature.properties.key, members.toReversed().map((feature) => feature.properties.key), event.shiftKey);
                     else { controller.select(feature.properties.key); onfly?.(feature); } await tick(); root?.querySelector('.selection')?.scrollIntoView?.({ block: 'nearest' }); }}>
                   <span class="feature-symbol" style={`color:${group.mode === 'uniform' ? group.colour : feature.properties.colour || group.colour}`}>
@@ -420,9 +517,22 @@
   .size-field { display: flex; align-items: center; gap: 5px; margin-top: 7px; color: var(--text-3); font-size: 10px; }
   .size-field input[type='range'] { flex: 1; min-width: 0; padding: 0; height: 18px; accent-color: var(--accent); }
   .size-field output { width: 34px; text-align: right; }
-  .group-grip { cursor: grab; opacity: .65; }
+  .icon-act.group-grip, .icon-act.feature-grip { cursor: grab; color: var(--text-2); }
+  .group-grip:active, .feature-grip:active { cursor: grabbing; }
+  .layer-title { display: flex; align-items: center; gap: 5px; text-align: left; cursor: pointer; }
+  .layer-title > span { overflow: hidden; text-overflow: ellipsis; }
+  .layer-title :global(svg) { flex: none; color: var(--text-3); }
+  .layer-title:hover :global(svg) { color: var(--text-1); }
+  .layer-details { margin-top: 7px; padding: 7px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-1); }
+  .layer-details label { display: grid; gap: 3px; margin-bottom: 6px; color: var(--text-3); font-size: 10px; }
+  .layer-details textarea { margin-top: 0; }
+  .layer-description { white-space: pre-wrap; display: -webkit-box; line-clamp: 2; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .group.drop-before { border-top: 2px solid var(--accent); }
   .group.drop-after { border-bottom: 2px solid var(--accent); }
+  .group.feature-target > .group-controls > .group-head { background: var(--accent-soft); }
+  .features li.drop-before { box-shadow: inset 0 2px var(--accent); }
+  .features li.dragging { opacity: .5; }
+  .features.drop-end { box-shadow: inset 0 -2px var(--accent); }
   .toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
   .toolbar > button { min-width: 0; justify-content: center; gap: 4px; padding: 4px; font-size: 10px; }
   input:not([type='checkbox']):not([type='color']), select, textarea { width: 100%; min-width: 0; padding: 4px 6px; font-size: var(--fs-xs); line-height: 1.35; border-radius: var(--radius-1); }
@@ -444,6 +554,7 @@
   .selection-actions { margin-top: 6px; }
   .selection-actions .danger { margin-left: auto; }
   .bulk-selection { position: sticky; top: 38px; z-index: 7; }
+  .bulk-selection .inline-field > span { width: 80px; }
   .bulk-selection:has(:global(.icon-menu)) { z-index: 11; }
   .notes { margin-top: 6px; color: var(--text-3); }
   summary { cursor: pointer; font-size: 10px; }
@@ -468,12 +579,11 @@
   .group-settings { padding: 4px 4px 5px 24px; }
   .group-settings > select { margin-top: 5px; }
   ul { list-style: none; margin: 0; padding: 0; }
-  .features button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; padding: 3px 5px 3px 29px; text-align: left; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
-  .features button:hover, .features button.active { background: var(--bg-3); color: var(--text-1); }
+  .features .feature-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 24px; padding: 3px 5px; text-align: left; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
+  .features .feature-row:hover, .features .feature-row.active { background: var(--bg-3); color: var(--text-1); }
   .features { max-height: min(340px, 45vh); overflow-y: auto; }
   .features li { display: flex; align-items: center; padding-left: 8px; }
-  .features input { width: 12px; height: 12px; margin: 0 3px; flex-shrink: 0; }
-  .features button { padding-left: 5px; }
+  .feature-grip { padding: 0; }
   .select-group { margin: 3px 0 3px 28px; }
   .feature-symbol { display: grid; place-items: center; flex: none; }
   .group-empty { padding-left: 29px; }

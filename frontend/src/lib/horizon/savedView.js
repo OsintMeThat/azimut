@@ -4,7 +4,8 @@
  *
  * The spec is the reading: where the eye stands and how high, which way it
  * looks through which lens, how the picture is drawn, the hour, the point
- * marked, and the photo laid over the view with what was done to match it.
+ * marked, the photo laid over the view with what was done to match it, and the
+ * buildings raised round the eye with how they were drawn.
  * Numbers are rounded to what the tab shows, so saving an untouched view
  * writes the same file.
  *
@@ -15,6 +16,7 @@
  * with pins keeps its alignment in them, so there the look is reading too, and
  * so is the moment on show, always.
  */
+import { buildingsSpec, builtOf } from './buildings.js';
 import { cleanHints } from './hints.js';
 import { headingOf } from './view.js';
 
@@ -30,8 +32,8 @@ const turn = (value) => {
 
 /** What was known about the photo, as the case keeps it (lib/horizon/hints.js). */
 function hintsSpec(hints) {
-  const { zoom, facing, reach } = cleanHints(hints);
-  return { zoom, facing: facing ? { heading: round(facing.heading, 1) } : null, reach };
+  const { picture, zoom, facing, reach } = cleanHints(hints);
+  return { picture, zoom, facing: facing ? { heading: round(facing.heading, 1) } : null, reach };
 }
 
 /**
@@ -71,8 +73,11 @@ export function photoKept(overlay) {
   return !overlay?.source || Boolean(photoSpec(overlay));
 }
 
-/** The view as the case keeps it, or null while no eye stands anywhere. */
-export function viewSpec(view, overlay = null) {
+/**
+ * The view as the case keeps it, or null while no eye stands anywhere.
+ * `buildings` are the buildings' settings (lib/horizon/buildings.js), if the tab has them.
+ */
+export function viewSpec(view, overlay = null, buildings = null) {
   const eye = view.observer;
   if (!eye) return null;
   const camera = view.camera;
@@ -101,6 +106,7 @@ export function viewSpec(view, overlay = null) {
     sky: { on: Boolean(view.skyOn), date: view.skyDate ?? '', time: view.skyTime ?? '12:00' },
     target: view.target ? { lat: round(view.target.lat, 6), lon: round(view.target.lon, 6), height: round(view.target.height ?? 0, 1) } : null,
     photo: photoSpec(overlay),
+    buildings: buildingsSpec(buildings),
   };
 }
 
@@ -152,9 +158,13 @@ export function restoredView(spec) {
   };
 }
 
-/** What the terrain was at the save, from the turn the app marched (`/api/horizon/panorama`). */
-export function madeOf(panorama) {
-  if (!panorama) return {};
+/**
+ * What the terrain was at the save, from the turn the app marched (`/api/horizon/panorama`),
+ * and where the buildings on show came from (`/api/horizon/buildings`).
+ */
+export function madeOf(panorama, buildings = null) {
+  const built = builtOf(buildings);
+  if (!panorama) return built ? { buildings: built } : {};
   const credits = (panorama.credits ?? []).map(({ label = '', attribution = '' }) => ({ label, attribution }));
   const finite = (value, digits) => (Number.isFinite(value) ? round(value, digits) : null);
   return {
@@ -163,6 +173,7 @@ export function madeOf(panorama) {
     refraction: finite(panorama.refraction, 3),
     ground_m: finite(panorama.observer?.ground, 1),
     altitude_m: finite(panorama.observer?.altitude, 1),
+    ...(built ? { buildings: built } : {}),
   };
 }
 

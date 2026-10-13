@@ -36,8 +36,8 @@ export const STRIDE = 9;
 /** wire.py's kinds, in its order. */
 export const KINDS = ['measured', 'estimated', 'range', 'unknown'];
 export const KIND_CODES = { measured: 0, estimated: 1, range: 2, unknown: 3 };
-/** The height an unknown building is drawn at when it is drawn, metres. */
-export const UNKNOWN_HEIGHT = 6;
+/** The height a building nobody knows the height of is drawn at, unless the analyst sets another: a storey. */
+export const UNKNOWN_HEIGHT = 3;
 
 /** A tile's side in Web Mercator metres. */
 export const chunkSpan = () => MERC / 2 ** CHUNK_Z;
@@ -304,12 +304,15 @@ export function runOver(chunk, z, x, y) {
  * The shadows' finest height grid (build.js `buildGrid`: `size` cells a side over
  * `reach` metres each way of the eye, rows from the north) with every building
  * raised to its roof, so the light marched over it casts their shadows too.
- * `roofs` is a list of `buildChunk` roofs arrays. Returns a new grid and its top.
+ * `roofs` is a list of `buildChunk` roofs arrays. Returns a new grid, its top,
+ * and how far from its centre the raised roofs reach, in metres either way (0
+ * for none).
  */
 export function burnRoofs(heights, size, reach, roofs) {
   const out = Float32Array.from(heights);
   const cell = (2 * reach) / size;
   let top = -Infinity;
+  let farthest = 0;
   for (const packed of roofs) {
     for (let at = 0; at < packed.length; ) {
       const n = packed[at];
@@ -361,7 +364,8 @@ export function burnRoofs(heights, size, reach, roofs) {
         if (c >= 0 && c < size && r >= 0 && r < size && roof > out[r * size + c]) out[r * size + c] = roof;
       }
       if (roof > top) top = roof;
+      farthest = Math.max(farthest, Math.min(reach, Math.max(-minX, maxX, -minY, maxY)));
     }
   }
-  return { heights: out, top };
+  return { heights: out, top, reach: farthest };
 }

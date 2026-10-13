@@ -154,10 +154,27 @@ def test_a_rolled_trace_comes_back_with_its_roll_unless_held_level(client):
     assert held["fits"][0]["roll"] == 1.0
 
 
+def test_a_panorama_is_read_through_the_strip_its_lens_up_to_the_whole_turn(client):
+    x, y = trace_on(RANGE, heading=60.0, fov=200.0, tilt=1.0, projection="panorama")
+    body = _body(x=x.tolist(), y=y.tolist(), fov=180.0, within=[120.0, 300.0], projection="panorama")
+    found = client.post(URL, json=body)
+    assert found.status_code == 200, found.text
+    best = found.json()["fits"][0]
+    assert best["heading"] == pytest.approx(60.0, abs=0.5)
+    assert best["fov"] == pytest.approx(200.0, rel=0.03)
+    assert best["roll"] == 0.0
+    assert found.json()["lenses"] == [120.0, 300.0]
+    # a photo's lens stops at the widest a camera has
+    assert client.post(URL, json={**body, "projection": "camera"}).status_code == 422
+    assert client.post(URL, json=_body(fov=200.0)).status_code == 422
+
+
 @pytest.mark.parametrize(
     "change",
     [
         {"within": [0.1, 60.0]},  # no lens that narrow
+        {"projection": "fisheye"},
+        {"fov": 400.0, "projection": "panorama"},
         {"within": [30.0]},
         {"facing": [400.0, 20.0]},
         {"facing": [40.0, 0.0]},

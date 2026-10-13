@@ -172,7 +172,8 @@
   function drawOptions() {
     const raised = buildings?.on ? buildings.drawOptions(view.placed?.lat) : null;
     return {
-      ...raised,
+      // switched off, the buildings stay built in the scene and are drawn nowhere
+      ...(raised ?? { buildings: 'none' }),
       ground: view.ground,
       // buildings drawn as edges are traced by the lines
       lines: view.lines || raised?.buildings === 'outline',
@@ -236,6 +237,10 @@
     scene?.setBuildings(tiles);
   });
   $effect(() => {
+    const shown = Boolean(buildings?.on);
+    scene?.setBuildingsShown(shown);
+  });
+  $effect(() => {
     const options = buildings?.sceneOptions;
     if (options) scene?.setBuildingOptions(options);
   });
@@ -277,6 +282,7 @@
     if (view.placed) scene?.place(view.placed, view.placed.far);
     if (buildings) {
       scene?.setBuildingOptions(buildings.sceneOptions);
+      scene?.setBuildingsShown(buildings.on);
       scene?.setBuildings(buildings.sceneTiles);
     }
     scene?.setImagery(view.imagery);
@@ -437,6 +443,11 @@
   // -- reading the picture ----------------------------------------------------
 
   const shown = $derived(Boolean(size.width && landed));
+
+  /** The buildings' question before a download, or how their download or raising goes. */
+  const buildingNote = $derived(buildings?.banner ?? null);
+  /** Where the buildings' heights come from and that they can be wrong, noted under the view while they show. */
+  const buildingCaveat = $derived(buildings?.caveat ?? null);
 
   /** What the view says while its ground loads: the whole turn first, then its pictures, the shadows, the lens. */
   const loadingText = $derived.by(() => {
@@ -797,7 +808,9 @@
       press = { ...local(event), slide: true, from: local(event), lens: { ...view.camera }, loupe: shownLoupe, moved: false };
       return;
     }
-    press = { ...local(event), camera: { ...camera }, moved: false, roll: event.shiftKey, pivot: pivotAt, swept: 0, angle: null };
+    // the panorama strip has no roll to turn
+    const roll = event.shiftKey && view.camera.projection !== 'panorama';
+    press = { ...local(event), camera: { ...camera }, moved: false, roll, pivot: pivotAt, swept: 0, angle: null };
   }
 
   /** The angle the hand has swept round the pivot since it pressed, clockwise on screen, in degrees. */
@@ -1339,6 +1352,30 @@
     </div>
   {/if}
 
+  {#if view.observer && buildingNote}
+    <div
+      class="glass loading building-note hz-control"
+      class:asking={buildingNote.kind === 'ask'}
+      role={buildingNote.kind === 'ask' ? 'region' : 'status'}
+      aria-label="Buildings"
+      aria-live="polite"
+    >
+      <span>{buildingNote.text}</span>
+      {#if buildingNote.kind === 'progress' && buildingNote.share != null}
+        <span class="bar"><span style:width="{Math.round(buildingNote.share * 100)}%"></span></span>
+      {:else if buildingNote.kind === 'progress'}
+        <span class="bar waiting"><span></span></span>
+      {/if}
+      {#if buildingNote.actions.length}
+        <span class="note-actions">
+          {#each buildingNote.actions as action (action.label)}
+            <button type="button" class:quiet={action.quiet} onclick={action.run}>{action.label}</button>
+          {/each}
+        </span>
+      {/if}
+    </div>
+  {/if}
+
   <svg class="overlay" width={size.width} height={size.height} aria-hidden="true">
     {#if level}
       <line class="level" x1={level.x1} y1={level.y1} x2={level.x2} y2={level.y2} />
@@ -1419,7 +1456,7 @@
       <polygon class="warp-edge under" points={cornersLine} />
       <polygon class="warp-edge over" points={cornersLine} />
     {/if}
-    {#if shown && ((shiftHeld && hovering) || rollNote)}
+    {#if shown && view.camera.projection !== 'panorama' && ((shiftHeld && hovering) || rollNote)}
       <!-- the point a roll turns about, ringed -->
       <g class="pivot" transform="translate({pivotAt.x} {pivotAt.y})">
         {#each ['under', 'over'] as layer (layer)}
@@ -1527,6 +1564,10 @@
     <p class="glass hint">{HINTS[moves]}</p>
   {:else if shown && !hinted}
     <p class="glass hint">Drag to turn · Wheel to zoom · Double-click to go there · ↑ ↓ to walk</p>
+  {/if}
+
+  {#if shown && buildingCaveat}
+    <p class="building-caveat"><span>{buildingCaveat.heights}</span><span>{buildingCaveat.note}</span></p>
   {/if}
 
   {#if credits}
@@ -2021,6 +2062,26 @@
     font-size: 10px;
     pointer-events: none;
   }
+  /* what the buildings' heights rest on, over the imagery's credits: always there, never in the way */
+  .building-caveat {
+    position: absolute;
+    right: 8px;
+    bottom: 50px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: min(440px, calc(100% - 16px));
+    margin: 0;
+    padding: 2px 7px;
+    border-radius: var(--r-sm);
+    background: var(--hz-glass);
+    color: var(--text-2);
+    font-size: 11px;
+    font-style: italic;
+    line-height: 1.4;
+    text-align: right;
+    pointer-events: none;
+  }
   /* the ground still loading, said once over the view rather than in a corner of the page */
   /* an export draws its own camera into the canvas: the screen waits behind this */
   .export-veil {
@@ -2056,6 +2117,53 @@
     height: 100%;
     background: var(--accent);
     transition: width 0.2s;
+  }
+  /* the buildings' question or progress: under the view's own controls and loading line */
+  .building-note {
+    top: 52px;
+    max-width: min(460px, calc(100% - 32px));
+    white-space: normal;
+  }
+  .building-note.asking {
+    color: var(--text-1);
+    pointer-events: auto;
+  }
+  .note-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .note-actions button {
+    height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: var(--accent);
+    color: var(--accent-text);
+    font: inherit;
+    cursor: pointer;
+  }
+  .note-actions button.quiet {
+    background: color-mix(in srgb, var(--text-1) 10%, transparent);
+    color: var(--text-1);
+  }
+  .bar.waiting span {
+    width: 30%;
+    animation: hz-waiting 1.2s ease-in-out infinite alternate;
+  }
+  @keyframes hz-waiting {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(233%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar.waiting span {
+      animation: none;
+    }
   }
   .loading.failed {
     flex-direction: row;

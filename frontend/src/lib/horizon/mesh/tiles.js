@@ -75,7 +75,8 @@ const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
  * @param {number} o.far metres: no tile farther is asked
  * @param {(list: object[]) => void} o.send asks meshes, `[{ key, z, x, y, provider }]`
  * @param {(list: object[]) => void} o.sendImages asks pictures for meshes held
- * @param {(tile: any) => void} o.release lets a tile's GPU handle go
+ * @param {(tile: any, keep: string|null) => void} o.release lets a tile's GPU handle go; `keep` names
+ *   its picture (`provider|key`) when it has one, which the caller may keep for a later tree
  * @param {(tile: any, image: any) => void} o.attach gives a held tile its picture
  */
 export function createTiles({
@@ -108,8 +109,10 @@ export function createTiles({
   let occluder = null;
 
   function geometryOf(z, x, y) {
-    const lon0 = tileLon(x, z);
-    const lon1 = tileLon(x + 1, z);
+    // a tile across the antimeridian is measured on the eye's side of it, a turn round
+    const turn = Math.round((lon - tileLon(x + 0.5, z)) / 360) * 360;
+    const lon0 = tileLon(x, z) + turn;
+    const lon1 = tileLon(x + 1, z) + turn;
     const lat0 = tileLat(y + 1, z);
     const lat1 = tileLat(y, z);
     const [dmin] = frame.inverse(Math.min(Math.max(lat, lat0), lat1), Math.min(Math.max(lon, lon0), lon1));
@@ -207,6 +210,8 @@ export function createTiles({
     return wanted.near && r.dmin < wanted.near.reach ? wanted.near.provider : wanted.provider;
   }
   const pictured = (r) => !providerOf(r) || r.picture === providerOf(r);
+  /** What names a held tile's picture, for keeping it past this tree: `provider|key`, or null for none. */
+  const pictureKey = (r) => (r.picture && r.tile?.texture ? `${r.picture}|${r.key}` : null);
 
   /**
    * The tiles the base needs all round for a camera, none fetched yet, the eye
@@ -422,7 +427,7 @@ export function createTiles({
     held.sort((a, b) => a.used - b.used);
     for (const r of held.slice(0, held.length - budget)) {
       if (r.used >= used - 1) break;
-      release(r.tile);
+      release(r.tile, pictureKey(r));
       r.tile = null;
       r.state = 'idle';
       r.picture = '';
@@ -464,6 +469,13 @@ export function createTiles({
       attach(r.tile, image);
       r.picture = provider;
     },
+    /**
+     * How far the view reaches now, metres: the tree keeps every tile it holds,
+     * and its base is laid again for the new reach on the next `land`.
+     */
+    setFar(next) {
+      far = next;
+    },
     /** The imagery the ground is drawn in: `{ provider, near: { provider, reach } | null }`, or null for none. */
     setImagery(next) {
       wanted = next;
@@ -490,7 +502,7 @@ export function createTiles({
     },
     /** Everything let go, for a new eye. */
     dispose() {
-      for (const r of records.values()) if (r.tile) release(r.tile);
+      for (const r of records.values()) if (r.tile) release(r.tile, pictureKey(r));
       records.clear();
     },
     get held() {

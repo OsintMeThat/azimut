@@ -182,8 +182,8 @@ def _buildings(feature: object) -> list[Building]:
     height = model.clean_height(props.get("hauteur"))
     date = _date(props)
     out = []
-    for polygon in _polygons(feature.get("geometry")):
-        rings = _rings(polygon)
+    for polygon in polygons(feature.get("geometry")):
+        rings = rings_of(polygon)
         if rings is None:
             continue
         building = Building(
@@ -211,7 +211,7 @@ def _date(props: dict[str, Any]) -> str:
     return ""
 
 
-def _polygons(geometry: object) -> list[Any]:
+def polygons(geometry: object) -> list[Any]:
     """The polygons of a feature's geometry, each a list of rings (outer first)."""
     if not isinstance(geometry, dict):
         return []
@@ -225,7 +225,7 @@ def _polygons(geometry: object) -> list[Any]:
     return []
 
 
-def _rings(polygon: object) -> tuple[Ring, ...] | None:
+def rings_of(polygon: object) -> tuple[Ring, ...] | None:
     """A polygon's outer ring and holes, or None when it has no usable outer ring."""
     if not isinstance(polygon, list):
         return None

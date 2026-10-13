@@ -1,6 +1,8 @@
 """The panorama the Horizon tab looks through, served over synthetic relief."""
 
 import base64
+import io
+import json
 import math
 import struct
 import zlib
@@ -491,6 +493,47 @@ def test_a_photo_that_says_nothing_is_offered_nothing(client):
     facts = client.get("/api/horizon/photo", params={"case": case_id, "path": path}).json()
     assert "focal35_mm" not in facts and "gps" not in facts and "taken_at" not in facts
     assert facts["focal_mm"] == 6.0
+
+
+def _stitched_piece(path, heading, middle, width=300):
+    import math
+
+    h = math.radians(heading)
+    r = [math.cos(h), 0.0, math.sin(h), 0.0, 1.0, 0.0, -math.sin(h), 0.0, math.cos(h)]
+    op = {"op": "remap", "params": {"warp": "cylindrical", "focal": 1.1, "aspect": 1, "ppx": 0.5, "ppy": 0.5,
+                                    "r": r, "scale": 1.1, "gain": 1}}
+    x0 = middle - width / 2
+    return {"id": f"nd_{heading}", "save": {"path": path, "time": 1.0, "ops": [op]},
+            "quad": [[x0, 0], [x0 + width, 0], [x0 + width, 400], [x0, 400]]}
+
+
+def test_a_picture_exported_from_a_stitched_collage_says_the_turn_it_spans(client):
+    case_id, clip = _case_with(client, "clip.jpg", _photo_bytes(focal35=None, gps=False, taken=None))
+    # the picture the collage exported: its pieces' bounds, here 20 px a degree over 1500 px
+    picture = _photo_bytes(size=(1500, 400), focal35=None, gps=False, taken=None)
+    strip = client.post(
+        f"/api/cases/{case_id}/media/upload",
+        files={"file": ("Collage 1.jpg", io.BytesIO(picture), "application/octet-stream")},
+    ).json()["item"]["path"]
+    nodes = [_stitched_piece(clip, h, 150 + 20 * (h + 30)) for h in (-30, -15, 0, 15, 30)]
+    nodes.append({"id": "nd_hand", "save": {"path": clip, "ops": []}, "quad": [[0, 0], [10, 0], [10, 10], [0, 10]]})
+    signature = json.dumps([[n["save"], n["quad"]] for n in nodes])
+    saved = client.post(f"/api/cases/{case_id}/collages", json={
+        "name": None, "title": "Collage 1",
+        "spec": {"width": 1600, "height": 400, "nodes": nodes, "exported": {"path": strip, "signature": signature}},
+    })
+    assert saved.status_code == 200, saved.text
+    facts = client.get("/api/horizon/photo", params={"case": case_id, "path": strip}).json()
+    assert facts["panorama"] == {"degrees": 75.0, "stitched": 5, "by_hand": 1, "warp": "cylindrical",
+                                 "collage": "Collage 1"}
+    # the pieces themselves, and a picture the layout no longer is, say no such thing
+    assert "panorama" not in client.get("/api/horizon/photo", params={"case": case_id, "path": clip}).json()
+    nodes[0]["quad"] = [[x - 40, y] for x, y in nodes[0]["quad"]]
+    client.post(f"/api/cases/{case_id}/collages", json={
+        "name": "Collage 1", "title": "Collage 1",
+        "spec": {"width": 1600, "height": 400, "nodes": nodes, "exported": {"path": strip, "signature": signature}},
+    })
+    assert "panorama" not in client.get("/api/horizon/photo", params={"case": case_id, "path": strip}).json()
 
 
 def test_the_photo_route_stays_inside_the_case(client):

@@ -115,6 +115,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .collages/    # collage layouts and their previews; the picture is media
     .compare/     # saved Compare session specs
     .horizon/     # saved Horizon views and their previews
+      finds/      #   searches for where a photo was taken: the question and every point scored
     .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
     .layers/      # added map layers: spec, snapshot, icons

@@ -138,6 +138,8 @@ KINDS: dict[str, Kind] = {
     # The images made from a view are media of their own, as a comparison's are;
     # its preview travels with it, since only the open view can draw it again.
     "horizon-view": Kind(path_attr="spec", companions=(Named(layout.horizon_thumb_rel),)),
+    # A search keeps its question and every point it scored in its one file.
+    "horizon-find": Kind(path_attr="spec"),
     "map-view": Kind(path_attr="spec"),
     "analysis-zones": Kind(path_attr="spec"),
     "analysis-area": Kind(path_attr="spec"),

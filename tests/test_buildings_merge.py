@@ -163,3 +163,55 @@ def test_a_house_drawn_inside_a_big_surveyed_block_is_not_added_twice():
     inner = square(45.0, 45.0, 8.0)  # another source's house in the block's corner
     result = run({"ign": [block], "osm": [inner]})
     assert [b.source for b in result.buildings] == ["ign"]
+
+
+def test_a_height_read_off_a_raster_comes_after_measured_ones_and_before_globfp():
+    osm = [square(0, 0), square(25, 0, height=30.0), square(50, 0)]
+    glo = [square(0, 0, height=7.0, source="globfp", date="2020"), square(50, 0, height=8.0, source="globfp", date="2020")]
+    # the raster knows the first two houses, not the third
+    asked = []
+    raster = (lambda bs: asked.append(len(bs)) or [12.5 if footprint_x(b) < 40 else None for b in bs], "2023")
+    result = merge.merge_tile(*KEY, {"osm": osm, "globfp": glo}, {"osm", "globfp", "google"}, {"google": raster})
+    first, second, third = result.buildings
+    assert (first.height, first.kind, first.height_source, first.height_date) == (12.5, "estimated", "google", "2023")
+    assert (second.height, second.kind) == (30.0, "measured")
+    assert (third.height, third.height_source) == (8.0, "globfp")
+    # asked once, for the two footprints no one measured
+    assert asked == [2]
+
+
+def test_a_raster_switched_off_lends_nothing():
+    osm = [square(0, 0)]
+    result = merge.merge_tile(*KEY, {"osm": osm}, {"osm"}, {"google": (lambda bs: [12.5] * len(bs), "2023")})
+    assert result.buildings[0].kind == "unknown"
+
+
+def footprint_x(building: Building) -> float:
+    """Metres east of the tile's middle, of a footprint's first point."""
+    return (building.rings[0][0][0] - LON0) * KX
+
+
+ALL = {"ign", "osm", "overture", "globfp"}
+
+
+def test_overture_draws_the_footprints_where_osm_has_mapped_little():
+    # Taiz: a house mapped by hand, the rest of the street traced by machine
+    osm = street("osm", 1, height=9.0)
+    traced = street("overture", 6, shift=1.0)
+    result = merge.merge_tile(*KEY, {"osm": osm, "overture": traced, "globfp": street("globfp", 6, shift=-4.0, height=7.0)}, ALL)
+    assert result.footprints == "overture"
+    # the hand-mapped height reaches its house; the others take 3D-GloBFP's estimate
+    assert [(b.height, b.height_source) for b in result.buildings] == [(9.0, "osm")] + [(7.0, "globfp")] * 5
+
+
+def test_osm_keeps_the_footprints_where_it_maps_the_street_and_globfp_where_overture_is_thin():
+    assert merge.merge_tile(*KEY, {"osm": street("osm", 6), "overture": street("overture", 6)}, ALL).footprints == "osm"
+    thin = merge.merge_tile(*KEY, {"osm": [], "overture": street("overture", 2), "globfp": street("globfp", 6, height=7.0)}, ALL)
+    assert thin.footprints == "globfp"
+
+
+def test_a_count_of_floors_is_an_estimate_lent_before_globfp():
+    floors = [square(i * 25.0, 0.0, height=12.0, kind="estimated", source="overture") for i in range(3)]
+    result = merge.merge_tile(*KEY, {"osm": street("osm", 3), "overture": floors, "globfp": street("globfp", 3, height=7.0)}, ALL)
+    assert result.footprints == "osm"
+    assert {(b.height, b.kind, b.height_source) for b in result.buildings} == {(12.0, "estimated", "overture")}

@@ -3,18 +3,23 @@
 The rule is fixed and said in the view, so an analyst can always tell why a
 building stands as tall as it does:
 
-1. Footprints. The IGN's where it has any in the tile (France), every building
-   there being surveyed. Elsewhere OpenStreetMap's, when they cover at least
-   `FOOTPRINT_SHARE` of the ground 3D-GloBFP calls built; otherwise 3D-GloBFP's.
-   Two sources' footprints are not mixed over the same ground: both draw the
-   same houses a few metres apart, and mixing them stacks one on the other. The
-   one exception is where the IGN has nothing within `FILL_GAP_M`: across a
-   border (Geneva, Basel, Tournai) the other side's buildings come from the
-   next source rather than leaving the half tile empty.
-2. Height. A building keeps a measured height of its own. One without takes a
-   measured height from another source's footprint at the same place, then
-   3D-GloBFP's estimate, and is otherwise left unknown: the view shows it as
-   unknown rather than inventing a storey count.
+1. Footprints. A national survey's where it has any in the tile (the IGN's in
+   France), every building there being surveyed. Elsewhere OpenStreetMap's,
+   when they cover at least `FOOTPRINT_SHARE` of the ground the fuller sources
+   call built; else Overture's (OpenStreetMap's with Google's and Microsoft's
+   traced footprints added) on the same test against 3D-GloBFP; otherwise
+   3D-GloBFP's. Two sources' footprints are not mixed over
+   the same ground: both draw the same houses a few metres apart, and mixing
+   them stacks one on the other. The one exception is where the survey has
+   nothing within `FILL_GAP_M`: across a border (Geneva, Basel, Tournai) the
+   other side's buildings come from the next source rather than leaving the
+   half tile empty.
+2. Height. A building keeps a measured height of its own. One without takes,
+   in this order: a measured height from another source's footprint at the
+   same place; an estimate read off a picture of heights (Google's 2.5D, about
+   1.5 m off); a count of floors Overture gives; 3D-GloBFP's estimate.
+   Otherwise it is left unknown, and the
+   view shows it as unknown rather than inventing a storey count.
 
 "At the same place" first allows for the datasets disagreeing as a whole: 3D-GloBFP's
 footprints in Taiz sit about 3.7 m west of Microsoft's, enough to pair a
@@ -31,11 +36,17 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from .model import Building, centroid, footprint_area, metres_frame, tile_bounds
+from collections.abc import Callable
 
-# OSM footprints are used when they cover at least this share of the ground
-# 3D-GloBFP calls built in the tile.
+from .model import NATIONAL, Building, Kind, centroid, footprint_area, metres_frame, tile_bounds
+
+# A source's footprints are used when they cover at least this share of the ground
+# the fuller sources after it call built in the tile.
 FOOTPRINT_SHARE = 0.8
+# Whose footprints are drawn where no national survey has the tile, in the order they are tried.
+FALLBACKS = ("osm", "overture", "globfp")
+# Who lends an estimate to a building nobody measured, best first.
+ESTIMATES = ("overture", "globfp")
 # Two footprints are the same building when their centres, after the shift, are
 # this close and neither is more than AREA_RATIO times the other.
 JOIN_M = 10.0
@@ -45,6 +56,8 @@ AREA_RATIO = 3.0
 SHIFT_PAIRS = 20
 SHIFT_REACH = 30.0
 SHIFT_MAX = 25.0
+# The shift is a median: this many footprints of the tile measure it as well as all of them.
+SHIFT_SAMPLE = 600
 # Where the IGN draws footprints, another source's footprint is added only this far
 # from every one of them: the far side of a border, never a second copy of a house.
 FILL_GAP_M = 40.0
@@ -118,9 +131,11 @@ class _Cover:
 
 
 def _shift(base: _Places, donor: _Places) -> tuple[float, float]:
-    """How far the donor's footprints sit from the base's, as a whole: (east, north) metres."""
+    """How far the donor's footprints sit from the base's, as a whole: (east, north) metres,
+    measured on an even sample of the base's footprints."""
     offsets = []
-    for x, y in base.xy:
+    step = max(1, len(base.xy) // SHIFT_SAMPLE)
+    for x, y in base.xy[::step]:
         hit = donor.nearest(x, y, SHIFT_REACH)
         if hit is not None:
             offsets.append(donor.xy[hit[0]] - (x, y))
@@ -146,26 +161,29 @@ def _built_area(buildings: list[Building]) -> float:
     return sum(footprint_area(b) for b in buildings)
 
 
+# Heights read off a raster for footprints asked all at once, and the date they stand for.
+Raster = tuple[Callable[[list[Building]], list[float | None]], str]
+
+
 def merge_tile(
     z: int, x: int, y: int, found: dict[str, list[Building] | None], enabled: set[str],
+    rasters: dict[str, Raster] | None = None,
 ) -> Merged:
     """The tile's buildings by the rule above.
 
     `found` maps a source to its buildings for the tile, or to None when it has
     nothing to say there (outside its coverage, not downloaded, or failing just
-    now). A source not in `enabled` is ignored even when found.
+    now). A source not in `enabled` is ignored even when found. `rasters` are
+    sources of estimated heights read off a picture of heights (Google's 2.5D),
+    asked for each footprint: better than 3D-GloBFP's estimates, below any
+    measured height.
     """
     have = {source: found.get(source) for source in enabled if found.get(source) is not None}
-    # a tile the IGN has nothing in is no French tile worth trusting it on
-    ign = have.get("ign") or None
-    osm, glo = have.get("osm"), have.get("globfp")
-
-    fallback: str | None
-    if osm is not None and glo is not None:
-        glo_area = _built_area(glo)
-        fallback = "osm" if glo_area <= 0 or _built_area(osm) >= FOOTPRINT_SHARE * glo_area else "globfp"
-    else:
-        fallback = "osm" if osm is not None else "globfp" if glo is not None else None
+    # a national survey's footprints, the first that has any in the tile: a tile it has
+    # nothing in is no tile of its country worth trusting it on
+    national = next((source for source in NATIONAL if have.get(source)), None)
+    ign = have[national] if national else None
+    fallback = _fallback(have)
 
     west, south, east, north = tile_bounds(z, x, y)
     origin = ((west + east) / 2, (south + north) / 2)
@@ -173,7 +191,7 @@ def merge_tile(
 
     footprints: str | None
     if ign is not None:
-        footprints = "ign"
+        footprints = national
         base_list = list(ign)
         if fallback is not None and have[fallback]:
             french = _Places(base_list, origin, scale)
@@ -193,37 +211,63 @@ def merge_tile(
 
     # who may lend a height, best first: measured heights, then estimates
     donors: list[tuple[str, _Places, tuple[float, float]]] = []
-    for source in ("ign", "osm", "globfp"):
+    for source in (*NATIONAL, "osm", "overture", "globfp"):
         candidates = have.get(source)
         if not candidates:
             continue
-        lent = [b for b in candidates if b.height is not None and b.kind in ("measured", "estimated")]
-        if lent:
-            places = _Places(lent, origin, scale)
+        lending = [b for b in candidates if b.height is not None and b.kind in ("measured", "estimated")]
+        if lending:
+            places = _Places(lending, origin, scale)
             donors.append((source, places, _shift(base, places)))
-    donors.sort(key=lambda d: 0 if d[0] in ("ign", "osm") else 1)
+    measured = [d for d in donors if d[0] != "globfp"]
+    estimates = sorted((d for d in donors if d[0] in ESTIMATES), key=lambda d: ESTIMATES.index(d[0]))
+    pictures = [(source, raster) for source, raster in (rasters or {}).items() if source in enabled]
 
+    # first the measured heights lent, then the pictures asked once for every footprint still without
+    given: list[tuple[float, Kind, str, str] | None] = [
+        None if building.kind == "measured" else _lend(base, i, building, measured, lambda b: b.kind == "measured")
+        for i, building in enumerate(base_list)
+    ]
+    for picture, (heights_of, taken) in pictures:
+        asking = [i for i, building in enumerate(base_list) if building.kind != "measured" and given[i] is None]
+        if not asking:
+            break
+        for i, read in zip(asking, heights_of([base_list[i] for i in asking])):
+            if read is not None:
+                given[i] = (read, "estimated", picture, taken)
     out = []
     for i, building in enumerate(base_list):
-        if building.kind == "measured":
-            out.append(building)
-            continue
-        lent_by: Building | None = None
-        for source, places, shift in donors:
-            if source == building.source:
-                continue
-            candidate = _donor_for(base, i, places, shift)
-            if candidate is None:
-                continue
-            # an estimate only replaces nothing; a measured height replaces an estimate too
-            if candidate.kind == "measured" or building.kind == "unknown":
-                lent_by = candidate
-                break
-        if lent_by is None:
+        lent = given[i]
+        if lent is None and building.kind == "unknown":
+            lent = _lend(base, i, building, estimates, lambda b: True)
+        if lent is None:
             out.append(building)
         else:
-            out.append(replace(
-                building, height=lent_by.height, kind=lent_by.kind,
-                height_source=lent_by.source, height_date=lent_by.date,
-            ))
+            height, kind, lender, date = lent
+            out.append(replace(building, height=height, kind=kind, height_source=lender, height_date=date))
     return Merged(out, footprints, {source: shift for source, _places, shift in donors})
+
+
+def _fallback(have: dict[str, list[Building] | None]) -> str | None:
+    """Whose footprints are drawn where no survey has the tile: the first that covers
+    `FOOTPRINT_SHARE` of the ground the fuller sources after it call built."""
+    present = [(source, _built_area(have[source] or [])) for source in FALLBACKS if have.get(source) is not None]
+    for i, (source, area) in enumerate(present):
+        fuller = max((later for _name, later in present[i + 1:]), default=0.0)
+        if fuller <= 0 or area >= FOOTPRINT_SHARE * fuller:
+            return source
+    return None
+
+
+def _lend(
+    base: _Places, i: int, building: Building, donors: list[tuple[str, _Places, tuple[float, float]]],
+    takes: Callable[[Building], bool],
+) -> tuple[float, Kind, str, str] | None:
+    """The first donor footprint at the same place that `takes` accepts: its height, kind, source, date."""
+    for source, places, shift in donors:
+        if source == building.source:
+            continue
+        candidate = _donor_for(base, i, places, shift)
+        if candidate is not None and candidate.height is not None and takes(candidate):
+            return candidate.height, candidate.kind, candidate.source, candidate.date
+    return None

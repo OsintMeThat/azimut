@@ -82,17 +82,21 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tu
             "name", "description", "colour", "category", "symbol", "group", "icon", "icon_scale", "stroke_width"
         ) if key in props}
     if fmt == "geojson":
+        ranks = {group["id"]: index for index, group in enumerate(layerediting._groups(spec))}
+        features.sort(key=lambda feature: ranks[feature["properties"]["group"]])
         for feature in features:
             props = feature["properties"]
             props.update({"marker-color": props.get("colour", "#0072b2"), "stroke": props.get("colour", "#0072b2"),
                           "stroke-width": props.get("stroke_width", 2)})
         geojson_document = {"type": "FeatureCollection", "name": spec["title"], "azimut_personal_layer": 1,
-                    "features": features}
+                    "description": spec.get("description", ""), "features": features}
         return json.dumps(geojson_document, ensure_ascii=False, indent=2).encode(), "application/geo+json", spec["title"]
     images = decode_icons(encoded_icons) if fmt == "kmz" else {}
     root = ET.Element(f"{{{NS}}}kml")
     document = _element(root, "Document")
     _element(document, "name", spec["title"])
+    if spec.get("description"):
+        _element(document, "description", spec["description"])
     folders = {}
     for group in layerediting._groups(spec):
         folder = _element(document, "Folder")

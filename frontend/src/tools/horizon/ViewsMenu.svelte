@@ -3,7 +3,8 @@
    * Open a saved view: one labelled button in the Horizon header, there as
    * soon as a case is open, eye or no eye. It lists the case's views to open
    * one, goes back to the saved version of the open one when it has changes,
-   * and starts another view from where the tab stands.
+   * and starts another view from where the tab stands. The case's searches for
+   * where a photo was taken are listed under them, each opened in Find.
    */
   import { fileUrl } from '../../lib/fileUrl.js';
   import Icon from '../../components/Icon.svelte';
@@ -17,6 +18,9 @@
     onopen = () => {},
     onnew = null,
     onrevert = null,
+    /** The case's searches (api/horizon_finds.py rows), and how to open one in Find. */
+    searches = [],
+    onopensearch = () => {},
   } = $props();
 
   let open = $state(false);
@@ -84,6 +88,20 @@
           <p class="vm-empty">No saved view yet</p>
         {/each}
       </div>
+      {#if searches.length}
+        <p class="vm-head">Searches in this case</p>
+        <div class="vm-list">
+          {#each searches as item (item.name)}
+            <button type="button" role="menuitem" class="vm-row" onclick={() => pick(() => onopensearch(item.name))}>
+              <span class="vm-thumb"><Icon name="search" size={14} /></span>
+              <span class="vm-text">
+                <span class="vm-title">{item.title}</span>
+                <small>{item.status === 'done' ? (item.best ? `best explains ${Math.round(item.best.explained * 100)}%` : 'nothing found') : item.status}</small>
+              </span>
+            </button>
+          {/each}
+        </div>
+      {/if}
       {#if (onrevert && changed) || (onnew && views.current)}
         <div class="vm-acts">
           {#if onrevert && changed}

@@ -58,6 +58,8 @@ COLLAGE_DIR = ".collages"
 COMPARE_DIR = ".compare"
 #: Saved Horizon views, each beside the small preview its list shows.
 HORIZON_DIR = ".horizon"
+# Searches for where a photo was taken, beside the saved views they open.
+HORIZON_FINDS_DIR = "finds"
 # Saved analyzer zones, follow-ups and runs with their owned input frames.
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
@@ -520,6 +522,11 @@ def horizon_thumb_rel(name: str) -> str:
     return f"{HORIZON_DIR}/{name}.webp"
 
 
+def horizon_find_rel(name: str) -> str:
+    """A search for where a photo was taken: what was asked, how far it got, what it found."""
+    return f"{HORIZON_DIR}/{HORIZON_FINDS_DIR}/{name}.json"
+
+
 def analysis_rel(kind: str, ident: str) -> str:
     """One Detect record: an area, a zone set, a routine or a run."""
     return f"{ANALYSIS_DIR}/{kind}-{ident}.json"
@@ -590,6 +597,7 @@ def content_dirs(root: Path) -> tuple[Path, ...]:
         # Born for the same reason: a derived cache created on first use would
         # otherwise be one path an emptied case holds and a new one does not.
         subdir(root, LAYERS_DIR) / LAYER_CACHE_DIR,
+        subdir(root, HORIZON_DIR) / HORIZON_FINDS_DIR,
     ]
     return tuple(dirs)
 

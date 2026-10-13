@@ -107,6 +107,18 @@ class UpdateIn(BaseModel):
 
 class EditableIn(BaseModel):
     title: str = Field(default="My layer", min_length=1, max_length=200)
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+
+
+class LayerDetailsIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=layer_engine.MAX_DESCRIPTION)
+
+
+class FeatureOrderIn(BaseModel):
+    keys: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(min_length=1, max_length=100000)
+    group: str = Field(min_length=1, max_length=64)
+    before: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class MarkerIn(BaseModel):
@@ -288,16 +300,17 @@ def list_layers(case_id: str) -> list[dict[str, Any]]:
 
 @router.post("/{case_id}/map-layers/editable")
 def create_editable_layer(case_id: str, body: EditableIn) -> dict[str, Any]:
-    return layerediting.create(get_case(case_id), body.title)
+    return layerediting.create(get_case(case_id), body.title, body.description)
 
 
 @router.post("/{case_id}/map-layers/editable/upload")
 async def import_editable_layer(
-    case_id: str, file: UploadFile, title: str = Form(default="", max_length=200)
+    case_id: str, file: UploadFile, title: str = Form(default="", max_length=200),
+    description: str = Form(default="", max_length=layer_engine.MAX_DESCRIPTION),
 ) -> dict[str, Any]:
     data = await file.read(MAX_UPLOAD + 1)
     try:
-        return layerediting.from_file(get_case(case_id), data, file.filename or "layer", title)
+        return layerediting.from_file(get_case(case_id), data, file.filename or "layer", title, description)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
@@ -305,7 +318,7 @@ async def import_editable_layer(
 @router.post("/{case_id}/map-layers/{name}/editable-copy")
 def copy_editable_layer(case_id: str, name: str, body: EditableIn) -> dict[str, Any]:
     try:
-        return layerediting.copy_layer(get_case(case_id), _stem(name), body.title)
+        return layerediting.copy_layer(get_case(case_id), _stem(name), body.title, body.description)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
@@ -339,6 +352,22 @@ def finish_layer_edit(case_id: str, name: str, body: EditEndIn) -> dict[str, Any
 def reorder_layer_groups(case_id: str, name: str, body: GroupOrderIn) -> dict[str, Any]:
     try:
         return layerediting.reorder_groups(get_case(case_id), _stem(name), body.ids)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.patch("/{case_id}/map-layers/{name}/edit")
+def edit_layer_details(case_id: str, name: str, body: LayerDetailsIn) -> dict[str, Any]:
+    try:
+        return layerediting.update_details(get_case(case_id), _stem(name), body.model_dump(exclude_none=True))
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/features/order")
+def reorder_layer_features(case_id: str, name: str, body: FeatureOrderIn) -> dict[str, Any]:
+    try:
+        return layerediting.reorder_features(get_case(case_id), _stem(name), body.keys, body.group, body.before)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
