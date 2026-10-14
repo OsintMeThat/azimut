@@ -22,6 +22,7 @@
   import { clockTime } from '../../lib/inspect.js';
   import { gapDegrees, gapSpan, isAtPlace } from '../../lib/horizon/overlay.js';
   import { headingText } from '../../lib/horizon/geometry.js';
+  import { detailsTitle, editing, magnetTitle, pressTool, TRACE_TOOLS, toolBlocked, toolOn } from '../../lib/horizon/traceTools.js';
 
   let {
     /** The overlay (state/overlay.svelte.js). */
@@ -40,6 +41,10 @@
     onplace = () => {},
     /** Asked to find the skyline in the photo. */
     ondetect = () => {},
+    /** Asked to show the photo above the terrain, the same frame on both. */
+    onside = () => {},
+    /** Whether that is being drawn. */
+    siding = false,
     /** The tab's view state, to tell which of the places found the view stands at. */
     view = null,
     /** Where the view looks now, which "roughly this way" takes. */
@@ -97,9 +102,14 @@
       title: 'Trace',
       rows: [
         [['T'], 'Draw along the skyline'],
-        [['Alt', 'drag'], 'Draw without snapping'],
+        [['R'], 'Draw a ridge seen against farther land'],
+        [['P'], 'Pair a line in front with the line behind it'],
+        [['X'], 'Cut a collage where its frames meet'],
+        [['M'], 'Snap to edges, or not'],
+        [['Alt', 'drag'], 'Draw the other way, snapped or not'],
         [['E'], 'Rub out'],
         [['H'], 'Hide or show the trace'],
+        [['D'], 'Show how far the terrain may be off, the cuts and the pairs'],
         [['Ctrl', 'Z'], 'Take the last change back'],
         [['Esc'], 'Put the pen down'],
       ],
@@ -152,6 +162,7 @@
   // what the band holds changes its width: a file, a trace, the gap and what is known, the places found
   $effect(() => {
     void [overlay.source?.name, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
+    void [overlay.linking, overlay.cutting, overlay.pen, overlay.front];
     void [gap, told, places.length, fitting, away];
     narrow();
   });
@@ -269,6 +280,17 @@
   >
     <Icon name="blink" size={14} /><span class="word spare">Blink</span>
   </button>
+  <button
+    type="button"
+    class="act"
+    disabled={siding}
+    aria-busy={siding}
+    onclick={onside}
+    title="Show the {what.toLowerCase()} above the terrain, the same frame on both"
+    aria-label="Side by side"
+  >
+    <Icon name="columns" size={14} /><span class="word spare">Side by side</span>
+  </button>
 
   <span class="divider" aria-hidden="true"></span>
 
@@ -276,11 +298,11 @@
     <button
       type="button"
       class="act"
-      class:on={overlay.tracing}
-      aria-pressed={overlay.tracing}
-      onclick={() => overlay.setTracing(!overlay.tracing)}
-      title="Draw along the skyline in the {what.toLowerCase()} (T)"
-      aria-label="Trace skyline"
+      class:on={toolOn(overlay, 'sky')}
+      aria-pressed={toolOn(overlay, 'sky')}
+      onclick={() => pressTool(overlay, 'sky')}
+      title={TRACE_TOOLS[0].title}
+      aria-label={TRACE_TOOLS[0].name}
     >
       <Icon name="freehand" size={14} /><span class="word">Trace skyline</span>
     </button>
@@ -293,18 +315,34 @@
     >
       <Icon name="profile" size={14} /><span class="word minor">Detect</span>
     </button>
-    {#if overlay.strokes.length || overlay.erasing}
+    {#if overlay.strokes.length || editing(overlay)}
       <span class="sub" role="group" aria-label="The trace">
+        {#each TRACE_TOOLS.slice(1) as tool (tool.id)}
+          {@const on = toolOn(overlay, tool.id)}
+          {@const blocked = toolBlocked(overlay, tool.id)}
+          <button
+            type="button"
+            class="act icon"
+            class:on
+            aria-pressed={on}
+            disabled={Boolean(blocked) && !on}
+            onclick={() => pressTool(overlay, tool.id)}
+            title={blocked || tool.title}
+            aria-label={tool.name}
+          >
+            <Icon name={tool.icon} size={14} />
+          </button>
+        {/each}
         <button
           type="button"
           class="act icon"
-          class:on={overlay.erasing}
-          aria-pressed={overlay.erasing}
-          onclick={() => overlay.setErasing(!overlay.erasing)}
-          title="Rub out part of the trace (E)"
-          aria-label="Rub out part of the trace"
+          class:on={overlay.magnet}
+          aria-pressed={overlay.magnet}
+          onclick={() => overlay.setMagnet(!overlay.magnet)}
+          title={magnetTitle(overlay.magnet)}
+          aria-label="Snap to edges"
         >
-          <Icon name="eraser" size={14} />
+          <Icon name="magnet" size={14} />
         </button>
         <button
           type="button"
@@ -315,6 +353,17 @@
           aria-label="{overlay.traceHidden ? 'Show' : 'Hide'} the trace"
         >
           <Icon name={overlay.traceHidden ? 'eyeOff' : 'eye'} size={14} />
+        </button>
+        <button
+          type="button"
+          class="act icon"
+          class:on={overlay.details}
+          aria-pressed={overlay.details}
+          onclick={() => overlay.setDetails(!overlay.details)}
+          title={detailsTitle(overlay.details)}
+          aria-label="Details"
+        >
+          <Icon name="info" size={14} />
         </button>
         <button
           type="button"
@@ -419,7 +468,11 @@
         </button>
       {/if}
     {:else if overlay.tracing}
-      <span class="say">Draw along the skyline in the {what.toLowerCase()}.</span>
+      <span class="say">{overlay.pen === 'ridge' ? 'Draw along a ridge seen against farther land.' : `Draw along the skyline in the ${what.toLowerCase()}.`}</span>
+    {:else if overlay.linking}
+      <span class="say">{overlay.front === null ? 'Click the line in front, then the one behind it.' : 'Now click the line behind it.'}</span>
+    {:else if overlay.cutting}
+      <span class="say">Click where two frames of the collage meet.</span>
     {:else if overlay.busy}
       <span class="say"><span class="spinner" aria-hidden="true"></span>Opening…</span>
     {:else if overlay.error}

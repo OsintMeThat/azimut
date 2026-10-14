@@ -38,14 +38,22 @@ export function openDepth(bytes, scale) {
 
 /**
  * The skyline at each reach the app kept it at (`skyline_cuts`): one row of
- * float32 angles per reach, NaN where no ground stands. `[{ reach, skyline }]`,
- * nearest first; none when the app sent none.
+ * float32 angles per reach, NaN where no ground stands, and as many rows of how
+ * far the ground setting it stands when the app sent them.
+ * `[{ reach, skyline, distance }]`, nearest first; none when the app sent none.
  */
-export function openCuts(bytes, reaches, count) {
+export function openCuts(bytes, reaches, count, distanceBytes = null) {
   if (!bytes?.byteLength || !reaches?.length || !(count > 0)) return [];
-  const rows = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const floats = (raw) => new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+  const rows = floats(bytes);
   if (rows.length < reaches.length * count) return [];
-  return reaches.map((reach, i) => ({ reach, skyline: rows.subarray(i * count, (i + 1) * count) }));
+  const far = distanceBytes?.byteLength ? floats(distanceBytes) : null;
+  const farOk = far && far.length >= reaches.length * count;
+  return reaches.map((reach, i) => ({
+    reach,
+    skyline: rows.subarray(i * count, (i + 1) * count),
+    distance: farOk ? far.subarray(i * count, (i + 1) * count) : null,
+  }));
 }
 
 /**
@@ -58,17 +66,26 @@ export function skylineWithin(panorama, reach = null) {
   return panorama?.cuts?.find((cut) => cut.reach === reach)?.skyline ?? panorama?.skyline ?? null;
 }
 
+/** How far the ground setting the skyline within a reach stands, metres per column, or null when unknown. */
+export function distanceWithin(panorama, reach = null) {
+  if (!Number.isFinite(reach)) return panorama?.skylineDistance ?? null;
+  const cut = panorama?.cuts?.find((one) => one.reach === reach);
+  if (cut) return cut.distance ?? null;
+  return panorama?.skylineDistance ?? null;
+}
+
 /**
  * The answer, with its rasters as typed arrays. Sky becomes `SKY`, which a
  * shader can test for where NaN would be lost on the way to the GPU.
  */
 export async function decodePanorama(answer) {
   const cuts = answer.skyline_cuts;
-  const [depthBytes, eastBytes, northBytes, cutBytes] = await Promise.all([
+  const [depthBytes, eastBytes, northBytes, cutBytes, cutDistances] = await Promise.all([
     inflate(answer.depth),
     inflate(answer.normal_east),
     inflate(answer.normal_north),
     cuts?.skylines ? inflate(cuts.skylines) : null,
+    cuts?.distances ? inflate(cuts.distances) : null,
   ]);
   const depth = openDepth(depthBytes, answer.depth_scale);
   return {
@@ -80,7 +97,7 @@ export async function decodePanorama(answer) {
     elevation: answer.elevation,
     skyline: answer.skyline,
     skylineDistance: answer.skyline_distance,
-    cuts: openCuts(cutBytes, cuts?.reach, answer.azimuth.count),
+    cuts: openCuts(cutBytes, cuts?.reach, answer.azimuth.count, cutDistances),
     depth,
     east: new Int8Array(eastBytes.buffer, eastBytes.byteOffset, eastBytes.byteLength),
     north: new Int8Array(northBytes.buffer, northBytes.byteOffset, northBytes.byteLength),

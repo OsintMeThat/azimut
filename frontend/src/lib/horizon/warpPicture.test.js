@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { drawWarped, paintWarped, PULL_PX, triangleTransform, WARP_CELLS } from './warpPicture.js';
+import { BEND_CELLS, drawStraightened, drawWarped, paintStraightened, paintWarped, PULL_PX, triangleTransform, WARP_CELLS } from './warpPicture.js';
+import { bendShape, straightened } from './overlay.js';
 
 /** A 2D context that keeps what it was asked to do. */
 function recorder() {
@@ -93,6 +94,59 @@ describe('a pulled photo drawn as a picture', () => {
       expect(fast.height).toBe(768);
       expect(WARP_CELLS.fast).toBeLessThan(WARP_CELLS.fine);
       expect(paintWarped({ width: 0, height: 0 }, corners)).toBeNull();
+    } finally {
+      delete globalThis.OffscreenCanvas;
+    }
+  });
+});
+
+describe('a photo straightened from its lens’s curve', () => {
+  const SHAPE = bendShape(4 / 3);
+
+  it('lays each cell’s corners where a straight lens would have put them', () => {
+    const ctx = recorder();
+    const laid = drawStraightened(ctx, 'photo', { width: 400, height: 300 }, -0.12, SHAPE, { width: 400, height: 300 }, 4);
+    expect(laid).toBe(32);
+    const draws = ctx.calls.filter(([kind]) => kind === 'draw');
+    // the photo's top left corner goes out past the frame, as a barrel's corners do once straightened
+    const corner = straightened({ u: 0, v: 0 }, -0.12, SHAPE);
+    const [x, y] = apply(draws[0][1], [0, 0]);
+    expect(x).toBeCloseTo(corner.u * 400, 6);
+    expect(y).toBeCloseTo(corner.v * 300, 6);
+    expect(corner.u).toBeLessThan(0);
+    // the middle stays put
+    const middle = draws.find(([, transform]) => {
+      const [mx, my] = apply(transform, [200, 150]);
+      return Math.abs(mx - 200) < 1e-6 && Math.abs(my - 150) < 1e-6;
+    });
+    expect(middle).toBeTruthy();
+  });
+
+  it('is the photo as it is with no curve', () => {
+    const ctx = recorder();
+    drawStraightened(ctx, 'photo', { width: 400, height: 300 }, 0, SHAPE, { width: 200, height: 150 }, 2);
+    const [, transform] = ctx.calls.find(([kind]) => kind === 'draw');
+    expect(apply(transform, [400, 300])).toEqual([200, 150]);
+  });
+
+  it('draws at the photo’s own size, lighter while the curve is being set, and a video’s frame as a photo', () => {
+    globalThis.OffscreenCanvas = class {
+      constructor(width, height) {
+        Object.assign(this, { width, height });
+      }
+      getContext() {
+        return recorder();
+      }
+    };
+    try {
+      const fine = paintStraightened({ width: 4000, height: 3000 }, 0.1, SHAPE);
+      expect([fine.width, fine.height]).toEqual([4000, 3000]);
+      const fast = paintStraightened({ width: 4000, height: 3000 }, 0.1, SHAPE, { fast: true });
+      expect(fast.width).toBe(PULL_PX);
+      expect(BEND_CELLS.fast).toBeLessThan(BEND_CELLS.fine);
+      const video = paintStraightened({ width: 0, height: 0, videoWidth: 1920, videoHeight: 1080 }, 0.1, SHAPE);
+      expect([video.width, video.height]).toEqual([1920, 1080]);
+      expect(paintStraightened({ width: 0, height: 0 }, 0.1, SHAPE)).toBeNull();
     } finally {
       delete globalThis.OffscreenCanvas;
     }

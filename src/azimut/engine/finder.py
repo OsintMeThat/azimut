@@ -14,6 +14,18 @@ GLO-30's 30 m over most of the world, a national survey's finer metres where one
 was published: `detail`); the three best are polished on a finer grid with the
 quick search, and the best five searched in full, as a Fit is.
 
+Where the relief stands near, the skyline changes over little ground: a point
+1.5 km from the hills it sees can explain the trace half as well as one 300 m
+off (the owner's desert collage). So once the grid is ranked, each of its
+cells is filled in at a tenth of the distance to the ridges the trace was laid
+on there (no finer than the terrain's detail), the cells nearest their ridges
+first, within a budget of points, and those are ranked too before the best
+are refined. A trace laid on far ridges asks for no filling: the skyline they
+make changes slowly over the ground.
+
+A reach the analyst gives is read as about that far: the turn is cut there and
+searched out to twice as far as well, so a ridge just past it still counts.
+
 Alignments (frontend lib/horizon/find.js) narrow it twice. A point off any
 alignment's line is not searched at all. And with the lens known, an alignment
 says which way the photo faces from each point: the bearing to its near point,
@@ -46,12 +58,16 @@ from . import horizon, skymatch, terrain
 # Searched when the analyst left the reach to Auto: these cuts and the turn out to the last.
 AUTO_FAR = 50_000.0
 AUTO_CUTS = (5_000.0, 10_000.0, 20_000.0)
+# A reach given is searched out to this many times as far too, within Auto's farthest.
+REACH_PAST = 2.0
+# A cell is filled in at this share of the distance to the ridges its point's best fit lies on, the
+# nearest first, and the filling-in adds at most this many times the grid's points.
+NEAR_SHARE = 0.1
+DENSE_MAX = 3.0
 # The grid is refined down to this many times the terrain's own detail (`detail`), within these metres.
 FINE_PER_DETAIL = 2.0
 FINE_MIN = 25.0
 FINE_MAX = 100.0
-# The terrain over most of the world: Copernicus GLO-30, however finely its tiles are cut.
-PLANET_DETAIL_M = 30.0
 # Points kept at each level and refined about, three by three.
 KEEP = 12
 # The best places polished on a grid this fine about them (a fraction of the finest spacing), this many either way.
@@ -105,6 +121,8 @@ class Trace:
     projection: skymatch.Projection = "camera"
     # a sector the analyst said the photo faces: middle and half width
     facing: tuple[float, float] | None = None
+    # what else the analyst marked: inner edges, pairs, a collage's pieces
+    marks: skymatch.Marks | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +155,25 @@ class Plan:
     spacing: float | None = None  # the coarse grid's, metres; None is Auto
     fine: float | None = None  # the finest, metres; None reads it off the terrain (`detail`)
     alignments: Sequence[Alignment] = field(default_factory=tuple)
+
+
+def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
+    """The marks beside the skyline a saved trace holds (api/horizon.py `MarksIn`), or None."""
+    pairs = trace.get("pairs") or []
+    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None:
+        return None
+
+    def ints(key: str) -> np.ndarray | None:
+        values = trace.get(key)
+        return None if values is None else np.asarray(values, dtype=np.int64)
+
+    return skymatch.Marks(
+        ridge_x=np.asarray(trace.get("ridge_x") or [], dtype=np.float64),
+        ridge_y=np.asarray(trace.get("ridge_y") or [], dtype=np.float64),
+        line=ints("line"), ridge_line=ints("ridge_line"),
+        pairs=tuple((int(front), int(back)) for front, back in pairs),
+        piece=ints("piece"), ridge_piece=ints("ridge_piece"),
+    )
 
 
 # -- the grid ------------------------------------------------------------------
@@ -258,10 +295,7 @@ def detail(plan: Plan, sampler: terrain.Sampler | None = None) -> float:
     lon = sum(p[1] for p in plan.area) / len(plan.area)
     probe = terrain.Sampler() if sampler is None else sampler
     probe.heights(lat, lon, terrain.MAX_ZOOM)
-    deepest = max(probe.zooms) if probe.zooms else terrain.PLANET_ZOOM
-    if deepest <= terrain.PLANET_ZOOM:
-        return PLANET_DETAIL_M
-    return float(terrain.metres_per_pixel(lat, deepest))
+    return float(probe.resolution(lat) or terrain.PLANET_DETAIL_M)
 
 
 def fine_spacing(plan: Plan, sampler: terrain.Sampler | None = None, *, probe: bool = True) -> float:
@@ -271,7 +305,7 @@ def fine_spacing(plan: Plan, sampler: terrain.Sampler | None = None, *, probe: b
     """
     if plan.fine:
         return float(plan.fine)
-    seen = detail(plan, sampler) if probe else PLANET_DETAIL_M
+    seen = detail(plan, sampler) if probe else terrain.PLANET_DETAIL_M
     return float(min(FINE_MAX, max(FINE_MIN, FINE_PER_DETAIL * seen)))
 
 
@@ -286,13 +320,36 @@ def estimate(plan: Plan) -> dict[str, Any]:
     coarse = int(grid(plan, spacing)[0].size)
     depth = levels(spacing, fine)
     refined = depth * KEEP * 8
+    points = coarse + refined + _polish_count() + TOP
     return {
         "spacing": spacing, "fine": round(fine, 1), "coarse": coarse,
-        "points": coarse + refined + _polish_count() + TOP, "levels": depth,
+        "points": points, "levels": depth,
+        # where relief stands near, the cells are filled in: at most this many points in all
+        "most": points + int(DENSE_MAX * coarse),
     }
 
 
 # -- one point -----------------------------------------------------------------
+
+
+def reaches(plan: Plan) -> tuple[float, list[float]]:
+    """How far the turn is read and where it is cut: Auto's cuts, or the analyst's reach and on to twice it."""
+    if not plan.reach:
+        return AUTO_FAR, [c for c in AUTO_CUTS if c < AUTO_FAR]
+    far = max(plan.reach, min(plan.reach * REACH_PAST, AUTO_FAR))
+    return far, [plan.reach] if far > plan.reach else []
+
+
+def relief(turn: skymatch.Turn, fit: skymatch.Fit) -> float:
+    """How far out the ridges the trace was laid on stand, metres: the middle of the skyline's distances
+    across the lens the fit found, on the cut it lies on; infinite where the turn does not say."""
+    if turn.distance is None:
+        return math.inf
+    half = min(180.0, fit.fov / 2)
+    columns = np.arange(fit.heading - half, fit.heading + half + turn.step / 2, turn.step)
+    far = turn.far(columns)
+    far = far[np.isfinite(far)]
+    return float(np.median(far)) if far.size else math.inf
 
 
 def column_step(trace: Trace) -> float:
@@ -328,8 +385,7 @@ def score_point(
     heights: Sequence[float] | None = None, rough: bool = False, near_step: float = horizon.NEAR_STEP,
 ) -> dict[str, Any]:
     """How well the trace lies on the turn seen from a point: the best place and how much it explains."""
-    far = plan.reach or AUTO_FAR
-    cuts = [] if plan.reach else [c for c in AUTO_CUTS if c < far]
+    far, cuts = reaches(plan)
     step = column_step(trace)
     facing = _facing(trace, plan, lat, lon)
     best: dict[str, Any] = {"lat": round(lat, 6), "lon": round(lon, 6), "explained": -1.0}
@@ -355,11 +411,21 @@ def score_point(
             out[marched] = row
             return out
 
-        turns = [skymatch.Turn(0.0, step, whole(row), reach=float(at)) for at, row in zip(swept.cuts, swept.skyline_cuts)]
-        turns.append(skymatch.Turn(0.0, step, whole(swept.skyline), reach=far))
+        turns = [
+            skymatch.Turn(0.0, step, whole(row), reach=float(at), distance=whole(far_row))
+            for at, row, far_row in zip(swept.cuts, swept.skyline_cuts, swept.skyline_cuts_distance)
+        ]
+        turns.append(skymatch.Turn(0.0, step, whole(swept.skyline), reach=far, distance=whole(swept.skyline_distance)))
+        ridges = None
+        if trace.marks is not None and trace.marks.ridge_x.size:
+            ridges = skymatch.Ridges.of(
+                0.0, step, columns.size, np.flatnonzero(marched)[swept.ridge_column], swept.ridge_angle,
+                swept.ridge_distance,
+            )
         found = skymatch.match(
             trace.x, trace.y, turns, half_width=trace.half_width, fov=trace.fov, known=trace.known,
             within=trace.within, facing=facing, projection=trace.projection, quick=quick, rough=rough,
+            marks=trace.marks, ridges=ridges,
         )
         if not found.fits:
             continue
@@ -370,7 +436,16 @@ def score_point(
                 "heading": round(fit.heading, 3), "tilt": round(fit.tilt, 3), "roll": round(fit.roll, 3),
                 "fov": round(fit.fov, 3), "gap": round(fit.gap, 4), "reach": fit.reach, "height": float(height),
                 "ground": round(swept.ground, 1), "verdict": found.verdict,
+                "relief": round(relief(next(t for t in turns if t.reach == fit.reach), fit), 1),
             }
+            if fit.sky is not None:
+                best["sky"] = round(fit.sky, 4)
+            if fit.inner is not None:
+                best["inner"] = round(fit.inner, 4)
+            if fit.pairs is not None:
+                best["pairs"] = list(fit.pairs)
+            if fit.pieces is not None:
+                best["pieces"] = skymatch.pieces_of(fit)
     return best
 
 
@@ -454,14 +529,20 @@ def search(
     for a, o in zip(lat, lon):
         seen.add((round(float(a), 6), round(float(o), 6)))
         scored.append(score(float(a), float(o), spacing, stage="rough"))
-    # refined three by three about the best, down to what the terrain is worth
+    # the cells near relief filled in, and ranked as roughly
+    extra = filled(plan, scored, spacing, fine, seen)
+    total += len(extra)
+    for a, o, own in extra:
+        scored.append(score(a, o, own, stage="rough"))
+    # refined three by three about the best, each from its own spacing, down to what the terrain is worth
     step = spacing
     for _ in range(depth):
         kept = _spread(scored, step, KEEP)
         step /= 3
         for point in kept:
-            for a, o in about(point, step, 1):
-                scored.append(score(a, o, step, stage="rough"))
+            own = max(fine, min(step, point["spacing"] / 3))
+            for a, o in about(point, own, 1):
+                scored.append(score(a, o, own, stage="rough"))
     # the three best polished on a finer grid, with the ground near the eye read finely
     polish_step = step / 2
     for point in _spread(scored, max(APART_M, 2 * fine), POLISH):
@@ -488,6 +569,46 @@ def search(
         "step": column_step(trace),
         "seconds": round(time.monotonic() - started, 1),
     }
+
+
+def filled(
+    plan: Plan, coarse: list[dict[str, Any]], spacing: float, fine: float, seen: set[tuple[float, float]],
+) -> list[tuple[float, float, float]]:
+    """Points filling in the cells of the coarse grid whose relief stands near: (lat, lon, spacing).
+
+    Each cell, `spacing` wide about its point, is filled in at `NEAR_SHARE` of
+    the distance to the ridges its point sees, no finer than `fine`. The cells
+    nearest their relief come first; past `DENSE_MAX` times the grid's points,
+    the rest are filled two by two, and none once even that does not fit.
+    Points off the area or the alignments' lines, or scored already, are left
+    out; the ones it lays are added to `seen`.
+    """
+    budget = int(DENSE_MAX * len(coarse))
+    out: list[tuple[float, float, float]] = []
+    for point in sorted(coarse, key=lambda p: p.get("relief", math.inf)):
+        near = point.get("relief", math.inf)
+        if not math.isfinite(near):
+            break
+        count = int(round(spacing / max(fine, NEAR_SHARE * near)))
+        if count < 2:
+            continue
+        if len(out) + count * count > budget:
+            count = 2
+            if len(out) + count * count > budget:
+                break
+        own = spacing / count
+        offsets = (np.arange(count) + 0.5) / count * spacing - spacing / 2
+        gx, gy = np.meshgrid(offsets, offsets)
+        lats, lons = _from_local(point["lat"], point["lon"], gx.ravel(), gy.ravel())
+        keep = inside(plan.area, lats, lons)
+        if plan.alignments:
+            keep &= on_lines(plan.alignments, lats, lons)
+        for a, o in zip(lats[keep], lons[keep]):
+            key = (round(float(a), 6), round(float(o), 6))
+            if key not in seen:
+                seen.add(key)
+                out.append((float(a), float(o), own))
+    return out
 
 
 def standout(places: list[dict[str, Any]], points: list[dict[str, Any]]) -> float | None:

@@ -899,13 +899,16 @@ describe('a panorama', () => {
   const wide = { fetchBlob: async (url) => ({ url, width: 4000, height: 1000 }) };
   const stitched = { degrees: 47.4, stitched: 15, by_hand: 4, warp: 'cylindrical', collage: 'Collage 9' };
 
-  it('is offered for a wide picture alone, and a photo stays a photo', async () => {
+  it('is offered for any image, which stays a photo until the analyst says otherwise', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
-    expect(photo.panoramaOffered).toBe(false);
-    photo.setHints({ picture: 'panorama' });
+    expect(photo.panoramaOffered).toBe(true);
     expect(photo.hints.picture).toBe('photo');
     expect(view.camera.projection).toBe('camera');
+    // a hand-made collage of any shape can be read through the strip once asked
+    photo.setHints({ picture: 'panorama' });
+    expect(photo.isPanorama).toBe(true);
+    expect(view.camera.projection).toBe('panorama');
   });
 
   it('reads a wide picture through the strip once asked, as wide as its shape suggests', async () => {
@@ -949,5 +952,157 @@ describe('a panorama', () => {
     again.restoreWork({ hints: { picture: 'photo', zoom: 'wide' } });
     expect(again.hints).toMatchObject({ picture: 'photo', zoom: 'wide' });
     expect(again.isPanorama).toBe(false);
+  });
+});
+
+describe('the marks beside the trace', () => {
+  const SCALE = { width: 1000, height: 750 };
+  const across = (v, from = 0.1, to = 0.9) => Array.from({ length: 9 }, (_, i) => ({ u: from + ((to - from) * i) / 8, v }));
+
+  it('draws a ridge with its own pen, and reads a skyline stroke under another as one', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setPen('ridge');
+    expect(photo.tracing).toBe(true);
+    photo.addStroke(across(0.6, 0.6, 0.9));
+    photo.setPen('sky');
+    photo.addStroke(across(0.45, 0.2, 0.5));
+    const [sky, ridge, under] = photo.marks.lines;
+    expect(photo.marks.inner).toEqual([ridge, under]);
+    expect(photo.skySeen).toHaveLength(1);
+    expect(photo.marks.inner).not.toContain(sky);
+    // a skyline drawn over a skyline stroke takes it for the ridge in front
+    photo.addStroke(across(0.1, 0.05, 0.95));
+    expect(photo.marks.inner).toContain(sky);
+    photo.undoStroke();
+    expect(photo.marks.inner).not.toContain(sky);
+  });
+
+  it('makes the line clicked the pen out', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setPen('ridge');
+    expect(photo.markLineAt({ u: 0.5, v: 0.301 }, SCALE)).toBe(true);
+    expect(photo.marks.inner).toEqual([photo.marks.lines[0]]);
+    expect(photo.markLineAt({ u: 0.5, v: 0.6 }, SCALE)).toBe(false);
+    photo.undoStroke();
+    expect(photo.marks.inner).toEqual([]);
+  });
+
+  it('pairs the line in front with the line behind it, and takes the pair back', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3, 0.1, 0.5));
+    photo.addStroke(across(0.35, 0.5, 0.9));
+    const [left, right] = photo.marks.lines;
+    photo.setLinking(true);
+    expect(photo.linking).toBe(true);
+    expect(photo.linkAt({ u: 0.7, v: 0.35 }, SCALE)).toEqual({ front: right });
+    expect(photo.front).toBe(right);
+    expect(photo.linkAt({ u: 0.3, v: 0.3 }, SCALE)).toEqual({ paired: [right, left] });
+    expect(photo.marks.pairs).toEqual([[right, left]]);
+    // side by side, neither lies under the other: both stay on the skyline
+    expect(photo.marks.inner).toEqual([]);
+    expect(photo.pairBadges[0].label).toBe('A');
+    photo.linkAt({ u: 0.7, v: 0.35 }, SCALE);
+    expect(photo.linkAt({ u: 0.3, v: 0.3 }, SCALE)).toEqual({ unpaired: [right, left] });
+    expect(photo.marks.pairs).toEqual([]);
+    expect(photo.linkAt({ u: 0.5, v: 0.9 }, SCALE)).toEqual({ missed: true });
+  });
+
+  it('makes the line in front an inner edge when it lies under the one behind', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.addStroke(across(0.5, 0.3, 0.6));
+    const [back, front] = photo.marks.lines;
+    // said to be skyline by a click with the skyline pen, then paired in front of the higher line
+    photo.setPen('sky');
+    photo.markLineAt({ u: 0.45, v: 0.5 }, SCALE);
+    expect(photo.marks.inner).toEqual([]);
+    photo.setLinking(true);
+    photo.linkAt({ u: 0.45, v: 0.5 }, SCALE);
+    photo.linkAt({ u: 0.45, v: 0.3 }, SCALE);
+    expect(photo.marks.pairs).toEqual([[front, back]]);
+    expect(photo.marks.inner).toEqual([front]);
+  });
+
+  it('cuts a collage where a click falls, takes the cut clicked away, and keeps the cuts through a clear', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.setCutting(true);
+    expect(photo.cutting).toBe(true);
+    photo.cutAt({ u: 0.4, v: 0.5 }, SCALE);
+    photo.cutAt({ u: 0.7, v: 0.2 }, SCALE);
+    expect(photo.marks.cuts).toEqual([0.4, 0.7]);
+    expect(photo.cutsSeen).toHaveLength(2);
+    expect(photo.pieceAt({ u: 0.5, v: 0.5 })).toBe(1);
+    photo.cutAt({ u: 0.703, v: 0.9 }, SCALE);
+    expect(photo.marks.cuts).toEqual([0.4]);
+    photo.undoStroke();
+    expect(photo.marks.cuts).toEqual([0.4, 0.7]);
+    photo.setPen('sky');
+    expect(photo.cutting).toBe(false);
+    photo.addStroke(across(0.3));
+    photo.clearTrace();
+    expect(photo.marks.cuts).toEqual([0.4, 0.7]);
+  });
+
+  it('keeps each rubbed piece under its line, so its pair and its kind hold', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setPen('ridge');
+    photo.addStroke(across(0.6));
+    const [sky, ridge] = photo.marks.lines;
+    photo.beginErase();
+    photo.eraseAlong([{ u: 0.5, v: 0.55 }, { u: 0.5, v: 0.65 }], 10, SCALE);
+    photo.endErase();
+    expect(photo.strokes).toHaveLength(3);
+    expect(photo.marks.lines).toEqual([sky, ridge, ridge]);
+    expect(photo.marks.inner).toEqual([ridge]);
+  });
+
+  it('lays saved marks back, and reads a trace kept before them by its shape', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)], marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5] } });
+    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5] });
+    photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)] });
+    expect(photo.marks.inner).toEqual([1]);
+    // Detect lays the skyline afresh: the cuts stay, they belong to the photo
+    photo.restoreWork({ strokes: [across(0.3)], marks: { lines: [0], inner: [], pairs: [], cuts: [0.5] } });
+    expect(photo.marks.cuts).toEqual([0.5]);
+  });
+
+  it('snaps or not as the magnet says', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.magnet).toBe(true);
+    photo.setMagnet(false);
+    expect(photo.magnet).toBe(false);
+  });
+
+  it('takes a point of the frame back to the photo’s own pixel through the lens’s curve', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    const point = { u: 0.8, v: 0.3 };
+    expect(photo.photoOf(point)).toEqual(point);
+    photo.setBend(-0.15);
+    const seen = photo.seenOf(point);
+    expect(seen.u).not.toBeCloseTo(point.u, 3);
+    const back = photo.photoOf(seen);
+    expect(back.u).toBeCloseTo(point.u, 5);
+    expect(back.v).toBeCloseTo(point.v, 5);
+  });
+
+  it('keeps the trace’s details folded until they are asked for', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    expect(photo.details).toBe(false);
+    photo.setDetails(true);
+    expect(photo.details).toBe(true);
   });
 });

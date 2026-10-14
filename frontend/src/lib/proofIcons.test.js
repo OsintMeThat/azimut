@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   ICON_BOX,
-  ICON_SIZE_DEFAULT,
   PROOF_ICONS,
   glyphInk,
   iconAnchor,
   iconByName,
   iconOrigin,
-  iconSizeFor,
   isSolidIcon,
 } from './proofIcons.js';
 
@@ -70,12 +68,6 @@ describe('where a symbol sits', () => {
     const tipOf = (box) => ({ x: box.x + box.w / 2, y: box.y + box.h * (22.4 / ICON_BOX) });
     expect(tipOf(small).x).toBeCloseTo(tipOf(large).x);
     expect(tipOf(small).y).toBeCloseTo(tipOf(large).y);
-  });
-
-  it('sizes a symbol against the panel, like stroke width', () => {
-    expect(iconSizeFor(1)).toBe(ICON_SIZE_DEFAULT);
-    expect(iconSizeFor(2)).toBe(ICON_SIZE_DEFAULT / 2);
-    expect(iconSizeFor(0)).toBe(ICON_SIZE_DEFAULT);
   });
 });
 

@@ -100,8 +100,14 @@ class ProofTemplateData(CanonicalModel):
     footerCoords: StrictBool = False
     footerColor: Color | None = None
     footerAlign: Literal["left", "right"] = "left"
+    captionColor: Color | None = None
     captionsEnabled: StrictBool = True
     panelDirection: Literal["horizontal", "vertical"] = "horizontal"
+    # The typeface every word on the proof is set in, shipped with the app so a
+    # proof reads the same on every machine. A style stored before fonts existed
+    # keeps the system's, which is what it has always looked like.
+    font: Literal["system", "inter", "barlow", "oxanium", "plexmono"] = "system"
+    fontBold: StrictBool = True
     signature: ProofSignature | None = None
     signatureText: ProofSignatureText | None = None
     palette: list[Color] = Field(
@@ -118,7 +124,7 @@ class ProofTemplateData(CanonicalModel):
         max_length=7,
     )
 
-    @field_validator("bg", "footerColor")
+    @field_validator("bg", "footerColor", "captionColor")
     @classmethod
     def normalize_color(cls, color: str | None) -> str | None:
         return color.lower() if color is not None else None

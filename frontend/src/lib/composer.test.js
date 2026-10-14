@@ -10,7 +10,7 @@ import {
   dedupeBySrc, satPanelInput, mediaPanelInput,
   SIG_MARGIN, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
   filterProofPanelItems, hasProofCanvasContent, panelPreview,
-  remapPanelXY, panelHitTest, groupNeighborIndex, hasGroupNeighbor,
+  groupNeighborIndex, hasGroupNeighbor,
   denseRowValues, clampPanelScale, trimClosingDuplicate, smoothFreehandPoints,
   freehandShape, canReassignLegendNote,
   BG, ANNO_COLORS, MAX_ANNO_COLORS, normSpace, isLightColor, textColors,
@@ -21,6 +21,8 @@ import {
   normalizeFrame, newFrame, FRAME_COLOR, FRAME_WIDTH, FRAME_WIDTH_MAX,
   newPaste, pasteBoxes, pasteInsertScale, clampPasteScale, clampPaste,
   surfaces, surfaceHitTest, PASTE_SCALE_MAX, PASTE_SHARE,
+  surfaceFrame, pageToSurface, surfaceToPage, pageStepOnSurface, moveShapeToSurface,
+  withInkOnPage, INK_UNITS,
   specPoints, statePoints, statePanelPoint, MAX_POINTS,
   captureAimed, pointProposed, uncheckedPoints,
   proofCoordsLines, coordsPlateLines, coordsPostLines,
@@ -641,6 +643,12 @@ describe('offsetShape — copy / paste / duplicate', () => {
     expect(out.points).toEqual([10, 10, 110, 50]);
   });
 
+  it('takes a step per axis, for a page step read on a turned panel', () => {
+    const line = { kind: 'line', panel: 'p1', points: [0, 0, 100, 40] };
+    expect(offsetShape(line, 3, -2).points).toEqual([3, -2, 103, 38]);
+    expect(offsetShape({ kind: 'rect', x: 1, y: 1 }, 3, -2)).toMatchObject({ x: 4, y: -1 });
+  });
+
   it('deep-clones so the source is untouched', () => {
     const src = { id: 's3', kind: 'curve', panel: 'p1', points: [1, 2, 3, 4] };
     const out = offsetShape(src, 5);
@@ -1107,46 +1115,196 @@ describe('hasProofCanvasContent — empty template-only proof', () => {
   });
 });
 
-describe('remapPanelXY — moving a shape between panels', () => {
-  it('is identity when the two boxes coincide', () => {
-    const box = { x: 100, y: 40, scale: 2 };
-    expect(remapPanelXY(10, 5, box, box)).toEqual({ x: 10, y: 5 });
+describe('surfaces on the page — where a mark is drawn and read', () => {
+  // A surface as the composer holds it: `natural` the upright box, the source
+  // beside it, and a box laid out on the page.
+  const entry = (id, box, image, rotation = 0) => ({
+    id, item: { id, natural: image, sourceNatural: image, rotation }, box,
+  });
+  const close = (p, q) => {
+    expect(p.x).toBeCloseTo(q.x, 6);
+    expect(p.y).toBeCloseTo(q.y, 6);
+  };
+
+  it('reads an upright surface the way its box lays it out', () => {
+    const frame = surfaceFrame(entry('p1', { x: 100, y: 40, w: 200, h: 100, scale: 2 }, [100, 50]));
+    close(pageToSurface({ x: 120, y: 50 }, frame), { x: 10, y: 5 });
+    close(surfaceToPage({ x: 10, y: 5 }, frame), { x: 120, y: 50 });
   });
 
-  it('maps a natural point through doc space into the target scale', () => {
-    const from = { x: 100, y: 40, scale: 2 };
-    const to = { x: 0, y: 0, scale: 4 };
-    // doc point (100 + 10*2, 40 + 5*2) = (120, 50); target natural divides by 4
-    expect(remapPanelXY(10, 5, from, to)).toEqual({ x: 30, y: 12.5 });
+  it('reads a turned surface where it is drawn, not as its upright box', () => {
+    // 200×100 picture turned a quarter clockwise: the upright box is 100×200
+    const frame = surfaceFrame(entry('p1', { x: 0, y: 0, w: 100, h: 200, scale: 1 }, [200, 100], 90));
+    // the picture's top-left corner is now the box's top-right
+    close(surfaceToPage({ x: 0, y: 0 }, frame), { x: 100, y: 0 });
+    close(pageToSurface({ x: 100, y: 0 }, frame), { x: 0, y: 0 });
+    // and the round trip holds anywhere
+    close(pageToSurface(surfaceToPage({ x: 37, y: 81 }, frame), frame), { x: 37, y: 81 });
+  });
+
+  it('turns a page step into the surface, at its scale', () => {
+    const upright = surfaceFrame(entry('a', { x: 0, y: 0, w: 50, h: 50, scale: 0.5 }, [100, 100]));
+    expect(pageStepOnSurface(10, 0, upright)).toEqual({ dx: 20, dy: 0 });
+    const turned = surfaceFrame(entry('b', { x: 0, y: 0, w: 100, h: 200, scale: 1 }, [200, 100], 90));
+    const step = pageStepOnSurface(10, 0, turned);
+    // right on the page is up the turned picture
+    expect(step.dx).toBeCloseTo(0, 6);
+    expect(step.dy).toBeCloseTo(-10, 6);
+  });
+
+  it('hits the topmost surface, in its own pixels', () => {
+    const list = [
+      entry('front', { x: 0, y: 0, w: 100, h: 100, scale: 2 }, [50, 50]),
+      entry('back', { x: 50, y: 50, w: 100, h: 100, scale: 1 }, [100, 100]),
+    ];
+    expect(surfaceHitTest(list, { x: 500, y: 500 })).toBeNull();
+    const front = surfaceHitTest(list, { x: 60, y: 60 });
+    expect(front.id).toBe('front');
+    expect([front.nx, front.ny]).toEqual([30, 30]);
+    const back = surfaceHitTest(list, { x: 120, y: 120 });
+    expect(back.id).toBe('back');
+    expect(back.nx).toBe(70);
+    // edges count as inside
+    expect(surfaceHitTest(list, { x: 0, y: 0 }).id).toBe('front');
+    expect(surfaceHitTest(list, { x: 100, y: 100 }).id).toBe('front');
+  });
+
+  it('misses the corners a turned picture leaves empty in its upright box', () => {
+    // a square turned 45° sits in a box √2 wider; its corner region is page, not picture
+    const side = 100;
+    const span = side * Math.SQRT2;
+    const list = [entry('p1', { x: 0, y: 0, w: span, h: span, scale: 1 }, [side, side], 45)];
+    expect(surfaceHitTest(list, { x: 3, y: 3 })).toBeNull();
+    const centre = surfaceHitTest(list, { x: span / 2, y: span / 2 });
+    expect(centre.nx).toBeCloseTo(50, 6);
+    expect(centre.ny).toBeCloseTo(50, 6);
   });
 });
 
-describe('panelHitTest — topmost panel under a point', () => {
-  const boxes = [
-    { x: 0, y: 0, w: 100, h: 100, scale: 2 }, // front (drawn first = z-top)
-    { x: 50, y: 50, w: 100, h: 100, scale: 1 }, // back
-  ];
+describe('moveShapeToSurface — a mark carried onto another panel', () => {
+  const frame = (box, image, rotation = 0) => ({ box: { w: image[0] * box.scale, h: image[1] * box.scale, ...box }, image, rotation });
+  // a small picture drawn big beside a large one drawn small
+  const small = frame({ x: 0, y: 0, scale: 2 }, [640, 360]);
+  const large = frame({ x: 1300, y: 0, scale: 0.5 }, [2560, 1440]);
 
-  it('returns null when the point misses every box', () => {
-    expect(panelHitTest(boxes, { x: 500, y: 500 })).toBeNull();
+  it('keeps a box the size it was on the page', () => {
+    const rect = { kind: 'rect', panel: 'a', x: 100, y: 50, w: 40, h: 20, strokeWidth: 4 };
+    const out = moveShapeToSurface(rect, small, large);
+    // 40 natural px at scale 2 is 80 page px, which is 160 natural px at 0.5
+    expect(out.w).toBeCloseTo(160, 6);
+    expect(out.h).toBeCloseTo(80, 6);
+    // the ink is page pixels already, so it is left as it was
+    expect(out.strokeWidth).toBe(4);
+    const before = surfaceToPage({ x: rect.x, y: rect.y }, small);
+    const after = surfaceToPage({ x: out.x, y: out.y }, large);
+    expect(after.x).toBeCloseTo(before.x, 6);
+    expect(after.y).toBeCloseTo(before.y, 6);
   });
 
-  it('returns the front box on overlap, with natural coords', () => {
-    const hit = panelHitTest(boxes, { x: 60, y: 60 });
-    expect(hit.index).toBe(0);
-    expect(hit.nx).toBe(30); // (60-0)/2
-    expect(hit.ny).toBe(30);
+  it('keeps a label, a symbol and a marker their size, and moves only their anchor', () => {
+    for (const s of [
+      { kind: 'text', x: 10, y: 10, fontSize: 28, text: 'a' },
+      { kind: 'icon', x: 10, y: 10, size: 56, name: 'tank' },
+      { kind: 'number', x: 10, y: 10, size: 56, n: 1 },
+    ]) {
+      const out = moveShapeToSurface(s, small, large);
+      expect(out.fontSize).toBe(s.fontSize);
+      expect(out.size).toBe(s.size);
+      expect(out.x).toBeCloseTo((0 + 10 * 2 - 1300) / 0.5, 6);
+    }
   });
 
-  it('falls through to a lower box when the front one misses', () => {
-    const hit = panelHitTest(boxes, { x: 120, y: 120 });
-    expect(hit.index).toBe(1);
-    expect(hit.nx).toBe(70); // (120-50)/1
+  it('carries every vertex of a polyline through the page', () => {
+    const line = { kind: 'line', points: [0, 0, 100, 0] };
+    const out = moveShapeToSurface(line, small, large);
+    // 100 natural at scale 2 is 200 page px, 400 natural at 0.5
+    expect(out.points[2] - out.points[0]).toBeCloseTo(400, 6);
   });
 
-  it('counts the box edges as inside', () => {
-    expect(panelHitTest(boxes, { x: 0, y: 0 }).index).toBe(0);
-    expect(panelHitTest(boxes, { x: 100, y: 100 }).index).toBe(0);
+  it('takes the difference between two turns, so it does not turn on the page', () => {
+    const turnedFrame = frame({ x: 0, y: 0, scale: 1 }, [200, 100], 30);
+    const rect = { kind: 'rect', x: 20, y: 20, w: 10, h: 10, rotation: 5 };
+    expect(moveShapeToSurface(rect, turnedFrame, large).rotation).toBeCloseTo(35, 6);
+    const back = moveShapeToSurface({ ...rect, rotation: 35 }, large, turnedFrame);
+    expect(back.rotation).toBeCloseTo(5, 6);
+  });
+
+  it('carries a callout by its tip and an inset by its frame, neither turning', () => {
+    const turnedFrame = frame({ x: 0, y: 0, scale: 1 }, [200, 100], 30);
+    const callout = { kind: 'callout', x: 20, y: 20, dx: 80, dy: -60, fontSize: 22 };
+    const out = moveShapeToSurface(callout, turnedFrame, large);
+    expect(out).not.toHaveProperty('rotation');
+    // the label's offset is page pixels from the tip, so it rides along as it is
+    expect([out.dx, out.dy, out.fontSize]).toEqual([80, -60, 22]);
+    const zoom = { kind: 'zoom', x: 10, y: 10, w: 40, h: 20, iw: 200, dx: 0, dy: 0 };
+    const moved = moveShapeToSurface(zoom, small, large);
+    expect(moved).not.toHaveProperty('rotation');
+    expect(moved.w).toBeCloseTo(160, 6);
+    expect(moved.iw).toBe(200);
+  });
+});
+
+describe('withInkOnPage — older proofs open looking the same', () => {
+  // PANEL_H tall at 100%: a 640×360 picture draws at scale 2, a 2560×1440 at 0.5
+  const legacy = (extra = {}) => ({
+    azimut_proof: 1,
+    captionSize: 20,
+    layout: 'grid',
+    panels: [
+      { id: 'small', natural: [640, 360], scale: 1 },
+      { id: 'large', natural: [2560, 1440], scale: 1.5, frame: { color: '#fff', width: 6 } },
+    ],
+    pastes: [{ id: 'x1', asset: 'a.png', natural: [400, 300], x: 0, y: 0, scale: 0.25 }],
+    shapes: [
+      { id: 's1', panel: 'small', kind: 'rect', x: 1, y: 1, w: 9, h: 9, strokeWidth: 4 },
+      { id: 's2', panel: 'large', kind: 'arrow', points: [0, 0, 9, 9], strokeWidth: 4 },
+      { id: 's3', panel: 'small', kind: 'text', x: 0, y: 0, text: 'a', fontSize: 28 },
+      { id: 's4', panel: 'large', kind: 'text', x: 0, y: 0, text: 'b' },
+      { id: 's5', panel: 'large', kind: 'icon', name: 'tank', x: 0, y: 0, size: 112, strokeWidth: 3 },
+      { id: 's6', panel: 'small', kind: 'number', x: 0, y: 0, n: 1 },
+      { id: 's7', panel: 'x1', kind: 'line', points: [0, 0, 9, 9], strokeWidth: 8 },
+      { id: 's8', panel: 'small', kind: 'icon', name: 'point', x: 0, y: 0, size: 28 },
+      { id: 's9', panel: 'small', kind: 'blur', x: 0, y: 0, w: 9, h: 9 },
+    ],
+    ...extra,
+  });
+
+  it('turns every width and size into the page pixels it drew at', () => {
+    const out = withInkOnPage(legacy());
+    const by = Object.fromEntries(out.shapes.map((s) => [s.id, s]));
+    // a width drew at its value at 100% and grew with the panel's own size
+    expect(by.s1.strokeWidth).toBe(4);
+    expect(by.s2.strokeWidth).toBe(6);
+    // on an overlay it was in the picture's pixels, drawn at the overlay's scale
+    expect(by.s7.strokeWidth).toBe(2);
+    // labels, symbols and markers were in the picture's own pixels
+    expect(by.s3.fontSize).toBe(56);
+    expect(by.s4.fontSize).toBe(21); // 28 by default, at 0.75
+    expect(by.s5.size).toBe(84);
+    expect(by.s5.strokeWidth).toBe(4.5);
+    expect(by.s6.size).toBe(56); // the default was sized against the panel at 100%
+    // a solid symbol carries no width and is not handed one
+    expect(by.s8).not.toHaveProperty('strokeWidth');
+    expect(by.s8.size).toBe(56);
+    // a blur box is all geometry
+    expect(by.s9).toEqual(legacy().shapes[8]);
+    // a frame is ink too
+    expect(out.panels[1].frame.width).toBe(5); // 6 × 0.75, rounded
+    expect(out.ink).toBe(INK_UNITS);
+  });
+
+  it('leaves where a mark stands and what it spans alone', () => {
+    const out = withInkOnPage(legacy());
+    expect(out.shapes[0]).toMatchObject({ x: 1, y: 1, w: 9, h: 9 });
+    expect(out.shapes[1].points).toEqual([0, 0, 9, 9]);
+  });
+
+  it('converts once: a proof saved since is already on the page', () => {
+    const once = withInkOnPage(legacy());
+    expect(withInkOnPage(once)).toBe(once);
+    const saved = toSpec({ title: 't', panels: [], shapes: [] });
+    expect(saved.ink).toBe(INK_UNITS);
+    expect(withInkOnPage(saved)).toBe(saved);
   });
 });
 
@@ -1412,6 +1570,9 @@ describe('templateFromProof — a content-free house style', () => {
       footerAlign: 'left',
       captionsEnabled: false,
       panelDirection: 'horizontal',
+      // a proof that never chose a typeface keeps the system's, set in bold
+      font: 'system',
+      fontBold: true,
       signature: { anchor: 'br', dx: 5, dy: 0, scale: 0.12, opacity: 0.9 },
       signatureText: { anchor: 'tr', dx: 0, dy: 0, size: 44, color: '#ffffff', opacity: 1 },
       palette: ['#123456', '#ff5252', '#40c4ff'],
@@ -2125,5 +2286,24 @@ describe('the date a proof states for its material', () => {
     expect(toSpec({ ...bare, when: '2024-03-12', whenZone: null }).whenZone).toBe(null);
     // A zone with no date to read says nothing.
     expect(toSpec({ ...bare, when: '', whenZone: 'Asia/Tokyo' }).whenZone).toBe(null);
+  });
+});
+
+describe('a proof\'s typeface', () => {
+  it('is part of the house style, and a style from before fonts keeps the system\'s', () => {
+    expect(normalizeProofStyle({ font: 'barlow', fontBold: false })).toMatchObject({ font: 'barlow', fontBold: false });
+    expect(normalizeProofStyle({})).toMatchObject({ font: 'system', fontBold: true });
+    expect(normalizeProofStyle({ font: 'comic' }).font).toBe('system');
+    const proof = { font: 'inter', fontBold: true, panels: [] };
+    applyProofStyle(proof, { font: 'plexmono', fontBold: false });
+    expect(proof).toMatchObject({ font: 'plexmono', fontBold: false });
+    // a style that says nothing about it leaves the proof's alone
+    applyProofStyle(proof, { bg: '#000000' });
+    expect(proof.font).toBe('plexmono');
+  });
+
+  it('is saved with the proof', () => {
+    expect(toSpec({ title: 't', panels: [], shapes: [], font: 'oxanium', fontBold: false }))
+      .toMatchObject({ font: 'oxanium', fontBold: false });
   });
 });

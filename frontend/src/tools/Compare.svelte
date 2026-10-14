@@ -2431,7 +2431,6 @@
         oneditadded={(row) => { layersOpen = false; personalLayers.open(row); }}
         onnewpersonal={() => { layersOpen = false; personalLayers.newLayer(); }}
         ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
-        onmaps={() => { layersOpen = false; personalLayers.openMaps(); }}
         header={both ? layerSides : null}
         bind:open={layersOpen}
       />
@@ -2663,7 +2662,7 @@
               onclose={closePointMenu}
             />
           {/if}
-          <LayerGeometry engine={a.ready ? a.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} />
+          <LayerGeometry engine={a.ready ? a.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === a.engine} />
           <AddedLayersOverlay
             engine={a.ready ? a.engine : null}
             caseId={caseState.current?.id ?? ''}
@@ -2673,6 +2672,7 @@
             interactive={!personalLayers.armed}
             onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
             onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
+            oncopyfeature={(row, feature) => personalLayers.copy(row, feature)}
           />
           {#if layers.a.includes('saved') && !personalLayers.armed}
             <SavedOverlay
@@ -2773,7 +2773,7 @@
               onclose={closePointMenu}
             />
           {/if}
-          <LayerGeometry engine={b.ready ? b.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} />
+          <LayerGeometry engine={b.ready ? b.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === b.engine} />
           <AddedLayersOverlay
             engine={b.ready ? b.engine : null}
             caseId={caseState.current?.id ?? ''}
@@ -2783,6 +2783,7 @@
             interactive={!personalLayers.armed}
             onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
             onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
+            oncopyfeature={(row, feature) => personalLayers.copy(row, feature)}
           />
           {#if layers.b.includes('saved') && !personalLayers.armed}
             <SavedOverlay
@@ -3033,8 +3034,6 @@
   {/if}
 
   <PersonalLayerPanel tool="compare" scope={myLayers} engine={primeEngine}
-    provider={a.engine ? a.providerId : b.providerId} rows={layerRows} onprovider={(id) => { if (a.engine) a.providerId = id; else b.providerId = id; }}
-    places={savedWork.rows.filter((row) => row.kind === 'place')}
     onarm={() => { annotationTool = 'select'; framing = false; }} />
 </div>
 

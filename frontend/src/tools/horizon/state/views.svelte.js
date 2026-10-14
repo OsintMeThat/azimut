@@ -19,8 +19,13 @@
  * The preview the saved work lists show is drawn from the view on screen at
  * each save (`snapshot`), and a preview that cannot be drawn costs the save
  * nothing.
+ *
+ * The bench a reload brings back (state/work.svelte.js) is laid over the view
+ * it came from with `layWork`: what it sets is not saved, so a view changed
+ * before the reload still says so.
  */
 import { settingsOfSpec } from '../../../lib/horizon/buildings.js';
+import { sameMarks } from '../../../lib/horizon/traceMarks.js';
 import {
   footprintRing,
   madeOf,
@@ -60,13 +65,14 @@ export function createViewsState({
   let opened = 0;
 
   const built = () => buildings?.settings ?? null;
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   const spec = $derived(viewSpec(view, overlay, built()));
   const now = $derived(signature(spec));
 
   const base = (id) => `/api/cases/${encodeURIComponent(id)}/horizon/views`;
 
   function hold() {
-    saved = { signature: signature(viewSpec(view, overlay, built())), strokes: overlay.strokes, pins: overlay.pins };
+    saved = { signature: signature(viewSpec(view, overlay, built())), strokes: overlay.strokes, marks: overlay.marks, pins: overlay.pins };
   }
 
   async function load(id = caseId()) {
@@ -84,6 +90,41 @@ export function createViewsState({
     return list;
   }
 
+  /** A spec's photo laid over the view with the work on it; false when the case changed meanwhile. */
+  async function layPhoto(id, photo, spec, still) {
+    if (overlay.source?.path !== photo.path || overlay.source?.caseId !== id) {
+      await overlay.openCase(id, { path: photo.path, kind: photo.kind, title: photo.title }, { time: photo.time ?? 0 });
+      if (!still()) return false;
+    }
+    overlay.restoreWork({
+      mix: photo.mix,
+      bend: photo.bend,
+      corners: photo.corners,
+      strokes: photo.strokes,
+      marks: photo.marks,
+      traceTime: photo.trace_time,
+      pins: photo.pins,
+      hints: photo.hints,
+      reach: photo.reach,
+    });
+    if (spec) {
+      // opening the photo set its lens and its lines: the view's own come back over them
+      view.look(spec.look);
+      view.setLines(spec.picture?.lines);
+    }
+    // a photo held to the terrain when it was saved is held again
+    if (photo.locked) overlay.setLocked(true);
+    return true;
+  }
+
+  /** The eye, the picture and the marked point a spec keeps. */
+  function standAs(kept) {
+    view.restore(restoredView(kept));
+    buildings?.set(settingsOfSpec(kept.buildings));
+    if (kept.target) view.mark(kept.target, { height: kept.target.height ?? 0 });
+    else view.clearTarget();
+  }
+
   async function open(name) {
     const id = caseId();
     if (!id || !name) return false;
@@ -95,29 +136,10 @@ export function createViewsState({
       if (mine !== opened || caseId() !== id) return false;
       const kept = answer.spec;
       if (overlay.source) overlay.remove();
-      view.restore(restoredView(kept));
-      buildings?.set(settingsOfSpec(kept.buildings));
-      if (kept.target) view.mark(kept.target, { height: kept.target.height ?? 0 });
-      else view.clearTarget();
+      standAs(kept);
       const photo = kept.photo;
       if (photo && answer.photo_here) {
-        await overlay.openCase(id, { path: photo.path, kind: photo.kind, title: photo.title }, { time: photo.time ?? 0 });
-        if (mine !== opened || caseId() !== id) return false;
-        overlay.restoreWork({
-          mix: photo.mix,
-          bend: photo.bend,
-          corners: photo.corners,
-          strokes: photo.strokes,
-          traceTime: photo.trace_time,
-          pins: photo.pins,
-          hints: photo.hints,
-          reach: photo.reach,
-        });
-        // opening the photo set its lens and its lines: the view's own come back over them
-        view.look(kept.look);
-        view.setLines(kept.picture?.lines);
-        // a photo held to the terrain when it was saved is held again
-        if (photo.locked) overlay.setLocked(true);
+        if (!(await layPhoto(id, photo, kept, () => mine === opened && caseId() === id))) return false;
       } else if (photo) {
         error = `The photo this view was matched on is no longer in the case (${photo.title || photo.path}).`;
       }
@@ -164,6 +186,27 @@ export function createViewsState({
     load,
     open,
 
+    /**
+     * The bench a reload brings back, laid over what the tab shows: `spec` the
+     * view as it stood (its eye only with `eye`), `photo` the photo and its work.
+     * Nothing it sets is saved; a trace or pins the same as the open view's are
+     * still that view's, so an unchanged view does not read as changed.
+     */
+    async layWork({ spec = null, photo = null } = {}, { photoHere = false, eye = true } = {}) {
+      const id = caseId();
+      if (!id) return false;
+      const mine = ++opened;
+      const still = () => mine === opened && caseId() === id;
+      if (spec && eye) standAs(spec);
+      if (photo && photoHere) {
+        if (!(await layPhoto(id, photo, spec && eye ? spec : null, still))) return false;
+      }
+      if (saved && same(overlay.strokes, saved.strokes)) saved = { ...saved, strokes: overlay.strokes };
+      if (saved && sameMarks(overlay.marks, saved.marks)) saved = { ...saved, marks: overlay.marks };
+      if (saved && same(overlay.pins, saved.pins)) saved = { ...saved, pins: overlay.pins };
+      return true;
+    },
+
     /** Keep the view in the case under `title`; a new title renames the view open. */
     async save(title) {
       const id = caseId();
@@ -181,7 +224,7 @@ export function createViewsState({
         const answer = await api.post(base(id), body);
         if (caseId() !== id) return null;
         current = { name: answer.name, title: answer.title };
-        saved = { signature: signature(kept), strokes: kept.photo?.strokes ?? overlay.strokes, pins: overlay.pins };
+        saved = { signature: signature(kept), strokes: kept.photo?.strokes ?? overlay.strokes, marks: overlay.marks, pins: overlay.pins };
         try {
           const picture = await snapshot();
           if (picture) {
@@ -205,24 +248,6 @@ export function createViewsState({
     /** Back to the view as it was saved. */
     revert() {
       return current ? open(current.name) : Promise.resolve(false);
-    },
-
-    /** Delete a view; the images kept from it stay in the case. */
-    async remove(name) {
-      const id = caseId();
-      if (!id || !name) return false;
-      try {
-        await api.delete(`${base(id)}/${encodeURIComponent(name)}`);
-      } catch (failure) {
-        error = failure.message;
-        return false;
-      }
-      if (current?.name === name) {
-        current = null;
-        saved = null;
-      }
-      await load(id);
-      return true;
     },
 
     /** The next save starts another view from where the tab stands. */

@@ -12,6 +12,11 @@
   // Reading a typed pair back into a point: the one parser the app has, and the
   // one a coordinate row is written in (decimal, hemispheres, or DMS).
   import { parseLatLon } from '../lib/sheetRoles.js';
+  import ProofPointMenu from './proof/ProofPointMenu.svelte';
+  import ProofPointLayers from './proof/ProofPointLayers.svelte';
+  import { createProofLayers, orderedTargets, placesOf } from './proof/proofLayers.svelte.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { personalLayers } from '../lib/map/personalLayers.svelte.js';
   import { zoneAt } from '../lib/localZone.js';
   import { kinSentence } from '../lib/proposalReview.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
@@ -28,6 +33,9 @@
   import ProofToolbar from './proof/ProofToolbar.svelte';
   import ProofCanvas from './proof/ProofCanvas.svelte';
   import ProofLayersPanel from './proof/ProofLayersPanel.svelte';
+  import ProofContextMenu from './proof/ProofContextMenu.svelte';
+  import '../lib/proofFontFaces.js';
+  import { PROOF_FONTS, DEFAULT_PROOF_FONT, fontStack, loadProofFont } from '../lib/proofFonts.js';
   import NewProofDialog from './proof/NewProofDialog.svelte';
   import ImportProofDialog from './proof/ImportProofDialog.svelte';
   import PointMapDialog from './proof/PointMapDialog.svelte';
@@ -50,10 +58,11 @@
     anchoredPos, anchoredOffset, SIG_TEXT_SIZE,
     copyShapeSpec, dedupeBySrc, satPanelInput, mediaPanelInput,
     SIG_ANCHORS, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
-    remapPanelXY, groupNeighborIndex, hasGroupNeighbor,
+    groupNeighborIndex, hasGroupNeighbor,
     denseRowValues, clampPanelScale, trimClosingDuplicate, freehandShape,
     canReassignLegendNote,
-    surfaces, surfaceHitTest, pasteBoxes, clampPaste, clampPasteScale,
+    surfaces, surfaceHitTest, surfaceFrame, pageToSurface, surfaceToPage, pageStepOnSurface,
+    moveShapeToSurface, withInkOnPage, pasteBoxes, clampPaste, clampPasteScale,
     pasteInsertScale, newPaste, newFrame, normalizeFrame, FRAME_WIDTH_MAX, FRAME_COLOR,
     PASTE_SCALE_MIN, PASTE_SCALE_MAX,
     filterProofPanelItems, hasProofCanvasContent, proofExportOptions, panelPreview,
@@ -68,7 +77,13 @@
     PANEL_SCALE_MAX,
     PANEL_SCALE_MIN,
     pointsWithTransform,
+    dashPattern,
+    DASHABLE,
+    restacked,
     scaleFromNode,
+    tagBox,
+    tagFont,
+    tagPlate,
     textBoxPad,
     viewCentrePoint,
   } from '../lib/proofEdits.js';
@@ -84,8 +99,8 @@
     surfaceImageSize,
   } from '../lib/proofSurface.js';
   import {
-    ICON_BOX, ICON_SIZE_MIN, PROOF_ICONS,
-    glyphInk, iconByName, iconOrigin, iconSizeFor, isSolidIcon,
+    ICON_BOX, ICON_SIZE_DEFAULT, ICON_SIZE_MIN, PROOF_ICONS,
+    glyphInk, iconByName, iconOrigin, isSolidIcon,
   } from '../lib/proofIcons.js';
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
@@ -94,12 +109,25 @@
     nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
+  import { shortcut } from '../lib/keys.js';
+  import {
+    along, bearingTo, coneHandles, fovFromEdge, lensFov, CONE_BADGE, CONE_BADGE_MIN, CONE_BADGE_MAX,
+  } from '../lib/viewCone.js';
+  import {
+    isPageMark, CALLOUT_FONT, CALLOUT_OFFSET, calloutBox, calloutInk, nearestOnRect, bubbleTail,
+    insetBox, insetHeight, insetPlacement, insetConnectors, labelToCallout, calloutToLabel, INSET_MIN,
+  } from '../lib/pageMarks.js';
+  import {
+    PAGE, isFree, canBeFree, pageEntry, onPage, isLink, holdsToPicture, linkPoints, settleLink,
+    pictureUnder, nudgedLink, letGoOf, shiftedTies,
+  } from '../lib/freeMarks.js';
   import { pollWhile } from '../lib/poll.js';
 
   const SCALE_STEP = 0.05;
   // Canvas handles are drawn, not styled, so the one accent has to be spelled
   // out here. Keep it equal to --accent in app.css.
   const ACCENT = '#e8a33d';
+  const HANDLE_RING = '#10141c'; // the dark ring Collage draws its handles with
 
   const DRAW_TOOLS = [
     { id: 'select', icon: 'cursor', label: 'Select / move', shortcut: 'v' },
@@ -110,9 +138,18 @@
     { id: 'curve', icon: 'curve', label: 'Curve (click points, double-click to finish)', shortcut: 'c' },
     { id: 'freehand', icon: 'freehand', label: 'Freehand', shortcut: 'd' },
     { id: 'text', icon: 'text', label: 'Text', shortcut: 't' },
+    { id: 'callout', icon: 'calloutLeader', label: 'Callout (press the point, drag to the label)', shortcut: 'k' },
     { id: 'number', icon: 'numbered', label: 'Numbered marker', shortcut: 'n' },
     { id: 'blur', icon: 'blurBox', label: 'Blur box', shortcut: 'b' },
+    { id: 'zoom', icon: 'zoomInset', label: 'Zoom inset (frame the detail)', shortcut: 'z' },
+    { id: 'cone', icon: 'viewCone', label: 'View cone (press where the camera stood, drag the way it looked)', shortcut: 'o' },
   ];
+
+  // Ink is measured in page pixels, the same on every panel and overlay. Nodes
+  // are drawn inside their surface's scale, so each size is divided by it there.
+  const ARROW_HEAD = 14;
+  // Ctrl+D and a paste step a copy this far down-right of what it copies.
+  const PASTE_STEP = 26;
 
   // Document state. Notes are keyed by color, shapes bind to surfaces and pasted
   // images remain local to this proof.
@@ -142,7 +179,10 @@
     footerEnabled: true, // false → no footer line at all
     footerColor: null, // null → auto from the background
     footerAlign: 'left',
+    captionColor: null, // null → auto from the background
     captionsEnabled: true, // whether newly added panels get a default caption
+    font: DEFAULT_PROOF_FONT, // the typeface every word on the proof is set in
+    fontBold: true, // the words of labels, callouts and tags in bold
     bg: BG, // proof background fill; captions/legend/footer follow it (textColors)
     space: { pad: PAD, gap: GAP, rowGap: ROW_GAP }, // panel spacing, editable per proof
     layout: 'grid', // 'grid' (rows) | 'free' (drag panels anywhere, overlap allowed)
@@ -169,6 +209,18 @@
   // Saved proof slug, or null before the first save.
   let savedName = $state(null);
   let dirty = $state(false);
+
+  // ---- the analyst's layers the points are in -------------------------------
+  // Read again whenever the case moves or the tab comes back, since a marker is
+  // as easily taken out from the map as from here.
+  const pointLayers = createProofLayers({ api, layers: addedLayers, lookup: lookupEntity, notify: toast,
+    refreshEditor: (name) => { if (personalLayers.editor?.name === name) personalLayers.refresh(); } });
+  $effect(() => {
+    const owner = caseState.current?.id, name = savedName;
+    void caseState.rev;
+    if (uiState.tool !== 'proof') return;
+    untrack(() => pointLayers.refresh(owner, name));
+  });
 
   // ---- the clock the date is read on ---------------------------------------
   // The first point is the conclusion, and footage is read on the clock of the
@@ -292,6 +344,12 @@
   // analyst asks: a box drawn over the evidence must not hide it by default.
   let fillOpacity = $state(0);
   let iconName = $state(PROOF_ICONS[0].name); // symbol the stamp tool places
+  let calloutTail = $state('leader'); // how the next callout reaches its point
+  let lineStyle = $state('solid'); // how the next line is drawn: solid, dash or dot
+  // The lens the next view cone opens to: a phone's main camera, held landscape.
+  let coneLens = $state('1');
+  let coneUpright = $state(false);
+  let coneBadge = $state(CONE_BADGE); // how big the next cone's camera is drawn
   let guide = $state(null); // null | '16:9' | '4:5' — tweet centre-crop overlay
   // The picked annotations. A press replaces the set, shift adds to it, and a
   // marquee dragged over the page takes everything it touches. Panels, overlays
@@ -299,7 +357,7 @@
   let selectedIds = $state([]);
   let selectedPanelId = $state(null); // free-layout only: panel picked for move/resize
   let selectedPasteId = $state(null); // pasted image picked for move/resize/frame
-  let selectedSig = $state(null); // null | 'logo' | 'text' — signature picked for resize
+  let selectedSig = $state(null); // null | 'logo' | 'text' — signature picked for resize; 'footer' for its text
   let picker = $state(false);
   let pickerItems = $state([]);
   let newProofOpen = $state(false);
@@ -438,8 +496,11 @@
     proof.footer = style.footer;
     proof.footerEnabled = style.footerEnabled;
     proof.footerColor = style.footerColor;
+    proof.captionColor = style.captionColor;
     proof.footerAlign = style.footerAlign;
     proof.captionsEnabled = style.captionsEnabled;
+    proof.font = style.font;
+    proof.fontBold = style.fontBold;
     proof.bg = style.bg;
     proof.space = style.space;
     proof.layout = style.layout;
@@ -501,6 +562,7 @@
   let containerEl = $state();
   let stage, docLayer, uiLayer, transformer, cropHandles, endHandles, guideGroup, panelCtrls;
   let rotateKnob;
+  let landingGuide; // the outline of where a dragged mark will belong
   let canvasRenderGate;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
@@ -532,21 +594,28 @@
       rotationSnaps: [0, 90, 180, 270],
       rotationSnapTolerance: 5,
       flipEnabled: false,
-      anchorSize: 11,
-      anchorCornerRadius: 3,
-      anchorStroke: '#e8a33d',
-      anchorFill: '#252525',
-      borderStroke: '#e8a33d',
+      // Collage's handles, so a mark is pulled the same way in both tools: accent
+      // discs on the corners, accent squares on the sides, ringed dark so they
+      // hold up over bright imagery.
+      anchorSize: 13,
+      anchorCornerRadius: 2,
+      anchorStroke: HANDLE_RING,
+      anchorStrokeWidth: 2,
+      anchorFill: ACCENT,
+      borderStroke: ACCENT,
       borderDash: [4, 3],
       ignoreStroke: true,
-      // The turn knob reads like Collage's: a dark disc ringed in the accent,
-      // on a short accent stem, rather than the square corner anchors.
+      // The turn knob reads like Collage's too: a dark disc ringed in the accent,
+      // on a short accent stem.
       anchorStyleFunc: (anchor) => {
-        if (!anchor.hasName('rotater')) return;
-        anchor.cornerRadius(anchor.width() / 2);
-        anchor.fill('rgba(22, 22, 22, 0.92)');
-        anchor.stroke(ACCENT);
-        anchor.strokeWidth(1.5);
+        if (anchor.hasName('rotater')) {
+          anchor.cornerRadius(anchor.width() / 2);
+          anchor.fill('rgba(22, 22, 22, 0.92)');
+          anchor.stroke(ACCENT);
+          anchor.strokeWidth(1.5);
+        } else if (/(top|bottom)-(left|right)/.test(anchor.name())) {
+          anchor.cornerRadius(anchor.width() / 2);
+        }
       },
     });
     guideGroup = new Konva.Group({ listening: false });
@@ -560,6 +629,8 @@
     uiLayer.add(endHandles);
     panelCtrls = new Konva.Group();
     uiLayer.add(panelCtrls);
+    landingGuide = new Konva.Group({ listening: false });
+    uiLayer.add(landingGuide);
 
     const resize = new ResizeObserver(() => {
       stage.width(containerEl.clientWidth);
@@ -573,6 +644,14 @@
     stage.on('pointermove', onPointerMove);
     stage.on('pointerup', onPointerUp);
     stage.on('dblclick dbltap', () => { if (pathDraft) finishPath(true); });
+    // A mark being dragged says where it will belong once let go, when that is
+    // somewhere new. Handles draw their own (see drawLinkHandles), so only a
+    // mark's own drag answers here.
+    stage.on('dragmove', (event) => {
+      const s = proof.shapes.find((x) => x.id === event.target.id());
+      if (s) showLanding(landingOfDrag(s, event.target));
+    });
+    stage.on('dragend', () => showLanding(null));
 
     // The release can happen outside the canvas. Capture it at window level so
     // a deferred rebuild is never left waiting after an interrupted drag, and
@@ -609,6 +688,8 @@
     // Capture before Konva dispatches the event: selected annotations stop
     // bubbling at their node, so a Stage listener alone cannot see every press.
     containerEl.addEventListener('pointerdown', beginPointer, true);
+    containerEl.addEventListener('dblclick', onCanvasDblClick);
+    containerEl.addEventListener('contextmenu', onCanvasContextMenu);
     window.addEventListener('pointerup', settlePointer, true);
     window.addEventListener('pointercancel', settlePointer, true);
     window.addEventListener('blur', settlePointer);
@@ -616,6 +697,8 @@
     return () => {
       resize.disconnect();
       containerEl.removeEventListener('pointerdown', beginPointer, true);
+      containerEl.removeEventListener('dblclick', onCanvasDblClick);
+      containerEl.removeEventListener('contextmenu', onCanvasContextMenu);
       window.removeEventListener('pointerup', settlePointer, true);
       window.removeEventListener('pointercancel', settlePointer, true);
       window.removeEventListener('blur', settlePointer);
@@ -731,7 +814,7 @@
       proof.legendOrder,
       proof.captionSize, proof.legendSize, proof.footerSize, proof.footer,
       proof.footerEnabled, proof.footerColor,
-      proof.footerAlign,
+      proof.footerAlign, proof.captionColor,
       // the plate prints these when asked, and printing them changes its height:
       // both have to reach the rebuild, or the picture lags a line behind
       proof.footerCoords, proof.footerText, proof.points,
@@ -769,7 +852,28 @@
   // are deliberately absent from the measure: the panels alone size the
   // document, so moving a paste can never change the export.
   const boxesOf = () => layoutPanels(proof.panels, proof.captionSize, proof.layout, proof.space);
-  const surfacesOf = () => surfaces(proof);
+  // The pictures front→back, then the page itself, which takes the marks drawn
+  // free of any picture (see lib/freeMarks.js).
+  function surfacesOf() {
+    if (!hasProofCanvasContent(proof)) return surfaces(proof);
+    const { width, height } = measureDoc();
+    return [...surfaces(proof), pageEntry(width, height)];
+  }
+  // The proof's typeface, and the weight a mark's words are set in.
+  const proofFace = () => fontStack(proof.font);
+  const markWeight = () => (proof.fontBold === false ? 'normal' : 'bold');
+
+  // A canvas does not wait for a font: a word measured before its face arrived
+  // keeps the fallback's width. So the page is drawn again once the face is in,
+  // and an export waits for it.
+  let fontReady = Promise.resolve();
+  $effect(() => {
+    const face = proof.font;
+    fontReady = loadProofFont(face).then(() => {
+      if (stage && face === proof.font) rebuild();
+    });
+  });
+
   const measureDoc = () =>
     docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space);
 
@@ -796,8 +900,11 @@
     proof.footerCoords = false;
     proof.footerText = true;
     proof.footerColor = null;
+    proof.captionColor = null;
     proof.footerAlign = 'left';
     proof.captionsEnabled = true;
+    proof.font = DEFAULT_PROOF_FONT;
+    proof.fontBold = true;
     proof.bg = BG;
     proof.space = { pad: PAD, gap: GAP, rowGap: ROW_GAP };
     proof.layout = 'grid';
@@ -1228,8 +1335,8 @@
   const canMoveLeft = (i) => hasGroupNeighbor(proof.panels, i, -1, (p) => p.row ?? 0);
   const canMoveRight = (i) => hasGroupNeighbor(proof.panels, i, 1, (p) => p.row ?? 0);
 
-  // Grow / shrink a single panel (its drawn elements scale with it, since they
-  // live in the panel's natural pixel space and render at the panel box scale).
+  // Grow / shrink a single panel. Its marks live in its own pixels, so they stay
+  // on what they point at and span what they spanned; their ink keeps its width.
   function scalePanel(index, delta) {
     const p = proof.panels[index];
     const cur = p.scale ?? 1;
@@ -1328,9 +1435,16 @@
     requestAnimationFrame(fit);
   }
 
+  /** A line's ends that held to a picture leaving the proof stay where they are, free. */
+  function letGoOfSurface(surfaceId) {
+    const frame = frameOf(surfaceId);
+    if (frame) proof.shapes = proof.shapes.map((s) => letGoOf(s, surfaceId, frame));
+  }
+
   function removePanel(index) {
     const panel = proof.panels[index];
     if (cropSurfaceId === panel?.id) discardSurfaceCrop(); // it is leaving anyway
+    letGoOfSurface(panel.id);
     proof.shapes = proof.shapes.filter((s) => s.panel !== panel.id);
     proof.panels.splice(index, 1);
     normalizeRows();
@@ -1465,6 +1579,7 @@
     const paste = proof.pastes[index];
     if (!paste) return;
     if (cropSurfaceId === paste.id) discardSurfaceCrop(); // it is leaving anyway
+    letGoOfSurface(paste.id);
     proof.shapes = proof.shapes.filter((s) => s.panel !== paste.id);
     proof.pastes.splice(index, 1);
     selectedIds = [];
@@ -1596,7 +1711,7 @@
     const dx = (before?.x ?? 0) - (kept?.x ?? 0);
     const dy = (before?.y ?? 0) - (kept?.y ?? 0);
     withSurfaceCentrePreserved(item, () => {
-      proof.shapes = mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy));
+      proof.shapes = shiftedTies(mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy)), item.id, dx, dy);
       item.crop = kept;
       refreshSurface(item);
     });
@@ -1608,7 +1723,7 @@
     if (!item?.crop) return;
     const { x: dx, y: dy } = item.crop;
     withSurfaceCentrePreserved(item, () => {
-      proof.shapes = mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy));
+      proof.shapes = shiftedTies(mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy)), item.id, dx, dy);
       item.crop = null;
       refreshSurface(item);
     });
@@ -1719,9 +1834,36 @@
   }
 
   // Annotations are drawn on whatever surface is under the pointer — a panel or
-  // a pasted image. Pasted images are in front, so they claim the point first.
-  function surfaceAt(doc) {
-    return surfaceHitTest(surfacesOf(), doc);
+  // a pasted image, or the page around them. Pasted images are in front, so they
+  // claim the point first, and the page answers last. `page: false` for the
+  // marks that only mean something on a picture; `page: 'only'` to draw free.
+  function surfaceAt(doc, { page = true } = {}) {
+    const list = surfacesOf();
+    const held = page === 'only'
+      ? list.filter((x) => x.id === PAGE)
+      : page ? list : list.filter((x) => x.id !== PAGE);
+    return surfaceHitTest(held, doc);
+  }
+
+  /** Where a surface sits on the page now, or null once it is gone. */
+  function frameOf(surfaceId) {
+    const entry = surfacesOf().find((x) => x.id === surfaceId);
+    return entry ? surfaceFrame(entry) : null;
+  }
+
+  /** The pointer on the page, held inside the document. */
+  function docPointOnPage() {
+    const { width, height } = measureDoc();
+    return onPage(docPoint(), width, height);
+  }
+
+  /** The pointer in a surface's own pixels, held to its picture. */
+  function pointerOn(frame) {
+    const p = pageToSurface(docPoint(), frame);
+    return {
+      x: Math.min(Math.max(p.x, 0), frame.image[0]),
+      y: Math.min(Math.max(p.y, 0), frame.image[1]),
+    };
   }
 
   /** Take hold of the view. The cursor says so, since the tool's own crosshair
@@ -1785,7 +1927,11 @@
       return;
     }
     stage.draggable(false);
-    const hit = surfaceAt(docPoint());
+    // A mark drawn where no picture is, in a margin or a gap, is free on the
+    // page, and so is every mark drawn while the rail says to draw free. The
+    // marks that only mean something on a picture's pixels need one under them.
+    const free = freeDraw && canBeFree(tool);
+    const hit = surfaceAt(docPoint(), { page: free ? 'only' : canBeFree(tool) });
     // Nothing to draw on under the pointer. The room around the page pans in
     // Select, and it is the same room: a drag that cannot mean an annotation
     // means the view, rather than nothing at all.
@@ -1802,6 +1948,30 @@
     // and saying what it says are one act, so the editor opens over it rather
     // than leaving the word "Text" on the panel to be found and double-clicked.
     // The tool goes back to Select because the next act is the editing.
+    // A callout starts the same way but from its point: the press names the
+    // pixel, the drag carries the label to where it reads, and the release opens
+    // its editor. A press that never moved puts the label up and to the right.
+    if (tool === 'callout') {
+      const tipPage = surfaceToPage({ x: hit.nx, y: hit.ny }, hit.frame);
+      const node = new Konva.Line({
+        points: [tipPage.x, tipPage.y, tipPage.x, tipPage.y],
+        stroke: color, strokeWidth: calloutInk().line, dash: [6, 4], listening: false,
+      });
+      uiLayer.add(node);
+      drawing = {
+        panel, node, kind: 'callout', box: hit.box, frame: hit.frame,
+        start: { x: hit.nx, y: hit.ny }, tipPage,
+      };
+      return;
+    }
+    // A view cone starts where the camera stood and is aimed by the drag.
+    if (tool === 'cone') {
+      drawing = {
+        panel, kind: 'cone', box: hit.box, frame: hit.frame, group,
+        start: { x: hit.nx, y: hit.ny }, node: null, cone: null,
+      };
+      return;
+    }
     if (tool === 'text') {
       const s = {
         id: newId('s'), panel: panel.id, kind: 'text', color,
@@ -1826,7 +1996,7 @@
       if (!entry) return;
       const s = {
         id: newId('s'), panel: panel.id, kind: 'icon', name: entry.name, color,
-        x: hit.nx, y: hit.ny, size: iconSizeFor(hit.box.baseScale),
+        x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT,
         ...(isSolidIcon(entry.name) ? {} : { strokeWidth: strokeW }),
         ...(fillOpacity > 0 ? { fillOpacity } : {}),
       };
@@ -1842,7 +2012,7 @@
     if (tool === 'number') {
       const s = {
         id: newId('s'), panel: panel.id, kind: 'number', color,
-        x: hit.nx, y: hit.ny, size: iconSizeFor(hit.box.baseScale), n: nextMarkerNumber(color),
+        x: hit.nx, y: hit.ny, size: ICON_SIZE_DEFAULT, n: nextMarkerNumber(color),
       };
       proof.shapes.push(s);
       selectedIds = [s.id];
@@ -1858,11 +2028,11 @@
       if (!pathDraft) {
         const node = new Konva.Line({
           points: [hit.nx, hit.ny], tension: 0.5, stroke: color,
-          strokeWidth: strokeW / hit.box.baseScale, lineCap: 'round', lineJoin: 'round',
+          strokeWidth: strokeW / hit.box.scale, lineCap: 'round', lineJoin: 'round',
           listening: false,
         });
         group.add(node);
-        pathDraft = { panel, box: hit.box, node, points: [hit.nx, hit.ny] };
+        pathDraft = { panel, box: hit.box, frame: hit.frame, node, points: [hit.nx, hit.ny] };
       } else {
         pathDraft.points.push(hit.nx, hit.ny);
         pathDraft.node.points([...pathDraft.points]);
@@ -1870,17 +2040,23 @@
       }
       return;
     }
-    const sw = strokeW / hit.box.baseScale;
+    // Ink is in page pixels, and the draft is drawn inside the surface's scale.
+    const sw = strokeW / hit.box.scale;
     if (tool === 'freehand') {
       const node = new Konva.Line({
         points: [hit.nx, hit.ny], tension: 0.25, stroke: color,
         strokeWidth: sw, lineCap: 'round', lineJoin: 'round', listening: false,
       });
       group.add(node);
-      drawing = { panel, node, box: hit.box, kind: tool };
+      drawing = { panel, node, box: hit.box, frame: hit.frame, kind: tool };
       return;
     }
-    const common = { stroke: color, strokeWidth: sw, listening: false };
+    const common = {
+      stroke: color, strokeWidth: sw, listening: false,
+      ...(DASHABLE.has(tool) && dashPattern(lineStyle, strokeW)
+        ? { dash: dashPattern(lineStyle, strokeW).map((v) => v / hit.box.scale), lineCap: lineStyle === 'dot' ? 'round' : 'butt' }
+        : {}),
+    };
     // the draft is drawn with the fill it will be committed with, so the analyst
     // sees what the box hides while dragging it, not after
     const paint = canFill(tool) ? fillPaint(color, fillOpacity) : null;
@@ -1889,6 +2065,14 @@
       node = new Konva.Rect({
         x: hit.nx, y: hit.ny, width: 1, height: 1, cornerRadius: 2, fill: paint, ...common,
       });
+    } else if (tool === 'zoom') {
+      // The frame of what will be shown bigger; the inset itself is placed on
+      // the release, beside the frame where the page has room.
+      node = new Konva.Rect({
+        x: hit.nx, y: hit.ny, width: 1, height: 1,
+        dash: [7 / hit.box.scale, 5 / hit.box.scale],
+        ...common,
+      });
     } else if (tool === 'blur') {
       // The draft is a dashed box over a darkened patch: the blur itself is
       // built from the picture once the box is a box, and a filter re-applied
@@ -1896,7 +2080,7 @@
       node = new Konva.Rect({
         x: hit.nx, y: hit.ny, width: 1, height: 1,
         fill: 'rgba(20, 22, 26, 0.45)',
-        dash: [7 / hit.box.baseScale, 5 / hit.box.baseScale],
+        dash: [7 / hit.box.scale, 5 / hit.box.scale],
         ...common,
       });
     } else if (tool === 'ellipse') {
@@ -1904,14 +2088,14 @@
     } else {
       node = new Konva.Arrow({
         points: [hit.nx, hit.ny, hit.nx, hit.ny],
-        pointerLength: tool === 'arrow' ? 14 / hit.box.baseScale : 0,
-        pointerWidth: tool === 'arrow' ? 14 / hit.box.baseScale : 0,
+        pointerLength: tool === 'arrow' ? ARROW_HEAD / hit.box.scale : 0,
+        pointerWidth: tool === 'arrow' ? ARROW_HEAD / hit.box.scale : 0,
         fill: color,
         ...common,
       });
     }
     group.add(node);
-    drawing = { panel, node, start: { x: hit.nx, y: hit.ny }, box: hit.box, kind: tool };
+    drawing = { panel, node, start: { x: hit.nx, y: hit.ny }, box: hit.box, frame: hit.frame, kind: tool, free };
   }
 
   function onPointerMove() {
@@ -1937,27 +2121,41 @@
       return;
     }
     if (pathDraft) {
-      const box = pathDraft.box;
-      const doc = docPoint();
-      const nx = Math.min(Math.max((doc.x - box.x) / box.scale, 0), pathDraft.panel.natural[0]);
-      const ny = Math.min(Math.max((doc.y - box.y) / box.scale, 0), pathDraft.panel.natural[1]);
+      const { x: nx, y: ny } = pointerOn(pathDraft.frame);
       pathDraft.node.points([...pathDraft.points, nx, ny]);
       docLayer.batchDraw();
       return;
     }
     if (!drawing) return;
-    const box = drawing.box;
-    const doc = docPoint();
-    // clamp to the panel even if the pointer leaves it
-    const nx = Math.min(Math.max((doc.x - box.x) / box.scale, 0), drawing.panel.natural[0]);
-    const ny = Math.min(Math.max((doc.y - box.y) / box.scale, 0), drawing.panel.natural[1]);
+    if (drawing.kind === 'cone') {
+      // the line of sight follows the pointer, wherever it is on the page
+      const at = pageToSurface(docPoint(), drawing.frame);
+      drawing.cone = newCone(drawing, at);
+      drawing.node?.destroy();
+      drawing.node = makeConeNode(drawing.cone, drawing.box.scale, drawing.frame.rotation, { live: false, image: drawing.frame.image });
+      drawing.group.add(drawing.node);
+      docLayer.batchDraw();
+      return;
+    }
+    if (drawing.kind === 'callout') {
+      // the label goes anywhere on the page, so the pointer is not held to the picture
+      const at = docPoint();
+      drawing.node.points([drawing.tipPage.x, drawing.tipPage.y, at.x, at.y]);
+      uiLayer.batchDraw();
+      return;
+    }
     const { start, node, kind } = drawing;
+    // Clamp to the picture even if the pointer leaves it, except for a line or
+    // an arrow: its far end may reach the page or another picture, and hold
+    // there (see commitDrawing). Either way it stays inside the document.
+    const link = kind === 'arrow' || kind === 'line';
+    const { x: nx, y: ny } = link ? pageToSurface(docPointOnPage(), drawing.frame) : pointerOn(drawing.frame);
     if (kind === 'freehand') {
       const points = node.points();
       const lx = points[points.length - 2];
       const ly = points[points.length - 1];
       if (nx !== lx || ny !== ly) node.points([...points, nx, ny]);
-    } else if (kind === 'rect' || kind === 'blur') {
+    } else if (kind === 'rect' || kind === 'blur' || kind === 'zoom') {
       node.setAttrs({
         x: Math.min(start.x, nx), y: Math.min(start.y, ny),
         width: Math.abs(nx - start.x), height: Math.abs(ny - start.y),
@@ -2005,7 +2203,19 @@
   /** Fold the draft in hand into an annotation, or drop it for being too small. */
   function commitDrawing() {
     if (!drawing) return;
-    const { node, kind, panel } = drawing;
+    if (drawing.kind === 'callout') {
+      commitCallout();
+      return;
+    }
+    if (drawing.kind === 'zoom') {
+      commitZoom();
+      return;
+    }
+    if (drawing.kind === 'cone') {
+      commitCone();
+      return;
+    }
+    const { node, kind, panel, frame, free } = drawing;
     const box = drawing.box;
     drawing = null;
     const minSize = 5 / box.scale;
@@ -2027,16 +2237,18 @@
     }
     node.destroy();
     if (shape) {
-      const s = {
+      let s = {
         id: newId('s'), panel: panel.id,
         // A blur box carries neither: it hides what is under it rather than
         // pointing at it, so it is drawn from the picture's own pixels and
         // nothing ever reads a colour or a line width off it.
         ...(kind === 'blur' ? {} : { color, strokeWidth: strokeW }),
+        ...(DASHABLE.has(kind) && lineStyle !== 'solid' ? { dash: lineStyle } : {}),
         // only the kinds that can hold one carry the field, and only once asked
         ...(canFill(kind) && fillOpacity > 0 ? { fillOpacity } : {}),
         ...shape,
       };
+      if (kind === 'arrow' || kind === 'line') s = linkFromDraft(s, frame, free);
       proof.shapes.push(s);
       selectedIds = [s.id];
       // The pen goes down with the shape. What follows a stroke is almost always
@@ -2049,6 +2261,114 @@
       tool = 'select';
       dirty = true;
     }
+  }
+
+  /**
+   * A line or arrow just drawn, settled from what is under each end: drawn
+   * within one picture it is that picture's mark, as ever; drawn from one picture
+   * to another, or out into a margin, it goes on the page and each end holds to
+   * the picture it was pressed or let go on. Drawn free, it holds to nothing.
+   */
+  function linkFromDraft(s, frame, free) {
+    const [x0, y0, x1, y1] = s.points;
+    const start = surfaceToPage({ x: x0, y: y0 }, frame);
+    const end = surfaceToPage({ x: x1, y: y1 }, frame);
+    const held = s.panel === PAGE || free ? null : { id: s.panel, nx: x0, ny: y0 };
+    return settleLink(
+      s,
+      { page: start, on: held },
+      { page: end, on: free ? null : pictureUnder(surfacesOf(), end) },
+    );
+  }
+
+  /** Settle a callout's drag: its point where it was pressed, its label where it was let go. */
+  function commitCallout() {
+    const { node, panel, start, tipPage } = drawing;
+    drawing = null;
+    node.destroy();
+    uiLayer.batchDraw();
+    const at = docPoint();
+    // under a few screen pixels the press was a click, not a drag
+    const dragged = Math.hypot(at.x - tipPage.x, at.y - tipPage.y) * stage.scaleX() > 4;
+    const s = {
+      id: newId('s'), panel: panel.id, kind: 'callout', color, text: 'Text',
+      fontSize: CALLOUT_FONT, x: start.x, y: start.y,
+      dx: dragged ? at.x - tipPage.x : CALLOUT_OFFSET.dx,
+      dy: dragged ? at.y - tipPage.y : CALLOUT_OFFSET.dy,
+      tail: calloutTail,
+    };
+    proof.shapes.push(s);
+    selectedIds = [s.id];
+    tool = 'select';
+    dirty = true;
+    // a frame later, for the reason the label waits (see the Text tool)
+    requestAnimationFrame(() => startTextEdit(s));
+  }
+
+  /**
+   * A cone from where the press was toward `at`, in the picture's own pixels,
+   * opening to the lens in hand. A drag shorter than a few screen pixels was a
+   * click, which aims the cone up the picture at a length that reads.
+   */
+  function newCone(draft, at) {
+    const { start, box } = draft;
+    const reach = at ? Math.hypot(at.x - start.x, at.y - start.y) : 0;
+    const clicked = reach * box.scale * stage.scaleX() < 6;
+    return {
+      id: newId('s'), panel: draft.panel.id, kind: 'cone', color, strokeWidth: strokeW,
+      x: start.x, y: start.y,
+      rotation: clicked ? 0 : bearingTo(start, at),
+      reach: clicked ? 160 / box.scale : reach,
+      fov: lensFov(coneLens, coneUpright), lens: coneLens, upright: coneUpright,
+      badge: coneBadge, fillOpacity: 0.35,
+      ...(lineStyle !== 'solid' ? { dash: lineStyle } : {}),
+    };
+  }
+
+  /** Settle a cone where it was drawn, or straight up from a click. */
+  function commitCone() {
+    const draft = drawing;
+    drawing = null;
+    draft.node?.destroy();
+    const s = draft.cone ?? newCone(draft, null);
+    proof.shapes.push(s);
+    selectedIds = [s.id];
+    tool = 'select';
+    dirty = true;
+  }
+
+  /** Settle an inset's frame, and put the enlargement where the page has room. */
+  function commitZoom() {
+    const { node, panel, frame } = drawing;
+    drawing = null;
+    const w = node.width();
+    const h = node.height();
+    const rect = { x: node.x(), y: node.y(), w, h };
+    node.destroy();
+    // a frame under a few screen pixels a side is a slipped click
+    const minSize = 5 / (frame.box.scale * stage.scaleX());
+    if (w <= minSize || h <= minSize) return;
+    const { width, height } = measureDoc();
+    const { box } = frame;
+    // the frame as the page sees it: its centre, and its size at the picture's scale
+    const centre = surfaceToPage({ x: rect.x + w / 2, y: rect.y + h / 2 }, frame);
+    const pw = w * box.scale;
+    const ph = h * box.scale;
+    const placed = insetPlacement(
+      { x: centre.x - pw / 2, y: centre.y - ph / 2, w: pw, h: ph },
+      { x: box.x, y: box.y, w: box.w, h: box.h },
+      width,
+      height,
+    );
+    const s = {
+      id: newId('s'), panel: panel.id, kind: 'zoom', color, strokeWidth: strokeW,
+      ...(lineStyle !== 'solid' ? { dash: lineStyle } : {}),
+      ...rect, iw: placed.iw, dx: placed.dx, dy: placed.dy,
+    };
+    proof.shapes.push(s);
+    selectedIds = [s.id];
+    tool = 'select';
+    dirty = true;
   }
 
   function onPointerUp() {
@@ -2135,11 +2455,11 @@
   /**
    * The decorative border of a panel or a pasted image, drawn inset so it never
    * spills past the image: the document is measured from the panels, and a frame
-   * must not change what that measure sees. Width is in the surface's own pixels,
-   * so it grows with the surface exactly as an annotation does.
+   * must not change what that measure sees. Width is in page pixels like any
+   * other ink, so a 6 px border is 6 px on every panel; `scale` is the surface's.
    */
-  function frameNode(frame, natural) {
-    const w = frame.width;
+  function frameNode(frame, natural, scale) {
+    const w = frame.width / scale;
     return new Konva.Rect({
       x: w / 2, y: w / 2,
       width: Math.max(0, natural[0] - w), height: Math.max(0, natural[1] - w),
@@ -2274,18 +2594,23 @@
         beginSurfaceCrop(panel);
       });
       if (panel.img) group.add(surfaceImageNode(panel, image));
-      if (panel.frame) group.add(frameNode(panel.frame, image));
-      for (const s of proof.shapes.filter((x) => x.panel === panel.id)) {
-        group.add(makeShapeNode(s, box, panel));
+      if (panel.frame) group.add(frameNode(panel.frame, image, box.scale));
+      for (const s of proof.shapes.filter((x) => x.panel === panel.id && !isPageMark(x))) {
+        addSurfaceShape(group, s, box, panel);
       }
       docLayer.add(group);
       if (panel.caption?.trim()) {
-        docLayer.add(new Konva.Text({
+        // A press on the caption picks its panel, whose rail sizes and colours
+        // the captions; a double-click writes on it (see onCanvasDblClick).
+        const caption = new Konva.Text({
+          id: `cap-${panel.id}`,
           x: box.x + 2, y: box.y + box.h + 9,
           width: box.w - 4, text: panel.caption,
-          fontSize: capSize, fontFamily: 'system-ui, sans-serif',
-          fill: tc.dim, ellipsis: true, wrap: 'none', listening: false,
-        }));
+          fontSize: capSize, fontFamily: proofFace(),
+          fill: proof.captionColor || tc.dim, ellipsis: true, wrap: 'none',
+        });
+        caption.on('click tap', () => selectPanel(panel.id));
+        docLayer.add(caption);
       }
     }
 
@@ -2307,7 +2632,7 @@
       docLayer.add(new Konva.Text({
         x: cx + r * 2 + 8, y: cy - legendSize * 0.62, width: colW - (r * 2 + 8),
         text: line.text, fontSize: legendSize, fill: tc.main,
-        fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
+        fontFamily: proofFace(), ellipsis: true, wrap: 'none', listening: false,
       }));
     });
     const printed = proof.footerEnabled !== false ? footerLines(proof, prefs.coordFormat) : [];
@@ -2318,17 +2643,22 @@
       // the drawing, or a proof that grew a line would overflow its own picture.
       const lines = printed;
       const band = footerBand(footerSize);
+      // One mark on the canvas: a press picks it for its size and colour, and a
+      // double-click writes its credit line.
+      const footer = new Konva.Group({ id: 'proof-footer' });
+      footer.on('click tap', () => { if (tool === 'select') selectSig('footer'); });
       lines.forEach((line, i) => {
-        docLayer.add(new Konva.Text({
+        footer.add(new Konva.Text({
           x: pad,
           y: height - pad - band * (lines.length - i) + Math.round((band - footerSize) / 2),
           width: width - pad * 2,
           text: line,
           align: proof.footerAlign === 'right' ? 'right' : 'left',
           fontSize: footerSize, fill: proof.footerColor || tc.faint,
-          fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
+          fontFamily: proofFace(), ellipsis: true, wrap: 'none',
         }));
       });
+      docLayer.add(footer);
     }
 
     // Pasted images, over the panels and the legend: pixels laid on top of the
@@ -2366,12 +2696,31 @@
         beginSurfaceCrop(paste);
       });
       if (paste.img) group.add(surfaceImageNode(paste, image));
-      if (paste.frame) group.add(frameNode(paste.frame, image));
-      for (const s of proof.shapes.filter((x) => x.panel === paste.id)) {
-        group.add(makeShapeNode(s, box, paste));
+      if (paste.frame) group.add(frameNode(paste.frame, image, box.scale));
+      for (const s of proof.shapes.filter((x) => x.panel === paste.id && !isPageMark(x))) {
+        addSurfaceShape(group, s, box, paste);
       }
       docLayer.add(group);
     }
+
+    // Callouts and zoom insets point from a picture out onto the page, and the
+    // free marks belong to it: all are drawn over every picture and overlay, in
+    // the order the list keeps. The group is the page's, as a panel's is its own.
+    const pageMarks = new Konva.Group({ id: `pg-${PAGE}` });
+    const surfaceList = surfacesOf();
+    const pageSurface = surfaceList.find((x) => x.id === PAGE);
+    for (const s of proof.shapes.filter((x) => isPageMark(x) || isFree(x))) {
+      if (isFree(s)) {
+        if (pageSurface) addSurfaceShape(pageMarks, s, pageSurface.box, pageSurface.item);
+        continue;
+      }
+      const entry = surfaceList.find((x) => x.id === s.panel);
+      if (!entry) continue;
+      const frame = surfaceFrame(entry);
+      if (s.kind === 'callout') addCalloutNodes(pageMarks, s, frame, { width, height });
+      else addZoomNodes(pageMarks, s, frame, { width, height }, entry.item);
+    }
+    docLayer.add(pageMarks);
 
     const st = proof.signatureText && prefs.signatureHandle?.trim() ? proof.signatureText : null;
     const pendingHandleNode = st ? new Konva.Text({
@@ -2379,7 +2728,7 @@
       text: prefs.signatureHandle.trim(),
       fontSize: st.size ?? SIG_TEXT_SIZE,
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif',
+      fontFamily: proofFace(),
       fill: st.color ?? '#ffffff',
       opacity: st.opacity ?? 1,
       listening: true,
@@ -2495,9 +2844,11 @@
     const pasteNode = !selectedNodes.length && !panelNode && selectedPasteId
       ? docLayer.findOne(`#pg-${selectedPasteId}`)
       : null;
+    // the footer is picked for its size and colour only: framed, with nothing to pull
     const sigNode = !selectedNodes.length && !panelNode && !pasteNode && selectedSig
-      ? docLayer.findOne(selectedSig === 'logo' ? '#sig-logo' : '#sig-text')
+      ? docLayer.findOne({ logo: '#sig-logo', text: '#sig-text', footer: '#proof-footer' }[selectedSig])
       : null;
+    const footerPicked = !!sigNode && selectedSig === 'footer';
     const boundPanel = panelNode ? proof.panels.find((p) => p.id === selectedPanelId) : null;
     const boundPaste = pasteNode ? proof.pastes.find((p) => p.id === selectedPasteId) : null;
     transformer.boundBoxFunc((oldBox, newBox) => {
@@ -2527,10 +2878,13 @@
           : panelNode ? [panelNode] : pasteNode ? [pasteNode] : sigNode ? [sigNode] : []
     );
     const selKind = selectedShape?.kind;
+    // A cone is pulled by its own handles; a box drawn round a wedge says nothing.
+    transformer.borderEnabled(selKind !== 'cone');
     // A marker is a disc and a symbol is a glyph: both keep their ratio, because
     // an oval number and a squashed symbol are not the same mark drawn bigger.
+    // An inset keeps its frame's proportions, or it would show something else.
     transformer.keepRatio(
-      !!sigNode || !!panelNode || !!pasteNode || selKind === 'icon' || selKind === 'number'
+      !!sigNode || !!panelNode || !!pasteNode || selKind === 'icon' || selKind === 'number' || selKind === 'zoom'
     );
     transformer.rotateEnabled(
       !!panelNode || !!pasteNode
@@ -2546,8 +2900,8 @@
     transformer.enabledAnchors(
       selKind === 'rect' || selKind === 'ellipse' || selKind === 'freehand' || selKind === 'blur'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : selKind === 'text' || selKind === 'icon' || selKind === 'number'
-            || panelNode || pasteNode || sigNode
+        : selKind === 'text' || selKind === 'icon' || selKind === 'number' || selKind === 'zoom'
+            || panelNode || pasteNode || (sigNode && !footerPicked)
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
@@ -2776,24 +3130,41 @@
   function drawEndHandles(list) {
     endHandles.destroyChildren();
     const s = selectedShape;
-    if (tool !== 'select' || !s || !POINT_KINDS.has(s.kind)) return;
+    if (tool !== 'select' || !s) return;
+    if (!POINT_KINDS.has(s.kind) && s.kind !== 'callout' && s.kind !== 'zoom' && s.kind !== 'cone') return;
     const surface = list.find((x) => x.id === s.panel);
     if (!surface) return;
-    const box = surface.box;
-    const panel = surface.item;
+    // the handles sit on the page, over a surface that may be turned
+    const frame = surfaceFrame(surface);
     const node = docLayer.findOne(`#${s.id}`);
     const r = 7 / stage.scaleX();
+    const look = { radius: r, fill: ACCENT, stroke: HANDLE_RING, strokeWidth: 2 / stage.scaleX(), draggable: true, name: 'endh' };
+    if (s.kind === 'callout') {
+      drawTipHandle(s, frame, look);
+      return;
+    }
+    if (s.kind === 'zoom') {
+      drawFrameHandles(s, frame, look);
+      return;
+    }
+    if (s.kind === 'cone') {
+      drawConeHandles(s, frame, look);
+      return;
+    }
+    if (isLink(s)) {
+      drawLinkHandles(s, frame, look);
+      return;
+    }
     for (let vi = 0; vi < s.points.length; vi += 2) {
       const handle = new Konva.Circle({
-        x: box.x + s.points[vi] * box.scale,
-        y: box.y + s.points[vi + 1] * box.scale,
-        radius: r, fill: '#252525', stroke: '#e8a33d', strokeWidth: 2 / stage.scaleX(),
-        draggable: true, name: 'endh',
+        ...surfaceToPage({ x: s.points[vi], y: s.points[vi + 1] }, frame),
+        ...look,
       });
       const apply = (commit) => {
-        const nx = Math.min(Math.max((handle.x() - box.x) / box.scale, 0), panel.natural[0]);
-        const ny = Math.min(Math.max((handle.y() - box.y) / box.scale, 0), panel.natural[1]);
-        handle.position({ x: box.x + nx * box.scale, y: box.y + ny * box.scale });
+        const own = pageToSurface(handle.position(), frame);
+        const nx = Math.min(Math.max(own.x, 0), frame.image[0]);
+        const ny = Math.min(Math.max(own.y, 0), frame.image[1]);
+        handle.position(surfaceToPage({ x: nx, y: ny }, frame));
         if (commit) {
           s.points[vi] = nx;
           s.points[vi + 1] = ny;
@@ -2811,6 +3182,130 @@
       handle.on('dragend', () => apply(true));
       endHandles.add(handle);
     }
+  }
+
+  /**
+   * A line's or an arrow's two ends. An end let go over a picture holds to it
+   * and follows it from then on, wherever the other end is; one let go in a
+   * margin is free on the page. Both on one picture make that picture's mark. An
+   * end that holds is drawn the other way round, dark and ringed in the accent.
+   */
+  function drawLinkHandles(s, frame, look) {
+    const node = docLayer.findOne(`#${s.id}`);
+    const page = isFree(s)
+      ? linkPoints(s, frameOf)
+      : [0, 2].flatMap((i) => {
+          const p = surfaceToPage({ x: s.points[i], y: s.points[i + 1] }, frame);
+          return [p.x, p.y];
+        });
+    const held = isFree(s) ? [0, 1].map((i) => !!s.ends?.[i]) : [true, true];
+    // what the end that is not moving holds to, in the shape `settleLink` reads
+    const holdOf = (i) => {
+      if (!isFree(s)) return { id: s.panel, nx: s.points[i * 2], ny: s.points[i * 2 + 1] };
+      const tie = s.ends?.[i];
+      return tie ? { id: tie.panel, nx: tie.x, ny: tie.y } : null;
+    };
+    [0, 1].forEach((i) => {
+      const handle = new Konva.Circle({
+        ...look, x: page[i * 2], y: page[i * 2 + 1],
+        ...(held[i] ? { fill: HANDLE_RING, stroke: ACCENT } : {}),
+      });
+      const at = () => {
+        const { width, height } = measureDoc();
+        return onPage(handle.position(), width, height);
+      };
+      handle.on('dragmove', () => {
+        const p = at();
+        handle.position(p);
+        if (node) {
+          const own = pageToSurface(p, frame);
+          const pts = [...node.points()];
+          pts[i * 2] = own.x;
+          pts[i * 2 + 1] = own.y;
+          node.points(pts);
+          docLayer.batchDraw();
+        }
+        showLanding(pictureUnder(surfacesOf(), p));
+      });
+      handle.on('dragend', () => {
+        const p = at();
+        const other = 1 - i;
+        const ends = [];
+        ends[i] = { page: p, on: pictureUnder(surfacesOf(), p) };
+        ends[other] = { page: { x: page[other * 2], y: page[other * 2 + 1] }, on: holdOf(other) };
+        putShape(settleLink(s, ends[0], ends[1]));
+        showLanding(null);
+        dirty = true;
+      });
+      endHandles.add(handle);
+    });
+  }
+
+  /**
+   * A callout's point, pulled to another pixel. The label stays where it is on
+   * the page, and the point lands on whichever picture it is let go over, or is
+   * held to its own when it is let go over none.
+   */
+  function drawTipHandle(s, frame, look) {
+    const tip = surfaceToPage({ x: s.x, y: s.y }, frame);
+    const label = { x: tip.x + (s.dx ?? 0), y: tip.y + (s.dy ?? 0) };
+    const handle = new Konva.Circle({ ...tip, ...look });
+    handle.on('dragend', () => {
+      const at = handle.position();
+      const hit = surfaceAt(at, { page: false });
+      let landed;
+      if (hit) {
+        s.panel = hit.id;
+        landed = { x: hit.nx, y: hit.ny, frame: hit.frame };
+      } else {
+        const own = pageToSurface(at, frame);
+        landed = {
+          x: Math.min(Math.max(own.x, 0), frame.image[0]),
+          y: Math.min(Math.max(own.y, 0), frame.image[1]),
+          frame,
+        };
+      }
+      s.x = landed.x;
+      s.y = landed.y;
+      const point = surfaceToPage(landed, landed.frame);
+      s.dx = label.x - point.x;
+      s.dy = label.y - point.y;
+      dirty = true;
+    });
+    endHandles.add(handle);
+  }
+
+  /**
+   * An inset's frame, reshaped from its corners on its own picture: each corner
+   * pulls against the one across from it, and the enlargement follows the new
+   * proportions at its own width.
+   */
+  function drawFrameHandles(s, frame, look) {
+    const own = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]];
+    own.forEach(([x, y], i) => {
+      const handle = new Konva.Rect({
+        ...look, width: look.radius * 1.6, height: look.radius * 1.6,
+        offsetX: look.radius * 0.8, offsetY: look.radius * 0.8,
+        ...surfaceToPage({ x, y }, frame),
+      });
+      const [ax, ay] = own[(i + 2) % 4];
+      const minSide = 4 / frame.box.scale;
+      handle.on('dragend', () => {
+        const p = pageToSurface(handle.position(), frame);
+        const px = Math.min(Math.max(p.x, 0), frame.image[0]);
+        const py = Math.min(Math.max(p.y, 0), frame.image[1]);
+        const w = Math.abs(px - ax);
+        const h = Math.abs(py - ay);
+        if (w >= minSide && h >= minSide) {
+          s.x = Math.min(px, ax);
+          s.y = Math.min(py, ay);
+          s.w = w;
+          s.h = h;
+        }
+        dirty = true;
+      });
+      endHandles.add(handle);
+    });
   }
 
   // Grid-mode panel controls: the selected panel (framed by the transformer)
@@ -2861,73 +3356,534 @@
     }
   }
 
-  // On drop, re-bind a shape to whichever surface its anchor now sits over — a
-  // panel or a pasted image — and convert its coordinates into that surface's
-  // natural pixel space. Returns the source/destination layout boxes so the
-  // caller can remap x/y or points.
-  function rebindOnDrop(s, node) {
-    const list = surfacesOf();
-    const from = list.find((x) => x.id === s.panel);
-    if (!from) return { fromBox: null, toBox: null };
-    const fromBox = from.box;
-    let anchor;
-    // Boxed kinds answer for their middle, a polyline for the mean of its
-    // vertices, and everything else for the origin it is drawn from. Sorted by
-    // what the shape holds rather than by a list of kinds: a numbered marker and
-    // a blur box both used to fall through to the polyline branch, where reading
-    // the points they have none of threw inside `dragend` — so the drop was
-    // never written down and the mark sprang back to where it had been picked up.
-    if (s.kind === 'rect' || s.kind === 'blur') {
-      anchor = { x: node.x() + (s.w ?? 0) / 2, y: node.y() + (s.h ?? 0) / 2 };
-    } else if (!Array.isArray(s.points)) {
-      anchor = { x: node.x(), y: node.y() };
-    } else {
-      const pts = s.points.map((v, i) => v + (i % 2 === 0 ? node.x() : node.y()));
-      let sx = 0, sy = 0;
-      for (let i = 0; i < pts.length; i += 2) { sx += pts[i]; sy += pts[i + 1]; }
-      anchor = { x: sx / (pts.length / 2), y: sy / (pts.length / 2) };
+  /**
+   * A double-click that writes on a mark: a label's or a callout's words, a
+   * box's tag. Read off the browser's own double-click rather than Konva's, which
+   * is only reported when both presses land on one node: a first press that
+   * draws the page again (a legend line it commits, say) leaves a new node under
+   * the second, and the double-click was lost. Both presses were still on the
+   * same mark, and that is what is asked. A label or a callout that Konva did
+   * hear has its editor open already, which is what `textEdit` says.
+   */
+  function onCanvasDblClick(event) {
+    if (tool !== 'select' || textEdit || !stage) return;
+    const at = targetUnder(event);
+    if (at.caption || at.footer) {
+      if (at.caption) startCaptionEdit(at.caption);
+      else startFooterEdit();
+      event.preventDefault();
+      return;
     }
-    const dx = fromBox.x + anchor.x * fromBox.scale;
-    const dy = fromBox.y + anchor.y * fromBox.scale;
-    // the list is front→back, so the topmost surface claims the drop
-    const to = surfaceHitTest(list, { x: dx, y: dy }) ?? from;
-    s.panel = to.id;
-    return { fromBox, toBox: to.box };
+    const s = at.shape;
+    if (!s) return;
+    if (s.kind === 'rect') startTagEdit(s);
+    else if (s.kind === 'text' || s.kind === 'callout') startTextEdit(s);
+    else return;
+    event.preventDefault();
   }
 
-  // Doc→panel remap of a single x/y origin between two layout boxes.
-  // `box` carries `scale` (natural→doc, grows with the panel) and `baseScale`
-  // (that mapping at scale 1). Stroke width and arrow heads are normalised by
-  // baseScale so they read the same across image resolutions yet still grow
-  // proportionally when the panel is scaled up.
+  /**
+   * What a browser pointer event is over: a mark, a panel, an overlay, or only
+   * the page. A box's tag answers for its box.
+   */
+  function targetUnder(event) {
+    stage.setPointersPositions(event);
+    let node = stage.getIntersection(stage.getPointerPosition());
+    for (; node; node = node.getParent()) {
+      const id = node.getAttr('markId') ?? node.id();
+      if (!id) continue;
+      const shape = proof.shapes.find((x) => x.id === id);
+      if (shape) return { shape };
+      if (id === 'proof-footer') return { footer: true };
+      if (id.startsWith('cap-')) {
+        const caption = proof.panels.find((p) => p.id === id.slice(4));
+        if (caption) return { caption };
+      }
+      if (!id.startsWith('pg-')) continue;
+      const panelIndex = proof.panels.findIndex((p) => p.id === id.slice(3));
+      if (panelIndex >= 0) return { panel: proof.panels[panelIndex], panelIndex };
+      const pasteIndex = proof.pastes.findIndex((p) => p.id === id.slice(3));
+      if (pasteIndex >= 0) return { paste: proof.pastes[pasteIndex], pasteIndex };
+    }
+    return {};
+  }
+
+  // A mark is drawn over the marks of its own picture, or over every picture
+  // for a callout, an inset or a free mark (whose `panel` is the page already),
+  // so that is what a step in the stack steps past.
+  const stackLayer = (s) => (isPageMark(s) ? 'page' : s.panel);
+
+  /** Bring the picked marks to the front or forward, send them backward or to the back. */
+  function restack(how) {
+    const next = restacked(proof.shapes, selectedIds, how, stackLayer);
+    if (next === proof.shapes) return;
+    proof.shapes = next;
+    dirty = true;
+  }
+
+  let ctxMenu = $state(null);
+
+  /**
+   * The right-click's say on where the picked marks belong: set free on the
+   * page what follows a picture, pin to the picture under it what is free.
+   */
+  function anchorItems() {
+    const marks = editableShapes.filter((s) => canBeFree(s.kind));
+    if (!marks.length) return [];
+    const list = surfacesOf();
+    const pinnable = (s) => {
+      if (holdsToPicture(s)) return false;
+      if (!isLink(s)) return !!pictureUnder(list, anchorOf(s));
+      const pts = linkPoints(s, frameOf);
+      return [0, 2].some((i) => !!pictureUnder(list, { x: pts[i], y: pts[i + 1] }));
+    };
+    const items = [];
+    if (marks.some(holdsToPicture)) {
+      items.push({ label: 'Free on the page', icon: 'anchorPage', run: () => setAnchor('page') });
+    }
+    if (marks.some((s) => !holdsToPicture(s))) {
+      items.push({
+        label: 'Pin to the picture', icon: 'anchorPicture',
+        run: () => setAnchor('picture'), disabled: !marks.some(pinnable),
+      });
+    }
+    return [...items, 'sep'];
+  }
+
+  /**
+   * The canvas's right-click. It never opens the browser's own menu here: this
+   * is a drawing surface, and a right-click answers with what can be done to
+   * what is under the pointer. A mark not yet picked is picked first, as it is
+   * in every editor. A drawing tool in hand keeps the canvas to itself, so the
+   * right button stays silent then, as it neither draws nor drops a pick.
+   */
+  function onCanvasContextMenu(event) {
+    event.preventDefault();
+    if (!stage || tool !== 'select' || drawing || pathDraft || textEdit || cropSurfaceId) return;
+    const at = targetUnder(event);
+    const keys = (k) => shortcut(k);
+    let title = '';
+    let items = [];
+    if (at.shape) {
+      if (!selectedIds.includes(at.shape.id)) pickShape(at.shape.id);
+      const many = selectedIds.length > 1;
+      const can = (how) => restacked(proof.shapes, selectedIds, how, stackLayer) !== proof.shapes;
+      title = many ? `${selectedIds.length} marks` : (KIND_LABEL[at.shape.kind] ?? 'Mark');
+      items = [
+        { label: 'Bring to front', keys: keys('Ctrl+Shift+↑'), run: () => restack('front'), disabled: !can('front') },
+        { label: 'Bring forward', icon: 'chevronUp', keys: keys('Ctrl+↑'), run: () => restack('forward'), disabled: !can('forward') },
+        { label: 'Send backward', icon: 'chevronDown', keys: keys('Ctrl+↓'), run: () => restack('backward'), disabled: !can('backward') },
+        { label: 'Send to back', keys: keys('Ctrl+Shift+↓'), run: () => restack('back'), disabled: !can('back') },
+        'sep',
+        ...anchorItems(),
+        { label: 'Duplicate', icon: 'copy', keys: keys('Ctrl+D'), run: () => duplicateShape(), disabled: many },
+        { label: 'Copy', icon: 'clipboard', keys: keys('Ctrl+C'), run: () => copyShape(), disabled: many },
+        'sep',
+        { label: 'Delete', icon: 'trash', keys: 'Del', danger: true, run: deleteSelected },
+      ];
+    } else if (at.caption) {
+      selectPanel(at.caption.id);
+      title = 'Caption';
+      items = [{ label: 'Edit caption', icon: 'edit', run: () => startCaptionEdit(at.caption) }];
+    } else if (at.footer) {
+      selectSig('footer');
+      title = 'Footer';
+      items = [{
+        label: 'Edit credit line', icon: 'edit', run: startFooterEdit, disabled: proof.footerText === false,
+      }];
+    } else if (at.panel || at.paste) {
+      const item = at.panel ?? at.paste;
+      const index = at.panel ? at.panelIndex : at.pasteIndex;
+      const list = at.panel ? proof.panels : proof.pastes;
+      const move = (delta) => (at.panel ? movePanelZ(index, delta) : movePasteZ(index, delta));
+      if (at.panel) selectPanel(item.id);
+      else selectPaste(item.id);
+      title = at.panel ? 'Panel' : 'Overlay';
+      // Panels only overlap in free layout; in the grid their order is the grid's.
+      const stacks = at.paste || proof.layout === 'free';
+      items = [
+        ...(stacks ? [
+          { label: 'Bring to front', run: () => move(-index), disabled: index === 0 },
+          { label: 'Bring forward', icon: 'chevronUp', run: () => move(-1), disabled: index === 0 },
+          { label: 'Send backward', icon: 'chevronDown', run: () => move(1), disabled: index === list.length - 1 },
+          { label: 'Send to back', run: () => move(list.length - 1 - index), disabled: index === list.length - 1 },
+          'sep',
+        ] : []),
+        { label: 'Crop', icon: 'crop', run: () => beginSurfaceCrop(item) },
+        'sep',
+        {
+          label: at.panel ? 'Remove panel' : 'Remove overlay', icon: 'trash', danger: true,
+          run: () => (at.panel ? removePanel(index) : removePaste(index)),
+        },
+      ];
+    } else {
+      items = [
+        ...(clipboard ? [{ label: 'Paste', icon: 'clipboard', keys: keys('Ctrl+V'), run: pasteShape }, 'sep'] : []),
+        { label: 'Fit view', icon: 'eye', keys: 'F', run: fit },
+      ];
+    }
+    ctxMenu = { x: event.clientX, y: event.clientY, title, items };
+  }
+
+  /**
+   * The point a mark answers for when it is let go, in its surface's pixels.
+   * Boxed kinds answer for their middle, a polyline for the mean of its
+   * vertices, and everything else for the origin it is drawn from. Sorted by
+   * what the shape holds rather than by a list of kinds: a numbered marker and
+   * a blur box both used to fall through to the polyline branch, where reading
+   * the points they have none of threw inside `dragend` — so the drop was
+   * never written down and the mark sprang back to where it had been picked up.
+   */
+  function anchorOf(s) {
+    if (s.kind === 'rect' || s.kind === 'blur' || s.kind === 'zoom') {
+      const turn = ((s.rotation ?? 0) * Math.PI) / 180;
+      const hw = (s.w ?? 0) / 2;
+      const hh = (s.h ?? 0) / 2;
+      return {
+        x: s.x + hw * Math.cos(turn) - hh * Math.sin(turn),
+        y: s.y + hw * Math.sin(turn) + hh * Math.cos(turn),
+      };
+    }
+    if (!Array.isArray(s.points)) return { x: s.x, y: s.y };
+    let sx = 0, sy = 0;
+    for (let i = 0; i < s.points.length; i += 2) { sx += s.points[i]; sy += s.points[i + 1]; }
+    return { x: sx / (s.points.length / 2), y: sy / (s.points.length / 2) };
+  }
+
+  /**
+   * Where a mark let go at a page point belongs, or null to stay where it is. A
+   * free mark stays free: the page is where it was put, over a picture or not. A
+   * picture's mark goes to the picture it is let go over, or onto the page when
+   * it is let go in a margin, if it means anything there. One let go outside the
+   * document stays with its picture.
+   */
+  function landingFor(s, point, list = surfacesOf()) {
+    if (isFree(s)) return null;
+    const hit = pictureUnder(list, point)
+      ?? (canBeFree(s.kind) ? surfaceHitTest(list.filter((x) => x.id === PAGE), point) : null);
+    return hit && hit.id !== s.panel ? hit : null;
+  }
+
+  /**
+   * Where a dropped mark now belongs (see `landingFor`). The drag is already
+   * folded into the shape, in the pixels of the surface it was picked up on. A
+   * surface it was carried onto takes it in its own pixels, unchanged on the
+   * page; one it never left keeps it as it is, which is how a mark keeps
+   * belonging to its panel.
+   */
+  function landShape(s) {
+    const list = surfacesOf();
+    const fromEntry = list.find((x) => x.id === s.panel);
+    if (!fromEntry) return;
+    const from = surfaceFrame(fromEntry);
+    const to = landingFor(s, surfaceToPage(anchorOf(s), from), list);
+    if (!to) return;
+    Object.assign(s, moveShapeToSurface(s, from, to.frame), { panel: to.id });
+  }
+
+  /** What a surface is called on the canvas, the way the side lists number them. */
+  function surfaceLabel(entry) {
+    if (entry.id === PAGE) return 'Free on the page';
+    return entry.kind === 'paste' ? `Overlay ${entry.index + 1}` : `Panel ${entry.index + 1}`;
+  }
+
+  /**
+   * Outline the surface a dragged mark or end will belong to once let go, and
+   * name it: the picture it is carried onto, or the whole page for a mark taken
+   * out into a margin. Null takes the outline down.
+   */
+  function showLanding(entry) {
+    if (!landingGuide) return;
+    landingGuide.destroyChildren();
+    if (entry) {
+      const z = stage.scaleX();
+      const frame = entry.frame ?? surfaceFrame(entry);
+      const [w, h] = frame.image;
+      const corners = [[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => surfaceToPage({ x, y }, frame));
+      landingGuide.add(new Konva.Line({
+        points: corners.flatMap((p) => [p.x, p.y]), closed: true,
+        stroke: ACCENT, strokeWidth: 2 / z, dash: [8 / z, 5 / z], fill: 'rgba(232, 163, 61, 0.07)',
+      }));
+      const left = Math.min(...corners.map((p) => p.x));
+      const top = Math.min(...corners.map((p) => p.y));
+      const chip = new Konva.Label({ x: left + 8 / z, y: top + 8 / z });
+      chip.add(new Konva.Tag({ fill: ACCENT, cornerRadius: 4 / z }));
+      chip.add(new Konva.Text({
+        text: surfaceLabel(entry), fontSize: 12 / z, padding: 5 / z, fontStyle: 'bold',
+        fontFamily: 'system-ui, sans-serif', fill: HANDLE_RING,
+      }));
+      landingGuide.add(chip);
+    }
+    uiLayer.batchDraw();
+  }
+
+  /** Where a mark being dragged would land if let go now, or null for where it is. */
+  function landingOfDrag(s, node) {
+    if (isFree(s) || isPageMark(s) || isLink(s)) return null;
+    const frame = frameOf(s.panel);
+    if (!frame) return null;
+    const moved = Array.isArray(s.points)
+      ? { ...s, points: s.points.map((v, i) => v + (i % 2 === 0 ? node.x() : node.y())) }
+      : { ...s, x: node.x(), y: node.y() };
+    return landingFor(s, surfaceToPage(anchorOf(moved), frame));
+  }
+
+  /** Replace a mark by its settled copy, in the same place in the stack. */
+  function putShape(next) {
+    const i = proof.shapes.findIndex((x) => x.id === next.id);
+    if (i >= 0) proof.shapes[i] = next;
+  }
+
+  /**
+   * A link with its ends moved by `step` (`[dx0, dy0, dx1, dy1]`, in its
+   * surface's pixels), settled again: an end that held to a picture holds to the
+   * one it now lies over, or comes free in a margin; a free end stays free.
+   */
+  function relinked(s, step) {
+    const frame = frameOf(s.panel);
+    if (!frame) return s;
+    const own = isFree(s) ? linkPoints(s, frameOf) : s.points;
+    const moved = own.map((v, i) => v + step[i]);
+    const held = isFree(s) ? [0, 1].map((i) => !!s.ends?.[i]) : [true, true];
+    const { width, height } = measureDoc();
+    const list = surfacesOf();
+    const end = (i) => {
+      const page = onPage(surfaceToPage({ x: moved[i * 2], y: moved[i * 2 + 1] }, frame), width, height);
+      return { page, on: held[i] ? pictureUnder(list, page) : null };
+    };
+    return settleLink(s, end(0), end(1));
+  }
+
+  /** One annotation into its surface's group, a box with its tag. */
+  function addSurfaceShape(group, s, box, surface) {
+    const node = makeShapeNode(s, box, surface);
+    group.add(node);
+    if (s.kind === 'rect' && s.tag) group.add(makeTagNode(s, node, box.scale));
+  }
+
+  // Words and lines are sized apart: a tag, a callout's label and a label's words
+  // grow on their own, without the line they hang from or are framed by.
+  const tagSizeOf = (s) => s.tagSize ?? tagFont(s.strokeWidth ?? 4);
+  const labelFrameOf = (s) => s.frameWidth ?? Math.max(2, Math.round((s.fontSize ?? 28) * 0.07));
+  const badgeOf = (s) => s.badge ?? CONE_BADGE;
+
+  /** The tab a box's tag is written on, measured in the surface's own units. */
+  function tagLayout(s, k) {
+    const fontSize = tagSizeOf(s);
+    const text = new Konva.Text({
+      text: s.tag || ' ', fontSize: fontSize / k, fontFamily: proofFace(),
+      fontStyle: markWeight(), fill: glyphInk(s.color, 1), listening: false,
+    });
+    const padX = (fontSize * 0.3) / k;
+    const padY = (fontSize * 0.15) / k;
+    return { text, fontSize, padX, padY, w: text.width() + padX * 2, h: text.height() + padY * 2 };
+  }
+
+  /**
+   * A box's tag: its words on a tab of the box's own colour, hung from one of
+   * its corners. Part of the box rather than a mark of its own: it follows the
+   * box as it is dragged, resized or turned, a press on it picks the box, and a
+   * double-click edits its words.
+   */
+  function makeTagNode(s, rect, k) {
+    const { text, padX, padY, w, h } = tagLayout(s, k);
+    const plate = new Konva.Rect({ width: w, height: h, fill: s.color });
+    // a press on the tab is a press on its box, double-click included
+    const tab = new Konva.Group({ name: 'box-tag', markId: s.id });
+    tab.add(plate, text);
+    const place = () => {
+      const size = [rect.width() * Math.abs(rect.scaleX()), rect.height() * Math.abs(rect.scaleY())];
+      const line = (s.strokeWidth ?? 4) / k;
+      const at = tagBox(...size, w, h, s.tagAt, line);
+      tab.setAttrs({ x: rect.x(), y: rect.y(), rotation: rect.rotation() });
+      const painted = tagPlate(...size, w, h, s.tagAt, line);
+      plate.setAttrs({ x: painted.x, y: painted.y, width: painted.w, height: painted.h });
+      text.position({ x: at.x + padX, y: at.y + padY });
+    };
+    place();
+    rect.on('dragmove transform', place);
+    bindShapePick(tab, s);
+    tab.on('dblclick dbltap', (e) => { e.cancelBubble = true; });
+    return tab;
+  }
+
+  /**
+   * Open the editor on a box's tag. A box without one is given one first, from
+   * its top-left corner, worded as its colour's line in the legend when it has
+   * one: the colour already names the feature, so the tag starts from that name.
+   */
+  function startTagEdit(s) {
+    const frame = frameOf(s.panel);
+    if (!frame || s.kind !== 'rect') return;
+    const fresh = !s.tag;
+    if (fresh) {
+      s.tag = proof.notes?.[s.color]?.trim() || 'Label';
+      s.tagAt = s.tagAt ?? 'tl';
+      // sized off the line it hangs from, and its own from then on
+      s.tagSize = tagFont(s.strokeWidth ?? 4);
+      dirty = true;
+    }
+    const k = frame.box.scale;
+    const { text, fontSize, padX, padY, w, h } = tagLayout(s, k);
+    text.destroy();
+    const at = tagBox(s.w, s.h, w, h, s.tagAt, (s.strokeWidth ?? 4) / k);
+    const turn = ((s.rotation ?? 0) * Math.PI) / 180;
+    const lx = at.x + padX;
+    const ly = at.y + padY;
+    const page = surfaceToPage({
+      x: s.x + lx * Math.cos(turn) - ly * Math.sin(turn),
+      y: s.y + lx * Math.sin(turn) + ly * Math.cos(turn),
+    }, frame);
+    selectedIds = [s.id];
+    textEdit = {
+      font: proofFace(), weight: markWeight() === 'bold' ? 700 : 400,
+      id: s.id,
+      field: 'tag',
+      fresh,
+      value: s.tag,
+      left: stage.x() + page.x * stage.scaleX(),
+      top: stage.y() + page.y * stage.scaleY(),
+      size: fontSize * stage.scaleX(),
+      color: glyphInk(s.color, 1),
+    };
+  }
+
+  // ---- free on the page -------------------------------------------------------
+
+  // Whether the next mark is drawn free on the page even over a picture. Set from
+  // the rail with a drawing tool in hand; a mark drawn in a margin is free anyway.
+  let freeDraw = $state(false);
+
+  /**
+   * Set a picture's mark free on the page, unchanged where it is drawn, or let a
+   * line's ends go of what they hold to. It stops following its picture.
+   */
+  function freeShape(s) {
+    if (!canBeFree(s.kind)) return;
+    if (isFree(s)) {
+      if (s.ends) putShape({ ...s, points: linkPoints(s, frameOf), ends: undefined });
+      return;
+    }
+    const from = frameOf(s.panel);
+    const to = frameOf(PAGE);
+    if (from && to) putShape({ ...moveShapeToSurface(s, from, to), panel: PAGE });
+  }
+
+  /**
+   * Pin a free mark to the picture under it, so it follows that picture from
+   * then on; a line holds by each end to the picture under that end. False when
+   * there is no picture under it to pin to.
+   */
+  function pinShape(s) {
+    if (!isFree(s)) return true;
+    const list = surfacesOf();
+    if (isLink(s)) {
+      const pts = linkPoints(s, frameOf);
+      const end = (i) => {
+        const page = { x: pts[i * 2], y: pts[i * 2 + 1] };
+        return { page, on: pictureUnder(list, page) };
+      };
+      const [a, b] = [end(0), end(1)];
+      if (!a.on && !b.on) return false;
+      putShape(settleLink(s, a, b));
+      return true;
+    }
+    const page = frameOf(PAGE);
+    // the page's pixels are the document's, so the anchor is already a page point
+    const to = pictureUnder(list, anchorOf(s));
+    if (!page || !to) return false;
+    putShape({ ...moveShapeToSurface(s, page, to.frame), panel: to.id });
+    return true;
+  }
+
+  /**
+   * Pin the picked marks to their pictures or set them free on the page. With a
+   * drawing tool in hand, how the next mark is drawn.
+   */
+  function setAnchor(which) {
+    const picked = editableShapes.filter((s) => canBeFree(s.kind));
+    if (!picked.length) {
+      freeDraw = which === 'page';
+      return;
+    }
+    let missed = 0;
+    for (const s of picked) {
+      if (which === 'page') freeShape(s);
+      else if (!pinShape(s)) missed += 1;
+    }
+    if (missed) toast('Move it over a picture to pin it there', 'info');
+    dirty = true;
+  }
+
+  /** Draw the picked lines solid, dashed or dotted, and the next one the same way. */
+  function setDash(style) {
+    for (const s of editableShapes) {
+      if (!DASHABLE.has(s.kind)) continue;
+      if (style === 'solid') delete s.dash;
+      else s.dash = style;
+      dirty = true;
+    }
+    lineStyle = style;
+  }
+
+  /** The picked label's frame and the plate behind its words. */
+  function setTextBox(patch) {
+    const s = editableShape;
+    if (s?.kind !== 'text') return;
+    if ('frame' in patch) s.frame = patch.frame;
+    if ('bg' in patch) s.bg = patch.bg;
+    dirty = true;
+  }
+
+  /** Hang the picked box's tag from another corner, give it one, or take it off. */
+  function setTagAt(at) {
+    const s = editableShape;
+    if (s?.kind !== 'rect') return;
+    if (at === 'none') {
+      if (!s.tag) return;
+      delete s.tag;
+      delete s.tagAt;
+    } else {
+      s.tagAt = at;
+      // a frame later, so the press on the control does not take the focus back
+      if (!s.tag) requestAnimationFrame(() => startTagEdit(s));
+    }
+    dirty = true;
+  }
+
+  // The node for one annotation, inside its surface's group. That group is scaled
+  // to the surface (`box.scale`, its pixels to the page) while ink is measured in
+  // page pixels, so every width and size is divided by the scale here: a 4 px
+  // line is 4 px on any panel or overlay, whatever its resolution or size.
   function makeShapeNode(s, box, surface) {
-    const panelScale = box.baseScale;
+    const k = box.scale;
     if (s.kind === 'text') {
       // The glyph itself: always built first so its measured size drives the
       // optional frame/background box. Unboxed, it's also the interactive node.
+      const fontSize = s.fontSize ?? 28;
       const textNode = new Konva.Text({
         x: 0, y: 0, text: s.text || ' ',
-        fontSize: s.fontSize ?? 28, fontFamily: 'system-ui, sans-serif',
-        fontStyle: 'bold', fill: s.color,
+        fontSize: fontSize / k, fontFamily: proofFace(),
+        fontStyle: markWeight(), fill: s.color,
       });
       const boxed = s.frame || s.bg;
       let node; // the draggable/transformable/selectable node (group when boxed)
       if (boxed) {
-        const pad = textBoxPad(s.fontSize);
+        const pad = textBoxPad(fontSize) / k;
         const w = textNode.width() + pad * 2;
         const h = textNode.height() + pad * 2;
-        const frameSW = Math.max(2, Math.round((s.fontSize ?? 28) * 0.07));
+        const frameSW = labelFrameOf(s) / k;
         node = new Konva.Group({ id: s.id, x: s.x, y: s.y, rotation: s.rotation ?? 0, draggable: true });
         // invisible full-box hit target — clicking/dragging the padding (not
         // just the glyph or the frame stroke) must still select this element
         node.add(new Konva.Rect({ x: 0, y: 0, width: w, height: h, fill: 'transparent', listening: true }));
         if (s.bg) {
-          node.add(new Konva.Rect({ x: 0, y: 0, width: w, height: h, fill: s.bg, cornerRadius: 4, listening: false }));
+          node.add(new Konva.Rect({ x: 0, y: 0, width: w, height: h, fill: s.bg, cornerRadius: 4 / k, listening: false }));
         }
         if (s.frame) {
           node.add(new Konva.Rect({
             x: 0, y: 0, width: w, height: h, stroke: s.color, strokeWidth: frameSW,
-            cornerRadius: 4, listening: false,
+            cornerRadius: 4 / k, listening: false,
           }));
         }
         textNode.position({ x: pad, y: pad });
@@ -2950,10 +3906,9 @@
         node.getParent()?.moveToTop();
       });
       node.on('dragend', () => {
-        const { fromBox, toBox } = rebindOnDrop(s, node);
-        const p = toBox ? remapPanelXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
-        s.x = p.x;
-        s.y = p.y;
+        s.x = node.x();
+        s.y = node.y();
+        landShape(s);
         dirty = true;
       });
       node.on('transformend', () => {
@@ -2967,13 +3922,18 @@
       });
       return node;
     }
-    if (s.kind === 'icon') return makeIconNode(s, panelScale);
-    if (s.kind === 'number') return makeNumberNode(s, panelScale);
+    if (s.kind === 'cone') {
+      return makeConeNode(s, k, surface?.rotation ?? 0, { image: surface ? imageSizeOf(surface) : null });
+    }
+    if (s.kind === 'icon') return makeIconNode(s, k);
+    if (s.kind === 'number') return makeNumberNode(s, k);
     if (s.kind === 'blur') return makeBlurNode(s, surface);
-    const sw = (s.strokeWidth ?? 4) / panelScale;
+    const sw = (s.strokeWidth ?? 4) / k;
+    const dash = dashPattern(s.dash, s.strokeWidth ?? 4);
     const common = {
       id: s.id, stroke: s.color, strokeWidth: sw, rotation: s.rotation ?? 0,
-      draggable: true, hitStrokeWidth: Math.max(sw * 3, 14 / panelScale),
+      draggable: true, hitStrokeWidth: Math.max(sw * 3, 14 / k),
+      ...(dash ? { dash: dash.map((v) => v / k), lineCap: s.dash === 'dot' ? 'round' : 'butt' } : {}),
     };
     const paint = canFill(s.kind) ? fillPaint(s.color, s.fillOpacity) : null;
     let node;
@@ -2981,6 +3941,9 @@
       node = new Konva.Rect({
         x: s.x, y: s.y, width: s.w, height: s.h, cornerRadius: 2, fill: paint, ...common,
       });
+      // A double-click on a box writes its tag (see onCanvasDblClick), so it must
+      // not reach the panel under it, which would open its crop marks.
+      node.on('dblclick dbltap', (e) => { e.cancelBubble = true; });
     } else if (s.kind === 'ellipse') {
       node = new Konva.Ellipse({
         x: s.x, y: s.y, radiusX: s.w / 2, radiusY: s.h / 2, fill: paint, ...common,
@@ -2992,9 +3955,10 @@
       });
     } else {
       node = new Konva.Arrow({
-        points: s.points,
-        pointerLength: s.kind === 'arrow' ? 14 / panelScale : 0,
-        pointerWidth: s.kind === 'arrow' ? 14 / panelScale : 0,
+        // a link's ends are where the pictures they hold to have them now
+        points: s.ends ? linkPoints(s, frameOf) : s.points,
+        pointerLength: s.kind === 'arrow' ? ARROW_HEAD / k : 0,
+        pointerWidth: s.kind === 'arrow' ? ARROW_HEAD / k : 0,
         fill: s.color,
         ...common,
       });
@@ -3006,24 +3970,22 @@
     });
     node.on('dragend', () => {
       if (s.kind === 'rect' || s.kind === 'ellipse') {
-        const { fromBox, toBox } = rebindOnDrop(s, node);
-        const p = toBox ? remapPanelXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
-        s.x = p.x;
-        s.y = p.y;
-      } else {
-        // points-based shapes: fold the drag offset into every vertex, then
-        // remap the whole polyline into the panel it was dropped onto
+        s.x = node.x();
+        s.y = node.y();
+      } else if (isLink(s) && holdsToPicture(s)) {
+        // each end that held to a picture holds to the one it is let go over
         const dx = node.x(), dy = node.y();
-        const folded = s.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
-        const { fromBox, toBox } = rebindOnDrop(s, node);
-        s.points = toBox
-          ? folded.map((v, i) => {
-              const doc = (i % 2 === 0 ? fromBox.x : fromBox.y) + v * (fromBox?.scale ?? 1);
-              return (doc - (i % 2 === 0 ? toBox.x : toBox.y)) / toBox.scale;
-            })
-          : folded;
+        node.position({ x: 0, y: 0 });
+        putShape(relinked(s, [dx, dy, dx, dy]));
+        dirty = true;
+        return;
+      } else {
+        // points-based shapes: fold the drag offset into every vertex
+        const dx = node.x(), dy = node.y();
+        s.points = s.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
         node.position({ x: 0, y: 0 });
       }
+      landShape(s);
       dirty = true;
     });
     node.on('transformend', () => {
@@ -3088,19 +4050,20 @@
    * one has to survive being printed over anything — a numeral in a thin line
    * over a bright roof is a numeral nobody can read.
    */
-  function makeNumberNode(s, panelScale) {
-    const size = s.size ?? iconSizeFor(panelScale);
+  function makeNumberNode(s, k) {
+    const size = s.size ?? ICON_SIZE_DEFAULT;
+    const side = size / k; // drawn inside the surface's scale
     const ink = glyphInk(s.color, 1);
     const group = new Konva.Group({
       id: s.id, x: s.x, y: s.y, rotation: s.rotation ?? 0, draggable: true,
     });
     group.add(new Konva.Circle({
-      x: 0, y: 0, radius: size / 2, fill: s.color,
-      stroke: ink, strokeWidth: Math.max(size * 0.04, 0.5),
+      x: 0, y: 0, radius: side / 2, fill: s.color,
+      stroke: ink, strokeWidth: Math.max(size * 0.04, 0.5) / k,
     }));
     const label = new Konva.Text({
-      text: String(s.n ?? 1), fontSize: size * 0.58, fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif', fill: ink, listening: false,
+      text: String(s.n ?? 1), fontSize: side * 0.58, fontStyle: 'bold',
+      fontFamily: proofFace(), fill: ink, listening: false,
     });
     label.position({ x: -label.width() / 2, y: -label.height() / 2 });
     group.add(label);
@@ -3110,14 +4073,13 @@
       group.getParent()?.moveToTop();
     });
     group.on('dragend', () => {
-      const { fromBox, toBox } = rebindOnDrop(s, group);
-      const p = toBox ? remapPanelXY(group.x(), group.y(), fromBox, toBox) : { x: group.x(), y: group.y() };
-      s.x = p.x;
-      s.y = p.y;
+      s.x = group.x();
+      s.y = group.y();
+      landShape(s);
       dirty = true;
     });
     group.on('transformend', () => {
-      s.size = Math.max(ICON_SIZE_MIN / panelScale, Math.abs(size * group.scaleX()));
+      s.size = Math.max(ICON_SIZE_MIN, Math.abs(size * group.scaleX()));
       s.x = group.x();
       s.y = group.y();
       s.rotation = group.rotation();
@@ -3141,11 +4103,13 @@
    * instead, because a blur box that shows nothing is a blur box that hides
    * nothing.
    */
-  function makeBlurNode(s, surface) {
+  function makeBlurNode(s, surface, { live = true } = {}) {
     const radius = blurRadiusFor(s);
     const turn = s.rotation ?? 0;
     const group = new Konva.Group({
-      id: s.id, x: s.x, y: s.y, rotation: turn, draggable: true,
+      // a zoom inset draws a still copy: same pixels, nothing to pick or drag
+      ...(live ? { id: s.id, draggable: true } : { listening: false }),
+      x: s.x, y: s.y, rotation: turn,
       // The filter reads a margin of ground around the box; the clip is what
       // keeps the box the size it was drawn.
       clip: { x: 0, y: 0, width: s.w, height: s.h },
@@ -3200,6 +4164,7 @@
       node.moveToTop();
     };
     paint();
+    if (!live) return group;
 
     bindShapePick(group, s);
     group.on('dragstart', () => {
@@ -3213,10 +4178,9 @@
     group.on('dragmove', paint);
     group.on('transform', paint);
     group.on('dragend', () => {
-      const { fromBox, toBox } = rebindOnDrop(s, group);
-      const p = toBox ? remapPanelXY(group.x(), group.y(), fromBox, toBox) : { x: group.x(), y: group.y() };
-      s.x = p.x;
-      s.y = p.y;
+      s.x = group.x();
+      s.y = group.y();
+      landShape(s);
       dirty = true;
     });
     group.on('transformend', () => {
@@ -3231,9 +4195,10 @@
     return group;
   }
 
-  function makeIconNode(s, panelScale) {
+  function makeIconNode(s, scale) {
     const entry = iconByName(s.name);
-    const size = s.size ?? iconSizeFor(panelScale);
+    const placed = s.size ?? ICON_SIZE_DEFAULT;
+    const size = placed / scale; // drawn inside the surface's scale
     const origin = iconOrigin(s.name, size);
     const group = new Konva.Group({
       id: s.id, x: s.x, y: s.y, rotation: s.rotation ?? 0, draggable: true,
@@ -3250,7 +4215,7 @@
         fill: fillPaint(s.color, disc),
         // The ring stays at full opacity so a sheer disc keeps an edge; without
         // it a badge at 30% has no silhouette left to read against the imagery.
-        stroke: s.color, strokeWidth: Math.max(size * 0.035, 0.5), listening: false,
+        stroke: s.color, strokeWidth: Math.max(placed * 0.035, 0.5) / scale, listening: false,
       }));
     }
     if (entry) {
@@ -3264,7 +4229,7 @@
               stroke: ink,
               // the glyph is drawn scaled, so the width is divided back out:
               // a bigger symbol is a bigger drawing, not a fatter outline
-              strokeWidth: (s.strokeWidth ?? 4) / panelScale / k,
+              strokeWidth: (s.strokeWidth ?? 4) / scale / k,
               lineCap: 'round', lineJoin: 'round',
             }),
       }));
@@ -3275,18 +4240,15 @@
       group.getParent()?.moveToTop();
     });
     group.on('dragend', () => {
-      const { fromBox, toBox } = rebindOnDrop(s, group);
-      const p = toBox
-        ? remapPanelXY(group.x(), group.y(), fromBox, toBox)
-        : { x: group.x(), y: group.y() };
-      s.x = p.x;
-      s.y = p.y;
+      s.x = group.x();
+      s.y = group.y();
+      landShape(s);
       dirty = true;
     });
     group.on('transformend', () => {
       // Uniform by construction: the transformer keeps the ratio and offers
       // corners only, so either axis answers for the new side.
-      s.size = Math.max(ICON_SIZE_MIN / panelScale, Math.abs(size * group.scaleX()));
+      s.size = Math.max(ICON_SIZE_MIN, Math.abs(placed * group.scaleX()));
       s.x = group.x();
       s.y = group.y();
       s.rotation = group.rotation();
@@ -3294,6 +4256,369 @@
       dirty = true;
     });
     return group;
+  }
+
+  // ---- view cones ------------------------------------------------------------
+
+  /** A colour at an opacity, for the stops of a gradient that fades it out. */
+  function tint(color, alpha) {
+    return (fillPaint(color, 1) ?? color).replace(/, 1\)$/, `, ${Math.max(0, Math.min(1, alpha))})`);
+  }
+
+  /**
+   * A view cone: a wedge from the camera along its line of sight, fading with
+   * distance, its two edges fading the same way, and the camera on a badge where
+   * it stood, sized on its own (`badge`). The cone is built
+   * pointing up and turned to its line of sight, and kept to its picture: a field
+   * of view running out over the page says nothing. The badge stays whole even at
+   * the picture's edge, upright on the page, `turn` being the picture's own turn.
+   */
+  function makeConeNode(s, k, turn = 0, { live = true, image = null } = {}) {
+    const fov = s.fov ?? lensFov('1');
+    const reach = Math.max(1 / k, s.reach ?? 100);
+    const width = s.strokeWidth ?? 4;
+    const fill = s.fillOpacity ?? 0.35;
+    const node = new Konva.Group({
+      ...(live ? { id: s.id, draggable: true } : { listening: false }),
+      x: s.x, y: s.y,
+    });
+    const kept = new Konva.Group(image ? { clip: { x: -s.x, y: -s.y, width: image[0], height: image[1] } } : {});
+    const group = new Konva.Group({ rotation: s.rotation ?? 0 });
+    kept.add(group);
+    node.add(kept);
+    // Konva's wedge starts along +x and runs clockwise; the cone is centred on up.
+    group.add(new Konva.Wedge({
+      radius: reach, angle: fov, rotation: -90 - fov / 2,
+      fillRadialGradientStartPoint: { x: 0, y: 0 }, fillRadialGradientStartRadius: 0,
+      fillRadialGradientEndPoint: { x: 0, y: 0 }, fillRadialGradientEndRadius: reach,
+      fillRadialGradientColorStops: [0, tint(s.color, fill), 0.6, tint(s.color, fill * 0.45), 1, tint(s.color, 0)],
+    }));
+    const dash = dashPattern(s.dash, width);
+    for (const side of [-fov / 2, fov / 2]) {
+      const end = along(side);
+      group.add(new Konva.Line({
+        points: [0, 0, end.x * reach, end.y * reach],
+        strokeWidth: width / k, lineCap: 'round', listening: false,
+        strokeLinearGradientStartPoint: { x: 0, y: 0 },
+        strokeLinearGradientEndPoint: { x: end.x * reach, y: end.y * reach },
+        strokeLinearGradientColorStops: [0, tint(s.color, 1), 1, tint(s.color, 0.12)],
+        ...(dash ? { dash: dash.map((v) => v / k) } : {}),
+      }));
+    }
+    // the camera itself, upright on the page whichever way it looks, at its own size
+    const radius = badgeOf(s) / 2 / k;
+    const ink = glyphInk(s.color, 1);
+    const camera = iconByName('camera');
+    const badge = new Konva.Group({ rotation: -turn });
+    badge.add(new Konva.Circle({ radius, fill: s.color, stroke: ink, strokeWidth: 1.5 / k }));
+    if (camera) {
+      const side = radius * 1.25;
+      const scale = side / ICON_BOX;
+      badge.add(new Konva.Path({
+        data: camera.path, x: -side / 2, y: -side / 2, scaleX: scale, scaleY: scale,
+        stroke: ink, strokeWidth: (1.8 / k) / scale, lineJoin: 'round', listening: false,
+      }));
+    }
+    node.add(badge);
+    if (!live) return node;
+    bindShapePick(node, s);
+    node.on('dragstart', () => { dragMoved = true; });
+    node.on('dragend', () => {
+      s.x = node.x();
+      s.y = node.y();
+      landShape(s);
+      dirty = true;
+    });
+    return node;
+  }
+
+  /**
+   * A cone's handles: the far end aims it and sets how far it reaches, each edge
+   * sets how wide it opens, and an edge brought near a phone lens settles on it.
+   * The cone follows the pointer while a handle is held.
+   */
+  function drawConeHandles(s, frame, look) {
+    const node = docLayer.findOne(`#${s.id}`);
+    const k = frame.box.scale;
+    let preview = null;
+    const show = (draft) => {
+      preview?.destroy();
+      preview = makeConeNode(draft, k, frame.rotation, { live: false, image: frame.image });
+      node?.getParent()?.add(preview);
+      node?.hide();
+      docLayer.batchDraw();
+    };
+    const own = (handle) => pageToSurface(handle.position(), frame);
+    const { end, left, right } = coneHandles(s);
+    const aim = new Konva.Circle({ ...look, ...surfaceToPage(end, frame) });
+    const aimed = () => {
+      const at = own(aim);
+      return { rotation: bearingTo(s, at), reach: Math.max(8 / k, Math.hypot(at.x - s.x, at.y - s.y)) };
+    };
+    aim.on('dragmove', () => show({ ...s, ...aimed() }));
+    aim.on('dragend', () => { Object.assign(s, aimed()); dirty = true; });
+    endHandles.add(aim);
+    for (const at of [left, right]) {
+      const edge = new Konva.Rect({
+        ...look, width: look.radius * 1.6, height: look.radius * 1.6,
+        offsetX: look.radius * 0.8, offsetY: look.radius * 0.8, ...surfaceToPage(at, frame),
+      });
+      edge.on('dragmove', () => show({ ...s, ...fovFromEdge(s, own(edge)) }));
+      edge.on('dragend', () => { Object.assign(s, fovFromEdge(s, own(edge))); dirty = true; });
+      endHandles.add(edge);
+    }
+    // The camera's own size, from a small diamond on its rim: the badge is
+    // upright on the page, so the rim is read in page pixels, whatever the line.
+    const camera = surfaceToPage(s, frame);
+    const rim = Math.SQRT1_2 * (badgeOf(s) / 2);
+    const side = look.radius * 1.3;
+    const size = new Konva.Rect({
+      ...look, name: 'cone-badge-size', width: side, height: side, offsetX: side / 2, offsetY: side / 2,
+      rotation: 45, x: camera.x + rim, y: camera.y + rim,
+    });
+    const sized = () => {
+      const p = size.position();
+      const across = 2 * Math.hypot(p.x - camera.x, p.y - camera.y);
+      return Math.round(Math.min(CONE_BADGE_MAX, Math.max(CONE_BADGE_MIN, across)));
+    };
+    size.on('dragmove', () => show({ ...s, badge: sized() }));
+    size.on('dragend', () => { s.badge = sized(); coneBadge = s.badge; dirty = true; });
+    endHandles.add(size);
+  }
+
+  /** The lens of the picked cone, or of the next one; a lens sets the width it opens to. */
+  function setLens(patch) {
+    if ('lens' in patch) coneLens = patch.lens;
+    if ('upright' in patch) coneUpright = patch.upright;
+    const s = editableShape;
+    if (s?.kind !== 'cone') return;
+    if ('lens' in patch) s.lens = patch.lens;
+    if ('upright' in patch) s.upright = patch.upright;
+    if (s.lens) s.fov = lensFov(s.lens, !!s.upright);
+    dirty = true;
+  }
+
+  // ---- callouts and zoom insets: from a picture out onto the page -----------
+
+  // A leader's label sits on a dark plate, which reads over any imagery.
+  const CALLOUT_PLATE = 'rgba(13, 17, 23, 0.88)';
+
+  /**
+   * Where a callout's parts are on the page: its point, and its label's box
+   * measured off the words and held inside the document.
+   */
+  function calloutLayout(s, frame, doc = measureDoc()) {
+    const tip = surfaceToPage({ x: s.x, y: s.y }, frame);
+    const fontSize = s.fontSize ?? CALLOUT_FONT;
+    const bubble = s.tail === 'bubble';
+    const text = new Konva.Text({
+      text: s.text || ' ', fontSize, fontFamily: proofFace(), fontStyle: markWeight(),
+      fill: bubble ? glyphInk(s.color, 1) : s.color, listening: false,
+    });
+    const pad = textBoxPad(fontSize);
+    const w = text.width() + pad * 2;
+    const h = text.height() + pad * 2;
+    return {
+      tip, text, pad, bubble, fontSize,
+      rect: calloutBox(tip, s, w, h, doc.width, doc.height),
+      radius: bubble ? Math.min(h / 2, pad * 1.6) : 3,
+    };
+  }
+
+  /**
+   * A callout: its label on the page, tied to its point by a leader or a tail.
+   *
+   * The label is the node the selection holds, and dragging it moves the label
+   * alone: the point stays on its pixel and has its own handle. Everything here
+   * is in page pixels and upright, over every picture.
+   */
+  function addCalloutNodes(parent, s, frame, doc) {
+    const { tip, text, pad, bubble, fontSize, rect, radius } = calloutLayout(s, frame, doc);
+    const { line, dot } = calloutInk(fontSize, s.strokeWidth);
+    const pointer = new Konva.Group({ listening: false });
+    const drawPointer = (box) => {
+      pointer.destroyChildren();
+      if (bubble) {
+        const tail = bubbleTail(tip, box, Math.max(6, fontSize * 0.35), radius);
+        if (tail) pointer.add(new Konva.Line({ points: tail, closed: true, fill: s.color }));
+        return;
+      }
+      const near = nearestOnRect(tip, box);
+      if (near) {
+        pointer.add(new Konva.Line({
+          points: [tip.x, tip.y, near.x, near.y], stroke: s.color, strokeWidth: line, lineCap: 'round',
+        }));
+      }
+      pointer.add(new Konva.Circle({ x: tip.x, y: tip.y, radius: dot, fill: s.color }));
+    };
+    drawPointer(rect);
+    const node = new Konva.Group({ id: s.id, x: rect.x, y: rect.y, draggable: true });
+    node.add(new Konva.Rect({
+      width: rect.w, height: rect.h, cornerRadius: radius,
+      fill: bubble ? s.color : CALLOUT_PLATE,
+      ...(bubble ? {} : { stroke: s.color, strokeWidth: line }),
+    }));
+    text.position({ x: pad, y: pad });
+    node.add(text);
+    bindShapePick(node, s);
+    node.on('dblclick dbltap', (e) => {
+      e.cancelBubble = true;
+      startTextEdit(s);
+    });
+    node.on('dragstart', () => { dragMoved = true; });
+    node.on('dragmove', () => drawPointer({ x: node.x(), y: node.y(), w: rect.w, h: rect.h }));
+    node.on('dragend', () => {
+      s.dx = node.x() + rect.w / 2 - tip.x;
+      s.dy = node.y() + rect.h / 2 - tip.y;
+      dirty = true;
+    });
+    parent.add(pointer, node);
+  }
+
+  /**
+   * A zoom inset: a frame on a detail of its picture, the same pixels shown
+   * bigger on the page, and two lines between them.
+   *
+   * The frame belongs to the picture and drags across it, or onto another one,
+   * like a box. The enlargement is the node the selection holds: it drags and
+   * resizes from its corners on its own, turned like its picture. It is drawn
+   * from the picture's pixels and from the blur boxes over them, so a redaction
+   * holds in the enlargement too.
+   */
+  function addZoomNodes(parent, s, frame, doc, surface) {
+    const lw = Math.max(1, (s.strokeWidth ?? 4) / 2);
+    const pattern = dashPattern(s.dash, lw);
+    const dashed = pattern ? { dash: pattern, lineCap: s.dash === 'dot' ? 'round' : 'butt' } : {};
+    const own = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]];
+    const corners = own.map(([x, y]) => surfaceToPage({ x, y }, frame));
+    const centre = surfaceToPage({ x: s.x + s.w / 2, y: s.y + s.h / 2 }, frame);
+    const iw = s.iw;
+    const ih = insetHeight(s);
+    const placed = insetBox(centre, s, doc.width, doc.height);
+    const turn = frame.rotation;
+    const radians = (turn * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const links = new Konva.Group({ listening: false });
+    const drawLinks = (cx, cy, scale = 1) => {
+      links.destroyChildren();
+      const hw = (iw * scale) / 2;
+      const hh = (ih * scale) / 2;
+      const inset = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]
+        .map(([x, y]) => ({ x: cx + x * cos - y * sin, y: cy + x * sin + y * cos }));
+      // which way the inset lies, read in the picture's own turn
+      const ox = cx - centre.x;
+      const oy = cy - centre.y;
+      const towards = { x: ox * cos + oy * sin, y: -ox * sin + oy * cos };
+      for (const [a, b] of insetConnectors(corners, inset, towards)) {
+        links.add(new Konva.Line({
+          points: [a.x, a.y, b.x, b.y], stroke: s.color, strokeWidth: Math.max(1, lw * 0.6), opacity: 0.9,
+        }));
+      }
+    };
+    drawLinks(placed.x + iw / 2, placed.y + ih / 2);
+
+    const outline = new Konva.Line({
+      name: 'zoom-frame', points: corners.flatMap((p) => [p.x, p.y]), closed: true,
+      stroke: s.color, strokeWidth: lw, hitStrokeWidth: Math.max(lw * 3, 10), draggable: true, ...dashed,
+    });
+    bindShapePick(outline, s);
+    outline.on('dragstart', () => { dragMoved = true; });
+    outline.on('dragend', () => {
+      const step = pageStepOnSurface(outline.x(), outline.y(), frame);
+      s.x += step.dx;
+      s.y += step.dy;
+      outline.position({ x: 0, y: 0 });
+      landShape(s);
+      dirty = true;
+    });
+
+    const node = new Konva.Group({
+      id: s.id, x: placed.x + iw / 2, y: placed.y + ih / 2, rotation: turn, draggable: true,
+    });
+    const view = new Konva.Group({ clip: { x: -iw / 2, y: -ih / 2, width: iw, height: ih } });
+    view.add(new Konva.Rect({
+      x: -iw / 2, y: -ih / 2, width: iw, height: ih, fill: 'rgba(20, 22, 26, 0.92)',
+    }));
+    const k = iw / s.w;
+    const pixels = new Konva.Group({ x: -iw / 2 - s.x * k, y: -ih / 2 - s.y * k, scaleX: k, scaleY: k });
+    // only the part of the frame that is over the picture has pixels to show
+    const x0 = Math.max(0, s.x);
+    const y0 = Math.max(0, s.y);
+    const x1 = Math.min(frame.image[0], s.x + s.w);
+    const y1 = Math.min(frame.image[1], s.y + s.h);
+    if (surface?.img && x1 > x0 && y1 > y0) {
+      const crop = surface.crop ?? { x: 0, y: 0 };
+      pixels.add(new Konva.Image({
+        image: surface.img, x: x0, y: y0, width: x1 - x0, height: y1 - y0,
+        crop: { x: crop.x + x0, y: crop.y + y0, width: x1 - x0, height: y1 - y0 },
+      }));
+      for (const blur of proof.shapes.filter((b) => b.kind === 'blur' && b.panel === s.panel)) {
+        pixels.add(makeBlurNode(blur, surface, { live: false }));
+      }
+    }
+    view.add(pixels);
+    node.add(view);
+    // the border, and the whole inset as something to press
+    node.add(new Konva.Rect({
+      x: -iw / 2, y: -ih / 2, width: iw, height: ih, fill: 'transparent', stroke: s.color, strokeWidth: lw, ...dashed,
+    }));
+    bindShapePick(node, s);
+    node.on('dragstart', () => { dragMoved = true; });
+    node.on('dragmove', () => drawLinks(node.x(), node.y()));
+    node.on('transform', () => drawLinks(node.x(), node.y(), Math.abs(node.scaleX())));
+    node.on('dragend', () => {
+      s.dx = node.x() - centre.x;
+      s.dy = node.y() - centre.y;
+      dirty = true;
+    });
+    node.on('transformend', () => {
+      s.iw = Math.max(INSET_MIN, iw * Math.abs(node.scaleX()));
+      s.dx = node.x() - centre.x;
+      s.dy = node.y() - centre.y;
+      node.scale({ x: 1, y: 1 });
+      dirty = true;
+    });
+    parent.add(links, outline, node);
+  }
+
+  /**
+   * Give the picked label a pointer, take a callout's off, or change how it
+   * reaches its point. A label and a callout are one mark with or without its
+   * pointer, so neither has to be typed again to become the other. With nothing
+   * picked, it sets how the next callout is drawn.
+   */
+  function setTail(tail) {
+    if (tail !== 'none') calloutTail = tail;
+    const s = tailShape;
+    if (!s) return;
+    const index = proof.shapes.findIndex((x) => x.id === s.id);
+    const frame = frameOf(s.panel);
+    if (index < 0 || !frame) return;
+    if (s.kind === 'callout' && tail !== 'none') {
+      s.tail = tail;
+    } else if (s.kind === 'callout') {
+      const { rect, text } = calloutLayout(s, frame);
+      text.destroy();
+      const origin = pageToSurface({ x: rect.x, y: rect.y }, frame);
+      proof.shapes[index] = calloutToLabel(s, origin, normalizeSurfaceAngle(-frame.rotation));
+    } else if (tail !== 'none') {
+      // the point is the middle of the label, wherever it stood and however turned
+      const fontSize = s.fontSize ?? 28;
+      const probe = new Konva.Text({ text: s.text || ' ', fontSize, fontFamily: proofFace(), fontStyle: markWeight() });
+      const pad = s.frame || s.bg ? textBoxPad(fontSize) : 0;
+      const half = { x: (probe.width() / 2 + pad) / frame.box.scale, y: (probe.height() / 2 + pad) / frame.box.scale };
+      probe.destroy();
+      const turn = ((s.rotation ?? 0) * Math.PI) / 180;
+      const point = {
+        x: s.x + half.x * Math.cos(turn) - half.y * Math.sin(turn),
+        y: s.y + half.x * Math.sin(turn) + half.y * Math.cos(turn),
+      };
+      proof.shapes[index] = labelToCallout(s, point, tail);
+    } else {
+      return;
+    }
+    dirty = true;
   }
 
   // ---- inline text editing (placed, or double-clicked on the canvas) ---------
@@ -3307,30 +4632,109 @@
    * transform the node would have been read through.
    */
   function startTextEdit(s) {
-    const box = surfacesOf().find((x) => x.id === s.panel)?.box;
-    if (!box) return;
+    const frame = frameOf(s.panel);
+    if (!frame) return;
+    if (s.kind === 'callout') {
+      // over the words of the label, wherever on the page it was carried
+      const { rect, pad, fontSize, text, bubble } = calloutLayout(s, frame);
+      text.destroy();
+      selectedIds = [s.id];
+      textEdit = {
+        font: proofFace(), weight: markWeight() === 'bold' ? 700 : 400,
+        id: s.id,
+        value: s.text ?? '',
+        left: stage.x() + (rect.x + pad) * stage.scaleX(),
+        top: stage.y() + (rect.y + pad) * stage.scaleY(),
+        size: fontSize * stage.scaleX(),
+        color: bubble ? glyphInk(s.color, 1) : s.color,
+      };
+      return;
+    }
     // A boxed label insets its glyph by the padding the frame uses, so the
-    // editor opens over the words instead of over the corner.
+    // editor opens over the words instead of over the corner. The padding is
+    // ink, in page pixels, along the label's own turn and its surface's.
     const inset = s.frame || s.bg ? textBoxPad(s.fontSize) : 0;
+    const turn = (((s.rotation ?? 0) + frame.rotation) * Math.PI) / 180;
+    const origin = surfaceToPage({ x: s.x, y: s.y }, frame);
     selectedIds = [s.id];
     textEdit = {
+      font: proofFace(), weight: markWeight() === 'bold' ? 700 : 400,
       id: s.id,
       value: s.text ?? '',
-      left: stage.x() + (box.x + (s.x + inset) * box.scale) * stage.scaleX(),
-      top: stage.y() + (box.y + (s.y + inset) * box.scale) * stage.scaleY(),
-      size: (s.fontSize ?? 28) * box.scale * stage.scaleX(),
+      left: stage.x() + (origin.x + inset * (Math.cos(turn) - Math.sin(turn))) * stage.scaleX(),
+      top: stage.y() + (origin.y + inset * (Math.sin(turn) + Math.cos(turn))) * stage.scaleY(),
+      size: (s.fontSize ?? 28) * stage.scaleX(),
       color: s.color,
     };
   }
 
+  /**
+   * Open the editor over a page text drawn as `node`: a panel's caption or the
+   * footer's credit line. One line each, set where it is printed and as wide.
+   */
+  function startLineEdit(node, edit) {
+    const z = stage.scaleX();
+    textEdit = {
+      font: proofFace(), weight: 400,
+      left: stage.x() + node.x() * z,
+      top: stage.y() + node.y() * z,
+      width: node.width() * z,
+      align: node.align(),
+      size: node.fontSize() * z,
+      color: node.fill(),
+      ...edit,
+    };
+  }
+
+  /** Write on a panel's caption where it is printed. */
+  function startCaptionEdit(panel) {
+    const node = docLayer?.findOne(`#cap-${panel.id}`);
+    if (!node) return;
+    selectPanel(panel.id);
+    startLineEdit(node, { field: 'caption', id: panel.id, value: panel.caption ?? '' });
+  }
+
+  /** Write the footer's credit line where it is printed: the band's last line. */
+  function startFooterEdit() {
+    const lines = docLayer?.findOne('#proof-footer')?.getChildren();
+    if (!lines?.length || proof.footerText === false) return;
+    const node = lines[lines.length - 1];
+    selectSig('footer');
+    startLineEdit(node, { field: 'footer', id: null, value: node.text() });
+  }
+
   function commitTextEdit(keep = true) {
     if (!textEdit) return;
-    if (keep) {
-      const s = proof.shapes.find((x) => x.id === textEdit.id);
-      if (s && s.text !== textEdit.value) {
-        s.text = textEdit.value;
+    // A caption and a credit line are one line each. A credit line left empty
+    // goes back to the one the panels give.
+    if (textEdit.field === 'caption' || textEdit.field === 'footer') {
+      const value = textEdit.value.replace(/\s*\n\s*/g, ' ').trim();
+      const panel = proof.panels.find((p) => p.id === textEdit.id);
+      if (keep && textEdit.field === 'caption' && panel && (panel.caption ?? '') !== value) {
+        panel.caption = value;
+        dirty = true;
+      } else if (keep && textEdit.field === 'footer' && value !== footerLines(proof, prefs.coordFormat).at(-1)) {
+        proof.footer = value;
         dirty = true;
       }
+      textEdit = null;
+      return;
+    }
+    const s = proof.shapes.find((x) => x.id === textEdit.id);
+    if (s && textEdit.field === 'tag') {
+      // A tag left empty is no tag, and so is a new one let go with Escape.
+      const value = keep ? textEdit.value : s.tag;
+      if (!value?.trim() || (!keep && textEdit.fresh)) {
+        delete s.tag;
+        delete s.tagAt;
+        dirty = true;
+      } else if (s.tag !== value) {
+        s.tag = value;
+        dirty = true;
+      }
+    } else if (keep && s && s.text !== textEdit.value) {
+      s.text = textEdit.value;
+      dirty = true;
     }
     textEdit = null;
   }
@@ -3344,6 +4748,7 @@
 
   // ---- clipboard (copy / paste / duplicate of a single element) ---------------
   let clipboard = null; // detached deep copy of a shape spec (no id)
+  let clipboardFrame = null; // where it sat on the page when it was copied
   /** Whether that copy is the last one the analyst made without leaving the window.
    *  What lets Ctrl+V tell a shape just copied here from an older screenshot sitting
    *  in the system clipboard (see `onPaste`). */
@@ -3352,7 +4757,10 @@
   function copyShape(id = selectedId) {
     const s = proof.shapes.find((x) => x.id === id);
     if (!s) return;
-    clipboard = copyShapeSpec(s);
+    // A copy of a line that holds to pictures is a free one, where it stood: a
+    // copy stepped aside would otherwise be pulled straight back over it.
+    clipboard = copyShapeSpec(s.ends ? { ...s, points: linkPoints(s, frameOf), ends: undefined } : s);
+    clipboardFrame = frameOf(s.panel);
     shapeCopyFresh = true;
   }
 
@@ -3364,19 +4772,27 @@
     return () => window.removeEventListener('blur', release);
   });
 
-  // Paste the clipboard as a fresh element, nudged down-right so it doesn't hide
-  // the original. Points-based kinds shift every vertex.
+  // Paste the clipboard as a fresh element, stepped down-right on the page so it
+  // doesn't hide the original. It lands on the surface it was copied from, panel
+  // or overlay alike; once that surface is gone, on the first panel, unchanged on
+  // the page. Points-based kinds shift every vertex.
   function pasteShape() {
     if (!clipboard) return;
-    const target = proof.panels.some((p) => p.id === clipboard.panel)
-      ? clipboard.panel
-      : proof.panels[0]?.id;
-    if (!target) return;
-    const s = { ...offsetShape(clipboard, 26), id: newId('s'), panel: target };
+    let spec = clipboard;
+    let frame = frameOf(clipboard.panel);
+    if (!frame) {
+      const target = proof.panels[0]?.id;
+      frame = target ? frameOf(target) : null;
+      if (!frame || !clipboardFrame) return;
+      spec = { ...moveShapeToSurface(clipboard, clipboardFrame, frame), panel: target };
+    }
+    const step = pageStepOnSurface(PASTE_STEP, PASTE_STEP, frame);
+    const s = { ...offsetShape(spec, step.dx, step.dy), id: newId('s'), panel: spec.panel };
     proof.shapes.push(s);
     selectedIds = [s.id];
     // cascade further pastes so repeated Ctrl+V steps down-right
     clipboard = offsetShape(s, 0);
+    clipboardFrame = frame;
     dirty = true;
   }
 
@@ -3428,13 +4844,9 @@
     proof.shapes = next;
     dirty = true;
   }
-  const bringForward = (i) => moveShapeTo(i, i + 1);
-  const sendBackward = (i) => moveShapeTo(i, i - 1);
-  const canBringForward = (i) => i < proof.shapes.length - 1;
-  const canSendBackward = (i) => i > 0;
 
-  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text', icon: 'pin', number: 'numbered', blur: 'blurBox' };
-  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text', icon: 'Symbol', number: 'Marker', blur: 'Blur box' };
+  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text', callout: 'calloutLeader', icon: 'pin', number: 'numbered', blur: 'blurBox', zoom: 'zoomInset', cone: 'viewCone' };
+  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text', callout: 'Callout', icon: 'Symbol', number: 'Marker', blur: 'Blur box', zoom: 'Zoom inset', cone: 'View cone' };
 
   // Colour / stroke / fill live-edit everything in hand and always remember the
   // pick as the default for the next drawn one — the last value you touched
@@ -3472,13 +4884,14 @@
   function setStroke(w) {
     // Font size is a text-only property, so editing it must not overwrite the
     // stroke-width default used for the next drawn shape.
-    if (editableShape?.kind === 'text') {
+    if (editableShape?.kind === 'text' || editableShape?.kind === 'callout') {
       editableShape.fontSize = w;
       dirty = true;
       return;
     }
     for (const s of editableShapes) {
-      if (s.kind === 'text') continue; // a font size is not a stroke width
+      // a font size is not a stroke width, and a callout's line follows its font
+      if (s.kind === 'text' || s.kind === 'callout') continue;
       if (s.kind === 'icon' && isSolidIcon(s.name)) continue; // a silhouette has no outline
       s.strokeWidth = w;
       dirty = true;
@@ -3497,13 +4910,19 @@
     fillOpacity = opacity;
   }
 
-  // Arrow-key nudge of the selected element, in panel-natural pixels.
+  // Arrow-key nudge of the selected elements, in page pixels: a press steps the
+  // same distance on every panel, whatever its resolution, size or turn.
   const NUDGE = {
     ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
   };
   function nudgeSelected(dx, dy) {
     if (!editableShapes.length) return;
-    for (const s of editableShapes) Object.assign(s, nudgeShape(s, dx, dy));
+    for (const s of editableShapes) {
+      const frame = frameOf(s.panel);
+      if (!frame) continue;
+      const step = pageStepOnSurface(dx, dy, frame);
+      Object.assign(s, s.ends ? nudgedLink(s, dx, dy, frameOf) : nudgeShape(s, step.dx, step.dy));
+    }
     dirty = true;
   }
 
@@ -3529,6 +4948,7 @@
     if (e.key === 'Escape' && drawing) {
       drawing = discardDraft(drawing);
       docLayer.batchDraw();
+      uiLayer.batchDraw(); // a callout's draft line is drawn there
       return;
     }
     // Escape unwinds here as everywhere else: the marks go and the image keeps
@@ -3547,6 +4967,12 @@
       // element rather than changing it, and what they add lands in plain sight.
       if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
       else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
+      // the stacking order: a step with the arrow, all the way with Shift too
+      else if ((k === 'arrowup' || k === 'arrowdown') && editableShapes.length) {
+        e.preventDefault();
+        const up = k === 'arrowup';
+        restack(e.shiftKey ? (up ? 'front' : 'back') : (up ? 'forward' : 'backward'));
+      }
       else if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (k === 'y') { e.preventDefault(); redo(); }
       else if (k === 's') { e.preventDefault(); save(); }
@@ -3602,6 +5028,9 @@
     else if (e.key === 's') tool = 'icon';
     else if (e.key === 'n') tool = 'number';
     else if (e.key === 'b') tool = 'blur';
+    else if (e.key === 'k') tool = 'callout';
+    else if (e.key === 'z') tool = 'zoom';
+    else if (e.key === 'o') tool = 'cone';
     else if (e.key === 'f') fit();
   }
 
@@ -3651,6 +5080,7 @@
     if (!proof.panels.length || copying) return;
     copying = true;
     try {
+      await fontReady;
       const blob = await (await fetch(exportPng())).blob();
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       toast('Proof image copied. Paste it anywhere', 'ok');
@@ -3912,6 +5342,7 @@
     saving = true;
     try {
       const c = await ensureCase();
+      await fontReady;
       const dataUrl = exportPng();
       // Pasted images the case does not hold yet ride along with the spec; the
       // ones already written are named by their content, so they need no resend.
@@ -4050,7 +5481,10 @@
 
   async function openProof(entry) {
     const run = ++openRun;
-    const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(entry.name)}`);
+    // A proof saved before ink moved to page pixels is converted on the way in.
+    const spec = withInkOnPage(
+      await api.get(`/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(entry.name)}`),
+    );
     if (run !== openRun) return;
     const style = normalizeProofStyle(spec);
     resetDoc();
@@ -4078,8 +5512,11 @@
     proof.footer = style.footer;
     proof.footerEnabled = style.footerEnabled;
     proof.footerColor = style.footerColor;
+    proof.captionColor = style.captionColor;
     proof.footerAlign = style.footerAlign;
     proof.captionsEnabled = style.captionsEnabled;
+    proof.font = style.font;
+    proof.fontBold = style.fontBold;
     proof.bg = style.bg;
     proof.space = style.space;
     proof.layout = style.layout;
@@ -4122,7 +5559,7 @@
         toast('An overlay of this proof is missing', 'warn');
       }
     }
-    const validSurfaces = new Set([...proof.panels, ...proof.pastes].map((s) => s.id));
+    const validSurfaces = new Set([...proof.panels, ...proof.pastes].map((s) => s.id).concat(PAGE));
     proof.shapes = (spec.shapes ?? []).filter((s) => validSurfaces.has(s.panel));
     // legend text lives in `notes` (per color); migrate old per-shape comments
     proof.notes = spec.notes ?? notesFromShapes(proof.shapes);
@@ -4171,6 +5608,28 @@
       || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
   );
   const editableShape = $derived(editableShapes.length === 1 ? editableShapes[0] : null);
+  // The picked mark whose pointer the toolbar sets: a callout, or a label that
+  // can be given one.
+  const tailShape = $derived(
+    editableShape?.kind === 'callout' || editableShape?.kind === 'text' ? editableShape : null,
+  );
+  // A line style means something to the marks drawn with a line, and nothing to
+  // a label, a symbol or a blur, so the control follows what is picked or held.
+  const showDash = $derived(
+    editableShapes.length ? editableShapes.some((s) => DASHABLE.has(s.kind)) : DASHABLE.has(tool),
+  );
+  const activeDash = $derived(editableShape && DASHABLE.has(editableShape.kind) ? (editableShape.dash ?? 'solid') : lineStyle);
+  const textBox = $derived(
+    editableShape?.kind === 'text' ? { frame: !!editableShape.frame, bg: editableShape.bg ?? null } : null,
+  );
+  const pickedSurface = $derived(
+    tool !== 'select' ? null
+      : selectedPanelId ? proof.panels.find((p) => p.id === selectedPanelId)
+        : selectedPasteId ? proof.pastes.find((p) => p.id === selectedPasteId) : null,
+  );
+  const activeTail = $derived(
+    tailShape ? (tailShape.kind === 'callout' ? (tailShape.tail ?? 'leader') : 'none') : calloutTail,
+  );
   const fillableSelection = $derived(editableShapes.some((s) => canFill(s.kind)));
   // A solid symbol is a silhouette: there is no outline to widen, so the
   // control stays away rather than sitting there doing nothing.
@@ -4258,6 +5717,26 @@
     [order[i - 1], order[i]] = [order[i], order[i - 1]];
     proof.points = order;
     dirty = true;
+  }
+
+  /** Each point's markers in the analyst's layers, and the layers it can join. */
+  const pointPlaces = $derived(placesOf(proof.points.map((one, i) => (i === 0 ? displayedCoords : one.coords)), pointLayers.targets));
+  const layerTargets = $derived(orderedTargets(pointLayers.targets, pointLayers.last(caseState.current?.id)));
+
+  /** A point into a layer. The marker follows the proof as saved, so unsaved changes are saved first. */
+  function addPointToLayer(i, choice) {
+    const go = () => pointLayers.add(caseState.current?.id, savedName, i === 0 ? displayedCoords : proof.points[i].coords,
+      choice.layer, choice.group, choice.style);
+    if (dirty || !savedName) save({ then: go }); else go();
+  }
+  /** The marker on the map, in its layer opened for editing. */
+  async function openPointInLayer(place) {
+    const row = addedLayers.rows.find((one) => one.name === place.layer.name && one.editable)
+      ?? { name: place.layer.name, title: place.layer.title, editable: true };
+    uiState.gotoCoords = { lat: place.marker.lat, lon: place.marker.lon, zoom: 17 };
+    uiState.tool = 'satellite';
+    if (personalLayers.editor?.name !== row.name) await personalLayers.open(row);
+    personalLayers.select(place.marker.key);
   }
 
   /** A camera stood in one place, so lighting one point puts the others out. */
@@ -4583,6 +6062,26 @@
       {setColor}
       {setStroke}
       {setFill}
+      {showDash}
+      {activeDash}
+      {setDash}
+      {textBox}
+      {setTextBox}
+      surfaceBorder={pickedSurface ? (pickedSurface.frame ?? null) : undefined}
+      setSurfaceBorder={(patch) => pickedSurface && setFrame(pickedSurface, patch)}
+      frameWidthMax={FRAME_WIDTH_MAX}
+      showLens={tool === 'cone' || editableShape?.kind === 'cone'}
+      activeLens={editableShape?.kind === 'cone'
+        ? { lens: editableShape.lens ?? null, upright: !!editableShape.upright, fov: editableShape.fov }
+        : { lens: coneLens, upright: coneUpright, fov: lensFov(coneLens, coneUpright) }}
+      {setLens}
+      showTag={editableShape?.kind === 'rect'}
+      activeTag={editableShape?.tag ? (editableShape.tagAt ?? 'tl') : 'none'}
+      {setTagAt}
+      showTail={tool === 'callout' || !!tailShape}
+      tailNone={!!tailShape}
+      {activeTail}
+      {setTail}
       {fit}
       layout={proof.layout}
       {setLayoutMode}
@@ -4593,6 +6092,7 @@
     />
     {/if}
 
+    <ProofContextMenu menu={ctxMenu} onclose={() => (ctxMenu = null)} />
     <ProofCanvas
       bind:containerEl
       {tool}
@@ -4746,15 +6246,29 @@
                   <Icon name="eye" size={13} />
                 </button>
               </div>
-              {#if i > 0}
-                <button class="point-move" title="Make this the proof's conclusion" onclick={() => raisePoint(i)}>
-                  <Icon name="chevronUp" size={13} />
-                </button>
-                <button class="point-drop" title="Remove this point" onclick={() => removePoint(i)}>
-                  <Icon name="x" size={13} />
-                </button>
-              {/if}
+              <ProofPointMenu
+                index={i}
+                coords={i === 0 ? displayedCoords : point.coords}
+                proposed={pointProposed(proof.points, i, proof.panels)}
+                canSave={proof.panels.length > 0}
+                unsaved={dirty || !savedName}
+                busy={pointLayers.busy || saving}
+                caseId={caseState.current?.id ?? null}
+                targets={layerTargets}
+                held={new Set((pointPlaces.get(i) ?? []).map((place) => `${place.layer.name}|${place.marker.group ?? ''}`))}
+                onadd={(choice) => addPointToLayer(i, choice)}
+                oncreate={(title) => pointLayers.create(caseState.current?.id, savedName, title)}
+                oncheck={() => (pointMap = { row: i, view: pointMapView(i) })}
+                onraise={i > 0 ? () => raisePoint(i) : null}
+                onremove={i > 0 ? () => removePoint(i) : null}
+              />
             </div>
+            <ProofPointLayers
+              places={pointPlaces.get(i) ?? []}
+              busy={pointLayers.busy}
+              onopen={openPointInLayer}
+              onremove={(place) => pointLayers.remove(caseState.current?.id, savedName, place)}
+            />
           {/each}
           {#if proof.points.length > 1}
             <div class="point-hint">Order decides the conclusion.</div>
@@ -4927,8 +6441,6 @@
           scaleMin={PANEL_SCALE_MIN}
           scaleMax={PANEL_SCALE_MAX}
           scaleStep={SCALE_STEP}
-          frameWidthMax={FRAME_WIDTH_MAX}
-          frameColor={FRAME_COLOR}
           {openPicker}
           {movePanelZ}
           {scalePanel}
@@ -4937,15 +6449,10 @@
           {removePanel}
           {movePasteZ}
           {removePaste}
-          {setFrame}
           {pickImageFile}
           {featureList}
           {moveLegendColor}
           {setColor}
-          {canBringForward}
-          {canSendBackward}
-          {bringForward}
-          {sendBackward}
           {moveShapeTo}
           kindIcon={KIND_ICON}
           kindLabel={KIND_LABEL}
@@ -4971,6 +6478,27 @@
                 }}
               />
               <span>Caption new panels</span>
+            </label>
+            <label class="adv-font">
+              <span>Font</span>
+              <select
+                class="input"
+                value={proof.font ?? 'system'}
+                onchange={(e) => { proof.font = e.currentTarget.value; dirty = true; }}
+                aria-label="proof font"
+              >
+                {#each PROOF_FONTS as face (face.id)}
+                  <option value={face.id}>{face.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="sig-check">
+              <input
+                type="checkbox"
+                checked={proof.fontBold !== false}
+                onchange={(e) => { proof.fontBold = e.currentTarget.checked; dirty = true; }}
+              />
+              <span>Labels, callouts and tags in bold</span>
             </label>
             <div class="adv-hint">Off: added panels start blank. You can still type a caption on any panel.</div>
             <div class="size-row">
@@ -5663,14 +7191,6 @@
   /* The name is as wide as a name needs to be; the coordinate takes the rest. */
   .point-row .label-field { width: 110px; flex: none; }
   .point-label { width: 100%; min-width: 0; font-size: var(--fs-xs); padding: 5px 8px; }
-  .point-move, .point-drop {
-    display: inline-flex;
-    color: var(--text-3);
-    padding: 2px;
-    border-radius: var(--r-sm);
-  }
-  .point-move:hover { color: var(--text-1); background: var(--bg-2); }
-  .point-drop:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
   .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
   .desc-input { resize: vertical; min-height: 44px; line-height: 1.35; }
   .adv-toggle {
@@ -5711,6 +7231,8 @@
     font-family: inherit;
   }
   .adv-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
+  .adv-font { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-2); }
+  .adv-font select { flex: 1; min-width: 0; }
   .sig-check {
     display: flex;
     align-items: center;

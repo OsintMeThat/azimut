@@ -94,6 +94,7 @@ def plan_of(ask: dict[str, Any]) -> tuple[finder.Plan, finder.Trace]:
         within=(float(min(within)), float(max(within))) if within else None,
         projection=lens.get("projection", "camera"),
         facing=(float(facing[0]), float(facing[1])) if facing else None,
+        marks=finder.marks_of(lens),
     )
     alignments = tuple(
         finder.Alignment(

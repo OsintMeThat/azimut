@@ -46,25 +46,38 @@ describe('the Horizon layout', () => {
     expect(markup.indexOf('<HorizonStrip')).toBeGreaterThan(markup.indexOf('<OverlayTransport'));
   });
 
-  it('opens Find from the pick screen and from a laid photo, over a tab that takes no focus meanwhile', () => {
+  it('heads every mode with the one switch, Find over a tab that takes no focus meanwhile', () => {
     const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
-    expect(header).toContain("{#if layout === 'picking' || (layout === 'looking' && overlay.source)}");
-    expect(header).toContain('onclick={openFind}');
-    expect(markup).toContain('<div class="hz-main" inert={finder.open}>');
-    expect(markup).toContain('inert={finder.open}>');
-    expect(markup).toContain('{#if finder.open}');
+    expect(header.indexOf('<ViewSwitch options={MODES} value={mode}')).toBeLessThan(header.indexOf('{#if layout'));
+    expect(header).not.toContain('openFind');
+    const find = readFileSync(new URL('./horizon/Find.svelte', import.meta.url), 'utf8');
+    expect(find).toContain('<ViewSwitch options={modes} value="find"');
+    expect(markup).toContain("<div class=\"hz-main\" inert={mode === 'find'}>");
+    expect(markup).toContain("{#if mode === 'find'}");
     expect(markup).toContain('onsearch={searchFromFind}');
     expect(markup).toContain('onplace={lookFromPlace}');
-    // the tab's own keys wait while Find is open
-    expect(source).toMatch(/function onKey\(event\) \{\s*\/\/ Find has the keys while it is open\s*if \(finder\.open\) return;/);
+    // the tab's own keys wait while Find is on screen
+    expect(source).toMatch(/function onKey\(event\) \{\s*\/\/ Find has the keys while it is on screen\s*if \(mode === 'find'\) return;/);
     // a search made with no case open makes one first
     expect(source).toMatch(/async function searchFromFind\(\) \{\s*try \{\s*const owner = await ensureCase\(\);/);
+  });
+
+  it('lays the photo over the view in Overlay only, hidden and kept in the other two', () => {
+    expect(markup).toContain('overlay={photoOn ? overlay : null}');
+    expect(markup).toContain('{#if photoOn && overlay.source && layout === \'looking\' && !swapped}\n          <OverlayBar');
+    expect(source).toContain("const photoOn = $derived(mode === 'overlay');");
+    // a photo laid from the dialog or a drop, or handed over from Inspect, brings Overlay
+    expect(source.match(/if \(mode === 'view'\) mode = 'overlay';/g)).toHaveLength(3);
+    // the address says the mode, and a change of mode is a step Back returns from
+    expect(source).toContain('...modeParams(mode)');
+    expect(source).toContain('|| mode !== lastMode');
+    expect(source).toContain('mode = modeOf(to);');
   });
 
   it('keeps how the ground is drawn on the view with a photo laid, out of the pen\'s way', () => {
     const view = readFileSync(new URL('./horizon/HorizonView.svelte', import.meta.url), 'utf8');
     expect(view).toContain(
-      'const controlsShown = $derived(Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping)));'
+      'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting))'
     );
     expect(view).toContain('{#if controlsShown}\n    <div class="controls">');
     // the names keep clear of the corner only while the controls are in it

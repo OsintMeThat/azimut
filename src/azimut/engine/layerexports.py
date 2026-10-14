@@ -20,8 +20,10 @@ NS = "http://www.opengis.net/kml/2.2"
 ET.register_namespace("", NS)
 
 
-def icon_key(symbol: str, colour: str) -> str:
-    return f"{symbol}-{colour.lower().removeprefix('#')}"
+def icon_key(symbol: str, colour: str, status: str = "", external: bool = False) -> str:
+    """The name the browser drew a marker's picture under (`markerImageKey`)."""
+    return (f"{symbol}-{colour.lower().removeprefix('#')}" + (f"-{status}" if status else "")
+            + ("-x" if external else ""))
 
 
 def decode_icons(values: dict[str, str]) -> dict[str, bytes]:
@@ -72,6 +74,11 @@ def _geometry(parent: ET.Element, geometry: dict[str, Any]) -> None:
             _geometry(group, {"type": single, "coordinates": part})
 
 
+#: What a personal feature says beyond its style, carried so a re-import keeps it.
+#: The link to a case item is not: a download never names case entities.
+PERSONAL_FIELDS = ("date", "date_end", "status", "bearing", "links", "provenance")
+
+
 def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tuple[bytes, str, str]:
     spec = layerediting._spec(case, name)
     rendered = layerediting.drawing(spec, case)["geojson"]
@@ -79,7 +86,8 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tu
     for feature in features:
         props = feature["properties"]
         feature["properties"] = {key: props[key] for key in (
-            "name", "description", "colour", "category", "symbol", "group", "icon", "icon_scale", "stroke_width"
+            "name", "description", "colour", "category", "symbol", "group", "icon", "icon_scale", "stroke_width",
+            *PERSONAL_FIELDS,
         ) if key in props}
     if fmt == "geojson":
         ranks = {group["id"]: index for index, group in enumerate(layerediting._groups(spec))}
@@ -115,7 +123,8 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tu
         _element(_element(style, "PolyStyle"), "color", f"40{kml_colour[2:]}")
         icon_style = _element(style, "IconStyle")
         _element(icon_style, "scale", props.get("icon_scale", 1))
-        key = icon_key(str(props.get("symbol") or "pin"), f"#{colour}")
+        key = icon_key(str(props.get("symbol") or "pin"), f"#{colour}", str(props.get("status") or ""),
+                       props.get("provenance") == "external")
         png = images.get(key)
         own = props.get("icon")
         if own and fmt == "kmz":
@@ -140,9 +149,20 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tu
         _element(placemark, "name", props.get("name", ""))
         _element(placemark, "description", props.get("description", ""))
         _element(placemark, "styleUrl", f"#s{index}")
+        if props.get("date") and props.get("date_end"):
+            span = _element(placemark, "TimeSpan")
+            _element(span, "begin", props["date"])
+            _element(span, "end", props["date_end"])
+        elif props.get("date"):
+            _element(_element(placemark, "TimeStamp"), "when", props["date"])
         extra = _element(placemark, "ExtendedData")
         for field in ("symbol", "colour", "icon_scale", "stroke_width"):
             _element(_element(extra, "Data", name=f"azimut_{field}"), "value", props.get(field, ""))
+        for field in ("status", "bearing", "provenance"):
+            if field in props:
+                _element(_element(extra, "Data", name=f"azimut_{field}"), "value", props[field])
+        if props.get("links"):
+            _element(_element(extra, "Data", name="azimut_links"), "value", "\n".join(props["links"]))
         _geometry(placemark, feature["geometry"])
     document[:] = [child for child in document if child.tag != f"{{{NS}}}Folder"] + list(folders.values())
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)

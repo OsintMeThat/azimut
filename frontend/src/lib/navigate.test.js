@@ -55,10 +55,6 @@ describe('openInTimeline', () => {
 });
 
 describe('openGuide', () => {
-  it('opens a saved map composition in Map with its case-owned spec', () => {
-    openEntity({ type: 'map-view', attrs: { spec: '.map-views/abc123.json' } });
-    expect(uiState.tool).toBe('satellite'); expect(uiState.openMapView).toBe('abc123');
-  });
   it('lands on the section written about the tab the mark was pressed from', () => {
     openGuide('satellite');
     expect(uiState.tool).toBe('guide');

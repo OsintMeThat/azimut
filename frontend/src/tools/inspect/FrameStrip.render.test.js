@@ -22,6 +22,7 @@ function show(props) {
     filedIds: new Set(),
     onselect: vi.fn(),
     onremove: vi.fn(),
+    onsave: vi.fn(),
     onsaveall: vi.fn(),
     ...props,
   };
@@ -91,5 +92,41 @@ describe('the frame strip', () => {
     const props = show({ frames: [frame('a', 1)] });
     target.querySelector('button[aria-label="Remove frame"]').click();
     expect(props.onremove).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('saving a frame from its tile', () => {
+  const saves = () => [...target.querySelectorAll('button[aria-label="Save frame"]')];
+
+  it('saves in one press, without opening the frame', () => {
+    const props = show({ frames: [frame('a', 1), frame('b', 2)] });
+
+    expect(saves()).toHaveLength(2);
+    saves()[1].click();
+    expect(props.onsave).toHaveBeenCalledWith('b');
+    expect(props.onselect).not.toHaveBeenCalled();
+  });
+
+  it('turns the press into the in-case mark once the frame is filed', () => {
+    show({ frames: [frame('a', 1), frame('b', 2)], filedIds: new Set(['a']) });
+
+    const [first, second] = target.querySelectorAll('.strip > div.tile');
+    expect(first.querySelector('.filed')).not.toBeNull();
+    expect(first.querySelector('button[aria-label="Save frame"]')).toBeNull();
+    expect(second.querySelector('button[aria-label="Save frame"]')).not.toBeNull();
+  });
+
+  it('shows a frame being saved, and leaves it out of the save-all count', () => {
+    show({ frames: [frame('a', 1), frame('b', 2), frame('c', 3)], busyIds: new Set(['a']) });
+
+    const first = target.querySelector('.strip > div.tile');
+    expect(first.querySelector('[aria-label="Saving"]')).not.toBeNull();
+    expect(saves()).toHaveLength(2);
+    expect(target.textContent).toContain('Save 2 frames');
+  });
+
+  it('offers nothing to save while the frame is still rendering', () => {
+    show({ frames: [frame('a', 1, { url: null })] });
+    expect(saves()).toHaveLength(0);
   });
 });

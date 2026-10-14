@@ -186,3 +186,34 @@ def test_a_panorama_is_read_through_the_strip_its_lens_up_to_the_whole_turn(clie
 )
 def test_hints_the_search_cannot_use_are_refused(client, change):
     assert client.post(URL, json=_body(**change)).status_code == 422
+
+
+def test_marks_beside_the_trace_are_judged_on_each_place(client):
+    x, _ = trace_on(RANGE, heading=47.0, fov=52.0, tilt=2.0)
+    # a collage cut down the middle: each piece's camera eases a little, which the skyline's score says
+    answer = client.post(URL, json=_body(fov=52.0, known=True, piece=[int(v > 0) for v in x]))
+    assert answer.status_code == 200, answer.text
+    best = answer.json()["fits"][0]
+    assert best["heading"] == pytest.approx(47.0, abs=0.3)
+    assert "sky" in best
+    # and says how each piece was eased, which the view lays each piece's skyline by
+    assert [piece["piece"] for piece in best["pieces"]] == [0, 1]
+    assert set(best["pieces"][0]) == {"piece", "turn", "tilt", "roll"}
+    # inner edges without the terrain's ridges are kept off the skyline, and judged nowhere here
+    edges = client.post(URL, json=_body(ridge_x=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5], ridge_y=[-0.2] * 6))
+    assert edges.status_code == 200, edges.text
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"ridge_x": [0.0, 0.1], "ridge_y": [0.0]},
+        {"ridge_x": [0.0] * 6, "ridge_y": [40.0] * 6},
+        {"line": [0, 1]},  # not one per point
+        {"pairs": [[0, 0]]},
+        {"pairs": [[0, 1, 2]]},
+        {"piece": [500] * 200},
+    ],
+)
+def test_marks_the_search_cannot_read_are_refused(client, change):
+    assert client.post(URL, json=_body(**change)).status_code == 422

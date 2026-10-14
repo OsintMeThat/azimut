@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { PANEL_H } from './composer.js';
 import {
   canFill,
+  dashPattern,
+  DASHABLE,
   fillPaint,
   movedBy,
   nextPanelRow,
@@ -10,7 +12,11 @@ import {
   PANEL_SCALE_MAX,
   PANEL_SCALE_MIN,
   pointsWithTransform,
+  restacked,
   scaleFromNode,
+  tagBox,
+  tagFont,
+  tagPlate,
   textBoxPad,
   viewCentrePoint,
 } from './proofEdits.js';
@@ -237,5 +243,83 @@ describe('textBoxPad', () => {
 
   it('answers for a label that never stated a size', () => {
     expect(textBoxPad(undefined)).toBe(textBoxPad(28));
+  });
+});
+
+describe('a box tag', () => {
+  it('grows with the box line, and never below a readable size', () => {
+    expect(tagFont(4)).toBe(20);
+    expect(tagFont(6)).toBe(28);
+    expect(tagFont(1)).toBe(14);
+  });
+
+  it('hangs outside the corner it names, flush with the outer edge of the line', () => {
+    // a 100×50 box with a 4-wide line, and a 30×12 tag
+    expect(tagBox(100, 50, 30, 12, 'tl', 4)).toEqual({ x: -2, y: -14 });
+    expect(tagBox(100, 50, 30, 12, 'tr', 4)).toEqual({ x: 72, y: -14 });
+    expect(tagBox(100, 50, 30, 12, 'bl', 4)).toEqual({ x: -2, y: 52 });
+    expect(tagBox(100, 50, 30, 12, 'br', 4)).toEqual({ x: 72, y: 52 });
+  });
+
+  it('paints its tab on across the line, so no seam shows between them', () => {
+    // above the box, the tab runs down to the line's inner edge
+    expect(tagPlate(100, 50, 30, 12, 'tl', 4)).toEqual({ x: -2, y: -14, w: 30, h: 16 });
+    // below it, up to the same edge
+    expect(tagPlate(100, 50, 30, 12, 'br', 4)).toEqual({ x: 72, y: 48, w: 30, h: 16 });
+  });
+});
+
+describe('restacking marks', () => {
+  // back to front: a and c on one picture, b on another, d on the first again
+  const a = { id: 'a', panel: 'p1' };
+  const b = { id: 'b', panel: 'p2' };
+  const c = { id: 'c', panel: 'p1' };
+  const d = { id: 'd', panel: 'p1' };
+  const ids = (list) => list.map((s) => s.id).join('');
+
+  it('sends a mark to the front or the back of everything', () => {
+    expect(ids(restacked([a, b, c, d], ['a'], 'front'))).toBe('bcda');
+    expect(ids(restacked([a, b, c, d], ['d'], 'back'))).toBe('dabc');
+  });
+
+  it('steps past the next mark of its own picture, not past one on another', () => {
+    // b is on another picture, so a moves past c, the next mark it can cover
+    expect(ids(restacked([a, b, c, d], ['a'], 'forward'))).toBe('bcad');
+    expect(ids(restacked([a, b, c, d], ['d'], 'backward'))).toBe('abdc');
+  });
+
+  it('moves a family together, in its own order', () => {
+    expect(ids(restacked([a, c, d], ['a', 'c'], 'forward'))).toBe('dac');
+    expect(ids(restacked([a, c, d], ['c', 'd'], 'back'))).toBe('cda');
+  });
+
+  it('hands the same list back when there is nowhere to go', () => {
+    const list = [a, b, c, d];
+    expect(restacked(list, ['d'], 'front')).toBe(list);
+    expect(restacked(list, ['d'], 'forward')).toBe(list);
+    expect(restacked(list, ['a'], 'backward')).toBe(list);
+    expect(restacked(list, ['b'], 'forward')).toBe(list); // alone on its picture
+  });
+
+  it('reads the layer it is given, so callouts stack among themselves', () => {
+    const page = (s) => (s.kind === 'callout' ? 'page' : s.panel);
+    const k1 = { id: 'k', panel: 'p1', kind: 'callout' };
+    const k2 = { id: 'm', panel: 'p2', kind: 'callout' };
+    expect(ids(restacked([k1, a, k2], ['k'], 'forward', page))).toBe('amk');
+  });
+});
+
+describe('a line style', () => {
+  it('draws dashes and dots in proportion to the line', () => {
+    expect(dashPattern('dash', 4)).toEqual([12, 8]);
+    expect(dashPattern('dash', 8)).toEqual([24, 16]);
+    expect(dashPattern('dot', 4)[1]).toBe(8);
+    expect(dashPattern('solid', 4)).toBeNull();
+    expect(dashPattern(undefined, 4)).toBeNull();
+  });
+
+  it('means something only to the marks drawn with a line', () => {
+    for (const kind of ['rect', 'ellipse', 'line', 'arrow', 'curve', 'freehand', 'zoom']) expect(DASHABLE.has(kind)).toBe(true);
+    for (const kind of ['text', 'callout', 'icon', 'number', 'blur']) expect(DASHABLE.has(kind)).toBe(false);
   });
 });

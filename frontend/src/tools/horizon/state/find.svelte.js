@@ -18,6 +18,9 @@
  * (api/horizon_finds.py): started by the analyst's press, followed while it
  * runs, stopped by theirs, and kept in the case once done with every point it
  * scored, so a search reopened shows its map without running again.
+ *
+ * The setup is part of Horizon's bench (state/work.svelte.js): `snapshot` is
+ * what the case keeps of it, `restore` puts it back after a reload.
  */
 import {
   ALIGN_COLOURS,
@@ -29,7 +32,8 @@ import {
   photoOffset,
 } from '../../../lib/horizon/find.js';
 import { searchHints } from '../../../lib/horizon/hints.js';
-import { GAP_MIN_POINTS, tracePlane, traceSamples } from '../../../lib/horizon/overlay.js';
+import { marksSaid } from '../../../lib/horizon/traceMarks.js';
+import { GAP_MIN_POINTS, markedPlane, traceSamples } from '../../../lib/horizon/overlay.js';
 import { pollWhile } from '../../../lib/poll.js';
 
 /** Who took the photo, and the heights each may stand at by default (over the ground, an aircraft's above the sea). */
@@ -65,6 +69,17 @@ export function durationText(points, step) {
   return `about ${(seconds / 3600).toFixed(1)} h`;
 }
 
+/**
+ * How large a search is, before it runs (`/api/horizon/finds/estimate`): its
+ * points and time, and how far both may grow where relief stands near and the
+ * grid is filled in (`most`).
+ */
+export function estimateText({ points, most = points, step }) {
+  const size = `${points.toLocaleString('en-US')} points, ${durationText(points, step)}`;
+  if (!(most > points)) return `${size}.`;
+  return `${size}; up to ${durationText(most, step).replace('about ', '')} where relief stands near.`;
+}
+
 let made = 0;
 
 /**
@@ -91,6 +106,9 @@ export function createFindState({ api, overlay, view }) {
   let list = $state.raw([]);
   /** How large the search would be: `{ points, coarse, spacing, step }`, or null. */
   let estimated = $state.raw(null);
+  /** How fine the heights over the area are, metres, once read; and where they were read. */
+  let detail = $state(null);
+  let detailAt = '';
   let stopPoll = null;
   let caseOf = null;
 
@@ -110,15 +128,30 @@ export function createFindState({ api, overlay, view }) {
     return ALIGN_COLOURS.find((c) => !used.has(c)) ?? ALIGN_COLOURS[alignments.length % ALIGN_COLOURS.length];
   }
 
+  /**
+   * An alignment with how far apart its two points stand across the photo,
+   * read on the photo as the search reads it (straightened from its lens's
+   * curve, between its pulled corners): a curve set after the points were
+   * placed moves it, as the points stay on the photo's own pixels. Kept as it
+   * was while the lens is not known.
+   */
+  function offsetNow(one) {
+    if (!one.offsetKnown) return one;
+    const offset = photoOffset(overlay.seenOf(one.photo.near), overlay.seenOf(one.photo.far), lensNow() ?? {});
+    return offset === null || offset === one.offset ? one : { ...one, offset };
+  }
+  /** The alignments as the photo now reads them. */
+  const live = $derived(alignments.map(offsetNow));
+
   function finishAlignment() {
     const { photo, map } = pending;
     const lens = lensNow();
-    const offset = photoOffset(photo.near, photo.far, lens ?? {});
+    const offset = photoOffset(overlay.seenOf(photo.near), overlay.seenOf(photo.far), lens ?? {});
     alignments = [
       ...alignments,
       {
         id: `al_${Date.now().toString(36)}_${(made += 1)}`,
-        colour: nextColour(),
+        colour: pending.colour ?? nextColour(),
         photo,
         map,
         // apart across a photo of unknown lens: taken as one behind the other
@@ -138,7 +171,7 @@ export function createFindState({ api, overlay, view }) {
   let asking = 0;
 
   async function askTouch(id) {
-    const one = alignments.find((a) => a.id === id);
+    const one = live.find((a) => a.id === id);
     if (!one?.tops) return;
     const mine = (asking += 1);
     asked.set(id, mine);
@@ -170,12 +203,16 @@ export function createFindState({ api, overlay, view }) {
     if (!(aspect > 0)) return null;
     const size = { width: PLANE_W, height: PLANE_W / aspect };
     const samples = traceSamples(overlay.strokesSeen ?? [], size);
-    if (samples.length < GAP_MIN_POINTS) return null;
+    const marks = overlay.marks ?? null;
+    const inner = new Set(marks?.inner ?? []);
+    // the skyline alone must say enough: inner edges are judged on the places it finds
+    if (samples.filter((s) => !inner.has(marks?.lines?.[s.stroke] ?? s.stroke)).length < GAP_MIN_POINTS) return null;
     const lens = overlay.lens;
     const projection = overlay.isPanorama ? 'panorama' : 'camera';
     const told = searchHints(overlay.hints, { lensKnown: Boolean(lens) });
     const fov = lens?.fov ?? Math.sqrt(told.within[0] * told.within[1]);
-    const plane = tracePlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 });
+    const pieceAt = (s) => overlay.pieceAt?.({ u: s.x / size.width, v: s.y / size.height }) ?? 0;
+    const plane = markedPlane(samples, { fov, ...size, projection, heading: 0, tilt: 0, roll: 0 }, marks, pieceAt);
     return { ...plane, fov, known: Boolean(lens), ...(told.within ? { within: told.within } : {}), projection };
   }
 
@@ -188,14 +225,24 @@ export function createFindState({ api, overlay, view }) {
     return {
       ...(source?.path ? { title: `${source.name ?? 'Photo'} search` } : {}),
       photo: source?.path
-        ? { path: source.path, kind: source.kind, title: source.name ?? '', time: overlay.time ?? 0, strokes: overlay.strokes }
+        ? {
+            path: source.path,
+            kind: source.kind,
+            title: source.name ?? '',
+            time: overlay.time ?? 0,
+            strokes: overlay.strokes,
+            ...(marksSaid(overlay.marks) ? { marks: overlay.marks } : {}),
+            // what the trace is straightened and pulled by, so the search opens again on the same plane
+            ...(overlay.bend ? { bend: overlay.bend } : {}),
+            ...(overlay.warped ? { corners: overlay.corners.map(({ u, v }) => ({ u, v })) } : {}),
+          }
         : null,
       trace,
       area: area.map((p) => ({ lat: p.lat, lon: p.lon })),
       who: { mode: who.mode, low: who.low, high: who.high },
       reach: Number.isFinite(reach) ? reach : reach === 'all' ? 100_000 : null,
       spacing: settings.spacing === 'auto' ? null : settings.spacing,
-      alignments: alignments.map((one) => ({
+      alignments: live.map((one) => ({
         near: one.map.near,
         far: one.map.far,
         bearing: alignmentBearing(one),
@@ -300,7 +347,7 @@ export function createFindState({ api, overlay, view }) {
     // -- the alignments ---------------------------------------------------------
 
     get alignments() {
-      return alignments;
+      return live;
     },
     get pending() {
       return pending;
@@ -309,8 +356,9 @@ export function createFindState({ api, overlay, view }) {
     get step() {
       return pending ? ALIGN_STEPS[pending.step] : null;
     },
+    /** Start an alignment: its colour is its own from the first click, on the photo and the map. */
     startAlignment() {
-      pending = { step: 0, photo: {}, map: {} };
+      pending = { step: 0, photo: {}, map: {}, colour: nextColour() };
       drawing = 'align';
     },
     cancelAlignment() {
@@ -356,7 +404,7 @@ export function createFindState({ api, overlay, view }) {
     },
     /** Where the alignments meet, `{ at, spread, crossings }`, or null. */
     get meeting() {
-      return meeting(alignments);
+      return meeting(live);
     },
 
     // -- the search ------------------------------------------------------------------
@@ -469,6 +517,85 @@ export function createFindState({ api, overlay, view }) {
       const spacing = SPACINGS.includes(change?.spacing) ? change.spacing : settings.spacing;
       const tolerance = Number(change?.tolerance) > 0 ? Number(change.tolerance) : settings.tolerance;
       settings = { spacing, tolerance };
+    },
+
+    // -- the bench ----------------------------------------------------------------------
+
+    /** The setup as the bench keeps it (api/horizon_work.py), or null while nothing is set. */
+    get snapshot() {
+      const plain = who.mode === 'ground' && settings.spacing === 'auto' && settings.tolerance === ALIGN_TOLERANCE;
+      if (!area.length && !alignments.length && !search && plain) return null;
+      return {
+        area: area.map(({ lat, lon }) => ({ lat, lon })),
+        alignments: live.map((one) => ({
+          colour: one.colour,
+          photo: one.photo,
+          map: one.map,
+          offset: one.offset,
+          offset_known: one.offsetKnown,
+          tops: one.tops,
+          heights: one.heights,
+        })),
+        who: { mode: who.mode, low: who.low, high: who.high },
+        spacing: settings.spacing,
+        tolerance: settings.tolerance,
+        search: search?.name ?? null,
+      };
+    },
+    /** The setup the bench kept put back: the search on show reopened, then what was set since over it. */
+    async restore(setup, caseId) {
+      drawing = null;
+      pending = null;
+      if (setup?.search && caseId) {
+        try {
+          await this.openSearch(caseId, setup.search);
+        } catch {
+          stopPoll?.();
+          search = null;
+        }
+      } else {
+        stopPoll?.();
+        search = null;
+      }
+      area = (setup?.area ?? []).map(({ lat, lon }) => ({ lat, lon }));
+      alignments = (setup?.alignments ?? []).map((one, index) => ({
+        id: `al_${Date.now().toString(36)}_${(made += 1)}`,
+        colour: one.colour ?? ALIGN_COLOURS[index % ALIGN_COLOURS.length],
+        photo: one.photo,
+        map: one.map,
+        offset: one.offset ?? 0,
+        offsetKnown: one.offset_known ?? true,
+        tops: Boolean(one.tops),
+        heights: one.heights ?? { near: 0, far: 0 },
+        touch: null,
+      }));
+      who = setup?.who && WHO[setup.who.mode] ? { mode: setup.who.mode, low: setup.who.low, high: setup.who.high } : { mode: 'ground', ...pick(WHO.ground) };
+      settings = {
+        spacing: SPACINGS.includes(setup?.spacing) ? setup.spacing : 'auto',
+        tolerance: Number(setup?.tolerance) > 0 ? Number(setup.tolerance) : ALIGN_TOLERANCE,
+      };
+      // where the tops touch was read off the terrain the analyst already looked at: read again
+      for (const one of alignments) if (one.tops) askTouch(one.id);
+    },
+
+    /** How fine the heights over the area are, metres (30 over most of the world), or null until read. */
+    get detail() {
+      return detail;
+    },
+    /** Read how fine the heights are at the area's middle, once it is closed: the one tile the search reads first anyway. */
+    async readDetail() {
+      if (area.length < 3 || drawing === 'area') return;
+      const lat = area.reduce((sum, p) => sum + p.lat, 0) / area.length;
+      const lon = area.reduce((sum, p) => sum + p.lon, 0) / area.length;
+      const at = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+      if (at === detailAt) return;
+      detailAt = at;
+      try {
+        const answer = await api.get(`/api/terrain/elevation?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}`);
+        if (detailAt === at) detail = Number(answer?.resolution_m) > 0 ? Number(answer.resolution_m) : null;
+      } catch {
+        if (detailAt === at) detail = null;
+      }
     },
 
     /** The lens Find reads the photo through, for a line on the panel. */

@@ -188,9 +188,19 @@
         });
       }
     }
+    // the alignment being made: its near point as it will stay, in its own colour and number
     const pendingMap = find.pending?.map ?? {};
     if (pendingMap.near) {
-      out.push({ id: 'pending-near', kind: 'marker', at: pendingMap.near, className: 'find-end pending', html: '<span></span>', size: [14, 14], zIndex: 740 });
+      const colour = find.pending.colour ?? AREA;
+      out.push({
+        id: 'pending-near',
+        kind: 'marker',
+        at: pendingMap.near,
+        className: 'find-end',
+        html: `<span style="background:${colour}">${find.alignments.length + 1}</span>`,
+        size: [18, 18],
+        zIndex: 740,
+      });
     }
     for (const [index, place] of (result?.places ?? []).entries()) {
       out.push({
@@ -349,11 +359,6 @@
     border: 3px solid;
     background: #0b0d10;
     box-sizing: border-box;
-  }
-  .fm :global(.find-end.pending span) {
-    width: 14px;
-    height: 14px;
-    background: var(--accent);
   }
   .fm :global(.find-eye span) {
     display: block;

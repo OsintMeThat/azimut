@@ -593,8 +593,6 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # adopts a feature into the case graph.
     EntityType("map-layer", "Map layer", DOCUMENT, "compass", ANNEX,
                hint="a source or personal map layer kept apart from case places"),
-    EntityType("map-view", "Map composition", DOCUMENT, "panelRight", ANNEX,
-               hint="a named map camera and layers, with an optional legend"),
     # The page a claim rests on. `url` and `fetched_at` are written by whatever
     # filed it — the extension is on the page, so the server stamps the moment it
     # was seen — and are not declared here: a declared attr is a field an analyst

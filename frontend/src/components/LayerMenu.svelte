@@ -20,7 +20,6 @@
     oneditadded = null,
     onnewpersonal = null,
     ondownloadadded = null,
-    onmaps = null,
     /** The trigger's look, from the tool it sits in. */
     buttonClass = 'btn btn-sm',
     /** Which edge of the button the menu lines up with. */
@@ -71,7 +70,7 @@
   {#if open}
     <div class="menu card" class:right={align === 'right'} role="dialog" aria-label="Layers">
       {@render header?.()}
-      <LayerList {rows} {added} {ontoggleadded} {onmanage} {oneditadded} {onnewpersonal} {ondownloadadded} {onmaps} bind:folded />
+      <LayerList {rows} {added} {ontoggleadded} {onmanage} {oneditadded} {onnewpersonal} {ondownloadadded} bind:folded />
     </div>
   {/if}
 </div>

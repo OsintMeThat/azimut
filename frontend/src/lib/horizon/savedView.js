@@ -18,6 +18,7 @@
  */
 import { buildingsSpec, builtOf } from './buildings.js';
 import { cleanHints } from './hints.js';
+import { marksSaid } from './traceMarks.js';
 import { headingOf } from './view.js';
 
 const round = (value, digits) => {
@@ -52,6 +53,8 @@ export function photoSpec(overlay) {
     bend: round(overlay.bend ?? 0, 3),
     corners: overlay.warped ? overlay.corners.map(({ u, v }) => ({ u, v })) : null,
     strokes: overlay.strokes ?? [],
+    // inner edges, pairs and a collage's cuts (lib/horizon/traceMarks.js); none for a skyline alone
+    marks: marksSaid(overlay.marks) ? overlay.marks : null,
     trace_time: overlay.traceTime ?? null,
     // held to the terrain, it opens held again
     locked: Boolean(overlay.locked),
@@ -111,9 +114,10 @@ export function viewSpec(view, overlay = null, buildings = null) {
 }
 
 /**
- * What decides whether a saved view has changed, as text. The trace and the
- * pins are compared by the arrays themselves (`sameWork`), which change
- * whenever they are drawn on: a long trace is not written out at every frame.
+ * What decides whether a saved view has changed, as text. The trace, its
+ * marks and the pins are compared by the arrays themselves (`sameWork`),
+ * which change whenever they are drawn on: a long trace is not written out at
+ * every frame.
  */
 export function signature(spec) {
   if (!spec) return '';
@@ -123,6 +127,7 @@ export function signature(spec) {
   if (photo) {
     const settings = { ...photo };
     delete settings.strokes;
+    delete settings.marks;
     delete settings.pins;
     delete settings.time;
     kept.photo = settings;
@@ -131,9 +136,13 @@ export function signature(spec) {
   return JSON.stringify(kept);
 }
 
-/** Whether the trace and the pins on show are the ones a view was saved or opened with. */
+/** Whether the trace, its marks and the pins on show are the ones a view was saved or opened with. */
 export function sameWork(overlay, saved) {
-  return (overlay?.strokes ?? null) === (saved?.strokes ?? null) && (overlay?.pins ?? null) === (saved?.pins ?? null);
+  return (
+    (overlay?.strokes ?? null) === (saved?.strokes ?? null) &&
+    (overlay?.marks ?? null) === (saved?.marks ?? null) &&
+    (overlay?.pins ?? null) === (saved?.pins ?? null)
+  );
 }
 
 /**

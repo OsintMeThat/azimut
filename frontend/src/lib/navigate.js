@@ -60,7 +60,6 @@ export const ENTITY_TOOL = {
   collage: 'collage',
   'compare-session': 'compare',
   'horizon-view': 'horizon',
-  'map-view': 'satellite',
   'analysis-zones': 'detect',
   'analysis-area': 'detect',
   'analysis-follow-up': 'detect',
@@ -200,11 +199,6 @@ export function openEntity(entity, resolved = false) {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openCompare = name;
     uiState.tool = 'compare';
-    return;
-  }
-  if (entity.type === 'map-view') {
-    uiState.openMapView = specName(entity.attrs?.spec);
-    uiState.tool = 'satellite';
     return;
   }
   if (entity.type === 'horizon-view') {

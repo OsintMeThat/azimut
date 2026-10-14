@@ -8,10 +8,12 @@
    */
   import Icon from '../../components/Icon.svelte';
   import PhotoHints from './PhotoHints.svelte';
-  import { ALIGN_TOLERANCES, areaText, HEAT_RAMP, UNCLEAR_HELP, VERDICTS } from '../../lib/horizon/find.js';
+  import { ALIGN_TOLERANCES, areaText, HEAT_RAMP, searchedReach, UNCLEAR_HELP, VERDICTS } from '../../lib/horizon/find.js';
   import { AUTO_REACH, reachText, ZOOMS } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { durationText, SPACINGS, WHO } from './state/find.svelte.js';
+  import { estimateText, SPACINGS, WHO } from './state/find.svelte.js';
+  import { marksSummary } from '../../lib/horizon/traceTools.js';
+  import { reliefWords } from '../../lib/horizon/overlay.js';
   import { formatDistance } from '../../lib/measure.js';
 
   let {
@@ -46,6 +48,12 @@
     return () => clearTimeout(estimateTimer);
   });
 
+  // how fine the heights are where the area lies, read once it is closed
+  $effect(() => {
+    void [find.area, find.drawing];
+    find.readDetail();
+  });
+
   const search = $derived(find.search);
   const result = $derived(search?.status === 'done' ? search.result : null);
   const progress = $derived(search?.progress?.total ? Math.round((100 * search.progress.done) / search.progress.total) : 0);
@@ -58,9 +66,10 @@
     const anyLens = !lens && !overlay.isPanorama && (hints.zoom ?? 'any') === 'any';
     const zoom = ZOOMS.find((z) => z.id === hints.zoom);
     const lensWords = lens ? `a ${Math.round(lens.fov)}° lens` : overlay.isPanorama ? 'a panorama' : anyLens ? 'any lens' : `${zoom.label.toLowerCase()} lenses`;
-    const near = Number.isFinite(hints.reach) && hints.reach <= 10_000 ? hints.reach : null;
+    // a reach given is searched about that far: on to twice it, so the warning names the farther one
+    const near = Number.isFinite(hints.reach) && searchedReach(hints.reach, AUTO_REACH) <= 10_000 ? searchedReach(hints.reach, AUTO_REACH) : null;
     const reachWords = Number.isFinite(hints.reach)
-      ? `ridges within ${reachText(hints.reach)}`
+      ? `ridges within about ${reachText(hints.reach)}`
       : hints.reach === 'all'
         ? 'every ridge'
         : `ridges within ${reachText(AUTO_REACH)}`;
@@ -84,6 +93,10 @@
   }
 
   const traced = $derived(overlay.strokes.length);
+  const tracedText = $derived.by(() => {
+    const marked = marksSummary(overlay.marks);
+    return `${traced} ${traced === 1 ? 'line' : 'lines'} traced${marked ? `: ${marked}` : ''}`;
+  });
   const ALIGN_TOTAL = 4;
   const whoRange = $derived(find.who.mode === 'aircraft' ? 'above the sea' : 'above the ground');
 
@@ -110,9 +123,15 @@
       {#if !overlay.source}
         <p class="fs-say">Add the photo first.</p>
       {:else if traced}
-        <p class="fs-say">{traced} {traced === 1 ? 'line' : 'lines'} traced. Rub out clouds, trees and buildings.</p>
+        <p class="fs-say">{tracedText}. Rub out clouds, trees and buildings.</p>
+        {#if !overlay.marks?.inner?.length}
+          <p class="fs-say quiet">A ridge seen in front of farther land, not the sky? Draw it with the Ridge pen.</p>
+        {/if}
       {:else}
         <p class="fs-say">Trace the skyline on the photo, or press Detect.</p>
+      {/if}
+      {#if overlay.source && find.detail}
+        <p class="fs-say quiet">{reliefWords(find.detail)}</p>
       {/if}
     </li>
 
@@ -278,6 +297,14 @@
                       ? `${place.fov < 10 ? place.fov.toFixed(1) : Math.round(place.fov)}° lens · `
                       : ''}{Number.isFinite(place.reach) ? `ridges within ${reachText(place.reach)}` : ''}</small
                   >
+                  {#if place.inner != null || place.pairs}
+                    <small
+                      >{place.inner != null ? `ridges in front ${Math.round(Math.max(0, place.inner) * 100)}% on the terrain` : ''}{place.inner !=
+                        null && place.pairs
+                        ? ' · '
+                        : ''}{place.pairs ? `${place.pairs[0]} of ${place.pairs[1]} ${place.pairs[1] === 1 ? 'pair' : 'pairs'} in order` : ''}</small
+                    >
+                  {/if}
                   <small>{place.lat.toFixed(4)}, {place.lon.toFixed(4)}</small>
                 </span>
                 <Icon name="chevronRight" size={13} />
@@ -312,7 +339,7 @@
             <p class="fs-say warn">Any lens finds more chance fits: say the zoom if you can.</p>
           {/if}
           {#if find.estimated}
-            <p class="fs-say">{find.estimated.points} points, {durationText(find.estimated.points, find.estimated.step)}.</p>
+            <p class="fs-say">{estimateText(find.estimated)}</p>
           {/if}
         {/if}
         <div class="fs-acts">

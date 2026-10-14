@@ -20,6 +20,8 @@ function fakeFind(over = {}) {
     searchProblem: 'Draw the area on the map',
     estimated: null,
     list: [],
+    detail: null,
+    readDetail: vi.fn(),
     estimate: vi.fn(),
     stop: vi.fn(),
     closeSearch: vi.fn(),
@@ -76,6 +78,18 @@ describe('the steps of Find', () => {
     expect(onsearch).toHaveBeenCalledOnce();
   });
 
+  it('says what the trace holds beside the skyline, and how far a search may grow near relief', () => {
+    const marks = { lines: [0, 1, 2], inner: [1], pairs: [[1, 0]], cuts: [0.5] };
+    const root = steps({ find: fakeFind(), overlay: { ...overlay, strokes: [[], [], []], marks } });
+    expect(root.textContent).toContain('3 lines traced: 1 ridge · 1 pair · 2 pieces.');
+    expect(root.textContent).not.toContain('Draw it with the Ridge pen');
+    const plain = steps({ find: fakeFind() });
+    expect(plain.textContent).toContain('A ridge seen in front of farther land, not the sky? Draw it with the Ridge pen.');
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const sized = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, most: 3205, step: 0.5 } }) });
+    expect(sized.textContent).toContain('1,003 points, about 5 min; up to 16 min where relief stands near.');
+  });
+
   it('follows a running search and stops it', () => {
     const find = fakeFind({ searching: true, search: { name: 's', status: 'running', progress: { done: 120, total: 469 } } });
     const root = steps({ find });
@@ -102,6 +116,12 @@ describe('the steps of Find', () => {
     expect(root.textContent).toContain('A score, not a probability');
   });
 
+  it('says, for each place, how its ridges in front and its pairs lay on the terrain', () => {
+    const places = [{ lat: 12.702, lon: 43.5415, explained: 0.79, heading: 271.6, fov: 55, inner: 0.898, pairs: [4, 4] }];
+    const root = steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'match', places, points: [] } } }) });
+    expect(root.querySelector('.fs-place').textContent).toContain('ridges in front 90% on the terrain · 4 of 4 pairs in order');
+  });
+
   it('lists the earlier searches to open or delete', () => {
     const onopensearch = vi.fn();
     const onremovesearch = vi.fn();
@@ -119,8 +139,9 @@ describe('the steps of Find', () => {
     const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
     const ready = fakeFind({ area, areaProblem: '', searchProblem: '' });
     const hazed = steps({ find: ready, overlay: { ...overlay, hints: { zoom: 'any', reach: 5000 } } });
-    expect(hazed.textContent).toContain('With any lens · ridges within 5 km · on foot.');
-    expect(hazed.textContent).toContain('Ridges past 5 km are left out: a far skyline cannot be found.');
+    expect(hazed.textContent).toContain('With any lens · ridges within about 5 km · on foot.');
+    // searched on to twice the reach given: the ridges past that are the ones left out
+    expect(hazed.textContent).toContain('Ridges past 10 km are left out: a far skyline cannot be found.');
     expect(hazed.textContent).toContain('Any lens finds more chance fits: say the zoom if you can.');
     const told = steps({ find: ready, overlay: { ...overlay, hints: { zoom: 'wide', reach: 'auto' } } });
     expect(told.textContent).toContain('With wide lenses · ridges within 50 km · on foot.');
@@ -134,5 +155,14 @@ describe('the steps of Find', () => {
     expect(root.textContent).toContain('Say the zoom, check how far the photo sees');
     // each place says its lens and how far it read, so a stray one shows
     expect(root.querySelector('.fs-place').textContent).toContain('22° lens · ridges within 5 km');
+  });
+});
+
+describe('the relief under the area', () => {
+  it('says how fine it is under the skyline step, once read', () => {
+    const coarse = steps({ find: fakeFind({ detail: 30 }) });
+    expect(coarse.textContent).toContain('Relief here is known to 30 m: trace a near ridge’s shape, not its rocks or trees.');
+    const unknown = steps({ find: fakeFind() });
+    expect(unknown.textContent).not.toContain('Relief here');
   });
 });

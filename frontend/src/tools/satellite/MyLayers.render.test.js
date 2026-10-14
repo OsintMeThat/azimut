@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import MyLayers from './MyLayers.svelte';
 import NewLayerDialog from './NewLayerDialog.svelte';
+import { createMyLayersState } from './state/myLayers.svelte.js';
+
+// the case palette is read from the server; here, a case that names no colours
+vi.mock('../../lib/api.js', () => ({ api: { get: vi.fn(async () => ({ colours: [] })), post: vi.fn(), patch: vi.fn(), put: vi.fn(), del: vi.fn() } }));
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 let held;
 const byText = (label) => [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === label);
@@ -11,6 +16,40 @@ function show(component, props) {
   flushSync();
 }
 afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; });
+const ROW = { name: 'work', title: 'Working', editable: true, edit_revision: 'r'.repeat(64) };
+/** A real editor over a mocked API, for the flows that save. */
+async function editing({ features = [], refuse = null } = {}) {
+  const groups = [{ id: 'g', name: 'Markers', mode: 'individual', colour: '#0072b2', symbol: 'pin', size: 1 }];
+  // A marker's edit answers with the marker as saved, as the server does.
+  const api = {
+    post: vi.fn(async (path) => path.endsWith('/edit') ? { layer: ROW, document: { features }, groups, checkpoint: 'c'.repeat(32) } : { layer: ROW }),
+    patch: vi.fn(async (path, body) => {
+      if (refuse && path.endsWith(refuse)) throw new Error('Refused');
+      const key = path.match(/\/markers\/([^/]+)$/)?.[1];
+      const at = features.findIndex((feature) => feature.properties.key === key);
+      if (at < 0) return { layer: ROW, document: { features } };
+      const properties = { ...features[at].properties, ...body };
+      for (const [field, value] of Object.entries(body)) if (value === null) delete properties[field];
+      features[at] = { ...features[at], properties };
+      return { layer: ROW, marker: features[at] };
+    }),
+    get: vi.fn(),
+  };
+  const controller = createMyLayersState({ api, layers: { rows: [], edited: vi.fn() }, caseId: () => 'case', notify: vi.fn(), reloadCase: vi.fn() });
+  await controller.open(ROW);
+  return { controller, api };
+}
+const finished = (api) => api.post.mock.calls.some(([path]) => path.endsWith('/edit/finish'));
+/** A stand-in editor with one feature selected, its sheet filled as the real one fills it. */
+function picked(feature, extra = {}) {
+  const props = feature.properties;
+  return { editor: { title: 'Working map' }, features: [feature], selected: feature, selection: [props.key], pending: 0,
+    form: { name: props.name ?? '', description: '', colour: props.colour || '#0072b2', symbol: props.symbol || 'pin', group: props.group ?? '',
+      date: '', status: '', bearing: props.bearing ?? '', links: [], provenance: '' }, ...extra };
+}
+const type = (node, value) => { node.value = value; node.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); };
+const leave = (node) => { node.dispatchEvent(new Event('change', { bubbles: true })); flushSync(); };
+const menuItem = (label) => [...document.querySelectorAll('.float-menu .fm-item')].find((node) => node.textContent.trim() === label);
 
 describe('personal layers', () => {
   it('expands a long group explicitly and selects rows with Shift instead of checkboxes', () => {
@@ -39,7 +78,9 @@ describe('personal layers', () => {
     expect(reorderFeatures).toHaveBeenCalledExactlyOnceWith(['one', 'two'], 'second', null);
     handle.dispatchEvent(drag('dragstart')); target.dispatchEvent(drag('dragover')); document.body.dispatchEvent(drag('drop'));
     expect(reorderFeatures).toHaveBeenCalledOnce();
-    expect(document.querySelector('[aria-label="Selected features group"]')).toBeTruthy();
+    // two selected: one sheet for both
+    expect(document.querySelector('[aria-label="Selected features"]').textContent).toContain('2 selected');
+    expect(document.querySelector('[aria-label="Feature group"]')).toBeTruthy();
   });
   it('reorders a focused feature with the keyboard without changing its geometry', () => {
     const features = ['one', 'two'].map((key) => ({ properties: { key, name: key, group: 'first' }, geometry: { type: 'LineString' } }));
@@ -48,20 +89,25 @@ describe('personal layers', () => {
     document.querySelector('[aria-label="Move one"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
     expect(reorderFeatures).toHaveBeenCalledWith(['one'], 'first', 'two');
   });
-  it('saves layer details on Done and keeps an invalid name or refused save open', async () => {
-    const updateDetails = vi.fn(async () => null), finish = vi.fn();
-    show(MyLayers, { controller: { editor: { title: 'Working' }, features: [], updateDetails, finish } });
-    document.querySelector('[aria-label="Edit layer details"]').click(); flushSync();
-    const name = document.querySelector('[aria-label="Layer name"]'), description = document.querySelector('[aria-label="Layer description"]');
-    name.value = ' '; name.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+  it('renames the layer in its header, describes it from its menu, and stays open after a refused save', async () => {
+    const { controller, api } = await editing({ refuse: '/edit' });
+    show(MyLayers, { controller });
+    const name = document.querySelector('[aria-label="Layer name"]');
+    expect(name.value).toBe('Working');
+    expect(document.querySelector('[aria-label="Layer description"]')).toBeNull();
+    type(name, ' ');
     expect(byText('Done').disabled).toBe(true);
-    name.value = 'Renamed'; name.dispatchEvent(new Event('input', { bubbles: true }));
-    description.value = 'Context'; description.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-    document.body.click(); flushSync(); expect(document.querySelector('.layer-details')).toBeNull();
-    byText('Done').click(); await Promise.resolve();
-    expect(updateDetails).toHaveBeenCalledWith({ title: 'Renamed', description: 'Context' });
-    expect(finish).not.toHaveBeenCalled();
-    document.querySelector('[aria-label="Back from layer editor"]').click(); flushSync();
+    // an empty name is not saved: leaving the field puts the name back
+    leave(name); expect(name.value).toBe('Working'); expect(api.patch).not.toHaveBeenCalled();
+    type(name, 'Renamed');
+    document.querySelector('[aria-label="Layer actions"]').click(); flushSync();
+    menuItem('Add a description').click(); flushSync();
+    type(document.querySelector('[aria-label="Layer description"]'), 'Context');
+    byText('Done').click(); await controller.whenSaved(); await Promise.resolve();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case/map-layers/work/edit', { title: 'Renamed', description: 'Context' });
+    expect(finished(api)).toBe(false);
+    document.querySelector('[aria-label="Layer actions"]').click(); flushSync();
+    menuItem('Discard changes…').click(); flushSync();
     expect(document.querySelector('[role="alertdialog"]')).toBeTruthy();
   });
   it('reorders groups from a native drop and cancels a drop outside the list', () => {
@@ -88,7 +134,7 @@ describe('personal layers', () => {
       { id: 'second', name: 'Second', mode: 'individual', colour: '#0072b2', symbol: 'pin', size: 1 }];
     const updateGroup = vi.fn(), reorderGroups = vi.fn();
     show(MyLayers, { controller: { editor: { title: 'Working' }, features: [], groups, updateGroup, reorderGroups } });
-    document.querySelector('[aria-label="Edit group Second"]').click(); flushSync();
+    document.querySelector('[aria-label="Settings of group Second"]').click(); flushSync();
     const range = document.querySelector('[aria-label="Icon size for Second"]');
     expect(range.type).toBe('range'); range.value = '2.25';
     range.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
@@ -100,28 +146,87 @@ describe('personal layers', () => {
   });
 
   it('asks before discarding saved layer edits or an unsaved feature form', async () => {
-    const point = { properties: { key: 'm1', name: 'Original' }, geometry: { type: 'Point' } };
-    const finish = vi.fn(async () => true), ondone = vi.fn();
-    show(MyLayers, { ondone, controller: { editor: { title: 'Working' }, features: [point], selected: point, finish } });
-    const name = document.querySelector('[aria-label="Selected marker name"]'); name.value = 'Unsaved name';
-    name.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-    document.querySelector('[aria-label="Back from layer editor"]').click(); flushSync();
+    const point = { type: 'Feature', properties: { key: 'm1', name: 'Original', group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    const { controller, api } = await editing({ features: [point] });
+    const ondone = vi.fn();
+    controller.select('m1');
+    show(MyLayers, { ondone, controller });
+    const name = document.querySelector('[aria-label="Feature name"]');
+    type(name, 'Unsaved name');
+    const discard = () => { document.querySelector('[aria-label="Layer actions"]').click(); flushSync(); menuItem('Discard changes…').click(); flushSync(); };
+    discard();
     expect(document.querySelector('[role="alertdialog"]').getAttribute('aria-label')).toBe('Discard changes?');
-    expect(finish).not.toHaveBeenCalled();
+    expect(finished(api)).toBe(false);
     byText('Cancel').click(); flushSync(); expect(name.value).toBe('Unsaved name');
-    document.querySelector('[aria-label="Back from layer editor"]').click(); flushSync();
-    byText('Discard changes').click(); await Promise.resolve(); await Promise.resolve(); flushSync();
-    expect(finish).toHaveBeenCalledWith(true); expect(ondone).toHaveBeenCalledOnce();
+    discard();
+    byText('Discard changes').click(); await controller.whenSaved(); await settle(); flushSync();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/edit/finish', expect.objectContaining({ discard: true }));
+    expect(ondone).toHaveBeenCalledOnce();
   });
 
   it('commits an unsaved feature form on Done and stays open after a refused save', async () => {
-    const point = { properties: { key: 'm1', name: 'Original' }, geometry: { type: 'Point' } };
-    const update = vi.fn(async () => null), finish = vi.fn(async () => true);
-    show(MyLayers, { controller: { editor: { title: 'Working' }, features: [point], selected: point, update, finish } });
-    const input = document.querySelector('[aria-label="Selected marker name"]'); input.value = 'Changed';
-    input.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); byText('Done').click(); await Promise.resolve();
-    expect(update).toHaveBeenCalledWith('m1', { name: 'Changed' });
-    expect(finish).not.toHaveBeenCalled();
+    const point = { type: 'Feature', properties: { key: 'm1', name: 'Original', group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    const { controller, api } = await editing({ features: [point], refuse: '/markers/m1' });
+    controller.select('m1');
+    show(MyLayers, { controller });
+    type(document.querySelector('[aria-label="Feature name"]'), 'Changed');
+    byText('Done').click(); await controller.whenSaved(); await Promise.resolve();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case/map-layers/work/markers/m1', { name: 'Changed' });
+    expect(finished(api)).toBe(false);
+  });
+
+  it('saves the status, the sources and who geolocated it as each is set, and clears a direction', async () => {
+    const point = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g', symbol: 'badge-tank', bearing: 90 }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    const { controller, api } = await editing({ features: [point] });
+    controller.select('m1');
+    show(MyLayers, { controller });
+    const path = '/api/cases/case/map-layers/work/markers/m1';
+    byText('Destroyed').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith(path, { status: 'destroyed' });
+    // the direction is set on the map; the sheet says it and clears it
+    expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('90° E');
+    document.querySelector('[aria-label="Clear the direction"]').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith(path, { bearing: null });
+    expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('Turn the ring on the map');
+    document.querySelector('[aria-label="Add a source"]').click(); flushSync();
+    const source = document.querySelector('[aria-label="New source"]');
+    type(source, 'x.com/a/1');
+    source.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); flushSync();
+    expect(document.querySelector('[role="alert"]').textContent).toBe('Start the address with http:// or https://');
+    type(source, 'https://x.com/a/1');
+    source.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith(path, { links: ['https://x.com/a/1'] });
+    expect(document.querySelector('.chip a').textContent).toBe('x.com');
+    byText('Someone else').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith(path, { provenance: 'external' });
+    expect(api.patch).toHaveBeenCalledTimes(4);
+    expect(byText('Save changes')).toBeUndefined();
+  });
+
+  it('changes several selected features together and says where they differ', () => {
+    const features = [{ properties: { key: 'a', name: 'A', group: 'g', date: '2026-03-01', status: 'damaged' }, geometry: { type: 'Point' } },
+      { properties: { key: 'b', name: 'B', group: 'g', date: '2026-03-02', status: 'damaged' }, geometry: { type: 'Point' } }];
+    const updateSelection = vi.fn();
+    show(MyLayers, { controller: { editor: { title: 'Working map' }, features, groups: [{ id: 'g', name: 'Markers' }],
+      selection: ['a', 'b'], pending: 0, updateSelection } });
+    const sheet = document.querySelector('[aria-label="Selected features"]');
+    expect(sheet.querySelector('[aria-pressed="true"]').textContent).toBe('Damaged');
+    expect(sheet.textContent).toContain('Several days');
+    byText('Intact').click();
+    expect(updateSelection).toHaveBeenCalledWith({ status: null });
+    byText('Someone else').click();
+    expect(updateSelection).toHaveBeenCalledWith({ provenance: 'external' });
+  });
+
+  it('finds features by name and opens the groups that hold them', async () => {
+    const features = ['Depot', 'Bridge', 'Depot west'].map((name, index) => ({ type: 'Feature',
+      properties: { key: `k${index}`, name, group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } }));
+    const { controller } = await editing({ features });
+    show(MyLayers, { controller });
+    const find = document.querySelector('[aria-label="Find in this layer"]'); find.value = 'depot';
+    find.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect([...document.querySelectorAll('.features .name')].map((node) => node.textContent)).toEqual(['Depot west', 'Depot']);
+    expect(document.body.textContent).toContain('2 found');
   });
   it('lists only editable layers and offers creation without a new tab', () => {
     const onnew = vi.fn();
@@ -134,54 +239,50 @@ describe('personal layers', () => {
     expect(onnew).toHaveBeenCalledOnce();
   });
 
-  it('shows marker defaults and explains their destination while adding', () => {
-    show(MyLayers, { rows: [], controller: { editor: { title: 'Working map' }, placing: true,
-      draft: { name: '', colour: '#0072b2', symbol: 'pin' }, features: [], pending: 0 } });
-    expect(document.body.textContent).toContain('Click to add markers; Esc to stop.');
-    expect(document.body.textContent).toContain('Markers stay in this layer until saved as case places.');
-    expect(document.querySelector('[aria-label="New marker icons"]')).toBeTruthy();
-    expect(document.querySelector('[aria-label="New marker blue"]')).toBeTruthy();
-  });
-
-  it('offers explicit place promotion only for a selected point', () => {
+  it('offers place promotion for a selected point from its menu', () => {
     const marker = { properties: { key: 'm1', name: 'Gate' }, geometry: { type: 'Point', coordinates: [2, 48] } };
     const promote = vi.fn();
-    show(MyLayers, { controller: { editor: { title: 'Working map' }, selected: marker,
-      features: [marker], pending: 0, promote } });
-    byText('Save as case place').click();
+    show(MyLayers, { controller: picked(marker, { promote }) });
+    document.querySelector('[aria-label="Feature actions"]').click(); flushSync();
+    menuItem('Save as case place').click(); flushSync();
     expect(promote).toHaveBeenCalledWith('m1');
+    expect(document.querySelector('[aria-label="Feature actions"][aria-expanded="true"]')).toBeNull();
   });
 
-  it('shows an already promoted point without offering another promotion', () => {
-    const marker = { properties: { key: 'm1', name: 'Gate', place_id: 'e1' }, geometry: { type: 'Point' } };
-    show(MyLayers, { controller: { editor: { title: 'Working map' }, selected: marker,
-      features: [marker], pending: 0 } });
-    expect(document.body.textContent).toContain('Saved as case place');
-    expect(byText('Save as case place')).toBeUndefined();
-    expect(byText('Delete case place')).toBeTruthy();
+  it('shows the case item a point follows, without offering another promotion', () => {
+    const marker = { properties: { key: 'm1', name: 'Gate', entity_id: 'e1', entity_type: 'place', entity_label: 'Gate' }, geometry: { type: 'Point' } };
+    const ondeleteplace = vi.fn();
+    show(MyLayers, { controller: picked(marker), ondeleteplace });
+    expect(document.body.textContent).toContain('Follows the place “Gate”');
+    expect(byText('Unlink')).toBeTruthy();
+    document.querySelector('[aria-label="Feature actions"]').click(); flushSync();
+    expect(menuItem('Save as case place')).toBeUndefined();
+    menuItem('Delete case place').click();
+    expect(ondeleteplace).toHaveBeenCalledWith('e1');
   });
 
-  it('edits an imported line without offering a point symbol or place promotion', () => {
-    const line = { properties: { key: 'line', name: 'Road' }, geometry: { type: 'LineString' } };
-    show(MyLayers, { controller: { editor: { title: 'Working map' }, selected: line,
-      features: [line], pending: 0 } });
-    expect(document.querySelector('[aria-label="Selected marker icons"]')).toBeNull();
-    expect(byText('Save as case place')).toBeUndefined();
-    expect(byText('Save changes')).toBeTruthy();
+  it('edits a line by its colour, with no icon, direction or place promotion', () => {
+    const line = { properties: { key: 'line', name: 'Road' }, geometry: { type: 'LineString', coordinates: [[2, 48], [2.01, 48]] } };
+    show(MyLayers, { controller: picked(line) });
+    expect(document.querySelector('[aria-label="Feature style"] .dot')).toBeTruthy();
+    expect(document.querySelector('[aria-label="Feature"]').textContent).not.toContain('Facing');
+    expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('Length');
+    document.querySelector('[aria-label="Feature actions"]').click(); flushSync();
+    expect(menuItem('Save as case place')).toBeUndefined();
+    expect(menuItem('Remove from the layer')).toBeTruthy();
   });
 
-  it('renames an imported pictogram without silently replacing its style', () => {
-    const marker = { properties: { key: 'm1', name: 'Gate', colour: '', icon: 'source-icon' },
-      geometry: { type: 'Point' } };
-    const update = vi.fn();
-    show(MyLayers, { controller: { editor: { title: 'Working map' }, selected: marker,
-      features: [marker], pending: 0, update } });
-    const input = document.querySelector('[aria-label="Selected marker name"]');
-    input.value = 'Reviewed gate';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    byText('Save changes').click();
-    expect(update).toHaveBeenCalledWith('m1', { name: 'Reviewed gate' });
+  it('renames an imported pictogram when the name is left, without replacing its style', async () => {
+    const marker = { type: 'Feature', properties: { key: 'm1', name: 'Gate', colour: '', icon: 'source-icon', group: 'g' },
+      geometry: { type: 'Point', coordinates: [2, 48] } };
+    const { controller, api } = await editing({ features: [marker] });
+    controller.select('m1');
+    show(MyLayers, { controller });
+    const input = document.querySelector('[aria-label="Feature name"]');
+    type(input, 'Reviewed gate');
+    expect(api.patch).not.toHaveBeenCalled();
+    leave(input); await controller.whenSaved();
+    expect(api.patch).toHaveBeenCalledExactlyOnceWith('/api/cases/case/map-layers/work/markers/m1', { name: 'Reviewed gate' });
   });
 
   it('keeps the editor open while clicks are still being saved', () => {
@@ -206,29 +307,21 @@ describe('personal layers', () => {
     expect(document.querySelector('[aria-label="Edit First"]')).toBeNull();
   });
 
-  it('keeps individual controls out of a uniformly styled group and offers moving the feature', () => {
+  it('restyles a one-style group from its feature, and moves the feature to another group', () => {
     const point = { properties: { key: 'm1', group: 'g1', name: 'Gate' }, geometry: { type: 'Point' } };
     const groups = [{ id: 'g1', name: 'Checked', colour: '#009e73', symbol: 'star', mode: 'uniform' },
       { id: 'g2', name: 'Other', colour: '#0072b2', symbol: 'pin', mode: 'individual' }];
-    show(MyLayers, { controller: { editor: { title: 'Working map' }, selected: point,
-      features: [point], groups, group: 'g1', pending: 0 } });
-    expect(document.body.textContent).toContain('Uses the style of Checked.');
-    expect(document.querySelector('[aria-label="Selected marker icons"]')).toBeNull();
-    expect(document.querySelector('[aria-label="Selected marker group"]')).toBeTruthy();
-    expect(document.querySelector('[aria-label="Remove from this layer"]')).toBeTruthy();
-  });
-
-  it('adds several existing case places to the active group without listing existing members', () => {
-    const addPlaces = vi.fn(async () => ({}));
-    show(MyLayers, { places: [{ id: 'e1', title: 'Already here' }, { id: 'e2', title: 'Gate' }, { id: 'e3', title: 'Dock' }],
-      controller: { editor: { title: 'Working map' }, features: [{ properties: { place_id: 'e1' } }],
-        groups: [], pending: 0, stop: vi.fn(), addPlaces } });
-    byText('Add case places').click(); flushSync();
-    expect(document.querySelector('.place-options').textContent).not.toContain('Already here');
-    document.querySelector('input[type="checkbox"]').click(); flushSync();
-    byText('Select shown').click(); flushSync();
-    byText('Add selected (2)').click();
-    expect(addPlaces).toHaveBeenCalledWith(['e2', 'e3']);
+    const updateGroup = vi.fn(), saveForm = vi.fn();
+    show(MyLayers, { controller: picked(point, { groups, group: 'g1', updateGroup, saveForm }) });
+    document.querySelector('[aria-label="Feature style"]').click(); flushSync();
+    expect(document.body.textContent).toContain('Checked has one style for all its features. A pick here restyles the whole group.');
+    document.querySelector('[aria-label="Feature style orange"]').click();
+    expect(updateGroup).toHaveBeenCalledWith('g1', { colour: '#d55e00' });
+    // the sheet's own Group row moves it; the picker leaves that to the row
+    expect(document.querySelector('[aria-label="Feature style group"]')).toBeNull();
+    const select = document.querySelector('[aria-label="Feature group"]');
+    select.value = 'g2'; select.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(saveForm).toHaveBeenCalledOnce();
   });
 
   it('opens a large imported group list folded and lets its groups be unfolded', () => {
@@ -242,27 +335,32 @@ describe('personal layers', () => {
     expect(heads[1].getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('closes group settings, the case picker and the new-group form on outside clicks', () => {
+  it('closes group settings and the new-group form on outside presses', async () => {
     const ondone = vi.fn();
     show(MyLayers, { controller: { editor: { name: 'working', title: 'Working map' },
       groups: [{ id: 'g1', name: 'Markers', mode: 'uniform', colour: '#0072b2', symbol: 'pin' }],
-      features: [], pending: 0, stop: vi.fn() }, ondone });
-    document.querySelector('[aria-label="Edit group Markers"]').click(); flushSync();
+      features: [], pending: 0, stop: vi.fn(), done: vi.fn(async () => true) }, ondone });
+    document.querySelector('[aria-label="Settings of group Markers"]').click(); flushSync();
     const name = document.querySelector('[aria-label="Group name"]');
-    name.click(); flushSync();
-    expect(document.querySelector('.group-settings')).toBeTruthy();
-    document.body.click(); flushSync();
-    expect(document.querySelector('.group-settings')).toBeNull();
-    byText('Add case places').click(); flushSync();
-    document.querySelector('[aria-label="Find case places"]').click(); flushSync();
-    expect(document.querySelector('.place-picker')).toBeTruthy();
-    document.body.click(); flushSync();
-    expect(document.querySelector('.place-picker')).toBeNull();
+    name.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+    expect(document.querySelector('[aria-label="Settings of group Markers"][role="group"]')).toBeTruthy();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+    expect(document.querySelector('[aria-label="Settings of group Markers"][role="group"]')).toBeNull();
     byText('New group').click(); flushSync();
     document.body.click(); flushSync();
     expect(document.querySelector('.new-group')).toBeNull();
-    byText('Done').click();
+    byText('Done').click(); await settle();
     expect(ondone).toHaveBeenCalledOnce();
+  });
+
+  it('sets a group to one style and restyles it from its settings', () => {
+    const updateGroup = vi.fn();
+    const group = { id: 'g1', name: 'Markers', mode: 'individual', colour: '#0072b2', symbol: 'pin' };
+    show(MyLayers, { controller: { editor: { title: 'Working map' }, groups: [group], features: [], pending: 0, updateGroup } });
+    document.querySelector('[aria-label="Settings of group Markers"]').click(); flushSync();
+    expect(document.querySelector('[aria-label="Group style"]')).toBeNull();
+    document.querySelector('[aria-label="One style for the whole group"]').click();
+    expect(updateGroup).toHaveBeenCalledWith('g1', { mode: 'uniform' });
   });
 });
 

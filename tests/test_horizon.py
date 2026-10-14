@@ -260,6 +260,17 @@ def test_a_cut_keeps_the_skyline_haze_would_leave(relief):
     assert found.skyline_cuts[0, 1] < found.skyline_cuts[1, 1]
 
 
+def test_each_cut_says_how_far_its_skyline_stands(relief):
+    eye = horizon.Observer(*EYE, "ground", 1.7)
+    found = horizon.sweep(eye, azimuths=[60.0, 200.0], far=60_000.0, sampler=_sampler(relief),
+                          cuts=(15_000.0, 60_000.0))
+    assert found.skyline_cuts_distance.shape == found.skyline_cuts.shape
+    # within its reach, and the outermost cut's is the whole turn's
+    assert (found.skyline_cuts_distance[0] <= found.cuts[0] + 1e-6).all()
+    assert (found.skyline_cuts_distance[0] > 0).all()
+    assert found.skyline_cuts_distance[1] == pytest.approx(found.skyline_distance)
+
+
 def test_a_sweep_without_cuts_has_none(relief):
     found = horizon.sweep(horizon.Observer(*EYE, "ground", 1.7), azimuths=[60.0], far=20_000.0,
                           sampler=_sampler(relief))

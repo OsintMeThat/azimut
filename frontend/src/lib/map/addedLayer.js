@@ -39,9 +39,7 @@ import { Popup } from 'maplibre-gl';
 import { paths } from '../../components/Icon.svelte';
 import { wrapLon } from '../coords.js';
 import { categoryColour } from './addedLayers.js';
-import symbols from './layerSymbols.json';
-
-const BADGES = new Map(symbols.filter((symbol) => symbol.id.startsWith('badge-')).map((symbol) => [symbol.id, symbol.icon]));
+import { drawMarker, isBadge, MARKER_PIXELS } from './markerGlyphs.js';
 
 /** Geometry defaults and the symbols available to personal layer points. */
 const GLYPHS = { point: 'pin', line: 'line', area: 'polygon', circle: 'circle', star: 'star', flag: 'flag' };
@@ -202,45 +200,54 @@ export function iconImage(kind, size = ICON_PIXELS, make = defaultCanvas) {
   return { width: size, height: size, data: sdf(pixels.data, size, ICON_SPREAD) };
 }
 
-/** A coloured disc with a white glyph, drawn locally without an icon service. */
-export function badgeImage(symbol, colour, make = defaultCanvas) {
-  const canvas = make(ICON_PIXELS, ICON_PIXELS);
-  const context = canvas.getContext('2d');
-  if (!context || !BADGES.has(symbol)) return null;
-  context.clearRect(0, 0, ICON_PIXELS, ICON_PIXELS);
-  context.beginPath();
-  context.arc(32, 32, 28, 0, Math.PI * 2);
-  context.fillStyle = colour;
-  context.fill();
-  context.strokeStyle = '#fff';
-  context.lineWidth = 2.5;
-  context.stroke();
-  context.setTransform(1.6, 0, 0, 1.6, 12.8, 12.8);
-  context.lineWidth = 1.8;
-  context.lineCap = 'round'; context.lineJoin = 'round';
-  context.stroke(new Path2D(paths[BADGES.get(symbol)]));
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  return context.getImageData(0, 0, ICON_PIXELS, ICON_PIXELS);
+/** A coloured disc with its glyph, drawn locally without an icon service. */
+export function badgeImage(symbol, colour, marks = {}, make = defaultCanvas) {
+  return isBadge(symbol) ? personalMarkerImage(symbol, colour, marks, make) : null;
 }
 
-/** Plain personal markers share a bitmap layer with badges to respect group order. */
-export function personalMarkerImage(symbol, colour, make = defaultCanvas) {
-  if (BADGES.has(symbol)) return badgeImage(symbol, colour, make);
-  const canvas = make(ICON_PIXELS, ICON_PIXELS), context = canvas.getContext('2d');
+/** Plain personal markers share a bitmap layer with badges to respect group order.
+ *  `marks` are the status stroke and the external rim (`markerParts`). */
+export function personalMarkerImage(symbol, colour, marks = {}, make = defaultCanvas) {
+  const canvas = make(MARKER_PIXELS, MARKER_PIXELS), context = canvas.getContext('2d');
   if (!context) return null;
-  context.clearRect(0, 0, ICON_PIXELS, ICON_PIXELS);
-  // The painted outline occupies the same height as a badge's disc.
-  context.setTransform(2.7, 0, 0, 2.7, -0.4, -0.4);
-  context.lineJoin = 'round'; context.lineCap = 'round';
-  const kind = ['circle', 'star', 'flag'].includes(symbol) ? symbol : 'point';
-  const path = new Path2D(paths[GLYPHS[kind]]);
-  context.strokeStyle = '#fff'; context.lineWidth = 4; context.stroke(path);
-  context.strokeStyle = colour; context.fillStyle = colour; context.lineWidth = 2.4;
-  if (kind !== 'point') context.fill(path);
-  context.stroke(path);
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  return context.getImageData(0, 0, ICON_PIXELS, ICON_PIXELS);
+  drawMarker(context, symbol, colour, marks);
+  return context.getImageData(0, 0, MARKER_PIXELS, MARKER_PIXELS);
 }
+
+/** The image a marker is registered under: one per symbol, colour and marks. */
+export function markerImageKey(symbol, colour, { status = '', external = false } = {}) {
+  return `${symbol}-${String(colour).toLowerCase().replace('#', '')}${status ? `-${status}` : ''}${external ? '-x' : ''}`;
+}
+
+/** The size of the direction mark's image, around a marker at the same scale. */
+const BEARING_PIXELS = 96;
+const BEARING_ICON = 'azimut-layer-bearing';
+
+/**
+ * A wedge just outside a badge's rim, pointing up: the map turns it to the
+ * marker's `bearing`, so it says which way a camera looked or a convoy drove.
+ */
+export function bearingImage(make = defaultCanvas) {
+  const canvas = make(BEARING_PIXELS, BEARING_PIXELS), context = canvas.getContext('2d');
+  if (!context) return null;
+  const middle = BEARING_PIXELS / 2;
+  context.clearRect(0, 0, BEARING_PIXELS, BEARING_PIXELS);
+  context.beginPath();
+  context.moveTo(middle, 3);
+  context.lineTo(middle + 9, 16);
+  context.lineTo(middle - 9, 16);
+  context.closePath();
+  context.lineJoin = 'round';
+  context.lineWidth = 3;
+  context.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+  context.stroke();
+  context.fillStyle = '#fff';
+  context.fill();
+  return context.getImageData(0, 0, BEARING_PIXELS, BEARING_PIXELS);
+}
+
+/** The app's sans-serif stack, which the engine hands to the browser to draw names. */
+const LABEL_FONT = ['ui-sans-serif', 'system-ui', 'sans-serif'];
 
 function defaultCanvas(width, height) {
   const canvas = document.createElement('canvas');
@@ -365,8 +372,31 @@ export function createAddedLayer(
   const OWN = `${prefix}-own`;
   const HIT = `${prefix}-hit`;
   const HIT_OWN = `${prefix}-hit-own`;
-  const PAINTED = [FILL, LINE, DOT, MARK, OWN, ...(editable ? [HIT, HIT_OWN] : [])];
+  const BEARING = `${prefix}-bearing`;
+  const LABEL = `${prefix}-label`;
+  // A source draws no text and no direction: its names are read in the card,
+  // and a personal layer is the one whose analyst asks for either.
+  const PAINTED = [FILL, LINE, DOT, ...(editable ? [BEARING] : []), MARK, OWN,
+    ...(editable ? [LABEL, HIT, HIT_OWN] : [])];
+  // A merge makes multi-part lines and areas, so each kind names both forms.
+  const POINT = ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]];
+  const BASE = {
+    [FILL]: ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]],
+    [LINE]: ['!', POINT],
+    [DOT]: POINT,
+    [BEARING]: ['all', POINT, ['has', 'bearing']],
+    // The two symbol layers split the points between them on the one
+    // question of whether this feature's own icon is registered.
+    [MARK]: ['all', POINT, ['!', ['has', '$own']]],
+    [OWN]: ['all', POINT, ['has', '$own']],
+    [LABEL]: ['all', ['has', 'show_label'], ['!=', ['get', 'name'], '']],
+    [HIT]: ['all', POINT, ['!', ['has', '$own']]],
+    [HIT_OWN]: ['all', POINT, ['has', '$own']],
+  };
   const badgeIcons = new Set();
+  // Features held off the map while the editor drags their copies (`hide`).
+  let hiddenKeys = new Set();
+  let lastFilter = [[], null];
 
   let built = false;
   let shown = true;
@@ -399,14 +429,14 @@ export function createAddedLayer(
       id: FILL,
       type: 'fill',
       source: SOURCE,
-      filter: ['==', ['geometry-type'], 'Polygon'],
+      filter: BASE[FILL],
       paint: { 'fill-color': colour, 'fill-opacity': 0.18 },
     });
     map.addLayer({
       id: LINE,
       type: 'line',
       source: SOURCE,
-      filter: ['!=', ['geometry-type'], 'Point'],
+      filter: BASE[LINE],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': 0.9 },
     });
@@ -419,18 +449,37 @@ export function createAddedLayer(
       id: DOT,
       type: 'circle',
       source: SOURCE,
-      filter: ['==', ['geometry-type'], 'Point'],
+      filter: BASE[DOT],
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 14, 0],
         'circle-color': colour,
         'circle-opacity': 0.85,
       },
     });
+    // Under the marker it turns around, so the badge always reads first.
+    if (editable && !map.hasImage?.(BEARING_ICON)) {
+      const wedge = bearingImage();
+      if (wedge) map.addImage(BEARING_ICON, wedge);
+    }
+    if (editable) map.addLayer({
+      id: BEARING,
+      type: 'symbol',
+      source: SOURCE,
+      filter: BASE[BEARING],
+      layout: {
+        'icon-image': BEARING_ICON,
+        'icon-size': ['*', ICON_SCALE, ['coalesce', ['get', 'icon_scale'], 1]],
+        'icon-rotate': ['get', 'bearing'],
+        'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    });
     map.addLayer({
       id: MARK,
       type: 'symbol',
       source: SOURCE,
-      filter: ['all', ['==', ['geometry-type'], 'Point'], ['!', ['has', '$own']]],
+      filter: BASE[MARK],
       layout: {
         'icon-image': ['get', '$icon'],
         'icon-size': ['*', editable ? PERSONAL_PIN_SCALE : ICON_SCALE, ['coalesce', ['get', 'icon_scale'], 1]],
@@ -466,7 +515,7 @@ export function createAddedLayer(
       id: OWN,
       type: 'symbol',
       source: SOURCE,
-      filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', '$own']],
+      filter: BASE[OWN],
       layout: {
         'icon-image': ['get', '$own'],
         'icon-size': ['*', ['case', editable ? ['any', ['has', '$badge'], ['has', '$native']] : ['has', '$badge'], ICON_SCALE, SOURCE_ICON_SCALE], ['coalesce', ['get', 'icon_scale'], 1]],
@@ -481,14 +530,32 @@ export function createAddedLayer(
       },
       paint: { 'icon-opacity': 0.95 },
     });
+    // A group's names, written under its marks once the analyst asks for them.
+    if (editable) map.addLayer({
+      id: LABEL,
+      type: 'symbol',
+      source: SOURCE,
+      filter: BASE[LABEL],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': LABEL_FONT,
+        'text-size': 11,
+        'text-anchor': 'top',
+        'text-offset': [0, 0.9],
+        'text-max-width': 10,
+        'text-optional': true,
+        'symbol-placement': 'point',
+      },
+      paint: { 'text-color': '#fff', 'text-halo-color': 'rgba(0, 0, 0, 0.85)', 'text-halo-width': 1.3 },
+    });
     if (editable) {
       // Personal points are all visible, so a circle gives them a reliable hit
       // area even on engines that miss the symbol's painted pixels.
       map.addLayer({ id: HIT, type: 'circle', source: SOURCE,
-        filter: ['all', ['==', ['geometry-type'], 'Point'], ['!', ['has', '$own']]],
+        filter: BASE[HIT],
         paint: { 'circle-radius': ['max', 12, ['*', 22, ['coalesce', ['get', 'icon_scale'], 1]]], 'circle-opacity': 0 } });
       map.addLayer({ id: HIT_OWN, type: 'circle', source: SOURCE,
-        filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', '$own']],
+        filter: BASE[HIT_OWN],
         paint: { 'circle-radius': ['max', 10, ['*', ['case', ['has', '$native'], 22, 13], ['coalesce', ['get', 'icon_scale'], 1]]], 'circle-opacity': 0 } });
     }
     if (!owners.has(map)) owners.set(map, new Map());
@@ -660,11 +727,12 @@ export function createAddedLayer(
         const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
         const colour = feature.properties?.colour || categoryColour(groups[groupAt], groupAt);
         let badge = null;
-        const native = editable && !BADGES.has(symbol) && !ready.has(feature.properties?.icon);
-        if (feature.geometry?.type === 'Point' && (BADGES.has(symbol) || native)) {
-          const id = `${prefix}-${symbol}-${colour.replace('#', '')}`;
+        const native = editable && !isBadge(symbol) && !ready.has(feature.properties?.icon);
+        if (feature.geometry?.type === 'Point' && (isBadge(symbol) || native)) {
+          const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
+          const id = `${prefix}-${markerImageKey(symbol, colour, marks)}`;
           if (!map.hasImage(id)) {
-            const pixels = native ? buildPersonal(symbol || 'pin', colour) : buildBadge(symbol, colour);
+            const pixels = native ? buildPersonal(symbol || 'pin', colour, marks) : buildBadge(symbol, colour, marks);
             if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
           }
           if (map.hasImage(id)) badge = id;
@@ -687,7 +755,7 @@ export function createAddedLayer(
       registerIcons(map, iconImage, symbols);
       map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
       for (const layer of PAINTED) {
-        if (layer === OWN || layer === HIT || layer === HIT_OWN || !map.getLayer(layer)) continue;
+        if ([OWN, HIT, HIT_OWN, BEARING, LABEL].includes(layer) || !map.getLayer(layer)) continue;
         const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color' : 'line-color';
         map.setPaintProperty(layer, property, featureColour(colour));
       }
@@ -705,26 +773,17 @@ export function createAddedLayer(
      * frame and a card opened on the map would otherwise close under it.
      */
     filter(hidden = [], period = null) {
+      lastFilter = [hidden, period];
       if (!built) return;
-      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '']);
+      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '', [...hiddenKeys]]);
       if (key === filtered) return;
       filtered = key;
-      const rules = [visibilityFilter(hidden), periodFilter(period)].filter(Boolean);
+      const rules = [visibilityFilter(hidden), periodFilter(period), hiddenKeys.size
+        ? ['!', ['in', ['get', 'key'], ['literal', [...hiddenKeys]]]] : null].filter(Boolean);
       const rule = rules.length > 1 ? ['all', ...rules] : rules[0];
-      const base = {
-        [FILL]: ['==', ['geometry-type'], 'Polygon'],
-        [LINE]: ['!=', ['geometry-type'], 'Point'],
-        [DOT]: ['==', ['geometry-type'], 'Point'],
-        // The two symbol layers split the points between them on the one
-        // question of whether this feature's own icon is registered.
-        [MARK]: ['all', ['==', ['geometry-type'], 'Point'], ['!', ['has', '$own']]],
-        [OWN]: ['all', ['==', ['geometry-type'], 'Point'], ['has', '$own']],
-        [HIT]: ['all', ['==', ['geometry-type'], 'Point'], ['!', ['has', '$own']]],
-        [HIT_OWN]: ['all', ['==', ['geometry-type'], 'Point'], ['has', '$own']],
-      };
       for (const layer of PAINTED) {
         if (!map.getLayer(layer)) continue;
-        map.setFilter(layer, rule ? ['all', base[layer], rule] : base[layer]);
+        map.setFilter(layer, rule ? ['all', BASE[layer], rule] : BASE[layer]);
       }
       closeCard();
     },
@@ -752,6 +811,11 @@ export function createAddedLayer(
       return true;
     },
 
+    /** The feature numbered `index` as the source wrote it, not as a tile cut it. */
+    feature(index) {
+      return featureAt(collection, index);
+    },
+
     /** The lowest of this layer's GL layers, or null while nothing is built. */
     floor() {
       return built && map.getLayer(FILL) ? FILL : null;
@@ -767,6 +831,17 @@ export function createAddedLayer(
       for (const layer of PAINTED) {
         if (map.getLayer(layer)) map.moveLayer(layer, below);
       }
+    },
+
+    /**
+     * Hold these features off the map, or none: the editor draws them where the
+     * analyst is dragging them until the move is saved and the layer redrawn.
+     */
+    hide(keys = []) {
+      const next = new Set(keys);
+      if (next.size === hiddenKeys.size && [...next].every((key) => hiddenKeys.has(key))) return;
+      hiddenKeys = next;
+      if (built) this.filter(...lastFilter);
     },
 
     /** Keep the features, take them off the map (or put them back). */

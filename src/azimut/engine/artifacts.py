@@ -140,7 +140,6 @@ KINDS: dict[str, Kind] = {
     "horizon-view": Kind(path_attr="spec", companions=(Named(layout.horizon_thumb_rel),)),
     # A search keeps its question and every point it scored in its one file.
     "horizon-find": Kind(path_attr="spec"),
-    "map-view": Kind(path_attr="spec"),
     "analysis-zones": Kind(path_attr="spec"),
     "analysis-area": Kind(path_attr="spec"),
     "analysis-follow-up": Kind(path_attr="spec"),

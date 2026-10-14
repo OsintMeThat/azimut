@@ -20,6 +20,7 @@
   import { fmtCoords, toast } from '../../lib/state.svelte.js';
   import { copyText } from '../../lib/clipboard.js';
   import { paths } from '../../components/Icon.svelte';
+  import { personalLayers } from '../../lib/map/personalLayers.svelte.js';
 
   let {
     engine = null,
@@ -38,6 +39,8 @@
     onedit = null,
     onremovefeature = null,
     ondeleteplace = null,
+    /** A source feature handed over to be copied into one of the analyst's layers. */
+    oncopyfeature = null,
   } = $props();
 
   async function copy(text) {
@@ -101,7 +104,8 @@
         editable: !!row.editable,
         card: (properties, point) => {
           const card = layerCard(row.title, { coords: fmtCoords, copy })(properties, point);
-          if (row.editable && properties.key) {
+          const own = row.editable && properties.key;
+          if (own || oncopyfeature) {
             const actions = document.createElement('div');
             actions.className = 'layer-card-actions';
             const action = (label, icon, run) => {
@@ -123,10 +127,16 @@
               button.addEventListener('click', (event) => { event.stopPropagation(); run(); });
               actions.append(button);
             };
-            if (onedit) action('Edit feature', 'edit', () => onedit(row, properties.key));
-            if (onremovefeature) action('Remove from this layer', 'trash', () => onremovefeature(row, properties.key));
-            if (properties.place_id && ondeleteplace) {
-              action('Delete case place', 'link', () => ondeleteplace(properties.place_id));
+            if (own && onedit) action('Edit feature', 'edit', () => onedit(row, properties.key));
+            if (own && onremovefeature) action('Remove from this layer', 'trash', () => onremovefeature(row, properties.key));
+            if (own && properties.entity_type === 'place' && ondeleteplace) {
+              action('Delete case place', 'link', () => ondeleteplace(properties.entity_id));
+            }
+            if (!own && oncopyfeature) {
+              action('Copy to my layer', 'copy', () => {
+                const feature = live.get(row.name)?.layer.feature(properties.index);
+                if (feature) oncopyfeature(row, feature);
+              });
             }
             const footer = document.createElement('div');
             footer.className = 'layer-card-footer';
@@ -163,6 +173,13 @@
   $effect(() => {
     const enabled = interactive;
     for (const { layer } of live.values()) layer.interactive(enabled);
+  });
+
+  // The features being dragged in the editor leave the map while their copies move.
+  $effect(() => {
+    const drag = personalLayers.dragging;
+    void layers;
+    for (const [name, { layer }] of live) layer.hide(drag?.offset && drag.name === name ? drag.keys : []);
   });
 
   /**
@@ -205,6 +222,20 @@
     margin: 2px 0 0;
     color: var(--text-3);
     font-size: 10px;
+  }
+  :global(.layer-card-facts) {
+    margin: 4px 0 0;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  :global(.layer-card-link) {
+    display: block;
+    margin-top: 4px;
+    overflow: hidden;
+    font-size: var(--fs-xs);
+    text-decoration: underline;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* The point, read like the Saved card's and pressed to copy: text first,
      the glyph only saying that it can be pressed. */

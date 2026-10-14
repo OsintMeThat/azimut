@@ -16,7 +16,7 @@ describe('layer downloads', () => {
     const fetchFile = vi.fn(async () => ({ ok: true, blob: async () => blob }));
     await downloadLayer('case', { name: 'layer name', title: 'Map / review' }, 'kmz', { drawIcon, fetchFile, save });
     expect(drawIcon).toHaveBeenCalledTimes(2);
-    expect(drawIcon).toHaveBeenCalledWith('badge-tank', '#d55e00');
+    expect(drawIcon).toHaveBeenCalledWith('badge-tank', '#d55e00', { status: '', external: false });
     expect(JSON.parse(fetchFile.mock.calls[0][1].body)).toEqual({ icons: { 'badge-tank-d55e00': 'local-png', 'pin-0072b2': 'local-png' } });
     expect(fetchFile.mock.calls[0][0]).toBe('/api/cases/case/map-layers/layer%20name/export/kmz');
     expect(save).toHaveBeenCalledWith(blob, 'Map _ review.kmz');

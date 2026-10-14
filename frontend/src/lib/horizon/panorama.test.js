@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { cellAt, decodePanorama, depthAt, inSight, openCuts, SKY, skylineAt, skylineWithin, wrap360 } from './panorama.js';
+import { cellAt, decodePanorama, depthAt, distanceWithin, inSight, openCuts, SKY, skylineAt, skylineWithin, wrap360 } from './panorama.js';
 
 /** The app's distance codes (api/horizon.py `depth_codes`). */
 const SCALE = { min: 1, max: 1e6, codes: 65534 };
@@ -97,5 +97,23 @@ describe('the skyline at each reach haze could leave', () => {
     // a reach not kept, or none: the whole turn
     expect(skylineWithin(panorama, 50_000)).toBe(panorama.skyline);
     expect(skylineWithin(panorama)).toBe(panorama.skyline);
+  });
+
+  it('says how far each cut’s skyline stands when the app sent it, the whole turn’s otherwise', async () => {
+    const base = await decodePanorama({ ...answer(), skyline_cuts: undefined });
+    const count = base.azimuth.count;
+    const sent = Float32Array.from({ length: 2 * count }, (_, i) => i);
+    const far = Float32Array.from({ length: 2 * count }, (_, i) => 1000 * (i + 1));
+    const panorama = await decodePanorama({
+      ...answer(),
+      skyline_distance: Array.from({ length: count }, () => 40_000),
+      skyline_cuts: { reach: [5_000, 10_000], skylines: pack(sent), distances: pack(far) },
+    });
+    expect(Array.from(distanceWithin(panorama, 5_000))).toEqual(Array.from(far.subarray(0, count)));
+    expect(distanceWithin(panorama)).toBe(panorama.skylineDistance);
+    expect(distanceWithin(panorama, 50_000)).toBe(panorama.skylineDistance);
+    // an app that sent no distances for its cuts: none for them
+    const older = await decodePanorama({ ...answer(), skyline_cuts: { reach: [5_000, 10_000], skylines: pack(sent) } });
+    expect(distanceWithin(older, 5_000)).toBeNull();
   });
 });

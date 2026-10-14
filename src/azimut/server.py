@@ -312,7 +312,7 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, horizon,
-        horizon_buildings, horizon_finds, horizon_views, ingest, inspect, maplayers, media, notes, plates, proofimports, proofs,
+        horizon_buildings, horizon_finds, horizon_views, horizon_work, ingest, inspect, maplayers, media, notes, plates, proofimports, proofs,
         proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
     )
     from .engine import sheets as sheet_engine
@@ -338,6 +338,7 @@ def create_app() -> FastAPI:
     app.include_router(horizon_buildings.router)
     app.include_router(horizon_views.router)
     app.include_router(horizon_finds.router)
+    app.include_router(horizon_work.router)
     app.include_router(proofs.router)
     app.include_router(proofimports.router)
     app.include_router(proposals.router)

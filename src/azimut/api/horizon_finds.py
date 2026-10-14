@@ -19,7 +19,8 @@ from ..engine import artifacts as artifact_engine
 from ..engine import finder, horizon, horizon_finds, skymatch, terrain, workqueue
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .horizon import HEIGHT_LIMITS, MATCH_PLANE_MAX, MATCH_POINTS_MAX, SKYLINE_CUTS
+from .horizon import HEIGHT_LIMITS, MATCH_PLANE_MAX, MATCH_POINTS_MAX, SKYLINE_CUTS, MarksIn
+from .horizon_views import Marks, PhotoPoint
 
 router = APIRouter(prefix="/api", tags=["horizon"])
 
@@ -33,8 +34,8 @@ class LatLon(BaseModel):
     lon: float = Field(ge=-180, le=180)
 
 
-class TraceIn(BaseModel):
-    """The trace on the picture plane and its lens, as `/api/horizon/match` takes them."""
+class TraceIn(MarksIn):
+    """The trace on the picture plane and its lens, and the marks beside it, as `/api/horizon/match` takes them."""
 
     x: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
     y: list[float] = Field(min_length=skymatch.MIN_POINTS, max_length=MATCH_POINTS_MAX)
@@ -56,6 +57,7 @@ class TraceIn(BaseModel):
             raise ValueError(f"lenses run from {skymatch.FOV_MIN:g}° to {top:g}°")
         if self.facing is not None and not (0 <= self.facing[0] < 360 and 0 < self.facing[1] <= 180):
             raise ValueError("a sector is its middle (0 to 360°) and half its width (up to 180°)")
+        self.check_marks(len(self.x))
         return self
 
 
@@ -93,6 +95,10 @@ class PhotoIn(BaseModel):
     title: str = Field(default="", max_length=300)
     time: float = 0.0
     strokes: list[list[dict[str, float]]] = Field(default_factory=list, max_length=200)
+    marks: Marks | None = None
+    #: The lens's curve undone and the pulled corners the trace was read through, so it opens on the same plane.
+    bend: float = Field(default=0, ge=-0.3, le=0.3, allow_inf_nan=False)
+    corners: list[PhotoPoint] | None = Field(default=None, min_length=4, max_length=4)
 
 
 class FindIn(BaseModel):

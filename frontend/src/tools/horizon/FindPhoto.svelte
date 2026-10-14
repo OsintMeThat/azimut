@@ -3,14 +3,36 @@
    * The photo column of Find: the photo on its own, no terrain behind it yet,
    * with its skyline traced on it and the alignments' points.
    *
-   * The trace is the overlay's, drawn with the view's own tools: the pen snaps
-   * a stroke onto the sky's edge (Alt draws it as drawn), Detect finds the whole
-   * skyline, the rubber rubs out, and every change can be taken back. The wheel
+   * The trace is the overlay's, drawn with the view's own tools
+   * (lib/horizon/traceTools.js): the skyline and ridge pens, which snap onto
+   * the photo's edges while the magnet is on (Alt does the other), pairs of
+   * lines one in front of the other, cuts across a collage, Detect for the
+   * whole skyline, the rubber, and every change can be taken back. The wheel
    * looks closer about the pointer and a drag moves the photo when no tool is
    * out. While an alignment asks for the photo, a click places its point.
+   *
+   * The photo shows as the search reads it: straightened from its lens's
+   * curve, which Lens curve sets, and between its corners when Overlay pulled
+   * them. Every mark on it (the strokes, the cuts, the pairs, the alignments'
+   * points) is kept on the photo's own pixels, so it follows the photo as the
+   * curve changes.
    */
   import Icon from '../../components/Icon.svelte';
   import { toast } from '../../lib/state.svelte.js';
+  import { BEND_MAX, bendText } from '../../lib/horizon/overlay.js';
+  import { paintStraightened } from '../../lib/horizon/warpPicture.js';
+  import {
+    editing,
+    magnetTitle,
+    marksSummary,
+    pressTool,
+    putAway,
+    TRACE_TOOLS,
+    toolBlocked,
+    toolForKey,
+    toolHint,
+    toolOn,
+  } from '../../lib/horizon/traceTools.js';
 
   let {
     /** The photo and its trace (state/overlay.svelte.js). */
@@ -33,6 +55,9 @@
   let press = null;
   let drawing = $state([]);
   let rubberAt = $state(null);
+  /** Whether the lens's curve is out to be set, and whether its slider is in the hand: the photo is drawn lighter meanwhile. */
+  let curveOpen = $state(false);
+  let bending = $state(false);
 
   const aspect = $derived(overlay.aspect || 0);
   /** Where the photo lies in the column, magnified and moved. */
@@ -46,15 +71,37 @@
   });
   const asking = $derived(find.step?.on === 'photo');
 
+  // the column shows the frame as the search reads it: a point of it, 0 to 1, on screen and back
   const toScreen = (p) => ({ x: rect.x + p.u * rect.w, y: rect.y + p.v * rect.h });
-  const toPhoto = (x, y) => ({ u: (x - rect.x) / rect.w, v: (y - rect.y) / rect.h });
+  const toFrame = (x, y) => ({ u: (x - rect.x) / rect.w, v: (y - rect.y) / rect.h });
   const inside = (p) => p.u >= 0 && p.u <= 1 && p.v >= 0 && p.v <= 1;
   const scale = () => ({ width: rect.w, height: rect.h });
 
-  // the photo drawn again when it, its frame, the column or the loupe change
+  /** The photo as the search reads it: between its pulled corners, straightened from its lens's curve. */
+  const shownPicture = $derived.by(() => {
+    void overlay.frame;
+    const picture = overlay.picture;
+    if (!picture || !overlay.bend) return picture;
+    return paintStraightened(picture, overlay.bend, overlay.bendShape, { fast: bending }) ?? picture;
+  });
+  /** Why the curve cannot be set now, or ''. */
+  const curveBlocked = $derived(
+    overlay.isPanorama
+      ? 'A panorama has no lens curve to undo'
+      : overlay.locked
+        ? 'Photo and terrain are held together in Overlay: let them go there to change this'
+        : ''
+  );
+
+  function setCurve(value, { done = false } = {}) {
+    bending = !done;
+    overlay.setBend(value);
+  }
+
+  // the photo drawn again when it, its frame, its curve, the column or the loupe change
   $effect(() => {
     void overlay.frame;
-    const picture = overlay.rawPicture;
+    const picture = shownPicture;
     const r = rect;
     if (!canvas) return;
     const ratio = globalThis.devicePixelRatio || 1;
@@ -83,11 +130,14 @@
     return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
   }
 
+  /** Whether a press or the wheel lands on the photo's own controls, which take it. */
+  const onControls = (event) => Boolean(event.target?.closest?.('button, input, .fp-curve'));
+
   function onWheel(event) {
-    if (!rect) return;
+    if (!rect || onControls(event)) return;
     event.preventDefault();
     const at = local(event);
-    const before = toPhoto(at.x, at.y);
+    const before = toFrame(at.x, at.y);
     const unit = event.deltaMode === 1 ? 0.05 : event.ctrlKey ? 0.01 : 0.0015;
     const next = Math.min(ZOOM_MAX, Math.max(1, zoom * Math.exp(-(event.deltaY || event.deltaX) * unit)));
     const fitW = rect.w / zoom;
@@ -102,18 +152,25 @@
 
   function onPointerDown(event) {
     // the toolbar's buttons take their own clicks: a capture here would take them away
-    if (!rect || event.button > 1 || event.target?.closest?.('button')) return;
+    if (!rect || event.button > 1 || onControls(event)) return;
+    // no text selection or native drag may start under the pen: the browser would cancel the stroke
+    event.preventDefault();
+    box.focus?.({ preventScroll: true });
     box.setPointerCapture?.(event.pointerId);
     const at = local(event);
+    if ((overlay.linking || overlay.cutting) && !asking) {
+      press = { picking: true };
+      return;
+    }
     if (overlay.tracing && !asking) {
-      press = { tracing: true };
-      drawing = [toPhoto(at.x, at.y)];
+      press = { tracing: true, from: at };
+      drawing = [toFrame(at.x, at.y)];
       return;
     }
     if (overlay.erasing && !asking) {
-      press = { erasing: true, last: toPhoto(at.x, at.y) };
+      press = { erasing: true, last: toFrame(at.x, at.y) };
       overlay.beginErase();
-      overlay.eraseAlong([overlay.seenOf(press.last)], RUBBER_PX, scale());
+      overlay.eraseAlong([press.last], RUBBER_PX, scale());
       return;
     }
     press = { pan: true, from: at, start: { ...pan }, moved: false };
@@ -124,12 +181,12 @@
     rubberAt = overlay.erasing && rect ? at : null;
     if (!press) return;
     if (press.tracing) {
-      drawing = [...drawing, toPhoto(at.x, at.y)];
+      drawing = [...drawing, toFrame(at.x, at.y)];
       return;
     }
     if (press.erasing) {
-      const here = toPhoto(at.x, at.y);
-      overlay.eraseAlong([overlay.seenOf(press.last), overlay.seenOf(here)], RUBBER_PX, scale());
+      const here = toFrame(at.x, at.y);
+      overlay.eraseAlong([press.last, here], RUBBER_PX, scale());
       press.last = here;
       return;
     }
@@ -144,10 +201,24 @@
     if (!press) return;
     const was = press;
     press = null;
+    if (was.picking) {
+      const at = local(event);
+      const point = toFrame(at.x, at.y);
+      if (overlay.cutting) overlay.cutAt(point, scale());
+      else if (overlay.linking) overlay.linkAt(point, scale());
+      return;
+    }
     if (was.tracing) {
       const stroke = drawing;
       drawing = [];
-      if (stroke.length > 1) overlay.addStroke(stroke.map((p) => overlay.seenOf(p)), { snap: !event.altKey, scale: scale() });
+      const at = local(event);
+      // a click on a line makes it the pen's kind
+      if (Math.hypot(at.x - was.from.x, at.y - was.from.y) < 4 && stroke.length < 3) {
+        overlay.markLineAt(toFrame(at.x, at.y), scale());
+        return;
+      }
+      // snapped onto the nearest edge while the magnet is on; Alt does the other for this stroke
+      if (stroke.length > 1) overlay.addStroke(stroke, { snap: overlay.magnet !== event.altKey, scale: scale() });
       return;
     }
     if (was.erasing) {
@@ -156,8 +227,9 @@
     }
     if (!was.moved && asking) {
       const at = local(event);
-      const point = toPhoto(at.x, at.y);
-      if (inside(point)) find.photoClick(point);
+      const point = toFrame(at.x, at.y);
+      // the point is kept on the photo's own pixels, as the trace is
+      if (inside(point)) find.photoClick(overlay.photoOf(point));
     }
   }
 
@@ -169,31 +241,55 @@
   }
 
   function onKey(event) {
+    // Escape folds the curve away, from its own slider too
+    if (event.key === 'Escape' && curveOpen && !editing(overlay)) {
+      event.stopPropagation();
+      curveOpen = false;
+      box?.focus?.({ preventScroll: true });
+      return;
+    }
     if (!overlay.source || event.target?.closest?.('input, select, textarea')) return;
     const key = event.key;
     if ((event.ctrlKey || event.metaKey) && (key === 'z' || key === 'Z')) {
       event.preventDefault();
       overlay.undoStroke();
-    } else if (key === 't' || key === 'T') overlay.setTracing(!overlay.tracing);
-    else if (key === 'e' || key === 'E') overlay.setErasing(!overlay.erasing);
+    } else if (toolForKey(key)) pressTool(overlay, toolForKey(key));
+    else if (key === 'm' || key === 'M') overlay.setMagnet(!overlay.magnet);
     else if (key === '0') fit();
-    else if (key === 'Escape' && (overlay.tracing || overlay.erasing)) {
+    else if (key === 'Escape' && editing(overlay)) {
       event.stopPropagation();
-      overlay.setTracing(false);
-      overlay.setErasing(false);
+      putAway(overlay);
     } else return;
   }
 
+  /** Escape or a press elsewhere folds the curve away, wherever the focus is. */
+  let curveBox = $state();
+  let curveButton = $state();
+  function onWindowKey(event) {
+    if (event.key !== 'Escape' || !curveOpen) return;
+    event.stopPropagation();
+    curveOpen = false;
+  }
+  function onWindowPointer(event) {
+    if (curveOpen && !curveBox?.contains(event.target) && !curveButton?.contains(event.target)) curveOpen = false;
+  }
+
   const path = (points) => points.map((p) => toScreen(p)).map((s) => `${s.x.toFixed(1)},${s.y.toFixed(1)}`).join(' ');
+  /** A point of the photo's own (an alignment's), where it shows. */
+  const shownAt = (point) => toScreen(overlay.seenOf(point));
+  const hint = $derived(asking ? '' : toolHint(overlay));
+  const marked = $derived(marksSummary(overlay.marks));
   const pendingPhoto = $derived(find.pending?.photo ?? {});
 </script>
+
+<svelte:window onkeydown={onWindowKey} onpointerdown={onWindowPointer} />
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   bind:this={box}
   class="fp"
   class:asking
-  class:pen={overlay.tracing && !asking}
+  class:pen={(overlay.tracing || overlay.linking || overlay.cutting) && !asking}
   class:rubber={overlay.erasing && !asking}
   class:grab={zoom > 1 && !overlay.tracing && !overlay.erasing && !asking}
   bind:clientWidth={width}
@@ -220,62 +316,134 @@
     {#if rect}
       <svg class="fp-marks" width={width} height={height} aria-hidden="true">
         {#if !overlay.traceHidden}
-          {#each overlay.strokes as stroke, index (index)}
-            <polyline class="fp-trace" points={path(stroke)} />
+          {#each overlay.cutsSeen as [top, bottom], index (index)}
+            <line class="fp-cut" x1={toScreen(top).x} y1={toScreen(top).y} x2={toScreen(bottom).x} y2={toScreen(bottom).y} />
+          {/each}
+          {#each overlay.strokesSeen as stroke, index (index)}
+            {@const id = overlay.marks?.lines?.[index]}
+            {#if overlay.front === id}
+              <polyline class="fp-trace picked" points={path(stroke)} />
+            {/if}
+            <polyline class="fp-trace" class:ridge={overlay.marks?.inner?.includes(id)} points={path(stroke)} />
+          {/each}
+          {#each overlay.pairBadges as badge (badge.label)}
+            {#each [['front', badge.front], ['back', badge.back]] as [side, at] (side)}
+              {@const spot = toScreen(at)}
+              <g class="fp-pair {side}" transform="translate({spot.x.toFixed(1)} {(spot.y - 14).toFixed(1)})">
+                <circle r="7.5" style:--pair={badge.colour} />
+                <text text-anchor="middle" dy="3.5">{badge.label}</text>
+              </g>
+            {/each}
           {/each}
         {/if}
         {#if drawing.length > 1}
           <polyline class="fp-trace drawing" points={path(drawing)} />
         {/if}
         {#each find.alignments as one, index (one.id)}
-          {@const a = toScreen(one.photo.near)}
-          {@const b = toScreen(one.photo.far)}
+          {@const a = shownAt(one.photo.near)}
+          {@const b = shownAt(one.photo.far)}
           <line class="fp-link" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={one.colour} />
           <circle class="fp-dot" cx={a.x} cy={a.y} r="6" fill={one.colour} />
           <circle class="fp-dot far" cx={b.x} cy={b.y} r="5" stroke={one.colour} />
           <text class="fp-num" x={a.x + 9} y={a.y + 4}>{index + 1}</text>
         {/each}
+        <!-- the alignment being made, in its own colour and number from the first click -->
         {#if pendingPhoto.near}
-          {@const a = toScreen(pendingPhoto.near)}
-          <circle class="fp-dot pending" cx={a.x} cy={a.y} r="6" />
+          {@const a = shownAt(pendingPhoto.near)}
+          {@const colour = find.pending?.colour ?? 'var(--accent)'}
+          {#if pendingPhoto.far}
+            {@const b = shownAt(pendingPhoto.far)}
+            <line class="fp-link" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colour} />
+            <circle class="fp-dot far" cx={b.x} cy={b.y} r="5" stroke={colour} />
+          {/if}
+          <circle class="fp-dot" cx={a.x} cy={a.y} r="6" fill={colour} />
+          <text class="fp-num" x={a.x + 9} y={a.y + 4}>{find.alignments.length + 1}</text>
         {/if}
         {#if rubberAt}
           <circle class="fp-rubber" cx={rubberAt.x} cy={rubberAt.y} r={RUBBER_PX} />
         {/if}
       </svg>
     {/if}
-    <div class="fp-tools" role="toolbar" aria-label="Trace the skyline">
-      <button
-        type="button"
-        class:on={overlay.tracing}
-        aria-pressed={overlay.tracing}
-        onclick={() => overlay.setTracing(!overlay.tracing)}
-        title="Draw along the skyline: it snaps to the edge, Alt draws freely (T)"
-        aria-label="Trace skyline"><Icon name="freehand" size={14} /><span>Trace</span></button
-      >
-      <button type="button" onclick={detect} title="Find the skyline from the colours of sky and ground" aria-label="Detect the skyline"
-        ><Icon name="profile" size={14} /><span>Detect</span></button
-      >
-      <button
-        type="button"
-        class:on={overlay.erasing}
-        aria-pressed={overlay.erasing}
-        disabled={!overlay.strokes.length && !overlay.erasing}
-        onclick={() => overlay.setErasing(!overlay.erasing)}
-        title="Rub out part of the trace (E)"
-        aria-label="Rub out part of the trace"><Icon name="eraser" size={14} /></button
-      >
-      <button type="button" disabled={!overlay.canUndo} onclick={() => overlay.undoStroke()} title="Take the last change back (Ctrl+Z)" aria-label="Undo"
-        ><Icon name="undo" size={14} /></button
-      >
-      <button
-        type="button"
-        disabled={!overlay.strokes.length}
-        onclick={() => overlay.clearTrace()}
-        title="Clear the whole trace (Ctrl+Z brings it back)"
-        aria-label="Clear the whole trace"><Icon name="trash" size={14} /></button
-      >
+    <!-- the tools, then the curve's settings under them: they wrap rather than run past a narrow column -->
+    <div class="fp-top">
+      <div class="fp-tools" role="toolbar" aria-label="Trace the skyline">
+        {#each TRACE_TOOLS as tool (tool.id)}
+          {@const on = toolOn(overlay, tool.id)}
+          {@const blocked = toolBlocked(overlay, tool.id)}
+          <button
+            type="button"
+            class:on
+            aria-pressed={on}
+            disabled={Boolean(blocked) && !on}
+            onclick={() => pressTool(overlay, tool.id)}
+            title={blocked || tool.title}
+            aria-label={tool.name}
+            ><Icon name={tool.icon} size={14} />{#if tool.id === 'sky'}<span>Trace</span>{/if}</button
+          >
+        {/each}
+        <button
+          type="button"
+          class:on={overlay.magnet}
+          aria-pressed={overlay.magnet}
+          onclick={() => overlay.setMagnet(!overlay.magnet)}
+          title={magnetTitle(overlay.magnet)}
+          aria-label="Snap to edges"><Icon name="magnet" size={14} /></button
+        >
+        <span class="fp-sep" aria-hidden="true"></span>
+        <button type="button" onclick={detect} title="Find the skyline from the colours of sky and ground" aria-label="Detect the skyline"
+          ><Icon name="profile" size={14} /><span>Detect</span></button
+        >
+        <button type="button" disabled={!overlay.canUndo} onclick={() => overlay.undoStroke()} title="Take the last change back (Ctrl+Z)" aria-label="Undo"
+          ><Icon name="undo" size={14} /></button
+        >
+        <button
+          type="button"
+          disabled={!overlay.strokes.length}
+          onclick={() => overlay.clearTrace()}
+          title="Clear the whole trace (Ctrl+Z brings it back)"
+          aria-label="Clear the whole trace"><Icon name="trash" size={14} /></button
+        >
+        <span class="fp-sep" aria-hidden="true"></span>
+        <button
+          bind:this={curveButton}
+          type="button"
+          class:on={curveOpen}
+          class:set={Boolean(overlay.bend)}
+          aria-expanded={curveOpen}
+          aria-controls="fp-curve"
+          onclick={() => (curveOpen = !curveOpen)}
+          title="Straighten the curve a wide lens gives the edges"
+          aria-label="Lens curve"
+          ><Icon name="curve" size={14} /><span>{overlay.bend ? bendText(overlay.bend) : 'Lens curve'}</span></button
+        >
+      </div>
+      {#if curveOpen}
+        <div bind:this={curveBox} id="fp-curve" class="fp-curve" role="group" aria-label="Lens curve">
+          <input
+            type="range"
+            min={-BEND_MAX}
+            max={BEND_MAX}
+            step="0.005"
+            value={overlay.bend}
+            disabled={Boolean(curveBlocked)}
+            oninput={(event) => setCurve(event.currentTarget.value)}
+            onchange={(event) => setCurve(event.currentTarget.value, { done: true })}
+            ondblclick={() => setCurve(0, { done: true })}
+            aria-label="Lens distortion"
+            aria-valuetext={bendText(overlay.bend)}
+            title={curveBlocked || 'Straightens the curve a wide lens gives the edges; double-click for none'}
+          />
+          <span class="fp-curve-value mono">{bendText(overlay.bend)}</span>
+          <button type="button" disabled={!overlay.bend || Boolean(curveBlocked)} onclick={() => setCurve(0, { done: true })} title="No curve">None</button>
+          <p class="fp-curve-note">{curveBlocked || 'The trace stays on the photo as it straightens.'}</p>
+        </div>
+      {/if}
     </div>
+    {#if hint}
+      <p class="fp-hint">{hint} · Esc when done</p>
+    {:else if marked}
+      <p class="fp-hint quiet">{marked}</p>
+    {/if}
     {#if zoom > 1}
       <button type="button" class="fp-zoom" onclick={fit} title="Show the whole photo (0)">×{zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)} Fit</button>
     {/if}
@@ -292,10 +460,12 @@
     position: relative;
     width: 100%;
     height: 100%;
-    overflow: hidden;
+    /* clipped, never scrolled: a focused control at the edge must not slide the photo aside */
+    overflow: clip;
     background: #0b0d10;
     outline: none;
     touch-action: none;
+    user-select: none;
   }
   .fp:focus-visible {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -328,6 +498,64 @@
   .fp-trace.drawing {
     stroke-dasharray: 4 3;
   }
+  /* an inner edge, a ridge seen against farther land: cyan, never read as the skyline */
+  .fp-trace.ridge {
+    stroke: #4dd6ff;
+  }
+  .fp-trace.picked {
+    stroke: rgba(255, 255, 255, 0.85);
+    stroke-width: 7;
+  }
+  /* a pair: the letter filled on the line in front, ringed on the line behind it */
+  .fp-pair circle {
+    stroke: var(--pair);
+    stroke-width: 2;
+  }
+  .fp-pair.front circle {
+    fill: var(--pair);
+  }
+  .fp-pair.back circle {
+    fill: rgba(0, 0, 0, 0.6);
+  }
+  .fp-pair text {
+    font-size: 10px;
+    font-weight: 700;
+    fill: #fff;
+  }
+  .fp-pair.front text {
+    fill: #111;
+  }
+  /* where a collage is cut */
+  .fp-cut {
+    stroke: #fff;
+    stroke-width: 1.5;
+    stroke-dasharray: 7 5;
+    paint-order: stroke;
+  }
+  .fp-sep {
+    width: 1px;
+    margin: 4px 3px;
+    background: var(--border);
+  }
+  .fp-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    max-width: calc(100% - 32px);
+    margin: 0;
+    padding: 5px 10px;
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+    text-align: center;
+    pointer-events: none;
+  }
+  .fp-hint.quiet {
+    color: var(--text-2);
+  }
   .fp-link {
     stroke-width: 1.5;
     stroke-dasharray: 3 3;
@@ -339,9 +567,6 @@
   .fp-dot.far {
     fill: #0b0d10;
     stroke-width: 2.5;
-  }
-  .fp-dot.pending {
-    fill: var(--accent);
   }
   .fp-num {
     fill: #fff;
@@ -356,11 +581,24 @@
     stroke: #fff;
     stroke-width: 1.5;
   }
-  .fp-tools {
+  .fp-top {
     position: absolute;
     top: 10px;
     left: 10px;
+    right: 10px;
     display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    pointer-events: none;
+  }
+  .fp-top > * {
+    pointer-events: auto;
+  }
+  .fp-tools {
+    display: flex;
+    flex-wrap: wrap;
+    max-width: 100%;
     gap: 2px;
     padding: 3px;
     border-radius: var(--r-md);
@@ -391,14 +629,59 @@
     color: var(--accent);
     background: var(--accent-soft);
   }
+  /* a curve set says its value on the button, in the accent */
+  .fp-tools button.set:not(.on) {
+    color: var(--accent);
+  }
+  .fp-curve {
+    display: grid;
+    grid-template-columns: minmax(110px, 220px) auto auto;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 8px 10px;
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .fp-curve input {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .fp-curve-value {
+    min-width: 92px;
+    color: var(--text-1);
+  }
+  .fp-curve button {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    cursor: pointer;
+  }
+  .fp-curve button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .fp-curve-note {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--text-3);
+  }
   .fp-tools button:disabled {
     opacity: 0.4;
     cursor: default;
   }
+  /* bottom left: the column's own enlarge button holds the bottom right */
   .fp-zoom {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    left: 10px;
+    bottom: 10px;
     background: color-mix(in srgb, var(--bg-1) 88%, transparent);
     box-shadow: 0 0 0 1px var(--border);
   }

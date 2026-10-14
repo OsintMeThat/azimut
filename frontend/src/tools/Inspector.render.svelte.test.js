@@ -234,6 +234,41 @@ describe('coming back to a file', () => {
   });
 });
 
+describe('saving a frame from the strip', () => {
+  it('files it under its default name and last folder, while the clip stays open', async () => {
+    saved['media/clip.mp4'] = {
+      name: 'Convoy clip',
+      title: 'Convoy clip',
+      spec: { source: { path: 'media/clip.mp4', kind: 'video' }, videoAdjust: {}, videoRotation: 0, frames: [frame('fr_a', 2), frame('fr_b', 5.5)], activeFrameId: null },
+    };
+    let answer;
+    post.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    await start();
+    await openFile('Convoy clip');
+    await afterQuiet();
+
+    target.querySelector('button[aria-label="Save frame"]').click();
+    await settle();
+
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/inspect/save-frames', {
+      items: [expect.objectContaining({ path: 'media/clip.mp4', time: 2, label: expect.stringContaining('Convoy clip') })],
+      folder: null,
+      notes: null,
+    });
+    const [first] = target.querySelectorAll('.strip > div.tile');
+    expect(first.querySelector('[aria-label="Saving"]')).not.toBeNull();
+    expect(target.querySelectorAll('button[aria-label="Save frame"]')).toHaveLength(1);
+    expect(target.querySelector('.strip > button.tile').classList.contains('active')).toBe(true);
+
+    media = [...MEDIA, { path: 'media/frame-a.png', kind: 'image', title: 'frame a', filename: 'frame-a.png' }];
+    answer({ saved: [{ item: { path: 'media/frame-a.png' } }] });
+    await settle();
+
+    expect(first.querySelector('.filed')).not.toBeNull();
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/^Saved “.*Convoy clip.*” to the case$/), 'ok');
+  });
+});
+
 describe('clearing a work', () => {
   it('sends it to the Trash, with the way back, and leaves the file open', async () => {
     saved['media/clip.mp4'] = {

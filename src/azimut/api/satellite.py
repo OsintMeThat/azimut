@@ -34,6 +34,7 @@ from ..engine import (
     google_tiles,
     localtime,
     media as media_engine,
+    proofimport,
     satellite as satellite_engine,
     sentinel,
     sky,
@@ -115,6 +116,11 @@ class ParseIn(BaseModel):
     #: `server.BulkBodyLimit`: the middleware is for bodies too big to parse, and a
     #: position never is — what this stops is a paste into the box arriving as a document.
     text: str = Field(max_length=2000)
+
+
+class ScanIn(BaseModel):
+    #: A pasted post or note, read for the positions, links and day it states.
+    text: str = Field(max_length=20000)
 
 
 class SatelliteUpdateIn(BaseModel):
@@ -1331,6 +1337,16 @@ def parse_coordinates(body: ParseIn) -> dict[str, Any]:
         "plus_code": geo.plus_code(lat, lon),
         # the Coordinates tool renders this ordered list wholesale
         "formats": geo.all_formats(lat, lon),
+    }
+
+
+@router.post("/geo/scan")
+def scan_text(body: ScanIn) -> dict[str, Any]:
+    """Every position, address and day a pasted text states. Reads only the text."""
+    return {
+        "points": geo.scan_coords(body.text),
+        "links": proofimport.scan_urls(body.text),
+        "date": geo.scan_day(body.text),
     }
 
 

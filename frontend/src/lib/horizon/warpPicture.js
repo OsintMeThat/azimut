@@ -1,11 +1,14 @@
 /**
- * A photo drawn between four pulled corners, as a picture of its own.
+ * A photo drawn between four pulled corners, or straightened from its lens's
+ * curve, as a picture of its own.
  *
  * The view draws the photo it is handed over the whole frame; a photo pulled
  * by its corners (lib/horizon/overlay.js `warped`) is handed over already
  * drawn in its new shape, so the view needs nothing to know about it. The
  * picture is the frame's, at the photo's own size: what falls outside the
- * corners is left empty, what is pulled past the frame is cut off.
+ * corners is left empty, what is pulled past the frame is cut off. Find's
+ * photo, drawn on a 2D canvas rather than by the view, is straightened the
+ * same way (`paintStraightened`), so the trace lies on it as on the view.
  *
  * A 2D canvas has no perspective, so the photo is cut into a grid of cells,
  * each cell into two triangles, and every triangle is laid with the flat
@@ -13,10 +16,12 @@
  * cannot tell it from a true perspective; each triangle is clipped a little
  * wide so no seam shows between them.
  */
-import { throughMatrix, warpMatrix } from './overlay.js';
+import { straightened, throughMatrix, warpMatrix } from './overlay.js';
 
 /** Cells along each side: fewer while a corner is in the hand, more once it is let go. */
 export const WARP_CELLS = { fast: 10, fine: 24 };
+/** Cells along each side of a straightened photo: its curve is gentler than a pulled corner, finer once let go. */
+export const BEND_CELLS = { fast: 10, fine: 32 };
 /** The long side a pulled photo is drawn at while a corner is in the hand. */
 export const PULL_PX = 1024;
 /** How far each triangle's clip reaches past its edges, in pixels, so neighbours overlap. */
@@ -62,8 +67,29 @@ export function drawWarped(ctx, picture, { width, height }, corners, out, cells 
   ctx.clearRect(0, 0, out.width, out.height);
   const m = warpMatrix(corners);
   if (!m) return 0;
+  return drawMesh(ctx, picture, { width, height }, (u, v) => throughMatrix(m, { u, v }), out, cells);
+}
+
+/**
+ * Draw `picture` straightened from a lens's curve `k` (lib/horizon/overlay.js
+ * `straightened`, `shape` its `bendShape`) on a 2D context `out.width` ×
+ * `out.height`: each pixel of the photo where a straight lens would have put
+ * it. Says how many triangles were laid.
+ */
+export function drawStraightened(ctx, picture, { width, height }, k, shape, out, cells = BEND_CELLS.fine) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, out.width, out.height);
+  return drawMesh(ctx, picture, { width, height }, (u, v) => straightened({ u, v }, k, shape), out, cells);
+}
+
+/**
+ * Lay `picture` as a grid of `cells` × `cells`, each cell's two triangles
+ * where `place(u, v)` (the photo's own point to the frame's, 0 to 1) puts
+ * their corners. Says how many triangles were laid.
+ */
+function drawMesh(ctx, picture, { width, height }, place, out, cells) {
   const to = (u, v) => {
-    const p = throughMatrix(m, { u, v });
+    const p = place(u, v);
     return [p.u * out.width, p.v * out.height];
   };
   const from = (u, v) => [u * width, v * height];
@@ -111,8 +137,23 @@ export function drawWarped(ctx, picture, { width, height }, corners, out, cells 
  * offers no canvas or the corners have folded.
  */
 export function paintWarped(picture, corners, { fast = false } = {}) {
-  const width = picture?.width || 0;
-  const height = picture?.height || 0;
+  return paint(picture, fast, (ctx, size, out) => drawWarped(ctx, picture, size, corners, out, fast ? WARP_CELLS.fast : WARP_CELLS.fine));
+}
+
+/**
+ * The photo straightened from its lens's curve `k` as a new canvas, the
+ * frame's shape at the photo's own size (at most `PULL_PX` along its long side
+ * while `fast`, as the curve is being set). A video's frame on show is drawn
+ * as a photo. Null when this browser offers no canvas.
+ */
+export function paintStraightened(picture, k, shape, { fast = false } = {}) {
+  return paint(picture, fast, (ctx, size, out) => drawStraightened(ctx, picture, size, k, shape, out, fast ? BEND_CELLS.fast : BEND_CELLS.fine));
+}
+
+/** A canvas the picture's size (smaller while `fast`), drawn by `draw`; null when nothing was laid on it. */
+function paint(picture, fast, draw) {
+  const width = picture?.videoWidth || picture?.width || 0;
+  const height = picture?.videoHeight || picture?.height || 0;
   if (!(width > 0 && height > 0)) return null;
   const scale = fast ? Math.min(1, PULL_PX / Math.max(width, height)) : 1;
   const out = { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
@@ -125,6 +166,5 @@ export function paintWarped(picture, corners, { fast = false } = {}) {
   const ctx = canvas?.getContext?.('2d');
   if (!ctx) return null;
   ctx.imageSmoothingQuality = fast ? 'low' : 'high';
-  const laid = drawWarped(ctx, picture, { width, height }, corners, out, fast ? WARP_CELLS.fast : WARP_CELLS.fine);
-  return laid ? canvas : null;
+  return draw(ctx, { width, height }, out) ? canvas : null;
 }

@@ -128,7 +128,7 @@ describe('personal layer editing', () => {
   });
 
   it('edits a marker position without updating the case place and keeps refused geometry as a draft', async () => {
-    const shared = feature('m1', { place_id: 'e1' });
+    const shared = feature('m1', { entity_id: 'e1' });
     api.get.mockResolvedValueOnce({ layer: ROW, document: { features: [shared] } });
     const editor = store(); await editor.open(ROW); editor.select('m1'); editor.editGeometry();
     editor.moveVertex(0, 0, { lon: 3, lat: 49 });
@@ -140,7 +140,7 @@ describe('personal layer editing', () => {
     expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/m1',
       { geometry: { type: 'Point', coordinates: [3, 49] } });
     expect(reloadCase).not.toHaveBeenCalled();
-    expect(editor.selected.properties.place_id).toBe('e1');
+    expect(editor.selected.properties.entity_id).toBe('e1');
   });
 
   it('keeps polygon holes while moving, inserting and removing vertices', async () => {
@@ -185,9 +185,9 @@ describe('personal layer editing', () => {
     const editor = store();
     await editor.open(ROW);
     editor.start();
-    editor.draft.name = 'North';
+    editor.draft.colour = '#d55e00';
     editor.addPoint({ lat: 1, lon: 2 });
-    editor.draft.name = 'South';
+    editor.draft.colour = '#009e73';
     editor.draft.symbol = 'star';
     editor.addPoint({ lat: 3, lon: 4 });
     await Promise.resolve();
@@ -195,11 +195,30 @@ describe('personal layer editing', () => {
     expect(editor.pending).toBe(2);
     gate.resolve({ layer: ROW, marker: feature('first-marker') });
     await editor.whenSaved();
-    expect(api.post.mock.calls.map(([, body]) => body.name)).toEqual(['North', 'South']);
-    expect(api.post.mock.calls[1][1]).toMatchObject({ lat: 3, lon: 4, symbol: 'star' });
+    expect(api.post.mock.calls.map(([, body]) => body.colour)).toEqual(['#d55e00', '#009e73']);
+    expect(api.post.mock.calls[1][1]).toEqual({ lat: 3, lon: 4, colour: '#009e73', symbol: 'star' });
     expect(editor.features).toHaveLength(2);
     expect(editor.pending).toBe(0);
     expect(api.post.mock.calls.every(([path]) => path.endsWith('/markers'))).toBe(true);
+  });
+
+  it('saves a name still being typed before the selection moves on', async () => {
+    const points = ['one', 'two'].map((key) => feature(key));
+    api.get.mockResolvedValue({ layer: ROW, document: { features: points } });
+    api.patch.mockImplementation(async (path, body) => ({ layer: ROW, marker: feature('one', body) }));
+    const editor = store(); await editor.open(ROW);
+    editor.select('one');
+    editor.form.name = 'Gate';
+    editor.select('two');
+    await editor.whenSaved();
+    expect(api.patch).toHaveBeenCalledExactlyOnceWith('/api/cases/first/map-layers/working/markers/one', { name: 'Gate' });
+    expect(editor.selected.properties.key).toBe('two');
+    expect(editor.form.name).toBe('two');
+    expect(editor.features.find((one) => one.properties.key === 'one').properties.name).toBe('Gate');
+    // nothing typed: moving on saves nothing
+    editor.select('one');
+    await editor.whenSaved();
+    expect(api.patch).toHaveBeenCalledOnce();
   });
 
   it('stops accepting clicks without losing ones already queued', async () => {
@@ -245,12 +264,12 @@ describe('personal layer editing', () => {
   it('creates a place only on an explicit promotion and refreshes the case', async () => {
     const editor = store();
     await editor.open(ROW);
-    api.post.mockResolvedValueOnce({ layer: ROW, marker: feature('kept', { place_id: 'e1' }),
+    api.post.mockResolvedValueOnce({ layer: ROW, marker: feature('kept', { entity_id: 'e1' }),
       place: { id: 'e1', label: 'Kept place' } });
     await editor.promote('kept');
     expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/kept/place', {});
     expect(reloadCase).toHaveBeenCalledOnce();
-    expect(editor.features[0].properties.place_id).toBe('e1');
+    expect(editor.features[0].properties.entity_id).toBe('e1');
   });
 
   it('creates an editable copy through the existing layer store', async () => {
@@ -281,16 +300,96 @@ describe('personal layer editing', () => {
     expect(editor.editor).toBe(null);
   });
 
-  it('shares existing places in the chosen group through a membership request', async () => {
+  it('adds case items in the chosen group, each at the point it was picked', async () => {
     const editor = store(); await editor.open(ROW);
     editor.group = 'checked';
-    api.post.mockResolvedValueOnce({ layer: ROW, groups: [{ id: 'checked' }],
-      document: { features: [feature('m1', { place_id: 'e1', group: 'checked' })] } });
-    await editor.addPlaces(['e1']);
-    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/places',
-      { ids: ['e1'], group: 'checked' });
-    expect(editor.features[0].properties.place_id).toBe('e1');
+    api.post.mockResolvedValueOnce({ layer: ROW, groups: [{ id: 'checked' }], added: 1,
+      document: { features: [feature('m1', { entity_id: 'e1', group: 'checked' })] } });
+    await editor.addLinks([{ id: 'e1', lat: 48.85, lon: 2.35 }]);
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/links',
+      { items: [{ id: 'e1', lat: 48.85, lon: 2.35 }], group: 'checked' });
+    expect(editor.features[0].properties.entity_id).toBe('e1');
+    expect(notify).toHaveBeenCalledWith('Added 1 from the case', 'ok', 2600);
     expect(reloadCase).not.toHaveBeenCalled();
+  });
+
+  it('merges the selection into its first feature and offers the merge back', async () => {
+    const lines = ['a', 'b'].map((key) => ({ ...feature(key), geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48]] } }));
+    api.get.mockResolvedValueOnce({ layer: ROW, document: { features: lines } });
+    const editor = store(); await editor.open(ROW);
+    editor.chooseKeys(['a', 'b']);
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [lines[0]] }, batch: 'merge-1', key: 'a' });
+    await editor.merge();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/merge', { keys: ['a', 'b'] });
+    expect(editor.selection).toEqual(['a']);
+    const [, , , action] = notify.mock.calls.at(-1);
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: lines } });
+    await action.onClick();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection/merge-1/restore', {});
+  });
+
+  it('cuts a line at a corner and selects both halves', async () => {
+    const editor = store(); await editor.open(ROW);
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [] }, batch: 'cut', keys: ['a', 'a2'] });
+    await editor.split('a', 2);
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/split', { key: 'a', at: 2 });
+    expect(editor.selection).toEqual(['a', 'a2']);
+  });
+
+  it('says when a dragged selection held only markers that follow a case item', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.drag(['a'], [1, 0]);
+    expect(editor.dragging).toEqual({ name: 'working', keys: ['a'], offset: [1, 0] });
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [] }, kept: 1, batch: null });
+    await editor.moveFeatures(['a'], [1, 0]);
+    expect(notify).toHaveBeenCalledWith('Linked markers stay on the case item they follow', 'info', 4000);
+    expect(editor.dragging).toBeNull();
+  });
+
+  it('saves only what the sheet changed, and clears a field with nothing', async () => {
+    api.get.mockResolvedValueOnce({ layer: ROW, document: { features: [feature('m1', { status: 'damaged', date: '2026-01-02' })] } });
+    const editor = store(); await editor.open(ROW); editor.select('m1');
+    editor.form.status = ''; editor.form.links = ['  ', 'https://a.example/x '];
+    expect(editor.formChanged).toBe(true);
+    api.patch.mockResolvedValueOnce({ layer: ROW, marker: feature('m1') });
+    await editor.saveForm();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/m1',
+      { status: null, links: ['https://a.example/x'] });
+  });
+
+  it('copies a source feature into the open layer as an external point with its day and addresses', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.copy({ name: 'gc', title: 'GeoConfirmed' }, { type: 'Feature', geometry: { type: 'Point', coordinates: [30, 50] },
+      properties: { name: 'Strike', description: 'Seen https://x.com/a/1 and https://x.com/a/1', date: '2026-09-13', colour: '#E53935' } });
+    await editor.copyTo(ROW, 'g1');
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers', expect.objectContaining({
+      lat: 50, lon: 30, name: 'Strike', provenance: 'external', date: '2026-09-13', links: ['https://x.com/a/1'], colour: '#E53935', group: 'g1' }));
+    expect(editor.copying).toBeNull();
+  });
+
+  it('copies a source line into a layer that is not open, through its own address', async () => {
+    const editor = store();
+    editor.copy({ name: 'gc', title: 'GeoConfirmed' }, { type: 'Feature', geometry: { type: 'LineString', coordinates: [[30, 50], [31, 50]] },
+      properties: { name: 'Front' } });
+    api.post.mockResolvedValueOnce({ layer: { ...ROW, name: 'other' }, key: 'new' });
+    await editor.copyTo({ ...ROW, name: 'other', title: 'Other' });
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/other/shapes', expect.objectContaining({
+      geometry: { type: 'LineString', coordinates: [[30, 50], [31, 50]] }, provenance: 'external' }));
+    expect(layers.edited).toHaveBeenCalledWith('first', expect.objectContaining({ name: 'other' }));
+  });
+
+  it('reshapes a merged multi-line and saves it back as one', async () => {
+    const multi = { ...feature('m'), geometry: { type: 'MultiPolygon', coordinates: [
+      [[[2, 48], [3, 48], [3, 49], [2, 48]]], [[[5, 48], [6, 48], [6, 49], [5, 48]]]] } };
+    api.get.mockResolvedValueOnce({ layer: ROW, document: { features: [multi] } });
+    const editor = store(); await editor.open(ROW); editor.select('m');
+    editor.editGeometry();
+    expect(editor.sketch.rings).toHaveLength(2);
+    editor.moveVertex(1, 0, { lon: 5.5, lat: 48 });
+    api.patch.mockResolvedValueOnce({ layer: ROW, marker: multi });
+    await editor.saveGeometry();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/m', { geometry: { type: 'MultiPolygon',
+      coordinates: [[[[2, 48], [3, 48], [3, 49], [2, 48]]], [[[5.5, 48], [6, 48], [6, 49], [5.5, 48]]]] } });
   });
 
   it('removes a member and restores it with the same key through Undo', async () => {

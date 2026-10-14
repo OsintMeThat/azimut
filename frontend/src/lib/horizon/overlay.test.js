@@ -25,7 +25,9 @@ import {
   warpMatrix,
   warpUniform,
   cameraAt,
+  erasedFrom,
   eraseStrokes,
+  markedPlane,
   fitFrame,
   fitToTrace,
   gapText,
@@ -44,12 +46,23 @@ import {
   strokeFrom,
   traceGap,
   traceSamples,
+  traceFit,
+  fitRuns,
+  ON_PX,
+  OFF_PX,
+  MARGIN_CELLS,
+  terrainMargin,
+  reliefWords,
   zoomLoupe,
   isAtPlace,
   matchRequest,
   searchedPlaces,
   searchOutcome,
   tracePlane,
+  pieceCameras,
+  terrainLine,
+  traceOnTerrain,
+  bendText,
 } from './overlay.js';
 
 const SIZE = { width: 1000, height: 750 };
@@ -130,6 +143,12 @@ describe('the loupe over a photo', () => {
 });
 
 describe('a lens’s curve', () => {
+  it('is said as a number with its kind', () => {
+    expect(bendText(0)).toBe('None');
+    expect(bendText(-0.12)).toBe('Barrel 0.12');
+    expect(bendText(0.05)).toBe('Pincushion 0.05');
+  });
+
   const shape = bendShape(4 / 3);
 
   it('measures from the middle in half-diagonals: a corner is 1 away', () => {
@@ -204,6 +223,36 @@ describe('a trace', () => {
     expect(gapText({ median: 0.4123, span: 52.25 })).toBe('Gap 0.41° median over 52° of skyline');
     expect(gapText({ median: 3.27, span: 6.5 })).toBe('Gap 3.3° median over 6.5° of skyline');
     expect(gapText(null)).toBe('');
+  });
+});
+
+describe('how each traced point lies on the terrain', () => {
+  it('lies on it through the camera that took the photo', () => {
+    const [kinds] = traceFit(traced(TRUE), TRUE, skyline);
+    expect(kinds.length).toBeGreaterThan(100);
+    expect(kinds.every((kind) => kind === 'on')).toBe(true);
+  });
+
+  it('stands off it where the view looks elsewhere, and off the ground where none stands', () => {
+    const [higher] = traceFit(traced(TRUE), { ...TRUE, tilt: TRUE.tilt + 2 }, skyline);
+    expect(higher.every((kind) => kind === 'off')).toBe(true);
+    const [none] = traceFit(traced(TRUE), TRUE, () => null);
+    expect(none.every((kind) => kind === 'off')).toBe(true);
+  });
+
+  it('is near it between the two thresholds the search counts with', () => {
+    // a third of a degree is about 9 px through a 60° lens 1000 px wide
+    const [kinds] = traceFit(traced(TRUE), { ...TRUE, tilt: TRUE.tilt + 1 / 3 }, skyline);
+    expect(ON_PX).toBeLessThan(OFF_PX);
+    expect(kinds.filter((kind) => kind === 'near').length).toBeGreaterThan(kinds.length / 2);
+  });
+
+  it('cuts a stroke into runs that join where the kind changes', () => {
+    const stroke = [1, 2, 3, 4, 5].map((u) => ({ u, v: 0 }));
+    const runs = fitRuns(stroke, ['on', 'on', 'off', 'off', 'on']);
+    expect(runs.map((run) => run.kind)).toEqual(['on', 'off', 'on']);
+    expect(runs.map((run) => run.points.map((p) => p.u))).toEqual([[1, 2], [2, 3, 4], [4, 5]]);
+    expect(fitRuns([], [])).toEqual([]);
   });
 });
 
@@ -584,6 +633,24 @@ describe('a fit searched over the whole turn', () => {
     expect(matchRequest(samples, TRUE, PANORAMA)).not.toHaveProperty('projection');
   });
 
+  it('gives the terrain a margin as wide as its heights seen from the ridge, shown and never sent', () => {
+    const far = Float32Array.from({ length: 3600 }, (_, i) => (i < 1800 ? 300 : 30_000));
+    const known = { ...PANORAMA, resolution: 30, skylineDistance: far };
+    expect(terrainMargin(known, 10)).toBeCloseTo(((MARGIN_CELLS * 30) / 300) * (180 / Math.PI), 6);
+    expect(terrainMargin(known, 200)).toBeLessThan(0.03);
+    expect(terrainMargin(PANORAMA, 10)).toBe(0);
+    // the search counts every point alike: the band is for the eye
+    const body = matchRequest(samples, TRUE, known, { known: true });
+    expect(body).not.toHaveProperty('distance');
+    expect(body).not.toHaveProperty('detail');
+  });
+
+  it('says how fine the relief is, and to skip a near ridge’s rocks where it is coarse', () => {
+    expect(reliefWords(30)).toBe('Relief here is known to 30 m: trace a near ridge’s shape, not its rocks or trees.');
+    expect(reliefWords(4.8)).toBe('Relief here is known to 5 m, from a national survey.');
+    expect(reliefWords(null)).toBe('');
+  });
+
   it('asks about the turn the view marched, and only a whole one', () => {
     const body = matchRequest(samples, TRUE, PANORAMA, { known: true });
     expect(body.skyline).toBe(PANORAMA.skyline);
@@ -729,5 +796,126 @@ describe('a fit searched over the whole turn', () => {
     // the same place, but the fit brings the trace closer: it is taken
     const nearer = { ...here, gap: { median: 1.1 } };
     expect(searchOutcome({ verdict: 'match', fits: [] }, [nearer], view, { before }).take).toBe(0);
+  });
+});
+
+
+describe('the marks beside the trace, as the search reads them', () => {
+  const FRAME = { width: 800, height: 400, fov: 60, heading: 0, tilt: 0, roll: 0, projection: 'camera' };
+
+  it('says which stroke each sample lies on, and which stroke each rubbed piece came from', () => {
+    const samples = traceSamples([[{ u: 0, v: 0.5 }, { u: 0.2, v: 0.5 }], [{ u: 0.5, v: 0.4 }, { u: 0.7, v: 0.4 }]], { width: 100, height: 100 }, { spacing: 5 });
+    expect(new Set(samples.map((s) => s.stroke))).toEqual(new Set([0, 1]));
+    const strokes = [
+      Array.from({ length: 11 }, (_, i) => ({ u: i / 10, v: 0.5 })),
+      [{ u: 0, v: 0.2 }, { u: 1, v: 0.2 }],
+    ];
+    const left = erasedFrom(strokes, [{ u: 0.5, v: 0.5 }], 30, { width: 100, height: 100 });
+    expect(left.strokes.length).toBe(3);
+    expect(left.from).toEqual([0, 0, 1]);
+    const untouched = erasedFrom(strokes, [{ u: 0.5, v: 0.9 }], 3, { width: 100, height: 100 });
+    expect(untouched.strokes).toBe(strokes);
+    expect(eraseStrokes(strokes, [{ u: 0.5, v: 0.5 }], 30, { width: 100, height: 100 })).toEqual(left.strokes);
+  });
+
+  it('keeps inner edges off the skyline, names the paired strokes and the pieces', () => {
+    const samples = [
+      { x: 100, y: 150, stroke: 0 },
+      { x: 300, y: 140, stroke: 0 },
+      { x: 500, y: 180, stroke: 1 },
+      { x: 700, y: 130, stroke: 2 },
+    ];
+    const plain = markedPlane(samples, FRAME, null);
+    expect(plain).toEqual(tracePlane(samples, FRAME));
+    const marks = { lines: [5, 9, 2], inner: [9], pairs: [[9, 5]], cuts: [0.5] };
+    const plane = markedPlane(samples, FRAME, marks);
+    expect(plane.x.length).toBe(3);
+    expect(plane.ridge_x.length).toBe(1);
+    expect(plane.line).toEqual([0, 0, 1]);
+    expect(plane.ridge_line).toEqual([2]);
+    expect(plane.pairs).toEqual([[2, 0]]);
+    expect(plane.piece).toEqual([0, 0, 1]);
+    expect(plane.ridge_piece).toEqual([1]);
+    // a piece read through the photo's own shape when the caller knows it
+    expect(markedPlane(samples, FRAME, marks, () => 3).piece).toEqual([3, 3, 3]);
+  });
+});
+
+describe('a collage’s pieces as the search eased them', () => {
+  // the right frame of the collage was taken half a degree higher than the left
+  const RIGHT = { ...TRUE, tilt: TRUE.tilt + 0.5 };
+  const PIECES = [
+    { piece: 0, turn: 0, tilt: 0, roll: 0 },
+    { piece: 1, turn: 0, tilt: 0.5, roll: 0 },
+  ];
+  const pieceAt = (p) => (p.u > 0.5 ? 1 : 0);
+  const strokes = [traced(TRUE, { from: 0.1, to: 0.5 })[0], traced(RIGHT, { from: 0.5, to: 0.9 })[0]];
+  const pieced = { pieces: PIECES, pieceAt };
+  const band = (azimuth) => ({ top: skyline(azimuth), margin: 0 });
+  /** How far a point of the frame lies from the terrain's skyline through `camera`, degrees. */
+  const off = (camera, x, y) => {
+    const ray = rayFor(camera, x, y);
+    return Math.abs(ray.elevation - skyline(ray.azimuth));
+  };
+
+  it('sees each piece through the whole’s camera eased by its own turn, tilt and roll', () => {
+    expect(pieceCameras(TRUE, null)(1)).toBe(TRUE);
+    const of = pieceCameras(TRUE, [{ piece: 1, turn: 0.4, tilt: -0.25, roll: 1 }]);
+    expect(of(1)).toMatchObject({ heading: TRUE.heading + 0.4, tilt: TRUE.tilt - 0.25, roll: TRUE.roll + 1, fov: TRUE.fov });
+    expect(of(0)).toBe(TRUE);
+  });
+
+  it('reads each piece of the trace through its own camera: on the terrain where one camera saw it off', () => {
+    const [left, right] = traceFit(strokes, TRUE, skyline);
+    expect(left.every((kind) => kind === 'on')).toBe(true);
+    expect(right.filter((kind) => kind === 'on').length).toBeLessThan(right.length / 4);
+    const eased = traceFit(strokes, TRUE, skyline, pieced);
+    expect(eased.flat().every((kind) => kind === 'on')).toBe(true);
+    const samples = traceSamples([strokes[1]], SIZE);
+    expect(traceGap(samples, TRUE, skyline, pieced).median).toBeLessThan(0.02);
+    expect(traceGap(samples, TRUE, skyline).median).toBeGreaterThan(0.3);
+  });
+
+  it('draws the terrain’s skyline over the photo, each eased piece where the search read it', () => {
+    const [whole] = terrainLine(TRUE, band);
+    expect(whole.length).toBeGreaterThan(300);
+    expect(whole.every((p) => off(TRUE, p.u * SIZE.width, p.v * SIZE.height) < 0.01)).toBe(true);
+    const runs = terrainLine(TRUE, band, pieced);
+    expect(runs.length).toBe(2);
+    expect(runs[0].every((p) => p.u <= 0.5) && runs[1].every((p) => p.u > 0.5)).toBe(true);
+    expect(runs[1].every((p) => off(RIGHT, p.u * SIZE.width, p.v * SIZE.height) < 0.01)).toBe(true);
+    // the right piece's skyline stands lower on the photo than one camera would draw it, as the photo shows it
+    const at = runs[1][10];
+    const plain = whole.reduce((best, p) => (Math.abs(p.u - at.u) < Math.abs(best.u - at.u) ? p : best));
+    expect(at.v).toBeGreaterThan(plain.v);
+  });
+
+  it('gives the margin up and down where it is known, and stops where no ground stands', () => {
+    const [run] = terrainLine(TRUE, (azimuth) => ({ top: skyline(azimuth), margin: 0.3 }));
+    expect(run.every((p) => p.high < p.v && p.v < p.low)).toBe(true);
+    expect(terrainLine(TRUE, band)[0].every((p) => p.high === null && p.low === null)).toBe(true);
+    const holed = terrainLine(TRUE, (azimuth) => ({ top: Math.abs(azimuth - TRUE.heading) < 3 ? null : skyline(azimuth), margin: 0 }));
+    expect(holed.length).toBe(2);
+    expect(terrainLine(TRUE, null)).toEqual([]);
+    expect(terrainLine({ ...TRUE, width: 0 }, band)).toEqual([]);
+  });
+
+  it('lays the trace on the terrain as the whole camera draws it, each eased piece moved where it was read', () => {
+    const plain = traceOnTerrain(strokes, TRUE);
+    expect(plain[1][0]).toEqual({ x: strokes[1][0].u * SIZE.width, y: strokes[1][0].v * SIZE.height });
+    const [left, right] = traceOnTerrain(strokes, TRUE, pieced);
+    expect(left.every((p, i) => Math.hypot(p.x - plain[0][i].x, p.y - plain[0][i].y) < 1e-6)).toBe(true);
+    expect(right.every((p) => off(TRUE, p.x, p.y) < 0.01)).toBe(true);
+  });
+
+  it('keeps a place the search eased as it found it, its pieces with it', () => {
+    const samples = traceSamples(strokes, SIZE);
+    const fit = { heading: TRUE.heading, tilt: TRUE.tilt, roll: TRUE.roll, fov: TRUE.fov, explained: 0.9, close: true, pieces: PIECES };
+    const [place] = searchedPlaces({ fits: [fit] }, samples, { ...TRUE, heading: TRUE.heading + 3 }, (azimuth) => skyline(azimuth), { pieceAt });
+    expect(place.camera.heading).toBe(TRUE.heading);
+    expect(place.pieces).toBe(PIECES);
+    expect(place.gap.median).toBeLessThan(0.02);
+    const [unread] = searchedPlaces({ fits: [fit] }, samples, TRUE, (azimuth) => skyline(azimuth));
+    expect(unread.pieces).toBeNull();
   });
 });

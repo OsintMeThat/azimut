@@ -201,3 +201,21 @@ def test_a_style_carries_what_the_plate_prints(client):
 
     assert saved["data"]["footerText"] is False
     assert saved["data"]["footerCoords"] is True
+
+
+def test_a_style_carries_its_typeface_and_a_style_from_before_keeps_the_system_one(client):
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Condensed", "data": {"font": "barlow", "fontBold": False}},
+    ).json()
+    assert saved["data"]["font"] == "barlow"
+    assert saved["data"]["fontBold"] is False
+
+    older = client.post("/api/templates/proof", json={"name": "Before fonts", "data": {"bg": "#101418"}}).json()
+    assert older["data"]["font"] == "system"
+    assert older["data"]["fontBold"] is True
+
+
+def test_a_typeface_the_app_does_not_ship_is_refused(client):
+    response = client.post("/api/templates/proof", json={"name": "Comic", "data": {"font": "comic-sans"}})
+    assert response.status_code == 422

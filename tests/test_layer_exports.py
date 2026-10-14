@@ -79,7 +79,7 @@ def test_download_round_trip_keeps_geometry_and_style_without_case_references(cl
             assert archive.read(href) == png()
     else:
         xml = data
-    for internal in (b"place_id", b"layer_origin", b"edit_checkpoint", b"removed_batch"):
+    for internal in (b"entity_id", b"place_id", b"layer_origin", b"edit_checkpoint", b"removed_batch"):
         assert internal not in xml
     upload = client.post(f"/api/cases/{owner}/map-layers/editable/upload",
                          files={"file": (f"review.{fmt}", data)}, data={"title": "Imported review"})

@@ -45,6 +45,14 @@ export const ALIGN_STEPS = [
 ];
 
 /** The least area worth searching, and the most, in square metres. */
+/**
+ * A reach the analyst gives is searched about that far (engine/finder.py
+ * `reaches`): cut there, and on to twice as far within Auto's farthest, so a
+ * ridge just past it still counts. How far the search then reads, metres.
+ */
+export const REACH_PAST = 2;
+export const searchedReach = (reach, auto = 50_000) => Math.max(reach, Math.min(reach * REACH_PAST, auto));
+
 export const AREA_MIN = 0.01e6;
 export const AREA_MAX = 2_500e6;
 
@@ -94,15 +102,23 @@ export function inArea(points, point) {
 }
 
 /**
+ * How far across the photo two clicks may stand, as a share of its width, and
+ * still be read as one above the other when its lens is unknown: a hand's
+ * click is never on the very same column.
+ */
+export const LINED_UP_SHARE = 0.01;
+
+/**
  * How many degrees right of the near point the far one stands across the
  * photo, read through its lens; null when the lens is unknown and they do not
- * stand one above the other. `near` and `far` are `{ u, v }` across and down
- * the photo, `fov` its width in degrees, `projection` the view's.
+ * stand one above the other (within `LINED_UP_SHARE` of its width). `near` and
+ * `far` are `{ u, v }` across and down the photo, `fov` its width in degrees,
+ * `projection` the view's.
  */
 export function photoOffset(near, far, { fov = null, projection = 'camera' } = {}) {
   const across = (far.u - near.u) * 2;
   if (Math.abs(across) < 1e-9) return 0;
-  if (!(fov > 0)) return null;
+  if (!(fov > 0)) return Math.abs(far.u - near.u) <= LINED_UP_SHARE ? 0 : null;
   if (projection === 'panorama') return (across * fov) / 2;
   const t = Math.tan((fov * RAD) / 2);
   const toNear = Math.atan((near.u * 2 - 1) * t) / RAD;

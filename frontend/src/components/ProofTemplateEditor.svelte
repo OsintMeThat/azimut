@@ -15,6 +15,7 @@
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ProofPreview from './ProofPreview.svelte';
+  import { PROOF_FONTS } from '../lib/proofFonts.js';
 
   let { data = $bindable() } = $props();
   Object.assign(data, normalizeProofStyle(data));
@@ -87,6 +88,7 @@
   // Footer switch + colour (null colour → auto from the background).
   const footerOn = $derived(data.footerEnabled !== false);
   const autoFooterColor = $derived(textColors(data.bg ?? BG).faint);
+  const autoCaptionColor = $derived(textColors(data.bg ?? BG).dim);
 
   // Default caption for newly added panels.
   const captionsOn = $derived(data.captionsEnabled !== false);
@@ -155,11 +157,33 @@
       </fieldset>
 
       <fieldset class="fld">
+        <span>Font
+          <select value={data.font} onchange={(e) => (data.font = e.target.value)} aria-label="house style font">
+            {#each PROOF_FONTS as face (face.id)}
+              <option value={face.id}>{face.label}</option>
+            {/each}
+          </select>
+          <label class="chk"><input type="checkbox" checked={data.fontBold !== false}
+            onchange={(e) => (data.fontBold = e.target.checked)} /> Labels, callouts and tags in bold</label>
+        </span>
+        <p class="hint">Shipped with Azimut, so a proof reads the same on every computer.</p>
+      </fieldset>
+
+      <fieldset class="fld">
         <span>
           <label class="chk"><input type="checkbox" checked={captionsOn}
             onchange={(e) => (data.captionsEnabled = e.target.checked)} /> Caption new panels</label>
         </span>
         <p class="hint">Off: panels are added blank. A caption can still be typed on any panel.</p>
+        <div class="color-row">
+          <span>Caption colour</span>
+          <input type="color" value={data.captionColor ?? autoCaptionColor}
+            oninput={(e) => (data.captionColor = e.target.value)} />
+          {#if data.captionColor}
+            <button type="button" class="btn btn-ghost btn-sm"
+              onclick={() => (data.captionColor = null)}>Auto</button>
+          {/if}
+        </div>
       </fieldset>
 
       <fieldset class="fld">

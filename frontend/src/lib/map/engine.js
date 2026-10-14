@@ -181,6 +181,9 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
   map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
+  // What a tool lays over the map steps aside from these buttons (the layer edit
+  // bar's `[data-bar-obstacle]`), without naming the engine that drew them.
+  container.querySelector?.('.maplibregl-ctrl-top-left .maplibregl-ctrl-group')?.setAttribute('data-bar-obstacle', '');
   // Judging feature sizes (buildings, roads) needs a scale reference, and it
   // reads under the coordinates rather than in the opposite corner: how far a
   // pixel goes and where you are are one instrument, and the right-hand corner

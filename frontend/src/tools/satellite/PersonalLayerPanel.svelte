@@ -7,15 +7,14 @@
   import NewLayerDialog from './NewLayerDialog.svelte';
   import PlaceDeleteDialog from './PlaceDeleteDialog.svelte';
   import LayerExportDialog from './LayerExportDialog.svelte';
-  import MapViews from './MapViews.svelte';
+  import LayerAddDialogs from './LayerAddDialogs.svelte';
 
-  let { tool, scope, engine = null, places = [], onarm = null, provider = '', rows = [], onprovider = null } = $props();
+  let { tool, scope, engine = null, onarm = null } = $props();
   const active = $derived(uiState.tool === tool);
   $effect(() => {
     const owner = caseState.current?.id;
     untrack(() => {
       if (personalLayers.exporting?.caseId && personalLayers.exporting.caseId !== owner) personalLayers.cancelDownload();
-      if (personalLayers.maps?.caseId && personalLayers.maps.caseId !== owner) personalLayers.closeMaps();
       if (personalLayers.editor && personalLayers.editor.caseId !== owner) {
         personalLayers.close(); personalLayers.cancelNew(); personalPlaceDeletion.cancel();
       }
@@ -42,8 +41,8 @@
 
 {#if active}
   {#if personalLayers.editor}
-    <aside class="personal-panel" aria-label="Personal map layers">
-      <LayerEditor controller={personalLayers} {places} onstart={() => personalLayers.start()}
+    <aside class="personal-panel" aria-label="Personal map layers" data-bar-obstacle>
+      <LayerEditor controller={personalLayers}
         onfly={fly} ondeleteplace={personalPlaceDeletion.open} />
     </aside>
   {/if}
@@ -54,7 +53,7 @@
   <PlaceDeleteDialog controller={personalPlaceDeletion} />
   {#if personalLayers.exporting}<LayerExportDialog target={personalLayers.exporting} onclose={() => personalLayers.cancelDownload()} />{/if}
 {/if}
-<MapViews {tool} {engine} {provider} {rows} {scope} {onprovider} />
+<LayerAddDialogs {tool} onfly={fly} />
 
 <style>
   .personal-panel { position: absolute; top: 70px; right: 12px; z-index: 45; width: 284px; max-width: calc(100% - 24px); max-height: calc(100% - 90px); overflow-y: auto; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--shadow-2); padding-bottom: 8px; }

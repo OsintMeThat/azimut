@@ -17,6 +17,7 @@ import {
   meeting,
   onAlignment,
   photoOffset,
+  searchedReach,
 } from './find.js';
 import { destination, haversine } from '../measure.js';
 import { bearingBetween } from './geometry.js';
@@ -92,6 +93,9 @@ describe('an alignment', () => {
   it('reads that offset through the lens, or says it cannot', () => {
     expect(photoOffset({ u: 0.5, v: 0.6 }, { u: 0.5, v: 0.2 })).toBe(0);
     expect(photoOffset({ u: 0.5, v: 0.6 }, { u: 0.6, v: 0.2 })).toBeNull();
+    // two hand clicks a hair apart are one above the other, lens or not
+    expect(photoOffset({ u: 0.5, v: 0.6 }, { u: 0.508, v: 0.2 })).toBe(0);
+    expect(photoOffset({ u: 0.5, v: 0.6 }, { u: 0.508, v: 0.2 }, { fov: 60 })).not.toBe(0);
     // through a 60° lens, the right edge is 30° off the middle
     expect(photoOffset({ u: 0.5, v: 0.6 }, { u: 1, v: 0.2 }, { fov: 60 })).toBeCloseTo(30, 9);
     // along a panorama's strip, as many degrees as it spans
@@ -156,5 +160,14 @@ describe('the heatmap', () => {
     expect(middle.opacity).toBeLessThan(0.72);
     // one point alone is the best
     expect(heatStyle(0.4, 0.4, 0.4).fill).toBe(HEAT_RAMP.at(-1));
+  });
+});
+
+
+describe('a reach the analyst gives', () => {
+  it('is searched on to twice as far, within Auto\'s farthest, as the engine reads it', () => {
+    expect(searchedReach(5_000)).toBe(10_000);
+    expect(searchedReach(40_000)).toBe(50_000);
+    expect(searchedReach(100_000)).toBe(100_000);
   });
 });

@@ -25,7 +25,6 @@
     oneditadded = null,
     onnewpersonal = null,
     ondownloadadded = null,
-    onmaps = null,
     /** group id → folded. Held by the caller, so a menu closed and opened again
      *  keeps the headings as they were left. */
     folded = $bindable({}),
@@ -73,7 +72,6 @@
         {#if group.id === 'mine' && onnewpersonal}
           <button type="button" class="manage" onclick={onnewpersonal}><Icon name="plus" size={12} /> New layer</button>
         {/if}
-        {#if group.id === 'mine' && onmaps}<button class="manage" onclick={onmaps}><Icon name="compass" size={12} /> Saved maps</button>{/if}
       {/if}
     </section>
   {/each}

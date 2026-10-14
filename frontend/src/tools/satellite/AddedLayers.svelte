@@ -38,6 +38,9 @@
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import LayerTimeStrip from './LayerTimeStrip.svelte';
+  import MarkerSymbol from './MarkerSymbol.svelte';
+  import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
+  import { caseState } from '../../lib/state.svelte.js';
   import {
     countLabel,
     followed,
@@ -82,6 +85,7 @@
     /** `(layer, period, commit)`: the time strip moved, or was let go. */
     onperiod,
   } = $props();
+  $effect(() => { if (rows.some((row) => row.editable)) layerPalette.load(caseState.current?.id); });
 
   const live = $derived(rows.filter((row) => row.enabled).length);
   const anyFollowed = $derived(rows.some(followed));
@@ -428,11 +432,17 @@
                       title={entry.on ? 'Hide this group' : 'Show this group'}
                       onclick={() => oncategory?.(row, entry.name)}
                     >
-                      <span class="swatch" style="--swatch: {entry.colour}"></span>
+                      {#if entry.symbol}<MarkerSymbol symbol={entry.symbol} colour={entry.colour} size={14} />
+                      {:else}<span class="swatch" style="--swatch: {entry.colour}"></span>{/if}
                       <span class="cat-name">{entry.name}</span>
                       <span class="cat-count">{entry.count}</span>
                     </button>
                   </li>
+                {/each}
+                <!-- the colours this case named, as many as wear each one here -->
+                {#each Object.entries(row.colours ?? {}).filter(([colour]) => layerPalette.nameOf(colour)) as [colour, count] (colour)}
+                  <li class="named"><span class="swatch" style="--swatch: {colour}"></span>
+                    <span class="cat-name">{layerPalette.nameOf(colour)}</span><span class="cat-count">{count}</span></li>
                 {/each}
               </ul>
             {/if}
@@ -662,6 +672,7 @@
   .cat.off {
     color: var(--text-3);
   }
+  .named { display: flex; align-items: center; gap: 6px; padding: 2px 6px; color: var(--text-3); font-size: var(--fs-xs); }
   .swatch {
     flex: none;
     width: 9px;

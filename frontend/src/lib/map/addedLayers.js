@@ -68,6 +68,8 @@ export function legend(layer) {
     count: inPeriod ? (inPeriod[category.name] ?? 0) : (category.count ?? 0),
     kinds: category.kinds ?? [],
     colour: categoryColour(category, index),
+    // a personal group drawn in one pictogram, shown as that pictogram
+    ...(category.symbol ? { symbol: category.symbol } : {}),
     on: !hidden.has(category.name),
   }));
 }

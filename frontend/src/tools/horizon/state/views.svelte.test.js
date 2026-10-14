@@ -48,11 +48,6 @@ function makeApi() {
       requests.push({ method: 'PUT', path, body });
       return { thumb: '.horizon/x.webp' };
     }),
-    delete: vi.fn(async (path) => {
-      requests.push({ method: 'DELETE', path });
-      stored.delete(decodeURIComponent(path.split('/').pop()));
-      return { deleted: true };
-    }),
     get: vi.fn(async (path) => {
       requests.push({ method: 'GET', path });
       if (path.startsWith('/api/horizon/photo')) return { focal35_mm: 26 };
@@ -308,6 +303,35 @@ describe('opening a view', () => {
     expect(overlay.locked).toBe(false);
   });
 
+  it('lays the bench over the view it came from: an unchanged trace reads unchanged, a new one reads changed', async () => {
+    const spec = await savedView();
+    const { overlay, views } = setup();
+    await views.open('North ridge');
+    // the bench as a reload finds it: the same work, read back from the case
+    await views.layWork({ spec: { ...spec, photo: null }, photo: structuredClone(spec.photo) }, { photoHere: true });
+    expect(overlay.strokes).toHaveLength(1);
+    expect(views.dirty).toBe(false);
+    const drawn = structuredClone(spec.photo);
+    drawn.strokes.push([{ u: 0.5, v: 0.4 }, { u: 0.8, v: 0.42 }]);
+    await views.layWork({ spec: { ...spec, photo: null }, photo: drawn }, { photoHere: true });
+    expect(overlay.strokes).toHaveLength(2);
+    expect(views.dirty).toBe(true);
+    expect(views.current).toEqual({ name: 'North ridge', title: 'North ridge' });
+  });
+
+  it('lays a bench with no saved view, its eye left alone when told so', async () => {
+    const spec = await savedView();
+    const { view, overlay, views } = setup();
+    view.standAt({ lat: 45, lon: 6 });
+    await views.layWork({ spec: { ...spec, photo: null }, photo: spec.photo }, { photoHere: true, eye: false });
+    expect(view.observer).toMatchObject({ lat: 45, lon: 6 });
+    expect(overlay.source.path).toBe(PHOTO);
+    expect(overlay.strokes).toHaveLength(1);
+    expect(views.current).toBeNull();
+    await views.layWork({ spec: { ...spec, photo: null }, photo: spec.photo }, { photoHere: false });
+    expect(view.observer).toEqual(spec.eye);
+  });
+
   it('opens without a photo the case no longer holds, and says so', async () => {
     await savedView();
     photoHere = false;
@@ -317,12 +341,4 @@ describe('opening a view', () => {
     expect(views.error).toMatch(/no longer in the case \(Ridge at dusk\)/);
   });
 
-  it('forgets the view deleted while it was open', async () => {
-    await savedView({ photo: false });
-    const { views } = setup();
-    await views.open('North ridge');
-    expect(await views.remove('North ridge')).toBe(true);
-    expect(views.current).toBeNull();
-    expect(views.list).toEqual([]);
-  });
 });

@@ -626,8 +626,10 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
                     # A change was read between two passes and spans both; a thing
                     # present on one pass is dated by that pass alone.
                     date=(source.get("pass_before") or source.get("pass_date", ""))
-                    if document.get("azimut_detect_layer") == 1 else "",
-                    date_end=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1 else "",
+                    if document.get("azimut_detect_layer") == 1
+                    else source.get("date", "") if document.get("azimut_personal_layer") == 1 else "",
+                    date_end=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1
+                    else source.get("date_end", "") if document.get("azimut_personal_layer") == 1 else "",
                     # simplestyle-spec, which is what every tool that writes a
                     # styled GeoJSON — geojson.io included — puts the colour in
                     colour=_hex(source.get("marker-color") or source.get("stroke")
@@ -646,10 +648,17 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
 
 
 def _personal_style(properties: dict[str, Any], source: dict[str, Any]) -> None:
-    from .layerediting import SYMBOLS
+    from .layerediting import SYMBOLS, apply_fields
 
     if source.get("symbol") in SYMBOLS:
         properties["symbol"] = source["symbol"]
+    # Kept field by field: one a later build would refuse costs that field only.
+    for field in ("status", "bearing", "provenance", "links"):
+        if source.get(field) not in (None, ""):
+            try:
+                apply_fields(properties, {field: source[field]})
+            except LayerError:
+                continue
     colour = _hex(source.get("colour"))
     if colour:
         properties["colour"] = colour
@@ -911,15 +920,19 @@ def _placemark(
         if extended is not None:
             personal: dict[str, Any] = {}
             for entry in extended:
-                field = str(entry.get("name", "")).removeprefix("azimut_")
-                if field not in ("symbol", "colour", "icon_scale", "stroke_width"):
+                label = str(entry.get("name", ""))
+                field = label.removeprefix("azimut_")
+                # a source's own column named "status" is the source's, not ours
+                if field == label or field not in _AZIMUT_FIELDS:
                     continue
                 value: Any = _child_text(entry, "value")
-                if field in ("icon_scale", "stroke_width"):
+                if field in ("icon_scale", "stroke_width", "bearing"):
                     try:
                         value = float(value)
                     except ValueError:
                         continue
+                elif field == "links":
+                    value = [line for line in value.splitlines() if line.strip()]
                 personal[field] = value
             _personal_style(features[-1]["properties"], personal)
 
@@ -935,6 +948,10 @@ def _kml_days(element: Element) -> tuple[str, str]:
     return "", ""
 
 
+#: The fields a personal layer's own download writes as `azimut_*` ExtendedData.
+_AZIMUT_FIELDS = ("symbol", "colour", "icon_scale", "stroke_width", "status", "bearing", "provenance", "links")
+
+
 def _kml_extended_data(element: Element) -> str:
     """A My Maps puts its columns here rather than in the description."""
     data = _child(element, "ExtendedData")
@@ -946,7 +963,7 @@ def _kml_extended_data(element: Element) -> str:
             continue
         label = child.get("name") or ""
         value = _child_text(child, "value")
-        if label and value and label not in ("azimut_symbol", "azimut_colour", "azimut_icon_scale", "azimut_stroke_width"):
+        if label and value and not (label.startswith("azimut_") and label[7:] in _AZIMUT_FIELDS):
             rows.append(f"{label}: {value}")
     return "\n".join(rows)
 
@@ -1590,7 +1607,7 @@ SPEC_VERSION = 1
 #: the day it was dropped in, for as long as the case lives. Bumped whenever a
 #: change here would give the same bytes a different reading; the next request
 #: for that layer reparses the snapshot already on disk.
-PARSE_VERSION = 4
+PARSE_VERSION = 5
 
 #: Where that stamp is written. A GeoJSON object may carry members it does not
 #: define, and this one is written first so the check reads the head of the file
@@ -2231,6 +2248,8 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
         "refresh": spec.get("refresh") or {},
         "features": int(summary.get("features") or 0),
         "categories": summary.get("categories") or [],
+        # a personal layer's colours, `#hex → features`, which its legend names
+        "colours": summary.get("colours") or {},
         "bbox": summary.get("bbox"),
         "format": summary.get("format") or source.get("format") or "",
         # How many of the source's own pictograms are stored, which is also what

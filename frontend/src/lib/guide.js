@@ -215,6 +215,10 @@ export const GUIDE = [
         text: 'Add a layer opens a KML, KMZ, GeoJSON or GPX file, follows a public My Maps, or brings in a GeoConfirmed conflict by dates and area. Its legend and its time strip filter it. It is saved with the case, and its features never become entities.',
       },
       {
+        label: 'A map of your own',
+        text: 'New layer under My layers puts its tools on the map: pick, drag, draw, merge. Paste a post to add its point, or add a place or a proof, and the marker follows it.',
+      },
+      {
         label: 'The search bar answers before it asks',
         text: 'Saved places, a pasted coordinate and a bundled gazetteer answer while you type. The geocoder is only asked once you stop.',
       },
@@ -285,6 +289,10 @@ export const GUIDE = [
       {
         label: 'Marks that number and marks that hide',
         text: 'A numbered marker ties a spot to a line in your text, and each colour counts its own series from 1. A blur box redraws the picture under it through a blur, so what is hidden is hidden in the exported file, not covered by a rectangle.',
+      },
+      {
+        label: 'Marks that name and point',
+        text: 'A double-click on a box hangs its name on a tab from one corner. A callout ties its words to one point and stands on the page, and a zoom inset shows a detail bigger, blurred where the picture is.',
       },
       {
         label: 'A proof can argue several points',
@@ -484,7 +492,9 @@ export const GUIDE = [
       {
         where: 'Geo Proof',
         keys: [
-          { combo: 'V R E A L C D T S N B', does: 'picks select, rectangle, ellipse, arrow, line, curve, freehand, text, icon, numbered marker and blur box' },
+          { combo: 'V R E A L C D T K S N B Z O', does: 'picks select, rectangle, ellipse, arrow, line, curve, freehand, text, callout, icon, numbered marker, blur box, zoom inset and view cone' },
+          { combo: 'Ctrl+↑ / Ctrl+↓', does: 'brings the picked marks forward or sends them back, all the way with Shift' },
+          { combo: 'Right-click', does: 'opens what can be done to the mark, the picture or the page under the pointer' },
           { combo: 'F', does: 'fits the document' },
           { combo: 'Space (held)', does: 'pans, whatever tool is in hand' },
           { combo: 'Delete', does: 'removes what is selected' },

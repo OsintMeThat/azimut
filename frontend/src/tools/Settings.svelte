@@ -19,6 +19,7 @@
   import Icon from '../components/Icon.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
+  import { DEFAULT_PROOF_FONT } from '../lib/proofFonts.js';
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExtensionTab from './settings/ExtensionTab.svelte';
@@ -733,7 +734,8 @@
   let deleteTpl = $state(null); // { kind, id, name } pending confirmation
 
   function freshTemplate(kind) {
-    return kind === 'proof' ? templateFromProof({}) : templateFromPost({});
+    // a new house style is set in the shipped default face, not the system's
+    return kind === 'proof' ? templateFromProof({ font: DEFAULT_PROOF_FONT }) : templateFromPost({});
   }
 
   function newTemplate(kind) {

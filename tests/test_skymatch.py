@@ -130,6 +130,56 @@ def test_a_level_line_is_flat_even_through_a_tilted_camera():
     assert found.verdict == "flat"
 
 
+@pytest.mark.parametrize("slope", [0.05, 0.15, 0.3])
+def test_a_straight_line_of_any_slope_is_too_flat_to_place(slope):
+    # a roll turns a sloping line level: measured against a level line, it once passed for a skyline
+    x = np.linspace(-0.9, 0.9, 150)
+    found = skymatch.match(x, slope * x, RANGE, half_width=HALF, fov=40.0)
+    assert found.verdict == "flat"
+    assert all(fit.explained == pytest.approx(0.0, abs=1e-9) for fit in found.fits)
+
+
+def test_a_straight_trace_explains_nothing_however_well_it_lies():
+    x = np.linspace(-0.9, 0.9, 120)
+    y = 0.2 * x
+    assert skymatch.explained_by(np.zeros(x.size), x, y, HALF) == pytest.approx(0.0, abs=1e-9)
+    # a skyline with shape, lying exactly on the terrain, is explained whole
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    assert skymatch.explained_by(np.zeros(x.size), x, y, HALF) == 1.0
+
+
+def test_the_straight_line_is_not_dragged_up_by_a_peak():
+    x = np.linspace(-0.9, 0.9, 200)
+    y = 0.1 * x + np.where(np.abs(x) < 0.1, 0.2, 0.0)
+    off = skymatch.off_line(x, y, HALF)
+    # the slope's points stand on the line; the peak alone stands off it
+    assert np.abs(off[np.abs(x) > 0.2]).max() < 1.0
+    assert off[np.abs(x) < 0.05].min() > 90.0
+
+
+def test_every_part_of_the_trace_must_fit():
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    loss = np.zeros(x.size)
+    whole = skymatch.explained_by(loss, x, y, HALF)
+    # the right quarter lost: most of the trace still lies on the terrain, the score falls far more
+    loss[x > 0.5] = skymatch.LOST_LOSS
+    part = skymatch.explained_by(loss, x, y, HALF)
+    assert whole == 1.0 and part < 0.6
+    # a part with no shape of its own is only asked to lie on the terrain
+    flat = np.linspace(-0.9, 0.9, 200)
+    bumped = np.where(flat < 0, 0.3 * np.exp(-((flat + 0.45) ** 2) / 0.01), 0.0)
+    near = np.full(flat.size, float(skymatch._loss(np.array([1.0]))[0]))
+    assert skymatch.explained_by(near, flat, bumped, HALF) > 0.8
+
+
+def test_a_trace_matched_on_the_wrong_turn_scores_lower_than_today():
+    # the right half lies on some ridge of the wrong turn, the left misses: no longer half explained
+    elsewhere = skyturn([(100, 3, 4), (130, 2.5, 6), (300, 4, 3)])
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    found = skymatch.match(x, y, elsewhere, half_width=HALF, fov=52.0, known=True)
+    assert found.fits[0].explained < skymatch.LOOSE_BELOW
+
+
 def test_ground_the_turn_does_not_hold_counts_against_the_fit():
     holed = skyturn([(40, 6, 3), (52, 3.5, 1.5), (61, 4.5, 4), (230, 5, 2)], nan_between=(120, 200))
     x, y = trace_on(holed, heading=47.0, fov=52.0)
@@ -276,3 +326,118 @@ def test_a_panorama_read_as_a_photo_explains_less_of_itself():
     strip = skymatch.match(x, y, RANGE, half_width=HALF, fov=140.0, known=True, projection="panorama")
     photo = skymatch.match(x, y, RANGE, half_width=HALF, fov=140.0, known=True)
     assert strip.fits[0].explained > photo.fits[0].explained
+
+
+# -- the marks beside the skyline ---------------------------------------------------
+
+
+def test_an_unknown_lens_stays_within_the_range_the_analyst_gave():
+    # the photo's lens lies past the widest the analyst said: the refinement may not ease it out
+    x, y = trace_on(RANGE, heading=47.0, fov=70.0, tilt=3.0)
+    found = skymatch.match(x, y, RANGE, half_width=HALF, fov=50.0, within=(40.0, 60.0))
+    assert found.fits
+    assert all(40.0 - 1e-9 <= fit.fov <= 60.0 + 1e-9 for fit in found.fits)
+
+
+def test_the_ridges_answer_the_nearest_silhouette_in_each_column():
+    ridges = skymatch.Ridges.of(
+        0.0, 1.0, 360, np.array([5, 5, 7]), np.array([1.0, 2.0, 3.0]), np.array([100.0, 500.0, 900.0])
+    )
+    off, far = ridges.nearest(np.array([5.2, 7.0, 9.0]), np.array([1.1, 2.5, 0.0]))
+    assert off[0] == pytest.approx(0.1) and far[0] == 100.0
+    assert off[1] == pytest.approx(-0.5) and far[1] == 900.0
+    assert np.isnan(off[2]) and np.isnan(far[2])
+    # a silhouette past the reach is not there
+    off, _ = ridges.nearest(np.array([7.0]), np.array([3.0]), reach=800.0)
+    assert np.isnan(off[0])
+
+
+def test_the_turn_says_how_far_its_skyline_stands():
+    turn = skymatch.Turn(0.0, 90.0, np.zeros(4), distance=np.array([1.0, 2.0, 3.0, 4.0]))
+    assert turn.far(np.array([0.0, 100.0, 359.0])).tolist() == [1.0, 2.0, 1.0]
+    assert np.isnan(skymatch.Turn(0.0, 90.0, np.zeros(4)).far(np.array([0.0]))[0])
+
+
+def _inner_edges(heading, fov, tilt, ridge_at, count=60):
+    """Points of an inner edge lying `ridge_at` degrees up across the middle of the photo."""
+    x = np.linspace(-0.4, 0.4, count)
+    low, high = np.full(count, -3.0), np.full(count, 3.0)
+    for _ in range(60):
+        y = (low + high) / 2
+        _, elevation = skymatch.directions(x, y, fov=fov, tilt=tilt)
+        above = elevation > ridge_at
+        high = np.where(above, y, high)
+        low = np.where(above, low, y)
+    return x, (low + high) / 2
+
+
+def _ridges_under(turn, at_angle, distance=1_000.0):
+    """Every column holds the skyline and one inner ridge `at_angle` degrees up."""
+    columns = turn.angles.size
+    column = np.concatenate([np.arange(columns), np.arange(columns)])
+    angle = np.concatenate([turn.angles, np.full(columns, at_angle)])
+    far = np.concatenate([np.full(columns, 9_000.0), np.full(columns, distance)])
+    return skymatch.Ridges.of(0.0, turn.step, columns, column, angle, far)
+
+
+def test_inner_edges_take_score_from_a_place_where_no_ridge_lies_and_add_none():
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    rx, ry = _inner_edges(47.0, 52.0, 0.0, ridge_at=0.4)
+    marks = skymatch.Marks(ridge_x=rx, ridge_y=ry)
+    alone = skymatch.match(x, y, RANGE, half_width=HALF, fov=52.0, known=True).fits[0]
+    held = skymatch.match(x, y, RANGE, half_width=HALF, fov=52.0, known=True, marks=marks,
+                          ridges=_ridges_under(RANGE, 0.4)).fits[0]
+    assert held.inner > 0.9
+    assert held.explained == pytest.approx(alone.explained, abs=1e-6)  # lying on its ridge adds nothing
+    missed = skymatch.match(x, y, RANGE, half_width=HALF, fov=52.0, known=True, marks=marks,
+                            ridges=_ridges_under(RANGE, -2.0)).fits[0]
+    assert missed.inner < 0.2
+    assert missed.explained < alone.explained - 0.3
+    assert missed.sky == pytest.approx(alone.explained, abs=1e-6)
+
+
+def test_a_pair_in_the_wrong_order_takes_a_share_of_the_score():
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    near = np.full(RANGE.angles.size, 2_000.0)
+    turn = skymatch.Turn(0.0, STEP, RANGE.angles, distance=near)
+    # the left half of the trace is one stroke, the right half another, at the same distance here
+    line = (x > 0).astype(np.int64)
+    kept = skymatch.match(x, y, turn, half_width=HALF, fov=52.0, known=True,
+                          marks=skymatch.Marks(line=line, pairs=((0, 1),))).fits[0]
+    assert kept.pairs == (0, 1)
+    farther = np.where(np.arange(near.size) * STEP < 47.0, 1_000.0, 5_000.0)
+    turn = skymatch.Turn(0.0, STEP, RANGE.angles, distance=farther)
+    alone = skymatch.match(x, y, turn, half_width=HALF, fov=52.0, known=True).fits[0]
+    good = skymatch.match(x, y, turn, half_width=HALF, fov=52.0, known=True,
+                          marks=skymatch.Marks(line=line, pairs=((0, 1),))).fits[0]
+    bad = skymatch.match(x, y, turn, half_width=HALF, fov=52.0, known=True,
+                         marks=skymatch.Marks(line=line, pairs=((1, 0),))).fits[0]
+    assert good.pairs == (1, 1) and good.explained == pytest.approx(alone.explained, abs=1e-6)
+    assert bad.pairs == (0, 1)
+    assert bad.explained == pytest.approx(alone.explained * (1 - skymatch.PAIR_COST), abs=1e-6)
+
+
+def test_a_collage_cut_in_pieces_fits_each_a_little_on_its_own_and_no_more():
+    x, y = trace_on(RANGE, heading=47.0, fov=52.0)
+    right = x > 0
+    # the right frame of the collage was laid half a degree low: a pinhole cannot follow it
+    _, rise = skymatch.directions(np.array([0.5]), np.array([0.0]), fov=52.0)
+    _, lower = skymatch.directions(np.array([0.5]), np.array([-0.0175]), fov=52.0)
+    shifted = np.where(right, y - 0.0175, y)
+    whole = skymatch.match(x, shifted, RANGE, half_width=HALF, fov=52.0, known=True).fits[0]
+    cut = skymatch.match(x, shifted, RANGE, half_width=HALF, fov=52.0, known=True,
+                         marks=skymatch.Marks(piece=right.astype(np.int64))).fits[0]
+    assert rise[0] - lower[0] > 0.4
+    assert cut.explained > whole.explained + 0.1
+    assert cut.sky == cut.explained
+    # each piece says how it was eased: the right one tilted about half a degree from the left
+    (left_piece, *left), (right_piece, *right_eased) = cut.pieces
+    assert (left_piece, right_piece) == (0, 1)
+    assert abs(right_eased[1] - left[1]) == pytest.approx(rise[0] - lower[0], abs=0.3)
+    assert skymatch.pieces_of(cut)[1]["piece"] == 1
+    assert whole.pieces is None
+    # a piece three degrees off stays off: its camera eases a degree at most
+    far_off = np.where(right, y - 0.11, y)
+    loose = skymatch.match(x, far_off, RANGE, half_width=HALF, fov=52.0, known=True,
+                           marks=skymatch.Marks(piece=right.astype(np.int64))).fits[0]
+    assert loose.explained < 0.6

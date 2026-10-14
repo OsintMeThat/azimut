@@ -67,6 +67,8 @@
     timelineViewState,
     holdsBackWorkingFiles,
     drawsFiles,
+    drawsLayers,
+    layerItems,
     situatedFile,
     mediaTrack,
     withWorkingFiles,
@@ -74,6 +76,8 @@
     trackTint,
   } from '../lib/timelineTracks.js';
   import { chronologyBlock, chronologyMarkdown, chronologyRows, readChronology } from '../lib/timelineCopy.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import TimelineLayerCard from '../components/TimelineLayerCard.svelte';
   import { provenance } from '../lib/sheetExport.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseZone, clockReading, rememberClock, rememberedClock } from '../lib/caseClock.js';
@@ -689,7 +693,8 @@
     try {
       const responses = await Promise.all(targets.map(async (track) => ({
         track,
-        page: await api.get(`/api/cases/${caseId}/timeline?${trackQuery(track, { more })}`),
+        page: drawsLayers(track) ? await layersPage(caseId)
+          : await api.get(`/api/cases/${caseId}/timeline?${trackQuery(track, { more })}`),
       })));
       if (mine !== seq) return;
       const nextPages = more ? { ...trackPages } : {};
@@ -743,8 +748,8 @@
     if (!targets.length) return;
     const mine = ++overviewSeq;
     try {
-      let pages = await Promise.all(targets.map((track) =>
-        api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track)}`)
+      let pages = await Promise.all(targets.map((track) => drawsLayers(track) ? layersOverview(caseId, 'year')
+        : api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track)}`)
       ));
       if (mine !== overviewSeq) return;
       let page = mergeOverviewPages(pages);
@@ -753,8 +758,8 @@
       // what that reading answers.
       const finer = densityUnit(page.extent, overviewWidth);
       if (finer !== 'year') {
-        pages = await Promise.all(targets.map((track) =>
-          api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track, { densityBucket: finer })}`)
+        pages = await Promise.all(targets.map((track) => drawsLayers(track) ? layersOverview(caseId, finer)
+          : api.get(`/api/cases/${caseId}/timeline?${overviewQuery(track, { densityBucket: finer })}`)
         ));
         if (mine !== overviewSeq) return;
         page = mergeOverviewPages(pages);
@@ -772,10 +777,34 @@
     if (!datedRows.length) return [];
     // Cut by the same rule the server is asked for, so a frozen reading and the live
     // one it was taken from draw the same histogram.
-    const width = { hour: 13, day: 10, month: 7, year: 4 }[densityUnit({
+    return bucketsOf(datedRows, densityUnit({
       from: datedRows.map((item) => item.earliest).sort()[0],
       to: datedRows.map((item) => item.latest ?? item.earliest).sort().at(-1),
-    }, overviewWidth)];
+    }, overviewWidth));
+  }
+
+  /**
+   * The dated markers of the analyst's layers, as one page of a My layers lane.
+   * Read off the layers on disk; nothing here is an event of the case.
+   */
+  async function layersPage(caseId) {
+    const rows = (await api.get(`/api/cases/${caseId}/map-layers`)).filter((row) => row.editable);
+    const drawings = await Promise.all(rows.map(async (row) => ({ row, collection: await addedLayers.drawing(caseId, row.name) })));
+    const found = layerItems(drawings);
+    return {
+      items: found, total: found.length, undated: 0, unplaced: 0, next_cursor: null,
+      extent: found.length ? { from: found[0].earliest, to: found.map((item) => item.latest).sort().at(-1) } : null,
+    };
+  }
+
+  /** …and its histogram, cut at the width the server was asked for beside it. */
+  async function layersOverview(caseId, unit) {
+    const page = await layersPage(caseId);
+    return { buckets: bucketsOf(page.items, unit), extent: page.extent };
+  }
+
+  function bucketsOf(datedRows, unit) {
+    const width = { hour: 13, day: 10, month: 7, year: 4 }[unit];
     const grouped = new Map();
     for (const item of datedRows) {
       const start = item.earliest.slice(0, width);
@@ -2581,6 +2610,9 @@
          for one line asking for a pick. -->
     {#if selected}
     <aside class="inspector">
+      {#if selected.kind === 'layer'}
+        <TimelineLayerCard item={selected} onclose={() => (selected = null)} />
+      {:else}
         <header><span class={`category-dot ${selected.category}`}></span><span>{HEADINGS[selected.category] ?? categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
         <div class="inspector-body">
           {#if previewEntity || previewThumb}
@@ -2754,6 +2786,7 @@
           <button class="btn btn-ghost" disabled={snapshotReading} onclick={() => (detailsId = selected.owner_id)}>Details</button>
           {#if selected.category === 'statement'}<button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor(selected)}>Edit claim</button>{/if}
         </footer>
+      {/if}
     </aside>
     {/if}
   </div>

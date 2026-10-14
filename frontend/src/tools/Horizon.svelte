@@ -57,8 +57,10 @@
   import { bearingBetween, elsewhere, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
   import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
+  import { sameCuts, skySamples } from '../lib/horizon/traceMarks.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
+  import { MODES, modeOf, modeOfView, modeParams } from '../lib/horizon/modes.js';
   import { photoKept } from '../lib/horizon/savedView.js';
   import { AUTO_REACH, searchHints } from '../lib/horizon/hints.js';
   import { blinkColours, composePair, composeView, photoTag, standingText, viewFilename } from '../lib/horizon/viewExport.js';
@@ -75,6 +77,10 @@
     searchedPlaces,
     searchOutcome,
     skylineBetween,
+    terrainLine,
+    terrainMargin,
+    traceOnTerrain,
+    traceFit,
     traceGap,
     traceSamples,
   } from '../lib/horizon/overlay.js';
@@ -86,7 +92,9 @@
   import { createFindState } from './horizon/state/find.svelte.js';
   import { facingFrom } from '../lib/horizon/find.js';
   import { createViewsState } from './horizon/state/views.svelte.js';
+  import { createWorkState } from './horizon/state/work.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
+  import SideBySide from './horizon/SideBySide.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import LayerList from '../components/LayerList.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
@@ -111,6 +119,7 @@
   import CaptureMenu from './horizon/CaptureMenu.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import Icon from '../components/Icon.svelte';
+  import ViewSwitch from '../components/ViewSwitch.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
   import Find from './horizon/Find.svelte';
 
@@ -124,7 +133,7 @@
   onDestroy(() => buildings.destroy());
   const imagery = createImageryState({ api });
   const overlay = createOverlayState({ api, view });
-  /** Find where the photo was taken: its own screen over the tab, sharing the photo and its trace. */
+  /** Find where the photo was taken: its own screen over the tab in Find, sharing the photo and its trace. */
   const finder = createFindState({ api, overlay, view });
   /** The view on screen, which draws the saved work's preview. */
   let viewPane = $state(null);
@@ -174,7 +183,7 @@
   const layout = $derived(!view.observer ? 'picking' : moving ? 'moving' : 'looking');
   /** The loupe the view is seen through while a photo lies on it, or null. */
   const seenLoupe = $derived(
-    overlay.source && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null
+    photoOn && overlay.source && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null
   );
   /** What the view shows, through that loupe: the heading and width the map's cone and knob follow. */
   const shownLens = $derived(
@@ -187,6 +196,50 @@
 
   const opening = splitHash(location.hash);
   if (opening.route === 'horizon') view.restore(readHorizonView(opening.params));
+
+  // -- the three modes (lib/horizon/modes.js) ------------------------------------------
+
+  let mode = $state(opening.route === 'horizon' ? modeOf(opening.params) : 'view');
+  /** Whether the photo lies over the view: in Overlay only. */
+  const photoOn = $derived(mode === 'overlay');
+
+  // -- the bench, kept in the case (state/work.svelte.js) ----------------------------------
+
+  /** The work no save has kept yet: a reload, or the case opened again, brings it back. */
+  const work = createWorkState({ api, caseId: () => caseState.current?.id ?? null, view, overlay, finder, views, buildings });
+  /** Where the address stood the eye when the tab opened: the bench never moves it from there. */
+  const addressEye = untrack(() => (view.observer ? { lat: view.observer.lat, lon: view.observer.lon } : null));
+
+  $effect(() => {
+    void caseState.current?.id;
+    untrack(async () => {
+      const back = await work.restore({ address: addressEye });
+      if (back?.photoGone) toast('The photo left on the bench is no longer in the case', 'warn', 6500);
+    });
+  });
+
+  const bench = $derived(work.current);
+  $effect(() => {
+    const now = bench;
+    untrack(() => work.keep(now));
+  });
+  onDestroy(() => {
+    work.flush();
+    work.destroy();
+  });
+
+  $effect(() => {
+    const finding = mode === 'find';
+    untrack(() => (finding ? finder.show() : finder.hide()));
+  });
+
+  /** A mode picked by the analyst: Overlay and Find ask for the photo when none is laid yet. */
+  function pickMode(next) {
+    if (next === mode) return;
+    mode = next;
+    if (next === 'find' && caseState.current) finder.refreshList(caseState.current.id);
+    if (next !== 'view' && !overlay.source) photoDialog = true;
+  }
 
   onMount(async () => {
     await prefsReady;
@@ -210,6 +263,7 @@
     if (uiState.tool !== 'horizon' || !asked) return;
     untrack(() => {
       uiState.horizonAt = null;
+      work.interrupt();
       // an eye set higher than a person stands is a mast or a drone
       const eye = Number.isFinite(asked.eyeHeight)
         ? { mode: asked.eyeHeight > 100 ? 'drone' : 'ground', height: asked.eyeHeight }
@@ -229,6 +283,8 @@
     if (uiState.tool !== 'horizon' || !asked || !caseId) return;
     untrack(() => {
       uiState.horizonPhoto = null;
+      work.interrupt();
+      if (mode === 'view') mode = 'overlay';
       overlay.openCase(caseId, asked, { time: asked.time ?? 0 });
     });
   });
@@ -295,7 +351,10 @@
     discarding = null;
     moving = false;
     mapLarge = false;
-    if (await views.open(name)) flyToEye();
+    if (await views.open(name)) {
+      mode = modeOfView(Boolean(overlay.source));
+      flyToEye();
+    }
   }
 
   function newView() {
@@ -320,6 +379,7 @@
     search = null;
     view.leave();
     uiState.horizonEye = null;
+    if (mode === 'overlay') mode = 'view';
     moving = false;
     mapLarge = false;
     folded = false;
@@ -331,6 +391,7 @@
     if (uiState.tool !== 'horizon' || !asked || !caseState.current) return;
     untrack(() => {
       uiState.openHorizonView = null;
+      work.interrupt();
       openView(asked);
     });
   });
@@ -373,7 +434,7 @@
   async function exportView(kind, { keep = false, trace = false, signed = true } = {}) {
     if (exportBusy || !viewPane || !view.observer) return;
     const pair = kind === 'row' || kind === 'column' || kind === 'blink';
-    if (pair && !overlay.source) return;
+    if (pair && !(photoOn && overlay.source)) return;
     exportBusy = kind;
     try {
       const owner = await ensureCase();
@@ -389,7 +450,7 @@
         title,
         standing: standingText({ observer: view.observer, camera: drawn.camera, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime }, kind }),
         credits,
-        daylight: view.ground !== 'plain' || Boolean(overlay.source),
+        daylight: view.ground !== 'plain' || Boolean(photoOn && overlay.source),
         trace,
         signed,
       };
@@ -439,7 +500,7 @@
   let captureBusy = $state(false);
 
   /** Whether the picture shows a photo pulled by hand, which its tag then says. */
-  const reshapedShown = () => Boolean(overlay.source && overlay.warped && overlay.shown > 0);
+  const reshapedShown = () => Boolean(photoOn && overlay.source && overlay.warped && overlay.shown > 0);
 
   /**
    * File the view in the case as it shows, or an `area` of it dragged over the
@@ -467,7 +528,7 @@
         title,
         standing: standingText({ observer: view.observer, camera: faced, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime } }),
         credits,
-        daylight: view.ground !== 'plain' || Boolean(overlay.source),
+        daylight: view.ground !== 'plain' || Boolean(photoOn && overlay.source),
         tag: reshapedShown() ? photoTag(true) : '',
       });
       const form = new FormData();
@@ -479,7 +540,7 @@
       form.append('fov', String(faced.fov));
       form.append('area', box ? 'true' : 'false');
       if (views.current) form.append('view', views.current.name);
-      const photo = overlay.source;
+      const photo = photoOn ? overlay.source : null;
       if (photo?.path && photo.caseId === owner.id) form.append('photo', photo.path);
       if (credits) form.append('attribution', credits);
       await api.post(`/api/cases/${encodeURIComponent(owner.id)}/horizon/captures`, form);
@@ -498,7 +559,7 @@
    * saved is saved first: the panels say which view they came from.
    */
   async function sendToProof() {
-    if (exportBusy || !viewPane || !overlay.source) return;
+    if (exportBusy || !viewPane || !photoOn || !overlay.source) return;
     if (!caseState.current) {
       toast('Open a case to send the view to Geo Proof', 'warn');
       return;
@@ -583,15 +644,17 @@
   // -- the address ----------------------------------------------------------------
 
   let lastEye = '';
+  let lastMode = untrack(() => mode);
   let addressTimer = 0;
   $effect(() => {
     if (uiState.tool !== 'horizon') return;
     const place = view.place;
-    const params = horizonParams(place);
+    const params = { ...horizonParams(place), ...modeParams(mode) };
     const eye = params.ll ? `${params.ll}|${params.m ?? ''}|${params.h ?? ''}` : '';
-    // moving the eye is going somewhere; turning the head is not
-    const navigate = Boolean(eye && lastEye && eye !== lastEye);
+    // moving the eye is going somewhere, and so is changing mode; turning the head is not
+    const navigate = Boolean(eye && lastEye && eye !== lastEye) || mode !== lastMode;
     lastEye = eye;
+    lastMode = mode;
     clearTimeout(addressTimer);
     // a playing video turns the view every frame: the address follows once it rests
     if (untrack(() => overlay.playing) && !navigate) addressTimer = setTimeout(() => settlePlace('horizon', params), 400);
@@ -601,6 +664,7 @@
   onDestroy(
     onBackForward('horizon', (to) => {
       view.restore(readHorizonView(to));
+      mode = modeOf(to);
       moving = false;
       flyToEye();
       return true;
@@ -653,8 +717,8 @@
   }
 
   function onKey(event) {
-    // Find has the keys while it is open
-    if (finder.open) return;
+    // Find has the keys while it is on screen
+    if (mode === 'find') return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && uiState.tool === 'horizon' && layout === 'looking') {
       event.preventDefault();
       saveView();
@@ -770,7 +834,7 @@
     const target = view.target;
     const pointed = view.pointed;
     // a photo held to the terrain: neither the eye nor its heading may be dragged away from it
-    const held = Boolean(overlay.source && overlay.locked);
+    const held = Boolean(photoOn && overlay.source && overlay.locked);
     if (!eyeLayer) return;
     const state = !target ? '' : target.busy || target.error ? 'busy' : target.visible ? 'seen' : 'hidden';
     eyeLayer.set([
@@ -939,9 +1003,9 @@
     const resolution = view.panorama?.resolution ? `${view.panorama.resolution} m relief` : '';
     return [...names, resolution].filter(Boolean).join(' · ');
   });
-  const aspect = $derived(overlay.aspect || (frame.width && frame.height ? frame.width / frame.height : 4 / 3));
+  const aspect = $derived((photoOn && overlay.aspect) || (frame.width && frame.height ? frame.width / frame.height : 4 / 3));
   /** The frame in the photo's shape while one is laid, letterboxed in the room there is. */
-  const boxed = $derived(overlay.source && overlay.aspect ? fitFrame(overlay.aspect, slot) : null);
+  const boxed = $derived(photoOn && overlay.source && overlay.aspect ? fitFrame(overlay.aspect, slot) : null);
 
   // -- the photo laid over the view ------------------------------------------------
 
@@ -951,9 +1015,76 @@
    */
   const skyline = (azimuth, reach = overlay.reach) => skylineBetween(view.panorama, azimuth, reach);
   const traceCamera = $derived({ ...view.camera, width: frame.width, height: frame.height });
-  // the trace as it shows on the straightened photo, which is what meets the terrain
-  const samples = $derived(overlay.traceShown && frame.width ? traceSamples(overlay.strokesSeen, frame) : []);
-  const gap = $derived(samples.length && view.panorama ? traceGap(samples, traceCamera, skyline) : null);
+  // the trace as it shows on the straightened photo, which is what meets the terrain: every stroke, and the skyline's alone
+  const marked = $derived(photoOn && overlay.traceShown && frame.width ? traceSamples(overlay.strokesSeen, frame) : []);
+  const samples = $derived(skySamples(marked, overlay.marks));
+
+  /**
+   * How the search eased each piece of a cut collage (`pieces`, engine/skymatch.py),
+   * for the photo, the eye it stood at and the cuts it read: while all hold, the
+   * gap, the trace's colours and the terrain's line read each piece through its own camera.
+   */
+  let eased = $state.raw(null);
+  const pieces = $derived(
+    eased &&
+      eased.photo === (overlay.source?.path ?? null) &&
+      view.observer?.lat === eased.at.lat &&
+      view.observer?.lon === eased.at.lon &&
+      sameCuts(eased.cuts, overlay.marks.cuts)
+      ? eased.pieces
+      : null
+  );
+  const pieced = $derived({ pieces, pieceAt: overlay.pieceAt });
+  /** Keep the pieces a place was found with, at the eye `at` and for the `cuts` the search read; none forgets them. */
+  function easePieces(found, at = view.observer, cuts = overlay.marks.cuts) {
+    eased = found?.length && at ? { pieces: found, cuts, at: { lat: at.lat, lon: at.lon }, photo: overlay.source?.path ?? null } : null;
+  }
+
+  const gap = $derived(samples.length && view.panorama ? traceGap(samples, traceCamera, skyline, pieced) : null);
+  /** The terrain's skyline and how far it may be off, for the band drawn round it while a photo is matched. */
+  const band = $derived(
+    photoOn && view.panorama ? (azimuth) => ({ top: skyline(azimuth), margin: terrainMargin(view.panorama, azimuth, overlay.reach) }) : null
+  );
+  /** How each traced point lies on the terrain, which the trace's colours show: green on it, red off it. */
+  const traceKinds = $derived(
+    photoOn && overlay.traceShown && frame.width && view.panorama ? traceFit(overlay.strokesSeen, traceCamera, skyline, pieced) : null
+  );
+  /** The terrain's skyline over the photo, each piece of a collage where the search read it, with its margin. */
+  const terrain = $derived(
+    photoOn && overlay.traceShown && overlay.strokes.length && frame.width && view.panorama ? terrainLine(traceCamera, band, pieced) : []
+  );
+
+  /**
+   * The photo above the terrain, the same frame on both, drawn when asked and
+   * shown over the view (SideBySide) until closed: what the view drew, with the
+   * trace as traced and as laid on the terrain.
+   */
+  let side = $state.raw(null);
+  let siding = $state(false);
+  async function showSide() {
+    if (siding || !viewPane || !photoOn || !overlay.source) return;
+    siding = true;
+    try {
+      const drawn = await viewPane.exportPicture({ kind: 'view', variants: [{ photo: 1 }, { photo: 0 }], note: 'Drawing the photo and the terrain…' });
+      if (!drawn) throw new Error('the view has not finished landing');
+      const strokes = overlay.traceShown && !overlay.traceHidden ? overlay.strokesSeen : [];
+      const { lines, inner } = overlay.marks;
+      side = {
+        ...drawn,
+        trace: strokes.length ? drawn.layers.trace : [],
+        traceOnTerrain: strokes.length ? traceOnTerrain(strokes, drawn.camera, pieced) : [],
+        ridges: strokes.map((_, index) => inner.includes(lines[index])),
+      };
+    } catch (failure) {
+      toast(`Could not draw them side by side: ${failure.message}`, 'danger');
+    } finally {
+      siding = false;
+    }
+  }
+  // a photo taken away or another mode takes its pictures with it
+  $effect(() => {
+    if (!photoOn || mode !== 'overlay') side = null;
+  });
 
   /** The places the last whole-turn search found, while the eye and the trace are the ones it read. */
   let search = $state.raw(null);
@@ -978,6 +1109,8 @@
     const camera = traceCamera;
     const looked = view.camera;
     const traced = samples;
+    const every = marked;
+    const marks = overlay.marks;
     const panorama = view.panorama;
     const strokes = overlay.strokesSeen;
     const before = gap;
@@ -987,11 +1120,13 @@
     fitting = true;
     let found = null;
     try {
-      const body = matchRequest(traced, camera, panorama, {
+      const body = matchRequest(every, camera, panorama, {
         known: !lens,
         reach,
         autoReach: AUTO_REACH,
         ...searchHints(told, { lensKnown: !lens }),
+        marks,
+        pieceAt: (s) => overlay.pieceAt({ u: s.x / camera.width, v: s.y / camera.height }),
       });
       if (body) found = await api.post('/api/horizon/match', body);
     } catch {
@@ -1005,7 +1140,8 @@
       fitFromHere(traced, camera, before, { lens, flat: found?.verdict === 'flat' });
       return;
     }
-    const places = searchedPlaces(found, traced, camera, skyline, { lens });
+    const pieceAt = (p) => overlay.pieceAt(p);
+    const places = searchedPlaces(found, traced, camera, skyline, { lens, pieceAt });
     search = { panorama, strokes, verdict: found.verdict, places };
     const outcome = searchOutcome(found, places, camera, { lens, before, facing: Boolean(told.facing) });
     // staying put, the view still reads the trace against the reach the place lies on
@@ -1041,12 +1177,15 @@
   function lookAtPlace(place, text, kind = 'ok') {
     const { heading, tilt, roll, fov } = view.camera;
     const reachBefore = overlay.reachFound;
+    const easedBefore = eased;
     takeReach(place);
+    easePieces(place.pieces);
     view.look(lensOf(place.camera));
     toast(text, kind, 8000, {
       label: 'Undo',
       onClick: () => {
         overlay.setReachFound(reachBefore);
+        eased = easedBefore;
         view.look({ heading, tilt, roll, fov });
       },
     });
@@ -1061,6 +1200,7 @@
     const place = searched?.places[index];
     if (!place || overlay.locked) return;
     takeReach(place);
+    easePieces(place.pieces);
     view.look(lensOf(place.camera));
   }
 
@@ -1072,13 +1212,6 @@
     if (result.error) toast(result.error, 'warn');
     else if (!result.found) toast('No clear skyline in this photo', 'warn');
     else toast('Skyline found: rub out what is not the ridge', 'ok', 8000, { label: 'Undo', onClick: () => overlay.undoStroke() });
-  }
-
-  /** Open Find, asking for the photo first when none is laid. */
-  function openFind() {
-    finder.show();
-    if (caseState.current) finder.refreshList(caseState.current.id);
-    if (!overlay.source) photoDialog = true;
   }
 
   // the case's searches, for Find and the Open menu, read again when the case changes
@@ -1099,8 +1232,10 @@
 
   /** Look from a place the search found, the view turned and the lens set as it found them. */
   function lookFromPlace(place) {
-    finder.hide();
+    mode = 'overlay';
     view.standAt(place, { mode: finder.who.mode, height: place.height ?? finder.who.low });
+    // the pieces were eased for the cuts the search was asked with
+    easePieces(place.pieces, place, finder.search?.ask?.photo?.marks?.cuts ?? []);
     if (Number.isFinite(place.heading)) {
       view.look({ heading: place.heading, tilt: place.tilt ?? 0, roll: place.roll ?? 0, fov: place.fov ?? view.camera.fov });
     }
@@ -1112,12 +1247,18 @@
     const caseId = caseState.current?.id;
     if (!caseId) return;
     try {
-      finder.show();
+      mode = 'find';
       const record = await finder.openSearch(caseId, name);
       const photo = record.ask?.photo;
       if (photo?.path && overlay.source?.path !== photo.path) {
         await overlay.openCase(caseId, { path: photo.path, kind: photo.kind, title: photo.title });
-        overlay.restoreWork({ strokes: photo.strokes ?? [], hints: record.ask?.hints });
+        overlay.restoreWork({
+          strokes: photo.strokes ?? [],
+          marks: photo.marks ?? null,
+          bend: photo.bend ?? 0,
+          corners: photo.corners ?? null,
+          hints: record.ask?.hints,
+        });
       }
     } catch (failure) {
       toast(failure.message || 'The search could not be opened', 'danger');
@@ -1138,7 +1279,7 @@
   /** Stand at a place Find gave, facing as its first alignment says (the lens known), else towards its near point. */
   function standFromFind(point) {
     const first = finder.alignments[0];
-    finder.hide();
+    mode = 'overlay';
     view.standAt(point);
     if (!first) return;
     const heading = facingFrom(first, point, finder.lens ?? {}) ?? bearingBetween(point, first.map.near);
@@ -1160,6 +1301,7 @@
 
   function layCase(item) {
     photoDialog = false;
+    if (mode === 'view') mode = 'overlay';
     const caseId = caseState.current?.id;
     if (caseId) overlay.openCase(caseId, item);
   }
@@ -1167,6 +1309,7 @@
   /** A file from this computer: added to the case when one is open, kept in this browser when not. */
   async function layFile(file) {
     photoDialog = false;
+    if (mode === 'view') mode = 'overlay';
     if (!overlay.accepts(file)) {
       toast('Only a photo or a video can be laid over the view', 'danger');
       return;
@@ -1296,8 +1439,9 @@
   style:--hz-map-h="{mapH}px"
 >
   <!-- Find covers the tab: what lies under it takes no focus and no click -->
-  <div class="hz-main" inert={finder.open}>
+  <div class="hz-main" inert={mode === 'find'}>
     <header class="tool-header hz-head">
+      <ViewSwitch options={MODES} value={mode} label="Horizon mode" onpick={pickMode} />
       {#if layout === 'looking'}
         <!-- the view's name, read as a title until it is clicked; where the eye stands is in its tooltip -->
         <div class="hz-title">
@@ -1338,18 +1482,28 @@
         </div>
       {:else}
         <div class="hz-ask">
-          <h2>{layout === 'moving' ? 'Move the viewpoint' : 'Pick a viewpoint'}</h2>
+          <h2>{layout === 'moving' ? 'Move the viewpoint' : photoOn ? 'Pick where the photo was taken from' : 'Pick a viewpoint'}</h2>
           <p class="sub">
             {layout === 'moving' ? 'Click the new spot, or search a place.' : 'Click where you want to stand, or search a place.'}
           </p>
         </div>
+        {#if layout === 'picking' && photoOn && overlay.source}
+          <button
+            type="button"
+            class="btn btn-sm hz-act"
+            onclick={() => pickMode('find')}
+            title="No idea where? Search an area of the map for where the photo was taken"
+          >
+            <Icon name="search" size={14} /><span class="hz-act-label">Find it on the map</span>
+          </button>
+        {/if}
       {/if}
       <span class="hz-status" role="status" aria-live="polite">
         {#if layout === 'looking' && view.status}
           <span class="spinner" aria-hidden="true"></span>{view.status}
         {/if}
       </span>
-      {#if layout === 'looking' && !overlay.source}
+      {#if photoOn && layout !== 'moving' && !overlay.source}
         <button
           type="button"
           class="btn btn-primary btn-sm hz-act"
@@ -1358,18 +1512,6 @@
           aria-label="Add a photo or video"
         >
           <Icon name="image" size={14} /><span class="hz-act-label">Add a photo or video</span>
-        </button>
-      {/if}
-      {#if layout === 'picking' || (layout === 'looking' && overlay.source)}
-        <button
-          type="button"
-          class="btn btn-sm hz-act"
-          class:btn-primary={layout === 'picking'}
-          onclick={openFind}
-          title="Search an area of the map for where the photo was taken, from its skyline and what lines up in it"
-          aria-label={layout === 'picking' ? 'Find where a photo was taken' : 'Find where it was taken'}
-        >
-          <Icon name="search" size={14} /><span class="hz-act-label">{layout === 'picking' ? 'Find where a photo was taken' : 'Find'}</span>
         </button>
       {/if}
       {#if caseState.current && layout !== 'moving'}
@@ -1387,9 +1529,9 @@
       {#if layout === 'looking'}
         <CaptureMenu busy={captureBusy} oncapture={captureView} />
         <ExportMenu
-          photo={Boolean(overlay.source)}
+          photo={Boolean(photoOn && overlay.source)}
           saved={Boolean(views.current)}
-          traced={Boolean(overlay.source && overlay.strokes.length)}
+          traced={Boolean(photoOn && overlay.source && overlay.strokes.length)}
           busy={exportBusy}
           earth={earthLink}
           onexport={exportView}
@@ -1428,7 +1570,7 @@
     <div class="hz-stage dark-surface">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="view-area" ondragover={onDragOver} ondragleave={() => (dropping = false)} ondrop={onDrop}>
-        {#if overlay.source && layout === 'looking' && !swapped}
+        {#if photoOn && overlay.source && layout === 'looking' && !swapped}
           <OverlayBar
             {overlay}
             {gap}
@@ -1440,6 +1582,8 @@
             places={searched && searched.verdict !== 'match' ? searched.places : []}
             onplace={takePlace}
             ondetect={detect}
+            onside={showSide}
+            {siding}
           />
         {/if}
         <div class="frame-slot" bind:clientWidth={slot.width} bind:clientHeight={slot.height}>
@@ -1456,7 +1600,9 @@
             <HorizonView
               bind:this={viewPane}
               {view}
-              {overlay}
+              overlay={photoOn ? overlay : null}
+              fit={traceKinds}
+              {terrain}
               units={prefs.units}
               sky={view.light}
               {tracks}
@@ -1472,13 +1618,29 @@
               </div>
             {/if}
           </div>
+          {#if side}
+            <SideBySide
+              frames={side.frames}
+              camera={side.camera}
+              labels={side.layers.labels}
+              ticks={side.layers.ticks}
+              trace={side.trace}
+              traceOnTerrain={side.traceOnTerrain}
+              ridges={side.ridges}
+              what={overlay.source?.kind === 'video' ? 'Video' : 'Photo'}
+              reshaped={overlay.warped}
+              saving={exportBusy === 'column'}
+              onsave={() => exportView('column', { trace: true })}
+              onclose={() => (side = null)}
+            />
+          {/if}
           {#if dropping}
             <div class="drop" aria-hidden="true">
               <p>Drop to lay it over the view{caseState.current ? ': it is added to the case' : ''}</p>
             </div>
           {/if}
         </div>
-        {#if overlay.source?.kind === 'video' && layout === 'looking' && !swapped}
+        {#if photoOn && overlay.source?.kind === 'video' && layout === 'looking' && !swapped}
           <OverlayTransport {overlay} />
         {/if}
         {#if copernicusHelp}
@@ -1499,7 +1661,7 @@
           {view}
           {frame}
           {bodies}
-          locked={Boolean(overlay.source && overlay.locked)}
+          locked={Boolean(photoOn && overlay.source && overlay.locked)}
           loupe={seenLoupe}
           places={searched && searched.verdict !== 'match' && searched.places.length > 1 ? searched.places : []}
           onplace={takePlace}
@@ -1528,12 +1690,12 @@
     ></button>
   {/if}
 
-  <aside class="hz-inspector" aria-label="Map and settings" inert={finder.open}>
+  <aside class="hz-inspector" aria-label="Map and settings" inert={mode === 'find'}>
     <div class="hz-slot"></div>
     <div class="hz-groups">
       <HorizonPanel
         {view}
-        {overlay}
+        overlay={photoOn ? overlay : null}
         {buildings}
         units={prefs.units}
         {aspect}
@@ -1543,7 +1705,7 @@
     </div>
   </aside>
 
-  <div class="hz-map" bind:this={mapBox} inert={finder.open}>
+  <div class="hz-map" bind:this={mapBox} inert={mode === 'find'}>
     {#if mapView}
       <MapSurface
         bind:this={surface}
@@ -1574,7 +1736,7 @@
             view={mapView}
             {bearing}
             units={prefs.units}
-            active={!finder.open}
+            active={mode !== 'find'}
             bind:value={searchText}
             oncoordinates={layout !== 'looking' ? standAt : null}
           />
@@ -1589,6 +1751,7 @@
           interactive={!!personalLayers.editor && !personalLayers.armed}
           onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
           onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
+          oncopyfeature={(row, feature) => personalLayers.copy(row, feature)}
         />
         {#if mapLayers.has('saved') && caseState.current && !personalLayers.armed}
           <SavedOverlay
@@ -1673,17 +1836,14 @@
             oneditadded={(row) => { layersOpen = false; mapLarge = true; personalLayers.open(row); }}
             onnewpersonal={() => { layersOpen = false; mapLarge = true; personalLayers.newLayer(); }}
             ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
-            onmaps={() => { layersOpen = false; personalLayers.openMaps(); }}
             bind:folded={layersFolded}
           />
         </div>
       {/if}
     {/if}
-    <PersonalLayerPanel tool="horizon" scope={myLayers} {engine}
-      provider={providerId} rows={layerRows} onprovider={(id) => { providerId = id; }}
-      places={savedWork.rows.filter((row) => row.kind === 'place')} />
+    <PersonalLayerPanel tool="horizon" scope={myLayers} {engine} />
   </div>
-  {#if finder.open}
+  {#if mode === 'find'}
     <Find
       find={finder}
       {overlay}
@@ -1691,7 +1851,8 @@
       {overlays}
       home={findHome}
       units={prefs.units}
-      standing={Boolean(view.observer)}
+      modes={MODES}
+      onmode={pickMode}
       onpick={() => (photoDialog = true)}
       onstand={standFromFind}
       onsearch={searchFromFind}

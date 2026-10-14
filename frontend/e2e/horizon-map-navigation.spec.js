@@ -86,7 +86,7 @@ test('offers navigation on the large Horizon map and leaves the compact map alon
 
 test('offers navigation in Find, both in three columns and with its map enlarged', async ({ page }) => {
   const queries = await openHorizon(page, false);
-  await page.getByRole('button', { name: 'Find where a photo was taken', exact: true }).click();
+  await page.getByRole('group', { name: 'Horizon mode' }).getByRole('button', { name: 'Find', exact: true }).click();
   await page.getByRole('dialog', { name: 'Add a photo or video' }).getByRole('button', { name: 'Close', exact: true }).click();
   const finder = page.getByRole('region', { name: 'Find where it was taken', exact: true });
   const map = finder.getByRole('region', { name: 'Map and the area', exact: true });

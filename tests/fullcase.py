@@ -82,6 +82,7 @@ class FullCase:
     horizon_view: str = ""  # a saved Horizon view, matched on the photo
     horizon_thumb: str = ""  # its preview, which travels with it
     horizon_find: str = ""  # a search for where the photo was taken, run to its end
+    horizon_work: str = ""  # the work on Horizon's bench, kept so a reload brings it back
     analyzer_zones: str = ""
     analyzer_area: str = ""
     analyzer_followup: str = ""
@@ -99,8 +100,6 @@ class FullCase:
     layer_id: str = ""
     editable_layer_id: str = ""
     editable_layer: str = ""
-    map_view: str = ""
-    map_view_id: str = ""
     layer: str = ""  # the spec, which is what the entity points at
     layer_snapshot: str = ""  # the bytes as received, which travel with it
     layer_icons: str = ""  # the source's own pictograms, which travel too
@@ -278,6 +277,18 @@ def build_full_case(
     # A search for where the photo was taken, run on flat relief drawn here: no network.
     if horizon_find:
         _add_horizon_find(client, case_id, full)
+
+    # The bench Horizon keeps while the analyst works: the photo laid and Find's area.
+    bench = client.put(
+        f"/api/cases/{case_id}/horizon/work",
+        json={
+            "view": view.json()["name"],
+            "photo": {"path": full.photo, "kind": "image", "strokes": [[{"u": 0.1, "v": 0.4}, {"u": 0.5, "v": 0.35}]]},
+            "find": {"area": [{"lat": 46.0, "lon": 7.0}, {"lat": 46.0, "lon": 7.01}, {"lat": 46.01, "lon": 7.01}]},
+        },
+    )
+    assert bench.status_code == 200, bench.text
+    full.horizon_work = ".horizon/.work.json"
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(
@@ -561,8 +572,8 @@ def build_full_case(
         styled = client.patch(f"/api/cases/{case_id}/map-layers/{personal_name}/groups/{group_id}",
                               json={"colour": "#009e73", "symbol": "badge-building", "size": 1.75, "stroke": 4})
         assert styled.status_code == 200, styled.text
-        shared = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/places",
-                             json={"ids": [full.place_id], "group": group_id})
+        shared = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/links",
+                             json={"items": [{"id": full.place_id, "lat": 48.8584, "lon": 2.2945}], "group": group_id})
         assert shared.status_code == 200, shared.text
         added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
                             json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
@@ -583,16 +594,6 @@ def build_full_case(
         full.editable_layer_id = client.get(
             f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
         ).json()["entity"]["id"]
-
-        view = client.post(f"/api/cases/{case_id}/map-views", json={
-            "title": "Review map", "provider": "esri", "camera": {"lat": 48.85, "lon": 2.35, "zoom": 12},
-            "layers": [{"name": layer_name, "hidden": []}], "note": "Working map legend",
-            "legend": [{"label": "Checkpoints", "colour": "#009e73"}],
-        })
-        assert view.status_code == 200, view.text
-        full.map_view = layout.map_view_rel(view.json()["id"])
-        full.map_view_id = client.get(f"/api/cases/{case_id}/entities/lookup",
-                                    params={"attr": "spec", "value": full.map_view}).json()["entity"]["id"]
 
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one

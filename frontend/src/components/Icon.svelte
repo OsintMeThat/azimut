@@ -39,39 +39,6 @@
     pin: 'M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
     star: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z',
     flag: 'M5 21V3m0 1h13l-3 4 3 4H5',
-    // Map symbols for infrastructure, vehicles and conflict observations.
-    radar: 'M12 3a9 9 0 1 0 9 9M12 7a5 5 0 1 0 5 5M12 12l7-7M7 14h.01M14 17h.01',
-    radarAntenna: 'M5 5a9 9 0 0 0 14 14L5 5Zm7 7 7-7m-1-1 2 2M11 16v5M7 21h9',
-    telecomAntenna: 'M12 8v13M8 21l4-9 4 9M6 3a8 8 0 0 0 0 10m12-10a8 8 0 0 1 0 10M9 6a4 4 0 0 0 0 4m6-4a4 4 0 0 1 0 4M12 6h.01',
-    powerPylon: 'M12 3 6 21m6-18 6 18M7 7h10M5 11h14M8 7l8 4-8 6 8 4M5 11v3m14-3v3M4 21h16',
-    tank: 'M6 13h12a4 4 0 0 1 0 8H6a4 4 0 0 1 0-8Zm0 4h12M7 13V9h7l3 4M14 9h7',
-    armouredVehicle: 'M3 16V9h12l6 5v3H3M5 9l2-4h7l2 4M14 6h7M7 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
-    truck: 'M3 16V5h11v11M14 9h4l3 5v3h-1M3 17h2m4 0h7M14 14h7M7 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm11 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
-    pickup: 'M3 16v-5h7V7h5l4 5h2v5h-1M10 12h9M3 17h2m4 0h6M7 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
-    ambulance: 'M3 16V5h12v11M15 10h3l3 4v3h-1M3 17h2m4 0h7M7 9h4m-2-2v4M7 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm11 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
-    bomb: 'M10 8a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm4 1 2-3 2 2-3 3M17 6l2-3h2M7 12l-1 2',
-    missile: 'M7 16 14 6l7-3-3 7-10 7-1-1ZM9 12H4l-1 7 5-2M12 9V4l7-1M4 20l-1 1',
-    artillery: 'M7 14 17 6l3 3-10 8M7 14a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm4 4h8l2 3M17 6l2-2 3 4-2 1',
-    airDefence: 'M4 17h16v4H4v-4ZM6 17l6-12 3 1-6 11m3 0 6-12 3 1-6 11',
-    drone: 'M5 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm14 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM5 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm14 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM7 7l3 3m4 0 3-3M7 17l3-3m4 0 3 3M10 10h4v4h-4v-4Z',
-    fpvDrone: 'M5 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm14 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM5 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm14 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM7 7l2 2m6 0 2-2M7 17l2-3m6 0 2 3M9 9h6v5H9V9ZM12 11h.01M12 9V5',
-    helicopter: 'M4 3h16M12 3v5M7 8h9l5 5v3H9l-4-4H2V7h3l2 1ZM14 8v5h7M8 20h12M11 16v4m6-4v4',
-    fighter: 'M12 3l2 7 7 5v3l-7-3v4l3 2h-4l-1-2-1 2H7l3-2v-4l-7 3v-3 7-5 2-7Z',
-    house: 'M3 11l9-8 9 8M5 10v11h14V10M10 21v-7h4v7',
-    highRise: 'M4 21V3h10v18M14 9h6v12M2 21h20M7 7h4m-4 4h4m-4 4h4M17 13v4M8 21v-3h2v3',
-    trench: 'M3 7h5v5h8V7h5M3 11h1v5h16v-5h1M6 5V3m6 7V8m6-3V3M7 20l1-2m8 2-1-2',
-    bunker: 'M3 13c0-9 18-9 18 0v7H3v-7Zm0 0h18M6 16h3m6 0h3M10 20v-3h4v3',
-    checkpoint: 'M4 21V10h3v11M4 6h17v4H4V6Zm5 0-2 4m7-4-2 4m7-4-2 4M18 16h3v5h-3v-5Z',
-    roadblock: 'M3 7h18v7H3V7Zm3 7-2 7m14-7 2 7M5 14l7-7m1 7 7-7',
-    factory: 'M3 21V11l6 4v-6l6 5V4h5v17H3ZM6 18h2m3 0h2m3 0h2M15 8h5',
-    fuelDepot: 'M3 7a4 2 0 1 1 8 0v12a4 2 0 0 1-8 0V7Zm0 0a4 2 0 0 0 8 0M15 7a3 2 0 1 1 6 0v12a3 2 0 0 1-6 0V7Zm0 0a3 2 0 0 0 6 0',
-    bridge: 'M2 16h20M5 20V5m14 15V5M5 7c4 8 10 8 14 0M9 12v4m6-4v4',
-    crater: 'M3 12h3c1 7 11 7 12 0h3M7 12l2 2m8-2-2 2M6 7 4 5m8 2V3m6 4 2-2',
-    hospital: 'M4 21V5h16v16H4Zm5-11h6m-3-3v6M9 21v-5h6v5',
-    camp: 'M3 21 12 4l9 17H3Zm5 0 4-8 4 8',
-    harbour: 'M12 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 4v14M8 10h8M3 13v4l3-2m15-2v4l-3-2M3 17c5 6 13 6 18 0',
-    railway: 'M6 21l3-18m9 18L15 3M8 5h8M7 9h10M6 13h12M5 17h14M4 21h16',
-    powerStation: 'M4 21V9h16v12H4ZM2 9l10-6 10 6M13 12l-4 4h4l-2 3 5-5h-4l1-2Z',
     // A pushpin, and deliberately not the marker above it: `pin` means a point on
     // the ground, so it would read as "this is a place" on a graph where place is
     // a family. This one means "somebody put this here and it stays".
@@ -100,6 +67,25 @@
     // makes that are neither a line nor a word
     numbered: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18ZM10.4 9.6 12.4 8.2V16M10.6 16h3.6',
     blurBox: 'M4.5 4.5h15v15h-15zM9 9h.01M15 9h.01M9 15h.01M15 15h.01M12 12h.01',
+    // a label on the page and the line down to the point it names
+    calloutLeader: 'M10 4h10v7H10V4Zm2.5 3.5h5M10 11l-5 6.5M4.5 18.5h.01',
+    calloutBubble: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
+    // a detail framed small, shown big beside it
+    zoomInset: 'M3 15h5v5H3v-5Zm8-12h10v10H11V3ZM3 15l8-12M8 20l13-7',
+    // a camera's field of view, opening from where it stood
+    viewCone: 'M12 20 4.5 7M12 20l7.5-13M4.5 7q7.5-4 15 0M12 20h.01',
+    // a mark that holds to its picture, and one free on the page across its edge
+    anchorPicture: 'M4 8h16v12H4V8Zm8-6v8m-2.5-2.5L12 10l2.5-2.5',
+    anchorPage: 'M7 3h13v18H7V3ZM3 9h8v6H3V9Z',
+    // how a line is drawn: whole, in dashes, in dots
+    lineSolid: 'M4 12h16',
+    lineDashed: 'M3 12h4m3.5 0h4M18 12h3',
+    lineDotted: 'M4 12h.01M8 12h.01M12 12h.01M16 12h.01M20 12h.01',
+    // a box and the tab its words hang on, from each corner
+    tagTL: 'M4 10h16v10H4V10Zm0 0V5h9v5',
+    tagTR: 'M4 10h16v10H4V10Zm16 0V5h-9v5',
+    tagBL: 'M4 4h16v10H4V4Zm0 10v5h9v-5',
+    tagBR: 'M4 4h16v10H4V4Zm16 10v5h-9v-5',
     globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.8 5.7 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3Z',
     // a page the case points at, not a hostname: `domain` keeps the globe, and the
     // two stopped being the same row at a glance
@@ -161,11 +147,25 @@
     line: 'M5 19 19 5',
     curve: 'M4 18c4 0 4-12 8-12s4 12 8 12',
     freehand: 'M3 17c3-9 5 5 8-2s4-8 6-2 3-2 4-5',
+    // a near ridge drawn under a farther one: an inner edge of the land
+    ridge: 'M2 19l6-6 4 3 3-3 7 6M2 11l5-4 4 2 4-3 7 5',
+    // a collage cut where its frames meet
+    scissors: 'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12',
+    // a stroke drawn snaps onto the nearest edge
+    magnet: 'm6 15-4-4 6.75-6.77a7.79 7.79 0 0 1 11 11L13 22l-4-4 6.39-6.36a2.14 2.14 0 0 0-3-3L6 15M5 8l4 4M12 15l4 4',
     // a rubber at a slant over the line it leaves
     eraser: 'M7 21 2.7 16.7a2.4 2.4 0 0 1 0-3.4l9.6-9.6a2.4 2.4 0 0 1 3.4 0l5.6 5.6a2.4 2.4 0 0 1 0 3.4L13 21M22 21H7M5 11l9 9',
     arrow: 'M5 19 19 5m0 0h-8m8 0v8',
     text: 'M5 6V4h14v2M12 4v16m-3 0h6',
     cursor: 'm4 3 6.2 15.5 2.2-6.5 6.5-2.2L4 3Z',
+    // a loop drawn round what is to be picked, its tail trailing off the hand
+    lasso: 'M12 4c5 0 9 2.7 9 6s-4 6-9 6c-1.4 0-2.7-.2-3.9-.6M4.6 13.3C3.6 12.4 3 11.2 3 10c0-3.3 4-6 9-6M6 15.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm0 4c0 1.2-.6 2-1.6 2.5',
+    // two branches joining into one stem
+    merge: 'M6 4v3a5 5 0 0 0 5 5h2a5 5 0 0 0 5-5V4M12 12v8m-3-3 3 3 3-3',
+    // a sheet on its clipboard, what a paste lands on
+    clipboard: 'M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1ZM8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2M9 12h6m-6 4h4',
+    // a label tied on: what a colour is named in the case
+    tag: 'M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9-8.1 8.1-8.9-8.9ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z',
     inspect: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35M8 11h6m-3-3v6',
     crop: 'M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14',
     screen: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm5 15h6m-3-4v4',

@@ -164,10 +164,12 @@ def panorama(body: PanoramaIn) -> dict[str, Any]:
         "elevation": {"top": float(rows[0]), "step": body.step, "count": int(rows.size)},
         "skyline": [round(float(v), 3) for v in found.skyline],
         "skyline_distance": [round(float(v), 1) for v in found.skyline_distance],
-        # one row of float32 angles per reach, as `depth` is packed
+        # one row of float32 angles per reach, as `depth` is packed, and how far the ground setting each
+        # stands, for the band the browser draws round the skyline (lib/horizon/overlay.js `terrainMargin`)
         "skyline_cuts": {
             "reach": [round(float(v), 1) for v in found.cuts],
             "skylines": _pack(found.skyline_cuts.astype(np.float32)) if found.cuts.size else "",
+            "distances": _pack(found.skyline_cuts_distance.astype(np.float32)) if found.cuts.size else "",
         },
         "depth": _pack(depth_codes(found.depth)),
         "depth_scale": {"min": DEPTH_MIN, "max": DEPTH_MAX, "codes": DEPTH_CODES},
@@ -573,7 +575,67 @@ class CutIn(BaseModel):
     skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
 
 
-class MatchIn(BaseModel):
+# Strokes the marks may name, and pairs they may ask.
+MARK_STROKES_MAX = 400
+MARK_PAIRS_MAX = 50
+
+
+class MarksIn(BaseModel):
+    """What the analyst marked beside the skyline (engine/skymatch.py `Marks`).
+
+    `ridge_x` and `ridge_y` are inner edges, ridges seen against farther land,
+    on the picture plane as the trace is. `line` and `ridge_line` name the
+    stroke each point was drawn in, which `pairs` use: the stroke in front,
+    then the stroke behind it. `piece` and `ridge_piece` say which piece of a
+    collage each point lies in.
+    """
+
+    ridge_x: list[float] = Field(default_factory=list, max_length=MATCH_POINTS_MAX)
+    ridge_y: list[float] = Field(default_factory=list, max_length=MATCH_POINTS_MAX)
+    line: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
+    ridge_line: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
+    pairs: list[list[int]] = Field(default_factory=list, max_length=MARK_PAIRS_MAX)
+    piece: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
+    ridge_piece: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
+
+    def check_marks(self, points: int) -> None:
+        """Each list as long as the points it describes, the strokes and pairs within bounds."""
+        if len(self.ridge_x) != len(self.ridge_y):
+            raise ValueError("the inner edges need as many x as y")
+        if any(not math.isfinite(v) or abs(v) > MATCH_PLANE_MAX for v in self.ridge_x + self.ridge_y):
+            raise ValueError("an inner edge lies off the picture")
+        inner = len(self.ridge_x)
+        for name, values, count in (
+            ("line", self.line, points), ("ridge_line", self.ridge_line, inner),
+            ("piece", self.piece, points), ("ridge_piece", self.ridge_piece, inner),
+        ):
+            if values is None:
+                continue
+            if len(values) != count:
+                raise ValueError(f"{name} needs one value per point")
+            if any(not 0 <= v < MARK_STROKES_MAX for v in values):
+                raise ValueError(f"{name} names a stroke or piece out of range")
+        for pair in self.pairs:
+            if len(pair) != 2 or pair[0] == pair[1] or any(not 0 <= v < MARK_STROKES_MAX for v in pair):
+                raise ValueError("a pair is two strokes, the one in front first")
+
+    def marks(self) -> skymatch.Marks | None:
+        """The marks as the search reads them, or None when there are none."""
+        if not self.ridge_x and not self.pairs and self.piece is None:
+            return None
+
+        def ints(values: list[int] | None) -> np.ndarray | None:
+            return None if values is None else np.asarray(values, dtype=np.int64)
+
+        return skymatch.Marks(
+            ridge_x=np.asarray(self.ridge_x, dtype=np.float64), ridge_y=np.asarray(self.ridge_y, dtype=np.float64),
+            line=ints(self.line), ridge_line=ints(self.ridge_line),
+            pairs=tuple((int(front), int(back)) for front, back in self.pairs),
+            piece=ints(self.piece), ridge_piece=ints(self.ridge_piece),
+        )
+
+
+class MatchIn(MarksIn):
     """A traced skyline and the turn of terrain to look for it on.
 
     The turn is the one the tab already marched (`/panorama`'s skyline, or one
@@ -585,6 +647,10 @@ class MatchIn(BaseModel):
     bounds an unknown lens (degrees, low and high), `facing` the heading (the
     sector's middle and half its width) and `level` holds the roll. A
     `panorama` is read through the view's strip, its lens the degrees it spans.
+    The marks beside the skyline (`MarksIn`) are judged on each place: the
+    pieces of a collage eased, the pairs' order read where the turn says how
+    far its skyline stands (it does not here, so pairs wait for Find), and
+    inner edges kept off the skyline.
     """
 
     skyline: list[float | None] = Field(min_length=36, max_length=MATCH_SKYLINE_MAX)
@@ -619,6 +685,7 @@ class MatchIn(BaseModel):
         if not np.isfinite(points).all() or np.abs(points).max() > MATCH_PLANE_MAX:
             raise ValueError("the trace lies off the picture")
         _sane_skyline(self.skyline)
+        self.check_marks(len(self.x))
         for cut in self.cuts:
             if len(cut.skyline) != len(self.skyline):
                 raise ValueError("a cut of the turn must have the turn's columns")
@@ -654,7 +721,7 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
     found = skymatch.match(
         np.asarray(body.x), np.asarray(body.y), turns,
         half_width=body.half_width, fov=body.fov, known=body.known, tilt=body.tilt, roll=body.roll,
-        within=within, facing=facing, level=body.level, projection=body.projection,
+        within=within, facing=facing, level=body.level, projection=body.projection, marks=body.marks(),
     )
     tried = skymatch.lenses(body.fov, known=body.known, within=within, projection=body.projection)
     best = found.fits[0].explained if found.fits else 0.0
@@ -671,6 +738,8 @@ def match_trace(body: MatchIn) -> dict[str, Any]:
                 "explained": round(fit.explained, 3),
                 "close": i == 0 or fit.explained >= skymatch.AMBIGUOUS_SHARE * best,
                 "points": fit.points,
+                **({} if fit.sky is None else {"sky": round(fit.sky, 3)}),
+                **({} if fit.pieces is None else {"pieces": skymatch.pieces_of(fit)}),
             }
             for i, fit in enumerate(found.fits)
         ],

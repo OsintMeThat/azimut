@@ -85,6 +85,53 @@ describe('the band over a photo', () => {
     expect(ondetect).toHaveBeenCalledOnce();
   });
 
+  it('brings out the ridge pen, the pairing, the cuts and the magnet beside the skyline pen', () => {
+    const overlay = fakeOverlay({
+      strokes: [[{ u: 0, v: 0.5 }, { u: 1, v: 0.5 }], [{ u: 0, v: 0.6 }, { u: 0.5, v: 0.6 }]],
+      pen: 'sky',
+      magnet: true,
+      linking: false,
+      cutting: false,
+      setPen: vi.fn(),
+      setLinking: vi.fn(),
+      setCutting: vi.fn(),
+      setMagnet: vi.fn(),
+    });
+    const root = bar(overlay);
+    button(root, 'Trace a ridge').click();
+    expect(overlay.setPen).toHaveBeenCalledWith('ridge');
+    button(root, 'Pair a line in front with one behind').click();
+    expect(overlay.setLinking).toHaveBeenCalledWith(true);
+    button(root, 'Cut the collage').click();
+    expect(overlay.setCutting).toHaveBeenCalledWith(true);
+    const magnet = button(root, 'Snap to edges');
+    expect(magnet.getAttribute('aria-pressed')).toBe('true');
+    magnet.click();
+    expect(overlay.setMagnet).toHaveBeenCalledWith(false);
+    // one line alone has nothing to pair with
+    const alone = bar(fakeOverlay({ pen: 'sky', magnet: true }));
+    expect(button(alone, 'Pair a line in front with one behind').disabled).toBe(true);
+    expect(button(alone, 'Pair a line in front with one behind').title).toBe('Draw two lines first');
+  });
+
+  it('shows the trace’s details on a press, and the photo above the terrain on another', () => {
+    const overlay = fakeOverlay({ details: false, setDetails: vi.fn() });
+    const onside = vi.fn();
+    const root = bar(overlay, { onside });
+    const details = button(root, 'Details');
+    expect(details.getAttribute('aria-pressed')).toBe('false');
+    expect(details.title).toMatch(/^Show how far the terrain may be off/);
+    details.click();
+    expect(overlay.setDetails).toHaveBeenCalledWith(true);
+    button(root, 'Side by side').click();
+    expect(onside).toHaveBeenCalledOnce();
+    // while the two are being drawn, a second press waits
+    const busy = bar(fakeOverlay(), { siding: true });
+    expect(button(busy, 'Side by side').disabled).toBe(true);
+    const shown = bar(fakeOverlay({ details: true, setDetails: vi.fn() }));
+    expect(button(shown, 'Details').getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('lists every gesture and key, and folds the list away on Escape or a press elsewhere', () => {
     const root = bar(fakeOverlay());
     const open = button(root, 'Gestures and keys');
@@ -103,9 +150,14 @@ describe('the band over a photo', () => {
       'Space+drag → Move both, or the middle button',
       'Space+wheel → Look closer at both',
       'L → Move both, or back to one alone',
-      'Alt+drag → Draw without snapping',
+      'Alt+drag → Draw the other way, snapped or not',
+      'R → Draw a ridge seen against farther land',
+      'P → Pair a line in front with the line behind it',
+      'X → Cut a collage where its frames meet',
+      'M → Snap to edges, or not',
       'E → Rub out',
       'H → Hide or show the trace',
+      'D → Show how far the terrain may be off, the cuts and the pairs',
       'Ctrl+Z → Take the last change back',
       'W → Reshape the photo by its corners and edges',
     ]) {
@@ -343,7 +395,13 @@ describe('what the analyst knows about the photo', () => {
     button(plain, 'What you know').click();
     flushSync();
     expect(plain.textContent).not.toContain('Picture');
-    const overlay = told({ panoramaOffered: true, stitched: null, isPanorama: false });
+    // a picture of any shape offers the choice; a wide one is pointed to Panorama
+    const collage = bar(told({ panoramaOffered: true, stitched: null, isPanorama: false, aspect: 2.1 }), { gap });
+    button(collage, 'What you know').click();
+    flushSync();
+    expect(collage.textContent).toContain('Picture');
+    expect(collage.textContent).not.toContain('reads better as Panorama');
+    const overlay = told({ panoramaOffered: true, stitched: null, isPanorama: false, aspect: 3.5 });
     const root = bar(overlay, { gap });
     button(root, 'What you know').click();
     flushSync();

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   colourExpression,
   badgeImage,
+  markerImageKey,
   createAddedLayer,
   featureAt,
   featureExtent,
@@ -15,19 +16,23 @@ import {
 } from './addedLayer.js';
 import { PALETTE } from './addedLayers.js';
 import symbols from './layerSymbols.json';
-import { paths } from '../../components/Icon.svelte';
+import { BADGE_GLYPHS } from './markerGlyphs.js';
 
 describe('personal marker symbols', () => {
-  it('draws every round pictogram using its catalogue path, including compound symbol names', () => {
+  it('draws every round pictogram from its own glyph, and no badge for a plain marker', () => {
     const drawn = [];
     vi.stubGlobal('Path2D', class { constructor(path) { drawn.push(path); } });
-    const context = { clearRect: vi.fn(), beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(),
-      stroke: vi.fn(), setTransform: vi.fn(), getImageData: vi.fn(() => ({ width: 64 })) };
+    const context = { clearRect: vi.fn(), setTransform: vi.fn(), translate: vi.fn(), rotate: vi.fn(),
+      fill: vi.fn(), stroke: vi.fn(), getImageData: vi.fn(() => ({ width: 64 })) };
+    const make = () => ({ getContext: () => context });
     try {
       for (const symbol of symbols.filter((entry) => entry.id.startsWith('badge-'))) {
-        expect(badgeImage(symbol.id, '#009e73', () => ({ getContext: () => context }))).toEqual({ width: 64 });
-        expect(drawn.at(-1)).toBe(paths[symbol.icon]);
+        drawn.length = 0;
+        expect(badgeImage(symbol.id, '#009e73', {}, make)).toEqual({ width: 64 });
+        // the halo and the disc, then the glyph's own layers in order
+        expect(drawn.slice(2)).toEqual(BADGE_GLYPHS[symbol.id].map(([, d]) => d));
       }
+      expect(badgeImage('star', '#009e73', {}, make)).toBeNull();
     } finally { vi.unstubAllGlobals(); }
   });
   it('uses the chosen app symbol on a point and keeps shapes on their own symbols', () => {
@@ -44,7 +49,7 @@ describe('personal marker symbols', () => {
     await layer.set({ type: 'FeatureCollection', features: [{ type: 'Feature',
       geometry: { type: 'Point', coordinates: [2, 48] },
       properties: { index: 0, category: 'Reviewed', colour: '#009e73', symbol: 'badge-building' } }] });
-    expect(buildBadge).toHaveBeenCalledWith('badge-building', '#009e73');
+    expect(buildBadge).toHaveBeenCalledWith('badge-building', '#009e73', { status: '', external: false });
     const source = [...engine.map.sources.values()][0].data.features[0];
     expect(source.properties.$badge).toBe(true);
     expect(source.properties.$own).toContain('badge-building-009e73');
@@ -89,10 +94,52 @@ describe('personal marker symbols', () => {
     const features = [...engine.map.sources.values()][0].data.features;
     expect(features.every((feature) => feature.properties.$own)).toBe(true);
     expect(features[0].properties.$badge).toBe(true); expect(features[1].properties.$native).toBe(true);
-    expect(buildPersonal).toHaveBeenCalledWith('pin', '#0072b2');
+    expect(buildPersonal).toHaveBeenCalledWith('pin', '#0072b2', { status: '', external: false });
     const own = [...engine.map.layers.values()].find((entry) => entry.id.endsWith('-own'));
     expect(own.layout['symbol-sort-key']).toEqual(['get', 'index']);
     expect(own.layout['icon-anchor']).toEqual(['case', ['has', '$native'], 'bottom', 'center']);
+  });
+
+  it('draws a status and an external rim into the marker image, one image per combination', async () => {
+    const engine = stubEngine(), pixels = { width: 64, height: 64, data: new Uint8Array(64 * 64 * 4) };
+    const buildPersonal = vi.fn(() => pixels), buildBadge = vi.fn(() => pixels);
+    const layer = createAddedLayer(engine, { editable: true, buildPersonal, buildBadge });
+    await layer.set({ type: 'FeatureCollection', features: [
+      { type: 'Feature', geometry: { type: 'Point', coordinates: [2, 48] },
+        properties: { index: 0, symbol: 'badge-tank', colour: '#0072b2', status: 'destroyed', provenance: 'external' } },
+      { type: 'Feature', geometry: { type: 'Point', coordinates: [2, 48] },
+        properties: { index: 1, symbol: 'badge-tank', colour: '#0072b2' } },
+    ] });
+    expect(buildBadge).toHaveBeenCalledWith('badge-tank', '#0072b2', { status: 'destroyed', external: true });
+    const own = [...engine.map.sources.values()][0].data.features.map((feature) => feature.properties.$own);
+    expect(own[0]).toMatch(/badge-tank-0072b2-destroyed-x$/);
+    expect(own[1]).toMatch(/badge-tank-0072b2$/);
+    expect(markerImageKey('pin', '#D55E00', { status: 'damaged' })).toBe('pin-d55e00-damaged');
+  });
+
+  it('turns a direction mark and writes names only for a personal layer', () => {
+    const editable = stubEngine(), source = stubEngine();
+    createAddedLayer(editable, { editable: true }).set({ type: 'FeatureCollection', features: [] });
+    createAddedLayer(source).set({ type: 'FeatureCollection', features: [] });
+    const bearing = [...editable.map.layers.values()].find((entry) => entry.id.endsWith('-bearing'));
+    expect(bearing.layout['icon-rotate']).toEqual(['get', 'bearing']);
+    expect(bearing.layout['icon-rotation-alignment']).toBe('map');
+    const label = [...editable.map.layers.values()].find((entry) => entry.id.endsWith('-label'));
+    expect(label.filter).toEqual(['all', ['has', 'show_label'], ['!=', ['get', 'name'], '']]);
+    expect([...source.map.layers.keys()].some((id) => id.endsWith('-bearing') || id.endsWith('-label'))).toBe(false);
+  });
+
+  it('holds dragged features off the map until the move is drawn, keeping the other filters', async () => {
+    const engine = stubEngine();
+    const layer = createAddedLayer(engine, { editable: true });
+    await layer.set({ type: 'FeatureCollection', features: [] }, { hidden: ['Old'] });
+    const fill = () => JSON.stringify([...engine.map.layers.values()].find((entry) => entry.id.endsWith('-fill')).filter);
+    layer.hide(['k1', 'k2']);
+    expect(fill()).toContain('"k1","k2"');
+    expect(fill()).toContain('"Old"');
+    layer.hide([]);
+    expect(fill()).not.toContain('"k1"');
+    expect(fill()).toContain('"Old"');
   });
 });
 

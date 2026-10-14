@@ -1606,8 +1606,10 @@ and reverse search. An image is its own single frame and needs no strip until
 under the controls that shape it: a name that holds real text from the start, a
 folder, an optional note. A frame, the adjusted video or an exported collage then
 reads *In the case*, linked to the Media Library, until an edit makes it a
-different picture. **Save N frames** in the strip files every frame not in the case
-yet, under its default name.
+different picture. In the strip, a frame not in the case yet carries a save press in
+its corner that files it under its default name and the last folder without opening
+it, and the corner turns to the *In the case* check once it is filed. **Save N
+frames** files every frame not in the case yet the same way.
 
 **A collage is a document.** New starts an empty canvas, filed once the first piece
 lands; the name in the header renames it and refuses a name another collage holds.
@@ -1904,73 +1906,151 @@ The section and its rows fold like **Added layers**; the pencil opens the editor
 the trash removes a layer, and the grip changes its stacking order. Keyboard users
 can move a focused grip with Up and Down. Each section keeps the other's order.
 
-**Add markers** accepts repeated map clicks; Escape stops adding. **New group**
-creates a foldable group with **Uniform style** or **Individual styles**. The icon
-palette opens from the pictogram and its chevron, with four plain symbols and
-fifty-two round pictograms drawn locally in the chosen colour. Search covers
-infrastructure, vehicles, aircraft, conflict observations and evidence. Palettes,
-group settings and pickers close on a click outside. **Done** uses an accent button.
-Individual styles survive a temporary group override. A
-selected feature opens a compact name and style form; its note stays folded until
-opened. A group selector moves it between groups. Group grips support dragging or
-Up/Down keys to reorder; the first group draws on top. Each group's **Icon size**
-slider runs from 50% to 300%, including individually styled groups.
-Pins and round markers use comparable painted heights. **Line width** runs from
-0.5 to 12 pixels. Click a feature row to select it; Shift-click selects a range,
-and Ctrl/Cmd-click toggles a row. Feature grips reorder rows or move them into
-another group, including the whole selection when its grip is dragged. Up/Down
-keys move a focused grip. **Move to group** remains available for a selection.
-**Select all** selects a whole group. A selection can move together, change style, change group, or be
-removed with Undo. Groups initially show 100 features, with **Show 100 more** and
-**Show all**. Their lists scroll within the editor so editing controls remain
-reachable.
-Removing a group moves its features to the first remaining group.
+While a layer is edited, everything done to its features is in a bar on the map,
+and the map rail and the **Save place** and **Capture** buttons step aside. The bar
+holds **Select**, **Select an area**, **Add markers**, **Draw line**, **Draw area**,
+**Paste a position**, **Add from the case** and **Style**, then **Reshape** (one
+line or area), **Merge**, **Split** and the trash once something is selected, and
+**Done**. A line beside it says what a press on the map does now; **Tips** hides
+it. The same bar appears in Map, Detect, Compare and Horizon; Compare puts it on
+one of its two maps.
 
-The same editor opens from **Layers → My layers** in Map, Detect, Compare and
-Horizon. Switching tools keeps the editing session and feature form. **Move marker**
-adjusts a point by dragging its handle or clicking the new position. **Draw line**
-and **Draw area** collect map clicks; Enter or **Save geometry** saves, Esc cancels.
-**Edit geometry** offers movable corners and midpoint buttons to insert corners;
-Delete removes a selected corner. Existing polygon holes stay intact. Editable
-shapes hold at most 4,096 coordinates. These edits only change the layer's geometry.
+The bar moves by its grip. Let go near an edge, it docks there, upright on the
+left or the right; anywhere else it stays where it was dropped. It keeps clear of
+the zoom buttons and the layer's panel, remembers its place in this browser, and a
+double-click on the grip puts it back at the top.
 
-Click the layer name and pencil to rename it or add an optional description.
-**New layer** also accepts a description. Both fields travel with the layer;
-renaming keeps its saved-map references and case memberships.
+With **Select**, a click on a feature picks it and opens its sheet in the panel,
+Shift-click adds to the selection, and a click on bare ground lets it go. Dragging
+a picked feature moves it, and the whole selection with it; the map does not pan
+under the drag, and the toast offers **Undo**. **Select an area** draws a free loop
+round what to pick; Shift adds. Delete removes the selection, with **Undo**.
+Double-clicking a line or an area opens its corners. A right-click on a feature
+opens its menu: style, status, **Clear the direction**, **Reshape**, **Save as
+case place** and removal, for the selection it is part of. **Add markers** accepts
+repeated map clicks; Escape stops adding. **Draw line** and **Draw area** collect
+map clicks; Enter or **Save** saves, Esc cancels, and **Undo last point** takes a
+corner back. A corner of a line being reshaped can be pressed, then **Cut the line
+here** splits it there.
 
-**Done** saves layer details, the selected feature form and any complete geometry
-draft, then ends the session. The small **Back** arrow asks before discarding changes and restores
-the layer to its state when editing started. Separately saved case places remain
-in the case. The checkpoint survives a reload, so reopening can still discard.
+**Merge** makes the selected lines, or areas, one feature. Lines that meet end to
+end become one line, in whichever direction each was drawn; lines apart become the
+parts of one feature, and areas always do. The first feature picked keeps its
+name, group and style. **Split** gives each part of such a feature its own, named
+after it and numbered. Both offer **Undo**.
+
+**Style** opens one palette, the same in the bar, the sheet, the right-click menu
+and a group's settings: the styles the layer already uses first, then the
+colours, then four plain symbols and sixty-two round pictograms drawn locally in
+the chosen colour (a filled white silhouette on the disc, dark on a pale one),
+laid out by theme (Markers, Sources, Events, Forces, Vehicles, Places) with a
+search by name, theme or keyword. Each pick applies at once and the palette stays
+open for the next. With nothing selected it sets the next markers and the group
+they go into; with a selection it restyles it and can move it to another group. A
+group with one style draws every feature in it, so a pick on its features
+restyles the group, and the palette says so.
+
+**New group** creates a foldable group. Its ⋯ opens its settings: its name, **One
+style for the whole group** and that style, **Names on the map**, **Icon size**,
+**Line width**, **Select all** and removing the group. The editor's feature list
+shows each point's pictogram, as the map draws it, and its day. A group with one
+style shows its pictogram in the list and in the layer's legend. Menus, settings
+and palettes close on a press outside or Escape. Individual styles survive a
+temporary group override.
+
+A feature's sheet holds its style and name, then what it says: its group;
+**Intact**, **Damaged** or **Destroyed**, drawn on the map as a stroke or a cross
+across the marker; a **Day**, which the layer's time strip and the Timeline read;
+which way it faces; its sources, each a chip that opens in a tab of its own;
+**Geolocated by** **Me** or **Someone else**, the second giving the marker a dashed
+rim; and a note. A line states its length and an area its surface. Each row saves
+as it is set, a name or a note when its field is left. Its ⋯ holds **Save as case
+place**, **Delete case place** for a followed place, and **Remove from the layer**.
+
+The one selected marker wears a ring on the map. Dragging its knob turns the
+marker toward the pointer, by steps of five degrees (Shift lets it go free), so
+pulling it out to a target aims the marker at it; the direction is drawn as a
+wedge round the marker. A double-click on the knob, or the sheet's ×, clears it.
+The knob also turns from the keyboard. The tag in the palette names the case's
+colours ("Side A", "Unknown"): every layer of the case offers them, the card names
+a feature's colour by them, and the layer's legend counts its features under each
+name.
+
+**Find in this layer** filters the list by name and opens the groups that hold a
+match. Group grips support dragging or Up/Down keys to reorder; the first group
+draws on top. Each group's **Icon size** slider runs from 50% to 300%, including
+individually styled groups. Pins and round markers use comparable painted heights.
+**Line width** runs from 0.5 to 12 pixels. Click a feature row to select it;
+Shift-click selects a range, and Ctrl/Cmd-click toggles a row. Rows drag to
+reorder or into another group, the whole selection with them; the grip shows on
+the row under the pointer, and Up/Down keys move a focused one. Several selected
+features share one sheet that changes them together, a row they disagree on
+reading "Several"; its ⋯ offers **Move with a handle** for the keyboard and
+removal with Undo. Groups initially show 100
+features, with **Show 100 more** and **Show all**. Their lists scroll within the
+editor so editing controls remain reachable. Removing a group moves its features
+to the first remaining group. Editable shapes hold at most 4,096 coordinates.
+
+Switching tools keeps the editing session and feature form. The layer's name is a
+field in the editor's header, saved when left; its ⋯ adds or edits an optional
+description, downloads the layer, and offers **Discard changes…**. **New layer**
+also accepts a description. Both fields travel with the layer.
+
+**Done**, in the bar or the panel, saves anything still in a field and any
+complete shape being drawn, then ends the session. **Discard changes…** asks
+first, then restores the layer to its state when editing started. Separately
+saved case places remain in the case. The checkpoint survives a reload, so
+reopening can still discard.
+
+A personal layer's time strip works as an added layer's does, on its features'
+days. The Timeline offers a **My layers** track in **Add a track**: each dated
+feature of the case's layers on its day, opening on a card with **Show on the
+map**. Its day is changed on the layer, not by dragging it on the axis.
 
 The download icon on a personal layer or its editor offers **KMZ**, **KML** and
 **GeoJSON**. KMZ carries bundled icons for use in Google Earth or My Maps; the
-single-file formats carry geometry, groups and style fields. Downloads include
-hidden groups and omit case entity IDs. Reimporting retains Azimut symbols, group
-sizes and line widths. Source bitmaps travel in KMZ.
+single-file formats carry geometry, groups and style fields. A feature's day,
+status, direction, sources and provenance travel too, and come back on reimport.
+Downloads include hidden groups and omit case entity IDs. Reimporting retains
+Azimut symbols, group sizes and line widths. Source bitmaps travel in KMZ.
 
-**Saved maps**, below **My layers**, saves a named camera, basemap, overlays, layer
-order and visibility, plus a legend note. Opening a saved map restores those
-choices using current layer data. Missing layers are reported. Its pencil updates
-the composition with the current view; its trash moves only the composition to
-Trash. The legend follows visible groups and can be hidden on the map. Saved maps
-also reopen from the case sidebar.
+Three ways bring outside points in. **Paste a position** reads coordinates, a map
+link or the text of a whole post, read where it is pasted and nowhere else: it
+lists the positions found, keeps the post's addresses as sources and its day when
+written unambiguously, and marks the point as somebody else's when the text cites
+an address. Ctrl+V on the map opens it with the clipboard. **Copy to my layer**,
+on the card of a source layer's feature (a GeoConfirmed event, a My Maps pin),
+copies it into one of the analyst's layers as somebody else's point, with its day
+and the addresses its note cites; the layer chosen last in the case comes first.
 
 A personal marker belongs to its layer. **Save as case place** explicitly creates
 a place, or reuses a place already at that point, and records the layer's origin.
-Editing a layer marker changes its label, style or layer position without changing
-the case place's coordinates. The layer's working
-collection, original file and icons travel with case bundles and Trash.
+The layer's working collection, original file and icons travel with case bundles
+and Trash.
 
-**Add case places** offers a searchable selection of existing places. A place can
-belong to several layers without adding another case entity; each layer keeps its
-own label, style and saved point. The link icon marks a case-place membership.
-**Remove from this layer** in the popup or editor removes that membership or marker
-and offers **Undo**. Popup actions use compact icons with accessible names and
-hover labels. The last twenty removed features are kept in the layer spec.
-**Delete case place** previews direct relations and the layers using it before
-moving the place and its relations to Trash. Layer points survive as independent
-markers; restoring the place restores their membership. Proofs retain their own
+**Add from the case** lists what the case has placed: places, proofs (one row per
+checked point), files, captures, comparisons and views, filtered by kind and
+name. Each becomes a marker that follows it: move the place or correct the proof,
+and the marker moves with it. Such a marker cannot be moved alone; **Unlink**
+keeps it where it stands and lets it go. Its sheet says what it follows and opens
+it. A case item can be shown in several layers without another case entity.
+Geo Proof's coordinate rows offer the same from the proof. A point's ⋯ goes a
+step at a time: the case's layers, the one used last first; then the layer's
+groups, when it has several; then, for a group whose features each have their own
+style, the marker's icon and colour, the layer's own styles first, and **Add**. A
+group with one style takes the point at once. A tick marks where the point already
+is, and **New layer…** makes one and opens it. A proof with unsaved changes is
+saved first, and a point the imagery only proposed is checked on the map first. Under the point, each
+layer it is in reads as one line, with **Open** for the marker on the map and ×
+to take it back out, with Undo. The same ⋯ makes a later point the conclusion or
+removes it.
+
+**Remove from this layer** in the popup or editor removes a marker and offers
+**Undo**. Popup actions use compact icons with accessible names and hover labels.
+The last twenty removed features are kept in the layer spec. **Delete case
+place** previews direct relations and the layers using it before moving the place
+and its relations to Trash. Layer markers that followed it stay where it stood;
+restoring the place makes them follow it again. Proofs retain their own
 coordinates, so media placements derived from proofs survive the place deletion.
 Media located only through the deleted place lose that map position; the preview
 says so when a media item is linked directly.
@@ -2500,8 +2580,50 @@ Shift+← and Shift+→ turn a step. The Move the point dialog in Geo Proof turn
 the same way, and Inspect's frame viewer takes the same drag, with a middle
 click standing the frame upright.
 
+Horizon has three modes on one switch at the left of its header: **View**, the
+terrain from the viewpoint; **Overlay**, a photo laid over it there and matched
+by hand; **Find**, an area of the map searched for where the photo was taken.
+The photo and its trace are the same in all three, and View only hides the
+photo. The mode is in the address, so a reload and Back return to it, and the
+work no save has kept yet (the photo, its trace, Find's area and alignments)
+is kept in the case and comes back with it.
+
+The trace is edited with the same tools in Overlay's band and on Find's photo,
+one out at a time: the **Skyline** pen (T) for the edge against the sky, the
+**Ridge** pen (R) for a ridge seen against farther land, drawn cyan, **Behind**
+(P) to pair a line in front with the line behind it (a letter filled on the
+front one, ringed on the back one), **Cut** (X) to cut a hand-made collage
+where its frames meet, and the rubber (E). The **magnet** (M) says whether a
+line drawn snaps onto the photo's nearest edge; Alt does the other for one
+stroke. A click with a pen on a line makes it that pen's kind, and a skyline
+stroke lying under another one is read as a ridge, as is a trace saved before
+ridges had a pen. Fit lays the skyline strokes alone on the terrain, and Find
+also reads the ridges against the terrain's inner silhouettes and the pairs'
+order. Both let each piece of a cut collage turn, tilt and roll by a degree or
+so, and the view then reads each piece through its own camera.
+
+Find's photo shows as the search reads it, straightened from its lens's curve
+and between its corners when Overlay pulled them. **Lens curve** on its
+toolbar sets the curve there, as Distortion does in the inspector. The
+strokes, cuts, pairs and alignment points stay on the photo's own pixels, so
+they follow it as it straightens, and a search keeps the curve and corners it
+was read through. **Picture** in What you know reads any image as a Photo or a
+Panorama, the same degrees per pixel all along as a phone's sweep, so a
+hand-made collage of any shape can be searched either way; a wide one is
+pointed to Panorama.
+
+Over a matched photo the view keeps to two lines: the trace, green where it
+lies on the terrain, amber near it and red off it, and the terrain's skyline
+in white, each piece of a collage where the search read it. A legend under the
+view names every line it draws, the terrain's own ridge lines and the eye's
+level included. **Details** (D) adds the band the terrain's skyline may be off
+by (wide over a near ridge), the cuts and the pairs' letters, which also show
+while a tool is out. **Side by side** draws the photo above the terrain through
+the same frame, on demand, with a line down both that says the direction under
+the pointer, and saves the pair as a picture.
+
 Horizon offers these controls and the place search on its large map and in
-**Find where it was taken**, including its three-column view. The small map
+Find, including its three-column view. The small map
 at the top right keeps its compact controls. Searching in an enlarged map or
 in Find moves the map; choosing coordinates while picking or moving a viewpoint
 stands there.
@@ -3144,7 +3266,8 @@ each panel's media traces back to.
 often shows more than one place — three impacts, a building, the camera — and each
 row takes an optional name and the marker that says the camera stood there. **The
 first row is the proof's point**: the map mark, the coordinate a post cites, the
-one the export prints. An arrow moves a row up to make it the conclusion; the
+one the export prints. A row's ⋯ moves it up to make it the conclusion, removes
+it, or adds it to one of the analyst's layers; the
 marker never reorders anything, or ticking it would take a coordinate out of a
 tweet without saying so. A single-point proof is the field it has always been.
 **A panel that carries a place adds it**, under the point already on screen rather
@@ -3256,9 +3379,48 @@ for. The separators still mark the groups: history, the drawing tools, then fit 
 layout together. The controls that come and go with a selection are last, so picking a
 shape never reshuffles the buttons above them.
 
+**The rail shows what the pick can take, and nothing else.** A line, an arrow or a
+stroke offers its colour, width and **line style** (solid, dashed or dotted, in
+proportion to the width); a box adds its fill and its tag; a label its size, a
+**frame** round its words and a **background** behind them; a cone its lens. A
+picked panel or overlay offers its **border**, colour and thickness. These used to
+be small buttons in the side column's rows, out of sight while the canvas had the
+eye, and the rows now keep the words alone. There is no floating bar over the
+picture: it would cover what is being annotated.
+
+**The canvas has its own right-click.** It never opens the browser's menu. On a
+mark it picks it, if it was not picked, and offers Bring to front, Bring forward,
+Send backward, Send to back, Duplicate, Copy and Delete; on an overlay, or a panel
+in free layout, the same stacking, Crop and Remove; on the page, Fit view and a
+Paste when a mark was copied. With a drawing tool in hand the right button stays
+silent, as it neither draws nor drops a pick. **Ctrl+↑ and Ctrl+↓** step the picked
+marks forward and back, with Shift all the way; a step passes the next mark of the
+same picture, the only one it can cover.
+
+**Handles are Collage's**: accent discs on the corners, accent squares on the
+sides, ringed dark to hold up over bright imagery, with the same round turn knob.
+
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it
 stays out of the legend, which is still built from annotation colours alone.
+
+**Fonts ship with the app.** The system's font is a different one on every machine,
+so a proof set in it changed width from one computer to the next and a re-export no
+longer matched what was published. A proof is set in Inter, Barlow Condensed,
+Oxanium or IBM Plex Mono, shipped in the build, with Latin and Cyrillic where the
+face has them; Advanced picks it per proof, and the house style carries it, with a
+switch for labels, callouts and tags in bold. A proof saved before fonts keeps the
+system's until it is changed. An export waits for the face to be loaded.
+
+**A mark belongs to its picture, its ink to the page.** Where a mark stands and
+what it spans are kept in its picture's own pixels, so a panel that is moved,
+resized, turned or cropped carries its marks along. Line widths, arrow heads,
+label, symbol and marker sizes and frames are kept in page pixels instead: 4 px
+is 4 px on every panel and overlay, whatever their resolution or size. A mark
+dragged onto another picture joins it unchanged on screen, the arrow keys and
+Ctrl+D step the same distance on every picture, and a mark drawn on a turned
+panel lands under the pointer, square to the picture. A proof saved before this
+rule is converted as it opens and looks as it did.
 
 **Panel and overlay transforms.** Selecting either image shows a round knob on a
 short stem above it — the one Collage turns its pieces by — for a free turn, with
@@ -3338,10 +3500,51 @@ ground it stands on — the patch is taken upright and turned back level inside 
 box. Over a surface whose picture has not loaded it draws solid, because a blur box
 that shows nothing hides nothing.
 
+**Box tags.** A box can carry its words on a tab of its own colour, hung from
+one of its corners outside it, the way a published geolocation names a vehicle in
+its frame. A double-click inside a box writes its tag, or the **Tag** control puts
+it on the corner asked for, moves it, or takes it off. A new tag starts from the
+legend line of its colour, since the colour already names the feature. The tag is
+part of the box: it follows a drag, a resize or a turn, a press on it picks the
+box, and its size follows the box's line, so one control weighs both. Emptied, or
+let go with Escape as it is made, it is gone.
+
+**Callouts.** A label tied to one point of a picture. Press the point, drag to
+where the words should read and let go: the editor opens on the label, as it does
+for Text, and a plain click puts the label up and to the right. The point belongs
+to the picture like any mark. The label stands on the page, upright, over every
+picture and in the margins, and stays inside the document, which only the panels
+size. The **Pointer** control picks how it reaches its point: a **leader line**
+ending on a dot, the default, or a **speech bubble**. On a picked label the same
+control gives it a pointer, and **No pointer** turns a callout back into a framed
+label, so the words are never typed twice. Dragging the label moves it alone. The
+dot has its own handle, and let go over another picture it moves there while the
+label stays put. A callout's size is its font size, and its line follows it.
+
+**View cones.** Where a camera stood and what it saw. Press where it stood and drag
+the way it looked: the cone opens from a badge with the camera on it, fades with
+distance, dots its line of sight down the middle and stops at the edge of its
+picture. How wide it opens is the part an analyst knows as a phone camera, not in
+degrees, so the **Lens** control offers the phone's own: ultra-wide 0.5×, main 1×,
+2×, 3× and 5×, read off their 35 mm equivalents, landscape or **held upright**. The
+far handle aims it and sets its reach; each edge handle opens or closes it and
+settles on a lens it comes within a degree and a half of. It belongs to its picture
+like any mark, takes a fill (a light one by default, since it fades) and a line style.
+
+**Zoom insets.** A frame dragged over a detail, shown bigger on the page. The
+enlargement opens beside its frame where the page has room, else in the far corner
+of the frame's own picture, two and a half times the frame up to two fifths of the
+document's smaller side, and two lines join the sides of the pair that face each
+other. The frame belongs to its picture: it moves like a box and reshapes from its
+corner handles. The enlargement drags and resizes from its corners on its own,
+keeps the frame's proportions and turns with a turned picture. It is drawn from the
+picture's pixels and from the blur boxes over them, so a redaction holds in the
+enlargement too.
+
 **The order they stack in.** The side column's **Elements** list runs front-first,
 the way the Panels list above it does: the row on top is the mark on top of the
-picture. A row is **dragged to reorder it**, and the two arrows bring it forward or
-send it back one place. The order is one order for the whole proof, while what an
+picture. A row is **dragged by its grip to reorder it**; the right-click and Ctrl+↑/↓
+restack in place. The order is one order for the whole proof, while what an
 element is drawn *over* is decided inside its own picture — two marks on two panels
 are stacked by the panels — so once more than one picture holds elements each row
 carries the picture it belongs to, and the list says so underneath.

@@ -119,10 +119,22 @@ describe('what counts as a change', () => {
     expect(signature(viewSpec(fakeView({ camera: { heading: 140, tilt: 0, roll: 0, fov: 60 } }), video))).toBe(before);
   });
 
-  it('compares the trace and the pins as the arrays they are', () => {
+  it('compares the trace, its marks and the pins as the arrays they are', () => {
     const overlay = fakeOverlay();
     expect(sameWork(overlay, { strokes: STROKES, pins: overlay.pins })).toBe(true);
     expect(sameWork(overlay, { strokes: [...STROKES], pins: overlay.pins })).toBe(false);
+    const marks = { lines: [0], inner: [0], pairs: [], cuts: [] };
+    const marked = fakeOverlay({ marks });
+    expect(sameWork(marked, { strokes: marked.strokes, marks, pins: marked.pins })).toBe(true);
+    expect(sameWork(marked, { strokes: marked.strokes, marks: { ...marks }, pins: marked.pins })).toBe(false);
+  });
+
+  it('keeps the marks beside the trace only when they say something, out of the signature', () => {
+    expect(photoSpec(fakeOverlay()).marks).toBeNull();
+    expect(photoSpec(fakeOverlay({ marks: { lines: [0, 1], inner: [], pairs: [], cuts: [] } })).marks).toBeNull();
+    const marks = { lines: [0, 1], inner: [1], pairs: [[1, 0]], cuts: [0.5] };
+    expect(photoSpec(fakeOverlay({ marks })).marks).toBe(marks);
+    expect(signature(viewSpec(fakeView(), fakeOverlay({ marks })))).toBe(signature(viewSpec(fakeView(), fakeOverlay())));
   });
 });
 

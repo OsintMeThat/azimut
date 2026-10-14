@@ -125,6 +125,78 @@ def test_two_places_about_as_good_and_apart_are_ambiguous():
     assert finder.standout(places[:1], crowd[:5]) is None
 
 
+def test_a_reach_given_is_read_as_about_that_far():
+    assert finder.reaches(finder.Plan(area=[])) == (finder.AUTO_FAR, list(finder.AUTO_CUTS))
+    # a ridge just past the reach still counts: the turn runs on to twice as far
+    assert finder.reaches(finder.Plan(area=[], reach=5_000.0)) == (10_000.0, [5_000.0])
+    assert finder.reaches(finder.Plan(area=[], reach=40_000.0)) == (finder.AUTO_FAR, [40_000.0])
+    assert finder.reaches(finder.Plan(area=[], reach=100_000.0)) == (100_000.0, [])
+
+
+def test_the_relief_is_how_far_the_ridges_the_trace_lies_on_stand():
+    # near hills to the east, far ones elsewhere: a fit facing east lies on the near ones
+    distance = np.where((np.arange(360) >= 60) & (np.arange(360) < 120), 1_500.0, 40_000.0)
+    turn = skymatch.Turn(0.0, 1.0, np.zeros(360), distance=distance)
+    east = skymatch.Fit(heading=90.0, tilt=0.0, fov=40.0, gap=0.0, explained=0.8, points=50)
+    assert finder.relief(turn, east) == 1_500.0
+    assert finder.relief(turn, skymatch.Fit(**{**east.__dict__, "heading": 250.0})) == 40_000.0
+    assert finder.relief(skymatch.Turn(0.0, 1.0, np.zeros(360)), east) == float("inf")
+
+
+def test_cells_near_relief_are_filled_in_within_the_budget():
+    area = _square(CAMERA, 2_000.0)
+    plan = finder.Plan(area=area)
+    lat, lon = finder.grid(plan, 500.0)
+    seen = {(round(float(a), 6), round(float(o), 6)) for a, o in zip(lat, lon)}
+    coarse = [{"lat": float(a), "lon": float(o), "explained": 0.1, "relief": 1_500.0} for a, o in zip(lat, lon)]
+    # ridges 1.5 km out: a tenth of that is 150 m, three points a side in a 500 m cell (its middle scored)
+    one = finder.filled(plan, coarse[27:28], 500.0, 60.0, set(seen))
+    assert len(one) == 0  # a single cell's eight would pass its budget of three: two a side instead
+    extra = finder.filled(plan, coarse, 500.0, 60.0, set(seen))
+    assert extra[0][2] == pytest.approx(500.0 / 3)
+    assert len(extra) <= finder.DENSE_MAX * len(coarse)
+    assert finder.inside(area, np.array([e[0] for e in extra]), np.array([e[1] for e in extra])).all()
+    # past the budget the nearest relief comes first, the rest two by two, then none
+    nearest = [{**p, "relief": 1_500.0 if i else 400.0} for i, p in enumerate(coarse)]
+    many = finder.filled(plan, nearest, 500.0, 25.0, set(seen))
+    assert len(many) <= finder.DENSE_MAX * len(coarse)
+    assert many[0][2] == pytest.approx(500.0 / 12)  # the nearest relief's cell (40 m), filled first and finest
+    assert {round(own, 3) for _, _, own in many[144:]} <= {round(500.0 / 3, 3), 250.0}
+    # a plain seeing no relief, or relief far enough for the grid, is left as it is
+    assert finder.filled(plan, [{**p, "relief": float("inf")} for p in coarse], 500.0, 60.0, set(seen)) == []
+    assert finder.filled(plan, [{**p, "relief": 9_000.0} for p in coarse], 500.0, 60.0, set(seen)) == []
+    assert finder.estimate(plan)["most"] >= finder.estimate(plan)["points"]
+
+
+def test_the_marks_a_saved_trace_holds_come_back():
+    assert finder.marks_of({"x": [0.0]}) is None
+    marks = finder.marks_of({"ridge_x": [0.1, 0.2], "ridge_y": [0.0, 0.0], "ridge_line": [1, 1], "line": [0, 0],
+                             "pairs": [[1, 0]], "piece": [0, 1], "ridge_piece": [0, 1]})
+    assert marks.pairs == ((1, 0),)
+    assert marks.ridge_x.tolist() == [0.1, 0.2]
+    assert marks.cut
+
+
+def test_inner_edges_are_judged_at_every_place_searched():
+    trace = _photo()
+    # an inner edge a degree under the skyline across the middle: no such ridge stands there
+    marks = skymatch.Marks(ridge_x=np.linspace(-0.3, 0.3, 20), ridge_y=np.full(20, float(np.median(trace.y)) - 0.05))
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 1_500.0), reach=REACH, spacing=500.0, fine=500.0)
+    found = finder.search(plan, finder.Trace(**{**trace.__dict__, "marks": marks}))
+    best = found["places"][0]
+    assert "inner" in best and "sky" in best
+    assert best["explained"] <= best["sky"] + 1e-9
+
+
+def test_a_collage_cut_in_pieces_gives_each_place_its_pieces():
+    trace = _photo()
+    marks = skymatch.Marks(piece=(trace.x > 0).astype(np.int64))
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 1_500.0), reach=REACH, spacing=500.0, fine=500.0)
+    best = finder.search(plan, finder.Trace(**{**trace.__dict__, "marks": marks}))["places"][0]
+    assert [piece["piece"] for piece in best["pieces"]] == [0, 1]
+    assert all(abs(piece["turn"]) <= skymatch.PIECE_TURN for piece in best["pieces"])
+
+
 # -- the searches a case keeps ----------------------------------------------------
 
 
@@ -165,9 +237,42 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 404
 
 
+def test_a_search_keeps_the_marks_beside_its_trace(client):
+    case_id = client.post("/api/cases", json={"name": "Marked search"}).json()["id"]
+    trace = {**_ask()["trace"], "ridge_x": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5], "ridge_y": [-0.3] * 6,
+             "ridge_line": [1] * 6, "line": [0] * len(_ask()["trace"]["x"]), "pairs": [[1, 0]]}
+    started = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(trace=trace))
+    assert started.status_code == 200, started.text
+    name = started.json()["name"]
+    client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    kept = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]["trace"]
+    assert kept["pairs"] == [[1, 0]] and kept["ridge_x"][:2] == [0.0, 0.1]
+
+
+def test_a_search_keeps_the_curve_and_corners_its_photo_was_read_through(client):
+    case_id = client.post("/api/cases", json={"name": "Curved search"}).json()["id"]
+    corners = [{"u": 0.02, "v": 0.0}, {"u": 1.0, "v": 0.03}, {"u": 0.98, "v": 1.0}, {"u": 0.0, "v": 0.97}]
+    photo = {"path": "media/p.png", "strokes": [[{"u": 0.1, "v": 0.4}, {"u": 0.9, "v": 0.35}]], "bend": -0.12, "corners": corners}
+    started = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(photo=photo))
+    assert started.status_code == 200, started.text
+    name = started.json()["name"]
+    client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    kept = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]["photo"]
+    assert kept["bend"] == -0.12 and kept["corners"] == corners
+    # a photo laid straight keeps neither
+    plain = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(photo={"path": "media/p.png"})).json()["name"]
+    client.post(f"/api/cases/{case_id}/horizon/finds/{plain}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    straight = client.get(f"/api/cases/{case_id}/horizon/finds/{plain}").json()["ask"]["photo"]
+    assert straight["bend"] == 0 and straight["corners"] is None
+
+
 def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     estimate = client.post("/api/horizon/finds/estimate", json=_ask()).json()
     assert estimate["coarse"] > 0 and estimate["step"] == 0.5
+    assert estimate["most"] >= estimate["points"]
     case_id = client.post("/api/cases", json={"name": "Refused searches"}).json()["id"]
     url = f"/api/cases/{case_id}/horizon/finds"
     tiny = [{"lat": 45.0, "lon": 6.0}, {"lat": 45.0001, "lon": 6.0}, {"lat": 45.0, "lon": 6.0001}]
@@ -177,6 +282,11 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
         {"reach": 12_345},
         {"who": {"mode": "drone", "low": 200, "high": 50}},
         {"trace": {**_ask()["trace"], "fov": 200.0}},
+        {"trace": {**_ask()["trace"], "pairs": [[2, 2]]}},
+        {"trace": {**_ask()["trace"], "ridge_x": [0.1], "ridge_y": []}},
+        {"photo": {"path": "media/p.png", "strokes": [], "marks": {"cuts": [2.0]}}},
+        {"photo": {"path": "media/p.png", "bend": 0.5}},
+        {"photo": {"path": "media/p.png", "corners": [{"u": 0.0, "v": 0.0}] * 3}},
     ):
         assert client.post(url, json=_ask(**change)).status_code == 422
     assert client.get(f"{url}/nothing").status_code == 404

@@ -67,7 +67,7 @@ import {
   cameraAt,
   clampCorner,
   clampLoupe,
-  eraseStrokes,
+  erasedFrom,
   FLAT_CORNERS,
   photoGrid,
   isFlat,
@@ -80,6 +80,22 @@ import {
   warped,
   zoomLoupe,
 } from '../../../lib/horizon/overlay.js';
+import {
+  addCut,
+  cleanMarks,
+  cutAt,
+  innerByShape,
+  lineAt,
+  liesUnder,
+  marksAfter,
+  NO_MARKS,
+  nextLine,
+  pairBadges,
+  pieceOf,
+  removeCut,
+  setInner,
+  togglePair,
+} from '../../../lib/horizon/traceMarks.js';
 import { skylineField, smoothPlanes, snapPath, traceSkyline } from '../../../lib/horizon/skyline.js';
 import { paintWarped } from '../../../lib/horizon/warpPicture.js';
 
@@ -95,6 +111,8 @@ export const PHOTO_MAX_PX = 4096;
 export const DEFAULT_FPS = 30;
 /** Changes to the trace Ctrl+Z can take back. */
 export const UNDO_STEPS = 50;
+/** How near a click must fall to a stroke or a cut to pick it, in screen pixels. */
+const PICK_PX = 10;
 /** How far a stroke snaps, in screen pixels either side of it. */
 export const SNAP_PX = 12;
 /** The long side a photo is read at to find its skyline, then to set it to the pixel. */
@@ -207,6 +225,19 @@ export function createOverlayState({
   let erasing = $state(false);
   let traceHidden = $state(false);
   let strokes = $state.raw([]);
+  /** What is marked beside the skyline (lib/horizon/traceMarks.js): each stroke's id, inner edges, pairs, cuts. */
+  let marks = $state.raw(NO_MARKS);
+  /** The pen out: along the `sky`'s edge, or an inner `ridge` seen against farther land. */
+  let pen = $state('sky');
+  /** Whether a stroke drawn snaps onto the photo's nearest edge; Alt held does the other. */
+  let magnet = $state(true);
+  /** Whether the trace's details show while no tool is out: the terrain's margin, the cuts, the pairs' letters. */
+  let details = $state(false);
+  /** Pairing strokes, the one in front then the one behind it; `front` is the one picked first. */
+  let linking = $state(false);
+  let front = $state(null);
+  /** Cutting a collage in pieces: a click lays a cut across the photo, or takes one away. */
+  let cutting = $state(false);
   let traceTime = $state(null);
   // the trace as it was before each change, newest last
   let history = $state.raw([]);
@@ -266,6 +297,12 @@ export function createOverlayState({
     return bend ? unitPoint(shown) : p;
   }
   const seen = $derived(bend || warp ? strokes.map((stroke) => stroke.map(toSeen)) : strokes);
+  /** The skyline's strokes alone, straightened: what Fit lays on the terrain's skyline. */
+  const skySeen = $derived(marks.inner.length ? seen.filter((_, i) => !marks.inner.includes(marks.lines[i])) : seen);
+  /** Each cut across the straightened photo, top and bottom (`[{ u, v }, { u, v }]`). */
+  const cutsSeen = $derived(marks.cuts.map((u) => [toSeen({ u, v: 0 }), toSeen({ u, v: 1 })]));
+  /** The pairs' letters where they show, on the straightened strokes (`pairBadges`). */
+  const badges = $derived(marks.pairs.length ? pairBadges(seen, marks) : []);
   /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
   const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
@@ -348,8 +385,13 @@ export function createOverlayState({
     error = '';
     tracing = false;
     erasing = false;
+    linking = false;
+    cutting = false;
+    front = null;
+    pen = 'sky';
     traceHidden = false;
     strokes = [];
+    marks = NO_MARKS;
     traceTime = null;
     history = [];
     rubbing = false;
@@ -566,7 +608,16 @@ export function createOverlayState({
 
   /** The trace as it is now, kept so a change to it can be taken back. */
   function keep() {
-    history = [...history.slice(1 - UNDO_STEPS), { strokes, traceTime }];
+    history = [...history.slice(1 - UNDO_STEPS), { strokes, traceTime, marks }];
+  }
+
+  /** Every tool on the photo put away but the one about to come out. */
+  function toolsAway() {
+    tracing = false;
+    erasing = false;
+    linking = false;
+    cutting = false;
+    front = null;
   }
 
   /** The picture on show, and its own size in pixels: a frame the app read can be smaller than the video. */
@@ -604,8 +655,7 @@ export function createOverlayState({
 
   function play() {
     if (!video || !playable) return;
-    tracing = false;
-    erasing = false;
+    toolsAway();
     if (video.ended || (duration && time >= duration - 0.01)) video.currentTime = 0;
     video.play()?.catch?.(() => {});
   }
@@ -650,6 +700,10 @@ export function createOverlayState({
     seenOf(point) {
       return toSeen(point);
     },
+    /** …and back: a point of the frame as it shows, as the photo's own pixel, where a mark on it is kept. */
+    photoOf(point) {
+      return toPhoto(point);
+    },
     /** Bumped each time a new frame is on show. */
     get frame() {
       return frame;
@@ -684,7 +738,7 @@ export function createOverlayState({
       if (hints.picture === 'panorama') asPanorama();
       lookThrough();
     },
-    /** Whether the picture may be read as a panorama: wide, or a stitched collage. */
+    /** Whether the picture may be read as a panorama: any image, the analyst's call. */
     get panoramaOffered() {
       return offeredPanorama();
     },
@@ -833,9 +887,10 @@ export function createOverlayState({
       return tracing;
     },
     setTracing(on) {
-      tracing = Boolean(on) && Boolean(source);
+      const next = Boolean(on) && Boolean(source);
+      if (next) toolsAway();
+      tracing = next;
       if (!tracing) return;
-      erasing = false;
       warping = false;
       traceHidden = false;
       if (video && !video.paused) video.pause();
@@ -845,9 +900,10 @@ export function createOverlayState({
       return erasing;
     },
     setErasing(on) {
-      erasing = Boolean(on) && Boolean(source);
+      const next = Boolean(on) && Boolean(source);
+      if (next) toolsAway();
+      erasing = next;
       if (!erasing) return;
-      tracing = false;
       warping = false;
       traceHidden = false;
       if (video && !video.paused) video.pause();
@@ -858,10 +914,7 @@ export function createOverlayState({
     },
     setTraceHidden(on) {
       traceHidden = Boolean(on);
-      if (traceHidden) {
-        tracing = false;
-        erasing = false;
-      }
+      if (traceHidden) toolsAway();
     },
     /** The strokes drawn, each `[{ u, v }]` across and down the photo's own pixels, 0 to 1. */
     get strokes() {
@@ -892,8 +945,7 @@ export function createOverlayState({
     setWarping(on) {
       warping = Boolean(on) && source?.kind === 'image' && !locked && hints.picture !== 'panorama';
       if (!warping) return;
-      tracing = false;
-      erasing = false;
+      toolsAway();
     },
     /** A corner taken in the hand (`true`) or let go: the photo is drawn finely again once it is. */
     setPulling(on) {
@@ -1003,10 +1055,23 @@ export function createOverlayState({
         // a stroke on another moment starts the trace of that moment
         if (!strokes.length || !onFrameTime(time)) {
           strokes = [];
+          marks = cleanMarks({ cuts: marks.cuts }, 0);
           traceTime = time;
         }
       }
+      const id = nextLine(marks.lines);
+      let next = { ...marks, lines: [...marks.lines, id] };
+      if (pen === 'ridge' || liesUnder(stroke, strokes)) {
+        // drawn as a ridge, or lying under the trace there: nothing under a line is the sky's edge
+        next = setInner(next, id, true);
+      } else {
+        // a skyline drawn over strokes takes them for the ridges in front of it
+        strokes.forEach((one, i) => {
+          if (!next.inner.includes(next.lines[i]) && liesUnder(one, [stroke])) next = setInner(next, next.lines[i], true);
+        });
+      }
       strokes = [...strokes, stroke];
+      marks = next;
     },
     /**
      * Rub out what lies within `radius` screen pixels of a path drawn on the
@@ -1022,7 +1087,10 @@ export function createOverlayState({
     },
     eraseAlong(path, radius, scale) {
       if (!traceOnShow()) return;
-      strokes = eraseStrokes(strokes, path.map(toPhoto), radius, scale);
+      const left = erasedFrom(strokes, path.map(toPhoto), radius, scale);
+      if (left.strokes === strokes) return;
+      marks = marksAfter(marks, left.from);
+      strokes = left.strokes;
       if (!strokes.length) traceTime = null;
     },
     endErase() {
@@ -1057,9 +1125,9 @@ export function createOverlayState({
         keep();
         strokes = found;
         traceTime = source.kind === 'video' ? time : null;
+        marks = cleanMarks({ cuts: marks.cuts }, found.length);
         traceHidden = false;
-        tracing = false;
-        erasing = false;
+        toolsAway();
         return { found: found.length };
       } catch {
         return { error: 'This browser would not read the picture.' };
@@ -1076,13 +1144,153 @@ export function createOverlayState({
       if (!last) return;
       history = history.slice(0, -1);
       strokes = last.strokes;
+      marks = last.marks ?? cleanMarks(NO_MARKS, strokes.length);
       traceTime = last.traceTime;
+      front = null;
     },
+    /** The trace gone; a collage's cuts stay, they belong to the photo. */
     clearTrace() {
       if (!strokes.length) return;
       keep();
       strokes = [];
+      marks = cleanMarks({ cuts: marks.cuts }, 0);
       traceTime = null;
+      front = null;
+    },
+
+    // -- the marks beside the skyline (lib/horizon/traceMarks.js) ------------------
+
+    /** Each stroke's id, the inner edges, the pairs and the cuts. */
+    get marks() {
+      return marks;
+    },
+    /** The skyline's strokes alone, straightened (the inner edges left out). */
+    get skySeen() {
+      return skySeen;
+    },
+    /** The cuts across the straightened photo, each its top and bottom point. */
+    get cutsSeen() {
+      return cutsSeen;
+    },
+    /** The pairs' letters and colours at their strokes, straightened. */
+    get pairBadges() {
+      return badges;
+    },
+    /** Which piece of the collage a point of the straightened photo lies in. */
+    pieceAt(point) {
+      return marks.cuts.length ? pieceOf(marks.cuts, toPhoto(point).u) : 0;
+    },
+    /** The pen a stroke is drawn with: `sky` for the skyline, `ridge` for an inner edge. Taking one brings it out. */
+    get pen() {
+      return pen;
+    },
+    setPen(kind) {
+      if (!['sky', 'ridge'].includes(kind)) return;
+      pen = kind;
+      this.setTracing(true);
+    },
+    /** Whether strokes snap onto the photo's edges as they are drawn. */
+    get magnet() {
+      return magnet;
+    },
+    setMagnet(on) {
+      magnet = Boolean(on);
+    },
+    /** Whether the terrain's margin, the cuts and the pairs' letters show while no tool is out. */
+    get details() {
+      return details;
+    },
+    setDetails(on) {
+      details = Boolean(on);
+    },
+    /**
+     * A click with a pen out, on a stroke there (`point` on the straightened
+     * photo, `scale` its size on screen): the stroke becomes the pen's kind.
+     * Says whether a stroke was there.
+     */
+    markLineAt(point, scale) {
+      const id = lineAt(strokes, marks.lines, toPhoto(point), PICK_PX, scale);
+      if (id === null) return false;
+      const inner = pen === 'ridge';
+      if (marks.inner.includes(id) === inner) return true;
+      keep();
+      marks = setInner(marks, id, inner);
+      return true;
+    },
+    /** Whether a click picks strokes to pair, the one in front first. */
+    get linking() {
+      return linking;
+    },
+    setLinking(on) {
+      const next = Boolean(on) && strokes.length > 1;
+      if (next) toolsAway();
+      linking = next;
+      front = null;
+      if (linking) traceHidden = false;
+    },
+    /** The stroke picked to stand in front, waiting for the one behind it; null while none is. */
+    get front() {
+      return front;
+    },
+    /**
+     * A click while pairing, at `point` on the straightened photo shown
+     * `scale` big: the first stroke hit stands in front, the second behind
+     * it, and the pair goes in (or out, when it was there). A stroke in front
+     * lying under the one behind it is an inner edge. Says what happened:
+     * `{ front }`, `{ paired: [front, back] }`, `{ unpaired }` or `{ missed }`.
+     */
+    linkAt(point, scale) {
+      const id = lineAt(strokes, marks.lines, toPhoto(point), PICK_PX, scale);
+      if (id === null) {
+        front = null;
+        return { missed: true };
+      }
+      if (front === null || front === id) {
+        front = front === id ? null : id;
+        return { front };
+      }
+      keep();
+      const had = marks.pairs.some(([f, b]) => f === front && b === id);
+      let next = togglePair(marks, front, id);
+      if (!had) {
+        const ahead = strokes.filter((_, i) => marks.lines[i] === front);
+        const behind = strokes.filter((_, i) => marks.lines[i] === id);
+        if (ahead.every((one) => liesUnder(one, behind))) next = setInner(next, front, true);
+      }
+      const pair = [front, id];
+      marks = next;
+      front = null;
+      return had ? { unpaired: pair } : { paired: pair };
+    },
+    /** Every pair taken away. */
+    clearPairs() {
+      if (!marks.pairs.length) return;
+      keep();
+      marks = { ...marks, pairs: [] };
+      front = null;
+    },
+    /** Whether a click lays a cut across the collage, or takes the one there away. */
+    get cutting() {
+      return cutting;
+    },
+    setCutting(on) {
+      const next = Boolean(on) && Boolean(source);
+      if (next) toolsAway();
+      cutting = next;
+    },
+    /** A click while cutting, at `point` on the straightened photo shown `scale` big. */
+    cutAt(point, scale) {
+      if (!source) return;
+      const u = toPhoto(point).u;
+      const near = cutAt(marks.cuts, u, PICK_PX, scale.width);
+      keep();
+      marks = near >= 0 ? removeCut(marks, near) : addCut(marks, u);
+    },
+    /** Every cut taken away. */
+    clearCuts() {
+      if (!marks.cuts.length) return;
+      keep();
+      marks = { ...marks, cuts: [] };
     },
 
     // -- a video's time -----------------------------------------------------
@@ -1145,17 +1353,19 @@ export function createOverlayState({
     /**
      * The work a saved view kept on this photo, laid back once the photo is
      * open (state/views.svelte.js): how much shows, its lens curve and pulled
-     * corners, the trace and, for a video, the moment it was drawn on and the
-     * pins, what was known about it and the reach Fit found the trace on.
-     * Nothing to take back: it is where the view starts again.
+     * corners, the trace and its marks (lib/horizon/traceMarks.js), for a video
+     * the moment it was drawn on and the pins, what was known about it and
+     * the reach Fit found the trace on. Nothing to take back: it is where the
+     * view starts again.
      */
     restoreWork({
       mix: share = 1,
       bend: k = 0,
       corners = null,
       strokes: drawn = [],
+      marks: marked = null,
       traceTime: at = null,
-      pins: kept = [],
+      pins: pinned = [],
       hints: told = NO_HINTS,
       reach: found = null,
     } = {}) {
@@ -1168,10 +1378,19 @@ export function createOverlayState({
       bend = Math.round(Math.min(BEND_MAX, Math.max(-BEND_MAX, Number(k) || 0)) * 1000) / 1000;
       const pulled = source.kind === 'image' && corners?.length === 4 ? corners.map((p) => roundPoint(clampCorner(p))) : null;
       warp = pulled && !isFlat(pulled) ? pulled : null;
-      strokes = drawn.filter((stroke) => stroke.length).map((stroke) => stroke.map(unitPoint));
+      const kept = drawn.map((stroke, i) => [stroke, i]).filter(([stroke]) => stroke.length);
+      strokes = kept.map(([stroke]) => stroke.map(unitPoint));
+      if (marked) {
+        marks = marksAfter(cleanMarks(marked, drawn.length), kept.map(([, i]) => i));
+      } else {
+        // a trace kept before the marks: the strokes lying under others were inner edges all along
+        const plain = cleanMarks(NO_MARKS, strokes.length);
+        marks = { ...plain, inner: innerByShape(strokes, plain.lines) };
+      }
       traceTime = source.kind === 'video' && strokes.length && Number.isFinite(at) ? at : null;
+      front = null;
       history = [];
-      pins = source.kind === 'video' ? [...kept].sort((a, b) => a.time - b.time) : [];
+      pins = source.kind === 'video' ? [...pinned].sort((a, b) => a.time - b.time) : [];
       if (hints.picture === 'panorama') asPanorama();
     },
 

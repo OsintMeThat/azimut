@@ -18,7 +18,8 @@ async function layPhoto(page, { width = 1280, height = 800 } = {}) {
   await page.route('**/api/horizon/**', (route) => route.fulfill({ status: 404, json: { detail: 'No terrain in the browser fixture' } }));
   await page.route(`**/files/${CASE_ID}/${PANEL_PATH}*`, (route) => route.fulfill({ contentType: 'image/png', body: PHOTO_PNG }));
   await page.goto('/#horizon?ll=46.5586,7.8353&hd=95&tl=0&fov=60&r=plain');
-  await page.getByRole('button', { name: 'Add a photo or video' }).click();
+  // Overlay asks for the photo when none is laid
+  await page.getByRole('group', { name: 'Horizon mode' }).getByRole('button', { name: 'Overlay' }).click();
   await page.getByText('panel.svg').first().click();
   const band = page.getByRole('toolbar', { name: 'Photo over the view' });
   await expect(band).toBeVisible();
@@ -98,6 +99,32 @@ test.describe('the band over a photo in Horizon', () => {
     await page.keyboard.press('l');
     await expect(photo).toHaveAttribute('aria-pressed', 'false');
     await expect(band.getByRole('radiogroup')).toHaveCount(0);
+  });
+
+  test('folds the trace’s details until asked, and draws the photo above the terrain only on a press', async ({ page }) => {
+    const { band } = await layPhoto(page);
+    await band.getByRole('button', { name: 'Trace skyline' }).click();
+    const frame = await page.locator('.frame').boundingBox();
+    await page.keyboard.down('Alt');
+    await page.mouse.move(frame.x + frame.width * 0.2, frame.y + frame.height * 0.4);
+    await page.mouse.down();
+    await page.mouse.move(frame.x + frame.width * 0.6, frame.y + frame.height * 0.35, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await page.keyboard.press('Escape');
+    const details = band.getByRole('button', { name: 'Details' });
+    await expect(details).toHaveAttribute('aria-pressed', 'false');
+    await details.click();
+    await expect(details).toHaveAttribute('aria-pressed', 'true');
+    // D folds them again, the pointer over the view
+    await page.mouse.move(frame.x + frame.width * 0.25, frame.y + frame.height * 0.8);
+    await page.keyboard.press('d');
+    await expect(details).toHaveAttribute('aria-pressed', 'false');
+    // nothing side by side until asked; with no terrain served here, the press says why it cannot draw
+    await expect(page.getByRole('region', { name: 'Photo above the terrain' })).toHaveCount(0);
+    await band.getByRole('button', { name: 'Side by side' }).click();
+    await expect(page.getByText('Could not draw them side by side: the view has not finished landing')).toBeVisible();
+    await expectAllInside(band);
   });
 
   test('keeps how the ground is drawn on the view, out of the way while the pen is out', async ({ page }) => {

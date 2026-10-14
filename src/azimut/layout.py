@@ -66,7 +66,6 @@ ANALYSIS_DIR = ".analysis"
 SEARCH_DIR = ".search"
 #: Source and personal map layers, managed through the Layers panel.
 LAYERS_DIR = ".layers"
-MAP_VIEWS_DIR = ".map-views"
 #: The parsed GeoJSON a layer is drawn from. Derived from the snapshot or spec
 #: beside it, dropped on delete and rebuilt on demand rather than carried.
 LAYER_CACHE_DIR = ".cache"
@@ -97,7 +96,6 @@ CASE_SUBDIRS = (
     ANALYSIS_DIR,
     SEARCH_DIR,
     LAYERS_DIR,
-    MAP_VIEWS_DIR,
 )
 
 #: Deleted artifacts wait here, hidden at the case root. Outside `CASE_SUBDIRS`
@@ -527,6 +525,15 @@ def horizon_find_rel(name: str) -> str:
     return f"{HORIZON_DIR}/{HORIZON_FINDS_DIR}/{name}.json"
 
 
+def horizon_work_rel() -> str:
+    """The work on Horizon's bench, kept as it is made so a reload brings it back.
+
+    One per case and never a view: the leading dot is one no view's name keeps
+    (`slugify` strips it), so the views listed beside it never read it as one.
+    """
+    return f"{HORIZON_DIR}/.work.json"
+
+
 def analysis_rel(kind: str, ident: str) -> str:
     """One Detect record: an area, a zone set, a routine or a run."""
     return f"{ANALYSIS_DIR}/{kind}-{ident}.json"
@@ -548,10 +555,6 @@ def grid_rel(name: str) -> str:
 def layer_spec_rel(name: str) -> str:
     """What a map layer is: where it came from, how it refreshes, how it draws."""
     return f"{LAYERS_DIR}/{name}.json"
-
-
-def map_view_rel(name: str) -> str:
-    return f"{MAP_VIEWS_DIR}/{name}.json"
 
 
 def layer_snapshot_rel(name: str) -> str:

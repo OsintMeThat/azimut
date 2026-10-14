@@ -118,9 +118,9 @@ def test_a_missing_survey_climbs_to_the_planet_level():
     px, _py = terrain._pixels(np.array([46.5]), np.array([8.0]), terrain.PLANET_ZOOM)
     assert float(got) == pytest.approx(float(px[0]) * 0.001, abs=0.01)
     assert sampler.zooms == {terrain.PLANET_ZOOM}
-    assert sampler.resolution(46.5) == pytest.approx(
-        terrain.metres_per_pixel(46.5, terrain.PLANET_ZOOM), abs=0.1
-    )
+    # the planet's tiles are cut finer than GLO-30's heights: what they are worth is said, not their pixel
+    assert terrain.metres_per_pixel(46.5, terrain.PLANET_ZOOM) < terrain.PLANET_DETAIL_M
+    assert sampler.resolution(46.5) == terrain.PLANET_DETAIL_M
 
 
 def _patchy_fetch():

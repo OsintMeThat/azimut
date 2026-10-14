@@ -7,7 +7,7 @@ const CAMERA = { lat: 16.9988, lon: 45.0938 };
 
 function finder({ lens = null, panorama = false, post } = {}) {
   const api = { get: vi.fn(), post: post ?? vi.fn(async () => ({ fits: [] })) };
-  const overlay = { lens, isPanorama: panorama };
+  const overlay = { lens, isPanorama: panorama, seenOf: (p) => p };
   const view = { camera: { heading: 0, tilt: 0, roll: 0, fov: 60, projection: 'camera' } };
   return { find: createFindState({ api, overlay, view }), api };
 }
@@ -75,6 +75,34 @@ describe('an alignment', () => {
     const blind = finder().find;
     align(blind, { nearU: 0.5, farU: 0.6, near, far });
     expect(blind.alignments[0]).toMatchObject({ offset: 0, offsetKnown: false });
+  });
+
+  it('reads them on the photo as the search does, so a curve set afterwards moves the offset, not the points', () => {
+    let curve = $state(0);
+    // a stand-in for the photo straightened from its lens's curve: the edges drawn in or out
+    const overlay = { lens: { fov: 60 }, isPanorama: false, seenOf: (p) => ({ u: 0.5 + (p.u - 0.5) * (1 + curve), v: p.v }) };
+    const view = { camera: { heading: 0, tilt: 0, roll: 0, fov: 60, projection: 'camera' } };
+    const find = createFindState({ api: { get: vi.fn(), post: vi.fn() }, overlay, view });
+    align(find, { nearU: 0.5, farU: 1, near, far });
+    expect(find.alignments[0].offset).toBeCloseTo(30, 6);
+    curve = -0.2;
+    const across = (Math.atan(0.8 * Math.tan(Math.PI / 6)) * 180) / Math.PI;
+    expect(find.alignments[0].offset).toBeCloseTo(across, 6);
+    // the far point stays where it was clicked on the photo's own pixels
+    expect(find.alignments[0].photo.far).toEqual({ u: 1, v: 0.4 });
+  });
+
+  it('keeps its colour from the first click to the last, and reads clicks a hair apart as lined up', () => {
+    const { find } = finder();
+    find.startAlignment();
+    const colour = find.pending.colour;
+    expect(colour).toMatch(/^#/);
+    find.photoClick({ u: 0.5, v: 0.6 });
+    find.photoClick({ u: 0.505, v: 0.4 });
+    find.mapClick(near);
+    expect(find.pending.colour).toBe(colour);
+    find.mapClick(far);
+    expect(find.alignments[0]).toMatchObject({ colour, offset: 0, offsetKnown: true });
   });
 
   it('gives each a colour of its own, and meets where two cross', () => {
@@ -168,6 +196,9 @@ describe('the search', () => {
       time: 0,
       hints: { picture: 'photo', zoom: 'zoomed', facing: null, reach: 'auto' },
       seenOf: (p) => p,
+      bend: 0,
+      warped: false,
+      corners: [],
     };
     const view = { camera: { heading: 0, tilt: 0, roll: 0, fov: 60, projection: 'camera' } };
     return { find: createFindState({ api, overlay, view }), api, overlay };
@@ -192,7 +223,29 @@ describe('the search', () => {
     expect(body.area).toHaveLength(4);
     expect(body).toMatchObject({ who: { mode: 'ground', low: 1.7, high: 1.7 }, reach: null, spacing: null });
     expect(body.photo).toMatchObject({ path: 'media/barry.png', title: 'barry' });
+    expect(body.photo).not.toHaveProperty('bend');
+    expect(body.photo).not.toHaveProperty('corners');
     expect(find.searching).toBe(true);
+    find.closeSearch();
+  });
+
+  it('keeps the curve and the corners the trace is read through with the search', async () => {
+    const { find, api, overlay } = laid();
+    overlay.bend = -0.12;
+    overlay.warped = true;
+    overlay.corners = [
+      { u: 0.02, v: 0 },
+      { u: 1, v: 0.03 },
+      { u: 0.98, v: 1 },
+      { u: 0, v: 0.97 },
+    ];
+    find.setArea(area);
+    await find.start('c1');
+    const body = api.post.mock.calls.at(-1)[1];
+    expect(body.photo.bend).toBe(-0.12);
+    expect(body.photo.corners).toEqual(overlay.corners);
+    // the strokes stay on the photo's own pixels
+    expect(body.photo.strokes).toBe(overlay.strokes);
     find.closeSearch();
   });
 
@@ -237,5 +290,78 @@ describe('the search', () => {
     expect(find.alignments[0].map.near).toEqual({ lat: 17, lon: 45.1 });
     expect(find.search.result.verdict).toBe('match');
     expect(find.searching).toBe(false);
+  });
+});
+
+describe('the setup kept on the bench', () => {
+  const corners = [
+    { lat: 16.9, lon: 45.0 },
+    { lat: 16.9, lon: 45.2 },
+    { lat: 17.1, lon: 45.2 },
+  ];
+
+  it('is nothing while nothing is set', () => {
+    const { find } = finder();
+    expect(find.snapshot).toBeNull();
+    find.setWho({ mode: 'drone' });
+    expect(find.snapshot).not.toBeNull();
+  });
+
+  it('keeps the area, the alignments, who took it and the settings, and puts them back', async () => {
+    const { find } = finder({ lens: { fov: 60 } });
+    find.setArea(corners);
+    align(find, { nearU: 0.45, farU: 0.5, near: CAMERA, far: destination(CAMERA, 5000, 300) });
+    find.setWho({ mode: 'drone', low: 20, high: 80 });
+    find.setSettings({ spacing: 250, tolerance: 2 });
+    const kept = structuredClone(find.snapshot);
+    expect(kept.area).toEqual(corners);
+    expect(kept.alignments[0]).toMatchObject({ photo: { near: { u: 0.45, v: 0.6 } }, offset_known: true, tops: false });
+    expect(kept).toMatchObject({ who: { mode: 'drone', low: 20, high: 80 }, spacing: 250, tolerance: 2, search: null });
+
+    const { find: again } = finder({ lens: { fov: 60 } });
+    await again.restore(kept, 'c1');
+    expect(again.area).toEqual(corners);
+    expect(again.alignments).toHaveLength(1);
+    expect(again.alignments[0].map).toEqual(find.alignments[0].map);
+    expect(again.who).toEqual({ mode: 'drone', low: 20, high: 80 });
+    expect(again.settings).toEqual({ spacing: 250, tolerance: 2 });
+    expect(again.snapshot).toEqual(kept);
+  });
+
+  it('reopens the search on show, then lays what was set since over it', async () => {
+    const { find, api } = finder();
+    api.get.mockResolvedValue({ status: 'done', ask: { area: [[1, 2], [1, 3], [2, 3]] }, result: { places: [] } });
+    await find.restore({ area: corners, search: 'Collage 1 search' }, 'c1');
+    expect(api.get).toHaveBeenCalledWith('/api/cases/c1/horizon/finds/Collage%201%20search');
+    expect(find.search.name).toBe('Collage 1 search');
+    expect(find.area).toEqual(corners);
+  });
+
+  it('empties back to its defaults when the bench holds none', async () => {
+    const { find } = finder();
+    find.setArea(corners);
+    await find.restore(null, 'c1');
+    expect(find.area).toEqual([]);
+    expect(find.who.mode).toBe('ground');
+    expect(find.snapshot).toBeNull();
+  });
+});
+
+describe('how fine the heights are over the area', () => {
+  it('is read once the area is closed, at its middle, and once for the same place', async () => {
+    const { find, api } = finder();
+    api.get.mockResolvedValue({ elevation: 900, resolution_m: 30 });
+    find.drawArea();
+    find.addCorner({ lat: 16.9, lon: 45.0 });
+    find.addCorner({ lat: 16.9, lon: 45.2 });
+    find.addCorner({ lat: 17.1, lon: 45.2 });
+    await find.readDetail();
+    expect(api.get).not.toHaveBeenCalled();
+    find.closeArea();
+    await find.readDetail();
+    await find.readDetail();
+    expect(api.get).toHaveBeenCalledTimes(1);
+    expect(api.get.mock.calls[0][0]).toMatch(/^\/api\/terrain\/elevation\?lat=16\.966667&lon=45\.133333$/);
+    expect(find.detail).toBe(30);
   });
 });

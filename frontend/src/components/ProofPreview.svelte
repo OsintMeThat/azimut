@@ -21,6 +21,8 @@
   } from '../lib/composer.js';
   import { closeStrandedGesture } from '../lib/konvaGesture.js';
   import { prefs } from '../lib/state.svelte.js';
+  import '../lib/proofFontFaces.js';
+  import { fontStack, loadProofFont } from '../lib/proofFonts.js';
 
   let { style = $bindable(), logoMissing = $bindable(false) } = $props();
 
@@ -98,8 +100,8 @@
       if (cap?.trim()) {
         layer.add(new Konva.Text({
           x: box.x + 2, y: box.y + box.h + 9, width: box.w - 4, text: cap,
-          fontSize: text.captionSize, fill: tc.dim,
-          fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
+          fontSize: text.captionSize, fill: safeStyle.captionColor || tc.dim,
+          fontFamily: fontStack(safeStyle.font), ellipsis: true, wrap: 'none', listening: false,
         }));
       }
     });
@@ -112,7 +114,7 @@
         width: width - space.pad * 2, text: safeStyle.footer?.trim() || attributionLine(pnls),
         align: safeStyle.footerAlign === 'right' ? 'right' : 'left',
         fontSize: fs, fill: safeStyle.footerColor || tc.faint,
-        fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
+        fontFamily: fontStack(safeStyle.font), ellipsis: true, wrap: 'none', listening: false,
       }));
     }
 
@@ -121,7 +123,7 @@
     const st = safeStyle.signatureText && prefs.signatureHandle?.trim() ? safeStyle.signatureText : null;
     const pendingTextNode = st ? new Konva.Text({
       text: prefs.signatureHandle.trim(), fontSize: st.size ?? SIG_TEXT_SIZE, fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif', fill: st.color ?? '#ffffff',
+      fontFamily: fontStack(safeStyle.font), fill: st.color ?? '#ffffff',
       opacity: st.opacity ?? 1, draggable: true,
     }) : null;
     const baseLogoBox = safeStyle.signature
@@ -258,6 +260,7 @@
     JSON.stringify([
       style.bg, style.space, style.captionSize, style.footerSize,
       style.footer, style.footerEnabled, style.footerText, style.footerColor, style.footerAlign,
+      style.captionColor,
       style.captionsEnabled,
       style.panelDirection,
       style.signature, style.signatureText,
@@ -265,6 +268,12 @@
     prefs.signatureHandle;
     cw;
     if (stage) render();
+  });
+
+  // The face is drawn once it is in: a canvas measures with whatever it has.
+  $effect(() => {
+    const face = style.font;
+    loadProofFont(face).then(() => { if (stage && face === style.font) render(); });
   });
 </script>
 

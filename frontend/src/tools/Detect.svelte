@@ -728,7 +728,6 @@
         oneditadded={(row) => { layersOpen = false; personalLayers.open(row); }}
         onnewpersonal={() => { layersOpen = false; personalLayers.newLayer(); }}
         ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
-        onmaps={() => { layersOpen = false; personalLayers.openMaps(); }}
         buttonClass="layers-chip cmp-glass"
         align="right"
         bind:open={layersOpen}
@@ -801,6 +800,7 @@
           interactive={!personalLayers.armed && !measuring && drawing === 'select' && !manual && !builder?.pinning}
           onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
           onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
+          oncopyfeature={(row, feature) => personalLayers.copy(row, feature)}
         />
         {#if mapLayers.has('saved') && !bare && caseState.current && !personalLayers.armed}
           <SavedOverlay
@@ -953,8 +953,6 @@
     />
   </div>
   <PersonalLayerPanel tool="detect" scope={myLayers} {engine}
-    provider={providerId} rows={layerRows} onprovider={(id) => { providerId = id; }}
-    places={savedWork.rows.filter((row) => row.kind === 'place')}
     onarm={() => { drawing = 'select'; manual = null; measureTool = 'select'; if (builder?.pinning) builder.escape(); }} />
 </div>
 

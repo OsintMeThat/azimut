@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from datetime import date
 from typing import Any
 
 import httpx
@@ -288,6 +289,39 @@ def scan_coords(text: str) -> list[dict[str, Any]]:
         if len(answer) == MAX_SCANNED_COORDS:
             break
     return answer
+
+
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_MONTH = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+_SCAN_DAYS = (
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "ymd"),
+    (re.compile(rf"\b(\d{{1,2}})\s+{_MONTH}\s+(\d{{4}})\b", re.IGNORECASE), "dmy"),
+    (re.compile(rf"\b{_MONTH}\s+(\d{{1,2}}),?\s+(\d{{4}})\b", re.IGNORECASE), "mdy"),
+)
+
+
+def scan_day(text: str) -> str:
+    """The first day a free text states, `YYYY-MM-DD`, or "".
+
+    Only spellings that cannot be read two ways: an ISO date, or a month written
+    as a word ("13 SEP 2026", "Sep 13, 2026"). "03/04/2026" is a different day
+    on either side of the Atlantic, so it is left for the analyst to type.
+    """
+    found: list[tuple[int, str]] = []
+    for pattern, order in _SCAN_DAYS:
+        for match in pattern.finditer(text or ""):
+            groups = match.groups()
+            try:
+                if order == "ymd":
+                    year, month, day = int(groups[0]), int(groups[1]), int(groups[2])
+                elif order == "dmy":
+                    day, month, year = int(groups[0]), _MONTHS.index(groups[1].lower()) + 1, int(groups[2])
+                else:
+                    month, day, year = _MONTHS.index(groups[0].lower()) + 1, int(groups[1]), int(groups[2])
+                found.append((match.start(), date(year, month, day).isoformat()))
+            except ValueError:
+                continue
+    return min(found)[1] if found else ""
 
 
 # -- formatting ------------------------------------------------------------------

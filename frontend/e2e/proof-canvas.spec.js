@@ -446,10 +446,16 @@ test('a dropped image is pasted, and its frame survives the save', async ({ page
   await pasteScreenshot(page, { via: 'drop' });
   await expect(page.locator('.paste-row')).toHaveCount(1);
 
-  // picking a border colour is what turns a frame on, on a paste or on a panel
-  await page.locator('.paste-row input[aria-label="border color"]').fill('#40c4ff');
-  await expect(page.locator('.paste-row input[aria-label="border thickness"]')).toBeVisible();
-  await page.locator('.panel-row:not(.paste-row) input[aria-label="border color"]').fill('#69f0ae');
+  // picking a border colour is what turns a frame on, on a paste or on a panel,
+  // from the rail once the picture is picked
+  // a dropped image lands picked; pressing its row again would let it go
+  await expect(page.locator('.paste-row')).toHaveClass(/selected/);
+  await page.getByTitle('Border', { exact: true }).click();
+  await page.getByLabel('border #40c4ff').click();
+  await expect(page.getByLabel('border thickness')).toBeVisible();
+  await page.locator('.panel-row:not(.paste-row) .panel-thumb').click();
+  await page.getByTitle('Border', { exact: true }).click();
+  await page.getByLabel('border #69f0ae').click();
 
   await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(1);

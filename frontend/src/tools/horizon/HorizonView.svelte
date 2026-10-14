@@ -65,6 +65,7 @@
     screenAt,
     slidPhoto,
     strokeFrom,
+    fitRuns,
   } from '../../lib/horizon/overlay.js';
 
   import { pointerReading, summitReading } from '../../lib/horizon/readings.js';
@@ -72,6 +73,7 @@
   import { MAP_LIGHT, shadowKeep } from '../../lib/horizon/sky.js';
   import { areaLens, areaWithin, exportScale, layersIn, turnCamera } from '../../lib/horizon/viewExport.js';
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
+  import { detailsShown, pressTool, putAway, toolForKey, toolHint, traceLegend } from '../../lib/horizon/traceTools.js';
   import PictureControls from './PictureControls.svelte';
 
   let {
@@ -93,6 +95,14 @@
     overlay = null,
     /** The buildings round the eye (state/buildings.svelte.js), or null. */
     buildings = null,
+    /** How each point of each stroke lies on the terrain (lib/horizon/overlay.js `traceFit`), or null: the trace then shows in one colour. */
+    fit = null,
+    /**
+     * The terrain's skyline over the photo, as runs across its frame with how
+     * far it may be off (lib/horizon/overlay.js `terrainLine`): drawn as a line
+     * beside the trace, and as a band while the details show.
+     */
+    terrain = [],
   } = $props();
 
   /** Where this browser remembers that the gesture lines were understood, without and with a photo. */
@@ -156,7 +166,9 @@
    * steps away while the pen, the rubber or the photo's corners are out, which
    * want the whole photo under the hand.
    */
-  const controlsShown = $derived(Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping)));
+  const controlsShown = $derived(
+    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting))
+  );
   /** The loupe over the photo while it shows anything but the whole photo, which the camera is then seen through. */
   const loupe = $derived(laid && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null);
 
@@ -394,17 +406,17 @@
    * options over the tab's own: `{ photo: 1 }` the photo alone, `{ photo: 0 }`
    * the terrain alone), each copied before the next is drawn, and the screen
    * comes back as it was. An `area` of the screen (CSS pixels) is cut out of
-   * each. Answers `{ frames, layers, camera, scale, lens }`, `lens` what the
+   * each; `note` is what the veil says meanwhile. Answers `{ frames, layers, camera, scale, lens }`, `lens` what the
    * picture faces and how wide it is (`areaLens`), or null when there is no
    * view to draw.
    */
-  export async function exportPicture({ kind = 'view', variants = [{}], area = null, wait = kind === 'turn' ? 25000 : 12000 } = {}) {
+  export async function exportPicture({ kind = 'view', variants = [{}], area = null, wait = kind === 'turn' ? 25000 : 12000, note = '' } = {}) {
     if (!scene || !canvas || !landed || exporting) return null;
     const through = exportCamera(kind);
     if (!through) return null;
     const scale = exportScale(through.width);
     const before = { width: canvas.width, height: canvas.height };
-    const text = kind === 'turn' ? 'Drawing the whole turn…' : 'Drawing the export…';
+    const text = note || (kind === 'turn' ? 'Drawing the whole turn…' : 'Drawing the export…');
     exporting = { text };
     try {
       canvas.width = Math.round(through.width * scale);
@@ -484,6 +496,49 @@
     };
   }
   const skylineY = (x) => skylineOf(camera)(x);
+
+  /** The trace's details out: the terrain's margin, the cuts and the pairs' letters (lib/horizon/traceTools.js). */
+  const detailsOn = $derived(laid && detailsShown(overlay));
+  /** The terrain's skyline on screen, while the trace shows; the pen and the rubber want the photo's own edge bare. */
+  const terrainPaths = $derived(
+    laid && shown && !overlay.traceHidden && !overlay.tracing && !overlay.erasing ? terrain.map((run) => onScreen(run)) : []
+  );
+  /**
+   * The band the terrain's skyline may be off by, while the details show, as
+   * polygons over the columns where it is a pixel wide or more: wide over a
+   * near ridge, nothing over a far one.
+   */
+  const bandShapes = $derived.by(() => {
+    if (!detailsOn || !shown || overlay.traceHidden) return [];
+    const shapes = [];
+    for (const run of terrain) {
+      let upper = [];
+      let lower = [];
+      const close = () => {
+        if (upper.length > 1) shapes.push([...upper, ...lower.reverse()].join(' '));
+        upper = [];
+        lower = [];
+      };
+      for (const p of run) {
+        const high = p.high == null ? null : screenAt(shownLoupe, p.u, p.high, size);
+        const low = p.low == null ? null : screenAt(shownLoupe, p.u, p.low, size);
+        if (!high || !low || low.y - high.y < 1) {
+          close();
+          continue;
+        }
+        upper.push(`${high.x.toFixed(1)},${high.y.toFixed(1)}`);
+        lower.push(`${low.x.toFixed(1)},${low.y.toFixed(1)}`);
+      }
+      close();
+    }
+    return shapes;
+  });
+  /** What the lines over the photo mean, named under the view while the trace shows. */
+  const legend = $derived(
+    shown && laid && overlay.traceShown && !overlay.traceHidden && overlay.strokes.length
+      ? traceLegend(overlay, { coloured: Boolean(fit), terrain: terrainPaths.length > 0, ridgeLines: Boolean(view.lines), level: Boolean(level) })
+      : []
+  );
 
   /**
    * Summits the picture shows, one per top, worked out once per picture rather
@@ -653,6 +708,8 @@
   let drawing = $state.raw([]);
   const tracing = $derived(laid && overlay.tracing);
   const erasing = $derived(laid && overlay.erasing);
+  /** Pairing lines or cutting the collage: a click picks, nothing is dragged. */
+  const picking = $derived(laid && (overlay.linking || overlay.cutting));
   /** The photo's corners out to be pulled. */
   const warping = $derived(laid && overlay.warping);
   /** The photo held to the terrain: the view's gestures carry both, and none parts them. */
@@ -777,6 +834,10 @@
       press = { ...local(event), pan: true };
       return;
     }
+    if (picking) {
+      press = { ...local(event), picking: true };
+      return;
+    }
     if (tracing) {
       press = { ...local(event), tracing: true };
       drawing = [local(event)];
@@ -834,7 +895,7 @@
       return;
     }
     if (!press) {
-      if (onControl(event) || tracing || erasing || overPhoto || choosing) {
+      if (onControl(event) || tracing || erasing || picking || overPhoto || choosing) {
         pointer = null;
         return;
       }
@@ -943,6 +1004,14 @@
       overlay.endErase();
       return;
     }
+    if (press.picking) {
+      press = null;
+      const at = local(event);
+      const point = photoAt(shownLoupe, at.x, at.y, size);
+      if (overlay.cutting) overlay.cutAt(point, photoScale);
+      else if (overlay.linking) overlay.linkAt(point, photoScale);
+      return;
+    }
     if (press.shaping) {
       press = null;
       dragging = false;
@@ -960,11 +1029,18 @@
       return;
     }
     if (press.tracing) {
+      const from = press;
       press = null;
+      const at = local(event);
       const stroke = strokeFrom(drawing, size, { loupe: shownLoupe });
       drawing = [];
-      // snapped onto the sky's edge near it, unless Alt asks for the line as drawn
-      if (stroke.length > 1) overlay.addStroke(stroke, { snap: !event.altKey, scale: photoScale });
+      // a click on a line makes it the pen's kind
+      if (Math.hypot(at.x - from.x, at.y - from.y) < CLICK_SLOP && stroke.length < 3) {
+        overlay.markLineAt(photoAt(shownLoupe, at.x, at.y, size), photoScale);
+        return;
+      }
+      // snapped onto the nearest edge while the magnet is on; Alt does the other for this stroke
+      if (stroke.length > 1) overlay.addStroke(stroke, { snap: overlay.magnet !== event.altKey, scale: photoScale });
       return;
     }
     const clicked = !press.moved;
@@ -1024,7 +1100,7 @@
     const delta = event.deltaY || event.deltaX;
     const unit = event.deltaMode === 1 ? 0.05 : event.ctrlKey ? 0.01 : 0.0015;
     const factor = Math.exp(-delta * unit);
-    if (laid && (tracing || erasing || locked || spaceHeld) && !event.shiftKey) {
+    if (laid && (tracing || erasing || picking || locked || spaceHeld) && !event.shiftKey) {
       // not under a stroke being drawn, which is kept in screen pixels until the hand lifts
       if (!press?.tracing) overlay.zoomLoupe(factor, at, size);
       return;
@@ -1138,7 +1214,7 @@
    * The photo's keys: Space held and a drag moves the loupe (a tap plays or
    * pauses a video), 0 shows the whole photo, comma and full stop step a
    * frame, B blinks, T traces, E rubs out, W puts the photo's corners out, L
-   * locks the photo to the terrain, H hides the trace, Ctrl+Z takes the last change to the trace back, Escape
+   * locks the photo to the terrain, H hides the trace, D shows its details, Ctrl+Z takes the last change to the trace back, Escape
    * puts the pen, the rubber or the corners away. True when the key was the
    * photo's.
    */
@@ -1160,15 +1236,15 @@
     else if (key === ',' && video) overlay.step(-1);
     else if (key === '.' && video) overlay.step(1);
     else if (key === 'b' || key === 'B') overlay.setBlink(!overlay.blink);
-    else if (key === 't' || key === 'T') overlay.setTracing(!overlay.tracing);
-    else if (key === 'e' || key === 'E') overlay.setErasing(!overlay.erasing);
+    else if (toolForKey(key)) pressTool(overlay, toolForKey(key));
+    else if (key === 'm' || key === 'M') overlay.setMagnet(!overlay.magnet);
     else if ((key === 'w' || key === 'W') && overlay.source.kind === 'image') overlay.setWarping(!overlay.warping);
     else if (key === 'l' || key === 'L') overlay.setLocked(!overlay.locked);
     else if ((key === 'h' || key === 'H') && overlay.strokes.length) overlay.setTraceHidden(!overlay.traceHidden);
-    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping)) {
+    else if ((key === 'd' || key === 'D') && overlay.strokes.length) overlay.setDetails(!overlay.details);
+    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting)) {
       event.stopPropagation();
-      overlay.setTracing(false);
-      overlay.setErasing(false);
+      putAway(overlay);
       overlay.setWarping(false);
     } else return false;
     return true;
@@ -1216,7 +1292,7 @@
 
   /** A double click on the ground goes there, facing the same way. */
   function onDoubleClick(event) {
-    if (!view.observer || onControl(event) || tracing || erasing || locked) return;
+    if (!view.observer || onControl(event) || tracing || erasing || picking || locked) return;
     const at = local(event);
     const ground = groundAt(at.x, at.y);
     if (ground?.distance != null) view.standAt(ground);
@@ -1295,7 +1371,7 @@
   class="horizon-view"
   class:daylight={view.ground !== 'plain' || laid}
   class:dragging
-  class:tracing={tracing || erasing || Boolean(choosing)}
+  class:tracing={tracing || erasing || picking || Boolean(choosing)}
   class:shaping={overPhoto}
   class:panning={laid && spaceHeld}
   class:sliding={moves === 'photo' && !tracing && !erasing}
@@ -1411,11 +1487,41 @@
         text-anchor="middle">{label.name}</text
       >
     {/each}
+    {#each bandShapes as points, index (index)}
+      <polygon class="margin-band" {points} />
+    {/each}
+    {#each terrainPaths as points, index (index)}
+      <polyline class="terrain-line under" {points} />
+      <polyline class="terrain-line over" {points} />
+    {/each}
     {#if laid && overlay.traceShown && !overlay.traceHidden}
+      {#each detailsOn ? overlay.cutsSeen : [] as cut, index (index)}
+        {@const points = onScreen(cut)}
+        <polyline class="cut under" {points} />
+        <polyline class="cut over" {points} />
+      {/each}
       {#each overlay.strokesSeen as stroke, index (index)}
         {@const points = onScreen(stroke)}
-        <polyline class="trace under" {points} />
-        <polyline class="trace over" {points} />
+        {@const id = overlay.marks.lines[index]}
+        <polyline class="trace under" class:picked={overlay.front === id} {points} />
+        {#if overlay.marks.inner.includes(id)}
+          <polyline class="trace over ridge" {points} />
+        {:else if fit?.[index]?.length === stroke.length}
+          {#each fitRuns(stroke, fit[index]) as run, part (part)}
+            <polyline class="trace over {run.kind}" points={onScreen(run.points)} />
+          {/each}
+        {:else}
+          <polyline class="trace over" {points} />
+        {/if}
+      {/each}
+      {#each detailsOn ? overlay.pairBadges : [] as badge (badge.label)}
+        {#each [['front', badge.front], ['back', badge.back]] as [side, at] (side)}
+          {@const spot = screenAt(shownLoupe, at.u, at.v, size)}
+          <g class="pair {side}" transform="translate({spot.x.toFixed(1)} {(spot.y - 14).toFixed(1)})">
+            <circle r="7.5" style:--pair={badge.colour} />
+            <text text-anchor="middle" dy="3.5">{badge.label}</text>
+          </g>
+        {/each}
       {/each}
     {/if}
     {#if drawing.length > 1}
@@ -1552,19 +1658,28 @@
     </div>
   {/if}
 
-  {#if shown && choosing}
-    <p class="glass hint">Drag a box over the view to capture it · Esc to cancel</p>
-  {:else if shown && warping}
-    <p class="glass hint">Pull a corner to slant the photo, an edge to stretch it · Drag inside it to move it · Esc when done</p>
-  {:else if shown && tracing}
-    <p class="glass hint">Draw along the skyline, it snaps to the edge · Alt+drag draws freely · Wheel to look closer · Esc when done</p>
-  {:else if shown && erasing}
-    <p class="glass hint">Drag over the trace to rub it out · Wheel to look closer · Ctrl+Z takes it back · Esc when done</p>
-  {:else if shown && laid && !photoHinted}
-    <p class="glass hint">{HINTS[moves]}</p>
-  {:else if shown && !hinted}
-    <p class="glass hint">Drag to turn · Wheel to zoom · Double-click to go there · ↑ ↓ to walk</p>
-  {/if}
+  <div class="notes">
+    {#if legend.length}
+      <ul class="glass legend" aria-label="What the lines over the photo show">
+        {#each legend as item (item.id)}
+          <li><span class="swatch {item.id}" aria-hidden="true"></span>{item.label}</li>
+        {/each}
+      </ul>
+    {/if}
+    {#if shown && choosing}
+      <p class="glass hint">Drag a box over the view to capture it · Esc to cancel</p>
+    {:else if shown && warping}
+      <p class="glass hint">Pull a corner to slant the photo, an edge to stretch it · Drag inside it to move it · Esc when done</p>
+    {:else if shown && (tracing || picking)}
+      <p class="glass hint">{toolHint(overlay)} · Esc when done</p>
+    {:else if shown && erasing}
+      <p class="glass hint">Drag over the trace to rub it out · Wheel to look closer · Ctrl+Z takes it back · Esc when done</p>
+    {:else if shown && laid && !photoHinted}
+      <p class="glass hint">{HINTS[moves]}</p>
+    {:else if shown && !hinted}
+      <p class="glass hint">Drag to turn · Wheel to zoom · Double-click to go there · ↑ ↓ to walk</p>
+    {/if}
+  </div>
 
   {#if shown && buildingCaveat}
     <p class="building-caveat"><span>{buildingCaveat.heights}</span><span>{buildingCaveat.note}</span></p>
@@ -1740,6 +1855,76 @@
   .trace.over {
     stroke: var(--hz-mark);
     stroke-width: 2;
+  }
+  /* the terrain's own skyline beside the trace: thin and white, so the trace's colours stay the reading */
+  .terrain-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .terrain-line.under {
+    stroke: rgba(0, 0, 0, 0.45);
+    stroke-width: 3.5;
+  }
+  .terrain-line.over {
+    stroke: #fff;
+    stroke-width: 1.5;
+  }
+  /* how far the terrain's skyline may be off, as coarse as its heights seen from the ridge */
+  .margin-band {
+    fill: rgba(255, 255, 255, 0.16);
+    stroke: rgba(255, 255, 255, 0.28);
+    stroke-width: 0.75;
+    stroke-dasharray: 3 3;
+  }
+  /* read against the terrain: green on its skyline, amber near it, red off it */
+  .trace.over.on {
+    stroke: var(--hz-seen);
+  }
+  .trace.over.near {
+    stroke: var(--accent);
+  }
+  .trace.over.off {
+    stroke: var(--hz-hidden);
+  }
+  /* an inner edge, a ridge seen against farther land: cyan, so it never reads as the skyline */
+  .trace.over.ridge {
+    stroke: #4dd6ff;
+  }
+  .trace.under.picked {
+    stroke: rgba(255, 255, 255, 0.85);
+    stroke-width: 7;
+  }
+  /* a pair: the letter filled on the line in front, ringed on the line behind it */
+  .pair circle {
+    stroke: var(--pair);
+    stroke-width: 2;
+  }
+  .pair.front circle {
+    fill: var(--pair);
+  }
+  .pair.back circle {
+    fill: rgba(0, 0, 0, 0.6);
+  }
+  .pair text {
+    font: 700 10px var(--font-sans, system-ui);
+    fill: #fff;
+  }
+  .pair.front text {
+    fill: #111;
+  }
+  /* where a collage is cut */
+  .cut {
+    fill: none;
+  }
+  .cut.under {
+    stroke: rgba(0, 0, 0, 0.5);
+    stroke-width: 3.5;
+  }
+  .cut.over {
+    stroke: #fff;
+    stroke-width: 1.5;
+    stroke-dasharray: 7 5;
   }
 
   /* -- the photo's corners, out to be pulled ----------------------------------- */
@@ -2041,15 +2226,91 @@
     white-space: nowrap;
     pointer-events: none;
   }
-  .hint {
+  /* the bottom-left corner: what the lines mean, over what the hand can do */
+  .notes {
     position: absolute;
     left: 10px;
     bottom: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    max-width: calc(100% - 20px);
+    pointer-events: none;
+  }
+  .hint {
     margin: 0;
     padding: 3px 8px;
     color: var(--text-2);
     font-size: var(--fs-xs);
-    pointer-events: none;
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    margin: 0;
+    padding: 3px 8px;
+    list-style: none;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .swatch {
+    width: 14px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--hz-mark);
+  }
+  .swatch.on {
+    background: var(--hz-seen);
+  }
+  .swatch.near {
+    background: var(--accent);
+  }
+  .swatch.off {
+    background: var(--hz-hidden);
+  }
+  .swatch.ridge {
+    background: #4dd6ff;
+  }
+  .swatch.terrain {
+    height: 2px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  }
+  .swatch.ridge-lines {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.75);
+  }
+  .swatch.level {
+    height: 0;
+    border-top: 1px dashed color-mix(in srgb, var(--text-1) 60%, transparent);
+    border-radius: 0;
+    background: none;
+  }
+  .swatch.margin {
+    height: 9px;
+    border: 1px dashed rgba(255, 255, 255, 0.5);
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+  .swatch.cut {
+    width: 0;
+    height: 11px;
+    border-left: 2px dashed #fff;
+    border-radius: 0;
+    background: none;
+  }
+  .swatch.pair {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #ff9f43;
+    box-shadow: 0 0 0 2px var(--hz-glass), 0 0 0 3px #ff9f43;
   }
   .credits {
     position: absolute;

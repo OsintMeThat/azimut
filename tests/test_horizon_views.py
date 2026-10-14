@@ -441,3 +441,34 @@ def test_a_view_refuses_hints_fit_could_not_use(client, hints):
     spec = _spec(_photo(client, cid))
     spec["photo"]["hints"] = hints
     assert _save(client, cid, "Refused", spec).status_code == 422
+
+
+def test_a_view_keeps_the_marks_beside_its_trace(client):
+    cid = _case(client, "Marked views")
+    spec = _spec(_photo(client, cid))
+    spec["photo"]["strokes"] = [[{"u": 0.1, "v": 0.41}, {"u": 0.3, "v": 0.38}], [{"u": 0.1, "v": 0.45}, {"u": 0.2, "v": 0.44}]]
+    spec["photo"]["marks"] = {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72]}
+    assert _save(client, cid, "Marked", spec).status_code == 200
+    kept = client.get(f"/api/cases/{cid}/horizon/views/Marked").json()["spec"]["photo"]
+    assert kept["marks"] == {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72]}
+    # a trace of the skyline alone keeps none
+    plain = _spec(_photo(client, cid))
+    assert _save(client, cid, "Plain", plain).status_code == 200
+    assert client.get(f"/api/cases/{cid}/horizon/views/Plain").json()["spec"]["photo"]["marks"] is None
+
+
+@pytest.mark.parametrize(
+    "marks",
+    [
+        {"pairs": [[1, 1]]},  # a stroke in front of itself
+        {"pairs": [[1, 2, 3]]},
+        {"cuts": [1.2]},  # past the photo's side
+        {"lines": [-1]},
+        {"cuts": [0.1] * 13},
+    ],
+)
+def test_a_view_refuses_marks_it_could_not_lay_again(client, marks):
+    cid = _case(client, "Refused marks")
+    spec = _spec(_photo(client, cid))
+    spec["photo"]["marks"] = marks
+    assert _save(client, cid, "Refused", spec).status_code == 422

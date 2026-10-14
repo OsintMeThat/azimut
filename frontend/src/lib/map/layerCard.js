@@ -144,11 +144,23 @@ export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
     heading.textContent = properties.name || UNNAMED;
     element.append(heading);
 
-    if (properties.category) {
+    const named = [properties.category, properties.colour_name].filter(Boolean).join(' · ');
+    if (named) {
       const group = document.createElement('p');
       group.className = 'layer-card-group';
-      group.textContent = properties.category;
+      group.textContent = named;
       element.append(group);
+    }
+
+    // What the feature says beyond its name: its day, its state, whose point it is.
+    const day = properties.date ? (properties.date_end ? `${properties.date} – ${properties.date_end}` : properties.date) : '';
+    const facts = [day, { damaged: 'Damaged', destroyed: 'Destroyed' }[properties.status] ?? '',
+      properties.provenance === 'external' ? 'Geolocated by someone else' : ''].filter(Boolean);
+    if (facts.length) {
+      const line = document.createElement('p');
+      line.className = 'layer-card-facts';
+      line.textContent = facts.join(' · ');
+      element.append(line);
     }
 
     // A line or an area has no one point, so it states none.
@@ -192,6 +204,18 @@ export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
         body.append(field);
       }
       element.append(body);
+    }
+
+    // The addresses a personal feature rests on, each opened in a tab of its own.
+    const links = (properties.links ?? []).filter((link) => /^https?:\/\//i.test(String(link)));
+    for (const link of links) {
+      const anchor = document.createElement('a');
+      anchor.className = 'layer-card-link';
+      anchor.href = link;
+      anchor.target = '_blank';
+      anchor.rel = 'noreferrer noopener';
+      anchor.textContent = link;
+      element.append(anchor);
     }
 
     const from = document.createElement('p');

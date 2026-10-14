@@ -55,6 +55,8 @@ export function timelineTrack(value, index = 0) {
       ...(query.collected_only === true ? { collected_only: true } : {}),
       // A lane that draws each of its events as the file it dates (`fileLane`).
       ...(FILE_LANES.has(query.as_files) ? { as_files: query.as_files } : {}),
+      // The dated markers of the analyst's own map layers (`layersLane`).
+      ...(query.as_layers === true ? { as_layers: true } : {}),
     },
     color: TRACK_COLORS.includes(raw.color) ? raw.color : '',
     collapsed: raw.collapsed === true,
@@ -91,6 +93,57 @@ export function imageryLane() {
   return timelineTrack({
     id: 'imagery', label: 'Imagery', categories: ['statement'], query: { as_files: 'imagery' },
   });
+}
+
+/**
+ * The My layers lane: the markers the analyst dated in their own map layers. Read
+ * from the layers on disk rather than the case's events, since a marker is not one;
+ * added from the track list.
+ */
+export function layersLane() {
+  return timelineTrack({
+    id: 'layers', label: 'My layers', categories: ['statement'], query: { as_layers: true },
+  });
+}
+
+export function drawsLayers(track) {
+  return track?.query?.as_layers === true;
+}
+
+/**
+ * Timeline entries for the dated features of personal layers, one per feature.
+ *
+ * `drawings` pairs each layer row with the collection it draws. A day is a whole
+ * day: it opens at midnight and closes at the last second, on UTC, which is how
+ * the time strip on the map reads it too.
+ */
+export function layerItems(drawings) {
+  const items = [];
+  for (const { row, collection } of drawings) {
+    for (const feature of collection?.features ?? []) {
+      const properties = feature.properties ?? {};
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(properties.date ?? '') || !properties.key) continue;
+      const last = properties.date_end > properties.date ? properties.date_end : properties.date;
+      const point = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : null;
+      items.push({
+        id: `layer:${row.name}:${properties.key}`,
+        kind: 'layer',
+        category: 'statement',
+        label: properties.name || 'Unnamed marker',
+        raw: properties.date,
+        precision: 'day',
+        earliest: `${properties.date}T00:00:00Z`,
+        latest: `${last}T23:59:59Z`,
+        layer: {
+          name: row.name, title: row.title, key: properties.key, group: properties.category ?? '',
+          status: properties.status ?? '', links: properties.links ?? [],
+          external: properties.provenance === 'external',
+          at: point ? { lon: point[0], lat: point[1] } : null,
+        },
+      });
+    }
+  }
+  return items.sort((a, b) => a.earliest.localeCompare(b.earliest));
 }
 
 /** Whether a track draws its events as the files they date. */
@@ -170,6 +223,7 @@ export function trackPresets(types = []) {
     timelineTrack({ id: 'preset-events', label: 'Events', categories: ['statement'] }),
     { ...mediaLane(), id: 'preset-files' },
     { ...imageryLane(), id: 'preset-imagery' },
+    { ...layersLane(), id: 'preset-layers' },
     ofType('person'),
     ofType('place', 'place'),
     timelineTrack({

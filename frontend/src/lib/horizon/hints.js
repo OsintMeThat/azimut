@@ -10,8 +10,9 @@
  *   along when the analyst said so.
  * - What kind of picture it is: a photo, or a panorama (a phone's sweep, or a
  *   collage Azimut stitched on a cylinder), which is read through the view's
- *   strip, the same degrees per pixel all along. Offered only for a wide
- *   picture or a stitched collage; a stitched collage says how wide it is.
+ *   strip, the same degrees per pixel all along. Offered for any image, the
+ *   analyst's call: a wide one is pointed to it, and a stitched collage says
+ *   how wide it is.
  * - How far the photo sees: haze hides ridges the terrain still holds, so the
  *   skyline a photo shows is often a nearer one than the turn's outermost.
  *   Auto lets Fit try each reach the panorama keeps (api/horizon.py
@@ -39,7 +40,7 @@ export const PICTURES = [
   { id: 'panorama', label: 'Panorama', title: 'A phone’s panorama or a stitched collage: the same degrees per pixel all along' },
 ];
 
-/** A picture this many times wider than tall may be a panorama. */
+/** A picture this many times wider than tall is pointed to Panorama. */
 export const PANORAMA_ASPECT = 2.2;
 
 /** The widths a panorama of unknown width is searched across, degrees. */
@@ -79,11 +80,19 @@ export function cleanHints(hints) {
 }
 
 /**
- * Whether a picture may be a panorama: an image, wide (`aspect`, width over
- * height), or exported from a collage Azimut stitched on a cylinder (`stitched`,
- * the photo route's `panorama`). A video's frames are photos.
+ * Whether a picture may be read as a panorama: any image, the analyst's call,
+ * a hand-made collage included whatever its shape. A video's frames are photos.
  */
-export function panoramaOffered({ kind, aspect, stitched }) {
+export function panoramaOffered({ kind }) {
+  return kind === 'image';
+}
+
+/**
+ * Whether a picture looks like a panorama, which the choice then says: wide
+ * (`aspect`, width over height), or exported from a collage Azimut stitched on a
+ * cylinder (`stitched`, the photo route's `panorama`).
+ */
+export function panoramaLikely({ kind, aspect, stitched }) {
   return kind === 'image' && (Boolean(stitched) || aspect >= PANORAMA_ASPECT);
 }
 

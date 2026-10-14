@@ -24,8 +24,6 @@
     scaleMin,
     scaleMax,
     scaleStep,
-    frameWidthMax,
-    frameColor,
     openPicker,
     movePanelZ,
     scalePanel,
@@ -34,15 +32,10 @@
     removePanel,
     movePasteZ,
     removePaste,
-    setFrame,
     pickImageFile,
     featureList,
     moveLegendColor,
     setColor,
-    canBringForward,
-    canSendBackward,
-    bringForward,
-    sendBackward,
     moveShapeTo,
     kindIcon,
     kindLabel,
@@ -139,42 +132,6 @@
 
 <!-- Coloured border for a panel or a pasted image. Picking a colour adds one,
      thickness 0 or the cross takes it away. -->
-{#snippet frameControl(item)}
-  <div class="frame-ctl">
-    <label
-      class="color-btn color-pick bg-pick"
-      class:active={!!item.frame}
-      style:background={item.frame?.color ?? 'transparent'}
-      title="Border color"
-    >
-      <Icon name="square" size={11} />
-      <input
-        type="color"
-        value={item.frame?.color ?? frameColor}
-        oninput={(event) => setFrame(item, { color: event.target.value })}
-        aria-label="border color"
-      />
-    </label>
-    {#if item.frame}
-      <input
-        class="input frame-width"
-        type="number"
-        min="0"
-        max={frameWidthMax}
-        step="1"
-        value={item.frame.width}
-        oninput={(event) => setFrame(item, { width: +event.target.value })}
-        title="Border thickness"
-        aria-label="border thickness"
-      />
-      <button
-        class="btn btn-ghost btn-sm"
-        title="Remove border"
-        onclick={() => setFrame(item, null)}
-      ><Icon name="x" size={11} /></button>
-    {/if}
-  </div>
-{/snippet}
 
 <!-- The crop button is the keyboard-accessible counterpart to double-clicking
      an image. Rotation lives on the canvas as the round selection handle. -->
@@ -259,7 +216,7 @@
             onclick={() => movePanelZ(index, 1)}
           ><Icon name="chevronDown" size={13} /></button>
         {/if}
-        <div class="panel-scale" title="Panel size; elements scale with it">
+        <div class="panel-scale" title="Panel size; marks follow it at the same line width">
           <button
             class="btn btn-ghost btn-sm"
             disabled={(panel.scale ?? 1) <= scaleMin}
@@ -274,7 +231,6 @@
             onclick={() => scalePanel(index, scaleStep)}
           >+</button>
         </div>
-        {@render frameControl(panel)}
         <button
           class="btn btn-ghost btn-sm remove-panel"
           title="Remove panel"
@@ -326,7 +282,6 @@
           title="Send backward"
           onclick={() => movePasteZ(index, 1)}
         ><Icon name="chevronDown" size={13} /></button>
-        {@render frameControl(paste)}
         <button
           class="btn btn-ghost btn-sm remove-panel"
           title="Remove overlay"
@@ -401,20 +356,8 @@
       title="Drag to reorder"
       onkeydown={(event) => event.key === 'Enter' && selectShape(shape.id, event.shiftKey)}
     >
-      <div class="reorder">
-        <button
-          class="btn btn-ghost reorder-btn"
-          disabled={!canBringForward(index)}
-          title="Bring forward (over the others on its picture)"
-          onclick={(event) => { event.stopPropagation(); bringForward(index); }}
-        ><Icon name="chevronUp" size={11} /></button>
-        <button
-          class="btn btn-ghost reorder-btn"
-          disabled={!canSendBackward(index)}
-          title="Send backward"
-          onclick={(event) => { event.stopPropagation(); sendBackward(index); }}
-        ><Icon name="chevronDown" size={11} /></button>
-      </div>
+      <!-- The row drags to restack; the canvas's right-click and Ctrl+↑/↓ do it in place. -->
+      <span class="grip" aria-hidden="true"><Icon name="grip" size={14} stroke={3.4} /></span>
       <!-- A blur box has no colour to show: it is the one mark drawn from the
            picture's own pixels rather than in ink. -->
       {#if shape.kind !== 'blur'}
@@ -438,38 +381,30 @@
           onchange={markDirty}
           onclick={(event) => event.stopPropagation()}
         />
-        <button
-          class="btn btn-ghost btn-sm"
-          class:active={shape.frame}
-          title="Frame (border in the text's color)"
-          onclick={(event) => {
-            event.stopPropagation();
-            shape.frame = !shape.frame;
+      {:else if shape.kind === 'rect' && shape.tag != null}
+        <!-- A tagged box's words, typed here as on the canvas; emptied, the tag goes. -->
+        <input
+          class="input comment-input"
+          placeholder="Tag…"
+          bind:value={shape.tag}
+          onchange={() => {
+            if (!shape.tag.trim()) {
+              delete shape.tag;
+              delete shape.tagAt;
+            }
             markDirty();
           }}
-        ><Icon name="square" size={13} /></button>
-        <label
-          class="color-btn color-pick bg-pick"
-          class:active={!!shape.bg}
-          style:background={shape.bg || 'transparent'}
-          title="Background color"
-        >
-          <Icon name="plus" size={11} />
-          <input
-            type="color"
-            value={shape.bg || '#000000'}
-            oninput={(event) => { shape.bg = event.target.value; markDirty(); }}
-            onclick={(event) => event.stopPropagation()}
-            aria-label="text background color"
-          />
-        </label>
-        {#if shape.bg}
-          <button
-            class="btn btn-ghost btn-sm"
-            title="Remove background"
-            onclick={(event) => { event.stopPropagation(); shape.bg = null; markDirty(); }}
-          ><Icon name="x" size={11} /></button>
-        {/if}
+          onclick={(event) => event.stopPropagation()}
+        />
+      {:else if shape.kind === 'callout'}
+        <!-- A callout's words, typed here as on a label; its box is its pointer's. -->
+        <input
+          class="input comment-input"
+          placeholder="Text…"
+          bind:value={shape.text}
+          onchange={markDirty}
+          onclick={(event) => event.stopPropagation()}
+        />
       {:else}
         <!-- Numbered by where the row sits, so the count follows the eye down
              the list rather than the array underneath it. -->
@@ -589,7 +524,6 @@
   .cap-input { font-size: var(--fs-xs); padding: 5px 8px; }
   .panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; row-gap: 4px; }
   .remove-panel { margin-left: auto; }
-  .frame-ctl { display: flex; align-items: center; gap: 3px; }
   .transform-ctl {
     display: flex;
     align-items: center;
@@ -598,13 +532,6 @@
     border-right: 1px solid var(--border);
   }
   .transform-ctl .active { color: var(--accent); background: var(--accent-soft); }
-  .frame-width {
-    width: 44px;
-    padding: 2px 4px;
-    font-size: var(--fs-xs);
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-  }
   .panel-scale { display: flex; align-items: center; gap: 4px; margin: 0 auto; }
   .scale-val {
     min-width: 42px;
@@ -626,29 +553,10 @@
   }
   .anno-row.active { border-color: var(--accent); background: var(--accent-soft); }
   .reorder { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
+  .grip { display: flex; margin-left: -4px; color: var(--text-2); cursor: grab; flex-shrink: 0; }
+  .grip:hover { color: var(--text-1); }
   .reorder-btn { padding: 0 2px; line-height: 1; color: var(--text-3); }
   .reorder-btn:disabled { opacity: 0.25; cursor: default; }
-  .color-btn {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    flex-shrink: 0;
-  }
-  .color-btn.active { border-color: var(--text-1); box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3.5px var(--text-3); }
-  .color-pick {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent-text);
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-  }
-  .color-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .bg-pick { width: 20px; height: 20px; flex-shrink: 0; border: 1px dashed var(--border); }
-  .bg-pick.active { border-style: solid; }
-  .bg-pick:not(.active) { color: var(--text-3); }
   .chip-num {
     width: 20px;
     height: 20px;

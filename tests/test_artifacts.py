@@ -95,6 +95,8 @@ def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     # Grids are not entities, so nothing deletes them for us (a gap the trash
     # work records rather than closes).
     client.delete(f"/api/cases/{full.case_id}/search-grids/north-sweep")
+    # Nor is Horizon's bench: it is the tab's work in progress, emptied by the tab itself.
+    client.delete(f"/api/cases/{full.case_id}/horizon/work")
     # Deleting is reversible now, so the bytes are still in the trash: this is
     # the second half of the gate, and where they are actually reclaimed.
     client.delete(f"/api/cases/{full.case_id}/trash")

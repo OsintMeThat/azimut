@@ -38,10 +38,11 @@
   import { focal35FromFov, fovFromFocal35 } from '../../lib/horizon/camera.js';
   import { HEIGHT_LIMITS, MODE_LABELS, MODES, visibilityAt, visibilityStep, VISIBILITY_STEPS } from '../../lib/horizon/view.js';
   import { formatDistance, formatHeight } from '../../lib/measure.js';
+  import { marksSummary } from '../../lib/horizon/traceTools.js';
   import { bandsGradient, clockOf, minuteOf, skyLines, sunBands } from '../../lib/horizon/sky.js';
   import { targetReading } from '../../lib/horizon/readings.js';
   import { distanceBetween } from '../../lib/horizon/geometry.js';
-  import { BEND_MAX, isZoned, localClock } from '../../lib/horizon/overlay.js';
+  import { BEND_MAX, bendText, isZoned, localClock, reliefWords } from '../../lib/horizon/overlay.js';
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
 
   let {
@@ -123,9 +124,7 @@
   const lensOff = $derived(Boolean(lens) && Math.abs(lens.fov - camera.fov) > 0.05);
   const fileWord = $derived(photo?.kind === 'video' ? 'video' : 'photo');
   /** The lens's curve undone, said as a number with its kind. */
-  const bendText = $derived(
-    !overlay?.bend ? 'None' : `${overlay.bend < 0 ? 'Barrel' : 'Pincushion'} ${Math.abs(overlay.bend).toFixed(2)}`
-  );
+  const bendWords = $derived(bendText(overlay?.bend));
   const placed = $derived(photo && overlay.facts.gps && observer ? overlay.facts.gps : null);
   const placedAway = $derived(placed ? distanceBetween(observer, placed) : 0);
   const taken = $derived(photo ? overlay.facts.taken_at ?? '' : '');
@@ -341,10 +340,10 @@
           oninput={(event) => overlay.setBend(event.currentTarget.value)}
           ondblclick={() => overlay.setBend(0)}
           aria-label="Lens distortion"
-          aria-valuetext={bendText}
+          aria-valuetext={bendWords}
           title={overlay.isPanorama ? 'A panorama has no lens curve to undo' : 'Straightens the curve a wide lens gives the edges; double-click for none'}
         />
-        <span class="end mono">{bendText}</span>
+        <span class="end mono">{bendWords}</span>
       </span>
       {#if placed}
         <span class="key">Place</span>
@@ -377,12 +376,19 @@
       {#if overlay.strokes.length}
         <span class="key">Trace</span>
         <span class="value with-act">
-          <span>{overlay.strokes.length === 1 ? 'One stroke' : `${overlay.strokes.length} strokes`}</span>
+          <span
+            >{overlay.strokes.length === 1 ? 'One stroke' : `${overlay.strokes.length} strokes`}{marksSummary(overlay.marks)
+              ? ` · ${marksSummary(overlay.marks)}`
+              : ''}</span
+          >
           <span class="acts">
             <button type="button" class="btn btn-ghost btn-sm" onclick={() => overlay.undoStroke()} title="Take the last change to the trace back (Ctrl+Z)">Undo</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick={() => overlay.clearTrace()}>Clear</button>
           </span>
         </span>
+      {/if}
+      {#if reliefWords(view.panorama?.resolution)}
+        <p class="hint wide">{reliefWords(view.panorama?.resolution)}</p>
       {/if}
       <p class="hint wide">{lens ? 'The lens is the file’s.' : 'No lens in the file: match it by eye or with Fit to trace.'} Alt+wheel on the view sets the height.</p>
     {/snippet}

@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
@@ -36,7 +36,7 @@ from ..engine import artifacts as artifact_engine
 from ..engine import geoconfirmed
 from ..engine import layerediting
 from ..engine import layerexports
-from ..engine import mapviews
+from ..engine import layerlinks
 from ..engine import maplayers as layer_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
@@ -121,7 +121,20 @@ class FeatureOrderIn(BaseModel):
     before: str | None = Field(default=None, min_length=1, max_length=64)
 
 
-class MarkerIn(BaseModel):
+#: A link a marker cites, bounded here and checked by the engine.
+Link = Annotated[str, Field(max_length=layerediting.MAX_LINK)]
+
+
+class MarkerFields(BaseModel):
+    """What a feature says beyond its name and style; see `layerediting.apply_fields`."""
+    date: str | None = Field(default=None, max_length=40)
+    status: str | None = Field(default=None, max_length=20)
+    bearing: float | None = Field(default=None, allow_inf_nan=False)
+    links: list[Link] | None = Field(default=None, max_length=layerediting.MAX_LINKS)
+    provenance: str | None = Field(default=None, max_length=20)
+
+
+class MarkerIn(MarkerFields):
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
     lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
     name: str = Field(default="", max_length=layer_engine.MAX_NAME)
@@ -138,13 +151,15 @@ class MarkerIn(BaseModel):
         return value
 
 
-class MarkerUpdateIn(BaseModel):
+class MarkerUpdateIn(MarkerFields):
     name: str | None = Field(default=None, max_length=layer_engine.MAX_NAME)
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     symbol: str | None = None
     description: str | None = Field(default=None, max_length=layer_engine.MAX_DESCRIPTION)
     group: str | None = Field(default=None, max_length=64)
     geometry: dict[str, Any] | None = None
+    #: Stop following the case item the marker was added from, keeping its point.
+    unlink: bool | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -163,6 +178,8 @@ class GroupUpdateIn(BaseModel):
     symbol: str | None = None
     size: float | None = Field(default=None, ge=0.5, le=3, allow_inf_nan=False)
     stroke: float | None = Field(default=None, ge=0.5, le=12, allow_inf_nan=False)
+    #: Draw each feature's name beside it on the map.
+    labels: bool | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -170,9 +187,43 @@ class GroupUpdateIn(BaseModel):
         return MarkerUpdateIn._symbol(value)
 
 
-class PlacesIn(BaseModel):
-    ids: list[str] = Field(min_length=1, max_length=2000)
+class PaletteEntryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    colour: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class PaletteIn(BaseModel):
+    colours: list[PaletteEntryIn] = Field(default_factory=list, max_length=layerediting.MAX_PALETTE)
+
+
+class LinkItemIn(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+class LinksIn(BaseModel):
+    items: list[LinkItemIn] = Field(min_length=1, max_length=2000)
     group: str | None = Field(default=None, max_length=64)
+    # The markers' own style, for a group whose features each have theirs.
+    symbol: str | None = None
+    colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("symbol")
+    @classmethod
+    def _symbol(cls, value: str | None) -> str | None:
+        if value is not None and value not in layerediting.SYMBOLS:
+            raise ValueError("choose an icon from the layer palette")
+        return value
+
+
+class MergeIn(BaseModel):
+    keys: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(min_length=2, max_length=2000)
+
+
+class SplitIn(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    at: int | None = Field(default=None, ge=1, le=4096)
 
 
 class SelectionIn(BaseModel):
@@ -192,7 +243,7 @@ class EditEndIn(BaseModel):
     discard: bool = False
 
 
-class ShapeIn(BaseModel):
+class ShapeIn(MarkerFields):
     geometry: dict[str, Any]
     name: str = Field(default="", max_length=layer_engine.MAX_NAME)
     colour: str = Field(default="#0072b2", pattern=r"^#[0-9a-fA-F]{6}$")
@@ -200,40 +251,16 @@ class ShapeIn(BaseModel):
     group: str | None = Field(default=None, max_length=64)
 
 
+def _changes(body: BaseModel) -> dict[str, Any]:
+    """The fields an edit sent. A marker field sent as null clears it; the rest skip null."""
+    return {key: value for key, value in body.model_dump(exclude_unset=True).items()
+            if value is not None or key in layerediting.CLEARABLE}
+
+
 def _refused(exc: layer_engine.LayerError) -> HTTPException:
     """A source that will not draw, said in one sentence the panel can show."""
     status = 502 if isinstance(exc, layer_engine.LayerFetchError) else 422
     return HTTPException(status_code=status, detail=str(exc))
-
-
-class MapCameraIn(BaseModel):
-    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
-    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
-    zoom: float = Field(ge=0, le=26, allow_inf_nan=False)
-    bearing: float = Field(default=0, ge=0, le=360, allow_inf_nan=False)
-    pitch: float = Field(default=0, ge=0, le=85, allow_inf_nan=False)
-
-
-class ViewLayerIn(BaseModel):
-    name: str = Field(min_length=1, max_length=200, pattern=r"^[^/\\\\]+$")
-    hidden: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=2000)
-
-
-class LegendEntryIn(BaseModel):
-    label: str = Field(min_length=1, max_length=200)
-    colour: str = Field(default="#0072b2", pattern=r"^#[0-9a-fA-F]{6}$")
-
-
-class MapViewIn(BaseModel):
-    id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
-    title: str = Field(min_length=1, max_length=200)
-    provider: str = Field(min_length=1, max_length=100)
-    camera: MapCameraIn
-    overlays: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=100)
-    layers: list[ViewLayerIn] = Field(default_factory=list, max_length=2000)
-    legend: list[LegendEntryIn] = Field(default_factory=list, max_length=2000)
-    note: str = Field(default="", max_length=2000)
-    show_legend: bool = True
 
 
 class LayerExportIn(BaseModel):
@@ -256,40 +283,6 @@ def download_layer(case_id: str, name: str, fmt: Literal["geojson", "kml", "kmz"
                                  "Cache-Control": "no-store"})
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
-
-
-@router.get("/{case_id}/map-views")
-def list_map_views(case_id: str) -> list[dict[str, Any]]:
-    return mapviews.listing(get_case(case_id))
-
-
-@router.post("/{case_id}/map-views")
-def save_map_view(case_id: str, body: MapViewIn) -> dict[str, Any]:
-    try:
-        case = get_case(case_id)
-        saved = mapviews.save(case, body.model_dump())
-        events.publish({"type": "saved", "case_id": case.id})
-        return saved
-    except layer_engine.LayerError as exc:
-        raise _refused(exc) from exc
-
-
-@router.get("/{case_id}/map-views/{name}")
-def get_map_view(case_id: str, name: str) -> dict[str, Any]:
-    try:
-        return mapviews.read(get_case(case_id), name)
-    except layer_engine.LayerError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.delete("/{case_id}/map-views/{name}")
-def remove_map_view(case_id: str, name: str) -> dict[str, Any]:
-    case = get_case(case_id)
-    try:
-        mapviews.read(case, name)
-        return delete_by_path(case, layout.map_view_rel(name))
-    except layer_engine.LayerError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{case_id}/map-layers")
@@ -375,7 +368,7 @@ def reorder_layer_features(case_id: str, name: str, body: FeatureOrderIn) -> dic
 @router.post("/{case_id}/map-layers/{name}/selection")
 def edit_layer_selection(case_id: str, name: str, body: SelectionIn) -> dict[str, Any]:
     try:
-        changes = body.changes.model_dump(exclude_none=True) if body.changes else {}
+        changes = _changes(body.changes) if body.changes else {}
         return layerediting.edit_selection(get_case(case_id), _stem(name), body.keys,
                                            changes=changes, offset=body.offset, remove=body.remove)
     except layer_engine.LayerError as exc:
@@ -431,10 +424,55 @@ def remove_layer_group(case_id: str, name: str, key: str) -> dict[str, Any]:
         raise _refused(exc) from exc
 
 
-@router.post("/{case_id}/map-layers/{name}/places")
-def add_layer_places(case_id: str, name: str, body: PlacesIn) -> dict[str, Any]:
+@router.get("/{case_id}/layer-palette")
+def layer_palette(case_id: str) -> dict[str, Any]:
+    return {"colours": layerediting.palette(get_case(case_id))}
+
+
+@router.put("/{case_id}/layer-palette")
+def save_layer_palette(case_id: str, body: PaletteIn) -> dict[str, Any]:
     try:
-        return layerediting.add_places(get_case(case_id), _stem(name), body.ids, body.group)
+        colours = layerediting.set_palette(get_case(case_id), [entry.model_dump() for entry in body.colours])
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+    events.publish({"type": "saved", "case_id": case_id})
+    return {"colours": colours}
+
+
+@router.get("/{case_id}/layer-links")
+def linkable_items(case_id: str) -> list[dict[str, Any]]:
+    """Everything located in the case that a layer marker can follow. Reads disk only."""
+    return layerlinks.linkable(get_case(case_id))
+
+
+@router.get("/{case_id}/layer-targets")
+def layer_targets(case_id: str, entity: Annotated[str | None, Query(max_length=64)] = None) -> list[dict[str, Any]]:
+    """The layers a case item can be added to, and where it already is. Reads disk only."""
+    return layerediting.layer_targets(get_case(case_id), entity)
+
+
+@router.post("/{case_id}/map-layers/{name}/links")
+def add_layer_links(case_id: str, name: str, body: LinksIn) -> dict[str, Any]:
+    try:
+        return layerediting.add_links(get_case(case_id), _stem(name),
+                                      [item.model_dump() for item in body.items], body.group,
+                                      symbol=body.symbol, colour=body.colour)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/merge")
+def merge_layer_features(case_id: str, name: str, body: MergeIn) -> dict[str, Any]:
+    try:
+        return layerediting.merge(get_case(case_id), _stem(name), body.keys)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/{name}/split")
+def split_layer_feature(case_id: str, name: str, body: SplitIn) -> dict[str, Any]:
+    try:
+        return layerediting.split(get_case(case_id), _stem(name), body.key, body.at)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
@@ -450,8 +488,7 @@ def add_layer_marker(case_id: str, name: str, body: MarkerIn) -> dict[str, Any]:
 @router.patch("/{case_id}/map-layers/{name}/markers/{key}")
 def edit_layer_marker(case_id: str, name: str, key: str, body: MarkerUpdateIn) -> dict[str, Any]:
     try:
-        return layerediting.update_marker(get_case(case_id), _stem(name), key,
-                                          body.model_dump(exclude_none=True))
+        return layerediting.update_marker(get_case(case_id), _stem(name), key, _changes(body))
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 

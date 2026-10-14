@@ -16,9 +16,10 @@
  * A video adds time. A pin keeps the view's alignment at a moment of it, and
  * between two pins the view turns as the camera did (`cameraAt`).
  */
-import { focal, principal, rayFor, turnBetween } from './camera.js';
+import { focal, principal, rayFor, toScreen, turnBetween } from './camera.js';
 import { headingText } from './geometry.js';
-import { skylineWithin } from './panorama.js';
+import { pieceOf } from './traceMarks.js';
+import { distanceWithin, skylineWithin } from './panorama.js';
 import { FOV, heightFor } from './view.js';
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -149,6 +150,11 @@ export function grownPhoto(camera, loupe, factor, at, size, fov = FOV) {
 
 /** The most a photo's lens curve is undone either way: the curve stays one to one out to the corners. */
 export const BEND_MAX = 0.3;
+
+/** A lens's curve undone, said as a number with its kind: "None", "Barrel 0.12", "Pincushion 0.05". */
+export function bendText(k) {
+  return !k ? 'None' : `${k < 0 ? 'Barrel' : 'Pincushion'} ${Math.abs(k).toFixed(2)}`;
+}
 
 /** A photo's half-diagonal in its own coordinates across and down, which the curve is measured in. */
 export function bendShape(aspect) {
@@ -400,7 +406,16 @@ function segmentToSegment(a, b, c, d) {
  * The strokes come back as they were when nothing was rubbed.
  */
 export function eraseStrokes(strokes, path, radius, scale) {
-  if (!path.length || !(radius > 0)) return strokes;
+  return erasedFrom(strokes, path, radius, scale).strokes;
+}
+
+/**
+ * As `eraseStrokes`, and for each stroke left, the index of the stroke it
+ * came from (`from`): the pieces of a rubbed stroke share one.
+ */
+export function erasedFrom(strokes, path, radius, scale) {
+  const untouched = { strokes, from: strokes.map((_, i) => i) };
+  if (!path.length || !(radius > 0)) return untouched;
   const toPx = (p) => ({ x: p.u * scale.width, y: p.v * scale.height });
   const toPhoto = (p) => ({ u: fraction(p.x / scale.width), v: fraction(p.y / scale.height) });
   const rub = path.map(toPx);
@@ -409,11 +424,15 @@ export function eraseStrokes(strokes, path, radius, scale) {
   const touches = (a, b) => rubs.some(([c, d]) => segmentToSegment(a, b, c, d) < radius);
   let changed = false;
   const kept = [];
-  for (const stroke of strokes) {
+  const from = [];
+  strokes.forEach((stroke, index) => {
     const line = stroke.map(toPx);
     let piece = [];
     const close = () => {
-      if (piece.length > 1) kept.push(piece);
+      if (piece.length > 1) {
+        kept.push(piece);
+        from.push(index);
+      }
       piece = [];
     };
     if (near(line[0])) changed = true;
@@ -435,8 +454,8 @@ export function eraseStrokes(strokes, path, radius, scale) {
       }
     }
     close();
-  }
-  return changed ? kept : strokes;
+  });
+  return changed ? { strokes: kept, from } : untouched;
 }
 
 /** The most points a trace is read at: plenty for a skyline, cheap enough per frame. */
@@ -444,7 +463,8 @@ export const TRACE_SAMPLES = 480;
 
 /**
  * Points along every stroke, evenly spaced on screen, in CSS pixels of a frame
- * this size: a stroke drawn slowly weighs no more than one drawn fast.
+ * this size: a stroke drawn slowly weighs no more than one drawn fast. Each
+ * says the index of the stroke it lies on (`stroke`).
  */
 export function traceSamples(strokes, size, { spacing = 4, most = TRACE_SAMPLES } = {}) {
   if (!(size.width > 0) || !(size.height > 0)) return [];
@@ -455,13 +475,13 @@ export function traceSamples(strokes, size, { spacing = 4, most = TRACE_SAMPLES 
   }
   const step = Math.max(spacing, length / most);
   const samples = [];
-  for (const line of lines) {
+  lines.forEach((line, stroke) => {
     if (line.length === 1) {
-      samples.push(line[0]);
-      continue;
+      samples.push({ ...line[0], stroke });
+      return;
     }
     let carried = 0;
-    samples.push(line[0]);
+    samples.push({ ...line[0], stroke });
     for (let i = 1; i < line.length; i += 1) {
       const a = line[i - 1];
       const b = line[i];
@@ -469,13 +489,51 @@ export function traceSamples(strokes, size, { spacing = 4, most = TRACE_SAMPLES 
       let at = step - carried;
       while (at <= span) {
         const t = at / span;
-        samples.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+        samples.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, stroke });
         at += step;
       }
       carried = span - (at - step);
     }
-  }
+  });
   return samples.slice(0, most * 2);
+}
+
+/**
+ * How far the terrain's skyline may be off, in cells of its heights seen from
+ * the ridge's distance: half a cell, a ridge's crest lying between two samples.
+ */
+export const MARGIN_CELLS = 0.5;
+
+/**
+ * How far the terrain's skyline may be off at an azimuth, degrees: wide on a
+ * ridge a few hundred metres off, next to nothing on one far out, as coarse as
+ * the heights the panorama was read from (`resolution`). None where the
+ * panorama says no distance. It is shown, as a band round the skyline, and
+ * never counted: forgiving near ridges was measured to lift wrong places more
+ * than the right one (engine/skymatch.py).
+ */
+export function terrainMargin(panorama, azimuth, reach = null) {
+  const detail = panorama?.resolution;
+  const distance = distanceWithin(panorama, reach);
+  if (!(detail > 0) || !distance?.length) return 0;
+  const { start, step, count } = panorama.azimuth;
+  const column = Math.round(((((azimuth - start) % 360) + 360) % 360) / step) % count;
+  const far = distance[column];
+  if (!(far > 0)) return 0;
+  return ((MARGIN_CELLS * detail) / Math.max(far, detail)) * (180 / Math.PI);
+}
+
+/**
+ * How fine the terrain is where a photo is matched, in words for the trace:
+ * a near ridge is known only that coarsely, so its rocks need no tracing.
+ * Empty while the grain is unknown.
+ */
+export function reliefWords(detail) {
+  if (!(detail > 0)) return '';
+  const metres = Math.round(detail);
+  return metres >= 20
+    ? `Relief here is known to ${metres} m: trace a near ridge’s shape, not its rocks or trees.`
+    : `Relief here is known to ${metres} m, from a national survey.`;
 }
 
 /**
@@ -509,10 +567,34 @@ function median(values) {
 }
 
 /** How each sampled point stands against the terrain's skyline, through a camera: degrees, + above it. */
-function residuals(samples, camera, skyline) {
+/**
+ * The camera each piece of a cut collage is seen through: the whole's, eased
+ * by the turn, tilt and roll the search found for that piece
+ * (engine/skymatch.py `pieces_of`). With no pieces, the whole's everywhere.
+ *
+ * @param {object} camera the whole's
+ * @param {{piece:number, turn:number, tilt:number, roll:number}[]|null} pieces
+ * @returns {(piece: number) => object}
+ */
+export function pieceCameras(camera, pieces) {
+  if (!pieces?.length) return () => camera;
+  const eased = new Map(
+    pieces.map((p) => [p.piece, { ...camera, heading: camera.heading + p.turn, tilt: camera.tilt + p.tilt, roll: (camera.roll ?? 0) + p.roll }])
+  );
+  return (piece) => eased.get(piece) ?? camera;
+}
+
+/** The camera a point of the frame (`{ u, v }`) is seen through, its piece's when the collage is cut and eased. */
+function cameraOver(camera, { pieces = null, pieceAt = null } = {}) {
+  if (!pieces?.length || !pieceAt) return () => camera;
+  const of = pieceCameras(camera, pieces);
+  return (point) => of(pieceAt(point));
+}
+
+function residuals(samples, camera, skyline, through = () => camera) {
   const out = [];
   for (const sample of samples) {
-    const ray = rayFor(camera, sample.x, sample.y);
+    const ray = rayFor(through({ u: sample.x / camera.width, v: sample.y / camera.height }), sample.x, sample.y);
     const top = skyline(ray.azimuth);
     if (top == null) continue;
     out.push({ gap: ray.elevation - top, azimuth: ray.azimuth });
@@ -538,9 +620,11 @@ export const GAP_MIN_POINTS = 6;
  * @param {{x:number, y:number}[]} samples from `traceSamples`
  * @param {object} camera the view's camera with its frame's width and height
  * @param {(azimuth: number) => number|null} skyline the terrain's, in degrees
+ * @param {{pieces?: object[]|null, pieceAt?: (point: {u:number, v:number}) => number}} [pieced]
+ *   a cut collage's pieces as the search eased them, and the piece a point lies in
  */
-export function traceGap(samples, camera, skyline) {
-  const found = residuals(samples, camera, skyline);
+export function traceGap(samples, camera, skyline, pieced = {}) {
+  const found = residuals(samples, camera, skyline, cameraOver(camera, pieced));
   if (found.length < GAP_MIN_POINTS) return null;
   return {
     median: median(found.map((r) => Math.abs(r.gap))),
@@ -548,6 +632,135 @@ export function traceGap(samples, camera, skyline) {
     span: spanOf(found),
     points: found.length,
   };
+}
+
+/**
+ * Screen pixels within which a traced point lies on the terrain's skyline, and
+ * past which it is off it: the search's own (engine/skymatch.py `HUBER_PX`,
+ * `LOST_PX`), so what the trace's colours show is what the score counts.
+ */
+export const ON_PX = 3;
+export const OFF_PX = 12;
+
+/**
+ * How each point of each stroke lies on the terrain through a camera: `on`
+ * the skyline, `near` it, or `off` it (no ground under it counts as off), by
+ * the thresholds the score counts with.
+ *
+ * @param {{u:number, v:number}[][]} strokes the trace on the straightened photo
+ * @param {object} camera the view's camera with its frame's width and height
+ * @param {(azimuth: number) => number|null} skyline the terrain's, in degrees
+ * @param {object} [pieced] a cut collage's eased pieces (`traceGap`)
+ * @returns {('on'|'near'|'off')[][]}
+ */
+export function traceFit(strokes, camera, skyline, pieced = {}) {
+  const { width, height } = camera;
+  if (!(width > 0) || !(height > 0)) return [];
+  const perDegree = pixelsPerDegree(camera);
+  const through = cameraOver(camera, pieced);
+  return strokes.map((stroke) =>
+    stroke.map((p) => {
+      const ray = rayFor(through(p), p.u * width, p.v * height);
+      const top = skyline(ray.azimuth);
+      if (top == null) return 'off';
+      const px = Math.abs(ray.elevation - top) * perDegree;
+      return px <= ON_PX ? 'on' : px <= OFF_PX ? 'near' : 'off';
+    })
+  );
+}
+
+/**
+ * A stroke cut where its points change how they lie (`traceFit`), each run
+ * sharing its first point with the run before so the line stays whole.
+ *
+ * @returns {{ kind: string, points: object[] }[]}
+ */
+export function fitRuns(stroke, kinds) {
+  const runs = [];
+  for (let i = 0; i < stroke.length; i += 1) {
+    const kind = kinds[i] ?? 'off';
+    const last = runs[runs.length - 1];
+    if (last && last.kind === kind) last.points.push(stroke[i]);
+    else runs.push({ kind, points: last ? [last.points[last.points.length - 1], stroke[i]] : [stroke[i]] });
+  }
+  return runs;
+}
+
+/**
+ * The trace laid on the terrain as the whole camera draws it, in frame
+ * pixels (`{ x, y }`): each point of a cut collage through its piece's eased
+ * camera, so a piece lands where the search read it; as traced otherwise.
+ *
+ * @param {{u:number, v:number}[][]} strokes the trace on the straightened photo
+ * @param {object} camera the view's camera with its frame's width and height
+ * @param {object} [pieced] a cut collage's eased pieces (`traceGap`)
+ */
+export function traceOnTerrain(strokes, camera, pieced = {}) {
+  const { width, height } = camera;
+  const through = cameraOver(camera, pieced);
+  return strokes.map((stroke) =>
+    stroke.map((p) => {
+      const traced = { x: p.u * width, y: p.v * height };
+      const own = through(p);
+      if (own === camera) return traced;
+      const ray = rayFor(own, traced.x, traced.y);
+      const at = toScreen(camera, ray.azimuth, ray.elevation);
+      return at.visible ? { x: at.x, y: at.y } : traced;
+    })
+  );
+}
+
+/** Frame pixels between two columns the terrain's skyline is drawn at over a photo. */
+export const TERRAIN_STEP_PX = 3;
+
+/**
+ * The terrain's skyline in the photo's frame, each piece of a cut collage
+ * through its own eased camera so it lies where the search read it: runs of
+ * points across the frame (`u`, `v`, 0 to 1), each with how far up and down
+ * the skyline may be off (`high`, `low` as a `v`, null where it is not known).
+ * A run ends where no ground stands or the skyline leaves the camera's sight,
+ * and at a cut whose pieces were eased.
+ *
+ * @param {object} camera the view's camera with its frame's width and height
+ * @param {((azimuth: number) => {top: number|null, margin: number})|null} band the terrain's skyline and its margin
+ * @param {object} [pieced] a cut collage's eased pieces (`traceGap`), and `step`, frame pixels between columns
+ * @returns {{u:number, v:number, high:number|null, low:number|null}[][]}
+ */
+export function terrainLine(camera, band, { pieces = null, pieceAt = null, step = TERRAIN_STEP_PX } = {}) {
+  const { width, height } = camera;
+  if (!band || !(width > 0) || !(height > 0)) return [];
+  const eased = Boolean(pieces?.length && pieceAt);
+  const of = pieceCameras(camera, eased ? pieces : null);
+  const runs = [];
+  let run = [];
+  let last = null;
+  const close = () => {
+    if (run.length > 1) runs.push(run);
+    run = [];
+  };
+  for (let x = 0; ; x += step) {
+    const column = Math.min(x, width);
+    const piece = eased ? pieceAt({ u: column / width, v: 0.5 }) : 0;
+    if (piece !== last) close();
+    last = piece;
+    const through = of(piece);
+    const { azimuth } = rayFor(through, column, height / 2);
+    const at = band(azimuth);
+    const seen = Number.isFinite(at?.top) ? toScreen(through, azimuth, at.top) : null;
+    if (seen?.visible) {
+      const high = at.margin > 0 ? toScreen(through, azimuth, at.top + at.margin) : null;
+      const low = at.margin > 0 ? toScreen(through, azimuth, at.top - at.margin) : null;
+      run.push({
+        u: seen.x / width,
+        v: seen.y / height,
+        high: high?.visible ? high.y / height : null,
+        low: low?.visible ? low.y / height : null,
+      });
+    } else close();
+    if (column >= width) break;
+  }
+  close();
+  return runs;
 }
 
 /** The gap's median in degrees as it is written: two decimals under 1°, one under 10°. */
@@ -712,6 +925,44 @@ export function tracePlane(samples, camera) {
   };
 }
 
+/**
+ * The trace on the picture plane with the marks beside it (lib/horizon/traceMarks.js),
+ * as the search reads them (api/horizon.py `MarksIn`): the skyline's points
+ * as `tracePlane` gives them, the inner edges' apart (`ridge_x`, `ridge_y`),
+ * and, when they matter, the stroke each point lies on (for the pairs) and
+ * the piece of a collage it lies in: `pieceAt(sample)`, by default how many
+ * of the marks' cuts stand left of it across the frame. Samples come from
+ * `traceSamples`, each saying its stroke. Without marks, the plane alone.
+ */
+export function markedPlane(samples, camera, marks, pieceAt = null) {
+  const cuts = marks?.cuts ?? [];
+  const inner = new Set(marks?.inner ?? []);
+  const lineOf = (s) => marks?.lines?.[s.stroke] ?? s.stroke;
+  const sky = inner.size ? samples.filter((s) => !inner.has(lineOf(s))) : samples;
+  const plane = tracePlane(sky, camera);
+  if (!inner.size && !marks?.pairs?.length && !cuts.length) return plane;
+  const ridge = samples.filter((s) => inner.has(lineOf(s)));
+  const ridges = ridge.length ? tracePlane(ridge, camera) : { x: [], y: [] };
+  const out = { ...plane, ridge_x: ridges.x, ridge_y: ridges.y };
+  if (marks?.pairs?.length) {
+    // the search names strokes 0, 1… in the order they come
+    const index = new Map();
+    const named = (id) => {
+      if (!index.has(id)) index.set(id, index.size);
+      return index.get(id);
+    };
+    out.line = sky.map((s) => named(lineOf(s)));
+    out.ridge_line = ridge.map((s) => named(lineOf(s)));
+    out.pairs = marks.pairs.filter(([f, b]) => index.has(f) && index.has(b)).map(([f, b]) => [index.get(f), index.get(b)]);
+  }
+  if (cuts.length) {
+    const piece = pieceAt ?? ((s) => pieceOf(cuts, s.x / camera.width));
+    out.piece = sky.map(piece);
+    out.ridge_piece = ridge.map(piece);
+  }
+  return out;
+}
+
 /** A skyline as JSON carries it: a column without ground is null. */
 const sendable = (angles) => Array.from(angles, (v) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null));
 
@@ -724,12 +975,13 @@ const sendable = (angles) => Array.from(angles, (v) => (Number.isFinite(v) ? Mat
  * up to `autoReach`, the farthest as the turn and the nearer ones beside it,
  * for the search to try each (the whole turn when it keeps none); a number
  * sends that cut alone; anything else the whole turn alone. `within` and
- * `facing` are the hints (lib/horizon/hints.js searchHints).
+ * `facing` are the hints (lib/horizon/hints.js searchHints). `marks` are
+ * the trace's (lib/horizon/traceMarks.js), `pieceAt` as `markedPlane` takes it.
  *
  * @param {{ known?: boolean, reach?: 'auto' | number | null, autoReach?: number, within?: number[], facing?: number[] }} [options]
  *   `known`: the photo said its lens, which is then the only one tried
  */
-export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing } = {}) {
+export function matchRequest(samples, camera, panorama, { known = false, reach = null, autoReach = Infinity, within, facing, marks = null, pieceAt = null } = {}) {
   if (!panorama?.skyline?.length || panorama.azimuth?.full === false) return null;
   const tried = reach === 'auto' ? (panorama.cuts ?? []).filter((cut) => cut.reach <= autoReach) : [];
   const outer = Number.isFinite(reach) && skylineWithin(panorama, reach) !== panorama.skyline ? reach : (tried.at(-1)?.reach ?? null);
@@ -739,7 +991,7 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
     cuts: tried.slice(0, -1).map((cut) => ({ reach: cut.reach, skyline: sendable(cut.skyline) })),
     start: panorama.azimuth.start,
     step: panorama.azimuth.step,
-    ...tracePlane(samples, camera),
+    ...markedPlane(samples, camera, marks, pieceAt),
     fov: camera.fov,
     known,
     tilt: camera.tilt,
@@ -756,12 +1008,14 @@ export function matchRequest(samples, camera, panorama, { known = false, reach =
  * first. A place lies on a cut of the turn (`reach`, metres, null for the
  * whole), and is refined and measured against that cut: `skyline(azimuth,
  * reach)` reads it. A place the refinement cannot improve stays as the search
- * left it.
+ * left it, and so does one whose collage pieces the search eased (`pieces`,
+ * kept on the place): they were eased about that camera.
  *
  * @param {{ fits: object[] }} found the search's answer
- * @param {{ lens?: boolean }} [options] `lens`: whether the field of view may change
+ * @param {{ lens?: boolean, pieceAt?: Function }} [options] `lens`: whether the field of view may change;
+ *   `pieceAt`, the piece of the collage a point of the frame lies in
  */
-export function searchedPlaces(found, samples, camera, skyline, { lens = true } = {}) {
+export function searchedPlaces(found, samples, camera, skyline, { lens = true, pieceAt = null } = {}) {
   return (found?.fits ?? []).map((fit) => {
     const on = Number.isFinite(fit.reach) ? fit.reach : null;
     const along = (azimuth) => skyline(azimuth, on);
@@ -772,9 +1026,11 @@ export function searchedPlaces(found, samples, camera, skyline, { lens = true } 
       roll: Number.isFinite(fit.roll) ? fit.roll : camera.roll,
       fov: lens ? fit.fov : camera.fov,
     };
-    const refined = fitToTrace(samples, start, along, { lens });
+    const pieces = fit.pieces?.length && pieceAt ? fit.pieces : null;
+    const refined = pieces ? null : fitToTrace(samples, start, along, { lens });
     const placed = refined?.improved ? refined.camera : start;
-    return { camera: placed, gap: traceGap(samples, placed, along), explained: fit.explained, close: fit.close, reach: on };
+    const gap = traceGap(samples, placed, along, { pieces, pieceAt });
+    return { camera: placed, gap, explained: fit.explained, close: fit.close, reach: on, pieces };
   });
 }
 

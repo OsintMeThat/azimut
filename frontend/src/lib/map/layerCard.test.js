@@ -146,3 +146,23 @@ describe("a pin's point on its card", () => {
     expect(element.querySelector('button')).toBeNull();
   });
 });
+
+describe('what a personal feature says on its card', () => {
+  it('names its colour, states its day and state, and links its sources', () => {
+    const card = layerCard('Front', { coords: () => '' })({
+      name: 'Depot', category: 'Strikes', colour_name: 'Side A', date: '2026-09-13', status: 'destroyed',
+      provenance: 'external', links: ['https://x.com/a/1', 'javascript:alert(1)'],
+    }, null);
+    expect(card.querySelector('.layer-card-group').textContent).toBe('Strikes · Side A');
+    expect(card.querySelector('.layer-card-facts').textContent).toBe('2026-09-13 · Destroyed · Geolocated by someone else');
+    const links = [...card.querySelectorAll('a.layer-card-link')];
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['https://x.com/a/1']);
+    expect(links[0].rel).toBe('noreferrer noopener');
+  });
+
+  it('gives a source feature its span of days and nothing it does not state', () => {
+    const card = layerCard('GC', { coords: () => '' })({ name: 'Event', date: '2026-09-01', date_end: '2026-09-03' }, null);
+    expect(card.querySelector('.layer-card-facts').textContent).toBe('2026-09-01 – 2026-09-03');
+    expect(card.querySelector('.layer-card-link')).toBeNull();
+  });
+});

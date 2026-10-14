@@ -67,6 +67,11 @@ MAX_STROKES = 400
 MAX_STROKE_POINTS = 20_000
 MAX_TRACE_POINTS = 60_000
 MAX_PINS = 500
+#: A collage is cut in a few pieces, and a few pairs of strokes say which stands in front.
+MAX_CUTS = 12
+MAX_PAIRS = 24
+#: A stroke's id stays under this however many strokes were drawn and rubbed out.
+MAX_LINE_ID = 100_000
 #: The ground a view took in: a ring of points round the eye, a few per degree of lens.
 MAX_FOOTPRINT = 2_000
 #: A kept picture: the photo and the terrain side by side at twice a wide screen,
@@ -155,6 +160,37 @@ class PhotoPoint(BaseModel):
     v: float = Field(ge=-1, le=2, allow_inf_nan=False)
 
 
+class Marks(BaseModel):
+    """What the analyst marked beside the skyline (frontend lib/horizon/marks.js): each stroke's id,
+    the ids of inner edges, pairs of ids (in front, behind) and where a collage is cut, across the photo."""
+
+    lines: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
+    inner: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
+    pairs: list[list[int]] = Field(default_factory=list, max_length=MAX_PAIRS)
+    cuts: list[float] = Field(default_factory=list, max_length=MAX_CUTS)
+
+    @field_validator("lines", "inner")
+    @classmethod
+    def _ids(cls, ids: list[int]) -> list[int]:
+        if any(not 0 <= one < MAX_LINE_ID for one in ids):
+            raise ValueError("a stroke's id is out of range")
+        return ids
+
+    @field_validator("pairs")
+    @classmethod
+    def _pairs(cls, pairs: list[list[int]]) -> list[list[int]]:
+        if any(len(pair) != 2 or pair[0] == pair[1] or not all(0 <= one < MAX_LINE_ID for one in pair) for pair in pairs):
+            raise ValueError("a pair is two strokes, the one in front first")
+        return pairs
+
+    @field_validator("cuts")
+    @classmethod
+    def _cuts(cls, cuts: list[float]) -> list[float]:
+        if any(not (0 < u < 1) for u in cuts):
+            raise ValueError("a cut stands across the photo, between its sides")
+        return cuts
+
+
 class Pin(BaseModel):
     """The view's alignment at a moment of a video."""
 
@@ -207,6 +243,8 @@ class Photo(BaseModel):
     #: The photo's corners once pulled, clockwise from the top left; None where it lies untouched.
     corners: list[PhotoPoint] | None = Field(default=None, min_length=4, max_length=4)
     strokes: list[list[PhotoPoint]] = Field(default_factory=list, max_length=MAX_STROKES)
+    #: Inner edges, pairs and a collage's cuts beside the strokes; None for a trace of the skyline alone.
+    marks: Marks | None = None
     #: The moment of the video the trace was drawn on.
     trace_time: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     #: Held to the terrain, as it opens again.

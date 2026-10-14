@@ -789,6 +789,9 @@ export async function installAppFixture(page, options = {}) {
   // what was marked is readable from what was written.
   const fixtureGrids = new Map();
   const gridWrites = [];
+  // Horizon's bench (api/horizon_work.py), per case, for the page's life: a reload brings it back.
+  const horizonWork = new Map(Object.entries(options.horizonWork ?? {}));
+  const workWrites = [];
   const skyQueries = [];
   // Where the graph's nodes have been dragged to, held across requests so a spec
   // can reload the view and find the arrangement still there.
@@ -1809,6 +1812,19 @@ export async function installAppFixture(page, options = {}) {
       const held = fixtureGrids.get(name);
       return held ? json(route, held.spec) : json(route, { detail: 'not found' }, 404);
     }
+    const workMatch = path.match(/^\/api\/cases\/([^/]+)\/horizon\/work$/);
+    if (workMatch) {
+      const owner = decodeURIComponent(workMatch[1]);
+      if (request.method() === 'PUT') {
+        const body = request.postDataJSON();
+        horizonWork.set(owner, body);
+        workWrites.push(body);
+        return json(route, { ok: true });
+      }
+      if (request.method() === 'DELETE') return json(route, { cleared: horizonWork.delete(owner) });
+      const held = horizonWork.get(owner) ?? null;
+      return json(route, { work: held, photo_here: held?.photo ? true : null });
+    }
     const placementMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/entities/(.+)/placement$`)
     );
@@ -2168,6 +2184,7 @@ export async function installAppFixture(page, options = {}) {
 
   return {
     captures,
+    workWrites,
     kinReads,
     proposalRuns,
     placeWrites,

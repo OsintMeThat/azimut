@@ -4,6 +4,10 @@
   import { PROOF_ICONS } from '../../lib/proofIcons.js';
   import { canFill, fillPaint } from '../../lib/proofEdits.js';
   import { shortcut } from '../../lib/keys.js';
+  import { CALLOUT_FONT } from '../../lib/pageMarks.js';
+  import { LINE_STYLES } from '../../lib/proofEdits.js';
+  import { LENSES, lensFov } from '../../lib/viewCone.js';
+  import ToolbarFlyout from './ToolbarFlyout.svelte';
 
   let {
     canUndo,
@@ -30,6 +34,48 @@
     setColor,
     setStroke,
     setFill,
+    // How a callout reaches its point. Shown with the callout tool in hand and on
+    // a picked callout or label; `tailNone` offers taking the pointer off, which
+    // only a picked mark can answer.
+    // How a line is drawn, for the marks that have one.
+    showDash = false,
+    activeDash = 'solid',
+    setDash = () => {},
+    // A picked label's frame and background: `{ frame, bg }`, or null.
+    textBox = null,
+    setTextBox = () => {},
+    // A picked panel's or overlay's border: `{ color, width }`, null for none,
+    // undefined when no panel or overlay is picked.
+    surfaceBorder = undefined,
+    setSurfaceBorder = () => {},
+    frameWidthMax = 60,
+    // The lens a view cone opens to, with the cone tool in hand or a cone picked:
+    // `{ lens, upright, fov }`, `lens` null for a width set by hand.
+    showLens = false,
+    activeLens = { lens: '1', upright: false, fov: 69 },
+    setLens = () => {},
+    // The pick's other sizes, each on its own slider beside the main one: a
+    // tag's words, a callout's line, a label's frame, a cone's camera.
+    // `[{ id, label, value, min, max }]`.
+    moreSizes = [],
+    setSize = () => {},
+    // A picked caption or footer: `{ id, label, size, color, auto }`, `color`
+    // null for the one the background gives (`auto`).
+    pageText = null,
+    setPageText = () => {},
+    // Whether the pick follows its picture or is free on the page, or how the
+    // next mark is drawn: 'picture', 'page', or 'mixed' for a family of both.
+    showAnchor = false,
+    activeAnchor = 'picture',
+    setAnchor = () => {},
+    // A box's tag and the corner it hangs from, shown on a picked box.
+    showTag = false,
+    activeTag = 'none',
+    setTagAt = () => {},
+    showTail = false,
+    tailNone = false,
+    activeTail = 'leader',
+    setTail = () => {},
     fit,
     layout,
     setLayoutMode,
@@ -45,11 +91,51 @@
   // bottom. `selectedShape` is the one picked annotation and is null for a
   // family of them, so what is on screen answers to the count.
   const showContextTools = $derived(tool !== 'select' || selectedCount > 0);
+  // A label and a callout are sized by their words; a callout's line follows.
+  const fontSized = $derived(selectedShape?.kind === 'text' || selectedShape?.kind === 'callout');
+  const ANCHORS = [
+    { id: 'picture', icon: 'anchorPicture', label: 'On its picture', hint: 'Moves with the picture it is drawn on' },
+    { id: 'page', icon: 'anchorPage', label: 'Free on the page', hint: 'Stays where it is, over pictures and margins' },
+  ];
+
+  /**
+   * A field of view drawn as the wedge it opens, from the middle of a w×h box's
+   * bottom edge, as long as the box lets it be at that width.
+   */
+  function wedgePath(fov, w, h) {
+    const half = (Math.min(Math.max(fov, 1), 170) * Math.PI) / 360;
+    const r = Math.min(h - 1.5, (w / 2 - 1) / Math.max(Math.sin(half), 0.05));
+    const cx = w / 2;
+    const cy = h - 1;
+    const dx = r * Math.sin(half);
+    const y = cy - r * Math.cos(half);
+    const f = (v) => v.toFixed(2);
+    return `M${cx} ${cy}L${f(cx - dx)} ${f(y)}A${f(r)} ${f(r)} 0 0 1 ${f(cx + dx)} ${f(y)}Z`;
+  }
   const sizeValue = $derived(
-    selectedShape?.kind === 'text'
-      ? (selectedShape.fontSize ?? 28)
+    fontSized
+      ? (selectedShape.fontSize ?? (selectedShape.kind === 'callout' ? CALLOUT_FONT : 28))
       : (selectedShape?.strokeWidth ?? strokeW),
   );
+  const TAILS = [
+    { id: 'none', icon: 'text', label: 'No pointer: a plain label' },
+    { id: 'leader', icon: 'calloutLeader', label: 'Leader line to the point' },
+    { id: 'bubble', icon: 'calloutBubble', label: 'Speech bubble' },
+  ];
+  const tailIcon = $derived(TAILS.find((t) => t.id === activeTail)?.icon ?? 'calloutLeader');
+  const TAGS = [
+    { id: 'none', icon: 'square', label: 'No tag' },
+    { id: 'tl', icon: 'tagTL', label: 'Tag on the top-left corner' },
+    { id: 'tr', icon: 'tagTR', label: 'Tag on the top-right corner' },
+    { id: 'bl', icon: 'tagBL', label: 'Tag on the bottom-left corner' },
+    { id: 'br', icon: 'tagBR', label: 'Tag on the bottom-right corner' },
+  ];
+  const DASH = {
+    solid: { icon: 'lineSolid', label: 'Solid line' },
+    dash: { icon: 'lineDashed', label: 'Dashed line' },
+    dot: { icon: 'lineDotted', label: 'Dotted line' },
+  };
+  const tagIcon = $derived(TAGS.find((t) => t.id === activeTag && t.id !== 'none')?.icon ?? 'tagTL');
   // Only the closed kinds hold a fill, so the control follows the box/ellipse
   // tool — or the box/ellipse in hand.
   const showFill = $derived(selectedCount > 0 ? fillableSelection : canFill(tool));
@@ -61,22 +147,30 @@
   let sizeOpen = $state(false);
   let fillOpen = $state(false);
   let iconOpen = $state(false);
+  let tailOpen = $state(false);
+  let tagOpen = $state(false);
   let overflowOpen = $state(false);
   // Wrapper refs feed outside-click detection; button refs anchor the flyout.
   let colorEl = $state();
   let sizeEl = $state();
   let fillEl = $state();
   let iconEl = $state();
+  let tailEl = $state();
+  let tagEl = $state();
   let overflowEl = $state();
   let colorBtn = $state();
   let sizeBtn = $state();
   let fillBtn = $state();
   let iconBtn = $state();
+  let tailBtn = $state();
+  let tagBtn = $state();
   let overflowBtn = $state();
   let colorPos = $state({});
   let sizePos = $state({});
   let fillPos = $state({});
   let iconPos = $state({});
+  let tailPos = $state({});
+  let tagPos = $state({});
   let overflowPos = $state({});
 
   function toggle(which) {
@@ -84,6 +178,8 @@
     sizeOpen = which === 'size' ? !sizeOpen : false;
     fillOpen = which === 'fill' ? !fillOpen : false;
     iconOpen = which === 'icon' ? !iconOpen : false;
+    tailOpen = which === 'tail' ? !tailOpen : false;
+    tagOpen = which === 'tag' ? !tagOpen : false;
     overflowOpen = which === 'overflow' ? !overflowOpen : false;
   }
 
@@ -95,6 +191,8 @@
       sizeOpen = false;
     }
     if (!showFill) fillOpen = false;
+    if (!showTail) tailOpen = false;
+    if (!showTag) tagOpen = false;
   });
 
   // Flyouts are position:fixed so the toolbar can scroll (overflow-y) without
@@ -122,13 +220,21 @@
     if (iconOpen && iconBtn) iconPos = anchor(iconBtn);
   });
   $effect(() => {
+    if (tailOpen && tailBtn) tailPos = anchor(tailBtn);
+  });
+  $effect(() => {
+    if (tagOpen && tagBtn) tagPos = anchor(tagBtn);
+  });
+  $effect(() => {
     if (overflowOpen && overflowBtn) overflowPos = anchor(overflowBtn);
   });
 
   // Close on outside click (mousedown capture, like Satellite.svelte) or Escape.
   $effect(() => {
-    if (!colorOpen && !sizeOpen && !fillOpen && !iconOpen && !overflowOpen) return;
+    if (!colorOpen && !sizeOpen && !fillOpen && !iconOpen && !tailOpen && !tagOpen && !overflowOpen) return;
     const onDown = (e) => {
+      if (tagOpen && tagEl && !tagEl.contains(e.target)) tagOpen = false;
+      if (tailOpen && tailEl && !tailEl.contains(e.target)) tailOpen = false;
       if (colorOpen && colorEl && !colorEl.contains(e.target)) colorOpen = false;
       if (sizeOpen && sizeEl && !sizeEl.contains(e.target)) sizeOpen = false;
       if (fillOpen && fillEl && !fillEl.contains(e.target)) fillOpen = false;
@@ -137,7 +243,7 @@
     };
     const onKey = (e) => {
       if (e.key === 'Escape') {
-        colorOpen = sizeOpen = fillOpen = iconOpen = overflowOpen = false;
+        colorOpen = sizeOpen = fillOpen = iconOpen = tailOpen = tagOpen = overflowOpen = false;
       }
     };
     document.addEventListener('mousedown', onDown, true);
@@ -333,7 +439,7 @@
       <button
         class="tb-btn tb-size"
         class:active={sizeOpen}
-        title={selectedShape?.kind === 'text' ? 'Font size' : 'Stroke width'}
+        title={fontSized ? 'Font size' : 'Stroke width'}
         onclick={() => toggle('size')}
         bind:this={sizeBtn}
       >
@@ -347,20 +453,84 @@
         style:top={sizePos.top}
         style:bottom={sizePos.bottom}
       >
-        <input
-          class="stroke-slider"
-          type="range"
-          min={selectedShape?.kind === 'text' ? 8 : 1}
-          max={selectedShape?.kind === 'text' ? 120 : 24}
-          step="1"
-          value={selectedShape?.kind === 'text'
-            ? (selectedShape.fontSize ?? 28)
-            : (selectedShape?.strokeWidth ?? strokeW)}
-          oninput={(event) => setStroke(+event.target.value)}
-          aria-label={selectedShape?.kind === 'text' ? 'font size' : 'stroke width'}
-        />
+        <div class="size-rows">
+          <label class="size-row">
+            <span class="size-name">{fontSized ? 'Text' : 'Line'}</span>
+            <input
+              class="stroke-slider"
+              type="range"
+              min={fontSized ? 8 : 1}
+              max={fontSized ? 120 : 24}
+              step="1"
+              value={sizeValue}
+              oninput={(event) => setStroke(+event.target.value)}
+              aria-label={fontSized ? 'font size' : 'stroke width'}
+            />
+            <span class="size-num">{sizeValue}</span>
+          </label>
+          {#each moreSizes as row (row.id)}
+            <label class="size-row">
+              <span class="size-name">{row.label}</span>
+              <input
+                class="more-slider"
+                type="range"
+                min={row.min}
+                max={row.max}
+                step="1"
+                value={row.value}
+                oninput={(event) => setSize(row.id, +event.target.value)}
+                aria-label={row.label}
+              />
+              <span class="size-num">{row.value}</span>
+            </label>
+          {/each}
+        </div>
       </div>
     </div>
+    {/if}
+
+    {#if showDash}
+      <ToolbarFlyout title="Line style" active={activeDash !== 'solid'}>
+        {#snippet button()}<Icon name={DASH[activeDash].icon} size={18} />{/snippet}
+        {#snippet children(close)}
+          <div class="flyout-row">
+            {#each LINE_STYLES as style (style)}
+              <button
+                class="tb-btn"
+                class:active={activeDash === style}
+                title={DASH[style].label}
+                aria-label={DASH[style].label}
+                onclick={() => { setDash(style); close(); }}
+              ><Icon name={DASH[style].icon} size={18} /></button>
+            {/each}
+          </div>
+        {/snippet}
+      </ToolbarFlyout>
+    {/if}
+
+    <!-- Where the pick belongs: on its picture, following it, or free on the page. -->
+    {#if showAnchor}
+      <ToolbarFlyout title="Anchor" active={activeAnchor === 'page'}>
+        {#snippet button()}
+          <Icon name={activeAnchor === 'page' ? 'anchorPage' : 'anchorPicture'} size={18} />
+        {/snippet}
+        {#snippet children(close)}
+          {#each ANCHORS as entry (entry.id)}
+            <button
+              class="anchor-row"
+              class:active={activeAnchor === entry.id}
+              aria-label={entry.label}
+              onclick={() => { setAnchor(entry.id); close(); }}
+            >
+              <Icon name={entry.icon} size={18} />
+              <span class="anchor-text">
+                <span>{entry.label}</span>
+                <span class="anchor-hint">{entry.hint}</span>
+              </span>
+            </button>
+          {/each}
+        {/snippet}
+      </ToolbarFlyout>
     {/if}
 
     <!-- Fill: how much of the shape's own colour lands inside it. -->
@@ -398,6 +568,281 @@
         </div>
       </div>
     {/if}
+
+    <!-- A label's box: a frame in its own colour, and a plate behind the words. -->
+    {#if textBox}
+      <button
+        class="tb-btn"
+        class:active={textBox.frame}
+        aria-pressed={textBox.frame}
+        title="Frame around the words"
+        onclick={() => setTextBox({ frame: !textBox.frame })}
+      ><Icon name="square" size={18} /></button>
+      <ToolbarFlyout title="Background" active={!!textBox.bg}>
+        {#snippet button()}<span class="tb-plate" style:background={textBox.bg ?? 'transparent'}></span>{/snippet}
+        {#snippet children(close)}
+          <div class="swatches">
+            <button
+              class="color-btn color-none"
+              class:active={!textBox.bg}
+              title="No background"
+              aria-label="no background"
+              onclick={() => { setTextBox({ bg: null }); close(); }}
+            ><Icon name="x" size={11} /></button>
+            {#each [...new Set(['#0d1117', '#ffffff', ...palette])] as entry (entry)}
+              <button
+                class="color-btn"
+                class:active={textBox.bg === entry}
+                style:background={entry}
+                aria-label={`background ${entry}`}
+                onclick={() => { setTextBox({ bg: entry }); close(); }}
+              ></button>
+            {/each}
+            <label class="color-btn color-pick" style:background={textBox.bg ?? 'transparent'} title="Custom background">
+              <Icon name="plus" size={12} />
+              <input
+                type="color"
+                value={textBox.bg ?? '#000000'}
+                oninput={(event) => setTextBox({ bg: event.target.value })}
+                aria-label="custom background"
+              />
+            </label>
+          </div>
+        {/snippet}
+      </ToolbarFlyout>
+    {/if}
+  {/if}
+
+  <!-- A picked panel's captions, or the footer: how big and in what colour. -->
+  {#if pageText}
+    <div class="tb-sep"></div>
+    <ToolbarFlyout title={`${pageText.label} text`} active={!!pageText.color}>
+      {#snippet button()}
+        <span class="tb-text" style:color={pageText.color ?? pageText.auto}>
+          <Icon name="text" size={15} />
+          <span class="tb-text-val">{pageText.size}</span>
+        </span>
+      {/snippet}
+      {#snippet children()}
+        <label class="size-row">
+          <span class="size-name">Size</span>
+          <input
+            class="more-slider"
+            type="range"
+            min="8"
+            max="80"
+            step="1"
+            value={pageText.size}
+            oninput={(event) => setPageText({ size: +event.target.value })}
+            aria-label={`${pageText.label} text size`}
+          />
+          <span class="size-num">{pageText.size}</span>
+        </label>
+        <div class="swatches">
+          <button
+            class="color-btn color-auto"
+            class:active={!pageText.color}
+            style:background={pageText.auto}
+            title="The colour the background gives"
+            aria-label={`${pageText.label} colour auto`}
+            onclick={() => setPageText({ color: null })}
+          >A</button>
+          {#each [...new Set(['#ffffff', '#0d1117', ...palette])] as entry (entry)}
+            <button
+              class="color-btn"
+              class:active={pageText.color === entry}
+              style:background={entry}
+              aria-label={`${pageText.label} colour ${entry}`}
+              onclick={() => setPageText({ color: entry })}
+            ></button>
+          {/each}
+          <label class="color-btn color-pick" style:background={pageText.color ?? pageText.auto} title="Custom colour">
+            <Icon name="plus" size={12} />
+            <input
+              type="color"
+              value={pageText.color ?? pageText.auto}
+              oninput={(event) => setPageText({ color: event.target.value })}
+              aria-label={`${pageText.label} custom colour`}
+            />
+          </label>
+        </div>
+      {/snippet}
+    </ToolbarFlyout>
+  {/if}
+
+  <!-- A picked panel or overlay: the border drawn round its picture. -->
+  {#if surfaceBorder !== undefined}
+    <div class="tb-sep"></div>
+    <ToolbarFlyout title="Border" active={!!surfaceBorder}>
+      {#snippet button()}
+        <span class="tb-border" style:border-color={surfaceBorder?.color ?? 'currentColor'}></span>
+      {/snippet}
+      {#snippet children(close)}
+        <div class="swatches">
+          {#each palette as entry (entry)}
+            <button
+              class="color-btn"
+              class:active={surfaceBorder?.color === entry}
+              style:background={entry}
+              aria-label={`border ${entry}`}
+              onclick={() => setSurfaceBorder({ color: entry })}
+            ></button>
+          {/each}
+          <label class="color-btn color-pick" style:background={surfaceBorder?.color ?? 'transparent'} title="Custom border colour">
+            <Icon name="plus" size={12} />
+            <input
+              type="color"
+              value={surfaceBorder?.color ?? palette[0]}
+              oninput={(event) => setSurfaceBorder({ color: event.target.value })}
+              aria-label="border color"
+            />
+          </label>
+        </div>
+        {#if surfaceBorder}
+          <input
+            class="stroke-slider"
+            type="range"
+            min="1"
+            max={frameWidthMax}
+            step="1"
+            value={surfaceBorder.width}
+            oninput={(event) => setSurfaceBorder({ width: +event.target.value })}
+            aria-label="border thickness"
+            title="Border thickness"
+          />
+          <button class="btn btn-ghost btn-sm" onclick={() => { setSurfaceBorder(null); close(); }}>No border</button>
+        {/if}
+      {/snippet}
+    </ToolbarFlyout>
+  {/if}
+
+  {#if showLens}
+    <div class="tb-sep"></div>
+    <!-- The camera's lens, each drawn as the wedge it opens, and how the phone
+         was held: what an analyst knows of a camera, rather than its degrees. -->
+    <ToolbarFlyout title="Lens">
+      {#snippet button()}
+        <span class="tb-cam">
+          <svg width="22" height="13" viewBox="0 0 22 13" aria-hidden="true">
+            <path d={wedgePath(activeLens.fov, 22, 13)} />
+          </svg>
+          <span class="tb-lens">{activeLens.lens ? `${activeLens.lens}×` : `${Math.round(activeLens.fov)}°`}</span>
+        </span>
+      {/snippet}
+      {#snippet children(close)}
+        <div class="cam">
+          <span class="cam-head">Lens</span>
+          <div class="lens-grid">
+            {#each LENSES as lens (lens.id)}
+              {@const fov = lensFov(lens.id, activeLens.upright)}
+              <button
+                class="lens-tile"
+                class:active={activeLens.lens === lens.id}
+                title={`${lens.label} · ${lens.mm} mm`}
+                aria-label={lens.label}
+                onclick={() => { setLens({ lens: lens.id }); close(); }}
+              >
+                <svg width="40" height="24" viewBox="0 0 40 24" aria-hidden="true">
+                  <path d={wedgePath(fov, 40, 24)} />
+                </svg>
+                <span class="lens-x">{lens.id}×</span>
+                <span class="lens-fov">{Math.round(fov)}°</span>
+              </button>
+            {/each}
+          </div>
+          <span class="cam-head">Held</span>
+          <div class="held">
+            <label class="held-opt" class:active={!activeLens.upright} title="Landscape">
+              <input type="radio" name="cone-held" checked={!activeLens.upright} aria-label="Landscape"
+                onchange={() => setLens({ upright: false })} />
+              <svg width="22" height="14" viewBox="0 0 22 14" aria-hidden="true">
+                <rect x="1" y="1.5" width="20" height="11" rx="2.2" /><circle cx="4.5" cy="7" r="1" />
+              </svg>
+              Landscape
+            </label>
+            <label class="held-opt" class:active={activeLens.upright} title="Phone held upright">
+              <input type="radio" name="cone-held" checked={activeLens.upright} aria-label="Phone held upright"
+                onchange={() => setLens({ upright: true })} />
+              <svg width="14" height="20" viewBox="0 0 14 20" aria-hidden="true">
+                <rect x="1.5" y="1" width="11" height="18" rx="2.2" /><circle cx="7" cy="4.5" r="1" />
+              </svg>
+              Upright
+            </label>
+          </div>
+          {#if !activeLens.lens}
+            <span class="lens-own">Set by hand: {Math.round(activeLens.fov)}°</span>
+          {/if}
+        </div>
+      {/snippet}
+    </ToolbarFlyout>
+  {/if}
+
+  {#if showTag}
+    <div class="tb-sep"></div>
+    <div class="tb-group" bind:this={tagEl}>
+      <button
+        class="tb-btn"
+        class:active={tagOpen || activeTag !== 'none'}
+        title="Tag"
+        onclick={() => toggle('tag')}
+        bind:this={tagBtn}
+      >
+        <Icon name={tagIcon} size={18} />
+      </button>
+      <div
+        class="flyout flyout-tails"
+        class:open={tagOpen}
+        style:left={tagPos.left}
+        style:top={tagPos.top}
+        style:bottom={tagPos.bottom}
+      >
+        {#each TAGS.filter((t) => activeTag !== 'none' || t.id !== 'none') as entry (entry.id)}
+          <button
+            class="tb-btn"
+            class:active={activeTag === entry.id}
+            title={entry.label}
+            aria-label={entry.label}
+            onclick={() => { setTagAt(entry.id); tagOpen = false; }}
+          >
+            <Icon name={entry.icon} size={18} />
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  {#if showTail}
+    <div class="tb-sep"></div>
+    <div class="tb-group" bind:this={tailEl}>
+      <button
+        class="tb-btn"
+        class:active={tailOpen}
+        title="Pointer"
+        onclick={() => toggle('tail')}
+        bind:this={tailBtn}
+      >
+        <Icon name={tailIcon} size={18} />
+      </button>
+      <div
+        class="flyout flyout-tails"
+        class:open={tailOpen}
+        style:left={tailPos.left}
+        style:top={tailPos.top}
+        style:bottom={tailPos.bottom}
+      >
+        {#each TAILS.filter((t) => tailNone || t.id !== 'none') as entry (entry.id)}
+          <button
+            class="tb-btn"
+            class:active={activeTail === entry.id}
+            title={entry.label}
+            aria-label={entry.label}
+            onclick={() => { setTail(entry.id); tailOpen = false; }}
+          >
+            <Icon name={entry.icon} size={18} />
+          </button>
+        {/each}
+      </div>
+    </div>
   {/if}
 
 </div>
@@ -533,6 +978,85 @@
     background: var(--bg-3);
   }
   .flyout-overflow { flex-direction: column; gap: 6px; }
+  .flyout-tails { gap: 6px; }
+  /* Sizes: one labelled row per size the pick has. */
+  .size-rows { display: flex; flex-direction: column; gap: 6px; }
+  .size-row { display: grid; grid-template-columns: 58px 1fr 26px; align-items: center; gap: 8px; }
+  .size-name { font-size: var(--fs-xs); color: var(--text-3); }
+  .size-num { font-size: var(--fs-xs); color: var(--text-2); text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* The camera: lens tiles drawn as the wedge each opens, and how it was held. */
+  .tb-cam { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .tb-cam svg path { fill: color-mix(in srgb, currentColor 22%, transparent); stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+  .tb-lens { font-size: 9px; font-weight: 700; line-height: 1; color: var(--text-2); }
+  .cam { display: flex; flex-direction: column; gap: 6px; width: 236px; }
+  .cam-head { font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+  .lens-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .lens-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 2px 5px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text-2);
+    background: var(--bg-2);
+    transition: border-color 0.12s var(--ease), color 0.12s var(--ease);
+  }
+  .lens-tile:hover { color: var(--text-1); border-color: var(--text-3); }
+  .lens-tile.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .lens-tile svg path { fill: color-mix(in srgb, currentColor 20%, transparent); stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; }
+  .lens-x { font-size: var(--fs-sm); font-weight: 700; line-height: 1.1; }
+  .lens-fov { font-size: 10px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .held { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .held-opt {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .held-opt:hover { color: var(--text-1); border-color: var(--text-3); }
+  .held-opt.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .held-opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .held-opt svg { fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .held-opt svg circle { fill: currentColor; stroke: none; }
+  .lens-own { font-size: var(--fs-xs); color: var(--text-3); }
+
+  /* Anchor: two rows, each saying what it does. */
+  .anchor-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 236px;
+    padding: 7px 8px;
+    border-radius: var(--r-sm);
+    color: var(--text-2);
+    text-align: left;
+  }
+  .anchor-row:hover { color: var(--text-1); background: var(--bg-2); }
+  .anchor-row.active { color: var(--accent); background: var(--accent-soft); }
+  .anchor-text { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-sm); }
+  .anchor-hint { font-size: var(--fs-xs); color: var(--text-3); }
+
+  .tb-text { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .tb-text-val { font-size: 9px; font-weight: 700; line-height: 1; color: var(--text-3); }
+  .color-auto { font-size: 10px; font-weight: 700; color: var(--bg-0); border-color: var(--border); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; width: 132px; align-items: center; }
+  .color-none { display: flex; align-items: center; justify-content: center; color: var(--text-3); border-color: var(--border); }
+  .tb-plate, .tb-border {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .tb-border { border: 3px solid; box-shadow: none; background: transparent; }
   .flyout-row { display: flex; gap: 6px; }
 
   .color-btn {
@@ -564,6 +1088,7 @@
     cursor: pointer;
   }
   .stroke-slider,
+  .more-slider,
   .fill-slider {
     width: 140px;
     accent-color: var(--accent);

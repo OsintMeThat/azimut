@@ -6,7 +6,7 @@
    * starts at "don't know"; each narrows the search the way a human would
    * (lib/horizon/hints.js holds the words and what they stand for).
    */
-  import { AUTO_REACH, FACING_HALF, PANORAMA_WITHIN, PICTURES, REACHES, reachText, ZOOMS } from '../../lib/horizon/hints.js';
+  import { AUTO_REACH, FACING_HALF, PANORAMA_WITHIN, panoramaLikely, PICTURES, REACHES, reachText, ZOOMS } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
 
   let {
@@ -41,7 +41,7 @@
       </div>
       {#if panorama && overlay.stitched}
         <p class="said">Stitched by Azimut from {overlay.stitched.collage}.</p>
-      {:else if !panorama && !overlay.stitched}
+      {:else if !panorama && panoramaLikely({ kind: overlay.source?.kind, aspect: overlay.aspect })}
         <p class="said">A phone’s panorama reads better as Panorama.</p>
       {/if}
     </div>

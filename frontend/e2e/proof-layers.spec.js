@@ -42,7 +42,7 @@ async function labelAt(page, seat) {
   return { x: at.x + at.width / 2, y: at.y + at.height / 2 };
 }
 
-test('the list runs front-first, and its arrows say which way that is', async ({ page }) => {
+test('the list runs front-first, and Ctrl+↑ brings a mark forward the way it reads', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
   const canvas = await page.locator('.konva canvas').first().boundingBox();
@@ -65,8 +65,8 @@ test('the list runs front-first, and its arrows say which way that is', async ({
   expect(fixture.proofSaves[0].spec.shapes.map((s) => s.color)).toEqual([RED, WHITE, BLUE]);
 
   // The bottom row is the one at the back, and bringing it forward moves it up
-  const back = page.locator('.shape-row').last();
-  await back.getByTitle(/^Bring forward/).click();
+  await page.locator('.shape-row').last().click();
+  await page.keyboard.press('Control+ArrowUp');
   expect(await colours(page)).toEqual([
     'rgb(64, 196, 255)', 'rgb(255, 82, 82)', 'rgb(255, 255, 255)',
   ]);

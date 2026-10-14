@@ -47,6 +47,8 @@ TILE = 512
 _SHIFT = 9  # log2(TILE)
 # Deepest level every land tile exists at.
 PLANET_ZOOM = 12
+# What the heights at that level are worth: Copernicus GLO-30's 30 m, however finely its tiles are cut.
+PLANET_DETAIL_M = 30.0
 # Deepest level ever asked for. Regional surveys go to z17, but past z14 (about
 # 5 m a pixel) the tiles a near field needs multiply faster than they help.
 MAX_ZOOM = 14
@@ -675,8 +677,14 @@ class Sampler:
         ]
 
     def resolution(self, lat: float) -> float | None:
-        """Ground size of the finest pixel that answered, in metres."""
-        return round(metres_per_pixel(lat, max(self.zooms)), 1) if self.zooms else None
+        """Ground size of the finest heights that answered, in metres: a survey's pixel where a level
+        past the planet's answered, else GLO-30's own 30 m, which the planet's tiles cut finer than it is."""
+        if not self.zooms:
+            return None
+        deepest = max(self.zooms)
+        if deepest <= PLANET_ZOOM:
+            return PLANET_DETAIL_M
+        return round(metres_per_pixel(lat, deepest), 1)
 
 
 def source(source_id: str) -> Source:

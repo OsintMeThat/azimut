@@ -45,6 +45,11 @@ def layer_url(owner, row):
     return f"/api/cases/{owner}/map-layers/{row['name']}"
 
 
+def at(entity):
+    """A link request for an entity at its own point."""
+    return {"id": entity["id"], "lat": entity["attrs"]["lat"], "lon": entity["attrs"]["lon"]}
+
+
 def test_dragging_features_reorders_a_block_and_moves_it_without_changing_case_places(client, owner):
     row = create(client, owner)
     url = layer_url(owner, row)
@@ -66,7 +71,7 @@ def test_dragging_features_reorders_a_block_and_moves_it_without_changing_case_p
         original = points[keys.index(feature["properties"]["key"])]
         assert feature["geometry"] == original["geometry"]
         assert feature["properties"]["colour"] == original["properties"]["colour"]
-    assert next(feature for feature in document if feature["properties"]["key"] == keys[1])["properties"]["place_id"] == place["id"]
+    assert next(feature for feature in document if feature["properties"]["key"] == keys[1])["properties"]["entity_id"] == place["id"]
     assert Case.open(owner).get_entity(place["id"]) == place
 
 
@@ -187,7 +192,7 @@ def test_removing_a_group_keeps_its_features_and_case_memberships(client, owner)
     answer = client.delete(f"{url}/groups/{group['id']}")
     assert answer.status_code == 200
     kept = answer.json()["document"]["features"][0]["properties"]
-    assert kept["key"] == key and kept["place_id"] == place["id"]
+    assert kept["key"] == key and kept["entity_id"] == place["id"]
     assert kept["colour"] == "#009e73"
     assert len(answer.json()["groups"]) == 1
     last = answer.json()["groups"][0]["id"]
@@ -214,10 +219,10 @@ def test_reusing_case_places_in_two_layers_does_not_duplicate_or_restyle_the_pla
     first, second = create(client, owner, "First"), create(client, owner, "Second")
     for row in (first, second):
         url = layer_url(owner, row)
-        answer = client.post(f"{url}/places", json={"ids": [place["id"], place["id"]]})
+        answer = client.post(f"{url}/links", json={"items": [at(place), at(place)]})
         assert answer.status_code == 200, answer.text
         assert len(answer.json()["document"]["features"]) == 1
-        client.post(f"{url}/places", json={"ids": [place["id"]]})
+        client.post(f"{url}/links", json={"items": [at(place)]})
         assert len(read(client, owner, row)["document"]["features"]) == 1
     own = read(client, owner, first)["document"]["features"][0]
     client.patch(f"{layer_url(owner, first)}/markers/{own['properties']['key']}",
@@ -231,7 +236,7 @@ def test_batch_place_attachment_is_atomic_when_one_place_has_no_coordinates(clie
     valid = case.add_entity("place", "Located", attrs={"lat": 48, "lon": 2}, by="test")
     invalid = case.add_entity("place", "Unknown", by="test")
     row = create(client, owner)
-    response = client.post(f"{layer_url(owner, row)}/places", json={"ids": [valid["id"], invalid["id"]]})
+    response = client.post(f"{layer_url(owner, row)}/links", json={"items": [at(valid), {"id": invalid["id"], "lat": 0, "lon": 0}]})
     assert response.status_code == 422
     assert read(client, owner, row)["document"]["features"] == []
 
@@ -253,7 +258,7 @@ def test_removing_and_undoing_membership_keeps_place_and_relations(client, owner
     assert places(owner) == [place] and case.list_links() == before
     restored = client.post(f"{url}/markers/{key}/restore").json()["document"]["features"]
     assert restored[0]["properties"]["key"] == key
-    assert restored[0]["properties"]["place_id"] == place["id"]
+    assert restored[0]["properties"]["entity_id"] == place["id"]
     assert restored[0]["properties"]["symbol"] == "star"
     assert client.post(f"{url}/markers/{key}/restore").status_code == 422
 
@@ -265,7 +270,7 @@ def test_place_usage_and_trash_restore_keep_layer_coordinates_and_refresh_member
     case.add_link(note["id"], place["id"], "related-to", by="test")
     rows = [create(client, owner, title) for title in ("First", "Second")]
     for row in rows:
-        client.post(f"{layer_url(owner, row)}/places", json={"ids": [place["id"]]})
+        client.post(f"{layer_url(owner, row)}/links", json={"items": [at(place)]})
         client.get(f"{layer_url(owner, row)}/data")
     before = read(client, owner, rows[0])["layer"]["sha256"]
     usage = client.get(f"/api/cases/{owner}/map-layers/places/{place['id']}/usage").json()
@@ -275,11 +280,11 @@ def test_place_usage_and_trash_restore_keep_layer_coordinates_and_refresh_member
     for row in rows:
         drawn = client.get(f"{layer_url(owner, row)}/data").json()["features"][0]
         assert drawn["geometry"]["coordinates"] == [2.35, 48.85]
-        assert "place_id" not in drawn["properties"]
+        assert "entity_id" not in drawn["properties"]
     assert read(client, owner, rows[0])["layer"]["sha256"] != before
     client.post(f"/api/cases/{owner}/trash/{removed['trash']}/restore")
     for row in rows:
-        assert client.get(f"{layer_url(owner, row)}/data").json()["features"][0]["properties"]["place_id"] == place["id"]
+        assert client.get(f"{layer_url(owner, row)}/data").json()["features"][0]["properties"]["entity_id"] == place["id"]
     assert case.list_links()[0]["to"] == place["id"]
 
 
@@ -434,7 +439,7 @@ def test_promoting_a_marker_is_explicit_and_idempotent(client, owner):
     assert len(places(owner)) == 1
     assert one["place"]["label"] == "Tower"
     assert one["place"]["attrs"]["layer_origin"]["feature"] == first["properties"]["key"]
-    assert read(client, owner, row)["document"]["features"][0]["properties"]["place_id"] == one["place"]["id"]
+    assert read(client, owner, row)["document"]["features"][0]["properties"]["entity_id"] == one["place"]["id"]
 
 
 def test_promotion_reuses_an_existing_case_place_without_renaming_it(client, owner):
@@ -496,12 +501,12 @@ def test_deleting_a_promoted_place_keeps_the_marker_and_proof_based_media_locati
     response = client.delete(f"/api/cases/{owner}/entities/{saved['id']}")
     assert response.status_code == 200
     kept = read(client, owner, row)["document"]["features"][0]
-    assert "place_id" not in kept["properties"]
+    assert "entity_id" not in kept["properties"]
     assert kept["geometry"]["coordinates"] == [2.35, 48.85]
     assert _points(_index(client, owner), source) == [(48.85, 2.35)]
     restored = client.post(f"/api/cases/{owner}/trash/{response.json()['trash']}/restore")
     assert restored.status_code == 200
-    assert read(client, owner, row)["document"]["features"][0]["properties"]["place_id"] == saved["id"]
+    assert read(client, owner, row)["document"]["features"][0]["properties"]["entity_id"] == saved["id"]
     assert _points(_index(client, owner), source) == [(48.85, 2.35)]
 
 
@@ -653,7 +658,9 @@ def test_drawn_shapes_can_be_edited_removed_and_discarded(client, owner, geometr
     assert places(owner) == []
 
 
-def test_moving_a_shared_marker_changes_only_the_layer_point(client, owner):
+def test_a_marker_on_a_case_place_follows_it_until_unlinked(client, owner):
+    """Its point is the place's: moving the place moves it, and moving it alone
+    is refused until it stops following. The place never moves with it."""
     row = create(client, owner)
     url = layer_url(owner, row)
     point = marker(client, owner, row)
@@ -661,10 +668,19 @@ def test_moving_a_shared_marker_changes_only_the_layer_point(client, owner):
     place = client.post(f"{url}/markers/{key}/place").json()["place"]
     moved = {"type": "Point", "coordinates": [3, 49]}
     response = client.patch(f"{url}/markers/{key}", json={"geometry": moved})
+    assert response.status_code == 422
+    assert "unlink" in response.json()["detail"]
+    case = Case.open(owner)
+    case.update_entity(place["id"], {"attrs": {**place["attrs"], "lat": 48.9, "lon": 2.4}})
+    assert client.get(f"{url}/data").json()["features"][0]["geometry"]["coordinates"] == [2.4, 48.9]
+    unlinked = client.patch(f"{url}/markers/{key}", json={"unlink": True})
+    assert unlinked.status_code == 200, unlinked.text
+    assert "entity_id" not in unlinked.json()["marker"]["properties"]
+    assert unlinked.json()["marker"]["geometry"]["coordinates"] == [2.4, 48.9]
+    response = client.patch(f"{url}/markers/{key}", json={"geometry": moved})
     assert response.status_code == 200
     assert response.json()["marker"]["geometry"] == moved
-    assert response.json()["marker"]["properties"]["place_id"] == place["id"]
-    assert Case.open(owner).get_entity(place["id"]) == place
+    assert Case.open(owner).get_entity(place["id"])["attrs"]["lat"] == 48.9
 
 
 @pytest.mark.parametrize("geometry", [
@@ -732,7 +748,9 @@ def test_selection_edits_are_atomic_and_keep_case_places(client, owner):
     moved = client.post(f"{url}/selection", json={"keys": keys, "offset": [-1, 1],
                         "changes": {"colour": "#009e73", "symbol": "badge-tank"}})
     assert moved.status_code == 200, moved.text
-    assert moved.json()["document"]["features"][0]["geometry"]["coordinates"] == [1.35, 49.85]
+    # the marker on the case place stays on it; the other one moves
+    assert [f["geometry"]["coordinates"] for f in moved.json()["document"]["features"]] == [[2.35, 48.85], [178, 49.85]]
+    assert moved.json()["kept"] == 1
     assert all(f["properties"]["symbol"] == "badge-tank" for f in moved.json()["document"]["features"])
     assert Case.open(owner).get_entity(place["id"])["attrs"]["lat"] == 48.85
     removed = client.post(f"{url}/selection", json={"keys": keys, "remove": True})

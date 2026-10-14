@@ -1,10 +1,17 @@
 import { expect, test } from '@playwright/test';
 import { awaitMapReady, CASE_ID, installAppFixture, showSaved } from './app.fixture.js';
 
-async function chooseIcon(panel, label, icon) {
-  await panel.getByRole('button', { name: `${label} icons`, exact: true }).click();
-  await panel.getByRole('button', { name: `${label} ${icon} icon`, exact: true }).click();
+/** Open a style button inside `scope` and pick an icon in its palette, which floats over the page. */
+async function chooseIcon(page, scope, label, icon) {
+  await scope.getByRole('button', { name: label, exact: true }).click();
+  await page.getByRole('button', { name: `${label} ${icon} icon`, exact: true }).click();
 }
+
+/** An item of the floating menu called `menu`. */
+const menuItem = (page, menu, label) => page.getByRole('menu', { name: menu, exact: true }).getByRole('button', { name: label, exact: true });
+
+/** The edit bar a personal layer puts on the map it is edited on. */
+const tools = (page) => page.getByRole('toolbar', { name: 'Layer tools', exact: true });
 
 async function clickCard(page, x, y) {
   const card = page.locator('.layer-card');
@@ -30,27 +37,29 @@ test('long imported groups expand explicitly and a selected range moves and remo
   await expect(panel.getByText('10 selected', { exact: true })).toBeVisible();
   const own = fixture.rows.find((row) => row.editable), features = fixture.collections.get(own.name);
   const before = structuredClone(features);
-  await panel.getByRole('button', { name: 'Move selection', exact: true }).click();
+  await panel.getByRole('button', { name: 'Feature actions', exact: true }).click();
+  await menuItem(page, 'Feature actions', 'Move with a handle').click();
   await page.getByRole('button', { name: 'Move vertex 1.1', exact: true }).press('Shift+ArrowRight');
-  await panel.getByRole('button', { name: 'Save geometry', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Save geometry', exact: true }).click();
   await expect.poll(() => features.at(-1).geometry.coordinates[0]).not.toBe(before.at(-1).geometry.coordinates[0]);
   expect(features[0].geometry).toEqual(before[0].geometry);
-  await panel.getByRole('button', { name: 'Remove selected from layer', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Remove selected', exact: true }).click();
   await expect(panel.getByText('240 features', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(panel.getByText('250 features', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: 'Point 1', exact: true }).click();
-  await expect(panel.getByRole('button', { name: 'Move marker', exact: true })).toBeInViewport();
+  await expect(panel.getByLabel('Feature name', { exact: true })).toBeInViewport();
   expect(fixture.promotions).toBe(0);
 });
 
-test('personal layers download their styles and saved maps restore the camera and legend', async ({ page }) => {
+test('personal layers download their styles', async ({ page }) => {
   const fixture = await personalFixture(page);
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
   const panel = await createPersonalLayer(page, 'Download map');
   const map = await page.locator('.map').boundingBox();
-  await panel.getByRole('button', { name: 'Add markers', exact: true }).click();
-  await chooseIcon(panel, 'New marker', 'Tank');
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await chooseIcon(page, tools(page), 'Style', 'Tank');
+  // the press on the map closes the palette and adds the marker in the style picked
   await page.mouse.click(map.x + map.width * .4, map.y + map.height * .5); await page.keyboard.press('Escape');
   await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
@@ -65,31 +74,6 @@ test('personal layers download their styles and saved maps restore the camera an
   const icons = fixture.exports.find((entry) => entry.format === 'kmz').body.icons;
   expect(Object.keys(icons)).toEqual(['badge-tank-0072b2']);
   expect(Buffer.from(icons['badge-tank-0072b2'], 'base64').subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  await page.getByRole('button', { name: 'Saved maps', exact: true }).click();
-  const maps = page.getByRole('dialog', { name: 'Saved maps', exact: true });
-  await maps.getByLabel('Map name', { exact: true }).fill('Review view');
-  await maps.getByLabel('Legend note', { exact: true }).fill('Working markers');
-  await maps.getByRole('button', { name: 'Save this map', exact: true }).click();
-  await expect(maps.getByRole('button', { name: 'Review view', exact: true })).toBeVisible();
-  expect(fixture.maps[0].layers[0].name).toBe(fixture.rows[0].name);
-  await maps.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: 'Map legend' })).toContainText('Working markers');
-  await page.reload(); await awaitMapReady(page);
-  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
-  await expect(page.getByRole('button', { name: /\bz15\b/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Saved maps', exact: true }).click();
-  await maps.getByRole('button', { name: 'Review view', exact: true }).click();
-  await expect(maps).not.toBeVisible();
-  await expect(page.getByRole('complementary', { name: 'Map legend' })).toContainText('Review view');
-  await expect(page.getByRole('button', { name: /\bz16\b/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Hide map legend', exact: true }).click();
-  await page.evaluate(async (id) => {
-    const { openEntity } = await import('/src/lib/navigate.js');
-    openEntity({ type: 'map-view', attrs: { spec: `.map-views/${id}.json` } });
-  }, fixture.maps[0].id);
-  await expect(page.getByRole('complementary', { name: 'Map legend' })).toContainText('Review view');
-  await expect(maps).not.toBeVisible();
-  await page.screenshot({ path: test.info().outputPath('saved-map-legend.png') });
 });
 
 test('the entire symbol palette rasterizes inside its badge and pin height matches round markers', async ({ page }) => {
@@ -107,7 +91,7 @@ test('the entire symbol palette rasterizes inside its badge and pin height match
     const pin = bounds(personalMarkerImage('pin', '#0072b2'));
     return { badges, pinHeight: (pin.bottom - pin.top + 1) * .4, roundHeight: (badges[0].bounds.bottom - badges[0].bounds.top + 1) * .4 };
   });
-  expect(result.badges).toHaveLength(52);
+  expect(result.badges).toHaveLength(62);
   for (const badge of result.badges) { expect(badge.bounds.left).toBeGreaterThan(0); expect(badge.bounds.right).toBeLessThan(63); }
   expect(Math.abs(result.pinHeight - result.roundHeight)).toBeLessThan(1);
 });
@@ -117,20 +101,26 @@ test('reordering groups changes which overlapping pin or round marker receives a
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
   const panel = await createPersonalLayer(page, 'Mixed symbols');
   const map = await page.locator('.map').boundingBox(), point = { x: map.x + map.width * .4, y: map.y + map.height * .5 };
-  await panel.getByRole('button', { name: 'Add markers', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
   await page.mouse.click(point.x, point.y); await page.keyboard.press('Escape');
   await panel.getByRole('button', { name: 'New group', exact: true }).click();
   await panel.getByLabel('New group name').fill('Vehicles');
   await panel.getByRole('button', { name: 'Create group', exact: true }).click();
-  await chooseIcon(panel, 'Group', 'Tank');
-  await panel.getByRole('button', { name: 'Add markers', exact: true }).click();
+  await panel.getByRole('button', { name: 'Settings of group Vehicles', exact: true }).click();
+  await chooseIcon(page, page.getByRole('group', { name: 'Settings of group Vehicles', exact: true }), 'Group style', 'Tank');
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
   await page.mouse.click(point.x, point.y); await page.keyboard.press('Escape');
   await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
-  await clickCard(page, point.x, point.y);
-  await expect(page.locator('.layer-card')).toContainText('Marker 1');
-  await page.locator('.maplibregl-popup-close-button').click();
+  // while the layer is edited, a click on the map picks the feature drawn on top
+  await page.mouse.click(point.x, point.y - 9);
+  await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Marker 1');
+  await panel.getByRole('button', { name: 'Clear the selection', exact: true }).click();
   await panel.getByRole('button', { name: 'Move group Vehicles', exact: true })
     .dragTo(panel.getByRole('button', { name: 'Move group Markers', exact: true }));
+  await page.mouse.click(point.x, point.y - 9);
+  await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Marker 2');
+  // …and out of the editor, the same click opens the card of that feature
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await clickCard(page, point.x, point.y);
   await expect(page.locator('.layer-card')).toContainText('Marker 2');
 });
@@ -143,6 +133,74 @@ async function createPersonalLayer(page, title) {
   await expect(page.getByRole('region', { name: 'Layer editor', exact: true })).toBeVisible();
   return page.getByRole('region', { name: 'Layer editor', exact: true });
 }
+
+test('on the map a pin drags without the map moving, a loop picks two lines that merge, and a pasted post is a marker', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.route('**/api/geo/scan', (route) => route.fulfill({ json: {
+    points: [{ lat: 48.8504, lon: 2.3502, text: '48.8504, 2.3502', format: 'decimal' }],
+    links: ['https://x.com/someone/status/1'], date: '2026-09-13' } }));
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Gestures');
+  const map = await page.locator('.map').boundingBox();
+  const at = (x, y) => ({ x: map.x + map.width * x, y: map.y + map.height * y });
+  const features = fixture.collections.get(fixture.rows[0].name);
+  // the rail's tools step aside while the layer is edited; its bar is on the map
+  await expect(page.getByRole('button', { name: 'Save place' })).toHaveCount(0);
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  const pin = at(.4, .45); await page.mouse.click(pin.x, pin.y); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  const before = [...features[0].geometry.coordinates];
+  await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
+  await page.mouse.move(pin.x + 60, pin.y - 18, { steps: 8 }); await page.mouse.up();
+  // sixty pixels east at zoom 16: had the map panned with the pointer, the pin would not have moved
+  await expect.poll(() => features[0].geometry.coordinates[0] - before[0]).toBeGreaterThan(0.0009);
+  expect(Math.abs(features[0].geometry.coordinates[1] - before[1])).toBeLessThan(0.0002);
+
+  for (const [x1, x2] of [[.3, .38], [.42, .5]]) {
+    await tools(page).getByRole('button', { name: 'Draw line', exact: true }).click();
+    const a = at(x1, .7), b = at(x2, .72);
+    await page.mouse.click(a.x, a.y); await page.mouse.click(b.x, b.y);
+    await tools(page).getByRole('button', { name: 'Save geometry', exact: true }).click();
+  }
+  await expect(panel.getByText('3 features', { exact: true })).toBeVisible();
+  await tools(page).getByRole('button', { name: 'Select an area', exact: true }).click();
+  const loop = [at(.26, .64), at(.56, .64), at(.56, .8), at(.26, .8)];
+  await page.mouse.move(loop[0].x, loop[0].y); await page.mouse.down();
+  for (const corner of [...loop.slice(1), loop[0]]) await page.mouse.move(corner.x, corner.y, { steps: 4 });
+  await page.mouse.up();
+  await expect(panel.getByText('2 selected', { exact: true })).toBeVisible();
+  await tools(page).getByRole('button', { name: 'Merge', exact: true }).click();
+  await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
+  expect(features.find((feature) => feature.geometry.type === 'MultiLineString')).toBeTruthy();
+
+  await tools(page).getByRole('button', { name: 'Paste a position', exact: true }).click();
+  const paste = page.getByRole('dialog', { name: 'Paste a position' });
+  await paste.getByLabel('Pasted text').fill('Strike on the depot, 13 SEP 2026. 48.8504, 2.3502 https://x.com/someone/status/1');
+  await expect(paste.getByLabel('Geolocated by someone else')).toBeChecked();
+  await paste.getByRole('button', { name: 'Add marker', exact: true }).click();
+  await expect(panel.getByText('3 features', { exact: true })).toBeVisible();
+  expect(features.at(-1).properties).toMatchObject({ date: '2026-09-13', provenance: 'external', links: ['https://x.com/someone/status/1'] });
+  await page.screenshot({ path: test.info().outputPath('map-edit-bar.png') });
+});
+
+test('a source feature is copied into one of the analyst\'s layers as somebody else\'s point', async ({ page }) => {
+  const fixture = await personalFixture(page, { imported: true });
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Collected');
+  await tools(page).getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(panel).not.toBeVisible();
+  await page.getByRole('button', { name: 'Source map', exact: true }).click();
+  const map = await page.locator('.map').boundingBox();
+  await clickCard(page, map.x + map.width / 2, map.y + map.height / 2 - 9);
+  await page.locator('.layer-card').getByRole('button', { name: 'Copy to my layer', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Copy to my layer' });
+  await expect(dialog.getByLabel('Layer to copy into')).toHaveValue(fixture.rows.find((row) => row.editable).name);
+  await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const copied = fixture.collections.get(fixture.rows.find((row) => row.editable).name);
+  expect(copied).toHaveLength(1);
+  expect(copied[0].properties).toMatchObject({ name: 'Original marker', provenance: 'external' });
+});
 
 test('feature grips reorder rows, move selected rows into groups and retain the group menu', async ({ page }) => {
   const fixture = await personalFixture(page, { imported: true, count: 4 });
@@ -166,14 +224,14 @@ test('feature grips reorder rows, move selected rows into groups and retain the 
   await panel.getByRole('button', { name: 'Move Point 1', exact: true }).dragTo(panel.getByRole('button', { name: 'Move group Reviewed', exact: true }));
   const reviewed = panel.locator('.group').filter({ has: page.getByRole('button', { name: 'Move group Reviewed', exact: true }) });
   await expect(reviewed.locator('.feature-row .name')).toHaveText(['Point 1', 'Point 4']);
-  await panel.getByLabel('Selected features group').selectOption('markers');
+  await panel.getByLabel('Feature group', { exact: true }).selectOption('markers');
   await expect(reviewed.locator('.feature-row')).toHaveCount(0);
   const current = fixture.collections.get(fixture.rows[0].name).map((feature) => feature.geometry);
   expect(current.sort((a, b) => a.coordinates[0] - b.coordinates[0])).toEqual(before.sort((a, b) => a.coordinates[0] - b.coordinates[0]));
   await page.screenshot({ path: test.info().outputPath('layer-feature-grips.png') });
 });
 
-test('layer names and optional descriptions save, reopen and restore through Back', async ({ page }) => {
+test('layer names and optional descriptions save as they are left, reopen and restore through Discard', async ({ page }) => {
   const fixture = await personalFixture(page);
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
   await page.getByRole('button', { name: 'New layer', exact: true }).click();
@@ -182,29 +240,28 @@ test('layer names and optional descriptions save, reopen and restore through Bac
   await dialog.getByRole('textbox', { name: 'Description (optional)', exact: true }).fill('Initial context');
   await dialog.getByRole('button', { name: 'Create layer', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Layer editor', exact: true });
-  await expect(panel.getByText('Initial context', { exact: true })).toBeVisible();
+  const name = panel.getByLabel('Layer name', { exact: true }), description = panel.getByLabel('Layer description', { exact: true });
+  await expect(description).toHaveValue('Initial context');
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Edit Original map', exact: true }).click();
-  await panel.getByRole('button', { name: 'Edit layer details', exact: true }).click();
-  await panel.getByLabel('Layer name', { exact: true }).fill('Renamed map');
-  await panel.getByLabel('Layer description', { exact: true }).fill('Updated context');
-  await panel.getByRole('button', { name: 'Save layer details', exact: true }).click();
-  await expect(panel.getByText('Updated context', { exact: true })).toBeVisible();
-  expect(fixture.rows[0].title).toBe('Renamed map');
-  await panel.getByRole('button', { name: 'Back from layer editor' }).click();
-  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await name.fill('Renamed map'); await name.press('Enter');
+  await expect.poll(() => fixture.rows[0].title).toBe('Renamed map');
+  await description.fill('Updated context'); await description.press('Tab');
+  await expect.poll(() => fixture.rows[0].description).toBe('Updated context');
+  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+  await menuItem(page, 'Layer actions', 'Discard changes…').click();
+  await page.getByRole('alertdialog', { name: 'Discard changes?' }).getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByRole('button', { name: 'Edit Original map', exact: true }).click();
-  await expect(panel.getByText('Initial context', { exact: true })).toBeVisible();
-  await panel.getByRole('button', { name: 'Edit layer details', exact: true }).click();
-  await panel.getByLabel('Layer name', { exact: true }).fill('Final map');
-  await panel.getByLabel('Layer description', { exact: true }).fill('Final context');
+  await expect(description).toHaveValue('Initial context');
+  await name.fill('Final map');
+  await description.fill('Final context');
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Edit Final map', exact: true }).click();
-  await expect(panel.getByText('Final context', { exact: true })).toBeVisible();
+  await expect(description).toHaveValue('Final context');
   expect(fixture.rows[0].description).toBe('Final context');
 });
 
-test('group size and native dragging persist, while Back restores the session baseline', async ({ page }) => {
+test('group size and native dragging persist, while Discard restores the session baseline', async ({ page }) => {
   const fixture = await personalFixture(page);
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
   let panel = await createPersonalLayer(page, 'Group map');
@@ -214,28 +271,37 @@ test('group size and native dragging persist, while Back restores the session ba
   await panel.getByRole('button', { name: 'New group', exact: true }).click();
   await panel.getByLabel('New group name').fill('Vehicles');
   await panel.getByRole('button', { name: 'Create group', exact: true }).click();
-  const size = panel.getByRole('slider', { name: 'Icon size for Vehicles' });
+  await panel.getByRole('button', { name: 'Settings of group Vehicles', exact: true }).click();
+  const settings = page.getByRole('group', { name: 'Settings of group Vehicles', exact: true });
+  const size = settings.getByRole('slider', { name: 'Icon size for Vehicles' });
   await size.fill('2'); await size.dispatchEvent('change');
-  await expect(panel.locator('output').first()).toHaveText('200%');
-  const width = panel.getByRole('slider', { name: 'Line width for Vehicles' });
+  await expect(settings.locator('output').first()).toHaveText('200%');
+  const width = settings.getByRole('slider', { name: 'Line width for Vehicles' });
   await width.fill('5.5'); await width.dispatchEvent('change');
   await expect.poll(() => fixture.groups.get(fixture.rows[0].name)[1].stroke).toBe(5.5);
   await expect.poll(() => fixture.groups.get(fixture.rows[0].name)[1].size).toBe(2);
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
   await panel.getByRole('button', { name: 'Move group Vehicles', exact: true })
     .dragTo(panel.getByRole('button', { name: 'Move group Markers', exact: true }));
   await expect.poll(() => fixture.groups.get(fixture.rows[0].name)[0].name).toBe('Vehicles');
   await page.screenshot({ path: test.info().outputPath('group-size-and-order.png') });
-  await panel.getByRole('button', { name: 'Back from layer editor' }).click();
+  const discard = async () => {
+    await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+    await menuItem(page, 'Layer actions', 'Discard changes…').click();
+  };
+  await discard();
   const confirm = page.getByRole('alertdialog', { name: 'Discard changes?' });
   await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(fixture.groups.get(fixture.rows[0].name)).toHaveLength(2);
-  await panel.getByRole('button', { name: 'Back from layer editor' }).click();
+  await discard();
   await confirm.getByRole('button', { name: 'Discard changes', exact: true }).click();
   await expect(panel).not.toBeVisible();
   expect(fixture.groups.get(fixture.rows[0].name).map((group) => group.name)).toEqual(['Markers']);
+  // nothing changed yet: nothing to discard
   await page.getByRole('button', { name: 'Edit Group map', exact: true }).click();
-  await panel.getByRole('button', { name: 'Back from layer editor' }).click();
-  await expect(panel).not.toBeVisible(); await expect(confirm).not.toBeVisible();
+  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+  await expect(menuItem(page, 'Layer actions', 'Discard changes…')).toBeDisabled();
 });
 
 test('marker dragging and editable line and area vertices save geometry without creating case places', async ({ page }) => {
@@ -244,34 +310,38 @@ test('marker dragging and editable line and area vertices save geometry without 
   const panel = await createPersonalLayer(page, 'Drawn map');
   const map = await page.locator('.map').boundingBox();
   const click = (x, y) => page.mouse.click(map.x + map.width * x, map.y + map.height * y);
-  await panel.getByRole('button', { name: 'Add markers', exact: true }).click(); await click(.4, .5);
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click(); await click(.4, .5);
   await expect(panel.getByText('1 feature', { exact: true })).toBeVisible(); await page.keyboard.press('Escape');
   const features = fixture.collections.get(fixture.rows[0].name);
   const initial = [...features[0].geometry.coordinates];
-  await panel.getByRole('button', { name: 'Marker 1', exact: true }).click();
-  await panel.getByRole('button', { name: 'Move marker', exact: true }).click();
-  const handle = page.getByRole('button', { name: 'Move vertex 1.1', exact: true });
-  const point = await handle.boundingBox();
-  await page.mouse.move(point.x + point.width / 2, point.y + point.height / 2);
-  await page.mouse.down(); await page.mouse.move(point.x + 35, point.y + 25, { steps: 5 }); await page.mouse.up();
+  // picked on the map, where it stands (a row of the list would fly the map to it)
+  const tip = { x: map.x + map.width * .4, y: map.y + map.height * .5 };
+  await page.mouse.click(tip.x, tip.y - 9);
+  await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Marker 1');
+  // the selected marker wears a ring: its knob, pulled toward a point, turns the marker to face it
+  const knob = page.getByRole('button', { name: 'Set the direction', exact: true });
+  const grip = await knob.boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down();
+  await page.mouse.move(tip.x + 90, tip.y + 2, { steps: 6 }); await page.mouse.up();
+  await expect.poll(() => features[0].properties.bearing).toBe(90);
+  await expect(panel.getByRole('group', { name: 'Feature', exact: true })).toContainText('90° E');
+  await expect(page.getByRole('button', { name: 'Direction 90° E', exact: true })).toBeVisible();
   expect(features[0].geometry.coordinates).toEqual(initial);
-  await panel.getByRole('button', { name: 'Save geometry', exact: true }).click();
-  await expect.poll(() => JSON.stringify(features[0].geometry.coordinates)).not.toBe(JSON.stringify(initial));
-  await panel.getByRole('button', { name: 'Draw line', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Draw line', exact: true }).click();
   await click(.34, .40); await click(.48, .54); await page.keyboard.press('Enter');
   await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
-  await panel.getByRole('button', { name: 'Draw area', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Draw area', exact: true }).click();
   await click(.34, .62); await click(.48, .62); await click(.48, .76);
-  await panel.getByRole('button', { name: 'Save geometry', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Save geometry', exact: true }).click();
   await expect(panel.getByText('3 features', { exact: true })).toBeVisible();
   const area = features.find((feature) => feature.geometry.type === 'Polygon');
   expect(area.geometry.coordinates[0][0]).toEqual(area.geometry.coordinates[0].at(-1));
   await panel.getByRole('button', { name: 'Area 2', exact: true }).click();
-  await panel.getByRole('button', { name: 'Edit geometry', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Reshape', exact: true }).click();
   await page.getByRole('button', { name: 'Add vertex 1.1', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Move vertex/ })).toHaveCount(4);
   await page.getByRole('button', { name: 'Move vertex 1.2', exact: true }).press('Shift+ArrowRight');
-  await panel.getByRole('button', { name: 'Save geometry', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Save geometry', exact: true }).click();
   await expect.poll(() => area.geometry.coordinates[0].length).toBe(5);
   await page.screenshot({ path: test.info().outputPath('lines-and-areas.png') });
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
@@ -295,13 +365,13 @@ for (const tool of ['detect', 'compare', 'horizon']) {
     const layers = page.getByRole('button', { name: tool === 'horizon' ? 'Map layers' : /^Layers/ });
     await layers.click(); const panel = await createPersonalLayer(page, `${tool} map`);
     const map = await page.locator('.map:visible').first().boundingBox();
-    await panel.getByRole('button', { name: 'Add markers', exact: true }).click();
+    await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
     await page.mouse.click(map.x + map.width * .35, map.y + map.height * .5);
     await expect(panel.getByText('1 feature', { exact: true })).toBeVisible(); await page.keyboard.press('Escape');
-    await panel.getByRole('button', { name: 'Draw line', exact: true }).click();
+    await tools(page).getByRole('button', { name: 'Draw line', exact: true }).click();
     await page.mouse.click(map.x + map.width * .35, map.y + map.height * .4);
     await page.mouse.click(map.x + map.width * .50, map.y + map.height * .6);
-    await panel.getByRole('button', { name: 'Save geometry', exact: true }).click();
+    await tools(page).getByRole('button', { name: 'Save geometry', exact: true }).click();
     await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
     await panel.getByRole('button', { name: 'Done', exact: true }).click();
     await layers.click(); await page.getByRole('button', { name: `Edit ${tool} map`, exact: true }).click();
@@ -317,13 +387,14 @@ test('switching map tools keeps the same edit checkpoint and unsaved feature for
   await page.getByRole('button', { name: 'Create layer', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Layer editor', exact: true });
   await panel.getByRole('button', { name: 'Original marker', exact: true }).click();
-  await panel.getByLabel('Selected marker name').fill('Unsaved across maps');
+  await panel.getByLabel('Feature name', { exact: true }).fill('Unsaved across maps');
   for (const tool of ['detect', 'compare', 'horizon', 'satellite']) {
     await page.goto(`/#${tool}`);
     await expect(page.locator(`.topbar button[title="Guide: ${tool[0].toUpperCase() + tool.slice(1)}"]`)).toBeVisible();
-    await expect(panel.getByLabel('Selected marker name')).toHaveValue('Unsaved across maps');
+    await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Unsaved across maps');
   }
-  await panel.getByRole('button', { name: 'Back from layer editor' }).click();
+  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+  await menuItem(page, 'Layer actions', 'Discard changes…').click();
   await page.getByRole('alertdialog', { name: 'Discard changes?' }).getByRole('button', { name: 'Discard changes', exact: true }).click();
   const own = fixture.rows.find((row) => row.editable);
   expect(fixture.collections.get(own.name)[0].properties.name).toBe('Original marker');
@@ -340,7 +411,6 @@ async function personalFixture(page, { imported = false, shared = false, count =
   const checkpoints = new Map();
   const batches = new Map();
   const exports = [];
-  const maps = [];
   const shapeSerial = new Map();
   const rows = [];
   await page.route(`**/api/cases/${CASE_ID}/horizon/views`, (route) => route.fulfill({ json: [] }));
@@ -350,6 +420,9 @@ async function personalFixture(page, { imported = false, shared = false, count =
   const savedIndex = () => placeAlive ? [{ id: casePlace.id, kind: 'place', title: casePlace.label,
     lat: 48.85, lon: 2.35, relations: 1 }] : [];
   await page.route(`**/api/cases/${CASE_ID}/satellite/index`, (route) => route.fulfill({ json: savedIndex() }));
+  await page.route(`**/api/cases/${CASE_ID}/layer-links`, (route) => route.fulfill({ json: savedIndex()
+    .map(({ id, kind, title, lat, lon }) => ({ id, kind, title, lat, lon })) }));
+  await page.route(`**/api/cases/${CASE_ID}/layer-palette`, (route) => route.fulfill({ json: { colours: [] } }));
   await page.route(`**/api/cases/${CASE_ID}/entities/${casePlace.id}/dependents`,
     (route) => route.fulfill({ json: { cascade: [], tombstone: [] } }));
   await page.route(`**/api/cases/${CASE_ID}/entities/${casePlace.id}`, (route) => {
@@ -383,15 +456,6 @@ async function personalFixture(page, { imported = false, shared = false, count =
     rows.unshift(row);
     return row;
   };
-  await page.route(`**/api/cases/${CASE_ID}/map-views`, (route) => {
-    if (route.request().method() === 'POST') {
-      const body = route.request().postDataJSON(), id = body.id || (++serial).toString(16).padStart(32, '0');
-      const saved = { ...body, id, version: 1 }, at = maps.findIndex((view) => view.id === id);
-      if (at >= 0) maps[at] = saved; else maps.push(saved);
-      return route.fulfill({ json: saved });
-    }
-    return route.fulfill({ json: maps });
-  });
   await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: rows }));
   await page.route(`**/api/cases/${CASE_ID}/map-layers/**`, async (route) => {
     const path = new URL(route.request().url()).pathname.split('/map-layers/')[1];
@@ -416,7 +480,7 @@ async function personalFixture(page, { imported = false, shared = false, count =
       return route.fulfill({ json: { place: casePlace, related: [
         { id: 'proof-1', label: 'Gate proof', type: 'proof' },
         { id: 'clip-1', label: 'Gate footage', type: 'media' }],
-        layers: rows.filter((row) => collections.get(row.name).some((feature) => feature.properties.place_id === casePlace.id)) } });
+        layers: rows.filter((row) => collections.get(row.name).some((feature) => feature.properties.entity_id === casePlace.id)) } });
     }
     const [name, action, key, last] = path.split('/');
     const row = rows.find((entry) => entry.name === name);
@@ -429,7 +493,10 @@ async function personalFixture(page, { imported = false, shared = false, count =
     const ownGroups = groups.get(name);
     const visibleFeatures = () => features.map((feature) => {
       const properties = { ...feature.properties };
-      if (properties.place_id === casePlace.id && !placeAlive) delete properties.place_id;
+      if (properties.entity_id === casePlace.id && !placeAlive) delete properties.entity_id;
+      // what the server adds to a marker that follows a case item
+      if (properties.entity_id) Object.assign(properties, { entity_type: 'place',
+        entity_label: properties.entity_id === casePlace.id ? casePlace.label : properties.name });
       return { ...feature, properties };
     });
     const answer = () => ({ layer: row, groups: ownGroups, checkpoint: checkpoints.has(name) ? 'c'.repeat(32) : null, document: { type: 'FeatureCollection', features: visibleFeatures() } });
@@ -486,7 +553,13 @@ async function personalFixture(page, { imported = false, shared = false, count =
         if (body.offset) feature.geometry.coordinates = shift(feature.geometry.coordinates);
         if (body.changes) Object.assign(feature.properties, body.changes);
       }
-      changed(); return route.fulfill({ json: answer() });
+      changed(); return route.fulfill({ json: { ...answer(), ...(body.offset ? { kept: 0 } : {}) } });
+    }
+    if (action === 'merge') {
+      const { keys } = route.request().postDataJSON(), [first, ...rest] = keys.map((one) => features.find((feature) => feature.properties.key === one));
+      first.geometry = { type: 'MultiLineString', coordinates: [first, ...rest].map((feature) => feature.geometry.coordinates) };
+      const keep = features.filter((feature) => !rest.includes(feature)); features.splice(0, features.length, ...keep);
+      changed(); return route.fulfill({ json: { ...answer(), batch: 'merged', key: first.properties.key } });
     }
     if (action === 'export') {
       exports.push({ format: key, body: route.request().postDataJSON() });
@@ -503,20 +576,23 @@ async function personalFixture(page, { imported = false, shared = false, count =
       Object.assign(ownGroups.find((group) => group.id === key), route.request().postDataJSON()); changed();
       return route.fulfill({ json: answer() });
     }
-    if (action === 'places' && method === 'POST') {
-      const { ids, group: target } = route.request().postDataJSON();
-      for (const id of ids) if (!features.some((feature) => feature.properties.place_id === id)) {
+    if (action === 'links' && method === 'POST') {
+      const { items, group: target } = route.request().postDataJSON();
+      let added = 0;
+      for (const { id } of items) if (!features.some((feature) => feature.properties.entity_id === id)) {
+        added += 1;
         features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [2.35, 48.85] },
           properties: { key: `shared-${++serial}`, name: casePlace.label, category: 'Markers',
-            colour: '#0072b2', symbol: 'pin', group: target || 'markers', place_id: id, index: features.length } });
+            colour: '#0072b2', symbol: 'pin', group: target || 'markers', entity_id: id, index: features.length } });
       }
-      changed(); return route.fulfill({ json: answer() });
+      changed(); return route.fulfill({ json: { ...answer(), added } });
     }
     if (action === 'markers' && method === 'POST' && !key) {
       const body = route.request().postDataJSON();
       const marker = { type: 'Feature', geometry: { type: 'Point', coordinates: [body.lon, body.lat] },
         properties: { key: `marker-${++serial}`, name: body.name || `Marker ${features.length + 1}`,
-          colour: body.colour, symbol: body.symbol, group: body.group || 'markers', category: 'Markers', index: features.length } };
+          colour: body.colour, symbol: body.symbol, group: body.group || 'markers', category: 'Markers', index: features.length,
+          ...Object.fromEntries(['date', 'links', 'provenance'].filter((field) => body[field]).map((field) => [field, body[field]])) } };
       features.push(marker);
       changed();
       return route.fulfill({ json: { layer: row, marker } });
@@ -524,10 +600,10 @@ async function personalFixture(page, { imported = false, shared = false, count =
     if (action === 'markers' && last === 'place') {
       promotions += 1;
       const marker = features.find((entry) => entry.properties.key === key);
-      marker.properties.place_id = `place-${promotions}`;
+      marker.properties.entity_id = `place-${promotions}`;
       changed();
       return route.fulfill({ json: { layer: row, marker,
-        place: { id: marker.properties.place_id, label: marker.properties.name } } });
+        place: { id: marker.properties.entity_id, label: marker.properties.name } } });
     }
     if (action === 'markers' && method === 'PATCH') {
       const marker = features.find((entry) => entry.properties.key === key);
@@ -554,7 +630,7 @@ async function personalFixture(page, { imported = false, shared = false, count =
     }
     return route.fallback();
   });
-  return { rows, collections, groups, uploads, exports, maps, get promotions() { return promotions; },
+  return { rows, collections, groups, uploads, exports, get promotions() { return promotions; },
     get deleted() { return deleted; }, get placeAlive() { return placeAlive; } };
 }
 
@@ -568,9 +644,9 @@ test('a personal layer saves repeated clicks, stops with Escape and promotes onl
   await page.getByRole('dialog', { name: 'New layer' }).getByRole('textbox', { name: 'Name', exact: true }).fill('Working map');
   await page.getByRole('button', { name: 'Create layer', exact: true }).click();
   const panel = page.getByRole('region', { name: 'My layers' });
-  await panel.getByRole('button', { name: 'Add markers', exact: true }).click();
-  await chooseIcon(panel, 'New marker', 'Star');
-  await panel.getByRole('button', { name: 'New marker orange', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await chooseIcon(page, tools(page), 'Style', 'Star');
+  await page.getByRole('button', { name: 'Style orange', exact: true }).click();
   const map = await page.locator('.map').boundingBox();
   await page.mouse.click(map.x + map.width * 0.4, map.y + map.height * 0.5);
   await page.mouse.click(map.x + map.width * 0.55, map.y + map.height * 0.55);
@@ -579,9 +655,10 @@ test('a personal layer saves repeated clicks, stops with Escape and promotes onl
   expect(fixture.collections.get(fixture.rows[0].name).every((feature) =>
     feature.properties.symbol === 'star' && feature.properties.colour === '#d55e00')).toBe(true);
   await page.keyboard.press('Escape');
-  await expect(panel.getByRole('button', { name: 'Add markers', exact: true })).toBeVisible();
+  await expect(tools(page).getByRole('button', { name: 'Add markers', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await page.mouse.click(map.x + map.width * 0.7, map.y + map.height * 0.6);
   await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
+  await tools(page).getByRole('button', { name: 'Done', exact: true }).click();
   await clickCard(page, map.x + map.width * 0.4, map.y + map.height * 0.5 - 9);
   await expect(page.locator('.layer-card')).toContainText('Marker 1');
   await page.screenshot({ path: test.info().outputPath('compact-marker-popup.png') });
@@ -590,8 +667,9 @@ test('a personal layer saves repeated clicks, stops with Escape and promotes onl
   expect((await action.boundingBox()).width).toBeLessThanOrEqual(26);
   await page.locator('.layer-card').getByRole('button', { name: 'Edit feature', exact: true }).click();
   await page.screenshot({ path: test.info().outputPath('personal-layer-editor.png') });
-  await panel.getByRole('button', { name: 'Save as case place', exact: true }).click();
-  await expect(panel.getByText('Saved as case place', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Feature actions', exact: true }).click();
+  await menuItem(page, 'Feature actions', 'Save as case place').click();
+  await expect(panel.getByText('Follows the place “Marker 1”', { exact: true })).toBeVisible();
   expect(fixture.promotions).toBe(1);
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await page.reload();
@@ -608,7 +686,8 @@ test('an imported layer starts an independent editable copy', async ({ page }) =
   const panel = page.getByRole('region', { name: 'My layers' });
   await expect(panel.getByText('Copy of source.kmz', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: 'Original marker', exact: true }).click();
-  await expect(panel.getByRole('button', { name: 'Save as case place', exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Feature actions', exact: true }).click();
+  await expect(menuItem(page, 'Feature actions', 'Save as case place')).toBeVisible();
   expect(fixture.rows.find((row) => row.name === 'source').features).toBe(1);
   expect(fixture.promotions).toBe(0);
 });
@@ -631,17 +710,18 @@ test('a downloaded KMZ opens through the file picker and its marker can be edite
   expect(fixture.uploads[0].includes(kmz)).toBe(true);
   expect(fixture.uploads[0].toString()).not.toContain('name="icons"');
   await panel.getByRole('button', { name: 'Original marker', exact: true }).click();
-  await panel.getByLabel('Selected marker name').fill('Reviewed marker');
-  await chooseIcon(panel, 'Selected marker', 'Flag');
-  await panel.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await panel.getByLabel('Feature name', { exact: true }).fill('Reviewed marker');
+  await panel.getByLabel('Feature name', { exact: true }).press('Enter');
+  await chooseIcon(page, panel, 'Feature style', 'Flag');
   await expect(panel.getByRole('button', { name: 'Reviewed marker', exact: true })).toBeVisible();
-  expect(fixture.collections.get(fixture.rows[0].name)[0].properties.symbol).toBe('flag');
+  await expect.poll(() => fixture.collections.get(fixture.rows[0].name)[0].properties.symbol).toBe('flag');
+  await page.keyboard.press('Escape');
   expect(fixture.promotions).toBe(0);
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   const map = await page.locator('.map').boundingBox();
   await clickCard(page, map.x + map.width / 2, map.y + map.height / 2 - 9);
   await page.locator('.layer-card').getByRole('button', { name: 'Edit feature', exact: true }).click();
-  await expect(panel.getByLabel('Selected marker name')).toHaveValue('Reviewed marker');
+  await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Reviewed marker');
 });
 
 test('groups share round icons, case places span layers, and popup removals can be undone', async ({ page }) => {
@@ -653,12 +733,13 @@ test('groups share round icons, case places span layers, and popup removals can 
     await panel.getByRole('button', { name: 'New layer', exact: true }).click();
     await page.getByRole('dialog', { name: 'New layer' }).getByRole('textbox', { name: 'Name', exact: true }).fill(title);
     await page.getByRole('button', { name: 'Create layer', exact: true }).click();
-    await expect(panel.getByRole('button', { name: 'Add markers', exact: true })).toBeVisible();
+    await expect(tools(page).getByRole('button', { name: 'Add markers', exact: true })).toBeVisible();
   };
   const addGate = async () => {
-    await panel.getByRole('button', { name: 'Add case places', exact: true }).click();
-    await panel.getByRole('checkbox', { name: 'Case gate', exact: true }).check();
-    await panel.getByRole('button', { name: 'Add selected (1)', exact: true }).click();
+    await tools(page).getByRole('button', { name: 'Add from the case', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add from the case' });
+    await dialog.getByRole('checkbox', { name: 'Case gate', exact: true }).check();
+    await dialog.getByRole('button', { name: 'Add 1', exact: true }).click();
     await expect(panel.getByRole('button', { name: 'Case gate', exact: true })).toBeVisible();
   };
   await createLayer('Checked map');
@@ -666,33 +747,39 @@ test('groups share round icons, case places span layers, and popup removals can 
   await panel.getByRole('button', { name: 'New group', exact: true }).click();
   await panel.getByLabel('New group name').fill('Verified');
   await panel.getByRole('button', { name: 'Create group', exact: true }).click();
-  await expect(panel.getByLabel('Group style')).toHaveValue('uniform');
-  await panel.getByRole('button', { name: 'Group icons', exact: true }).click();
-  await expect(panel.getByRole('group', { name: 'Group icon palette', exact: true }).getByRole('button')).toHaveCount(56);
+  await panel.getByRole('button', { name: 'Settings of group Verified', exact: true }).click();
+  const settings = page.getByRole('group', { name: 'Settings of group Verified', exact: true });
+  await expect(settings.getByLabel('One style for the whole group')).toBeChecked();
+  await settings.getByRole('button', { name: 'Group style', exact: true }).click();
+  const palette = page.getByRole('group', { name: 'Group style icon palette', exact: true });
+  await expect(palette.getByRole('button')).toHaveCount(66);
   await page.screenshot({ path: test.info().outputPath('round-icon-palette.png') });
-  await panel.getByLabel('Group find icon').click();
-  await expect(panel.getByRole('group', { name: 'Group icon palette', exact: true })).toBeVisible();
-  await panel.getByLabel('Group name', { exact: true }).fill('Verified sites');
-  await page.getByRole('tab', { name: 'Layers', exact: true }).click();
-  await expect(panel.getByRole('group', { name: 'Group icon palette', exact: true })).toHaveCount(0);
-  await expect(panel.getByLabel('Group style')).toHaveCount(0);
+  await page.getByLabel('Group style find icon').click();
+  await expect(palette).toBeVisible();
+  await settings.getByLabel('Group name', { exact: true }).fill('Verified sites');
+  await settings.getByLabel('Group name', { exact: true }).press('Enter');
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await expect(page.getByLabel('One style for the whole group')).toHaveCount(0);
   await expect.poll(() => fixture.groups.get(first.name)[1].name).toBe('Verified sites');
-  await panel.getByRole('button', { name: 'Edit group Verified sites', exact: true }).click();
-  await panel.getByRole('button', { name: 'Group icons', exact: true }).click();
-  await panel.getByLabel('Group find icon').fill('Building');
-  await panel.getByRole('button', { name: 'Group Building icon', exact: true }).click();
-  await panel.getByRole('button', { name: 'Group green', exact: true }).click();
+  await panel.getByRole('button', { name: 'Settings of group Verified sites', exact: true }).click();
+  await page.getByRole('button', { name: 'Group style', exact: true }).click();
+  await page.getByLabel('Group style find icon').fill('Building');
+  await page.getByRole('button', { name: 'Group style Building icon', exact: true }).click();
+  await page.getByRole('button', { name: 'Group style green', exact: true }).click();
   await expect.poll(() => fixture.groups.get(first.name)[1].symbol).toBe('badge-building');
-  await panel.getByRole('button', { name: 'Add markers', exact: true }).click();
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
   const box = await page.locator('.map').boundingBox();
   await page.mouse.click(box.x + box.width * 0.37, box.y + box.height * 0.5);
   await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
-  await clickCard(page, box.x + box.width * 0.37, box.y + box.height * 0.5);
-  await expect(page.locator('.layer-card')).toContainText('Marker 1');
+  await page.mouse.click(box.x + box.width * 0.37, box.y + box.height * 0.5);
+  await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Marker 1');
   await addGate();
   await panel.getByRole('button', { name: 'Case gate', exact: true }).click();
-  await expect(panel.getByText('Uses the style of Verified sites.', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Feature style', exact: true }).click();
+  await expect(page.getByText('Verified sites has one style for all its features. A pick here restyles the whole group.', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.screenshot({ path: test.info().outputPath('compact-group-editor.png') });
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
 
@@ -700,9 +787,9 @@ test('groups share round icons, case places span layers, and popup removals can 
   const second = fixture.rows[0];
   await addGate();
   await panel.getByRole('button', { name: 'Case gate', exact: true }).click();
-  await chooseIcon(panel, 'Selected marker', 'FPV drone');
-  await panel.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await chooseIcon(page, panel, 'Feature style', 'FPV drone');
   await expect.poll(() => fixture.collections.get(second.name)[0].properties.symbol).toBe('badge-fpv-drone');
+  await page.keyboard.press('Escape');
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await panel.getByRole('button', { name: 'Move Checked map', exact: true }).press('ArrowUp');
   await expect.poll(() => fixture.rows[0].title).toBe('Checked map');
@@ -719,7 +806,7 @@ test('groups share round icons, case places span layers, and popup removals can 
   await card.getByRole('button', { name: 'Remove from this layer', exact: true }).click();
   await expect.poll(() => fixture.collections.get(second.name).length).toBe(0);
   expect(fixture.placeAlive).toBe(true);
-  expect(fixture.collections.get(first.name).some((feature) => feature.properties.place_id === 'shared-place')).toBe(true);
+  expect(fixture.collections.get(first.name).some((feature) => feature.properties.entity_id === 'shared-place')).toBe(true);
   await page.getByRole('button', { name: 'Undo', exact: true }).last().click();
   await expect.poll(() => fixture.collections.get(second.name).length).toBe(1);
 
@@ -764,4 +851,51 @@ test('a saved place exposes compact icon actions and previews deletion before ch
   await popup.getByRole('button', { name: 'Delete case place', exact: true }).click();
   await expect(page.getByRole('alertdialog', { name: 'Delete this case place?' })).toBeVisible();
   expect(fixture.deleted).toBe(0);
+});
+
+test('the edit bar moves where it is dropped, docks upright on a side, and goes back on a double-click', async ({ page }) => {
+  await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  await createPersonalLayer(page, 'Bar map');
+  const bar = tools(page), map = await page.locator('.map').boundingBox();
+  await expect(bar).toHaveAttribute('aria-orientation', 'horizontal');
+  const grip = await bar.getByRole('button', { name: 'Move the tool bar', exact: true }).boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down();
+  await page.mouse.move(map.x + 30, map.y + map.height * .6, { steps: 10 }); await page.mouse.up();
+  await expect(bar).toHaveAttribute('aria-orientation', 'vertical');
+  const docked = await bar.boundingBox();
+  expect(docked.x - map.x).toBeLessThan(20);
+  // it keeps clear of the map's zoom buttons
+  const zoom = await page.locator('.maplibregl-ctrl-group').first().boundingBox();
+  expect(docked.y >= zoom.y + zoom.height || docked.y + docked.height <= zoom.y || docked.x >= zoom.x + zoom.width).toBe(true);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('azimut:layer-bar'))).edge).toBe('left');
+  await page.screenshot({ path: test.info().outputPath('edit-bar-docked-left.png') });
+  await page.reload(); await page.getByRole('button', { name: 'Edit Bar map', exact: true }).click();
+  await expect(tools(page)).toHaveAttribute('aria-orientation', 'vertical');
+  await tools(page).getByRole('button', { name: 'Move the tool bar', exact: true }).dblclick();
+  await expect(tools(page)).toHaveAttribute('aria-orientation', 'horizontal');
+});
+
+test('a right-click on a marker opens its menu, and its status and style change from there', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Menu map');
+  const map = await page.locator('.map').boundingBox(), at = { x: map.x + map.width * .4, y: map.y + map.height * .5 };
+  await chooseIcon(page, tools(page), 'Style', 'Tank');
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await page.mouse.click(at.x, at.y); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  await page.mouse.click(at.x, at.y, { button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Feature actions', exact: true });
+  await expect(menu).toBeVisible();
+  await expect(page.getByLabel('This point', { exact: true })).toHaveCount(0);
+  await menu.getByRole('button', { name: 'Destroyed', exact: true }).click();
+  const features = fixture.collections.get(fixture.rows[0].name);
+  await expect.poll(() => features[0].properties.status).toBe('destroyed');
+  await menu.getByRole('button', { name: 'Feature style', exact: true }).click();
+  await page.getByRole('button', { name: 'Feature style orange', exact: true }).click();
+  await expect.poll(() => features[0].properties.colour).toBe('#d55e00');
+  await page.screenshot({ path: test.info().outputPath('feature-right-click-menu.png') });
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
 });

@@ -98,9 +98,9 @@
   import NewLayerDialog from './satellite/NewLayerDialog.svelte';
   import { personalLayers as myLayers, personalPlaceDeletion as placeDeletion } from '../lib/map/personalLayers.svelte.js';
   import LayerGeometry from './satellite/LayerGeometry.svelte';
+  import LayerAddDialogs from './satellite/LayerAddDialogs.svelte';
   import PlaceDeleteDialog from './satellite/PlaceDeleteDialog.svelte';
   import LayerExportDialog from './satellite/LayerExportDialog.svelte';
-  import MapViews from './satellite/MapViews.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
   import AddLayerDialog from './satellite/AddLayerDialog.svelte';
   import GeoConfirmedDialog from './satellite/GeoConfirmedDialog.svelte';
@@ -1237,7 +1237,8 @@
   /** Its own height, so the engine's zoom buttons stack under it rather than
    *  behind it — and keep doing so when a tool is added to the rail. */
   let railHeight = $state(0);
-  const railBottom = $derived(railTop + railHeight + 8);
+  // A layer being edited puts its own bar on the map, and the rail steps aside for it.
+  const railBottom = $derived(railTop + (myLayers.editor ? 0 : railHeight + 8));
 
   /** Whether the case has anything the saved layer could draw, on any of its
    *  three positions — media reads its own index, so one length is not enough. */
@@ -1527,8 +1528,6 @@
       footprint.cancel();
       if (myLayers.editor && myLayers.editor.caseId !== id) { myLayers.close(); myLayers.cancelNew(); }
       if (myLayers.exporting?.caseId !== id) myLayers.cancelDownload();
-      if (myLayers.maps?.caseId && myLayers.maps.caseId !== id) myLayers.closeMaps();
-      if (myLayers.legend?.caseId !== id) myLayers.setLegend(null);
     }
     const stopSaved = savedWork.load(id);
     // Reads what is on disk, once per reload however many maps ask. The only
@@ -1546,11 +1545,6 @@
   });
 
   $effect(() => { if (uiState.tool === 'satellite' && myLayers.armed) untrack(() => closeOthers(modes, 'layer')); });
-
-  function beginMarkers() {
-    closeOthers(modes, 'layer');
-    myLayers.start();
-  }
 
   async function editMyLayer(row, key = null) {
     closeOthers(modes, 'layer');
@@ -1575,11 +1569,6 @@
 
   // The media index, read the first time that position is opened.
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
-  $effect(() => {
-    if (uiState.tool !== 'satellite' || !uiState.openMapView || !mapReady) return;
-    const name = uiState.openMapView;
-    untrack(() => { myLayers.openMaps(name); uiState.openMapView = null; });
-  });
 
   // A reloaded media index re-reads the stack being played: a file deleted or
   // unplaced elsewhere leaves it, and the viewer closes once nothing is left.
@@ -2387,6 +2376,7 @@
         onedit={editMyLayer}
         onremovefeature={(row, key) => myLayers.remove(key, row)}
         ondeleteplace={placeDeletion.open}
+        oncopyfeature={(row, feature) => myLayers.copy(row, feature)}
       />
 
       {#if sheetPoints && sheetShown}
@@ -2460,6 +2450,7 @@
       <!-- The map's toolbox, and the one slot the armed tool's settings open
            in. Only verbs live here; what is *drawn* over the imagery is a layer
            and is listed in the panel on the right. -->
+      {#if !myLayers.editor}
       <div class="map-tools" style:top={`${railTop}px`}>
         <MapRail
           sections={RAIL}
@@ -2555,6 +2546,7 @@
           </div>
         {/if}
       </div>
+      {/if}
 
       <!-- capture-frame outline: what the centred Capture will cover — only when
            a centred capture is the intent (hovering the capture button, or
@@ -2659,6 +2651,7 @@
       >
         <!-- What marks the point and whether it is the centre: one square, set
              once, beside the two acts that are pressed all day. -->
+        {#if !myLayers.editor}
         <MarkerMenu bind:style={markerStyle} free={moveMode} toggleFree={toggleMoveMode} />
         <div class="place-save">
           <button
@@ -2706,6 +2699,7 @@
           openExtensionGate={() => (capture.extGate = true)}
           openFigure={isSentinel ? openFigure : null}
         />
+        {/if}
       </MapStatusBar>
       {#if figureOpen && caseState.current}
         <FigureDialog
@@ -2828,10 +2822,8 @@
           {#if uiState.tool === 'satellite'}<MyLayers
             rows={addedLayers.rows}
             controller={myLayers}
-            places={savedWork.rows.filter((row) => row.kind === 'place')}
             onnew={() => myLayers.newLayer()}
             onedit={editMyLayer}
-            onstart={beginMarkers}
             ontoggle={(row) => addedLayers.toggle(caseState.current?.id, row)}
             onfly={flyToLayerFeature}
             onremove={(row) => (removingLayer = row)}
@@ -2973,9 +2965,8 @@
 {#if uiState.tool === 'satellite'}
   <PlaceDeleteDialog controller={placeDeletion} />
   {#if myLayers.exporting}<LayerExportDialog target={myLayers.exporting} onclose={() => myLayers.cancelDownload()} />{/if}
+  <LayerAddDialogs tool="satellite" onfly={flyToLayerFeature} />
 {/if}
-<MapViews tool="satellite" {engine} provider={providerId} rows={layerRows} scope={addedLayers.scope('satellite')}
-  onprovider={(id) => { providerId = id; }} />
 
 <!-- delete confirm: a capture drops its image file, a place or a comparison its entity -->
 {#if deleteTarget}

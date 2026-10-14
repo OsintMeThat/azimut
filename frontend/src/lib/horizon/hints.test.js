@@ -7,6 +7,7 @@ import {
   hintsSummary,
   NO_HINTS,
   PANORAMA_WITHIN,
+  panoramaLikely,
   panoramaOffered,
   panoramaWidth,
   REACHES,
@@ -55,11 +56,15 @@ describe('what the analyst knows about a photo', () => {
     expect(searchHints({ zoom: 'zoomed' }, { lensKnown: true })).toEqual({});
   });
 
-  it('offers a panorama for a wide picture or a stitched collage, never a video', () => {
-    expect(panoramaOffered({ kind: 'image', aspect: 4 / 3 })).toBe(false);
-    expect(panoramaOffered({ kind: 'image', aspect: 3.5 })).toBe(true);
-    expect(panoramaOffered({ kind: 'image', aspect: 2.1, stitched: { degrees: 47 } })).toBe(true);
+  it('offers a panorama for any image, never a video, and points a wide picture or a stitched collage to it', () => {
+    // a hand-made collage only twice as wide as tall may still be one
+    expect(panoramaOffered({ kind: 'image', aspect: 2.1 })).toBe(true);
+    expect(panoramaOffered({ kind: 'image', aspect: 4 / 3 })).toBe(true);
     expect(panoramaOffered({ kind: 'video', aspect: 3.5 })).toBe(false);
+    expect(panoramaLikely({ kind: 'image', aspect: 4 / 3 })).toBe(false);
+    expect(panoramaLikely({ kind: 'image', aspect: 3.5 })).toBe(true);
+    expect(panoramaLikely({ kind: 'image', aspect: 2.1, stitched: { degrees: 47 } })).toBe(true);
+    expect(panoramaLikely({ kind: 'video', aspect: 3.5 })).toBe(false);
     expect(cleanHints({ picture: 'fisheye' }).picture).toBe('photo');
   });
 

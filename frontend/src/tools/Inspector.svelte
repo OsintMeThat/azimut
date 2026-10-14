@@ -40,7 +40,8 @@
   let pickerOpen = $state(false);
   let opening = $state(false);
   let clearConfirm = $state(false);
-  let saving = $state(null); // 'video', 'all' or a frame id while its save runs
+  let saving = $state(null); // 'video' or 'all' while its save runs
+  let savingFrames = $state(new Set()); // ids of the frames being filed, each on its own
   let saveFolder = $state(''); // where the last save went, offered for the next
 
   const inspectable = $derived(mediaList.filter((m) => m.kind === 'image' || m.kind === 'video'));
@@ -653,33 +654,52 @@
     return saved;
   }
 
+  // Several saves can run at once (the strip saves a frame in one press), so each
+  // frame is marked busy on its own and a save-all leaves out those already going.
+  function markSaving(frames, busy) {
+    const ids = new Set(savingFrames);
+    for (const f of frames) busy ? ids.add(f.id) : ids.delete(f.id);
+    savingFrames = ids;
+  }
+
+  // as in SaveToCase: Unfiled has to be sent when the work folder filed the frame
+  const lastFolder = () => saveFolder || (workFolder() ? '' : null);
+
   async function saveFrame(frame, { name, folder, note }) {
-    saving = frame.id;
     saveFolder = folder ?? '';
+    markSaving([frame], true);
     try {
       const saved = await saveFrames([frame], { folder, note, names: [name] });
       toast(`Saved “${name}” to the case${dupeNote(saved)}`, 'ok');
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
-      saving = null;
+      markSaving([frame], false);
     }
   }
 
+  /** The strip's save press: the default name and the last folder, nothing asked. */
+  function quickSaveFrame(id) {
+    const frame = work.frames.find((f) => f.id === id);
+    if (!frame?.url || savingFrames.has(id) || filedIds.has(id)) return;
+    saveFrame(frame, { name: frameNames.get(id), folder: lastFolder(), note: null });
+  }
+
   async function saveAllFrames() {
-    const frames = work.frames.filter((f) => !filedIds.has(f.id) && f.url);
+    const frames = work.frames.filter((f) => !filedIds.has(f.id) && f.url && !savingFrames.has(f.id));
     if (!frames.length) return;
     saving = 'all';
+    markSaving(frames, true);
     try {
       const saved = await saveFrames(frames, {
-        // as in SaveToCase: Unfiled has to be sent when the work folder filed them
-        folder: saveFolder || (workFolder() ? '' : null), note: null, names: frames.map((f) => frameNames.get(f.id)),
+        folder: lastFolder(), note: null, names: frames.map((f) => frameNames.get(f.id)),
       });
       toast(`Saved ${frames.length} frames to the case${dupeNote(saved)}`, 'ok');
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
       saving = null;
+      markSaving(frames, false);
     }
   }
 
@@ -830,10 +850,12 @@
             {selected}
             {filters}
             {filedIds}
+            busyIds={savingFrames}
             removable={isVideo || work.frames.length > 1}
             savingAll={saving === 'all'}
             onselect={select}
             onremove={removeFrame}
+            onsave={quickSaveFrame}
             onsaveall={saveAllFrames}
           />
         {/if}
@@ -866,7 +888,7 @@
               frameSave={{
                 defaultName: frameNames.get(activeFrame.id),
                 filedPath: filedIds.has(activeFrame.id) ? activeFrame.filed.path : null,
-                busy: saving === activeFrame.id || saving === 'all',
+                busy: savingFrames.has(activeFrame.id),
                 blocked: activeFrame.url ? '' : 'The frame is still rendering.',
                 onsave: (opts) => saveFrame(activeFrame, opts),
               }}

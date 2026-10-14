@@ -74,16 +74,6 @@ beforeEach(() => {
 });
 
 describe('opening a case', () => {
-  it('waits for the existing disk read before a saved map restores its layers', async () => {
-    let resolve; api.get.mockImplementation(() => new Promise((done) => { resolve = done; }));
-    const layers = store(); layers.load('c1');
-    let ready = false; const read = layers.whenLoaded('c1').then(() => { ready = true; });
-    await Promise.resolve(); expect(ready).toBe(false); expect(api.get).toHaveBeenCalledOnce();
-    resolve([FILE_LAYER]); await read;
-    expect(layers.rows[0].name).toBe('Sightings');
-    api.get.mockRejectedValue(new Error('Disk read failed')); layers.load('c1', 1);
-    await expect(layers.whenLoaded('c1')).rejects.toThrow('Disk read failed');
-  });
   it('reads what is on disk and nothing else', async () => {
     rows = [FILE_LAYER, followed()];
     const layers = store();

@@ -1,6 +1,7 @@
 <script>
   /**
-   * Find where a photo was taken: a screen of its own over the Horizon tab.
+   * Find where a photo was taken: Horizon's third mode, a screen of its own
+   * over the tab, its header holding the same mode switch as the tab's.
    *
    * Three columns: the photo with its skyline, the map with the area and the
    * alignments, the steps. A column is enlarged by its own button and given
@@ -9,6 +10,7 @@
    * next time in this browser.
    */
   import Icon from '../../components/Icon.svelte';
+  import ViewSwitch from '../../components/ViewSwitch.svelte';
   import FindPhoto from './FindPhoto.svelte';
   import FindMap from './FindMap.svelte';
   import FindSteps from './FindSteps.svelte';
@@ -21,8 +23,9 @@
     /** Where the map opens. */
     home,
     units = 'metric',
-    /** Whether a viewpoint stands to go back to. */
-    standing = false,
+    /** Horizon's modes, `{ id, label, icon, hint }`, and how another is picked. */
+    modes = [],
+    onmode = () => {},
     /** Asked to choose the photo. */
     onpick = () => {},
     /** Asked to stand at a place found, `{ lat, lon }`. */
@@ -104,9 +107,15 @@
     event.stopPropagation();
   }
 
+  /**
+   * What the next click is for, said in the column that waits for it (`on`),
+   * which is outlined meanwhile: nothing moves aside, the columns stay put.
+   */
   const guide = $derived.by(() => {
-    if (find.pending) return { text: `${find.pending.step + 1} of 4 · ${find.step?.text}`, cancel: () => find.cancelAlignment() };
-    if (find.drawing === 'area') return { text: 'Click each corner of the area on the map. Press the first one, or Enter, to close it.', cancel: () => find.closeArea() };
+    if (find.pending) {
+      return { on: find.step?.on, text: `${find.pending.step + 1} of 4 · ${find.step?.text}`, act: 'Cancel', run: () => find.cancelAlignment() };
+    }
+    if (find.drawing === 'area') return { on: 'map', text: 'Click each corner of the area on the map. Press the first one, or Enter, to close it.', act: 'Done', run: () => find.closeArea() };
     return null;
   });
 </script>
@@ -115,12 +124,10 @@
 
 <section class="find" aria-label="Find where it was taken">
   <header class="find-head">
+    <ViewSwitch options={modes} value="find" label="Horizon mode" onpick={onmode} />
     <h2>Find where it was taken</h2>
     {#if overlay.source}<span class="find-file" title={overlay.source.name}>{overlay.source.name}</span>{/if}
     <span class="find-gap"></span>
-    <button type="button" class="btn btn-sm" onclick={() => find.hide()} title={standing ? 'Back to the view from the viewpoint' : 'Back to picking a viewpoint'}>
-      <Icon name="chevronLeft" size={13} />{standing ? 'Back to the view' : 'Close'}
-    </button>
     <button
       type="button"
       class="btn btn-ghost btn-sm"
@@ -136,16 +143,20 @@
     </button>
   </header>
 
-  {#if guide}
-    <div class="find-guide" role="status">
-      <span>{guide.text}</span>
-      <button type="button" class="btn btn-sm btn-ghost" onclick={guide.cancel}>{find.pending ? 'Cancel' : 'Done'}</button>
-    </div>
-  {/if}
+  {#snippet guideIn(column)}
+    {#if guide?.on === column}
+      <div class="find-await" aria-hidden="true"></div>
+      <div class="find-guide" role="status">
+        <span>{guide.text}</span>
+        <button type="button" class="btn btn-sm btn-ghost" onclick={guide.run}>{guide.act}</button>
+      </div>
+    {/if}
+  {/snippet}
 
   <div class="find-cols" bind:this={columns} style:--share={share} class:folded>
     <section class="find-col photo" class:hidden={big === 'map'} class:big={big === 'photo'} aria-label="Photo and its skyline">
       <FindPhoto {overlay} {find} {onpick} />
+      {@render guideIn('photo')}
       <button
         type="button"
         class="find-big"
@@ -173,6 +184,7 @@
       {#if home}
         <FindMap {imagery} {overlays} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} bind:lit />
       {/if}
+      {@render guideIn('map')}
       <button
         type="button"
         class="find-big map"
@@ -210,12 +222,13 @@
     flex-direction: column;
     background: var(--bg-0, var(--bg-1));
   }
+  /* as tall and as padded as Horizon's own header, so the mode switch stays where it was */
   .find-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    height: 44px;
-    padding: 0 10px 0 14px;
+    gap: 12px;
+    min-height: 40px;
+    padding: 0 8px 0 12px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-1);
   }
@@ -237,14 +250,32 @@
   .find-gap {
     flex: 1;
   }
+  /* the column a click is awaited in, outlined over whatever it draws */
+  .find-await {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    box-shadow: inset 0 0 0 2px var(--accent);
+    pointer-events: none;
+  }
+  /* what the click is for, low in that column, over its enlarge button and the map's credits */
   .find-guide {
+    position: absolute;
+    left: 50%;
+    bottom: 76px;
+    z-index: 5;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--accent-soft);
+    gap: 10px;
+    width: max-content;
+    max-width: calc(100% - 24px);
+    padding: 5px 6px 5px 12px;
+    border-radius: var(--r-md);
+    transform: translateX(-50%);
+    background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    box-shadow:
+      0 0 0 1px var(--accent),
+      0 4px 14px rgba(0, 0, 0, 0.35);
     color: var(--text-1);
     font-size: var(--fs-sm);
   }
