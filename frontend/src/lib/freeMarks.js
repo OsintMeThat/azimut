@@ -6,8 +6,9 @@
  * upright one at scale 1 whose pixels are the document's, so a free mark is
  * stored, drawn, picked and edited like any other, with `panel` set to `PAGE`.
  * It stays where it is when a panel moves, it can sit in a margin or across two
- * pictures, and it is drawn over every picture. It is held inside the document,
- * which the panels alone size.
+ * pictures, and it is drawn over every picture. The page grows right and down to
+ * hold the free marks put past its edge, background and all, with the footer
+ * kept under them; it never grows up or left, so the pictures keep their place.
  *
  * A straight line or arrow can also hold to pictures by its ends, which is how
  * one detail is tied to the same detail on another picture. Such a link is a
@@ -17,6 +18,7 @@
  * removed.
  */
 import { pageToSurface, surfaceFrame, surfaceHitTest, surfaceToPage } from './composer.js';
+import { ICON_SIZE_DEFAULT } from './proofIcons.js';
 
 /** The `panel` a free mark is drawn on. */
 export const PAGE = 'page';
@@ -44,12 +46,92 @@ export function pageEntry(width, height) {
   };
 }
 
-/** A page point held inside the document. */
-export function onPage(point, width, height) {
+/** How far right and down a free mark may take the page, in its pixels. */
+export const PAGE_REACH = 8000;
+
+/** A page point held where the page is or can grow to: never above it or left of it. */
+export function onPage(point) {
   return {
-    x: Math.min(Math.max(point.x, 0), width),
-    y: Math.min(Math.max(point.y, 0), height),
+    x: Math.min(Math.max(point.x, 0), PAGE_REACH),
+    y: Math.min(Math.max(point.y, 0), PAGE_REACH),
   };
+}
+
+/**
+ * The page as what a mark let go at `point` lands on, wherever the page can grow
+ * to; null above it or left of it. `list` holds the page entry.
+ */
+export function pageHit(list, point) {
+  const entry = list.find((x) => x.id === PAGE);
+  if (!entry || point.x < 0 || point.y < 0) return null;
+  return { ...entry, frame: surfaceFrame(entry), nx: point.x, ny: point.y };
+}
+
+/**
+ * What a free mark covers on the page: `{ left, top, right, bottom }`, ink and
+ * a tag included. `measure(s)` gives a label's `{ w, h }`, and `frameOf` the
+ * frames a line's ends hold to.
+ */
+export function markBounds(s, { measure, frameOf }) {
+  const ink = (s.strokeWidth ?? 4) / 2;
+  const xs = [];
+  const ys = [];
+  let grow = ink;
+  const turned = (w, h) => {
+    const r = ((s.rotation ?? 0) * Math.PI) / 180;
+    for (const [cx, cy] of [[0, 0], [w, 0], [w, h], [0, h]]) {
+      xs.push(s.x + cx * Math.cos(r) - cy * Math.sin(r));
+      ys.push(s.y + cx * Math.sin(r) + cy * Math.cos(r));
+    }
+  };
+  if (s.kind === 'rect' || s.kind === 'blur') {
+    turned(s.w ?? 0, s.h ?? 0);
+    if (s.tag) grow += (s.tagSize ?? 18) * 1.6;
+  } else if (s.kind === 'ellipse') {
+    const r = ((s.rotation ?? 0) * Math.PI) / 180;
+    const rx = (s.w ?? 0) / 2;
+    const ry = (s.h ?? 0) / 2;
+    const ex = Math.hypot(rx * Math.cos(r), ry * Math.sin(r));
+    const ey = Math.hypot(rx * Math.sin(r), ry * Math.cos(r));
+    xs.push(s.x - ex, s.x + ex);
+    ys.push(s.y - ey, s.y + ey);
+  } else if (Array.isArray(s.points)) {
+    const points = s.ends ? linkPoints(s, frameOf) : s.points;
+    for (let i = 0; i < points.length; i += 2) {
+      xs.push(points[i]);
+      ys.push(points[i + 1]);
+    }
+    if (s.kind === 'arrow') grow += 14;
+  } else if (s.kind === 'text') {
+    const { w, h } = measure(s);
+    turned(w, h);
+  } else {
+    // a symbol or a marker hangs round its point by up to its size
+    const size = s.size ?? ICON_SIZE_DEFAULT;
+    xs.push(s.x - size, s.x + size);
+    ys.push(s.y - size, s.y + size);
+  }
+  if (!xs.length) return null;
+  return {
+    left: Math.min(...xs) - grow,
+    top: Math.min(...ys) - grow,
+    right: Math.max(...xs) + grow,
+    bottom: Math.max(...ys) + grow,
+  };
+}
+
+/** How far right and down the free marks reach, for the page to grow to. */
+export function freeExtent(shapes, helpers) {
+  let right = 0;
+  let bottom = 0;
+  for (const s of shapes ?? []) {
+    if (!isFree(s)) continue;
+    const b = markBounds(s, helpers);
+    if (!b) continue;
+    right = Math.max(right, b.right);
+    bottom = Math.max(bottom, b.bottom);
+  }
+  return { right, bottom };
 }
 
 /** A straight line or arrow: the marks whose two ends can each hold to a picture. */
@@ -136,9 +218,6 @@ export function letGoOf(shape, surfaceId, frame) {
   else delete out.ends;
   return out;
 }
-
-/** A frame for the page, for the helpers that read one off a surface. */
-export const pageFrame = (width, height) => surfaceFrame(pageEntry(width, height));
 
 /**
  * The holds on one picture moved by (`dx`, `dy`) of its pixels, for when its

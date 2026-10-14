@@ -1,11 +1,13 @@
 """What a personal-layer feature says beyond its style, and the edits on several at once."""
 
 import base64
+import copy
 import io
 import zipfile
 
 import pytest
 
+from azimut.engine import layerediting
 from azimut.workspace import Case
 from mediafixture import _png_bytes, _upload
 
@@ -215,13 +217,14 @@ def test_layer_targets_list_each_layer_its_groups_and_the_markers_following_an_i
         "items": [{"id": proof["id"], "lat": 48.86, "lon": 2.36}], "group": group["id"]}).status_code == 200
     marker(client, owner, first, name="Unrelated")
 
-    bare = client.get(f"/api/cases/{owner}/layer-targets").json()
-    assert [(row["title"], row["markers"]) for row in bare] == [("Front", []), ("Strikes", [])]
+    # newest first, so the order turns on the second each was made in
+    bare = {row["title"]: row for row in client.get(f"/api/cases/{owner}/layer-targets").json()}
+    assert {title: row["markers"] for title, row in bare.items()} == {"Front": [], "Strikes": []}
     # the styles each layer shows, as drawn: a marker of its own, and the proof's in its group's
-    assert bare[0]["styles"] == [{"symbol": "pin", "colour": "#0072b2"}]
-    assert bare[1]["styles"] == [{"symbol": group["symbol"], "colour": group["colour"].lower()}]
-    assert [one["name"] for one in bare[1]["groups"]] == ["Markers", "Craters"]
-    assert set(bare[1]["groups"][0]) == {"id", "name", "mode", "colour", "symbol"}
+    assert bare["Front"]["styles"] == [{"symbol": "pin", "colour": "#0072b2"}]
+    assert bare["Strikes"]["styles"] == [{"symbol": group["symbol"], "colour": group["colour"].lower()}]
+    assert [one["name"] for one in bare["Strikes"]["groups"]] == ["Markers", "Craters"]
+    assert set(bare["Strikes"]["groups"][0]) == {"id", "name", "mode", "colour", "symbol"}
 
     rows = {row["title"]: row for row in client.get(f"/api/cases/{owner}/layer-targets", params={"entity": proof["id"]}).json()}
     assert rows["Front"]["markers"] == []
@@ -230,7 +233,8 @@ def test_layer_targets_list_each_layer_its_groups_and_the_markers_following_an_i
     # the marker answers where the proof's point stands now, not where it was added
     _proof(client, owner, [{"coords": "48.85, 2.35"}, {"coords": "48.8605, 2.3605", "label": "Crater"}],
            path=proof["path"], rename_from=proof["name"])
-    [moved] = client.get(f"/api/cases/{owner}/layer-targets", params={"entity": proof["id"]}).json()[1]["markers"]
+    again = {row["title"]: row for row in client.get(f"/api/cases/{owner}/layer-targets", params={"entity": proof["id"]}).json()}
+    [moved] = again["Strikes"]["markers"]
     assert (moved["lat"], moved["lon"]) == (48.8605, 2.3605)
 
 
@@ -246,6 +250,166 @@ def test_a_followed_point_can_take_an_icon_and_a_colour_of_its_own(client, owner
     [marker] = features(client, owner, row).values()
     assert (marker["properties"]["symbol"], marker["properties"]["colour"], marker["properties"]["entity_id"]) == (
         "badge-tank", "#d55e00", proof["id"])
+
+
+def test_a_marker_added_from_a_proof_starts_with_its_day_description_and_sources(client, owner):
+    path = _upload(client, owner, "panel.png")
+    spec = {"panels": [{"id": "p0", "src": path, "meta": {"source_url": "https://example.org/post/1"}}],
+            "points": [{"coords": "48.85, 2.35"}, {"coords": "48.86, 2.36", "label": "Crater"}],
+            "coordsText": "48.85, 2.35", "when": "2024-05-10/2024-05-12", "description": "Strike on the depot."}
+    answer = client.post(f"/api/cases/{owner}/proofs", json={
+        "title": "Strike", "spec": spec, "png_base64": base64.b64encode(_png_bytes((10, 10, 10))).decode()})
+    assert answer.status_code == 200, answer.text
+    proof = answer.json()
+    row = create(client, owner)
+    assert client.post(f"{url_of(owner, row)}/links", json={
+        "items": [{"id": proof["id"], "lat": 48.86, "lon": 2.36}]}).status_code == 200
+    [added] = features(client, owner, row).values()
+    said = added["properties"]
+    # named by its description, as a GeoConfirmed event is by its sentence, which says it all
+    assert (said["name"], said["date"], said["date_end"], said["description"], said["links"]) == (
+        "Strike on the depot. · Crater", "2024-05-10", "2024-05-12", "", ["https://example.org/post/1"])
+    # the map's card shows the proof itself
+    drawn = client.get(f"{url_of(owner, row)}/data").json()["features"][0]["properties"]
+    assert drawn["entity_picture"].endswith((".png", ".jpg", ".webp"))
+    assert client.get(f"/files/{owner}/{drawn['entity_picture']}").status_code == 200
+
+
+@pytest.mark.parametrize(("sources", "panel", "cited"), [
+    (None, {"source_urls": ["https://a.example/1", "https://a.example/1", "not an address"]}, ["https://a.example/1"]),
+    (["https://b.example/2"], {"source_url": "https://a.example/1"}, ["https://b.example/2"]),
+    # an empty list is the analyst saying the footage has no public source
+    ([], {"source_url": "https://a.example/1"}, []),
+    ("https://c.example/3 · https://c.example/4", {}, ["https://c.example/3", "https://c.example/4"]),
+    ("Handed over privately", {"source_url": "https://a.example/1"}, []),
+])
+def test_a_proof_cites_what_its_sources_field_shows(sources, panel, cited):
+    from azimut.engine import layerlinks
+
+    assert layerlinks.proof_sources({"sources": sources, "panels": [{"meta": panel}]}) == cited
+
+
+def test_a_file_placed_in_its_details_joins_a_layer_with_its_notes_and_address_but_no_day(client, owner):
+    answer = client.post(f"/api/cases/{owner}/media/upload", data={"source_url": "https://example.org/clip/7"},
+                         files={"file": ("rooftop.png", io.BytesIO(_png_bytes((90, 20, 20))), "image/png")})
+    assert answer.status_code == 200, answer.text
+    path = answer.json()["item"]["path"]
+    assert client.patch(f"/api/cases/{owner}/media", json={"path": path, "notes": "Filmed from the roof."}).status_code == 200
+    case = Case.open(owner)
+    media = case.find_entity(attr="path", value=path)
+    place = client.post(f"/api/cases/{owner}/satellite/place", json={"lat": 48.85, "lon": 2.35}).json()
+    assert client.post(f"/api/cases/{owner}/links", json={
+        "from_id": media["id"], "to_id": place["id"], "type": "located-at"}).status_code == 200
+    # the map's Media position draws it there, so a layer can take it there
+    [shown] = [one for one in client.get(f"/api/cases/{owner}/satellite/media").json() if one["path"] == path]
+    row = create(client, owner)
+    added = client.post(f"{url_of(owner, row)}/links", json={
+        "items": [{"id": media["id"], "lat": shown["lat"], "lon": shown["lon"]}]})
+    assert added.status_code == 200, added.text
+    [marker] = features(client, owner, row).values()
+    said = marker["properties"]
+    # named by its notes, which say it all
+    assert (said["name"], said["description"], said["links"], "date" in said) == (
+        "Filmed from the roof.", "", ["https://example.org/clip/7"], False)
+    # and it follows the place when the analyst corrects it
+    client.patch(f"/api/cases/{owner}/entities/{place['id']}", json={"attrs": {"lat": 48.851, "lon": 2.351}})
+    drawn = client.get(f"{url_of(owner, row)}/data").json()["features"][0]
+    assert drawn["geometry"]["coordinates"] == [2.351, 48.851]
+    assert drawn["properties"]["entity_picture"]
+
+
+def _footage(client, owner, url="https://example.org/clip/7", notes=""):
+    """A collected file with the address it came from, and its entity."""
+    answer = client.post(f"/api/cases/{owner}/media/upload", data={"source_url": url},
+                         files={"file": ("rooftop.png", io.BytesIO(_png_bytes((90, 20, 20))), "image/png")})
+    assert answer.status_code == 200, answer.text
+    path = answer.json()["item"]["path"]
+    if notes:
+        assert client.patch(f"/api/cases/{owner}/media", json={"path": path, "notes": notes}).status_code == 200
+    return path, Case.open(owner).find_entity(attr="path", value=path)
+
+
+def _save_proof(client, owner, path, **spec):
+    answer = client.post(f"/api/cases/{owner}/proofs", json={
+        "title": "Mas camp", "png_base64": base64.b64encode(_png_bytes((10, 10, 10))).decode(),
+        "spec": {"panels": [{"id": "p0", "src": path}], "points": [{"coords": "15.688073, 44.901113"}],
+                 "coordsText": "15.688073, 44.901113", **spec}})
+    assert answer.status_code == 200, answer.text
+    return answer.json()
+
+
+def test_a_proof_and_its_footage_are_one_marker_from_either_side(client, owner):
+    path, video = _footage(client, owner)
+    proof = _save_proof(client, owner, path, when="2025-04-14",
+                        description="Various strikes hit Mas camp in Marib governorate late on the 14th.")
+    row = create(client, owner)
+    # the file, added where the proof places it, is the proof's marker
+    added = client.post(f"{url_of(owner, row)}/links", json={"items": [{"id": video["id"], "lat": 15.688073, "lon": 44.901113}]})
+    assert added.json()["added"] == 1
+    [marker] = features(client, owner, row).values()
+    said = marker["properties"]
+    assert (said["entity_id"], said["name"], said["date"], said["links"]) == (
+        proof["id"], "Various strikes hit Mas camp in Marib governorate late on the 14th.", "2025-04-14",
+        ["https://example.org/clip/7"])
+    # the proof, added after, is already there
+    again = client.post(f"{url_of(owner, row)}/links", json={"items": [{"id": proof["id"], "lat": 15.688073, "lon": 44.901113}]})
+    assert (again.json()["added"], len(features(client, owner, row))) == (0, 1)
+    # both sides see it, so taking it out from either takes it out
+    for item in (video["id"], proof["id"]):
+        [layer] = client.get(f"/api/cases/{owner}/layer-targets", params={"entity": item}).json()
+        assert [held["key"] for held in layer["markers"]] == [said["key"]]
+    # the card shows the footage first, then the proof
+    drawn = client.get(f"{url_of(owner, row)}/data").json()["features"][0]["properties"]
+    assert (drawn["source_id"], bool(drawn["source_picture"]), bool(drawn["entity_picture"])) == (video["id"], True, True)
+
+
+def test_saving_the_proof_writes_its_description_and_day_into_the_marker_but_keeps_a_hand_written_note(client, owner):
+    path, _video = _footage(client, owner)
+    proof = _save_proof(client, owner, path)
+    row = create(client, owner)
+    client.post(f"{url_of(owner, row)}/links", json={"items": [{"id": proof["id"], "lat": 15.688073, "lon": 44.901113}]})
+    [marker] = features(client, owner, row).values()
+    assert marker["properties"]["name"] == "Mas camp"
+    note = client.patch(f"{url_of(owner, row)}/markers/{marker['properties']['key']}", json={"description": "Seen from the north."})
+    assert note.status_code == 200, note.text
+    # a description and a day written on the proof afterwards reach the marker on its save
+    _save_proof(client, owner, path, when="2025-04-14", description="Strikes hit Mas camp.\nThree craters.",
+                sources=["https://example.org/post/9"])
+    [marker] = features(client, owner, row).values()
+    said = marker["properties"]
+    assert (said["name"], said["date"], said["links"], said["description"]) == (
+        "Strikes hit Mas camp.", "2025-04-14", ["https://example.org/post/9"], "Seen from the north.")
+    assert "synced" not in client.get(f"{url_of(owner, row)}/data").json()["features"][0]["properties"]
+
+
+def test_a_file_marker_made_before_its_proof_becomes_the_proofs_on_save_and_a_double_goes(client, owner):
+    path, video = _footage(client, owner, notes="Filmed from the roof.")
+    place = client.post(f"/api/cases/{owner}/satellite/place", json={"lat": 15.688073, "lon": 44.901113}).json()
+    client.post(f"/api/cases/{owner}/links", json={"from_id": video["id"], "to_id": place["id"], "type": "located-at"})
+    row = create(client, owner)
+    client.post(f"{url_of(owner, row)}/links", json={"items": [{"id": video["id"], "lat": 15.688073, "lon": 44.901113}]})
+    [marker] = features(client, owner, row).values()
+    # a file alone is named by its notes and cites where it came from, with no day
+    assert (marker["properties"]["entity_id"], marker["properties"]["name"], "date" in marker["properties"]) == (
+        video["id"], "Filmed from the roof.", False)
+    # its notes, rewritten, follow
+    client.patch(f"/api/cases/{owner}/media", json={"path": path, "notes": "Filmed from the water tower."})
+    [marker] = features(client, owner, row).values()
+    assert marker["properties"]["name"] == "Filmed from the water tower."
+
+    # a layer drawn before the link held a second copy of that geolocation
+    case = Case.open(owner)
+    spec = layerediting._spec(case, row["name"])
+    double = copy.deepcopy(spec["document"]["features"][0])
+    double["properties"]["key"] = "double"
+    spec["document"]["features"].append(double)
+    layerediting._save(case, row["name"], spec)
+    proof = _save_proof(client, owner, path, description="Strikes hit Mas camp.")
+    [marker] = features(client, owner, row).values()
+    assert (marker["properties"]["entity_id"], marker["properties"]["name"]) == (proof["id"], "Strikes hit Mas camp.")
+    # the double was kept for Undo
+    restored = client.post(f"{url_of(owner, row)}/markers/double/restore", json={})
+    assert restored.status_code == 200, restored.text
 
 
 def test_an_item_with_no_point_cannot_be_added(client, owner):
@@ -341,3 +505,18 @@ def test_the_named_colours_travel_with_the_case_bundle(client, owner):
     destination = Case.create(bundles.imported_name("Palette travels"))
     imported = Case.open(bundles.import_into(destination, bundles.export_case(Case.open(owner)))["case_id"])
     assert client.get(f"/api/cases/{imported.id}/layer-palette").json()["colours"] == [{"name": "Side A", "colour": "#0072b2"}]
+
+
+def test_a_point_added_from_the_case_says_what_state_it_shows(client, owner):
+    proof = _proof(client, owner, [{"coords": "48.85, 2.35"}])
+    row = create(client, owner)
+    item = {"id": proof["id"], "lat": 48.85, "lon": 2.35}
+    assert client.post(f"{url_of(owner, row)}/links", json={"items": [item], "status": "burnt"}).status_code == 422
+    added = client.post(f"{url_of(owner, row)}/links", json={"items": [item], "status": "destroyed"})
+    assert added.status_code == 200, added.text
+    [marker] = features(client, owner, row).values()
+    assert marker["properties"]["status"] == "destroyed"
+    intact = create(client, owner, "Intact")
+    client.post(f"{url_of(owner, intact)}/links", json={"items": [item]})
+    [plain] = features(client, owner, intact).values()
+    assert "status" not in plain["properties"]

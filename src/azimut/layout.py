@@ -54,6 +54,8 @@ DRAFTS_DIR = ".drafts"
 INSPECT_DIR = ".inspect"
 #: Collage layouts. The picture a collage exports is a media working file.
 COLLAGE_DIR = ".collages"
+#: Map plates: a page laid out round the case's maps, and its preview.
+MAPPLATE_DIR = ".mapplates"
 #: Saved Compare session specs. Their rendered image is a media working file.
 COMPARE_DIR = ".compare"
 #: Saved Horizon views, each beside the small preview its list shows.
@@ -96,6 +98,7 @@ CASE_SUBDIRS = (
     ANALYSIS_DIR,
     SEARCH_DIR,
     LAYERS_DIR,
+    MAPPLATE_DIR,
 )
 
 #: Deleted artifacts wait here, hidden at the case root. Outside `CASE_SUBDIRS`
@@ -505,6 +508,15 @@ def collage_rel(name: str) -> str:
 def collage_thumb_rel(name: str) -> str:
     """The preview the collage list shows, drawn by the browser from the open layout."""
     return f"{COLLAGE_DIR}/{name}.webp"
+
+
+def map_plate_rel(name: str) -> str:
+    return f"{MAPPLATE_DIR}/{name}.json"
+
+
+def map_plate_thumb_rel(name: str) -> str:
+    """The preview the saved work lists show, drawn by the browser at each save."""
+    return f"{MAPPLATE_DIR}/{name}.webp"
 
 
 def compare_session_rel(name: str) -> str:

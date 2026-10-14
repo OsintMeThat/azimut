@@ -16,10 +16,11 @@
   import { tick } from 'svelte';
   import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import { moveName } from '../../lib/map/addedLayers.js';
-  import { api } from '../../lib/api.js';
-  import { caseState, toast } from '../../lib/state.svelte.js';
-  import { openEntity } from '../../lib/navigate.js';
+  import { caseState } from '../../lib/state.svelte.js';
+  import { openFollowed } from '../../lib/map/followed.js';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
+  import LayerTrackPanel from './LayerTrackPanel.svelte';
+  import { axisZone } from '../../lib/caseAxis.svelte.js';
 
   let { controller, ondone, onfly, ondeleteplace } = $props();
   $effect(() => layerPalette.load(controller.editor?.caseId));
@@ -90,16 +91,20 @@
     if (controller.detailsChanged && !(await controller.saveDetails())) return;
     controller.download(controller.editor);
   }
+  /** Before the clock is ever set, a layer follows the case's clock, as every date field does. */
+  function switchTrack() {
+    layerMenu = false;
+    const on = !controller.editor.track?.on;
+    controller.setTrack(controller.editor.track ? { on } : { on, zone: axisZone(controller.editor.caseId) || 'UTC' });
+  }
+  async function sendToMyMaps() {
+    layerMenu = false;
+    if (controller.formChanged && !(await controller.saveForm())) return;
+    if (controller.detailsChanged && !(await controller.saveDetails())) return;
+    controller.sendToMyMaps(controller.editor);
+  }
   async function discardChanges() {
     if (await controller.finish(true)) { discard = false; ondone?.(); }
-  }
-  /** The case item a marker follows, opened where it is worked on. */
-  async function openFollowed(id) {
-    const owner = caseState.current?.id;
-    try {
-      const chain = await api.get(`/api/cases/${owner}/entities/${id}/chain`);
-      if (caseState.current?.id === owner) openEntity(chain.entity, true);
-    } catch (error) { toast(error.message, 'danger'); }
   }
   function dragOver(event) {
     if (draggedFeatures.length) {
@@ -217,11 +222,12 @@
   {#if controller.editor.origin}
     <p class="note">Copy of {controller.editor.origin.source.name || controller.editor.origin.source.url}</p>
   {/if}
+  {#if controller.editor.track?.on && !controller.loading}<LayerTrackPanel {controller} />{/if}
   {#if controller.loading}
     <p class="note">Opening layer…</p>
   {:else}
     {#if controller.pending}<p class="saving" role="status">Saving {controller.pending}…</p>{/if}
-    <LayerFeatureSheet {controller} onfollowed={openFollowed} {ondeleteplace} />
+    <LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} />
 
     <input type="search" class="find" aria-label="Find in this layer" placeholder="Find in this layer" bind:value={query} />
     {#if needle}<p class="note">{found ? `${found} found` : 'Nothing by that name.'}</p>{/if}
@@ -268,7 +274,8 @@
                   aria-label={`Move ${feature.properties.name || 'Unnamed feature'}`} title="Drag to reorder or move to a group"
                   disabled={controller.pending > 0 || !!controller.sketch} onkeydown={(event) => nudgeFeature(event, feature)}>
                   <Icon name="grip" size={14} stroke={2.5} /></button>
-                <button class="feature-row" aria-pressed={selection.includes(feature.properties.key)}
+                <button class="feature-row" aria-pressed={selection.includes(feature.properties.key)} class:absent={feature.properties.$absent}
+                  title={feature.properties.$absent ? 'Not on the map on the layer\'s day' : null}
                   class:active={selection.includes(feature.properties.key) || selected?.properties.key === feature.properties.key}
                   onclick={async (event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) controller.toggleSelected(feature.properties.key, members.toReversed().map((feature) => feature.properties.key), event.shiftKey);
                     else { controller.select(feature.properties.key); onfly?.(feature); } await tick(); root?.querySelector('.sheet')?.scrollIntoView?.({ block: 'nearest' }); }}>
@@ -312,8 +319,13 @@
   <FloatingMenu anchor={layerMenuAnchor} align="end" width={220} label="Layer actions" onclose={() => (layerMenu = false)}>
     <button type="button" class="fm-item" onclick={() => { layerMenu = false; describing = true; }}>
       <Icon name="note" size={14} /><span class="fm-grow">{controller.editor.description ? 'Edit the description' : 'Add a description'}</span></button>
+    <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={!!controller.editor.track?.on} disabled={busy} onclick={switchTrack}>
+      <Icon name="clock" size={14} /><span class="fm-grow">Track over time</span>
+      {#if controller.editor.track?.on}<Icon name="check" size={13} />{/if}</button>
     <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={download}>
       <Icon name="download" size={14} /><span class="fm-grow">Download layer</span></button>
+    <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={sendToMyMaps}>
+      <Icon name="upload" size={14} /><span class="fm-grow">Send to My Maps…</span></button>
     <div class="fm-sep"></div>
     <button type="button" class="fm-item danger" disabled={busy || !controller.changed} onclick={() => { layerMenu = false; discard = true; }}>
       <Icon name="undo" size={14} /><span class="fm-grow">Discard changes…</span></button>
@@ -375,6 +387,7 @@
   .features .feature-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 26px; padding: 3px 6px; border-radius: var(--r-sm); text-align: left; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
   .features .feature-row:hover, .features .feature-row.active { background: var(--bg-3); color: var(--text-1); }
   .features .feature-row.active { box-shadow: inset 2px 0 var(--accent); }
+  .features .feature-row.absent { opacity: .45; }
   .features { max-height: min(340px, 45vh); overflow-y: auto; }
   .features li { display: flex; align-items: center; padding-left: 10px; }
   .feature-symbol { display: grid; place-items: center; flex: none; }

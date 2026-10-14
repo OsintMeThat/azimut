@@ -1,10 +1,13 @@
+import { seenAt } from '../../../lib/map/layerHistory.js';
+
 /** The personal-layer editor. Each click is saved separately, in click order. */
 export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   beginSession = (path) => api.post(`${path}/edit`, {}) }) {
   let dialog = $state(null);
   let exporting = $state(null);
   let editor = $state(null);
-  let features = $state.raw([]);
+  /** The features as the layer holds them, their latest shapes and their histories. */
+  let stored = $state.raw([]);
   let groups = $state([]);
   let group = $state('');
   let placing = $state(false);
@@ -28,6 +31,17 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   let details = $state(null);
   // The style the next markers are added in, set from the map's edit bar.
   let draft = $state({ colour: '#0072b2', symbol: 'pin' });
+  // On a tracked layer read at a moment: does an edit start a state there
+  // ('new') or correct the one in force then ('fix')?
+  let timeMode = $state('new');
+  /**
+   * The features as the editor shows and edits them: on a tracked layer read at a
+   * moment, each in the shape and status it had then, its history kept, and the ones
+   * not there yet or any more marked `$absent`. Otherwise as the layer holds them.
+   */
+  const features = $derived(seenAt(stored, editor?.track?.on ? layers.time?.(editor.name)?.at ?? null : null));
+  /** The selected feature as it stands now, so a moved cursor reshapes what is picked. */
+  const picked = () => (selected ? features.find((feature) => feature.properties.key === selected.properties.key) ?? selected : null);
   let generation = 0;
   let tail = Promise.resolve();
   /** What the feature panel edits, each field in the shape its input holds. */
@@ -44,7 +58,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   /** What the panel changed on the selected feature, as the patch that saves it. */
   function formPatch() {
     if (!selected || !form) return {};
-    const before = formOf(selected), patch = {};
+    const before = formOf(picked()), patch = {};
     for (const [key, value] of Object.entries(form)) {
       if (JSON.stringify(value) === JSON.stringify(before[key])) continue;
       if (key === 'links') {
@@ -66,6 +80,18 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     [key, !draft || draft[key] === before?.[key] ? value : draft[key]])) : null;
 
   const base = (owner, name) => `/api/cases/${owner}/map-layers/${encodeURIComponent(name)}`;
+  /** The moment the layer is read at while it is tracked, else null: what an edit is dated to. */
+  const cursor = () => editor?.track?.on ? layers.time?.(editor.name)?.at ?? null : null;
+  /** What dates an edit to existing features: nothing at now, else the cursor and the mode. */
+  const stamp = () => {
+    const at = cursor();
+    return at === null ? {} : { at, ...(timeMode === 'fix' ? { fix: true } : {}) };
+  };
+  /** What dates a new feature: it appears at the cursor. */
+  const birth = () => {
+    const at = cursor();
+    return at === null ? {} : { at };
+  };
   const current = (owner, name, stamp) =>
     generation === stamp && caseId() === owner && editor?.name === name;
 
@@ -83,7 +109,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     selection = []; anchor = null;
     form = null;
     details = null;
-    features = [];
+    stored = [];
     groups = [];
     group = '';
     loading = false;
@@ -101,7 +127,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       if (!current(owner, row.name, stamp)) return;
       editor = { ...answer.layer, caseId: owner };
       details = detailsOf(editor);
-      features = answer.document.features;
+      stored = answer.document.features;
       groups = answer.groups ?? [];
       group = groups[0]?.id ?? '';
       checkpoint = answer.checkpoint;
@@ -139,7 +165,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       if (!groups.some((item) => item.id === group)) group = groups[0]?.id ?? '';
     }
     if (answer.document) {
-      features = answer.document.features;
+      stored = answer.document.features;
       const available = new Set(features.map((feature) => feature.properties.key));
       selection = selection.filter((key) => available.has(key));
       const before = formOf(selected);
@@ -149,12 +175,12 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     }
     if (!answer.marker) return;
     const key = answer.marker.properties.key;
-    const at = features.findIndex((feature) => feature.properties.key === key);
-    features = at < 0 ? [...features, answer.marker]
-      : features.map((feature, index) => index === at ? answer.marker : feature);
+    const at = stored.findIndex((feature) => feature.properties.key === key);
+    stored = at < 0 ? [...stored, answer.marker]
+      : stored.map((feature, index) => index === at ? answer.marker : feature);
     if (selected?.properties.key === key) {
       const before = formOf(selected);
-      selected = answer.marker;
+      selected = features.find((feature) => feature.properties.key === key) ?? answer.marker;
       form = mergeDraft(form, before, formOf(selected));
     }
   }
@@ -198,7 +224,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     const patch = formPatch();
     if (!selected || !Object.keys(patch).length) return;
     const key = selected.properties.key;
-    enqueue((path) => api.patch(`${path}/markers/${key}`, patch));
+    enqueue((path) => api.patch(`${path}/markers/${key}`, { ...patch, ...stamp() }));
   }
 
   function chooseKeys(keys, add = false) {
@@ -218,7 +244,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       return true;
     }
     if (!placing || !editor || loading || caseId() !== editor.caseId) return false;
-    const body = { lat: point.lat, lon: point.lon, ...draft, ...(group ? { group } : {}) };
+    const body = { lat: point.lat, lon: point.lon, ...draft, ...(group ? { group } : {}), ...birth() };
     enqueue((path) => api.post(`${path}/markers`, body));
     return true;
   }
@@ -231,7 +257,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     for (const point of points) {
       last = await enqueue((path) => api.post(`${path}/markers`, {
         lat: point.lat, lon: point.lon, ...draft, ...(point.name ? { name: point.name } : {}),
-        ...fields, ...(target ? { group: target } : {}),
+        ...fields, ...(target ? { group: target } : {}), ...birth(),
       }));
       if (!last || !current(owner, name, generation)) return null;
     }
@@ -266,6 +292,8 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     get dialog() { return dialog; },
     get exporting() { return exporting; },
     download(row) { exporting = { row, caseId: caseId() }; },
+    /** The same dialog, on the file a My Maps is sent. */
+    sendToMyMaps(row) { exporting = { row, caseId: caseId(), mode: 'mymaps' }; },
     cancelDownload() { exporting = null; },
     get editor() { return editor; },
     get features() { return features; },
@@ -280,11 +308,16 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     get copying() { return copying; },
     get sketch() { return sketch; },
     get armed() { return placing || !!sketch || lassoing; },
-    get changed() { return !!editor?.edit_changed || !!sketch || !sameForm(form, formOf(selected)) || !sameForm(details, detailsOf(editor)); },
+    get changed() { return !!editor?.edit_changed || !!sketch || !sameForm(form, formOf(picked())) || !sameForm(details, detailsOf(editor)); },
     get loading() { return loading; },
     get pending() { return pending; },
     get draft() { return draft; },
-    get selected() { return selected; },
+    /** 'new' or 'fix': what an edit at the cursor does to a tracked feature. */
+    get timeMode() { return timeMode; },
+    set timeMode(value) { timeMode = value === 'fix' ? 'fix' : 'new'; },
+    /** The moment the tracked layer being edited is read at, or null for now. */
+    get cursor() { return cursor(); },
+    get selected() { return picked(); },
     get selection() { return selection; },
     get form() { return form; },
     get details() { return details; },
@@ -295,7 +328,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     async saveForm() {
       const patch = formPatch();
       if (!selected || !Object.keys(patch).length) return false;
-      return !!(await enqueue((path) => api.patch(`${path}/markers/${selected.properties.key}`, patch)));
+      return !!(await enqueue((path) => api.patch(`${path}/markers/${selected.properties.key}`, { ...patch, ...stamp() })));
     },
     async saveDetails() {
       const patch = detailsPatch();
@@ -327,7 +360,8 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     closePaste() { pasting = null; },
     openLinking() { if (editor) { placing = false; sketch = null; lassoing = false; linking = true; } },
     closeLinking() { linking = false; },
-    copy(row, feature) { copying = { row, feature, caseId: caseId() }; },
+    /** Put a source layer's feature in one of the analyst's layers, from the menu opened on `anchor`. */
+    copy(row, feature, anchor = null) { copying = { row, feature, anchor, caseId: caseId() }; },
     cancelCopy() { copying = null; },
     addPoints,
     startShape(type) {
@@ -337,12 +371,12 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       sketch = { type, key: null, rings: [[]] };
     },
     editGeometry() {
-      const shape = selected?.geometry;
+      const shape = picked()?.geometry;
       if (!shape || !['Point', 'LineString', 'Polygon', 'MultiLineString', 'MultiPolygon'].includes(shape.type)) return;
       placing = false; lassoing = false;
       const coords = JSON.parse(JSON.stringify(shape.coordinates));
       const open = (ring) => ring.slice(0, -1);
-      sketch = { type: shape.type, key: selected.properties.key,
+      sketch = { type: shape.type, key: picked().properties.key,
         rings: shape.type === 'Point' ? [[coords]] : shape.type === 'LineString' ? [coords]
           : shape.type === 'MultiLineString' ? coords : shape.type === 'MultiPolygon' ? coords.flatMap((polygon) => polygon.map(open))
             : coords.map(open),
@@ -361,10 +395,10 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     async saveGeometry() {
       if (!sketch) return null;
       const before = sketch, shape = geometry(), key = sketch.key;
-      const body = { geometry: shape, colour: draft.colour, ...(group ? { group } : {}) };
+      const body = { geometry: shape, colour: draft.colour, ...(group ? { group } : {}), ...birth() };
       const answer = await enqueue((path) => before.type === 'Selection' ? api.post(`${path}/selection`, {
-        keys: before.keys, offset: [before.rings[0][0][0] - before.origin[0], before.rings[0][0][1] - before.origin[1]],
-      }) : key ? api.patch(`${path}/markers/${key}`, { geometry: shape })
+        keys: before.keys, offset: [before.rings[0][0][0] - before.origin[0], before.rings[0][0][1] - before.origin[1]], ...stamp(),
+      }) : key ? api.patch(`${path}/markers/${key}`, { geometry: shape, ...stamp() })
         : api.post(`${path}/shapes`, body));
       if (answer && sketch === before) sketch = null;
       return answer;
@@ -406,7 +440,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     },
     updateSelection(changes) {
       const keys = [...selection];
-      return enqueue((path) => api.post(`${path}/selection`, { keys, changes }));
+      return enqueue((path) => api.post(`${path}/selection`, { keys, changes, ...stamp() }));
     },
     removeSelection() {
       const keys = [...selection];
@@ -418,7 +452,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     /** Move features by a distance in degrees, as one edit the toast can undo. */
     moveFeatures(keys, offset) {
       const owner = editor?.caseId, name = editor?.name;
-      return enqueue((path) => api.post(`${path}/selection`, { keys, offset }), (answer) => {
+      return enqueue((path) => api.post(`${path}/selection`, { keys, offset, ...stamp() }), (answer) => {
         const moved = keys.length - (answer.kept ?? 0);
         if (answer.kept && !moved) notify('Linked markers stay on the case item they follow', 'info', 4000);
         else undoable(answer.kept ? `Moved ${moved}; ${answer.kept} linked stay on their case item` : moved === 1 ? 'Moved' : `Moved ${moved} features`,
@@ -441,6 +475,24 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       });
     },
     unlink(key) { return enqueue((path) => api.patch(`${path}/markers/${key}`, { unlink: true })); },
+    /** Say the feature is no longer there from the cursor on. */
+    markGone(key) {
+      const at = cursor();
+      if (at === null) return Promise.resolve(null);
+      return enqueue((path) => api.patch(`${path}/markers/${key}`, { at, gone: true }));
+    },
+    /** Take one state out of a feature's history, by the moment it was written at. */
+    dropState(key, at) {
+      return enqueue((path) => api.patch(`${path}/markers/${key}`, { at, drop_state: true }));
+    },
+    /** Switch time tracking on or off, or change its precision or its clock. */
+    setTrack(changes) {
+      return enqueue((path) => api.patch(`${path}/edit`, { track: changes }));
+    },
+    /** Keep (or forget, with '') the My Maps this layer is sent to. */
+    setMyMaps(address) {
+      return enqueue((path) => api.patch(`${path}/edit`, { mymaps: address }));
+    },
     update(key, changes) {
       return enqueue((path) => api.patch(`${path}/markers/${key}`, changes));
     },
@@ -487,9 +539,10 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     },
     /**
      * Copy `copying`'s feature into one of the analyst's layers, as an external
-     * point: its name, note, day and the addresses its note cites come along.
+     * point: its name, note, day and the addresses its note cites come along, in
+     * `style` (`{ symbol, colour }`) when one was picked.
      */
-    async copyTo(row, groupId = null) {
+    async copyTo(row, groupId = null, style = null, status = '') {
       const job = copying;
       if (!job || !row) return null;
       const owner = job.caseId;
@@ -499,7 +552,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
         name: properties.name ?? '', description: properties.description ?? '', provenance: 'external',
         ...(properties.date ? { date: properties.date } : {}), ...(links.length ? { links } : {}),
         ...(/^#[0-9a-f]{6}$/i.test(properties.colour ?? '') ? { colour: properties.colour } : {}),
-        ...(groupId ? { group: groupId } : {}),
+        ...(groupId ? { group: groupId } : {}), ...(style ?? {}), ...(status ? { status } : {}),
       };
       const point = geometry?.type === 'Point';
       const send = (path) => point

@@ -32,3 +32,23 @@ describe('layer downloads', () => {
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe('a tracked layer downloaded', () => {
+  it('asks for the layer as it stood, named after the day, with every past status drawn', async () => {
+    api.get.mockResolvedValue({ features: [{ geometry: { type: 'Point' }, properties: { symbol: 'pin', colour: '#009e73',
+      states: [{ at: '2026-10-01', geometry: {} }, { at: '2026-10-09', geometry: {}, status: 'destroyed' }, { at: '2026-10-20', gone: true }] } }] });
+    const drawIcon = vi.fn(() => 'png'), save = vi.fn();
+    const fetchFile = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['KMZ']) }));
+    await downloadLayer('case', { name: 'front', title: 'Front' }, 'kmz', { at: '2026-10-12T14:00', drawIcon, fetchFile, save });
+    const body = JSON.parse(fetchFile.mock.calls[0][1].body);
+    expect(body.at).toBe('2026-10-12T14:00');
+    expect(Object.keys(body.icons).sort()).toEqual(['pin-009e73', 'pin-009e73-destroyed']);
+    expect(save.mock.calls[0][1]).toBe('Front 12 Oct 2026 14h00.kmz');
+  });
+
+  it('asks for the whole history only when told', async () => {
+    const fetchFile = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['KML']) }));
+    await downloadLayer('case', { name: 'front', title: 'Front' }, 'kml', { history: true, fetchFile, save: vi.fn() });
+    expect(JSON.parse(fetchFile.mock.calls[0][1].body)).toEqual({ icons: {}, history: true });
+  });
+});

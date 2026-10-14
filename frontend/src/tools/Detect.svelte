@@ -800,7 +800,7 @@
           interactive={!personalLayers.armed && !measuring && drawing === 'select' && !manual && !builder?.pinning}
           onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
           onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
-          oncopyfeature={(row, feature) => personalLayers.copy(row, feature)}
+          oncopyfeature={(row, feature, anchor) => personalLayers.copy(row, feature, anchor)}
         />
         {#if mapLayers.has('saved') && !bare && caseState.current && !personalLayers.armed}
           <SavedOverlay

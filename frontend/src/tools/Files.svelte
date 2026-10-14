@@ -78,7 +78,7 @@
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
     post: 'post', place: 'pin', 'inspect-session': 'inspect', collage: 'grid', 'compare-session': 'compare',
-    'horizon-view': 'horizon', bookmark: 'link',
+    'horizon-view': 'horizon', 'map-plate': 'plate', bookmark: 'link',
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
 
@@ -220,7 +220,7 @@
     if (e.type === 'proof' && typeof path === 'string' && /\.png$/i.test(path)) return path;
     if (e.type === 'compare-session' && typeof path === 'string' && /\.(png|gif)$/i.test(path)) return path;
     // a saved view's preview sits beside its spec
-    if (e.type === 'horizon-view' && typeof e.attrs?.thumb === 'string') return e.attrs.thumb;
+    if ((e.type === 'horizon-view' || e.type === 'map-plate') && typeof e.attrs?.thumb === 'string') return e.attrs.thumb;
     return pathInfo.get(path)?.thumbnail ?? null;
   };
 
@@ -842,7 +842,7 @@
       openNotebook(entity.id);
       return;
     }
-    if (['compare-session', 'horizon-view', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+    if (['compare-session', 'horizon-view', 'map-plate', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
       openEntity(entity);
       return;
     }

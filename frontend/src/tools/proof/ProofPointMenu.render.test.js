@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import ProofPointMenu from './ProofPointMenu.svelte';
-import ProofPointLayers from './ProofPointLayers.svelte';
+import LayerPlaces from '../satellite/LayerPlaces.svelte';
 
 vi.mock('../../lib/api.js', () => ({ api: { get: vi.fn(async () => ({ colours: [] })), put: vi.fn() } }));
 
@@ -32,11 +32,11 @@ describe('a proof point’s menu', () => {
     expect(back().textContent).toBe('Front');
     expect([...document.querySelectorAll('.fm-item')].map((node) => node.textContent.trim())).toEqual(['Positions', 'Checkpoints']);
     item('Checkpoints').click(); flushSync();
-    expect(onadd).toHaveBeenCalledWith({ layer: front, group: front.groups[1], style: null });
+    expect(onadd).toHaveBeenCalledWith({ layer: front, group: front.groups[1], style: null, status: '' });
     expect(document.querySelector('[role="menu"]')).toBeNull();
     // a layer of one group with one style: one press
     open(); item('Strikes').click(); flushSync();
-    expect(onadd).toHaveBeenLastCalledWith({ layer: strikes, group: strikes.groups[0], style: null });
+    expect(onadd).toHaveBeenLastCalledWith({ layer: strikes, group: strikes.groups[0], style: null, status: '' });
   });
 
   it('asks for the icon and colour of a marker in a group where each has its own', () => {
@@ -52,7 +52,7 @@ describe('a proof point’s menu', () => {
     const add = [...document.querySelectorAll('.add-row button')][0];
     expect(add.textContent.trim()).toBe('Add to Positions');
     add.click(); flushSync();
-    expect(onadd).toHaveBeenCalledWith({ layer: front, group: front.groups[0], style: { symbol: 'badge-ship', colour: '#d55e00' } });
+    expect(onadd).toHaveBeenCalledWith({ layer: front, group: front.groups[0], style: { symbol: 'badge-ship', colour: '#d55e00' }, status: '' });
     // back steps up one level at a time
     open(); item('Sites').click(); flushSync();
     expect(back().textContent).toBe('Sites');
@@ -124,7 +124,7 @@ describe('the layers under a point', () => {
   it('names each layer the point is in, opens it, and takes it back out', () => {
     const onopen = vi.fn(), onremove = vi.fn();
     const places = [{ layer: front, group: front.groups[1], marker: { key: 'a' } }, { layer: strikes, group: strikes.groups[0], marker: { key: 'b' } }];
-    show(ProofPointLayers, { places, onopen, onremove });
+    show(LayerPlaces, { places, onopen, onremove });
     expect([...document.querySelectorAll('.where')].map((node) => node.textContent)).toEqual(['In Front › Checkpoints', 'In Strikes']);
     document.querySelector('.open').click();
     expect(onopen).toHaveBeenCalledWith(places[0]);

@@ -1074,44 +1074,13 @@ def media_index(case: Case) -> list[dict[str, Any]]:
         ):
             continue
         incident = case.links_of(entity_id)
-        spots: dict[tuple[float, float], dict[str, Any]] = {}
-        for link in incident:
-            if link["from"] != entity_id or link["type"] not in PLACE_VERBS:
-                continue
-            place = places.get(link["to"])
-            attrs = (place or {}).get("attrs") or {}
-            point = _point(attrs.get("lat"), attrs.get("lon"))
-            if place is None or point is None:
-                continue
-            proposed = "suggested" in (
-                (link.get("provenance") or {}).get("status"),
-                (place.get("provenance") or {}).get("status"),
-            )
-            _stand(spots, point, {
-                "type": link["type"],
-                "status": "suggested" if proposed else "confirmed",
-            })
-        # A file with no chain edge derives from nothing and nothing derives from
-        # it, so the walk could only come back empty: the edges are already read
-        # here, and asking anyway is two queries per file on a whole library.
-        walked = (
-            placements(case, entity_id)
-            if any(link["type"] in links.CHAIN_TYPES for link in incident)
-            else None
-        )
-        for point in (walked or {}).get("points", []):
-            via = point.get("via") or {}
-            road: dict[str, Any] = {
-                "type": via.get("type"),
-                "id": via.get("id"),
-                "title": via.get("label") or "",
-                "status": "confirmed",
-            }
-            if via.get("id") in proofs:
-                road["name"] = _proof_name(proofs[via["id"]])
-            _stand(spots, point, road)
+        spots = media_spots(case, entity_id, incident=incident, places=places)
         if not spots:
             continue
+        for spot in spots:
+            for road in spot["roads"]:
+                if road.get("id") in proofs:
+                    road["name"] = _proof_name(proofs[road["id"]])
         # the proofs built straight on this file, offered wherever it stands: the
         # one that placed a row is listed first on that row
         composed = [
@@ -1121,9 +1090,63 @@ def media_index(case: Case) -> list[dict[str, Any]]:
             and link["to"] == entity_id
             and link["from"] in proofs
         ]
-        rows.extend(_media_row(case, item, spot, geo, composed) for spot in spots.values())
+        rows.extend(_media_row(case, item, spot, geo, composed) for spot in spots)
     rows.sort(key=lambda r: r["fetched_at"], reverse=True)
     return rows
+
+
+def media_spots(
+    case: Case,
+    entity_id: str,
+    *,
+    incident: list[dict[str, Any]] | None = None,
+    places: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Every point one file stands on, each with the roads that put it there.
+
+    The roads are the ones :func:`media_index` names: a ``located-at`` or
+    ``depicts`` edge to a place, and the derivation chain. A road a tool only
+    proposed says ``"suggested"``. The index hands over the file's edges and the
+    case's places, read once for the whole library; alone, they are read here.
+    """
+    if incident is None:
+        incident = case.links_of(entity_id)
+    spots: dict[tuple[float, float], dict[str, Any]] = {}
+    for link in incident:
+        if link["from"] != entity_id or link["type"] not in PLACE_VERBS:
+            continue
+        place = places.get(link["to"]) if places is not None else case.get_entity(link["to"])
+        if place is None or place.get("type") != "place":
+            continue
+        attrs = place.get("attrs") or {}
+        point = _point(attrs.get("lat"), attrs.get("lon"))
+        if point is None:
+            continue
+        proposed = "suggested" in (
+            (link.get("provenance") or {}).get("status"),
+            (place.get("provenance") or {}).get("status"),
+        )
+        _stand(spots, point, {
+            "type": link["type"],
+            "status": "suggested" if proposed else "confirmed",
+        })
+    # A file with no chain edge derives from nothing and nothing derives from
+    # it, so the walk could only come back empty: the edges are already read
+    # here, and asking anyway is two queries per file on a whole library.
+    walked = (
+        placements(case, entity_id)
+        if any(link["type"] in links.CHAIN_TYPES for link in incident)
+        else None
+    )
+    for point in (walked or {}).get("points", []):
+        via = point.get("via") or {}
+        _stand(spots, point, {
+            "type": via.get("type"),
+            "id": via.get("id"),
+            "title": via.get("label") or "",
+            "status": "confirmed",
+        })
+    return list(spots.values())
 
 
 def _proof_name(entity: dict[str, Any]) -> str:

@@ -574,6 +574,10 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # and the picture it exports is media of its own.
     EntityType("collage", "Collage", DOCUMENT, "grid", ANNEX,
                hint="frames and images laid out together, exported as one picture"),
+    # A page laid out round the case's maps, exported as a picture, a PDF or a video.
+    # It holds the case's layers by name, so it is what they are when it is opened.
+    EntityType("map-plate", "Map plate", DOCUMENT, "plate", DELIVERABLE,
+               hint="a page laid out round maps of the case, exported as an image, a PDF or a video"),
     EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
                hint="two map sources, their layers and the shared camera"),
     # An eye on the terrain, the way it looked, and the photo matched over it.

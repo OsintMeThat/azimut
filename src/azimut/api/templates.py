@@ -1,4 +1,4 @@
-"""REST API for reusable presets: proof house styles and post-thread skeletons.
+"""REST API for reusable presets: proof house styles, post-thread skeletons and map layouts.
 
 Templates are app-wide (workspace-level), like the signature and API keys — a
 house style spans every case, so it never lives inside a case folder. Two
@@ -28,6 +28,7 @@ from pydantic import (
 )
 
 from .. import config
+from ..engine import mapplates
 
 router = APIRouter(prefix="/api", tags=["templates"])
 
@@ -199,11 +200,13 @@ def _require_kind(kind: str) -> None:
 
 
 def _canonical_data(kind: str, data: dict[str, Any]) -> dict[str, Any]:
-    model = ProofTemplateData if kind == "proof" else PostTemplateData
+    models: dict[str, type[BaseModel]] = {"proof": ProofTemplateData, "post": PostTemplateData,
+                                          "map": mapplates.TemplateData}
+    model = models[kind]
     try:
         return model.model_validate(data).model_dump(mode="json")
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_input=False)) from exc
+        raise HTTPException(status_code=422, detail=exc.errors(include_input=False, include_context=False)) from exc
 
 
 def _data_size(data: dict[str, Any]) -> int:

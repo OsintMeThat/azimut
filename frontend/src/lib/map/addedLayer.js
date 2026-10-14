@@ -102,6 +102,8 @@ const SOURCE_ICON_SCALE = 0.28;
  * format chosen so the source's colour could tint our pictogram.
  */
 const ICON_OUTLINE = '#fff';
+/** What is new on the day a tracked layer is read on is ringed in this, on any ground. */
+export const NEW_COLOUR = '#ffd400';
 /** Enough to lift the mark off the ground under it, and no more: past about a
  *  pixel the edge starts reading as the mark and the colour as its filling. */
 const ICON_OUTLINE_WIDTH = 0.8;
@@ -227,6 +229,29 @@ const BEARING_ICON = 'azimut-layer-bearing';
  * A wedge just outside a badge's rim, pointing up: the map turns it to the
  * marker's `bearing`, so it says which way a camera looked or a convoy drove.
  */
+/**
+ * The stripes an area's gains or losses are hatched with, in its own colour:
+ * gains in close stripes one way, losses in sparser fainter ones the other, so
+ * the two read apart in print as well as on screen.
+ */
+export const HATCH_PIXELS = 12;
+export function hatchImage(colour, kind, make = defaultCanvas) {
+  const canvas = make(HATCH_PIXELS, HATCH_PIXELS);
+  const ctx = canvas?.getContext?.('2d');
+  if (!ctx) return null;
+  ctx.strokeStyle = colour;
+  ctx.globalAlpha = kind === 'gained' ? 0.85 : 0.5;
+  ctx.lineWidth = kind === 'gained' ? 2.2 : 1.4;
+  ctx.beginPath();
+  // Three strokes so the stripe runs on across the tile's corners without a seam.
+  for (const shift of [-HATCH_PIXELS, 0, HATCH_PIXELS]) {
+    if (kind === 'gained') { ctx.moveTo(shift, HATCH_PIXELS); ctx.lineTo(shift + HATCH_PIXELS, 0); }
+    else { ctx.moveTo(shift, 0); ctx.lineTo(shift + HATCH_PIXELS, HATCH_PIXELS); }
+  }
+  ctx.stroke();
+  return ctx.getImageData(0, 0, HATCH_PIXELS, HATCH_PIXELS);
+}
+
 export function bearingImage(make = defaultCanvas) {
   const canvas = make(BEARING_PIXELS, BEARING_PIXELS), context = canvas.getContext('2d');
   if (!context) return null;
@@ -360,7 +385,7 @@ export function periodFilter(period = null) {
 export function createAddedLayer(
   engine,
   { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null,
-    editable = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage } = {}
+    editable = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage } = {}
 ) {
   const map = engine.impl;
   const prefix = `added-${++layers}`;
@@ -374,24 +399,43 @@ export function createAddedLayer(
   const HIT_OWN = `${prefix}-hit-own`;
   const BEARING = `${prefix}-bearing`;
   const LABEL = `${prefix}-label`;
+  // A tracked layer's past, under what it is now (`layerHistory.js`): the
+  // state before, dashed, and an area's gains and losses, hatched.
+  const CHANGE_FILL = `${prefix}-change-fill`;
+  const CHANGE_LINE = `${prefix}-change-line`;
+  const TRAIL_LINE = `${prefix}-trail-line`;
+  const TRAIL_DOT = `${prefix}-trail-dot`;
+  // …and what is new on the day it is read on, ringed under it.
+  const NEW_LINE = `${prefix}-new-line`;
+  const NEW_RING = `${prefix}-new-ring`;
   // A source draws no text and no direction: its names are read in the card,
   // and a personal layer is the one whose analyst asks for either.
   const PAINTED = [FILL, LINE, DOT, ...(editable ? [BEARING] : []), MARK, OWN,
     ...(editable ? [LABEL, HIT, HIT_OWN] : [])];
+  // Drawn, never clicked: the past says nothing a card on the feature would not.
+  const DECOR = editable ? [CHANGE_FILL, CHANGE_LINE, TRAIL_LINE, TRAIL_DOT, NEW_LINE, NEW_RING] : [];
+  const DRAWN = [...DECOR, ...PAINTED];
   // A merge makes multi-part lines and areas, so each kind names both forms.
   const POINT = ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]];
+  const NOW = ['!', ['any', ['has', '$trail'], ['has', '$change']]];
   const BASE = {
-    [FILL]: ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]],
-    [LINE]: ['!', POINT],
-    [DOT]: POINT,
-    [BEARING]: ['all', POINT, ['has', 'bearing']],
+    [FILL]: ['all', NOW, ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]]],
+    [LINE]: ['all', NOW, ['!', POINT]],
+    [DOT]: ['all', NOW, POINT],
+    [BEARING]: ['all', NOW, POINT, ['has', 'bearing']],
     // The two symbol layers split the points between them on the one
     // question of whether this feature's own icon is registered.
-    [MARK]: ['all', POINT, ['!', ['has', '$own']]],
-    [OWN]: ['all', POINT, ['has', '$own']],
-    [LABEL]: ['all', ['has', 'show_label'], ['!=', ['get', 'name'], '']],
-    [HIT]: ['all', POINT, ['!', ['has', '$own']]],
-    [HIT_OWN]: ['all', POINT, ['has', '$own']],
+    [MARK]: ['all', NOW, POINT, ['!', ['has', '$own']]],
+    [OWN]: ['all', NOW, POINT, ['has', '$own']],
+    [LABEL]: ['all', NOW, ['has', 'show_label'], ['!=', ['get', 'name'], '']],
+    [HIT]: ['all', NOW, POINT, ['!', ['has', '$own']]],
+    [HIT_OWN]: ['all', NOW, POINT, ['has', '$own']],
+    [CHANGE_FILL]: ['has', '$change'],
+    [CHANGE_LINE]: ['has', '$change'],
+    [TRAIL_LINE]: ['all', ['has', '$trail'], ['!', POINT]],
+    [TRAIL_DOT]: ['all', ['has', '$trail'], POINT],
+    [NEW_LINE]: ['all', NOW, ['has', '$new'], ['!', POINT]],
+    [NEW_RING]: ['all', NOW, ['has', '$new'], POINT],
   };
   const badgeIcons = new Set();
   // Features held off the map while the editor drags their copies (`hide`).
@@ -425,12 +469,33 @@ export function createAddedLayer(
       attribution,
     });
     const colour = ['to-color', ['get', '$colour']];
+    if (editable) {
+      map.addLayer({ id: CHANGE_FILL, type: 'fill', source: SOURCE, filter: BASE[CHANGE_FILL],
+        paint: { 'fill-pattern': ['get', '$hatch'] } });
+      map.addLayer({ id: CHANGE_LINE, type: 'line', source: SOURCE, filter: BASE[CHANGE_LINE],
+        layout: { 'line-join': 'round' },
+        paint: { 'line-color': colour, 'line-width': 1, 'line-opacity': ['case', ['==', ['get', '$change'], 'gained'], 0.9, 0.5],
+          'line-dasharray': [3, 2] } });
+      map.addLayer({ id: TRAIL_LINE, type: 'line', source: SOURCE, filter: BASE[TRAIL_LINE],
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': 0.55,
+          'line-dasharray': [2, 2] } });
+      map.addLayer({ id: TRAIL_DOT, type: 'circle', source: SOURCE, filter: BASE[TRAIL_DOT],
+        paint: { 'circle-radius': 5, 'circle-color': 'rgba(0, 0, 0, 0)', 'circle-stroke-color': colour,
+          'circle-stroke-width': 1.5, 'circle-stroke-opacity': 0.7 } });
+      map.addLayer({ id: NEW_LINE, type: 'line', source: SOURCE, filter: BASE[NEW_LINE],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': NEW_COLOUR, 'line-width': ['+', 6, ['coalesce', ['get', 'stroke_width'], 2]], 'line-opacity': 0.6, 'line-blur': 2 } });
+      map.addLayer({ id: NEW_RING, type: 'circle', source: SOURCE, filter: BASE[NEW_RING],
+        paint: { 'circle-radius': ['*', 15, ['coalesce', ['get', 'icon_scale'], 1]], 'circle-color': 'rgba(255, 212, 0, 0.18)',
+          'circle-stroke-color': NEW_COLOUR, 'circle-stroke-width': 2.5, 'circle-blur': 0.1 } });
+    }
     map.addLayer({
       id: FILL,
       type: 'fill',
       source: SOURCE,
       filter: BASE[FILL],
-      paint: { 'fill-color': colour, 'fill-opacity': 0.18 },
+      paint: { 'fill-color': colour, 'fill-opacity': ['case', ['has', '$fade'], 0.07, 0.18] },
     });
     map.addLayer({
       id: LINE,
@@ -438,7 +503,7 @@ export function createAddedLayer(
       source: SOURCE,
       filter: BASE[LINE],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': 0.9 },
+      paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': ['case', ['has', '$fade'], 0.35, 0.9] },
     });
     // Under the symbols, and only while they are being dropped: far out, the
     // collision below hides most of a dense layer, and a dot per feature is what
@@ -496,7 +561,8 @@ export function createAddedLayer(
       },
       paint: {
         'icon-color': colour,
-        'icon-opacity': 0.95,
+        // an event past its day reads faintly, as what has happened rather than what stands
+        'icon-opacity': ['case', ['has', '$fade'], 0.4, 0.95],
         'icon-halo-color': ICON_OUTLINE,
         'icon-halo-width': ICON_OUTLINE_WIDTH,
         'icon-halo-blur': 0.2,
@@ -528,7 +594,7 @@ export function createAddedLayer(
         'icon-ignore-placement': editable,
         'symbol-sort-key': ['get', 'index'],
       },
-      paint: { 'icon-opacity': 0.95 },
+      paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.4, 0.95] },
     });
     // A group's names, written under its marks once the analyst asks for them.
     if (editable) map.addLayer({
@@ -698,7 +764,7 @@ export function createAddedLayer(
   }
 
   function applyVisibility() {
-    for (const layer of PAINTED) {
+    for (const layer of DRAWN) {
       if (map.getLayer(layer)) {
         map.setLayoutProperty(layer, 'visibility', shown ? 'visible' : 'none');
       }
@@ -727,6 +793,15 @@ export function createAddedLayer(
         const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
         const colour = feature.properties?.colour || categoryColour(groups[groupAt], groupAt);
         let badge = null;
+        if (feature.properties?.$change) {
+          const kind = feature.properties.$change === 'gained' ? 'gained' : 'lost';
+          const id = `${prefix}-hatch-${kind}-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
+          if (!map.hasImage(id)) {
+            const pixels = buildHatch(colour, kind);
+            if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+          }
+          return { ...feature, properties: { ...feature.properties, $hatch: id } };
+        }
         const native = editable && !isBadge(symbol) && !ready.has(feature.properties?.icon);
         if (feature.geometry?.type === 'Point' && (isBadge(symbol) || native)) {
           const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
@@ -754,9 +829,10 @@ export function createAddedLayer(
         .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
       registerIcons(map, iconImage, symbols);
       map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
-      for (const layer of PAINTED) {
-        if ([OWN, HIT, HIT_OWN, BEARING, LABEL].includes(layer) || !map.getLayer(layer)) continue;
-        const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color' : 'line-color';
+      for (const layer of DRAWN) {
+        if ([OWN, HIT, HIT_OWN, BEARING, LABEL, CHANGE_FILL, NEW_LINE, NEW_RING].includes(layer) || !map.getLayer(layer)) continue;
+        const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color'
+          : layer === TRAIL_DOT ? 'circle-stroke-color' : 'line-color';
         map.setPaintProperty(layer, property, featureColour(colour));
       }
       filtered = '';
@@ -781,7 +857,7 @@ export function createAddedLayer(
       const rules = [visibilityFilter(hidden), periodFilter(period), hiddenKeys.size
         ? ['!', ['in', ['get', 'key'], ['literal', [...hiddenKeys]]]] : null].filter(Boolean);
       const rule = rules.length > 1 ? ['all', ...rules] : rules[0];
-      for (const layer of PAINTED) {
+      for (const layer of DRAWN) {
         if (!map.getLayer(layer)) continue;
         map.setFilter(layer, rule ? ['all', BASE[layer], rule] : BASE[layer]);
       }
@@ -818,7 +894,8 @@ export function createAddedLayer(
 
     /** The lowest of this layer's GL layers, or null while nothing is built. */
     floor() {
-      return built && map.getLayer(FILL) ? FILL : null;
+      const lowest = DRAWN[0];
+      return built && map.getLayer(lowest) ? lowest : null;
     },
 
     /**
@@ -828,7 +905,7 @@ export function createAddedLayer(
     stackUnder(other) {
       const below = other?.floor();
       if (!built || !below) return;
-      for (const layer of PAINTED) {
+      for (const layer of DRAWN) {
         if (map.getLayer(layer)) map.moveLayer(layer, below);
       }
     },
@@ -883,7 +960,7 @@ export function createAddedLayer(
       for (const [type, on, handler] of listeners) map.off(type, on, handler);
       listeners.length = 0;
       if (built) {
-        for (const layer of PAINTED) {
+        for (const layer of DRAWN) {
           if (map.getLayer(layer)) map.removeLayer(layer);
         }
         if (map.getSource(SOURCE)) map.removeSource(SOURCE);

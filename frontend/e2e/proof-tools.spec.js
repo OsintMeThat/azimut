@@ -190,7 +190,7 @@ test('a view cone is aimed by the drag and opens to the lens in hand', async ({ 
   await page.getByRole('button', { name: /Zoom 2×/ }).click();
   expect((await save(page, fixture)).shapes[0].fov).toBeCloseTo(38.2, 1);
   await page.getByTitle('Lens', { exact: true }).click();
-  await page.getByLabel('Phone held upright').check();
+  await page.getByTitle('Phone held upright').click();
   const upright = (await save(page, fixture)).shapes[0];
   expect(upright.upright).toBe(true);
   expect(upright.fov).toBeLessThan(38.2);

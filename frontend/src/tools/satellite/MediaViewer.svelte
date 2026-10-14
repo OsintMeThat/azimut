@@ -7,11 +7,17 @@
    * hide the half being compared. A mark holding several files opens all of them,
    * and the arrows walk the stack.
    *
-   * Nothing is edited here. It plays the file, says why the file stands on this
-   * point, and opens it in Media or in the proofs built on it.
+   * It plays the file, says why the file stands on this point, opens it in
+   * Media or in the proofs built on it, and puts it in one of the analyst's
+   * layers with the menu Geo Proof's points use (`LayerTargetSteps`). The marker
+   * follows the file and starts with its notes and address.
    */
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import LayerTargetSteps from './LayerTargetSteps.svelte';
+  import LayerPlaces from './LayerPlaces.svelte';
+  import { orderedTargets, placesAt } from './itemLayers.svelte.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { roadWords, step } from '../../lib/mediaViewer.js';
 
@@ -21,9 +27,12 @@
     caseId,
     coords,
     fullscreen = false,
+    /** The item-layers store (`createItemLayers`); without one, no file joins a layer here. */
+    layerItems = null,
     onclose,
     onmedia,
     onproof,
+    onopenlayer = null,
   } = $props();
 
   const row = $derived(items[Math.min(index, items.length - 1)] ?? null);
@@ -32,6 +41,30 @@
   const blocked = $derived(fullscreen ? 'Exit fullscreen first. This leaves the map' : null);
 
   let el = $state();
+  let layerMenu = $state(false);
+  let layerAnchor = $state(null);
+  /** Where the layer menu stands: the layers (null), a layer's groups, or a group's icon. */
+  let layerStep = $state(null);
+  /** The markers on this file's point, whichever layer they are in. */
+  const places = $derived(layerItems && row ? placesAt(row, layerItems.entity === row.id ? layerItems.targets : []) : []);
+  const held = $derived(new Set(places.map((place) => `${place.layer.name}|${place.marker.group ?? ''}`)));
+
+  // the layers are read for the file shown, and again whenever the menu opens
+  $effect(() => {
+    const id = row?.id;
+    if (layerItems && caseId && id) untrack(() => layerItems.refresh(caseId, id));
+  });
+  function toggleLayers() {
+    if (layerMenu) { closeLayers(); return; }
+    layerMenu = true;
+    layerItems.refresh(caseId, row.id);
+  }
+  function closeLayers() { layerMenu = false; layerStep = null; }
+  function addToLayer({ layer, group, style, status }) {
+    const id = row.id, at = { lat: row.lat, lon: row.lon };
+    closeLayers();
+    layerItems.add(caseId, id, at, layer, group, style, status);
+  }
 
   function go(delta) {
     index = step(index, delta, items.length);
@@ -123,7 +156,30 @@
           <span class="label">{proof.title || proof.name}</span>
         </button>
       {/each}
+      {#if layerItems}
+        <button class="btn btn-sm" bind:this={layerAnchor} aria-expanded={layerMenu} title="Put this file in one of your layers"
+          onclick={toggleLayers}>
+          <Icon name="layers" size={13} />
+          <span>Add to a layer</span>
+        </button>
+      {/if}
     </nav>
+    {#if layerItems}
+      <LayerPlaces {places} busy={layerItems.busy} onopen={(place) => onopenlayer?.(place)}
+        onremove={(place) => layerItems.remove(caseId, row.id, place)} />
+    {/if}
+
+    {#if layerMenu && layerItems}
+      <FloatingMenu anchor={layerAnchor} width={layerStep?.group ? 264 : 248} label="Add to a layer" onclose={closeLayers}>
+        {#if !layerStep}<p class="fm-head">Add to a layer</p>{/if}
+        {#if proposed}
+          <p class="fm-note">This point is only suggested. Confirm it in Media first.</p>
+        {:else}
+          <LayerTargetSteps bind:step={layerStep} targets={orderedTargets(layerItems.targets, layerItems.last(caseId))} {held}
+            busy={layerItems.busy} {caseId} oncreate={(title) => layerItems.create(caseId, row.id, title)} onadd={addToLayer} />
+        {/if}
+      </FloatingMenu>
+    {/if}
   </section>
 {/if}
 

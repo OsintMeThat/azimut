@@ -424,3 +424,59 @@ describe('personal layer editing', () => {
     expect(api.post.mock.calls.map(([, body]) => body.group)).toEqual(['north', 'south']);
   });
 });
+
+describe('editing a layer followed over time', () => {
+  const TRACKED = { ...ROW, track: { on: true, precision: 'day', zone: 'UTC' } };
+  let cursorAt;
+  beforeEach(() => {
+    cursorAt = null;
+    layers.time = () => ({ at: cursorAt, trail: true, since: null });
+    api.get.mockResolvedValue({ layer: TRACKED, document: { features: [feature('front'), feature('base')] } });
+  });
+
+  it('edits plainly at now, so a feature is corrected rather than given a state', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    expect(editor.cursor).toBeNull();
+    await editor.moveFeatures(['front'], [0, 1]);
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], offset: [0, 1] });
+  });
+
+  it('dates a move to the cursor, or corrects the state in force when set to fix', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    cursorAt = '2026-10-12';
+    expect(editor.cursor).toBe('2026-10-12');
+    await editor.moveFeatures(['front'], [0, 1]);
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], offset: [0, 1], at: '2026-10-12' });
+    editor.timeMode = 'fix';
+    api.patch.mockResolvedValue({ layer: TRACKED, marker: feature('front') });
+    await editor.update('front', { name: 'kept' });
+    editor.select('front'); editor.form.status = 'destroyed';
+    await editor.saveForm();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { status: 'destroyed', at: '2026-10-12', fix: true });
+  });
+
+  it('adds new features at the cursor whatever the mode', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    cursorAt = '2026-10-12T14:00'; editor.timeMode = 'fix';
+    editor.start(); editor.addPoint({ lat: 50, lon: 30 });
+    await editor.whenSaved();
+    expect(api.post.mock.calls.at(-1)[1]).toMatchObject({ lat: 50, lon: 30, at: '2026-10-12T14:00' });
+    expect(api.post.mock.calls.at(-1)[1].fix).toBeUndefined();
+  });
+
+  it('says a feature is gone from the cursor, drops one state and switches tracking', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    api.patch.mockResolvedValue({ layer: TRACKED, marker: feature('front') });
+    expect(await editor.markGone('front')).toBeNull();
+    cursorAt = '2026-10-20';
+    await editor.markGone('front');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { at: '2026-10-20', gone: true });
+    await editor.dropState('front', '2026-10-12');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { at: '2026-10-12', drop_state: true });
+    api.patch.mockResolvedValue({ layer: { ...TRACKED, track: { on: false } } });
+    await editor.setTrack({ on: false });
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/edit', { track: { on: false } });
+    expect(editor.cursor).toBeNull();
+  });
+});
+

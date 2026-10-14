@@ -282,6 +282,17 @@ describe('docSize', () => {
     expect(height).toBe(PAD + (PANEL_H + captionBand()) + footerBand() + PAD);
   });
 
+  it('grows right and down to hold the marks free on the page, the footer kept under them', () => {
+    const panels = [landscape(1000, 500, { caption: 'c' })];
+    const base = docSize(panels, [], {});
+    expect(docSize(panels, [], {}, {}, [], 'grid', undefined, { right: 10, bottom: 10 })).toMatchObject({
+      width: base.width, height: base.height,
+    });
+    const grown = docSize(panels, [], {}, {}, [], 'grid', undefined, { right: 2000, bottom: 1200 });
+    expect(grown.width).toBe(2000 + PAD);
+    expect(grown.height).toBe(1200 + 8 + footerBand() + PAD);
+  });
+
   it('accounts for custom caption / legend / footer sizes', () => {
     const panels = [landscape(1000, 500, { caption: 'c' })];
     const shapes = [{ kind: 'rect', color: '#ff5252', panel: 'p1' }];
@@ -1543,6 +1554,7 @@ describe('templateFromProof — a content-free house style', () => {
     footer: 'By the desk',
     footerEnabled: false,
     footerColor: '#aabbcc',
+    captionColor: '#ddeeff',
     captionsEnabled: false,
     signature: { anchor: 'br', dx: 5, dy: 0, scale: 0.12, opacity: 0.9 },
     signatureText: { text: '@desk', anchor: 'tr', dx: 0, dy: 0, size: 44, color: '#ffffff', opacity: 1 },
@@ -1568,6 +1580,7 @@ describe('templateFromProof — a content-free house style', () => {
       footerCoords: false,
       footerColor: '#aabbcc',
       footerAlign: 'left',
+      captionColor: '#ddeeff',
       captionsEnabled: false,
       panelDirection: 'horizontal',
       // a proof that never chose a typeface keeps the system's, set in bold

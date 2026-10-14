@@ -42,7 +42,8 @@
     const rank = new Map((controller.groups ?? []).map((group, index) => [group.id, index]));
     return controller.features.flatMap((feature) => {
       const group = groups.get(feature.properties.group);
-      if (hiddenGroups.has(group?.name)) return [];
+      // a tracked feature that was not there on the layer's day is not there to pick
+      if (hiddenGroups.has(group?.name) || feature.properties.$absent) return [];
       const style = group?.mode === 'uniform' ? { symbol: group.symbol, colour: group.colour } : {};
       return [{ ...feature, properties: { ...feature.properties, ...style, icon_scale: group?.size ?? 1 } }];
     }).sort((a, b) => (rank.get(b.properties.group) ?? 0) - (rank.get(a.properties.group) ?? 0));

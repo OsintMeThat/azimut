@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..engine import artifacts as artifact_engine
-from ..engine import exportdir
+from ..engine import exportdir, layerediting
 from ..engine import links as link_engine
 from ..engine import localtime
 from ..engine import media as media_engine
@@ -573,6 +573,9 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     )
 
     place, released = _place_for(case, entity_id, spec)
+    # The markers showing this proof in the analyst's layers say what it says now:
+    # its description, day and sources, and the footage behind it is the same marker.
+    layerediting.sync_followers(case, entity_id)
     return {
         # The proof's entity, so the composer can ask what it shares with the case.
         "id": entity_id,
@@ -614,32 +617,7 @@ def _source_material(case: Case, spec: dict[str, Any]) -> list[dict[str, Any]]:
     """
     paths = [p.get("src") for p in spec.get("panels", []) if p.get("src")]
     found, _missing = link_engine.resolve(case, paths + _material_paths(spec))
-    roots: dict[str, dict[str, Any]] = {}
-    seen: set[str] = set()
-    frontier = list(found)
-    while frontier:
-        current = frontier.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        entity = case.get_entity(current)
-        if entity is None:
-            continue
-        parents = [
-            link["to"]
-            for link in case.links_of(current)
-            if link["type"] == link_engine.DERIVED_FROM and link["from"] == current
-        ]
-        collected = [
-            parent
-            for parent in parents
-            if (case.get_entity(parent) or {}).get("type") in {"media", "capture"}
-        ]
-        if collected:
-            frontier.extend(collected)
-        elif entity["type"] == "media":
-            roots[current] = entity
-    return list(roots.values())
+    return link_engine.collected_roots(case, found)
 
 
 def _dating_label(name: str) -> str:

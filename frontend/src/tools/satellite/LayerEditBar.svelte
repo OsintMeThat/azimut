@@ -15,6 +15,7 @@
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
   import { mergeable, splittable } from '../../lib/map/layerHit.js';
   import { DEFAULT_PLACE, barBox, loadPlace, loadTips, savePlace, saveTips, snapPlace, upright } from '../../lib/map/editBarPlace.js';
+  import { momentLabel } from '../../lib/map/layerHistory.js';
 
   let { controller, vertex = null, ondone } = $props();
   const selection = $derived(controller.selection ?? []);
@@ -30,6 +31,11 @@
   const reshapable = $derived(chosen.length === 1 && !chosen[0].properties.entity_id
     && ['LineString', 'Polygon', 'MultiLineString', 'MultiPolygon'].includes(chosen[0].geometry.type));
   const onePoint = $derived(chosen.length === 1 && chosen[0].geometry.type === 'Point');
+  /** A tracked layer read at a moment: what an edit does then, said and switched on the bar. */
+  const tracked = $derived(!!controller.editor?.track?.on);
+  const cursor = $derived(controller.cursor);
+  /** `12 Oct`, or `12 Oct 14:00`: the year is in the panel. */
+  const short = $derived(cursor ? momentLabel(cursor).replace(/ \d{4}/, '').replace(' · ', ' ') : '');
   const hint = $derived(controller.lassoing ? 'Draw round what to select. Shift adds to the selection.'
     : controller.placing ? 'Click the map to add markers in the style shown. Esc to stop.'
       : sketch?.type === 'Selection' ? 'Drag the handle to move the selection. Enter to save, Esc to cancel.'
@@ -129,6 +135,19 @@
     {#if !vertical}
       <span class="layer" title={controller.editor.title}><Icon name="stack" size={12} /><span class="title">{controller.editor.title}</span></span>
     {/if}
+    {#if tracked}
+      <span class="rule" aria-hidden="true"></span>
+      {#if cursor === null}
+        <span class="when" title="Edits correct what each feature is now. Move the layer's day to date a change.">Now</span>
+      {:else}
+        <span class="when-mode" role="group" aria-label={`Edits on ${momentLabel(cursor)}`}>
+          <button type="button" class="mode" aria-pressed={controller.timeMode === 'new'} title={`Start a state on ${momentLabel(cursor)}`}
+            onclick={() => (controller.timeMode = 'new')}><Icon name="clock" size={12} />{#if !vertical}<span>{short}</span>{/if}</button>
+          <button type="button" class="mode" aria-pressed={controller.timeMode === 'fix'} title="Correct the state in force then"
+            onclick={() => (controller.timeMode = 'fix')}>{vertical ? 'F' : 'Fix'}</button>
+        </span>
+      {/if}
+    {/if}
     <span class="rule" aria-hidden="true"></span>
     <button type="button" aria-label="Select" title="Select and move" aria-pressed={selecting} disabled={busy}
       onclick={() => controller.stop()}><Icon name="cursor" size={15} /></button>
@@ -195,6 +214,10 @@
   .layer { display: flex; align-items: center; gap: 5px; flex: none; padding: 0 6px 0 2px; color: var(--text-2); font-size: var(--fs-xs); }
   .title { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .layer :global(svg) { flex: none; color: var(--text-3); }
+  .when { flex: none; padding: 0 6px; color: var(--text-3); font-size: var(--fs-xs); }
+  .when-mode { display: flex; flex: none; gap: 1px; padding: 1px; border: 1px solid var(--border); border-radius: var(--r-sm); }
+  .vertical .when-mode { flex-direction: column; }
+  .mode { display: flex; gap: 4px; width: auto; min-width: 26px; height: 26px; padding: 0 7px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
   .rule { width: 1px; height: 20px; margin: 0 3px; background: var(--border); flex: none; }
   .vertical .rule { width: 20px; height: 1px; margin: 3px 0; }
   button { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }

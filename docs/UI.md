@@ -2007,8 +2007,41 @@ days. The Timeline offers a **My layers** track in **Add a track**: each dated
 feature of the case's layers on its day, opening on a card with **Show on the
 map**. Its day is changed on the layer, not by dragging it on the axis.
 
+**Track over time**, in the editor's ⋯, follows a layer through its changes
+instead of overwriting them. It is off until asked for, and a layer that stays
+off behaves as above. On, the layer's row and its editor read it at one moment
+on a cursor: a tick per change, steps to the one before and the next, **Now**,
+and a calendar. Every map reads the same cursor, which is never stored, so a
+layer opens on now. The editor sets how states are dated, **Day** or **Day and
+time**, and the one clock they are read on, the case's clock until another is
+picked. Switching precision rewrites nothing: a day stays a day.
+
+At **Now** an edit corrects what each feature is now. At a moment the edit bar
+says what an edit does there: **New** starts a state on that day (a move, a
+reshape, a status), **Fix** corrects the state in force then. A feature added at
+a moment appears then; one with no day is there always. A feature's sheet lists
+its states in place of its day, each pressed to read the layer then and × to take
+it out, and its ⋯ says it is **Gone from** the cursor's day. Merge and split work
+on features with no history yet.
+
+What the cursor reads is drawn alone, never between two states: the state before
+dashed under it, and, from the cursor's ⋯, an area's gains and losses since the
+state before or since a chosen day, hatched in its colour. What is after the
+cursor's day is not drawn, and what appeared or changed on that very day is ringed
+in yellow. A group's menu can say its features are **Events**: a strike or a clash
+shows on its day, fades after it and leaves the map the number of days the
+cursor's ⋯ sets, seven unless changed, where a lasting thing stays. At **Now**
+events are read against the layer's last change. Off again, the history
+is hidden and kept, and an edit corrects the latest state. On the Timeline a
+tracked feature is a bar per state, the last one marked on the day it went.
+
 The download icon on a personal layer or its editor offers **KMZ**, **KML** and
-**GeoJSON**. KMZ carries bundled icons for use in Google Earth or My Maps; the
+**GeoJSON**. A tracked layer goes out as it is now, as it stood on the cursor's
+day, or with every state dated for another viewer's time slider. **Send to My
+Maps…**, in the editor's ⋯ or from the download dialog, saves the KMZ of one day
+and opens the analyst's My Maps, whose address the layer keeps, beside three
+steps: delete the old layer there, then import the file. Google offers no way to
+write to a My Maps, so the replacing is done there. KMZ carries bundled icons for use in Google Earth or My Maps; the
 single-file formats carry geometry, groups and style fields. A feature's day,
 status, direction, sources and provenance travel too, and come back on reimport.
 Downloads include hidden groups and omit case entity IDs. Reimporting retains
@@ -2018,10 +2051,13 @@ Three ways bring outside points in. **Paste a position** reads coordinates, a ma
 link or the text of a whole post, read where it is pasted and nowhere else: it
 lists the positions found, keeps the post's addresses as sources and its day when
 written unambiguously, and marks the point as somebody else's when the text cites
-an address. Ctrl+V on the map opens it with the clipboard. **Copy to my layer**,
+an address. Ctrl+V on the map opens it with the clipboard. **Add to a layer**,
 on the card of a source layer's feature (a GeoConfirmed event, a My Maps pin),
-copies it into one of the analyst's layers as somebody else's point, with its day
-and the addresses its note cites; the layer chosen last in the case comes first.
+puts it in one of the analyst's layers as somebody else's point, with its day and
+the addresses its note cites. It opens the same step-by-step menu as a Geo Proof
+point, the layer used last first, the icon step starting on the feature's own
+colour; a line or an area skips the icon. A row at the top of that menu says what
+the item shows, **Intact**, **Damaged** or **Destroyed**, on the marker it adds.
 
 A personal marker belongs to its layer. **Save as case place** explicitly creates
 a place, or reuses a place already at that point, and records the layer's origin.
@@ -2032,8 +2068,21 @@ and Trash.
 checked point), files, captures, comparisons and views, filtered by kind and
 name. Each becomes a marker that follows it: move the place or correct the proof,
 and the marker moves with it. Such a marker cannot be moved alone; **Unlink**
-keeps it where it stands and lets it go. Its sheet says what it follows and opens
-it. A case item can be shown in several layers without another case entity.
+keeps it where it stands and lets it go. **A proof and the footage it rests on
+are one marker**: a file added where a proof places it follows that proof, an
+item already shown on that point, as itself or as its proof or footage, is not
+added twice, and taking the marker out from either side takes it out. The marker
+says what its item says: a proof is named by its description (its title when it
+has none, with the point's label on a proof of several) and gives its day and the
+addresses it cites, the footage's among them; a file alone is named by its notes,
+else its title, and gives the address it came from but no day, since a post's
+date is often not when it was filmed. Each save of the proof or the file writes
+these again, except a field rewritten by hand in the marker, which stays the
+analyst's. A file marker made before its proof becomes the proof's on that save,
+and a second marker of the same geolocation in one layer goes, kept for Undo. Its
+sheet opens on the footage, then the proof, each picture opening it; the
+marker's card on the map shows the same two. A case item can be shown in several
+layers without another case entity.
 Geo Proof's coordinate rows offer the same from the proof. A point's ⋯ goes a
 step at a time: the case's layers, the one used last first; then the layer's
 groups, when it has several; then, for a group whose features each have their own
@@ -2099,8 +2148,11 @@ against, and a window over the map would hide the half being compared. The marks
 stack like any other, so one press opens every file on that metre; `←`/`→` walk
 them, the count says where you are, and `Esc` brings the list back. A focused
 video keeps its own arrows for seeking. The card carries the file's name, its
-point, why it stands there, and the ways out: **Open in Media**, and one button
-per proof built on it. The mark being read stays lit on the map.
+point, why it stands there, and the ways out: **Open in Media**, one button
+per proof built on it, and **Add to a layer**, the same step-by-step menu as a
+Geo Proof point's (layer, group, then icon and colour). A point only a tool
+suggested is confirmed in Media first. Each layer the file is in reads as one
+line under it, with **Open** and ×. The mark being read stays lit on the map.
 Items with
 no country collect under **Unlocated**, where **Locate** looks them up a batch at
 a time and can be stopped mid-pass. Its left edge resizes from 260 to 560 px,
@@ -2611,6 +2663,13 @@ was read through. **Picture** in What you know reads any image as a Photo or a
 Panorama, the same degrees per pixel all along as a phone's sweep, so a
 hand-made collage of any shape can be searched either way; a wide one is
 pointed to Panorama.
+
+An alignment is made by four clicks, the near thing and what stands behind it
+on the photo, then both on the map. What the next click is for is said in the
+column that waits for it, which is outlined, so the columns never move between
+clicks; each point shows as soon as it is placed, in the alignment's own colour
+and number. Two clicks within a hundredth of the photo's width count as lined
+up even when its lens is unknown.
 
 Over a matched photo the view keeps to two lines: the trace, green where it
 lies on the terrain, amber near it and red off it, and the terrain's skyline
@@ -3266,8 +3325,9 @@ each panel's media traces back to.
 often shows more than one place — three impacts, a building, the camera — and each
 row takes an optional name and the marker that says the camera stood there. **The
 first row is the proof's point**: the map mark, the coordinate a post cites, the
-one the export prints. A row's ⋯ moves it up to make it the conclusion, removes
-it, or adds it to one of the analyst's layers; the
+one the export prints. A row's layers button adds it to one of the analyst's layers,
+moves it up to make it the conclusion, or removes it; it has a face like the eye
+beside it, so it reads as a button. The
 marker never reorders anything, or ticking it would take a coordinate out of a
 tweet without saying so. A single-point proof is the field it has always been.
 **A panel that carries a place adds it**, under the point already on screen rather
@@ -3383,7 +3443,12 @@ shape never reshuffles the buttons above them.
 stroke offers its colour, width and **line style** (solid, dashed or dotted, in
 proportion to the width); a box adds its fill and its tag; a label its size, a
 **frame** round its words and a **background** behind them; a cone its lens. A
-picked panel or overlay offers its **border**, colour and thickness. These used to
+picked panel or overlay offers its **border**, colour and thickness, and a picked
+panel the **captions'** size and colour. **Words and lines are sized apart**: the
+size control holds one slider per size the pick has, so a tag's words grow without
+its box's line (**Tag text**), a callout's words without its line, a framed
+label's words without its frame, and a cone's camera without its edges
+(**Camera**). These used to
 be small buttons in the side column's rows, out of sight while the canvas had the
 eye, and the rows now keep the words alone. There is no floating bar over the
 picture: it would cover what is being annotated.
@@ -3392,13 +3457,21 @@ picture: it would cover what is being annotated.
 mark it picks it, if it was not picked, and offers Bring to front, Bring forward,
 Send backward, Send to back, Duplicate, Copy and Delete; on an overlay, or a panel
 in free layout, the same stacking, Crop and Remove; on the page, Fit view and a
-Paste when a mark was copied. With a drawing tool in hand the right button stays
+Paste when a mark was copied; on a caption or the footer, the editor. With a drawing tool in hand the right button stays
 silent, as it neither draws nor drops a pick. **Ctrl+↑ and Ctrl+↓** step the picked
 marks forward and back, with Shift all the way; a step passes the next mark of the
 same picture, the only one it can cover.
 
 **Handles are Collage's**: accent discs on the corners, accent squares on the
 sides, ringed dark to hold up over bright imagery, with the same round turn knob.
+
+**Captions and the footer are written in place.** A double-click on a panel's
+caption or on the footer's credit line opens the editor over the words, one line
+each; a footer emptied goes back to the line the panels give. A press on a caption
+picks its panel, and a press on the footer picks it, framed with nothing to pull:
+the rail then sets the size and colour of the captions, which share both so a row
+reads as one line, or of the footer. **Auto** is the colour the background gives.
+The house style carries the caption colour too.
 
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it
@@ -3421,6 +3494,32 @@ dragged onto another picture joins it unchanged on screen, the arrow keys and
 Ctrl+D step the same distance on every picture, and a mark drawn on a turned
 panel lands under the pointer, square to the picture. A proof saved before this
 rule is converted as it opens and looks as it did.
+
+**Marks free on the page.** A box, an ellipse, a line, an arrow, a curve, a
+stroke, a label, a symbol or a marker belongs to where it is let go. On a picture
+it follows that picture; **dragged out into a margin it comes free**: it stays where
+it is when a panel moves, and it is drawn over every picture, in one stack with the
+callouts and the insets. **Put back on a picture, it is anchored to it again.** A
+mark drawn in a margin is free, and so is one drawn over a zoom inset, so it lands
+on the inset it annotates rather than under it. A free mark out in a margin can
+still follow a picture: the right-click **pins it to the nearest one**, and it stays
+pinned while it is moved about out there. While a mark is dragged, the picture or
+the page it will belong to is outlined and named. **The
+page grows** right and down to hold a free mark put past its edge, background
+and all, with the footer kept under it; it never grows up or left, so a mark taken
+past those edges comes back to them. Blur boxes, insets, callouts and cones stay
+on their pictures, since they only mean something on its pixels.
+
+**Lines that hold to two pictures.** A line or an arrow drawn from one picture to
+another holds by each end to the pixel it was pressed or let go on, and follows
+both: the minaret in the photo stays tied to the minaret on the satellite however
+the panels are moved, resized, turned or cropped. Drawn out into a margin, the end
+there is free. Each end has its own handle, drawn dark ringed in the accent while
+it holds; an end let go over a picture holds there and one let go in a margin comes
+free, for a handle and for the whole line dragged alike, and both ends on one
+picture make it that picture's mark again. The Elements row says
+what it ties, `P1→P2`. A picture that is removed lets go of the ends it held,
+where they were; a copy is a free line, stepped aside.
 
 **Panel and overlay transforms.** Selecting either image shows a round knob on a
 short stem above it — the one Collage turns its pieces by — for a free turn, with
@@ -3506,7 +3605,8 @@ its frame. A double-click inside a box writes its tag, or the **Tag** control pu
 it on the corner asked for, moves it, or takes it off. A new tag starts from the
 legend line of its colour, since the colour already names the feature. The tag is
 part of the box: it follows a drag, a resize or a turn, a press on it picks the
-box, and its size follows the box's line, so one control weighs both. Emptied, or
+box, and its words start at a size read off the box's line and are sized on their
+own from then on (**Tag text**). Emptied, or
 let go with Escape as it is made, it is gone.
 
 **Callouts.** A label tied to one point of a picture. Press the point, drag to
@@ -3519,17 +3619,20 @@ ending on a dot, the default, or a **speech bubble**. On a picked label the same
 control gives it a pointer, and **No pointer** turns a callout back into a framed
 label, so the words are never typed twice. Dragging the label moves it alone. The
 dot has its own handle, and let go over another picture it moves there while the
-label stays put. A callout's size is its font size, and its line follows it.
+label stays put. A callout's line follows its font size until it is given a width
+of its own.
 
 **View cones.** Where a camera stood and what it saw. Press where it stood and drag
 the way it looked: the cone opens from a badge with the camera on it, fades with
-distance, dots its line of sight down the middle and stops at the edge of its
-picture. How wide it opens is the part an analyst knows as a phone camera, not in
-degrees, so the **Lens** control offers the phone's own: ultra-wide 0.5×, main 1×,
-2×, 3× and 5×, read off their 35 mm equivalents, landscape or **held upright**. The
-far handle aims it and sets its reach; each edge handle opens or closes it and
-settles on a lens it comes within a degree and a half of. It belongs to its picture
-like any mark, takes a fill (a light one by default, since it fades) and a line style.
+distance and stops at the edge of its picture. How wide it opens is the part an
+analyst knows as a phone camera, not in degrees, so the **Lens** control shows the
+phone's own as tiles, each drawn as the wedge it opens: ultra-wide 0.5×, main 1×,
+2×, 3× and 5×, read off their 35 mm equivalents, held **landscape** or
+**upright**. The far handle aims it and sets its reach; each edge handle opens or
+closes it and settles on a lens it comes within a degree and a half of; a small
+diamond on the badge's rim sizes the camera, which the size control also sets,
+apart from the line. It belongs to its picture like any mark, takes a fill (a light
+one by default, since it fades) and a line style.
 
 **Zoom insets.** A frame dragged over a detail, shown bigger on the page. The
 enlargement opens beside its frame where the page has room, else in the far corner
@@ -3564,8 +3667,9 @@ then whatever is picked, and only with nothing left to drop does it put the pen
 down. Only the primary button draws. A release the canvas never sees still lands:
 letting go over the side column commits the stroke and applies the rectangle
 rather than leaving either one following a bare pointer. Space or the middle
-button pans, and so does a drag that starts where no tool has anything to draw
-on. A row picked in the side column takes the hand back to Select, since a row
+button pans, and the middle button never drags or picks the mark under it; so does
+a drag that starts outside the page, or, with a tool that only draws on a picture,
+where no picture is. A row picked in the side column takes the hand back to Select, since a row
 cannot mean "draw here" — which is also why the rows stop lighting up while a
 drawing tool is in hand: a pick nothing answers to is not shown as one. A dialog
 over the composer keeps the one-letter keys, so `r` never changes the tool
@@ -4448,6 +4552,49 @@ says what it is checking.
 - Only the rows on screen are in the DOM, so a sheet of twenty thousand scrolls. Row
   height is fixed: a cell holding sentences shows one line and opens into a box that
   grows.
+
+## Map plate
+
+**Map plate**, in Compose, lays a page out round the case's maps, for a report,
+a print or a post. **New plate** opens on the house layout over the ground the
+Map is looking at, with the layers switched on there (the analyst's own layers
+when none is): a title and a subtitle, the map, a legend, an inset, a cartouche,
+the scale, the north and the credits. The plate saves itself; its name is its
+file, and renaming it in the header moves it.
+
+The page is laid out in millimetres and shown at its true size, scaled to the
+window, so a line weighs on the screen what it weighs on the paper. **Add** puts
+a map, an inset, a legend, a text, a label, an arrow, a scale bar, a north arrow,
+a picture of the case or credits on the page; a label and an arrow are placed by
+a press on a map, and their points are then dragged on the ground. An element is
+dragged and resized by its handles, catches on the page's edges and middle and on
+the other elements' (Alt lets go), moves by the arrow keys, and goes with Delete;
+Ctrl+Z undoes. The credits are what the maps' sources are owed: they stay on the
+page and are written for it.
+
+A map picked on the page carries its own bar: **Frame**, which hands the map to
+the hand (drag and scroll, right-drag or Ctrl-drag to turn, Esc when done), a
+step to either side and a compass to turn it, and **Ground**: Plain, Plain dark,
+Esri imagery, OpenStreetMap or OpenTopoMap, with relief shading, borders and
+names over it. The inspector sets the rest: the zoom and the turn to the decimal,
+a latitude and longitude grid, which of the case's layers the map draws, which of
+their groups it leaves out, how heavy their lines are, and **Label its named
+features**, which puts a label beside each one to be moved by hand. A legend's
+rows are named after the case's named colours or the groups, and renamed on the
+plate. A text writes `{date}`, `{today}`, `{case}` and `{title}` filled in. With
+nothing picked, the inspector sets the paper (A5, A4, A3, Letter, 16:9 or square,
+either way round), the font and the colours.
+
+A plate that draws a layer followed over time has a day of its own, on a bar under
+the page that steps and plays its changes, with the trail and the gains and
+losses as on the map, which the legend names. **Export** writes a PNG or a PDF of
+the paper size at screen or print resolution, and, for such a plate, its days as
+an MP4, a GIF or an evolution sheet, into the folder saved for views.
+
+**Keep as template** keeps the layout, its paper and colours without the ground,
+the layers or the labels. A new plate can start from one. Settings → Templates
+lists them: **Edit** opens one here over the Map's ground, and one goes out and
+comes back as a file.
 
 ## Notebook
 

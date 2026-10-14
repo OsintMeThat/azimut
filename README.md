@@ -71,13 +71,14 @@ to fix a point on the map.*
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services, which the capture extension opens with the picture already in them. |
 | **Inspect** | Reads any photo or video closely with sharpest-frame capture, frame adjustments, editable crop and ELA hints, all kept with the file as you work. |
 | **Collage** | Lays out frames and images from any number of files on one canvas, with per-piece warp and crop and auto-stitch for panoramas. |
-| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measurement tools, a 3D relief view with elevation profiles, stacked overlays, your own KML, GeoJSON or GPX layers, and AOI grids for area review. |
+| **Satellite** | Coordinates or a place name become an imagery crop over Esri, OSM, the Wayback archive, Sentinel-2 or Sentinel-1 radar, with measurement tools, a 3D relief view with elevation profiles, stacked overlays, your own KML, GeoJSON or GPX layers (followed over time if you want, so a moved front line keeps where it was), and AOI grids for area review. |
 | **Horizon** | Stand anywhere and see what the eye sees: ridges, relief or imagery out to 150 km with the curve of the Earth, summit names, the sun and moon against the ridges, and whether a point is in sight. |
 | **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights and ground-anchored notes that follow both maps. |
 | **Detect** | Sweeps drawn areas of Sentinel-2 and Sentinel-1 radar for vessels, fires, construction, burn scars, floods and other changes, and only a candidate you keep becomes a case pin. |
 | **Coords & Sky** | Converts coordinate formats, opens map links, and reads the sun and moon at that point on a date, computed offline. |
 | **Geo Proof** | Composes annotated case panels into a proof, from a house style or a published post, and exports `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turns a proof into a prepared thread for X or Bluesky, with coordinates, attribution, character counts, media and a Markdown case note. |
+| **Map plate** | Lays a page out round the case's maps, with a legend, scale, north, inset, labels and credits, and exports it as a PNG, a print PDF, or a layer followed over time played through its days as a video. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
@@ -335,7 +336,7 @@ history keeps it.
 ```bash
 source ~/.config/azimut/amo.env   # AMO_JWT_ISSUER + AMO_JWT_SECRET, 0600 file outside the repo
 python3 scripts/sign_extension.py                    # signs, writes packaging/updates.json
-gh release upload v0.3.2 dist-xpi/azimut-capture-0.3.2.xpi
+gh release upload v0.3.3 dist-xpi/azimut-capture-0.3.3.xpi
 ```
 
 Then commit `packaging/updates.json`. That file is what
@@ -402,7 +403,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.3.2 && git push origin v0.3.2
+git tag v0.3.3 && git push origin v0.3.3
 ```
 
 One-time setup: register the repo as a

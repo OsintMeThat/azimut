@@ -122,6 +122,11 @@ export function layerItems(drawings) {
   for (const { row, collection } of drawings) {
     for (const feature of collection?.features ?? []) {
       const properties = feature.properties ?? {};
+      // a history switched off is hidden, here as on the map: the feature reads by its days
+      if (row.track?.on && Array.isArray(properties.states) && properties.states.length && properties.key) {
+        items.push(...stateItems(row, feature));
+        continue;
+      }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(properties.date ?? '') || !properties.key) continue;
       const last = properties.date_end > properties.date ? properties.date_end : properties.date;
       const point = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : null;
@@ -144,6 +149,55 @@ export function layerItems(drawings) {
     }
   }
   return items.sort((a, b) => a.earliest.localeCompare(b.earliest));
+}
+
+/**
+ * A tracked feature on the Timeline: one bar per state, from its day to the day
+ * before the next one, and a mark on the day it went. What it was then is what
+ * the card says, so a front line reads as the spans it held.
+ */
+function stateItems(row, feature) {
+  const properties = feature.properties;
+  const states = properties.states;
+  const name = properties.name || 'Unnamed feature';
+  const items = [];
+  states.forEach((state, index) => {
+    const day = String(state.at ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+    const next = String(states[index + 1]?.at ?? '').slice(0, 10);
+    const last = !state.gone && next > day ? isoDayBefore(next) : day;
+    // where the map is sent: the point, or where a line or an area starts
+    const point = state.gone ? null : firstPosition(state.geometry?.coordinates);
+    items.push({
+      id: `layer:${row.name}:${properties.key}:${state.at}`,
+      kind: 'layer',
+      category: 'statement',
+      label: state.gone ? `${name} · gone` : index && states[index - 1]?.at ? `${name} · changed` : name,
+      raw: state.at,
+      precision: 'day',
+      earliest: `${day}T00:00:00Z`,
+      latest: `${last < day ? day : last}T23:59:59Z`,
+      layer: {
+        name: row.name, title: row.title, key: properties.key, group: properties.category ?? '',
+        status: state.status ?? '', links: properties.links ?? [],
+        external: properties.provenance === 'external',
+        at: point ? { lon: point[0], lat: point[1] } : null,
+        moment: state.at,
+      },
+    });
+  });
+  return items;
+}
+
+function firstPosition(node) {
+  if (!Array.isArray(node)) return null;
+  return typeof node[0] === 'number' ? node : firstPosition(node[0]);
+}
+
+function isoDayBefore(day) {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }
 
 /** Whether a track draws its events as the files they date. */

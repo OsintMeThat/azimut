@@ -2,8 +2,8 @@
  * The card a feature of an added layer opens.
  *
  * Read-only by construction: it is built from the strings the source stated,
- * and its one control copies the feature's point. Nothing in an added layer
- * enters the case.
+ * and its controls copy the feature's point or open the case item one of the
+ * analyst's own markers follows. Nothing in an added layer enters the case.
  *
  * Three things it does beyond printing the description:
  *
@@ -135,7 +135,7 @@ function copyGlyph() {
  *   does. Absent, they are text.
  * @returns {(properties: Record<string, any>, point?: { lat: number, lon: number } | null) => HTMLElement}
  */
-export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
+export function layerCard(title, { coords = formatCoords, copy = null, pictures = null } = {}) {
   return (properties = {}, point = null) => {
     const element = document.createElement('div');
     element.className = 'layer-card';
@@ -143,6 +143,33 @@ export function layerCard(title, { coords = formatCoords, copy = null } = {}) {
     const heading = document.createElement('h4');
     heading.textContent = properties.name || UNNAMED;
     element.append(heading);
+
+    // What a personal marker follows, each shown and opened from its picture: the
+    // footage first, then the proof that geolocates it. `pictures` answers a list of
+    // `{ src, caption, title, open }`.
+    const shown = (pictures?.(properties) ?? []).filter((one) => one.src);
+    if (shown.length) {
+      const row = document.createElement('div');
+      row.className = 'layer-card-pictures';
+      for (const one of shown) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'layer-card-picture';
+        button.title = one.title;
+        const image = document.createElement('img');
+        image.src = one.src;
+        image.alt = one.title;
+        image.loading = 'lazy';
+        // a thumbnail the cache let go: the card reads on without it
+        image.addEventListener('error', () => button.remove());
+        const caption = document.createElement('span');
+        caption.textContent = one.caption;
+        button.append(image, caption);
+        button.addEventListener('click', (event) => { event.stopPropagation(); one.open(); });
+        row.append(button);
+      }
+      element.append(row);
+    }
 
     const named = [properties.category, properties.colour_name].filter(Boolean).join(' · ');
     if (named) {

@@ -13,7 +13,7 @@
   // one a coordinate row is written in (decimal, hemispheres, or DMS).
   import { parseLatLon } from '../lib/sheetRoles.js';
   import ProofPointMenu from './proof/ProofPointMenu.svelte';
-  import ProofPointLayers from './proof/ProofPointLayers.svelte';
+  import LayerPlaces from './satellite/LayerPlaces.svelte';
   import { createProofLayers, orderedTargets, placesOf } from './proof/proofLayers.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { personalLayers } from '../lib/map/personalLayers.svelte.js';
@@ -118,8 +118,8 @@
     insetBox, insetHeight, insetPlacement, insetConnectors, labelToCallout, calloutToLabel, INSET_MIN,
   } from '../lib/pageMarks.js';
   import {
-    PAGE, isFree, canBeFree, pageEntry, onPage, isLink, holdsToPicture, linkPoints, settleLink,
-    pictureUnder, nudgedLink, letGoOf, shiftedTies,
+    PAGE, isFree, canBeFree, pageEntry, onPage, pageHit, isLink, holdsToPicture, linkPoints, settleLink,
+    pictureUnder, nudgedLink, letGoOf, shiftedTies, markBounds, freeExtent,
   } from '../lib/freeMarks.js';
   import { pollWhile } from '../lib/poll.js';
 
@@ -647,11 +647,18 @@
     // A mark being dragged says where it will belong once let go, when that is
     // somewhere new. Handles draw their own (see drawLinkHandles), so only a
     // mark's own drag answers here.
+    stage.on('dragstart', (event) => {
+      const s = proof.shapes.find((x) => x.id === event.target.id());
+      if (s && outsideOwnPicture(s)) pinnedOut.add(s.id);
+    });
     stage.on('dragmove', (event) => {
       const s = proof.shapes.find((x) => x.id === event.target.id());
       if (s) showLanding(landingOfDrag(s, event.target));
     });
-    stage.on('dragend', () => showLanding(null));
+    stage.on('dragend', (event) => {
+      pinnedOut.delete(event.target.id());
+      showLanding(null);
+    });
 
     // The release can happen outside the canvas. Capture it at window level so
     // a deferred rebuild is never left waiting after an interrupted drag, and
@@ -660,12 +667,19 @@
     const closeStranded = () => {
       if (stage) closeStrandedGesture({ transformer, stage, isDragging: () => Konva.isDragging() });
     };
-    const beginPointer = () => {
+    // The wheel button moves the view and nothing else. Konva lets it drag a mark
+    // as well, so a mark under the pointer slid along with the pan. That setting
+    // is one for every canvas in the app, so it is narrowed for a press that
+    // starts here, before Konva hears of it, and given back at the release.
+    const dragButtons = [...Konva.dragButtons];
+    const beginPointer = (event) => {
+      if (event.button === 1) Konva.dragButtons = dragButtons.filter((b) => b !== 1);
       closeStranded(); // a new press proves the last gesture is over, however it ended
       gestureSeq += 1;
       canvasRenderGate?.beginPointer();
     };
     const settlePointer = () => {
+      Konva.dragButtons = dragButtons;
       canvasRenderGate?.endPointer();
       // The pan is the one gesture that cannot wait: it follows the live
       // pointer, so a move arriving before the frame below would slide the view
@@ -874,8 +888,28 @@
     });
   });
 
-  const measureDoc = () =>
-    docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space);
+  const measureDoc = () => docSize(
+    proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space,
+    freeExtent(proof.shapes, inkHelpers),
+  );
+
+  // What sizing a free mark takes: a label's words measured in the proof's face,
+  // and the frames of the pictures a line's ends hold to. Read off the pictures
+  // alone, since the page's own frame is what is being measured.
+  const inkHelpers = {
+    measure: (s) => {
+      const fontSize = s.fontSize ?? 28;
+      const probe = new Konva.Text({ text: s.text || ' ', fontSize, fontFamily: proofFace(), fontStyle: markWeight() });
+      const pad = s.frame || s.bg ? textBoxPad(fontSize) * 2 : 0;
+      const size = { w: probe.width() + pad, h: probe.height() + pad };
+      probe.destroy();
+      return size;
+    },
+    frameOf: (id) => {
+      const entry = surfaces(proof).find((x) => x.id === id);
+      return entry ? surfaceFrame(entry) : null;
+    },
+  };
 
   function resetDoc() {
     proof.title = freshTitle();
@@ -1011,7 +1045,8 @@
    */
   function bindShapePick(node, s) {
     node.on('pointerdown', (e) => {
-      if (tool !== 'select') return;
+      // the wheel button is the view's, and picks nothing (see beginPointer)
+      if (tool !== 'select' || (e.evt.button ?? 0) !== 0) return;
       e.cancelBubble = true;
       dragMoved = false;
       if (e.evt.shiftKey || !selectedIds.includes(s.id)) pickShape(s.id, e.evt.shiftKey);
@@ -1851,14 +1886,13 @@
     return entry ? surfaceFrame(entry) : null;
   }
 
-  /** The pointer on the page, held inside the document. */
-  function docPointOnPage() {
-    const { width, height } = measureDoc();
-    return onPage(docPoint(), width, height);
-  }
-
-  /** The pointer in a surface's own pixels, held to its picture. */
-  function pointerOn(frame) {
+  /**
+   * The pointer in a surface's own pixels, held to its picture; `loose`, held
+   * only where the page is or can grow to, for a mark drawn on the page and for
+   * a line's far end, which may reach another picture.
+   */
+  function pointerOn(frame, loose = false) {
+    if (loose) return pageToSurface(onPage(docPoint()), frame);
     const p = pageToSurface(docPoint(), frame);
     return {
       x: Math.min(Math.max(p.x, 0), frame.image[0]),
@@ -1930,7 +1964,9 @@
     // A mark drawn where no picture is, in a margin or a gap, is free on the
     // page, and so is every mark drawn while the rail says to draw free. The
     // marks that only mean something on a picture's pixels need one under them.
-    const free = freeDraw && canBeFree(tool);
+    // A mark drawn over a zoom inset goes on the page too, so it is drawn over
+    // the inset it annotates rather than under it, on the picture beneath.
+    const free = overInset(docPoint()) && canBeFree(tool);
     const hit = surfaceAt(docPoint(), { page: free ? 'only' : canBeFree(tool) });
     // Nothing to draw on under the pointer. The room around the page pans in
     // Select, and it is the same room: a drag that cannot mean an annotation
@@ -2121,7 +2157,7 @@
       return;
     }
     if (pathDraft) {
-      const { x: nx, y: ny } = pointerOn(pathDraft.frame);
+      const { x: nx, y: ny } = pointerOn(pathDraft.frame, pathDraft.panel.id === PAGE);
       pathDraft.node.points([...pathDraft.points, nx, ny]);
       docLayer.batchDraw();
       return;
@@ -2148,8 +2184,8 @@
     // Clamp to the picture even if the pointer leaves it, except for a line or
     // an arrow: its far end may reach the page or another picture, and hold
     // there (see commitDrawing). Either way it stays inside the document.
-    const link = kind === 'arrow' || kind === 'line';
-    const { x: nx, y: ny } = link ? pageToSurface(docPointOnPage(), drawing.frame) : pointerOn(drawing.frame);
+    const loose = kind === 'arrow' || kind === 'line' || drawing.panel.id === PAGE;
+    const { x: nx, y: ny } = pointerOn(drawing.frame, loose);
     if (kind === 'freehand') {
       const points = node.points();
       const lx = points[points.length - 2];
@@ -3210,10 +3246,7 @@
         ...look, x: page[i * 2], y: page[i * 2 + 1],
         ...(held[i] ? { fill: HANDLE_RING, stroke: ACCENT } : {}),
       });
-      const at = () => {
-        const { width, height } = measureDoc();
-        return onPage(handle.position(), width, height);
-      };
+      const at = () => onPage(handle.position());
       handle.on('dragmove', () => {
         const p = at();
         handle.position(p);
@@ -3424,30 +3457,24 @@
   let ctxMenu = $state(null);
 
   /**
-   * The right-click's say on where the picked marks belong: set free on the
-   * page what follows a picture, pin to the picture under it what is free.
+   * The right-click's one say on where a mark belongs. A mark is anchored by
+   * where it is let go: on a picture it follows that picture, in a margin it is
+   * free. A free mark out in a margin can still be pinned to the picture nearest
+   * it, to follow it from out there.
    */
   function anchorItems() {
-    const marks = editableShapes.filter((s) => canBeFree(s.kind));
-    if (!marks.length) return [];
-    const list = surfacesOf();
-    const pinnable = (s) => {
-      if (holdsToPicture(s)) return false;
-      if (!isLink(s)) return !!pictureUnder(list, anchorOf(s));
-      const pts = linkPoints(s, frameOf);
-      return [0, 2].some((i) => !!pictureUnder(list, { x: pts[i], y: pts[i + 1] }));
-    };
-    const items = [];
-    if (marks.some(holdsToPicture)) {
-      items.push({ label: 'Free on the page', icon: 'anchorPage', run: () => setAnchor('page') });
-    }
-    if (marks.some((s) => !holdsToPicture(s))) {
-      items.push({
-        label: 'Pin to the picture', icon: 'anchorPicture',
-        run: () => setAnchor('picture'), disabled: !marks.some(pinnable),
-      });
-    }
-    return [...items, 'sep'];
+    const loose = editableShapes.filter((s) => canBeFree(s.kind) && !holdsToPicture(s));
+    if (!loose.length) return [];
+    const nearest = loose.length === 1 ? nearestPicture(anchorOf(loose[0])) : null;
+    if (loose.length === 1 && !nearest) return [];
+    return [{
+      label: nearest ? `Pin to ${surfaceLabel(nearest)}` : 'Pin each to the nearest picture',
+      icon: 'anchorPicture',
+      run: () => {
+        loose.forEach(pinShape);
+        dirty = true;
+      },
+    }, 'sep'];
   }
 
   /**
@@ -3551,21 +3578,74 @@
   }
 
   /**
-   * Where a mark let go at a page point belongs, or null to stay where it is. A
-   * free mark stays free: the page is where it was put, over a picture or not. A
-   * picture's mark goes to the picture it is let go over, or onto the page when
-   * it is let go in a margin, if it means anything there. One let go outside the
-   * document stays with its picture.
+   * Where a mark let go at a page point belongs, or null to stay where it is: the
+   * picture it is let go over, which it follows from then on, or the page when it
+   * is let go in a margin, if it means anything there. One let go above or left of
+   * the page stays where it belonged.
    */
   function landingFor(s, point, list = surfacesOf()) {
-    if (isFree(s)) return null;
-    const hit = pictureUnder(list, point)
-      ?? (canBeFree(s.kind) ? surfaceHitTest(list.filter((x) => x.id === PAGE), point) : null);
-    return hit && hit.id !== s.panel ? hit : null;
+    const free = canBeFree(s.kind);
+    // let go over an inset, it goes on the page to be drawn over it (see onPointerDown)
+    const hit = free && overInset(point) ? null : pictureUnder(list, point);
+    if (hit) return hit.id !== s.panel ? hit : null;
+    // In a margin a picture's mark comes free, unless it was pinned out there
+    // and is only being moved about out there.
+    if (!free || pinnedOut.has(s.id)) return null;
+    const page = pageHit(list, point);
+    return page && page.id !== s.panel ? page : null;
   }
 
   /**
-   * Where a dropped mark now belongs (see `landingFor`). The drag is already
+   * The marks being dragged that a picture holds from outside it, pinned out in
+   * its margin: filled as a drag starts, emptied once it has landed.
+   */
+  const pinnedOut = new Set();
+
+  /** Whether a picture's mark stands outside its picture: pinned out in a margin. */
+  function outsideOwnPicture(s) {
+    if (isFree(s)) return false;
+    const frame = frameOf(s.panel);
+    if (!frame) return false;
+    const p = anchorOf(s);
+    return p.x < 0 || p.y < 0 || p.x > frame.image[0] || p.y > frame.image[1];
+  }
+
+  /** Whether a page point is on a zoom inset's enlargement. */
+  function overInset(point) {
+    const doc = measureDoc();
+    for (const s of proof.shapes) {
+      if (s.kind !== 'zoom') continue;
+      const frame = frameOf(s.panel);
+      if (!frame) continue;
+      const box = insetBox(surfaceToPage({ x: s.x + s.w / 2, y: s.y + s.h / 2 }, frame), s, doc.width, doc.height);
+      // the enlargement is turned like its picture, about its middle
+      const r = (-frame.rotation * Math.PI) / 180;
+      const dx = point.x - (box.x + box.w / 2);
+      const dy = point.y - (box.y + box.h / 2);
+      const x = dx * Math.cos(r) - dy * Math.sin(r);
+      const y = dx * Math.sin(r) + dy * Math.cos(r);
+      if (Math.abs(x) <= box.w / 2 && Math.abs(y) <= box.h / 2) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Hold a free mark on the page: one taken past its left or top edge comes back
+   * to it, since the page grows right and down only. Past the other two, the
+   * page grows to hold it.
+   */
+  function keepOnPage(s) {
+    if (!isFree(s)) return;
+    const b = markBounds(s, inkHelpers);
+    if (!b) return;
+    const dx = Math.max(0, -b.left);
+    const dy = Math.max(0, -b.top);
+    if (dx || dy) Object.assign(s, s.ends ? nudgedLink(s, dx, dy, frameOf) : nudgeShape(s, dx, dy));
+  }
+
+  /**
+   * Where a dropped mark now belongs (see `landingFor`): the picture it is let
+   * go over, which it follows from then on, or the page in a margin. The drag is already
    * folded into the shape, in the pixels of the surface it was picked up on. A
    * surface it was carried onto takes it in its own pixels, unchanged on the
    * page; one it never left keeps it as it is, which is how a mark keeps
@@ -3577,8 +3657,11 @@
     if (!fromEntry) return;
     const from = surfaceFrame(fromEntry);
     const to = landingFor(s, surfaceToPage(anchorOf(s), from), list);
-    if (!to) return;
-    Object.assign(s, moveShapeToSurface(s, from, to.frame), { panel: to.id });
+    if (to) Object.assign(s, moveShapeToSurface(s, from, to.frame), { panel: to.id });
+    keepOnPage(s);
+    // Come onto the page, it goes in front of what the page holds: it was let go
+    // over an inset or a callout, most likely to say something about it.
+    if (to?.id === PAGE) proof.shapes = restacked(proof.shapes, [s.id], 'front', stackLayer);
   }
 
   /** What a surface is called on the canvas, the way the side lists number them. */
@@ -3619,7 +3702,7 @@
 
   /** Where a mark being dragged would land if let go now, or null for where it is. */
   function landingOfDrag(s, node) {
-    if (isFree(s) || isPageMark(s) || isLink(s)) return null;
+    if (isPageMark(s) || isLink(s)) return null;
     const frame = frameOf(s.panel);
     if (!frame) return null;
     const moved = Array.isArray(s.points)
@@ -3636,20 +3719,18 @@
 
   /**
    * A link with its ends moved by `step` (`[dx0, dy0, dx1, dy1]`, in its
-   * surface's pixels), settled again: an end that held to a picture holds to the
-   * one it now lies over, or comes free in a margin; a free end stays free.
+   * surface's pixels), settled again: each end holds to the picture it now lies
+   * over, or comes free in a margin.
    */
   function relinked(s, step) {
     const frame = frameOf(s.panel);
     if (!frame) return s;
-    const own = isFree(s) ? linkPoints(s, frameOf) : s.points;
+    const own = s.ends ? linkPoints(s, frameOf) : s.points;
     const moved = own.map((v, i) => v + step[i]);
-    const held = isFree(s) ? [0, 1].map((i) => !!s.ends?.[i]) : [true, true];
-    const { width, height } = measureDoc();
     const list = surfacesOf();
     const end = (i) => {
-      const page = onPage(surfaceToPage({ x: moved[i * 2], y: moved[i * 2 + 1] }, frame), width, height);
-      return { page, on: held[i] ? pictureUnder(list, page) : null };
+      const page = onPage(surfaceToPage({ x: moved[i * 2], y: moved[i * 2 + 1] }, frame));
+      return { page, on: pictureUnder(list, page) };
     };
     return settleLink(s, end(0), end(1));
   }
@@ -3750,69 +3831,34 @@
 
   // ---- free on the page -------------------------------------------------------
 
-  // Whether the next mark is drawn free on the page even over a picture. Set from
-  // the rail with a drawing tool in hand; a mark drawn in a margin is free anyway.
-  let freeDraw = $state(false);
-
-  /**
-   * Set a picture's mark free on the page, unchanged where it is drawn, or let a
-   * line's ends go of what they hold to. It stops following its picture.
-   */
-  function freeShape(s) {
-    if (!canBeFree(s.kind)) return;
-    if (isFree(s)) {
-      if (s.ends) putShape({ ...s, points: linkPoints(s, frameOf), ends: undefined });
-      return;
+  /** The picture nearest a page point, over it or beside it, with its frame. */
+  function nearestPicture(point) {
+    let best = null;
+    for (const entry of surfaces(proof)) {
+      const frame = surfaceFrame(entry);
+      const [w, h] = frame.image;
+      const corners = [[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => surfaceToPage({ x, y }, frame));
+      const xs = corners.map((p) => p.x);
+      const ys = corners.map((p) => p.y);
+      const dx = Math.max(Math.min(...xs) - point.x, 0, point.x - Math.max(...xs));
+      const dy = Math.max(Math.min(...ys) - point.y, 0, point.y - Math.max(...ys));
+      const away = Math.hypot(dx, dy);
+      if (!best || away < best.away) best = { ...entry, frame, away };
     }
-    const from = frameOf(s.panel);
-    const to = frameOf(PAGE);
-    if (from && to) putShape({ ...moveShapeToSurface(s, from, to), panel: PAGE });
+    return best;
   }
 
   /**
-   * Pin a free mark to the picture under it, so it follows that picture from
-   * then on; a line holds by each end to the picture under that end. False when
-   * there is no picture under it to pin to.
+   * Pin a free mark to the picture nearest it, unchanged where it is drawn: it
+   * follows that picture from then on, out in its margin. It stays pinned when
+   * dragged about out there (see `pinnedOut`), and a drag onto a picture or
+   * back into a margin from inside one anchors it again by where it lands.
    */
   function pinShape(s) {
-    if (!isFree(s)) return true;
-    const list = surfacesOf();
-    if (isLink(s)) {
-      const pts = linkPoints(s, frameOf);
-      const end = (i) => {
-        const page = { x: pts[i * 2], y: pts[i * 2 + 1] };
-        return { page, on: pictureUnder(list, page) };
-      };
-      const [a, b] = [end(0), end(1)];
-      if (!a.on && !b.on) return false;
-      putShape(settleLink(s, a, b));
-      return true;
-    }
+    if (holdsToPicture(s)) return;
     const page = frameOf(PAGE);
-    // the page's pixels are the document's, so the anchor is already a page point
-    const to = pictureUnder(list, anchorOf(s));
-    if (!page || !to) return false;
-    putShape({ ...moveShapeToSurface(s, page, to.frame), panel: to.id });
-    return true;
-  }
-
-  /**
-   * Pin the picked marks to their pictures or set them free on the page. With a
-   * drawing tool in hand, how the next mark is drawn.
-   */
-  function setAnchor(which) {
-    const picked = editableShapes.filter((s) => canBeFree(s.kind));
-    if (!picked.length) {
-      freeDraw = which === 'page';
-      return;
-    }
-    let missed = 0;
-    for (const s of picked) {
-      if (which === 'page') freeShape(s);
-      else if (!pinShape(s)) missed += 1;
-    }
-    if (missed) toast('Move it over a picture to pin it there', 'info');
-    dirty = true;
+    const to = nearestPicture(anchorOf(s));
+    if (page && to) putShape({ ...moveShapeToSurface(s, page, to.frame), panel: to.id });
   }
 
   /** Draw the picked lines solid, dashed or dotted, and the next one the same way. */
@@ -3972,8 +4018,8 @@
       if (s.kind === 'rect' || s.kind === 'ellipse') {
         s.x = node.x();
         s.y = node.y();
-      } else if (isLink(s) && holdsToPicture(s)) {
-        // each end that held to a picture holds to the one it is let go over
+      } else if (isLink(s)) {
+        // each end holds to the picture it is let go over, or comes free in a margin
         const dx = node.x(), dy = node.y();
         node.position({ x: 0, y: 0 });
         putShape(relinked(s, [dx, dy, dx, dy]));
@@ -4314,10 +4360,15 @@
     if (camera) {
       const side = radius * 1.25;
       const scale = side / ICON_BOX;
-      badge.add(new Konva.Path({
-        data: camera.path, x: -side / 2, y: -side / 2, scaleX: scale, scaleY: scale,
+      const glyph = new Konva.Path({
+        data: camera.path, scaleX: scale, scaleY: scale,
         stroke: ink, strokeWidth: (1.8 / k) / scale, lineJoin: 'round', listening: false,
-      }));
+      });
+      // centred on what it draws: the glyph sits low in its own box, under the
+      // hump of the viewfinder, and centring the box left it off the badge's middle
+      const drawn = glyph.getSelfRect();
+      glyph.offset({ x: drawn.x + drawn.width / 2, y: drawn.y + drawn.height / 2 });
+      badge.add(glyph);
     }
     node.add(badge);
     if (!live) return node;
@@ -5630,6 +5681,60 @@
   const activeTail = $derived(
     tailShape ? (tailShape.kind === 'callout' ? (tailShape.tail ?? 'leader') : 'none') : calloutTail,
   );
+  // Every size the pick has beyond its main one, on its own slider, so words
+  // and lines grow apart: a tag's words, a callout's line, a label's frame, and
+  // a cone's camera, which is also the next cone's with the tool in hand.
+  const moreSizes = $derived.by(() => {
+    const s = editableShape;
+    if (s?.kind === 'rect' && s.tag) {
+      return [{ id: 'tag', label: 'Tag text', value: Math.round(tagSizeOf(s)), min: 8, max: 96 }];
+    }
+    if (s?.kind === 'callout') {
+      const { line } = calloutInk(s.fontSize ?? CALLOUT_FONT, s.strokeWidth);
+      return [{ id: 'line', label: 'Line', value: Math.round(line), min: 1, max: 16 }];
+    }
+    if (s?.kind === 'text' && s.frame) {
+      return [{ id: 'frame', label: 'Frame', value: labelFrameOf(s), min: 1, max: 16 }];
+    }
+    if (s?.kind === 'cone' || (!editableShapes.length && tool === 'cone')) {
+      return [{ id: 'camera', label: 'Camera', value: s ? badgeOf(s) : coneBadge, min: CONE_BADGE_MIN, max: CONE_BADGE_MAX }];
+    }
+    return [];
+  });
+
+  function setSize(id, value) {
+    if (id === 'camera') coneBadge = value;
+    const s = editableShape;
+    if (id === 'tag' && s?.kind === 'rect') s.tagSize = value;
+    else if (id === 'line' && s?.kind === 'callout') s.strokeWidth = value;
+    else if (id === 'frame' && s?.kind === 'text') s.frameWidth = value;
+    else if (id === 'camera' && s?.kind === 'cone') s.badge = value;
+    else return;
+    dirty = true;
+  }
+
+  // A picked panel answers for the captions, which all share one size and one
+  // colour so a row of them reads as one line; the picked footer for itself.
+  const pageText = $derived.by(() => {
+    if (tool !== 'select' || selectedIds.length) return null;
+    const tc = textColors(proof.bg ?? BG);
+    if (selectedPanelId) {
+      return { id: 'caption', label: 'Caption', size: proof.captionSize ?? CAPTION_SIZE, color: proof.captionColor ?? null, auto: tc.dim };
+    }
+    if (selectedSig === 'footer') {
+      return { id: 'footer', label: 'Footer', size: proof.footerSize ?? FOOTER_SIZE, color: proof.footerColor ?? null, auto: tc.faint };
+    }
+    return null;
+  });
+
+  function setPageText(patch) {
+    const which = pageText?.id;
+    if (!which) return;
+    if ('size' in patch) proof[`${which}Size`] = Math.max(8, Math.min(80, Math.round(patch.size)));
+    if ('color' in patch) proof[`${which}Color`] = patch.color;
+    dirty = true;
+  }
+
   const fillableSelection = $derived(editableShapes.some((s) => canFill(s.kind)));
   // A solid symbol is a silhouette: there is no outline to widen, so the
   // control stays away rather than sitting there doing nothing.
@@ -5726,7 +5831,7 @@
   /** A point into a layer. The marker follows the proof as saved, so unsaved changes are saved first. */
   function addPointToLayer(i, choice) {
     const go = () => pointLayers.add(caseState.current?.id, savedName, i === 0 ? displayedCoords : proof.points[i].coords,
-      choice.layer, choice.group, choice.style);
+      choice.layer, choice.group, choice.style, choice.status);
     if (dirty || !savedName) save({ then: go }); else go();
   }
   /** The marker on the map, in its layer opened for editing. */
@@ -6075,6 +6180,10 @@
         ? { lens: editableShape.lens ?? null, upright: !!editableShape.upright, fov: editableShape.fov }
         : { lens: coneLens, upright: coneUpright, fov: lensFov(coneLens, coneUpright) }}
       {setLens}
+      {moreSizes}
+      {setSize}
+      {pageText}
+      {setPageText}
       showTag={editableShape?.kind === 'rect'}
       activeTag={editableShape?.tag ? (editableShape.tagAt ?? 'tl') : 'none'}
       {setTagAt}
@@ -6263,7 +6372,7 @@
                 onremove={i > 0 ? () => removePoint(i) : null}
               />
             </div>
-            <ProofPointLayers
+            <LayerPlaces
               places={pointPlaces.get(i) ?? []}
               busy={pointLayers.busy}
               onopen={openPointInLayer}

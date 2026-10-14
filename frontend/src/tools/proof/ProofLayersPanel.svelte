@@ -76,12 +76,22 @@
    * greyed out with none.
    */
   const surfaceNames = $derived.by(() => {
-    const names = new Map();
+    const names = new Map([['page', 'Page']]);
     proof.panels.forEach((panel, at) => names.set(panel.id, `P${at + 1}`));
     proof.pastes.forEach((paste, at) => names.set(paste.id, `I${at + 1}`));
     return names;
   });
   const manySurfaces = $derived(new Set(proof.shapes.map((shape) => shape.panel)).size > 1);
+
+  /** What a row is on: its picture, the page, or for a line the pictures its ends hold to. */
+  function onWhat(shape) {
+    if (!shape.ends?.some(Boolean)) {
+      const name = surfaceNames.get(shape.panel) ?? '–';
+      return { short: name, long: shape.panel === 'page' ? 'Free on the page' : `Drawn on ${name}` };
+    }
+    const names = shape.ends.map((tie) => (tie ? surfaceNames.get(tie.panel) ?? '–' : 'Page'));
+    return { short: names.join('→'), long: `From ${names[0]} to ${names[1]}` };
+  }
 
   // Dragging a row to reorder it. A press is armed first and becomes a drag a
   // few pixels later, so a plain click still picks the element it lands on, and
@@ -363,10 +373,9 @@
       {#if shape.kind !== 'blur'}
         <span class="chip" style:background={shape.color}></span>
       {/if}
-      {#if manySurfaces}
-        <span class="on-what" title="Drawn on {surfaceNames.get(shape.panel) ?? 'a picture'}">
-          {surfaceNames.get(shape.panel) ?? '–'}
-        </span>
+      {#if manySurfaces || shape.ends?.some(Boolean)}
+        {@const on = onWhat(shape)}
+        <span class="on-what" title={on.long}>{on.short}</span>
       {/if}
       {#if shape.kind === 'icon'}
         <ProofGlyph name={shape.name} size={13} />

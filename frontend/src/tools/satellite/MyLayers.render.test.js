@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import MyLayers from './MyLayers.svelte';
+import LayerFeatureSheet from './LayerFeatureSheet.svelte';
 import NewLayerDialog from './NewLayerDialog.svelte';
 import { createMyLayersState } from './state/myLayers.svelte.js';
 
@@ -261,6 +262,33 @@ describe('personal layers', () => {
     expect(ondeleteplace).toHaveBeenCalledWith('e1');
   });
 
+  it('shows the proof a point follows first, its plate opening it', () => {
+    const marker = { properties: { key: 'm1', name: 'Strike', entity_id: 'p1', entity_type: 'proof', entity_label: 'Strike',
+      entity_picture: 'proofs/strike.png', date: '2024-05-10', links: ['https://example.org/post/1'] }, geometry: { type: 'Point' } };
+    show(MyLayers, { controller: picked(marker) });
+    const sheet = document.querySelector('[aria-label="Feature"]');
+    const plate = sheet.querySelector('.follows .follow-picture');
+    expect(plate.title).toBe('Open the proof');
+    expect(plate.querySelector('img').getAttribute('src')).toContain('proofs/strike.png');
+    // above the rows the proof filled in
+    expect(plate.compareDocumentPosition(sheet.querySelector('.rows')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    plate.querySelector('img').dispatchEvent(new Event('error')); flushSync();
+    expect(sheet.querySelector('.follow-picture')).toBeNull();
+    expect(sheet.textContent).toContain('Follows the proof “Strike”');
+  });
+
+  it('shows the footage before the proof that geolocates it, each opening its own', () => {
+    const marker = { properties: { key: 'm1', name: 'Strike', entity_id: 'p1', entity_type: 'proof', entity_label: 'Strike',
+      entity_picture: 'proofs/strike.png', source_id: 'v1', source_label: 'rooftop', source_picture: 'thumbs/v.webp' }, geometry: { type: 'Point' } };
+    const onfollowed = vi.fn();
+    show(LayerFeatureSheet, { controller: picked(marker), onfollowed });
+    const shown = [...document.querySelectorAll('.follows .follow-picture')];
+    expect(shown.map((one) => one.textContent.trim())).toEqual(['Source', 'Proof']);
+    shown[0].click();
+    shown[1].click();
+    expect(onfollowed.mock.calls).toEqual([['v1'], ['p1']]);
+  });
+
   it('edits a line by its colour, with no icon, direction or place promotion', () => {
     const line = { properties: { key: 'line', name: 'Road' }, geometry: { type: 'LineString', coordinates: [[2, 48], [2.01, 48]] } };
     show(MyLayers, { controller: picked(line) });
@@ -387,5 +415,40 @@ describe('new layer', () => {
     flushSync();
     expect(byText('Create layer').disabled).toBe(true);
     expect(document.body.textContent).toContain('Keeps the original file and its bundled icons.');
+  });
+});
+
+describe('a feature with a history', () => {
+  const line = (y) => ({ type: 'LineString', coordinates: [[30, y], [31, y]] });
+  const front = { type: 'Feature', geometry: line(1), properties: { key: 'f', name: 'Front line', states: [
+    { at: '2026-10-03', geometry: line(0) }, { at: '2026-10-12', geometry: line(1), status: 'damaged' }] } };
+
+  it('lists its states instead of a day, and a state pressed reads the layer then', async () => {
+    const { addedLayers } = await import('../../lib/map/addedLayersState.svelte.js');
+    const dropState = vi.fn();
+    show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: true } }, cursor: null, dropState }) });
+    const states = [...document.querySelectorAll('[aria-label="Feature history"] .state')];
+    expect(states.map((node) => node.textContent.trim())).toEqual(['3 Oct 2026', '12 Oct 2026 · damaged']);
+    expect(states[1].classList.contains('current')).toBe(true);
+    expect(document.querySelector('[aria-label="Feature day"]')).toBeNull();
+    states[0].querySelector('button').click();
+    expect(addedLayers.time('work').at).toBe('2026-10-03');
+    document.querySelector('[aria-label="Remove the state of 12 Oct 2026"]').click();
+    expect(dropState).toHaveBeenCalledWith('f', '2026-10-12');
+    addedLayers.setTime('work', { at: null });
+  });
+
+  it('can be said gone from the moment the layer is read at', () => {
+    const markGone = vi.fn();
+    show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: true } }, cursor: '2026-10-15', markGone }) });
+    document.querySelector('[aria-label="Feature actions"]').click(); flushSync();
+    menuItem('Gone from 15 Oct 2026').click();
+    expect(markGone).toHaveBeenCalledWith('f');
+  });
+
+  it('keeps a switched-off history read-only', () => {
+    show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: false } }, cursor: null }) });
+    const buttons = [...document.querySelectorAll('[aria-label="Feature history"] button')];
+    expect(buttons.every((button) => button.disabled)).toBe(true);
   });
 });

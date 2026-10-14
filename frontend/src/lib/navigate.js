@@ -60,6 +60,7 @@ export const ENTITY_TOOL = {
   collage: 'collage',
   'compare-session': 'compare',
   'horizon-view': 'horizon',
+  'map-plate': 'plate',
   'analysis-zones': 'detect',
   'analysis-area': 'detect',
   'analysis-follow-up': 'detect',
@@ -205,6 +206,12 @@ export function openEntity(entity, resolved = false) {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openHorizonView = name;
     uiState.tool = 'horizon';
+    return;
+  }
+  if (entity.type === 'map-plate') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openPlate = name;
+    uiState.tool = 'plate';
     return;
   }
   if (['analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {

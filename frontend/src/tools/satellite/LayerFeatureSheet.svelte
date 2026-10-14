@@ -1,7 +1,9 @@
 <script>
   /**
    * What the selected features of a personal layer say, as a sheet of rows:
-   * group, status, day, direction, sources, who geolocated it, a note.
+   * group, status, day, direction, sources, who geolocated it, a note. A marker
+   * that follows a case item shows it first, the footage before the proof, each
+   * picture opening it.
    *
    * Every row saves as it is set; a name or a note when the field is left, or
    * before the selection moves on (`commitForm` in the editor state). One
@@ -15,7 +17,10 @@
   import { linesOf } from '../../lib/map/layerHit.js';
   import { facingLabel } from '../../lib/map/turnRing.js';
   import { formatArea, formatDistance, pathLength, polygonArea } from '../../lib/measure.js';
-  import { prefs } from '../../lib/state.svelte.js';
+  import { caseState, prefs } from '../../lib/state.svelte.js';
+  import { fileUrl } from '../../lib/fileUrl.js';
+  import { hasHistory, lifeline, momentLabel, stateAt } from '../../lib/map/layerHistory.js';
+  import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
 
   let { controller, onfollowed = null, ondeleteplace = null } = $props();
   const STATUSES = [['', 'Intact'], ['damaged', 'Damaged'], ['destroyed', 'Destroyed']];
@@ -36,7 +41,9 @@
   let refused = $state('');
   // A save hands back a fresh copy of the same feature; only another feature resets the sheet.
   const oneKey = $derived(one?.properties.key ?? '');
-  $effect(() => { void oneKey; adding = false; address = ''; refused = ''; menu = false; });
+  /** The pictures that failed to load, for this feature: the thumbnail cache let them go. */
+  let gone = $state(new Set());
+  $effect(() => { void oneKey; adding = false; address = ''; refused = ''; menu = false; gone = new Set(); });
 
   /** The one value several features share, or null when they differ. */
   function shared(field, fallback = '') {
@@ -71,10 +78,17 @@
     }
     return null;
   });
-  const status = $derived(one ? form?.status ?? '' : shared('status'));
+  // on a tracked layer read at a moment, the status the feature had then
+  const status = $derived(one ? (controller.editor?.track?.on && controller.cursor !== null ? one.properties.status ?? '' : form?.status ?? '') : shared('status'));
   const origin = $derived(one ? form?.provenance ?? '' : shared('provenance'));
   const day = $derived(one ? form?.date ?? '' : shared('date'));
   const group = $derived(one ? form?.group ?? '' : shared('group'));
+  /** The layer is followed over time, and the moment it is read at (null for now). */
+  const tracked = $derived(!!controller.editor?.track?.on);
+  const cursor = $derived(controller.cursor);
+  const history = $derived(one && hasHistory(one) ? lifeline(one, cursor) : []);
+  /** Whether the selected feature stands at the cursor, so it can be said gone from it. */
+  const standing = $derived(!!one && cursor !== null && !!stateAt(one, cursor));
   const blur = (event) => { if (event.key === 'Enter') event.currentTarget.blur(); };
 </script>
 
@@ -94,6 +108,37 @@
         onclick={() => controller.select(null)}><Icon name="x" size={13} /></button>
     </div>
 
+    {#if one?.properties.entity_id}
+      {@const said = one.properties}
+      {@const kind = KINDS[said.entity_type] ?? 'case item'}
+      <!-- what the marker stands for, first: the footage, then the proof that geolocates it -->
+      <div class="follows">
+        {#if (said.source_picture && !gone.has('source')) || (said.entity_picture && !gone.has('item'))}
+          <div class="follow-pictures">
+            {#if said.source_picture && !gone.has('source')}
+              <button type="button" class="follow-picture" title={`Open the footage “${said.source_label || 'Untitled'}”`} disabled={!onfollowed}
+                onclick={() => onfollowed?.(said.source_id)}>
+                <img src={fileUrl(caseState.current?.id, said.source_picture)} alt={said.source_label || 'Footage'}
+                  onerror={() => (gone = new Set([...gone, 'source']))} /><span>Source</span></button>
+            {/if}
+            {#if said.entity_picture && !gone.has('item')}
+              <button type="button" class="follow-picture" title={`Open the ${kind}`} disabled={!onfollowed}
+                onclick={() => onfollowed?.(said.entity_id)}>
+                <img src={fileUrl(caseState.current?.id, said.entity_picture)} alt={said.entity_label || kind}
+                  onerror={() => (gone = new Set([...gone, 'item']))} /><span>{said.entity_type === 'proof' ? 'Proof' : 'Source'}</span></button>
+            {/if}
+          </div>
+        {/if}
+        <div class="follow-text">
+          <span title="Updated from it on each save, except what you rewrite here"><Icon name="link" size={11} /> Follows the {kind} “{said.entity_label || 'Untitled'}”</span>
+          <span class="follow-acts">
+            {#if onfollowed}<button type="button" class="text-act" onclick={() => onfollowed(said.entity_id)}>Open</button>{/if}
+            <button type="button" class="text-act" disabled={busy} onclick={() => controller.unlink(said.key)}>Unlink</button>
+          </span>
+        </div>
+      </div>
+    {/if}
+
     <div class="rows">
       {#if groups.length > 1}
         <span class="key">Group</span>
@@ -110,9 +155,27 @@
         {/each}
       </div>
 
-      <span class="key">Day</span>
-      <DayPicker value={day ?? ''} label="Feature day" placeholder={day === null ? 'Several days' : 'No day'} clearable
-        onpick={(picked) => set('date', picked)} />
+      {#if history.length}
+        <!-- A feature with a history is dated by it: each state, pressed to read the layer then. -->
+        <span class="key">History</span>
+        <div class="lifeline" role="list" aria-label="Feature history">
+          {#each history as state (state.at)}
+            <span class="state" role="listitem" class:current={state.current} class:gone={state.gone}>
+              <button type="button" disabled={!tracked || !state.at} title={tracked ? 'Read the layer then' : 'Switch Track over time on to read it'}
+                onclick={() => addedLayers.setTime(controller.editor.name, { at: state.at })}>
+                {state.gone ? 'Gone ' : ''}{momentLabel(state.at)}{state.status ? ` · ${state.status}` : ''}</button>
+              {#if tracked && history.length > 1}
+                <button type="button" class="drop" aria-label={`Remove the state of ${momentLabel(state.at)}`} title="Remove this state" disabled={busy}
+                  onclick={() => controller.dropState(one.properties.key, state.at)}><Icon name="x" size={9} /></button>
+              {/if}
+            </span>
+          {/each}
+        </div>
+      {:else}
+        <span class="key">Day</span>
+        <DayPicker value={day ?? ''} label="Feature day" placeholder={day === null ? 'Several days' : 'No day'} clearable
+          onpick={(picked) => set('date', picked)} />
+      {/if}
 
       {#if point}
         <span class="key">Facing</span>
@@ -163,13 +226,6 @@
       {#if measured}<span class="key">{measured[0]}</span><span class="value">{measured[1]}</span>{/if}
     </div>
 
-    {#if one?.properties.entity_id}
-      <div class="follows"><Icon name="link" size={11} />
-        <span>Follows the {KINDS[one.properties.entity_type] ?? 'case item'} “{one.properties.entity_label || 'Untitled'}”</span>
-        {#if onfollowed}<button type="button" class="text-act" onclick={() => onfollowed(one.properties.entity_id)}>Open</button>{/if}
-        <button type="button" class="text-act" disabled={busy} onclick={() => controller.unlink(one.properties.key)}>Unlink</button>
-      </div>
-    {/if}
   </div>
 
   {#if menu}
@@ -182,6 +238,10 @@
         {#if one.properties.entity_type === 'place' && one.properties.entity_id && ondeleteplace}
           <button type="button" class="fm-item danger" onclick={() => { menu = false; ondeleteplace(one.properties.entity_id); }}>
             <Icon name="trash" size={14} /><span class="fm-grow">Delete case place</span></button>
+        {/if}
+        {#if tracked && standing}
+          <button type="button" class="fm-item" disabled={busy} onclick={() => { menu = false; controller.markGone(one.properties.key); }}>
+            <Icon name="clock" size={14} /><span class="fm-grow">Gone from {momentLabel(cursor)}</span></button>
         {/if}
         <button type="button" class="fm-item danger" disabled={busy} onclick={() => { menu = false; controller.remove(one.properties.key); }}>
           <Icon name="x" size={14} /><span class="fm-grow">Remove from the layer</span></button>
@@ -224,7 +284,24 @@
   .add-source { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: 1px dashed var(--border); border-radius: 999px; color: var(--text-3); font-size: 11px; cursor: pointer; }
   .add-source:hover { border-color: var(--text-3); color: var(--text-1); }
   .refused { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 10px; }
-  .follows { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 10px; }
+  .lifeline { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+  .state { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-1); font-size: 11px; }
+  .state > button:first-child { padding: 1px 7px; color: var(--text-2); cursor: pointer; font-variant-numeric: tabular-nums; }
+  .state > button:first-child:disabled { cursor: default; }
+  .state.current { border-color: var(--accent); background: var(--accent-soft); }
+  .state.current > button:first-child { color: var(--text-1); font-weight: 600; }
+  .state.gone > button:first-child { color: var(--text-3); font-style: italic; }
+  .state .drop { display: grid; place-items: center; width: 16px; height: 16px; margin-right: 2px; border-radius: 50%; color: var(--text-3); cursor: pointer; }
+  .state .drop:hover:not(:disabled) { background: var(--bg-3); color: var(--danger); }
+  .follows { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding-bottom: 7px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: 10px; }
+  .follow-pictures { display: flex; gap: 6px; }
+  .follow-picture { position: relative; flex: 1; min-width: 0; max-width: 50%; height: 72px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: #000; overflow: hidden; cursor: pointer; }
+  .follow-picture:hover:not(:disabled) { border-color: var(--accent); }
+  .follow-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .follow-picture span { position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 999px; background: rgb(0 0 0 / 0.65); color: #fff; font-size: 10px; }
+  .follow-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .follow-text > span:first-child { overflow-wrap: anywhere; }
+  .follow-acts { display: flex; gap: 8px; }
   .icon-act { display: grid; place-items: center; flex: none; width: 24px; height: 24px; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; }
   .icon-act:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); }
   .text-act { color: var(--text-2); font-size: 10px; cursor: pointer; }

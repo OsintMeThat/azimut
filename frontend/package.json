@@ -37,6 +37,7 @@
     "konva": "^9.3.0",
     "maplibre-gl": "^6.8.0",
     "marked": "^17.0.6",
-    "mermaid": "^11.16.1"
+    "mermaid": "^11.16.1",
+    "polygon-clipping": "^0.15.7"
   }
 }

@@ -55,6 +55,10 @@
     // magnifiers on one screen doing two different things is a third thing to learn.
     filter: 'M4 5h16l-6.2 7.4V20l-3.6-2.2v-5.4L4 5Z',
     grid: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z',
+    // a map plate: a sheet with its map, a title line over it and the legend beside it
+    plate: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm2 3h8M6 10h9v7H6v-7Zm3 7 2.5-3 2 2M17.5 10h1m-1 3h1',
+    // a legend: a mark and its line, three times
+    list: 'M4 6h2m4 0h10M4 12h2m4 0h10M4 18h2m4 0h10',
     // A table: the frame, its header row, one column divider. Distinct from `grid`
     // above, which is four equal cells and means an AOI sweep.
     table: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm-1 4.5h18M10 9.5V19',
@@ -74,9 +78,8 @@
     zoomInset: 'M3 15h5v5H3v-5Zm8-12h10v10H11V3ZM3 15l8-12M8 20l13-7',
     // a camera's field of view, opening from where it stood
     viewCone: 'M12 20 4.5 7M12 20l7.5-13M4.5 7q7.5-4 15 0M12 20h.01',
-    // a mark that holds to its picture, and one free on the page across its edge
+    // a mark pinned down onto its picture
     anchorPicture: 'M4 8h16v12H4V8Zm8-6v8m-2.5-2.5L12 10l2.5-2.5',
-    anchorPage: 'M7 3h13v18H7V3ZM3 9h8v6H3V9Z',
     // how a line is drawn: whole, in dashes, in dots
     lineSolid: 'M4 12h16',
     lineDashed: 'M3 12h4m3.5 0h4M18 12h3',

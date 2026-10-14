@@ -219,3 +219,16 @@ def test_a_style_carries_its_typeface_and_a_style_from_before_keeps_the_system_o
 def test_a_typeface_the_app_does_not_ship_is_refused(client):
     response = client.post("/api/templates/proof", json={"name": "Comic", "data": {"font": "comic-sans"}})
     assert response.status_code == 422
+
+
+def test_a_proof_template_keeps_its_caption_colour(client):
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Amber captions", "data": {"captionColor": "#FFD740"}},
+    ).json()
+    assert saved["data"]["captionColor"] == "#ffd740"
+
+    older = client.post("/api/templates/proof", json={"name": "Auto captions", "data": {}}).json()
+    assert older["data"]["captionColor"] is None
+    refused = client.post("/api/templates/proof", json={"name": "Bad", "data": {"captionColor": "amber"}})
+    assert refused.status_code == 422

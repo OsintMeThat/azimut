@@ -135,6 +135,7 @@ export const GUIDE = [
         steps: [
           { tool: 'proof', text: 'Export the panels as a PNG. The spec is saved beside it, so next week the same proof reopens and edits.' },
           { tool: 'post', text: 'Build the sourced thread. With the extension it fills the composer on X or Bluesky box by box.' },
+          { tool: 'plate', text: 'Lay the situation out on a page round the map, and export it as a PNG, a PDF or a video of its days.' },
           { tool: 'notebook', text: 'Write the note around it, embed the case media and a diagram, and export the PDF.' },
         ],
       },
@@ -279,8 +280,8 @@ export const GUIDE = [
   {
     id: 'compose',
     title: 'Compose',
-    lead: 'The three ways work leaves a case: a proof, a thread, a note.',
-    tools: ['proof', 'post', 'notebook'],
+    lead: 'The ways work leaves a case: a proof, a thread, a map plate, a note.',
+    tools: ['proof', 'post', 'plate', 'notebook'],
     points: [
       {
         label: 'Geo Proof stays editable',
@@ -295,12 +296,20 @@ export const GUIDE = [
         text: 'A double-click on a box hangs its name on a tab from one corner. A callout ties its words to one point and stands on the page, and a zoom inset shows a detail bigger, blurred where the picture is.',
       },
       {
+        label: 'Marks can be free of the pictures',
+        text: 'Drag a mark off its picture into a margin and it stays put when panels move, and the page grows to hold it; put it back on a picture and it follows that one again. An arrow drawn from one picture to another holds to both and follows them.',
+      },
+      {
         label: 'A proof can argue several points',
         text: 'Each place is optionally named and one of them can be the camera. They are filed as places and carried into the thread and onto the picture.',
       },
       {
         label: 'Geo Report stops before posting',
         text: 'It prepares a sourced thread and, with the extension, fills the composer on X or Bluesky box by box. Pressing Post is left to you.',
+      },
+      {
+        label: 'A map plate is a page round the maps',
+        text: 'Title, legend, scale, north, inset and credits on paper, over the case\'s layers. A tracked layer is drawn on the plate\'s day, and played through its days as a video.',
       },
       {
         label: 'Notebook is Markdown with case material',

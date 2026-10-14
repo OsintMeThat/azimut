@@ -110,9 +110,19 @@ class EditableIn(BaseModel):
     description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
 
 
+class TrackIn(BaseModel):
+    """A personal layer followed over time; see `layerediting.set_track`."""
+    on: bool | None = None
+    precision: Literal["day", "time"] | None = None
+    zone: str | None = Field(default=None, max_length=64)
+
+
 class LayerDetailsIn(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=layer_engine.MAX_DESCRIPTION)
+    track: TrackIn | None = None
+    #: The My Maps this layer is sent to, by its editor's address; "" forgets it.
+    mymaps: str | None = Field(default=None, max_length=layerediting.MAX_LINK)
 
 
 class FeatureOrderIn(BaseModel):
@@ -134,7 +144,13 @@ class MarkerFields(BaseModel):
     provenance: str | None = Field(default=None, max_length=20)
 
 
+#: A moment on a tracked layer's clock: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, "" for always.
+Moment = Annotated[str, Field(max_length=16)]
+
+
 class MarkerIn(MarkerFields):
+    #: On a tracked layer, the moment the new feature appears.
+    at: Moment | None = None
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
     lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
     name: str = Field(default="", max_length=layer_engine.MAX_NAME)
@@ -160,6 +176,14 @@ class MarkerUpdateIn(MarkerFields):
     geometry: dict[str, Any] | None = None
     #: Stop following the case item the marker was added from, keeping its point.
     unlink: bool | None = None
+    #: On a tracked layer: the moment a change of shape or status is dated to…
+    at: Moment | None = None
+    #: …the feature no longer there from it…
+    gone: bool | None = None
+    #: …or the state written at it taken out of the history.
+    drop_state: bool | None = None
+    #: Correct the state in force at `at` rather than start one there.
+    fix: bool | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -180,6 +204,8 @@ class GroupUpdateIn(BaseModel):
     stroke: float | None = Field(default=None, ge=0.5, le=12, allow_inf_nan=False)
     #: Draw each feature's name beside it on the map.
     labels: bool | None = None
+    #: Its features are events: on a tracked layer they fade after their day.
+    events: bool | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -208,6 +234,8 @@ class LinksIn(BaseModel):
     # The markers' own style, for a group whose features each have theirs.
     symbol: str | None = None
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    #: What the new markers say of what they show: damaged or destroyed, intact when absent.
+    status: Literal["damaged", "destroyed"] | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -231,6 +259,10 @@ class SelectionIn(BaseModel):
     changes: MarkerUpdateIn | None = None
     offset: list[Annotated[float, Field(ge=-360, le=360, allow_inf_nan=False)]] | None = Field(default=None, min_length=2, max_length=2)
     remove: bool = False
+    #: On a tracked layer, the moment a move or a status is dated to…
+    at: Moment | None = None
+    #: …or, set, the state in force then that each feature corrects.
+    fix: bool = False
 
 
 class GroupOrderIn(BaseModel):
@@ -244,6 +276,7 @@ class EditEndIn(BaseModel):
 
 
 class ShapeIn(MarkerFields):
+    at: Moment | None = None
     geometry: dict[str, Any]
     name: str = Field(default="", max_length=layer_engine.MAX_NAME)
     colour: str = Field(default="#0072b2", pattern=r"^#[0-9a-fA-F]{6}$")
@@ -273,11 +306,17 @@ class LayerExportIn(BaseModel):
             raise ValueError("export icons exceed 16 MB")
         return value
 
+    #: A tracked layer as it stood at this moment, what a My Maps is sent.
+    at: Moment | None = None
+    #: A tracked layer's whole history, each state dated, for a time slider.
+    history: bool = False
+
 
 @router.post("/{case_id}/map-layers/{name}/export/{fmt}")
 def download_layer(case_id: str, name: str, fmt: Literal["geojson", "kml", "kmz"], body: LayerExportIn) -> Response:
     try:
-        content, mime, title = layerexports.export(get_case(case_id), _stem(name), fmt, body.icons)
+        content, mime, title = layerexports.export(get_case(case_id), _stem(name), fmt, body.icons,
+                                                   at=body.at, history=body.history)
         return Response(content=content, media_type=mime,
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(title + '.' + fmt, safe='')}",
                                  "Cache-Control": "no-store"})
@@ -370,7 +409,8 @@ def edit_layer_selection(case_id: str, name: str, body: SelectionIn) -> dict[str
     try:
         changes = _changes(body.changes) if body.changes else {}
         return layerediting.edit_selection(get_case(case_id), _stem(name), body.keys,
-                                           changes=changes, offset=body.offset, remove=body.remove)
+                                           changes=changes, offset=body.offset, remove=body.remove,
+                                           at=body.at, fix=body.fix)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
@@ -456,7 +496,7 @@ def add_layer_links(case_id: str, name: str, body: LinksIn) -> dict[str, Any]:
     try:
         return layerediting.add_links(get_case(case_id), _stem(name),
                                       [item.model_dump() for item in body.items], body.group,
-                                      symbol=body.symbol, colour=body.colour)
+                                      symbol=body.symbol, colour=body.colour, status=body.status or "")
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 

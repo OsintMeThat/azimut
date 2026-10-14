@@ -41,6 +41,9 @@ describe('a callout label on the page', () => {
     expect(calloutInk(22).line).toBe(2);
     expect(calloutInk(8).line).toBe(1.5);
     expect(calloutInk(44).dot).toBeCloseTo(8.8);
+    // a width of its own keeps the line as it is while the words grow
+    expect(calloutInk(60, 2).line).toBe(2);
+    expect(calloutInk(60, 2).dot).toBeCloseTo(4.4);
   });
 
   it('finds the side of the box a tip faces, and nothing under the box', () => {

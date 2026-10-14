@@ -851,7 +851,7 @@ export function legendRowCount(count, columns) {
  * count and every text band grows with its own font size (all editable per
  * proof via `text = { captionSize, legendSize, footerSize }`).
  */
-export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [], layout = 'grid', space) {
+export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [], layout = 'grid', space, extent = null) {
   const {
     captionSize = CAPTION_SIZE, legendSize = LEGEND_SIZE, footerSize = FOOTER_SIZE,
     footerEnabled = true, footerLines = 1,
@@ -861,14 +861,18 @@ export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [],
   const width = boxes.length
     ? Math.max(...boxes.map((b) => b.x + b.w)) + pad
     : 640;
-  const contentW = Math.max(width, 640);
+  // `extent` is how far right and down the marks free on the page reach: the
+  // page grows to hold them, and the footer stays under them.
+  const contentW = Math.max(width, 640, extent ? Math.ceil(extent.right + pad) : 0);
   const legend = legendLines(shapes, notes, legendOrder).filter((l) => l.text);
   const cols = legendColumns(contentW, legend.length, space);
   const legendRows = legendRowCount(legend.length, cols);
-  const height =
+  const footer = footerEnabled && footerLines > 0 ? footerBand(footerSize, footerLines) : 0;
+  const height = Math.max(
     panelsBottom(panels, captionSize, layout, space) +
-    (legend.length ? 10 + legendRows * legendLineHeight(legendSize) : 0) +
-    (footerEnabled && footerLines > 0 ? footerBand(footerSize, footerLines) : 0) + pad;
+      (legend.length ? 10 + legendRows * legendLineHeight(legendSize) : 0) + footer + pad,
+    extent?.bottom > 0 ? Math.ceil(extent.bottom + 8 + footer + pad) : 0,
+  );
   return { width: contentW, height, legend, cols };
 }
 

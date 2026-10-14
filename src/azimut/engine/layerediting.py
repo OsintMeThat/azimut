@@ -11,14 +11,17 @@ import json
 import math
 import re
 import uuid
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import layout
 from ..workspace import Case
 from . import layerlinks, maplayers, satellite
 
 EDITABLE = "editable"
-WORK_FIELDS = ("title", "description", "document", "groups", "hidden", "marker_serial", "shape_serial", "removed_features", "removed_batch")
+WORK_FIELDS = ("title", "description", "document", "groups", "hidden", "marker_serial", "shape_serial",
+               "removed_features", "removed_batch", "track", "mymaps")
 SYMBOLS = ("pin", "circle", "star", "flag") + tuple(f"badge-{icon}" for icon in (
     "image", "video", "audio", "user", "building", "car", "plane", "ship", "note", "alert",
     "shield", "flame", "crosshair", "compass", "bookmark", "globe", "phone", "mail", "clock", "flag",
@@ -147,6 +150,9 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
         properties["stroke_width"] = group["stroke"]
         if group.get("labels"):
             properties["show_label"] = True
+        # an event fades after its day on a tracked layer, where a lasting thing stays
+        if group.get("events"):
+            properties["event"] = True
         if group["mode"] == "uniform":
             properties.update({"colour": group["colour"], "symbol": group["symbol"], "icon": ""})
         if named.get(str(properties.get("colour") or "").lower()):
@@ -267,6 +273,7 @@ def _create(
         properties = feature["properties"]
         properties.pop("place_id", None)
         properties.pop("entity_id", None)
+        properties.pop("synced", None)
         properties["key"] = uuid.uuid4().hex
     parsed = maplayers._collection(features, title=title, fmt="geojson")
     with case.lock:
@@ -412,10 +419,274 @@ def apply_fields(properties: dict[str, Any], changes: dict[str, Any]) -> None:
             properties.pop("provenance", None)
 
 
+# -- a layer followed over time ------------------------------------------------------
+#
+# A tracked layer keeps what each feature was at each moment instead of only what
+# it is now. A feature's `states` are `{at, geometry, status?}` or `{at, gone}`,
+# sorted by `at`; the feature's own geometry, status and days mirror them, so
+# everything that reads a layer without asking about time (the exports, Compare,
+# Detect, the hit tests) reads its latest shape. A feature with no states is what
+# it always was: there from its day, or always when it has none.
+#
+# `at` is the moment on the layer's own clock: a day, `YYYY-MM-DD`, or a day and a
+# time, `YYYY-MM-DDTHH:MM`, and "" for "since always". One zone per layer means
+# these sort as plain strings, and a day sorts before every time of that day,
+# which is the rule: a state dated to a day holds from that day's start.
+
+#: How finely a tracked layer dates its states.
+PRECISIONS = ("day", "time")
+#: The states one feature keeps.
+MAX_STATES = 500
+_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$")
+_KEEP = object()
+
+
+def track(spec: dict[str, Any]) -> dict[str, Any] | None:
+    """The layer's time settings while it is followed over time, else None."""
+    settings = spec.get("track")
+    return settings if isinstance(settings, dict) and settings.get("on") else None
+
+
+def zone_of(name: str) -> str:
+    """A clock a layer can be read on: UTC, or an IANA zone this machine knows."""
+    text = str(name or "").strip() or "UTC"
+    if text == "UTC":
+        return text
+    try:
+        ZoneInfo(text)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise maplayers.LayerError("choose a time zone from the list") from exc
+    return text
+
+
+def set_track(spec: dict[str, Any], changes: dict[str, Any]) -> None:
+    """Switch time tracking on or off, or change its precision or clock.
+
+    Off hides the history and never deletes it: switched back on, every state is
+    where it was.
+    """
+    settings = dict(spec.get("track") or {"on": False, "precision": "day", "zone": "UTC"})
+    if "on" in changes:
+        settings["on"] = bool(changes["on"])
+    if "precision" in changes:
+        if changes["precision"] not in PRECISIONS:
+            raise maplayers.LayerError("date states by the day, or by the day and the time")
+        settings["precision"] = changes["precision"]
+    if "zone" in changes:
+        settings["zone"] = zone_of(changes["zone"])
+    spec["track"] = settings
+
+
+def instant(value: Any) -> str:
+    """A moment on the layer's clock, checked: a day, a day and a time, or ""."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not _INSTANT.match(text):
+        raise maplayers.LayerError("write the moment as YYYY-MM-DD, or YYYY-MM-DDTHH:MM")
+    try:
+        datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise maplayers.LayerError("this day does not exist") from exc
+    return text
+
+
+def _seeded(feature: dict[str, Any]) -> list[dict[str, Any]]:
+    """The feature's states, or the one it implies before it has any."""
+    properties = feature["properties"]
+    states = properties.get("states")
+    if isinstance(states, list) and states:
+        return states
+    seed: dict[str, Any] = {"at": str(properties.get("date") or ""), "geometry": copy.deepcopy(feature["geometry"])}
+    if properties.get("status"):
+        seed["status"] = properties["status"]
+    return [seed]
+
+
+def in_force(states: list[dict[str, Any]], at: str) -> dict[str, Any] | None:
+    """The state a feature is in at `at`: the last one written at or before it."""
+    found = None
+    for state in states:
+        if state["at"] > at:
+            break
+        found = state
+    return found
+
+
+def _live_before(states: list[dict[str, Any]], at: str) -> dict[str, Any]:
+    """The last state at or before `at` the feature was there in, or its first."""
+    live = [state for state in states if state["at"] <= at and not state.get("gone")]
+    return live[-1] if live else next(state for state in states if not state.get("gone"))
+
+
+def latest(feature: dict[str, Any]) -> str:
+    """The moment of the state a feature is drawn in now."""
+    states = _seeded(feature)
+    return [state for state in states if not state.get("gone")][-1]["at"]
+
+
+def _mirror(feature: dict[str, Any]) -> None:
+    """What the rest of the app reads off a tracked feature: its latest shape and status, and its days."""
+    properties = feature["properties"]
+    states = properties["states"]
+    live = [state for state in states if not state.get("gone")]
+    feature["geometry"] = copy.deepcopy(live[-1]["geometry"])
+    if live[-1].get("status"):
+        properties["status"] = live[-1]["status"]
+    else:
+        properties.pop("status", None)
+    if states[0]["at"]:
+        properties["date"] = states[0]["at"][:10]
+    else:
+        properties.pop("date", None)
+    if states[-1].get("gone") and states[-1]["at"][:10] > str(properties.get("date") or ""):
+        properties["date_end"] = states[-1]["at"][:10]
+    else:
+        properties.pop("date_end", None)
+
+
+def write_state(feature: dict[str, Any], at: str, *, geometry: dict[str, Any] | None = None,
+                status: Any = _KEEP, gone: bool = False) -> None:
+    """Say what a feature was from `at` on: a new state there, or the one already there rewritten.
+
+    A new state starts as the one in force before it, so moving a line on the
+    12th keeps its status, and marking a building destroyed on the 20th keeps
+    its outline.
+    """
+    properties = feature["properties"]
+    states = _seeded(feature)
+    at = instant(at)
+    existing = next((state for state in states if state["at"] == at), None)
+    if gone:
+        if existing is states[0] or at < states[0]["at"]:
+            raise maplayers.LayerError("a feature can only be gone after it first appears")
+        target: dict[str, Any] = existing if existing is not None else {"at": at}
+        target.clear()
+        target.update({"at": at, "gone": True})
+    else:
+        base = _live_before(states, at)
+        target = existing if existing is not None else {"at": at}
+        if target.get("gone") or "geometry" not in target:
+            target.pop("gone", None)
+            target["geometry"] = copy.deepcopy(base["geometry"])
+            if base.get("status"):
+                target["status"] = base["status"]
+        if geometry is not None:
+            target["geometry"] = copy.deepcopy(geometry)
+        if status is not _KEEP:
+            if status:
+                target["status"] = status
+            else:
+                target.pop("status", None)
+    if existing is None:
+        if len(states) >= MAX_STATES:
+            raise maplayers.LayerError(f"a feature keeps at most {MAX_STATES} states")
+        states.append(target)
+        states.sort(key=lambda state: state["at"])
+    properties["states"] = states
+    _mirror(feature)
+
+
+def drop_state(feature: dict[str, Any], at: str) -> None:
+    """Take one state out of a feature's history; its last one goes with the feature only."""
+    properties = feature["properties"]
+    states = [state for state in properties.get("states") or [] if state["at"] != at]
+    if len(states) == len(properties.get("states") or []):
+        raise maplayers.LayerError("this state is no longer in the feature's history")
+    if not states:
+        raise maplayers.LayerError("a feature keeps at least one state; remove the feature instead")
+    if states[0].get("gone"):
+        raise maplayers.LayerError("a feature can only be gone after it first appears")
+    properties["states"] = states
+    _mirror(feature)
+    if len(states) == 1 and "T" not in states[0]["at"]:
+        # One state dated to a day is a plain feature again.
+        properties.pop("states")
+
+
+def as_of(feature: dict[str, Any], at: str) -> dict[str, Any] | None:
+    """The feature as it stood at `at`, or None when it was not there.
+
+    A feature with no history is there from its day through its last one, and
+    always when it states none.
+    """
+    properties = feature["properties"]
+    states = properties.get("states")
+    if not states:
+        start, end = str(properties.get("date") or ""), str(properties.get("date_end") or "")
+        if (start and start > at) or (end and end < at[:10]):
+            return None
+        return feature
+    state = in_force(states, at)
+    if state is None or state.get("gone"):
+        return None
+    answer = {**feature, "geometry": copy.deepcopy(state["geometry"]),
+              "properties": {key: value for key, value in properties.items() if key not in ("states", "status")}}
+    if state.get("status"):
+        answer["properties"]["status"] = state["status"]
+    return answer
+
+
+def _timed(spec: dict[str, Any], feature: dict[str, Any], at: str | None, fix: bool = False) -> str | None:
+    """The moment an edit to this feature is written at, or None for a plain edit.
+
+    `fix` corrects the state the feature is in at `at` rather than starting one
+    there; a feature with no history is then simply rewritten.
+    """
+    if at is not None:
+        if not track(spec):
+            raise maplayers.LayerError("switch “Track over time” on to date an edit")
+        moment = instant(at)
+        if not fix:
+            return moment
+        if not feature["properties"].get("states"):
+            return None
+        state = in_force(feature["properties"]["states"], moment)
+        return state["at"] if state and not state.get("gone") else moment
+    if feature["properties"].get("states"):
+        return latest(feature)
+    return None
+
+
+def _time_fields(feature: dict[str, Any]) -> dict[str, Any]:
+    """What an undo puts back of a feature's history."""
+    properties = feature["properties"]
+    return {field: copy.deepcopy(properties[field]) for field in ("states", "date", "date_end", "status")
+            if field in properties}
+
+
+def _born(spec: dict[str, Any], feature: dict[str, Any], at: str | None) -> None:
+    """A feature added while a tracked layer is read at a moment appears at that moment."""
+    moment = _timed(spec, feature, at) if at else None
+    if not moment:
+        return
+    state: dict[str, Any] = {"at": moment, "geometry": copy.deepcopy(feature["geometry"])}
+    if feature["properties"].get("status"):
+        state["status"] = feature["properties"]["status"]
+    feature["properties"]["states"] = [state]
+    _mirror(feature)
+
+
+_MYMAPS = re.compile(r"^https://(www\.)?google\.[a-z.]+/maps/d/[^\s]*$", re.IGNORECASE)
+
+
+def mymaps_address(value: Any) -> str:
+    """The My Maps a layer is sent to, as its editor's address, or "" for none."""
+    text = str(value or "").strip()
+    if text and (len(text) > MAX_LINK or not _MYMAPS.match(text)):
+        raise maplayers.LayerError("paste the address of a My Maps, starting with https://www.google.com/maps/d/")
+    return text
+
+
+def _refuse_history(features: list[dict[str, Any]], act: str) -> None:
+    if any(feature["properties"].get("states") for feature in features):
+        raise maplayers.LayerError(f"{act} works on features with no history yet")
+
+
 def add_marker(
     case: Case, layer: str, *, lat: float, lon: float, name: str,
     colour: str, symbol: str, description: str = "",
-    group: str | None = None, **fields: Any,
+    group: str | None = None, at: str | None = None, **fields: Any,
 ) -> dict[str, Any]:
     with case.lock:
         spec = _spec(case, layer)
@@ -438,6 +709,7 @@ def add_marker(
         apply_fields(properties, fields)
         marker = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
                   "properties": properties}
+        _born(spec, marker, at)
         features.append(marker)
         row = _save(case, layer, spec)
         return {"layer": row, "marker": marker, "groups": _groups(spec)}
@@ -451,12 +723,26 @@ def _marker(spec: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Change one feature. On a tracked layer `at` dates the change of shape or
+    status, `gone` says the feature is no longer there from `at`, and
+    `drop_state` takes the state at `at` out of its history.
+
+    A feature with a history and no `at` has its latest state changed, which
+    is what correcting it means.
+    """
     with case.lock:
         spec = _spec(case, layer)
         # an unlinked marker keeps the point its case item stands on now
         layerlinks.follow(case, spec["document"]["features"], rendered=False)
-        marker = _marker(spec, key)
-        properties = marker["properties"]
+        _marker(spec, key)
+        stored = next(f for f in spec["document"]["features"] if f["properties"]["key"] == key)
+        properties = stored["properties"]
+        changes = dict(changes)
+        moment = _timed(spec, stored, changes.pop("at", None), bool(changes.pop("fix", False)))
+        gone, drop = bool(changes.pop("gone", False)), bool(changes.pop("drop_state", False))
+        if moment is not None and properties.get("states") and "date" in changes:
+            raise maplayers.LayerError("this feature's days are its history; change them there")
+        shape = None
         for field, value in changes.items():
             if field == "name":
                 properties[field] = maplayers._text(value, maplayers.MAX_NAME)
@@ -471,20 +757,35 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
                 if properties.get("entity_id"):
                     raise maplayers.LayerError("this marker follows the item it was added from; unlink it to move it")
                 geometry = validate_geometry(value)
-                if geometry["type"] != marker["geometry"]["type"]:
+                if geometry["type"] != stored["geometry"]["type"]:
                     raise maplayers.LayerError("keep the feature's geometry type")
-                marker["geometry"] = geometry
-                stored = next(f for f in spec["document"]["features"]
-                              if f["properties"]["key"] == key)
-                stored["geometry"] = geometry
+                if moment is None:
+                    stored["geometry"] = geometry
+                else:
+                    shape = geometry
             elif field == "unlink" and value:
                 properties.pop("entity_id", None)
-        apply_fields(properties, {field: value for field, value in changes.items() if field in CLEARABLE})
+        fields = {field: value for field, value in changes.items() if field in CLEARABLE}
+        # A tracked feature's status is part of what it was at a moment.
+        status: Any = _KEEP
+        if moment is not None and "status" in fields:
+            status = fields.pop("status") or ""
+        if status is not _KEEP and status not in ("", *STATUSES):
+            raise maplayers.LayerError("a status is damaged or destroyed")
+        apply_fields(properties, fields)
+        if moment is not None and drop:
+            drop_state(stored, moment)
+        elif moment is not None and gone:
+            write_state(stored, moment, gone=True)
+        elif moment is not None and (shape is not None or status is not _KEEP):
+            write_state(stored, moment, geometry=shape, status=status)
+        elif drop or gone:
+            raise maplayers.LayerError("date the change on a layer tracked over time")
         # Choosing an app symbol replaces the imported pictogram on this marker.
         if "symbol" in changes or "colour" in changes:
             properties["icon"] = ""
         row = _save(case, layer, spec)
-        return {"layer": row, "marker": marker, "groups": _groups(spec)}
+        return {"layer": row, "marker": copy.deepcopy(stored), "groups": _groups(spec)}
 
 
 def promote(case: Case, layer: str, key: str) -> dict[str, Any]:
@@ -550,6 +851,11 @@ def update_group(case: Case, layer: str, key: str, changes: dict[str, Any]) -> d
                 group["labels"] = True
             else:
                 group.pop("labels", None)
+        if "events" in changes:
+            if changes["events"]:
+                group["events"] = True
+            else:
+                group.pop("events", None)
         _save(case, layer, spec)
         return read(case, layer)
 
@@ -565,6 +871,12 @@ def update_details(case: Case, layer: str, changes: dict[str, Any]) -> dict[str,
             spec["title"] = title
         if "description" in changes:
             spec["description"] = changes["description"].strip()
+        if isinstance(changes.get("track"), dict):
+            set_track(spec, changes["track"])
+        if "mymaps" in changes:
+            spec["mymaps"] = mymaps_address(changes["mymaps"])
+            if not spec["mymaps"]:
+                spec.pop("mymaps")
         _save(case, layer, spec)
         if spec["title"] != before:
             _sync_title(case, layer, spec["title"])
@@ -632,11 +944,13 @@ def _undo(spec: dict[str, Any], *, removed: list[dict[str, Any]] | None = None,
 
 
 def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str, Any],
-                   offset: list[float] | None, remove: bool) -> dict[str, Any]:
+                   offset: list[float] | None, remove: bool, at: str | None = None,
+                   fix: bool = False) -> dict[str, Any]:
     """Apply one atomic edit to selected features, without touching case entities.
 
     A move skips the markers that follow a case item, since their point is that
-    item's, and says how many it left where they were.
+    item's, and says how many it left where they were. On a tracked layer `at`
+    dates a move or a status, as for one feature (`update_marker`).
     """
     with case.lock:
         spec = _spec(case, layer)
@@ -666,13 +980,24 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
             return [shifted(child) for child in node]
 
         moving = [key for key in keys if offset and not by_key[key]["properties"].get("entity_id")]
-        undo = _undo(spec, before=[{"key": key, "geometry": copy.deepcopy(by_key[key]["geometry"])}
+        undo = _undo(spec, before=[{"key": key, "geometry": copy.deepcopy(by_key[key]["geometry"]),
+                                    "time": _time_fields(by_key[key])}
                                    for key in moving]) if moving else None
+        moments = {key: _timed(spec, by_key[key], at, fix) for key in keys}
         for key in moving:
             feature = by_key[key]
-            feature["geometry"]["coordinates"] = shifted(feature["geometry"]["coordinates"])
+            dated = moments[key]
+            if dated is None:
+                feature["geometry"]["coordinates"] = shifted(feature["geometry"]["coordinates"])
+                continue
+            base = copy.deepcopy(_live_before(_seeded(feature), dated)["geometry"])
+            base["coordinates"] = shifted(base["coordinates"])
+            write_state(feature, dated, geometry=base)
         for key in keys:
             props = by_key[key]["properties"]
+            moment = moments[key]
+            if moment is not None and "status" in changes:
+                write_state(by_key[key], moment, status=changes["status"] or "")
             for field, value in changes.items():
                 if field == "group" and target:
                     props.update(group=target["id"], category=target["name"])
@@ -682,7 +1007,9 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
                     props[field] = maplayers._rich_text(value, maplayers.MAX_DESCRIPTION)
                 elif field in ("colour", "symbol"):
                     props[field] = value
-            apply_fields(props, {field: value for field, value in changes.items() if field in CLEARABLE})
+            apply_fields(props, {field: value for field, value in changes.items() if field in CLEARABLE
+                                 and not (moment is not None and field == "status")
+                                 and not (props.get("states") and field == "date")})
             if "symbol" in changes or "colour" in changes:
                 props["icon"] = ""
         _save(case, layer, spec)
@@ -707,6 +1034,11 @@ def restore_selection(case: Case, layer: str, batch_id: str) -> dict[str, Any]:
         for entry in batch.get("geometry") or []:
             if entry["key"] in by_key:
                 by_key[entry["key"]]["geometry"] = entry["geometry"]
+                if "time" in entry:
+                    properties = by_key[entry["key"]]["properties"]
+                    for field in ("states", "date", "date_end", "status"):
+                        properties.pop(field, None)
+                    properties.update(copy.deepcopy(entry["time"]))
         groups = _groups(spec)
         ids = {group["id"] for group in groups}
         for item in batch["items"]:
@@ -776,6 +1108,7 @@ def merge(case: Case, layer: str, keys: list[str]) -> dict[str, Any]:
         if len(keys) < 2 or len(set(keys)) != len(keys) or not set(keys) <= by_key.keys():
             raise maplayers.LayerError("select two or more features to merge")
         chosen = [by_key[key] for key in keys]
+        _refuse_history(chosen, "Merging")
         kinds = {_kind(feature["geometry"]) for feature in chosen}
         if kinds == {"point"} or len(kinds) != 1:
             raise maplayers.LayerError("merge lines with lines, or areas with areas")
@@ -811,6 +1144,7 @@ def split(case: Case, layer: str, key: str, at: int | None = None) -> dict[str, 
         if index is None:
             raise maplayers.LayerError("this feature is no longer in the layer")
         feature = features[index]
+        _refuse_history([feature], "Splitting")
         geometry = feature["geometry"]
         single = {"MultiLineString": "LineString", "MultiPolygon": "Polygon"}.get(geometry["type"])
         if single:
@@ -894,7 +1228,8 @@ def validate_geometry(value: Any) -> dict[str, Any]:
 
 
 def add_shape(case: Case, layer: str, *, geometry: dict[str, Any], name: str,
-              colour: str, description: str, group: str | None, **fields: Any) -> dict[str, Any]:
+              colour: str, description: str, group: str | None, at: str | None = None,
+              **fields: Any) -> dict[str, Any]:
     geometry = validate_geometry(geometry)
     if geometry["type"] == "Point":
         raise maplayers.LayerError("add a marker for a point")
@@ -910,7 +1245,9 @@ def add_shape(case: Case, layer: str, *, geometry: dict[str, Any], name: str,
                                            description=description, colour=colour, category=target["name"])
         properties.update(key=uuid.uuid4().hex, group=target["id"], symbol="pin")
         apply_fields(properties, fields)
-        features.append({"type": "Feature", "geometry": geometry, "properties": properties})
+        shape = {"type": "Feature", "geometry": geometry, "properties": properties}
+        _born(spec, shape, at)
+        features.append(shape)
         spec["hidden"] = [item for item in spec.get("hidden", []) if item != target["name"]]
         _save(case, layer, spec)
         return {**read(case, layer), "key": properties["key"]}
@@ -939,38 +1276,185 @@ def remove_group(case: Case, layer: str, key: str) -> dict[str, Any]:
 
 
 def add_links(case: Case, layer: str, items: list[dict[str, Any]], group: str | None, *,
-              symbol: str | None = None, colour: str | None = None) -> dict[str, Any]:
+              symbol: str | None = None, colour: str | None = None, status: str = "") -> dict[str, Any]:
     """Add markers that follow case items, in the group's style unless given one.
 
     Each item names an entity and the point it was picked at, which picks one of
-    the places an entity stands on. One entity at one point is added once.
+    the places an entity stands on. **One geolocation is one marker**: a file a
+    proof places on that point is added as that proof (`layerlinks.anchor`), and
+    an item already shown on that point, as itself or as its proof or footage, is
+    not added twice; the marker it has follows the proof from then on. A marker
+    says what its item says (`layerlinks.prefill`), kept in step by
+    `sync_followers`. `status` is what a new marker says of what it shows:
+    intact when empty, or one of `STATUSES`.
     """
+    if status and status not in STATUSES:
+        raise maplayers.LayerError("a status is damaged or destroyed")
     with case.lock:
         spec = _spec(case, layer)
         target = _group(spec, group)
         spec["hidden"] = [name for name in spec.get("hidden", []) if name != target["name"]]
         features = spec["document"]["features"]
         layerlinks.follow(case, features, rendered=False)
-        held = {(f["properties"].get("entity_id"), tuple(round(v, 6) for v in f["geometry"]["coordinates"][:2]))
-                for f in features if f["properties"].get("entity_id")}
-        points = []
+        points: list[dict[str, Any]] = []
+        kin: dict[str, set[str]] = {}
+        changed = False
         for item in items:
-            entity, (lon, lat) = layerlinks.resolve(case, str(item["id"]), float(item["lat"]), float(item["lon"]))
-            spot = (entity["id"], (round(lon, 6), round(lat, 6)))
-            if spot in held:
+            picked, (lon, lat) = layerlinks.resolve(case, str(item["id"]), float(item["lat"]), float(item["lon"]))
+            entity = layerlinks.anchor(case, picked, (lon, lat))
+            if entity["id"] not in kin:
+                kin[entity["id"]] = layerlinks.family(case, entity)
+            shown = [f for f in features + points if f["geometry"]["type"] == "Point"
+                     and f["properties"].get("entity_id") in kin[entity["id"]]
+                     and layerlinks._distance(tuple(f["geometry"]["coordinates"][:2]), (lon, lat)) <= layerlinks.SAME_SPOT]
+            if shown:
+                for feature in shown:
+                    changed |= _follow_item(case, feature, entity, labels={picked.get("label") or ""})
                 continue
-            held.add(spot)
-            properties = maplayers._properties(name=entity.get("label") or "", description="",
-                                               category=target["name"], colour=colour or target["colour"])
+            properties = maplayers._properties(category=target["name"], colour=colour or target["colour"])
             properties.update({"key": uuid.uuid4().hex, "entity_id": entity["id"],
                                "group": target["id"], "symbol": symbol or target["symbol"]})
-            points.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                           "properties": properties})
+            feature = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                       "properties": properties}
+            _follow_item(case, feature, entity)
+            apply_fields(properties, {"status": status or None})
+            points.append(feature)
         if len(features) + len(points) > maplayers.MAX_FEATURES:
             raise maplayers.LayerError("this layer has reached its feature limit")
-        features.extend(points)
-        _save(case, layer, spec)
+        if points or changed:
+            features.extend(points)
+            _save(case, layer, spec)
         return {**read(case, layer), "added": len(points)}
+
+
+#: What a marker following a case item takes from it, written again whenever the
+#: item is saved.
+SYNCED = ("name", "description", "date", "date_end", "links")
+
+
+def _item_values(case: Case, entity: dict[str, Any], point: tuple[float, float]) -> dict[str, Any]:
+    """What a marker following `entity` at `point` says, checked as a marker stores it."""
+    said = layerlinks.prefill(case, entity, point)
+    checked = maplayers._properties(name=said["name"], description=said["description"],
+                                    date=said["date"], date_end=said["date_end"])
+    cited = [link for link in said["links"] if len(link) <= MAX_LINK]
+    return {"name": checked["name"], "description": checked["description"],
+            "date": checked.get("date", ""), "date_end": checked.get("date_end", ""),
+            "links": cited[:MAX_LINKS]}
+
+
+def _follow_item(case: Case, feature: dict[str, Any], entity: dict[str, Any],
+                 labels: set[str] | None = None) -> bool:
+    """Make a marker follow `entity` and say what it says, field by field.
+
+    A field still holding what the item wrote last (`synced`) takes the item's new
+    value; one the analyst rewrote by hand stays theirs. A marker followed before
+    `synced` was kept counts a field as the item's when it is empty, a title of the
+    item (`labels`) or the notes it was once given from it. Returns whether the
+    marker changed.
+    """
+    properties = feature["properties"]
+    before = case.get_entity(properties["entity_id"]) if properties.get("entity_id") else None
+    changed = properties.get("entity_id") != entity["id"]
+    properties["entity_id"] = entity["id"]
+    point = tuple(feature["geometry"]["coordinates"][:2])
+    values = _item_values(case, entity, (float(point[0]), float(point[1])))
+    last = properties.get("synced")
+    earlier = {str(one.get("label") or "") for one in (before, entity) if one} | (labels or set())
+    notes = {str((one.get("attrs") or {}).get("notes") or "") for one in (before, entity) if one}
+    for field in SYNCED:
+        empty: Any = [] if field == "links" else ""
+        current = properties.get(field, empty)
+        # on a tracked layer a marker's days mirror its dated states (`_mirror`)
+        if current == values[field] or (field in ("date", "date_end") and properties.get("states")):
+            continue
+        if isinstance(last, dict):
+            theirs = current != last.get(field, empty)
+        else:
+            theirs = bool(current) and not (field == "name" and current in earlier) \
+                and not (field == "description" and current in notes)
+        if theirs:
+            continue
+        if values[field] or field in ("name", "description"):
+            properties[field] = values[field]
+        else:
+            properties.pop(field, None)
+        changed = True
+    if not properties.get("states") and str(properties.get("date_end") or "") <= str(properties.get("date") or ""):
+        changed |= properties.pop("date_end", None) is not None
+    if last != values:
+        properties["synced"] = values
+        changed = True
+    return changed
+
+
+def sync_followers(case: Case, entity_id: str) -> list[str]:
+    """Write a saved item into the markers that follow it, in every layer.
+
+    Called when a proof or a file is saved. A proof also takes in the markers that
+    followed its footage on one of its points, since they show the same
+    geolocation, and a file's save reaches the markers of the proofs placing it,
+    which cite its address. Where a layer ends up with one geolocation twice, the
+    second marker goes, kept for Undo like any removed feature. Returns the layers
+    changed.
+    """
+    with case.lock:
+        entity = case.get_entity(entity_id)
+        if entity is None or entity.get("type") not in layerlinks.LINKABLE_TYPES:
+            return []
+        items = {entity_id: entity}
+        footage: set[str] = set()
+        spots: list[tuple[float, float]] = []
+        if entity["type"] == "proof":
+            footage = layerlinks.family(case, entity) - {entity_id}
+            spots = layerlinks.entity_points(case, entity)
+        elif entity["type"] == "media":
+            for other in layerlinks.family(case, entity) - {entity_id}:
+                proof = case.get_entity(other)
+                if proof is not None:
+                    items[other] = proof
+        changed: list[str] = []
+        for row in maplayers.listing(case):
+            if not row["editable"]:
+                continue
+            try:
+                spec = _spec(case, row["name"])
+            except maplayers.LayerError:
+                continue
+            features = spec["document"]["features"]
+            if not any(f["properties"].get("entity_id") in items.keys() | footage for f in features):
+                continue
+            layerlinks.follow(case, features, rendered=False)
+            dirty = False
+            for feature in features:
+                properties = feature["properties"]
+                followed = properties.get("entity_id")
+                if feature["geometry"]["type"] != "Point" or not followed:
+                    continue
+                at = tuple(feature["geometry"]["coordinates"][:2])
+                if followed in footage and any(layerlinks._distance(at, spot) <= layerlinks.SAME_SPOT for spot in spots):
+                    dirty |= _follow_item(case, feature, entity)
+                elif followed in items:
+                    dirty |= _follow_item(case, feature, items[followed])
+            seen: set[tuple[Any, ...]] = set()
+            twice: list[int] = []
+            for index, feature in enumerate(features):
+                followed = feature["properties"].get("entity_id")
+                if followed not in items or feature["geometry"]["type"] != "Point":
+                    continue
+                place = (followed, *(round(v, 5) for v in feature["geometry"]["coordinates"][:2]))
+                if place in seen:
+                    twice.append(index)
+                seen.add(place)
+            history = spec.setdefault("removed_features", [])
+            for index in reversed(twice):
+                history.append({"feature": features.pop(index), "index": index})
+                dirty = True
+            spec["removed_features"] = history[-20:]
+            if dirty:
+                _save(case, row["name"], spec)
+                changed.append(row["name"])
+        return changed
 
 
 def remove_marker(case: Case, layer: str, key: str) -> dict[str, Any]:
@@ -1013,11 +1497,13 @@ def layer_targets(case: Case, entity_id: str | None = None) -> list[dict[str, An
 
     One row per editable layer, in listing order, with the groups a new marker
     can join, the marker styles it already shows (at most twelve, as drawn) and,
-    when ``entity_id`` names an item, the markers that follow it at the point
-    they stand on now. A layer whose working copy cannot be read is left out
-    rather than failing the others.
+    when ``entity_id`` names an item, the markers that show it at the point they
+    stand on now, a proof's own or its footage's (`layerlinks.family`). A layer
+    whose working copy cannot be read is left out rather than failing the others.
     """
     with case.lock:
+        item = case.get_entity(entity_id) if entity_id else None
+        kin = layerlinks.family(case, item) if item else set()
         rows = []
         for row in maplayers.listing(case):
             if not row["editable"]:
@@ -1027,8 +1513,7 @@ def layer_targets(case: Case, entity_id: str | None = None) -> list[dict[str, An
             except maplayers.LayerError:
                 continue
             linked = [copy.deepcopy(f) for f in spec["document"]["features"]
-                      if entity_id and f["properties"].get("entity_id") == entity_id
-                      and f["geometry"]["type"] == "Point"]
+                      if f["properties"].get("entity_id") in kin and f["geometry"]["type"] == "Point"]
             layerlinks.follow(case, linked, rendered=False)
             groups = {group["id"]: group for group in _groups(spec)}
             styles: list[dict[str, str]] = []

@@ -121,6 +121,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .search/      # saved Grid Search state
     .layers/      # added map layers: spec, snapshot, icons
       .cache/     #   parsed GeoJSON, rebuilt from the snapshot
+    .mapplates/   # map plates: the layout round the case's maps, and its preview
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
 

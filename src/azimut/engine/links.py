@@ -844,6 +844,41 @@ def resolve(case: CaseRepository, rel_paths: list[str]) -> tuple[list[str], list
     return found, missing
 
 
+def collected_roots(case: CaseRepository, start: list[str]) -> list[dict[str, Any]]:
+    """The collected files these entities read back to, along ``derived-from``.
+
+    A frame leads to the video it was cut from, and on up to whatever nothing else
+    in the case derives from: the footage itself. Captures are walked through and
+    left out at the end, since a satellite screenshot is not the thing filmed.
+    """
+    roots: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    frontier = list(start)
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        entity = case.get_entity(current)
+        if entity is None:
+            continue
+        parents = [
+            link["to"]
+            for link in case.links_of(current)
+            if link["type"] == DERIVED_FROM and link["from"] == current
+        ]
+        collected = [
+            parent
+            for parent in parents
+            if (case.get_entity(parent) or {}).get("type") in {"media", "capture"}
+        ]
+        if collected:
+            frontier.extend(collected)
+        elif entity["type"] == "media":
+            roots[current] = entity
+    return list(roots.values())
+
+
 def _validated_chain_targets(
     case: CaseRepository, entity_id: str, type_: str, target_ids: list[str]
 ) -> list[str]:

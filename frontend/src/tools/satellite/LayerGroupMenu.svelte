@@ -38,6 +38,12 @@
   {/if}
   <label class="switch"><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}
     onchange={(event) => controller.updateGroup(group.id, { labels: event.currentTarget.checked })} /> Names on the map</label>
+  {#if controller.editor?.track?.on}
+    <!-- a strike fades after its day where a position stays: what the layer's cursor reads -->
+    <label class="switch" title="Each one fades after its day, and leaves the map some days later"><input type="checkbox"
+      aria-label={`${group.name} are events`} checked={!!group.events} disabled={busy}
+      onchange={(event) => controller.updateGroup(group.id, { events: event.currentTarget.checked })} /> Events: fade after their day</label>
+  {/if}
   <label class="field slider"><span>Icon size</span>
     <input type="range" min="0.5" max="3" step="0.25" value={size ?? group.size ?? 1} aria-label={`Icon size for ${group.name}`}
       oninput={(event) => { size = Number(event.currentTarget.value); }}

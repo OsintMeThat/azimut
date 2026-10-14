@@ -15,7 +15,7 @@ vi.mock('../../lib/state.svelte.js', () => ({ caseState: { current: { id: 'case'
 
 const { default: LayerLinkDialog } = await import('./LayerLinkDialog.svelte');
 const { default: LayerPasteDialog } = await import('./LayerPasteDialog.svelte');
-const { default: LayerCopyDialog } = await import('./LayerCopyDialog.svelte');
+const { default: LayerCopyMenu } = await import('./LayerCopyMenu.svelte');
 
 let held;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -63,29 +63,42 @@ describe('Paste a position', () => {
   });
 });
 
-describe('Copy to my layer', () => {
-  it('offers the layer chosen last in the case, and remembers the one used', async () => {
-    mocks.rows = [{ name: 'a', title: 'First', editable: true }, { name: 'b', title: 'Second', editable: true }, { name: 'src', title: 'GC' }];
-    localStorage.setItem('azimut:copy-layer:case', 'b');
-    mocks.api.get.mockResolvedValue({ groups: [{ id: 'g1', name: 'One' }, { id: 'g2', name: 'Two' }] });
-    const controller = { copying: { caseId: 'case', row: { title: 'GC' }, feature: { properties: { name: 'Strike' } } },
+describe('a source layer’s feature put in one of the analyst’s layers', () => {
+  const front = { name: 'b', title: 'Second', styles: [], markers: [], groups: [
+    { id: 'g1', name: 'Positions', mode: 'individual', colour: '#0072b2', symbol: 'pin' },
+    { id: 'g2', name: 'Checkpoints', mode: 'uniform', colour: '#009e73', symbol: 'star' }] };
+  const first = { name: 'a', title: 'First', styles: [], markers: [], groups: [{ id: 'm', name: 'Markers', mode: 'uniform', colour: '#cc79a7', symbol: 'pin' }] };
+  const job = (feature) => ({ caseId: 'case', row: { title: 'GeoConfirmed' }, anchor: null, feature });
+
+  it('goes layer, group, icon, on the feature’s own colour, with the layer used last first', async () => {
+    mocks.rows = [{ name: 'a', title: 'First', editable: true }, { name: 'b', title: 'Second', editable: true }];
+    localStorage.setItem('azimut:layer-last:case', 'b');
+    mocks.api.get.mockImplementation(async (url) => (url.includes('layer-targets') ? [first, front] : { colours: [] }));
+    const controller = { copying: job({ geometry: { type: 'Point', coordinates: [2, 48] }, properties: { name: 'Strike', colour: '#d55e00' } }),
       copyTo: vi.fn(async () => ({})), cancelCopy: vi.fn() };
-    show(LayerCopyDialog, { controller }); await settle(); flushSync();
-    expect(document.querySelector('[aria-label="Layer to copy into"]').value).toBe('b');
-    expect(document.querySelector('[aria-label="Group to copy into"]')).toBeTruthy();
-    byText('Copy').click(); await settle();
-    expect(controller.copyTo).toHaveBeenCalledWith(mocks.rows[1], 'g1');
-    expect(localStorage.getItem('azimut:copy-layer:case')).toBe('b');
+    show(LayerCopyMenu, { controller }); await settle(); flushSync();
+    const menu = document.querySelector('[role="menu"][aria-label="Add to a layer"]');
+    expect(menu.textContent).toContain('“Strike” stays GeoConfirmed\'s geolocation, with its day and sources.');
+    expect([...menu.querySelectorAll('.targets .fm-item')].map((node) => node.textContent.trim())).toEqual(['Second', 'First']);
+    // what it shows is said on the way, whichever step the menu is at
+    byText('Destroyed').click(); flushSync();
+    byText('Second').click(); flushSync();
+    byText('Positions').click(); flushSync();
+    expect(document.querySelector('[aria-label="What it shows"] [aria-pressed="true"]').textContent).toBe('Destroyed');
+    document.querySelector('[aria-label="Point icon Tank icon"]').click(); flushSync();
+    byText('Add to Positions').click(); await settle();
+    expect(controller.copyTo).toHaveBeenCalledWith(mocks.rows[1], 'g1', { symbol: 'badge-tank', colour: '#d55e00' }, 'destroyed');
+    expect(localStorage.getItem('azimut:layer-last:case')).toBe('b');
   });
 
-  it('makes a layer for the copy when there is none yet', async () => {
+  it('adds a line at once, in the group it is put in', async () => {
     mocks.rows = [];
-    mocks.createEditable.mockResolvedValueOnce({ name: 'new', title: 'Copied points', editable: true });
-    const controller = { copying: { caseId: 'case', row: { title: 'GC' }, feature: { properties: {} } },
+    mocks.api.get.mockImplementation(async (url) => (url.includes('layer-targets') ? [front] : { colours: [] }));
+    const controller = { copying: job({ geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48]] }, properties: { name: 'Front line' } }),
       copyTo: vi.fn(async () => ({})), cancelCopy: vi.fn() };
-    show(LayerCopyDialog, { controller });
-    byText('Copy').click(); await settle();
-    expect(mocks.createEditable).toHaveBeenCalledWith('Copied points');
-    expect(controller.copyTo).toHaveBeenCalledWith(expect.objectContaining({ name: 'new' }), null);
+    show(LayerCopyMenu, { controller }); await settle(); flushSync();
+    byText('Second').click(); flushSync();
+    byText('Positions').click(); await settle();
+    expect(controller.copyTo).toHaveBeenCalledWith(expect.objectContaining({ name: 'b' }), 'g1', null, '');
   });
 });

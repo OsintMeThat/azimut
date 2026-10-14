@@ -83,6 +83,8 @@ class FullCase:
     horizon_thumb: str = ""  # its preview, which travels with it
     horizon_find: str = ""  # a search for where the photo was taken, run to its end
     horizon_work: str = ""  # the work on Horizon's bench, kept so a reload brings it back
+    map_plate: str = ""  # a page laid out round a map of the case
+    map_plate_thumb: str = ""  # its preview, which travels with it
     analyzer_zones: str = ""
     analyzer_area: str = ""
     analyzer_followup: str = ""
@@ -289,6 +291,25 @@ def build_full_case(
     )
     assert bench.status_code == 200, bench.text
     full.horizon_work = ".horizon/.work.json"
+
+    # A map plate: one map, its legend and a title. Drawn by the browser; only the layout is kept.
+    plate = client.post(
+        f"/api/cases/{case_id}/map-plates",
+        json={"title": "Situation", "spec": {"elements": [
+            {"id": "map", "kind": "map", "box": [10, 20, 200, 150],
+             "view": {"lat": 48.85, "lon": 2.29, "zoom": 12}},
+            {"id": "legend", "kind": "legend", "box": [215, 20, 70, 60], "of": "map"},
+            {"id": "title", "kind": "text", "box": [10, 6, 200, 12], "text": "Situation", "size": 18, "weight": 700},
+        ]}},
+    )
+    assert plate.status_code == 200, plate.text
+    full.map_plate = plate.json()["spec_path"]
+    plate_thumb = client.put(
+        f"/api/cases/{case_id}/map-plates/{plate.json()['name']}/thumb",
+        files={"file": ("preview.png", io.BytesIO(_png((160, 110))), "image/png")},
+    )
+    assert plate_thumb.status_code == 200, plate_thumb.text
+    full.map_plate_thumb = plate_thumb.json()["thumb"]
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(

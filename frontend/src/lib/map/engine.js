@@ -154,8 +154,15 @@ function settleOnLevel(map, following) {
  * @param {object} opts
  * @param {object} opts.view `{ lat, lon, zoom }` the map opens on
  * @param {boolean} [opts.imperial] scale bar in miles rather than metres
+ * @param {boolean} [opts.settle] come to rest on whole levels; a map plate
+ *   frames its ground at any zoom, and keeps it there
+ * @param {boolean} [opts.controls] the zoom buttons and the scale bar; a plate
+ *   draws its own scale, in print, and is framed by the hand
+ * @param {[number, number]} [opts.maxCanvasSize] the largest canvas, raised by a
+ *   plate drawn again at print resolution
  */
-export async function createMapEngine(container, { view, imperial = false } = {}) {
+export async function createMapEngine(container, { view, imperial = false, settle = true, controls = true,
+  maxCanvasSize = undefined } = {}) {
   const map = new MapLibreMap({
     container,
     style: EMPTY_STYLE,
@@ -174,13 +181,14 @@ export async function createMapEngine(container, { view, imperial = false } = {}
     // A map turned round over relief comes back to ground it has drawn; keeping
     // more levels of tiles is what spares it loading them all again.
     maxTileCacheZoomLevels: 8,
+    ...(maxCanvasSize ? { maxCanvasSize } : {}),
   });
   const mapId = `m${(mapsMade += 1)}`;
   maps.set(mapId, map);
   map.once('remove', () => maps.delete(mapId));
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
-  map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
+  if (controls) map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
   // What a tool lays over the map steps aside from these buttons (the layer edit
   // bar's `[data-bar-obstacle]`), without naming the engine that drew them.
   container.querySelector?.('.maplibregl-ctrl-top-left .maplibregl-ctrl-group')?.setAttribute('data-bar-obstacle', '');
@@ -188,7 +196,7 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // reads under the coordinates rather than in the opposite corner: how far a
   // pixel goes and where you are are one instrument, and the right-hand corner
   // is where the acts sit, which used to land Capture on top of the bracket.
-  map.addControl(
+  if (controls) map.addControl(
     new ScaleControl({ unit: imperial ? 'imperial' : 'metric' }),
     'bottom-left'
   );
@@ -201,7 +209,7 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // as soon as this returns.
   await map.once('load');
   const facade = mapFacade(map, container, mapId);
-  settleOnLevel(map, facade.following);
+  if (settle) settleOnLevel(map, facade.following);
   // A stable class for the tool's own cursor rules: a mode armed above the map
   // says so on the surface, whichever engine drew it.
   container.classList.add('map-surface');

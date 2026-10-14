@@ -7,9 +7,11 @@ import binascii
 import copy
 import json
 import zipfile
+from datetime import datetime
 from io import BytesIO
 from typing import Any
 from xml.etree import ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from PIL import Image, UnidentifiedImageError
 
@@ -79,21 +81,70 @@ def _geometry(parent: ET.Element, geometry: dict[str, Any]) -> None:
 PERSONAL_FIELDS = ("date", "date_end", "status", "bearing", "links", "provenance")
 
 
-def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tuple[bytes, str, str]:
+def kml_time(at: str, zone: str) -> str:
+    """A moment on a layer's clock as KML writes one: a bare day on UTC, else with its offset."""
+    if zone == "UTC" and "T" not in at:
+        return at
+    moment = datetime.fromisoformat(at if "T" in at else f"{at}T00:00")
+    stamp = moment.replace(tzinfo=ZoneInfo(zone) if zone != "UTC" else ZoneInfo("UTC")).isoformat()
+    return stamp.replace("+00:00", "Z")
+
+
+def _dated(features: list[dict[str, Any]], at: str | None, history: bool) -> list[dict[str, Any]]:
+    """A tracked layer as it stood at `at`, or one feature per state for its whole history.
+
+    Each state of the history carries the moment it began, and the next one's as
+    its end, which is what a time slider reads.
+    """
+    if at is not None:
+        moment = layerediting.instant(at)
+        return [standing for feature in features if (standing := layerediting.as_of(feature, moment))]
+    if not history:
+        return features
+    out = []
+    for feature in features:
+        states = feature["properties"].get("states")
+        if not states:
+            out.append(feature)
+            continue
+        for index, state in enumerate(states):
+            if state.get("gone"):
+                continue
+            copy_ = {**feature, "geometry": state["geometry"],
+                     "properties": {**feature["properties"], "$begin": state["at"]}}
+            copy_["properties"].pop("status", None)
+            if state.get("status"):
+                copy_["properties"]["status"] = state["status"]
+            if index + 1 < len(states):
+                copy_["properties"]["$end"] = states[index + 1]["at"]
+            out.append(copy_)
+    return out
+
+
+def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str], *,
+           at: str | None = None, history: bool = False) -> tuple[bytes, str, str]:
+    """Download a personal layer. A tracked one can be had as it stood at `at`,
+    which is what a My Maps is sent, or with `history`, every state dated."""
     spec = layerediting._spec(case, name)
     rendered = layerediting.drawing(spec, case)["geojson"]
-    features = copy.deepcopy(rendered["features"])
+    tracked = layerediting.track(spec)
+    zone = (tracked or {}).get("zone") or "UTC"
+    features = copy.deepcopy(_dated(rendered["features"], at, history and bool(tracked)))
     for feature in features:
         props = feature["properties"]
         feature["properties"] = {key: props[key] for key in (
             "name", "description", "colour", "category", "symbol", "group", "icon", "icon_scale", "stroke_width",
-            *PERSONAL_FIELDS,
+            *PERSONAL_FIELDS, "$begin", "$end",
         ) if key in props}
     if fmt == "geojson":
         ranks = {group["id"]: index for index, group in enumerate(layerediting._groups(spec))}
         features.sort(key=lambda feature: ranks[feature["properties"]["group"]])
         for feature in features:
             props = feature["properties"]
+            if "$begin" in props:
+                props["begin"] = kml_time(props.pop("$begin"), zone) if props["$begin"] else ""
+            if "$end" in props:
+                props["end"] = kml_time(props.pop("$end"), zone)
             props.update({"marker-color": props.get("colour", "#0072b2"), "stroke": props.get("colour", "#0072b2"),
                           "stroke-width": props.get("stroke_width", 2)})
         geojson_document = {"type": "FeatureCollection", "name": spec["title"], "azimut_personal_layer": 1,
@@ -149,7 +200,13 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str]) -> tu
         _element(placemark, "name", props.get("name", ""))
         _element(placemark, "description", props.get("description", ""))
         _element(placemark, "styleUrl", f"#s{index}")
-        if props.get("date") and props.get("date_end"):
+        if "$begin" in props:
+            span = _element(placemark, "TimeSpan")
+            if props["$begin"]:
+                _element(span, "begin", kml_time(props["$begin"], zone))
+            if props.get("$end"):
+                _element(span, "end", kml_time(props["$end"], zone))
+        elif props.get("date") and props.get("date_end"):
             span = _element(placemark, "TimeSpan")
             _element(span, "begin", props["date"])
             _element(span, "end", props["date_end"])

@@ -486,8 +486,10 @@ describe('Proof Composer pasted images', () => {
   });
 
   it('never lets a pasted image change the size of the document', () => {
-    // docSize is measured from panels and shapes only, and a drag is clamped
-    expect(source).toContain('docSize(proof.panels, proof.shapes');
+    // docSize is measured from panels and shapes only (the free marks among
+    // them reach the page's edge), and a drag is clamped
+    expect(source).toContain('proof.panels, proof.shapes, proof.notes, textOpts()');
+    expect(source).toContain('freeExtent(proof.shapes, inkHelpers)');
     expect(source).toContain('Object.assign(paste, clampPaste(paste, width, height))');
   });
 
@@ -505,7 +507,7 @@ describe('Proof Composer pasted images', () => {
     // is still on it, not who else joined
     expect(source).toMatch(/transformer\.keepRatio\([^)]*!!pasteNode/);
     expect(source).toContain('implied < PASTE_SCALE_MIN || implied > PASTE_SCALE_MAX');
-    expect(source).toContain('|| pasteNode || sigNode');
+    expect(source).toContain('|| panelNode || pasteNode || (sigNode && !footerPicked)');
   });
 
   it('drops a pasted image with its annotations, and only one thing is selected', () => {
@@ -904,7 +906,7 @@ describe('stamping a symbol', () => {
     expect(node).toContain('id: s.id, x: s.x, y: s.y');
     // and it rebinds by that same point when dropped onto another surface:
     // everything that is not a box and not a polyline answers for its origin
-    expect(bodyOfFn('landShape')).toContain('} else if (!Array.isArray(s.points)) {');
+    expect(bodyOfFn('anchorOf')).toContain('if (!Array.isArray(s.points)) return { x: s.x, y: s.y };');
   });
 
   it('turns the fill into a badge disc behind the glyph', () => {
@@ -1359,9 +1361,10 @@ describe('Proof Composer — numbered markers and blur boxes', () => {
     // both used to fall through to the polyline branch, where reading the points
     // they have none of threw inside dragend: the drop was never written and the
     // mark sprang back to where it had been picked up
-    const body = bodyOfFn('landShape');
+    const body = bodyOfFn('anchorOf');
     expect(body).toContain("if (s.kind === 'rect' || s.kind === 'blur' || s.kind === 'zoom') {");
-    expect(body).toContain('} else if (!Array.isArray(s.points)) {');
+    expect(body).toContain('if (!Array.isArray(s.points)) return { x: s.x, y: s.y };');
+    expect(bodyOfFn('landShape')).toContain('surfaceToPage(anchorOf(s), from)');
   });
 
   it('keeps a colour away from the one mark drawn in no ink', () => {

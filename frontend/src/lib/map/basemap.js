@@ -158,6 +158,11 @@ const OVERLAYS = [
 /** The ids a surface can be asked to show, so nothing hard-codes the list. */
 export const OVERLAY_IDS = OVERLAYS.map((overlay) => overlay.id);
 
+/** The credit an overlay is owed, for a surface that prints its own (a map plate). */
+export function overlayAttribution(id) {
+  return OVERLAYS.find((overlay) => overlay.id === id)?.attribution ?? '';
+}
+
 /**
  * Whether a style layer is the picture itself rather than something laid over
  * it: the imagery, the second picture Blink lays on it, and the overlays named,

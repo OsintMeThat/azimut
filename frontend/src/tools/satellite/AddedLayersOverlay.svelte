@@ -21,6 +21,9 @@
   import { copyText } from '../../lib/clipboard.js';
   import { paths } from '../../components/Icon.svelte';
   import { personalLayers } from '../../lib/map/personalLayers.svelte.js';
+  import { openFollowed } from '../../lib/map/followed.js';
+  import { fileUrl } from '../../lib/fileUrl.js';
+  import { asOf, isTracked } from '../../lib/map/layerHistory.js';
 
   let {
     engine = null,
@@ -47,8 +50,28 @@
     await copyText(text);
   }
 
-  /** name → { layer, sha } so a refreshed snapshot redraws and nothing else does. */
+  /** name → { layer, sha, moment, collection } so a refreshed snapshot redraws, a
+   *  tracked layer's moved cursor redraws from what is in hand, and nothing else does. */
   const live = new Map();
+
+  /** What a tracked layer's cursor reads, as one key: a change redraws it. */
+  const momentKey = (row) => isTracked(row) ? JSON.stringify(row.time ?? null) : '';
+
+  /** The features a row draws: all of them, or a tracked layer as it stood at its moment. */
+  function drawn(row, collection) {
+    if (!isTracked(row) || !collection) return collection;
+    const time = row.time ?? {};
+    return asOf(collection, time.at ?? null, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? 7 });
+  }
+
+  function paint(row, entry) {
+    entry.layer.set(drawn(row, entry.collection), {
+      categories: row.categories,
+      hidden: row.hidden,
+      period: row.period,
+      attribution: attribution(row),
+    });
+  }
 
   /**
    * Where this layer's own icons are, or nothing when it has none.
@@ -62,6 +85,22 @@
     if (!row.icons) return null;
     const base = `/api/cases/${caseId}/map-layers/${encodeURIComponent(row.name)}/icons`;
     return (key) => `${base}/${key}`;
+  }
+
+  /**
+   * What an own marker follows, on its card, each opened on a press: the footage
+   * first, then the proof geolocating it, or the file alone.
+   */
+  function followedPictures(properties) {
+    if (!properties.entity_id) return [];
+    const proof = properties.entity_type === 'proof';
+    const label = properties.entity_label || 'Untitled';
+    return [
+      properties.source_picture && { src: fileUrl(caseId, properties.source_picture), caption: 'Source',
+        title: `Open the footage “${properties.source_label || 'Untitled'}”`, open: () => openFollowed(caseId, properties.source_id) },
+      properties.entity_picture && { src: fileUrl(caseId, properties.entity_picture), caption: proof ? 'Proof' : 'Source',
+        title: proof ? `Open the proof “${label}”` : `Open “${label}”`, open: () => openFollowed(caseId, properties.entity_id) },
+    ].filter(Boolean);
   }
 
   function drop(name) {
@@ -95,6 +134,11 @@
     for (const row of layers) {
       const existing = live.get(row.name);
       if (existing && existing.sha === row.sha256) {
+        if (existing.moment !== momentKey(row)) {
+          existing.moment = momentKey(row);
+          if (existing.collection) untrack(() => paint(row, existing));
+          continue;
+        }
         // already drawn from these bytes: only the legend or the period can have moved
         existing.layer.filter(row.hidden, row.period);
         continue;
@@ -103,7 +147,7 @@
       const layer = createAddedLayer(engine, {
         editable: !!row.editable,
         card: (properties, point) => {
-          const card = layerCard(row.title, { coords: fmtCoords, copy })(properties, point);
+          const card = layerCard(row.title, { coords: fmtCoords, copy, pictures: followedPictures })(properties, point);
           const own = row.editable && properties.key;
           if (own || oncopyfeature) {
             const actions = document.createElement('div');
@@ -132,15 +176,32 @@
             if (own && properties.entity_type === 'place' && ondeleteplace) {
               action('Delete case place', 'link', () => ondeleteplace(properties.entity_id));
             }
-            if (!own && oncopyfeature) {
-              action('Copy to my layer', 'copy', () => {
-                const feature = live.get(row.name)?.layer.feature(properties.index);
-                if (feature) oncopyfeature(row, feature);
-              });
-            }
             const footer = document.createElement('div');
             footer.className = 'layer-card-footer';
             footer.append(actions);
+            // somebody else's feature, put in one of the analyst's layers with the
+            // menu a proof's point and a file use, opened from this button
+            if (!own && oncopyfeature) {
+              const add = document.createElement('button');
+              add.type = 'button';
+              add.className = 'layer-card-add';
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              svg.setAttribute('viewBox', '0 0 24 24');
+              svg.setAttribute('width', '12'); svg.setAttribute('height', '12');
+              svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor');
+              svg.setAttribute('stroke-width', '1.8');
+              svg.setAttribute('aria-hidden', 'true');
+              const path = document.createElementNS(svg.namespaceURI, 'path');
+              path.setAttribute('d', paths.layers);
+              svg.append(path);
+              add.append(svg, 'Add to a layer');
+              add.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const feature = live.get(row.name)?.layer.feature(properties.index);
+                if (feature) oncopyfeature(row, feature, add);
+              });
+              footer.append(add);
+            }
             const from = card.querySelector('.layer-card-from');
             if (from) footer.append(from);
             card.append(footer);
@@ -152,17 +213,17 @@
           onmenu?.(properties ? { ...at, feature: properties.name || UNNAMED, layer: row.title } : at),
       });
       layer.interactive(untrack(() => interactive));
-      live.set(row.name, { layer, sha: row.sha256 });
+      const entry = { layer, sha: row.sha256, moment: momentKey(row), collection: null };
+      live.set(row.name, entry);
       drawing(caseId, row.name)
         .then((collection) => {
           // the layer may have been switched off while its features were loading
-          if (live.get(row.name)?.layer !== layer) return;
-          layer.set(collection, {
-            categories: row.categories,
-            hidden: row.hidden,
-            period: row.period,
-            attribution: attribution(row),
-          });
+          if (live.get(row.name) !== entry) return;
+          entry.collection = collection;
+          // the row as it is now: its cursor may have moved while this loaded
+          const current = layers.find((item) => item.name === row.name) ?? row;
+          entry.moment = momentKey(current);
+          paint(current, entry);
           restack();
         })
         .catch(() => { if (live.get(row.name)?.layer === layer) drop(row.name); });
@@ -228,6 +289,31 @@
     color: var(--text-2);
     font-size: var(--fs-xs);
   }
+  /* What the marker follows, side by side: the footage, then the proof. */
+  :global(.layer-card-pictures) { display: flex; gap: 6px; margin: 6px 0 0; }
+  :global(.layer-card-picture) {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: #000;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  :global(.layer-card-picture:hover), :global(.layer-card-picture:focus-visible) { border-color: var(--accent); }
+  :global(.layer-card-picture img) { display: block; width: 100%; height: 96px; object-fit: cover; }
+  :global(.layer-card-picture span) {
+    position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 999px;
+    background: rgb(0 0 0 / 0.65); color: #fff; font-size: 10px;
+  }
+  :global(.layer-card-add) {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px;
+    border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-3);
+    color: var(--text-1); font-size: var(--fs-xs); cursor: pointer;
+  }
+  :global(.layer-card-add:hover), :global(.layer-card-add:focus-visible) { border-color: var(--accent); color: var(--accent); }
   :global(.layer-card-link) {
     display: block;
     margin-top: 4px;

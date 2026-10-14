@@ -2178,6 +2178,10 @@ export async function installAppFixture(page, options = {}) {
       });
     }
 
+    // The layers a proof's point can join: the fixture case has none. A spec
+    // that needs some routes its own over this one.
+    if (/^\/api\/cases\/[^/]+\/layer-targets$/.test(path)) return json(route, []);
+
     unexpected.push(`${request.method()} ${path}`);
     return json(route, { detail: `Unhandled browser fixture request: ${path}` }, 404);
   });

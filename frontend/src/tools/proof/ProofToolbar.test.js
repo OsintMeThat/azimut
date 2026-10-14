@@ -284,3 +284,54 @@ describe('what the rail shows for the pick', () => {
     expect(own.body).toContain('52°');
   });
 });
+
+describe('ProofToolbar sizes apart, and the page texts', () => {
+  it('puts each of the pick’s sizes on a slider of its own, named', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select',
+        selectedShape: { kind: 'rect', strokeWidth: 4, tag: 'AK' },
+        moreSizes: [{ id: 'tag', label: 'Tag text', value: 30, min: 8, max: 96 }],
+      }),
+    });
+    expect(body).toContain('>Line<');
+    expect(body).toContain('aria-label="stroke width"');
+    expect(body).toContain('>Tag text<');
+    expect(body).toContain('aria-label="Tag text size"');
+    expect(body).toMatch(/class="more-slider[^"]*"[\s\S]*?max="96"/);
+  });
+
+  it('names the main slider Text for words, and adds a callout’s line under it', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select',
+        selectedShape: { kind: 'callout', fontSize: 40 },
+        moreSizes: [{ id: 'line', label: 'Line', value: 4, min: 1, max: 16 }],
+      }),
+    });
+    expect(body).toContain('>Text<');
+    expect(body).toContain('aria-label="Line size"');
+  });
+
+  it('offers a picked panel’s captions their size and colour, Auto included', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({
+        tool: 'select',
+        pageText: { id: 'caption', label: 'Caption', size: 24, color: null, auto: '#94a3b8' },
+      }),
+    });
+    expect(body).toContain('title="Caption text"');
+    expect(body).toContain('aria-label="Caption text size"');
+    expect(body).toContain('aria-label="Caption colour auto"');
+    expect(render(ProofToolbar, { props: props({ tool: 'select' }) }).body).not.toContain('Caption text');
+  });
+
+  it('draws each lens as the wedge it opens, and the two ways a phone is held', () => {
+    const { body } = render(ProofToolbar, {
+      props: props({ tool: 'cone', showLens: true, activeLens: { lens: '1', upright: false, fov: 69.4 } }),
+    });
+    expect(body.match(/class="lens-tile/g)).toHaveLength(5);
+    expect(body).toContain('aria-label="Landscape"');
+    expect(body).toContain('aria-label="Phone held upright"');
+  });
+});

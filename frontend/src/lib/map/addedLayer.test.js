@@ -125,8 +125,33 @@ describe('personal marker symbols', () => {
     expect(bearing.layout['icon-rotate']).toEqual(['get', 'bearing']);
     expect(bearing.layout['icon-rotation-alignment']).toBe('map');
     const label = [...editable.map.layers.values()].find((entry) => entry.id.endsWith('-label'));
-    expect(label.filter).toEqual(['all', ['has', 'show_label'], ['!=', ['get', 'name'], '']]);
+    expect(label.filter).toEqual(['all', ['!', ['any', ['has', '$trail'], ['has', '$change']]],
+      ['has', 'show_label'], ['!=', ['get', 'name'], '']]);
     expect([...source.map.layers.keys()].some((id) => id.endsWith('-bearing') || id.endsWith('-label'))).toBe(false);
+  });
+
+  it('draws a tracked layer\'s past under it, dashed and hatched, and never on the layers that answer clicks', async () => {
+    const engine = stubEngine();
+    const buildHatch = vi.fn(() => ({ width: 12, height: 12, data: new Uint8Array(12 * 12 * 4) }));
+    const layer = createAddedLayer(engine, { editable: true, buildHatch });
+    const square = { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] };
+    await layer.set({ type: 'FeatureCollection', features: [
+      { type: 'Feature', geometry: square, properties: { index: 0, category: 'Front', colour: '#d55e00', $change: 'gained' } },
+      { type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] }, properties: { index: 0, category: 'Front', colour: '#d55e00', $trail: true } },
+    ] });
+    expect(buildHatch).toHaveBeenCalledWith('#d55e00', 'gained');
+    const [hatched] = [...engine.map.sources.values()][0].data.features;
+    expect(hatched.properties.$hatch).toMatch(/hatch-gained-d55e00$/);
+    const layers = [...engine.map.layers.values()];
+    const ids = layers.map((entry) => entry.id);
+    // the past is the lowest of the layer's own drawing
+    expect(ids.findIndex((id) => id.endsWith('-change-fill'))).toBeLessThan(ids.findIndex((id) => id.endsWith('-fill') && !id.includes('change')));
+    expect(layers.find((entry) => entry.id.endsWith('-trail-line')).paint['line-dasharray']).toEqual([2, 2]);
+    expect(layers.find((entry) => entry.id.endsWith('-hit')).filter[1]).toEqual(['!', ['any', ['has', '$trail'], ['has', '$change']]]);
+    // what is new keeps its own colour, whatever the feature's
+    expect(layers.find((entry) => entry.id.endsWith('-new-line')).paint['line-color']).toBe('#ffd400');
+    expect(layers.find((entry) => entry.id.endsWith('-new-ring')).filter).toContainEqual(['has', '$new']);
+    expect(layers.find((entry) => entry.id.endsWith('-mark')).paint['icon-opacity']).toEqual(['case', ['has', '$fade'], 0.4, 0.95]);
   });
 
   it('holds dragged features off the map until the move is drawn, keeping the other filters', async () => {

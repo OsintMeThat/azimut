@@ -118,7 +118,7 @@ test('the Tag control hangs it from another corner, and takes it off', async ({ 
   fixture.expectNoUnexpectedRequests();
 });
 
-test('a tag goes with its box, and grows with its line', async ({ page }) => {
+test('a tag goes with its box, and its words are sized apart from its line', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
   const box = await drawBox(page);
@@ -138,10 +138,15 @@ test('a tag goes with its box, and grows with its line', async ({ page }) => {
   expect(moved.tag.x - before.tag.x).toBeCloseTo(40, 0);
   expect(moved.tag.y - before.tag.y).toBeCloseTo(25, 0);
 
-  // a heavier line carries a bigger tag
+  // a heavier line keeps the words as they were, and the tag's own size grows them
   await page.getByTitle('Stroke width').click();
   await page.getByLabel('stroke width').fill('8');
+  await expect.poll(async () => (await save(page, fixture)).shapes[0].strokeWidth).toBe(8);
+  expect((await drawn(page, rect.id)).tag.h).toBeLessThan(moved.tag.h * 1.25);
+  await page.getByTitle('Stroke width').click();
+  await page.getByLabel('Tag text size').fill('40');
   await expect.poll(async () => (await drawn(page, rect.id)).tag.h).toBeGreaterThan(moved.tag.h * 1.4);
+  expect((await save(page, fixture)).shapes[0]).toMatchObject({ strokeWidth: 8, tagSize: 40 });
   fixture.expectNoUnexpectedRequests();
 });
 

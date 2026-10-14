@@ -74,6 +74,7 @@ class BulkBodyLimit:
         ("PUT", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
         ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("map-plates", "export"), "mapplates", "MAX_EXPORT_BODY_BYTES"),
         ("POST", ("compare", "gif"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("compare", "sequence"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "preview"), "compare", "MAX_GIF_BODY_BYTES"),
@@ -312,7 +313,8 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, horizon,
-        horizon_buildings, horizon_finds, horizon_views, horizon_work, ingest, inspect, maplayers, media, notes, plates, proofimports, proofs,
+        horizon_buildings, horizon_finds, horizon_views, horizon_work, ingest, inspect, mapplates, maplayers, media, notes, plates,
+        proofimports, proofs,
         proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
     )
     from .engine import sheets as sheet_engine
@@ -322,6 +324,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
     app.include_router(plates.router)
+    app.include_router(mapplates.router)
     app.include_router(figures.router)
     app.include_router(sheets.router)
     # The one sheet road that fetches bytes, so its own module and its own job.

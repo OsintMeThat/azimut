@@ -127,6 +127,7 @@
   import SavedSearch from './satellite/SavedSearch.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import MediaViewer from './satellite/MediaViewer.svelte';
+  import { createItemLayers } from './satellite/itemLayers.svelte.js';
   import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
   import HorizonEyeOverlay from './satellite/HorizonEyeOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
@@ -190,6 +191,16 @@
   // The case's saved work — both indexes, the panel's filter and the Locate
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
+  // The file played beside the map, put in one of the analyst's layers.
+  const mediaLayers = createItemLayers({ api, layers: addedLayers, notify: toast,
+    refreshEditor: (name) => { if (myLayers.editor?.name === name) myLayers.refresh(); } });
+  /** One of the file's markers, in its layer opened for editing. */
+  async function openMediaInLayer(place) {
+    const row = addedLayers.rows.find((one) => one.name === place.layer.name && one.editable)
+      ?? { name: place.layer.name, title: place.layer.title, editable: true };
+    if (myLayers.editor?.name !== row.name) await myLayers.open(row);
+    myLayers.select(place.marker.key);
+  }
   // The layers the analyst added themselves (a file they opened, a map they
   // follow) live in the one store every map reads (lib/map/addedLayersState),
   // because it owns the one network rule this feature has: a feed is read when
@@ -2376,7 +2387,7 @@
         onedit={editMyLayer}
         onremovefeature={(row, key) => myLayers.remove(key, row)}
         ondeleteplace={placeDeletion.open}
-        oncopyfeature={(row, feature) => myLayers.copy(row, feature)}
+        oncopyfeature={(row, feature, anchor) => myLayers.copy(row, feature, anchor)}
       />
 
       {#if sheetPoints && sheetShown}
@@ -2872,6 +2883,8 @@
             onclose={() => (mediaView = null)}
             onmedia={(row) => openEntity({ id: row.id, type: 'media', attrs: { path: row.path } })}
             onproof={openProofByName}
+            layerItems={mediaLayers}
+            onopenlayer={openMediaInLayer}
           />
           {:else}
           <SavedTree

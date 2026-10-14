@@ -65,6 +65,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   .analysis/   # Detect areas, saved detections, runs and the frames behind their results
   .search/     # saved Grid Search state
   .layers/     # added map layers: spec + source as received + its icons; .cache/ is derived
+  .mapplates/  # map plates: a page laid out round the case's maps, and its preview
   .trash/      # recoverable artifact payloads, in numbered slots
 ```
 
@@ -172,9 +173,13 @@ proof for publication.
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
 | ✅ **Personal map layers** | Edit on the map with a movable bar and a right-click menu (pick, area select, drag, draw, restyle, merge, split), turn a marker by its ring, style groups with pictograms and case-named colours, and mark each feature's status, day, sources and provenance in a sheet that saves as it goes. |
-| ✅ **Points into a layer** | Follows places, proofs and files of the case as they move, reads pasted coordinates, map links and posts, copies source features as external points, and takes a Geo Proof point from its menu, showing under it the layers it is in. |
+| ✅ **Points into a layer** | Follows places, proofs and files of the case as they move and as they are saved (a proof and its footage are one marker, named by the proof's description), reads pasted coordinates, map links and posts, and takes a Geo Proof point, a file played on the map or another layer's feature from the same step-by-step menu. |
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
+| ✅ **Layers followed over time** | Keeps a personal layer's features as dated states, by the day or the minute on one clock, reads it on any day with the state before dashed, what is new that day ringed, events fading and an area's gains and losses hatched, and downloads it as it stood or with every state dated. |
+| ✅ **Send to My Maps** | Saves a layer as it stood on one day as a KMZ, opens the analyst's My Maps beside it and says the three steps that replace its layer. |
+| ✅ **Map plates** | Lays a page out round the case's maps (title, legend, scale, north, inset, labels, arrows, pictures and forced credits) on a quiet basemap, and exports it as a PNG, a print PDF, or its days as an MP4, a GIF or an evolution sheet. |
+| ✅ **Map templates** | Keeps a plate's layout as a template, from the plate or in Settings, shares it as a file and starts new plates from it. |
 | ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
@@ -182,7 +187,7 @@ proof for publication.
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
 | ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
-| ✅ **Proof annotations & publishing** | Adds numbered markers, blur boxes, box tags, callouts, zoom insets, view cones and line styles, sets the proof in shipped fonts, keeps line widths and sizes the same on every panel, verifies proof points and carries proof dates into previewed post templates. |
+| ✅ **Proof annotations & publishing** | Adds numbered markers, blur boxes, box tags, callouts, zoom insets, view cones and line styles, puts marks free on the page or tied by their ends across panels, sets the proof in shipped fonts, keeps line widths and sizes the same on every panel, verifies proof points and carries proof dates into previewed post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
 | ✅ **Subjects & case analysis** | Corrects and merges subjects, indexes their events, searches across scripts and reviews proposed account and site connections. |
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
@@ -222,7 +227,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Collage; still to do: sample a video window directly, seam blending. |
-| **Proof annotation** | Boxes, arrows and labels free on the page like callouts, across panels and into the margins. |
 | **Detached tool windows** | The rule the map already follows, applied to the rest: a read-and-work surface (Board, Graph, Timeline) opens as many tabs as wanted and the tab it left stays live; a document editor opens one window per document and is greyed out where it was. Cross-tool handoffs route to wherever the tool now lives. |
 
 Edit Provenance rests on three facts about Adobe renders, kept here so the tool
@@ -315,6 +319,7 @@ stops making sense.
 - **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 - **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
+- **A live public map:** a layer published as GeoJSON at a public address (a Gist) that a uMap remote-data layer reads, so one press updates a map others follow.
 - **Dated layers by side in Compare:** a GeoConfirmed or other dated layer showing on each side only what was known by that side's date.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
 

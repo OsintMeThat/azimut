@@ -780,10 +780,11 @@ def update_settings(mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         return settings
 
 
-# Reusable presets file (templates.json). The two families a template can be:
-# "proof" (a proof's house style) and "post" (a thread skeleton).
-TEMPLATE_KINDS = ("proof", "post")
-DEFAULT_TEMPLATES: dict[str, Any] = {"schema": 1, "proof": [], "post": []}
+# Reusable presets file (templates.json). The families a template can be:
+# "proof" (a proof's house style), "post" (a thread skeleton) and "map" (a map
+# plate's layout with its data taken out).
+TEMPLATE_KINDS = ("proof", "post", "map")
+DEFAULT_TEMPLATES: dict[str, Any] = {"schema": 1, "proof": [], "post": [], "map": []}
 _templates_lock = threading.Lock()
 
 

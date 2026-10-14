@@ -138,8 +138,8 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 # The pair below is the contract, and it moves in one direction only: when a
 # shipped file really changes, set the manifest to the current __version__ and
 # record the new digest here (the failing test prints it).
-EXTENSION_VERSION = "0.3.2"
-EXTENSION_PAYLOAD = "39ae74f8fbe3eee32a95f5c73816bb6c6a4dd424a26004a48e527261325227c6"
+EXTENSION_VERSION = "0.3.3"
+EXTENSION_PAYLOAD = "09ea4b60571bee9f613c8726dc9d1510b9a8e142e0cfddbffa5a49972a8299c5"
 
 # The digest itself lives in engine/extinstall.py, because the update button
 # compares the same number: what the app ships against what the installed folder

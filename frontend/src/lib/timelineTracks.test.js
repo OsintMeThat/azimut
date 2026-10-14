@@ -92,6 +92,24 @@ describe('Timeline tracks', () => {
     expect(items[1].layer).toMatchObject({ title: 'Front', group: 'Strikes', status: 'destroyed', external: true, at: { lon: 2.35, lat: 48.85 } });
   });
 
+  it('draws a tracked feature as the spans its states held, and the day it went', () => {
+    const line = (y) => ({ type: 'LineString', coordinates: [[30, y], [31, y]] });
+    const items = layerItems([{ row: { name: 'front', title: 'Front', track: { on: true } }, collection: { features: [{ type: 'Feature', geometry: line(1),
+      properties: { key: 'f', name: 'Front line', states: [
+        { at: '2026-10-03', geometry: line(0) },
+        { at: '2026-10-12T14:00', geometry: line(1), status: 'damaged' },
+        { at: '2026-10-20', gone: true },
+      ] } }] } }]);
+    expect(items.map((item) => [item.label, item.earliest, item.latest])).toEqual([
+      ['Front line', '2026-10-03T00:00:00Z', '2026-10-11T23:59:59Z'],
+      ['Front line · changed', '2026-10-12T00:00:00Z', '2026-10-19T23:59:59Z'],
+      ['Front line · gone', '2026-10-20T00:00:00Z', '2026-10-20T23:59:59Z'],
+    ]);
+    expect(items[1].layer).toMatchObject({ moment: '2026-10-12T14:00', status: 'damaged', at: { lon: 30, lat: 1 } });
+    expect(items[2].layer.at).toBeNull();
+    expect(new Set(items.map((item) => item.id)).size).toBe(3);
+  });
+
   it('normalizes imported state and keeps track ids unique', () => {
     const tracks = normalizeTimelineTracks([
       { id: 'same', label: 'One', categories: ['statement', 'bad'] },

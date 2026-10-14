@@ -192,14 +192,20 @@ test('a source feature is copied into one of the analyst\'s layers as somebody e
   await page.getByRole('button', { name: 'Source map', exact: true }).click();
   const map = await page.locator('.map').boundingBox();
   await clickCard(page, map.x + map.width / 2, map.y + map.height / 2 - 9);
-  await page.locator('.layer-card').getByRole('button', { name: 'Copy to my layer', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Copy to my layer' });
-  await expect(dialog.getByLabel('Layer to copy into')).toHaveValue(fixture.rows.find((row) => row.editable).name);
-  await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
-  await expect(dialog).not.toBeVisible();
-  const copied = fixture.collections.get(fixture.rows.find((row) => row.editable).name);
+  const mine = fixture.rows.find((row) => row.editable);
+  await page.route(`**/api/cases/${CASE_ID}/layer-targets**`, (route) => route.fulfill({ json: [
+    { name: mine.name, title: mine.title, styles: [], markers: [], groups: fixture.groups.get(mine.name) }] }));
+  // the card says what it can do in words, and opens the menu a proof's point opens
+  await page.locator('.layer-card').getByRole('button', { name: 'Add to a layer', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Add to a layer', exact: true });
+  await page.screenshot({ path: test.info().outputPath('card-add-menu.png') });
+  await menu.getByRole('button', { name: 'Collected', exact: true }).click();
+  await menu.getByRole('button', { name: 'Point icon Tank icon', exact: true }).click();
+  await menu.getByRole('button', { name: 'Add to Collected', exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  const copied = fixture.collections.get(mine.name);
   expect(copied).toHaveLength(1);
-  expect(copied[0].properties).toMatchObject({ name: 'Original marker', provenance: 'external' });
+  expect(copied[0].properties).toMatchObject({ name: 'Original marker', provenance: 'external', symbol: 'badge-tank' });
 });
 
 test('feature grips reorder rows, move selected rows into groups and retain the group menu', async ({ page }) => {

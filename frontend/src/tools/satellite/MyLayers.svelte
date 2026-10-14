@@ -17,7 +17,9 @@
       ondownload={(row) => controller.download(row)}
       {ontoggle} {onedit} {onremove} {onreorder} {oncategory} onadd={onnew}
       dates={addedLayers.dates}
-      onperiod={(row, period, commit) => addedLayers.setPeriod(caseState.current?.id, row, period, commit)} />
+      onperiod={(row, period, commit) => addedLayers.setPeriod(caseState.current?.id, row, period, commit)}
+      moments={(row) => addedLayers.moments(row.name)}
+      ontime={(row, patch) => addedLayers.setTime(row.name, patch)} />
   {/if}
 </section>
 

@@ -63,11 +63,6 @@
     // null for the one the background gives (`auto`).
     pageText = null,
     setPageText = () => {},
-    // Whether the pick follows its picture or is free on the page, or how the
-    // next mark is drawn: 'picture', 'page', or 'mixed' for a family of both.
-    showAnchor = false,
-    activeAnchor = 'picture',
-    setAnchor = () => {},
     // A box's tag and the corner it hangs from, shown on a picked box.
     showTag = false,
     activeTag = 'none',
@@ -93,10 +88,6 @@
   const showContextTools = $derived(tool !== 'select' || selectedCount > 0);
   // A label and a callout are sized by their words; a callout's line follows.
   const fontSized = $derived(selectedShape?.kind === 'text' || selectedShape?.kind === 'callout');
-  const ANCHORS = [
-    { id: 'picture', icon: 'anchorPicture', label: 'On its picture', hint: 'Moves with the picture it is drawn on' },
-    { id: 'page', icon: 'anchorPage', label: 'Free on the page', hint: 'Stays where it is, over pictures and margins' },
-  ];
 
   /**
    * A field of view drawn as the wedge it opens, from the middle of a w×h box's
@@ -479,7 +470,7 @@
                 step="1"
                 value={row.value}
                 oninput={(event) => setSize(row.id, +event.target.value)}
-                aria-label={row.label}
+                aria-label={`${row.label} size`}
               />
               <span class="size-num">{row.value}</span>
             </label>
@@ -504,31 +495,6 @@
               ><Icon name={DASH[style].icon} size={18} /></button>
             {/each}
           </div>
-        {/snippet}
-      </ToolbarFlyout>
-    {/if}
-
-    <!-- Where the pick belongs: on its picture, following it, or free on the page. -->
-    {#if showAnchor}
-      <ToolbarFlyout title="Anchor" active={activeAnchor === 'page'}>
-        {#snippet button()}
-          <Icon name={activeAnchor === 'page' ? 'anchorPage' : 'anchorPicture'} size={18} />
-        {/snippet}
-        {#snippet children(close)}
-          {#each ANCHORS as entry (entry.id)}
-            <button
-              class="anchor-row"
-              class:active={activeAnchor === entry.id}
-              aria-label={entry.label}
-              onclick={() => { setAnchor(entry.id); close(); }}
-            >
-              <Icon name={entry.icon} size={18} />
-              <span class="anchor-text">
-                <span>{entry.label}</span>
-                <span class="anchor-hint">{entry.hint}</span>
-              </span>
-            </button>
-          {/each}
         {/snippet}
       </ToolbarFlyout>
     {/if}
@@ -1028,22 +994,6 @@
   .held-opt svg { fill: none; stroke: currentColor; stroke-width: 1.5; }
   .held-opt svg circle { fill: currentColor; stroke: none; }
   .lens-own { font-size: var(--fs-xs); color: var(--text-3); }
-
-  /* Anchor: two rows, each saying what it does. */
-  .anchor-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 236px;
-    padding: 7px 8px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    text-align: left;
-  }
-  .anchor-row:hover { color: var(--text-1); background: var(--bg-2); }
-  .anchor-row.active { color: var(--accent); background: var(--accent-soft); }
-  .anchor-text { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-sm); }
-  .anchor-hint { font-size: var(--fs-xs); color: var(--text-3); }
 
   .tb-text { display: flex; flex-direction: column; align-items: center; gap: 1px; }
   .tb-text-val { font-size: 9px; font-weight: 700; line-height: 1; color: var(--text-3); }

@@ -2265,6 +2265,10 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
         "spec": layout.layer_spec_rel(name),
         "editable": source.get("kind") == "editable",
         "origin": spec.get("origin"),
+        # a personal layer followed over time: `{on, precision, zone}`, kept when off
+        "track": spec.get("track") or None,
+        # the My Maps a personal layer is sent to, by its editor's address
+        "mymaps": spec.get("mymaps") or "",
     }
 
 

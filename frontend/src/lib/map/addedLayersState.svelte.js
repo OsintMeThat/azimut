@@ -40,6 +40,10 @@ import {
   toggleCategory,
 } from './addedLayers.js';
 import { active, indexDates, within } from './layerDates.js';
+import { isTracked, moments as momentsOf } from './layerHistory.js';
+
+/** How a tracked layer is read when nobody moved its cursor: as it is now, with its trail. */
+export const NOW = Object.freeze({ at: null, trail: true, since: null, window: 7 });
 
 /** The Map's switches, where layers are added: what `rows`, `drawn` and `toggle` read. */
 const MAP = 'satellite';
@@ -79,12 +83,19 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   /** name → `{ collection, index }`: the days of a layer's features, indexed
    *  once per snapshot rather than on every frame of a drag. */
   const indexes = new Map();
+  /** name → how a tracked layer is read: the moment its cursor is on (null for
+   *  now), its trail, and the reference its gains are counted from. The page's
+   *  and never stored, so a layer opens on what it is now, in every map at once. */
+  let times = $state({});
+  /** name → `{ collection, list }`: the moments a layer changes at, once per snapshot. */
+  const momentLists = new Map();
   /** …and the ones already re-read this session, so switching one off and on
    *  again draws what is in hand rather than asking its source again. */
   const renewed = new Set();
 
   function reset() {
     rows = [];
+    times = {};
     drawings.clear();
     held = new Set();
     picked = null;
@@ -110,6 +121,8 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   function listed(scope = MAP) {
     const shown = on[scope];
     return rows.map((row) => {
+      // a tracked layer is read at a moment, not filtered by a period
+      if (isTracked(row)) return { ...row, enabled: Boolean(shown?.has(row.name)), period: null, time: times[row.name] ?? NOW };
       const period = row.name in drafts ? drafts[row.name] : (row.period ?? null);
       const listing = { ...row, enabled: Boolean(shown?.has(row.name)), period };
       const index = active(period) ? datesOf(row.name) : null;
@@ -135,6 +148,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   function forget(name) {
     drawings.delete(name);
     indexes.delete(name);
+    momentLists.delete(name);
     if (!held.has(name)) return;
     const next = new Set(held);
     next.delete(name);
@@ -452,6 +466,32 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
      */
     dates(layer) {
       return datesOf(layer?.name ?? '');
+    },
+
+    /** A layer's features once something drew them, else null: what a plate's legend reads. */
+    collection(name) {
+      return held.has(name) ? drawings.get(name) ?? null : null;
+    },
+
+    /** How a tracked layer is read right now (`NOW` until its cursor moves). */
+    time(name) {
+      return times[name] ?? NOW;
+    },
+
+    /** Move a tracked layer's cursor, or switch its trail or its gains: every map follows. */
+    setTime(name, patch) {
+      times = { ...times, [name]: { ...(times[name] ?? NOW), ...patch } };
+    },
+
+    /** The moments a tracked layer changes at, once its features are in hand, else []. */
+    moments(name) {
+      if (!held.has(name)) return [];
+      const collection = drawings.get(name);
+      const memo = momentLists.get(name);
+      if (memo?.collection === collection) return memo.list;
+      const list = momentsOf(collection);
+      momentLists.set(name, { collection, list });
+      return list;
     },
 
     /**

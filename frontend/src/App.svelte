@@ -74,6 +74,7 @@
     { id: 'coordinates', label: TOOL_LABELS.coordinates, load: () => import('./tools/Coordinates.svelte') },
     { id: 'proof', label: TOOL_LABELS.proof, load: () => import('./tools/ProofComposer.svelte') },
     { id: 'post', label: TOOL_LABELS.post, load: () => import('./tools/PostComposer.svelte') },
+    { id: 'plate', label: TOOL_LABELS.plate, load: () => import('./tools/MapPlate.svelte') },
     { id: 'notebook', label: TOOL_LABELS.notebook, load: () => import('./tools/Notebook.svelte') },
   ];
   const ALL_TOOLS = [

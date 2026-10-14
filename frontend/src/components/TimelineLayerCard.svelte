@@ -6,6 +6,14 @@
    */
   import Icon from './Icon.svelte';
   import { gotoPoint } from '../lib/navigate.js';
+  import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { momentLabel } from '../lib/map/layerHistory.js';
+
+  /** A state of a tracked feature opens the map on that moment, so it is drawn as it stood. */
+  function show() {
+    if (item.layer.moment) addedLayers.setTime(item.layer.name, { at: item.layer.moment });
+    gotoPoint(item.layer.at.lat, item.layer.at.lon);
+  }
 
   let { item, onclose } = $props();
   const marks = $derived([item.layer.status === 'destroyed' ? 'Destroyed' : item.layer.status === 'damaged' ? 'Damaged' : '',
@@ -17,12 +25,12 @@
 <div class="body">
   <div class="kind">{item.layer.title}{item.layer.group ? ` · ${item.layer.group}` : ''}</div>
   <h2 dir="auto">{item.label}</h2>
-  <div class="day"><Icon name="clock" size={15} /><strong>{item.raw}</strong></div>
+  <div class="day"><Icon name="clock" size={15} /><strong>{item.layer.moment ? momentLabel(item.layer.moment) : item.raw}</strong></div>
   {#if marks}<p class="marks">{marks}</p>{/if}
   {#each item.layer.links as link (link)}<a href={link} target="_blank" rel="noreferrer noopener">{link}</a>{/each}
 </div>
 <footer>
-  {#if item.layer.at}<button class="btn btn-primary" onclick={() => gotoPoint(item.layer.at.lat, item.layer.at.lon)}>Show on the map</button>{/if}
+  {#if item.layer.at}<button class="btn btn-primary" onclick={show}>Show on the map</button>{/if}
 </footer>
 
 <style>

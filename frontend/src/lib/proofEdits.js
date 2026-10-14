@@ -176,8 +176,8 @@ export function fillPaint(color, opacity) {
 export const TAG_CORNERS = ['tl', 'tr', 'bl', 'br'];
 
 /**
- * A box tag's font size, in page pixels, read off the box's own line: a heavy
- * box carries a heavy tag, and one control sets both.
+ * The font size a new box tag starts at, in page pixels, read off the box's own
+ * line: a heavy box gets a heavy tag. It is the tag's own size from then on.
  */
 export function tagFont(strokeWidth = 4) {
   return Math.max(14, Math.round(strokeWidth * 4 + 4));

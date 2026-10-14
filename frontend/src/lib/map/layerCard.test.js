@@ -165,4 +165,23 @@ describe('what a personal feature says on its card', () => {
     expect(card.querySelector('.layer-card-facts').textContent).toBe('2026-09-01 – 2026-09-03');
     expect(card.querySelector('.layer-card-link')).toBeNull();
   });
+
+  it('shows the footage and the proof one of the analyst’s markers follows, each opened from its picture', () => {
+    const open = vi.fn();
+    const pictures = (properties) => [
+      { src: properties.source_picture && `/files/c/${properties.source_picture}`, caption: 'Source', title: 'Open the footage', open: () => open('video') },
+      { src: properties.entity_picture && `/files/c/${properties.entity_picture}`, caption: 'Proof', title: 'Open the proof', open: () => open('proof') },
+    ];
+    const element = layerCard('Front', { coords: () => '', pictures })(
+      { name: 'Strike', source_picture: 'thumbs/v.webp', entity_picture: 'thumbs/p.webp' }, null);
+    const shown = [...element.querySelectorAll('.layer-card-picture')];
+    expect(shown.map((one) => [one.textContent, one.querySelector('img').getAttribute('src')])).toEqual([
+      ['Source', '/files/c/thumbs/v.webp'], ['Proof', '/files/c/thumbs/p.webp']]);
+    shown[0].click();
+    expect(open).toHaveBeenCalledWith('video');
+    // a picture the thumbnail cache let go leaves the card as it was
+    shown[0].querySelector('img').dispatchEvent(new Event('error'));
+    expect([...element.querySelectorAll('.layer-card-picture')].map((one) => one.textContent)).toEqual(['Proof']);
+    expect(layerCard('Front', { pictures })({ name: 'Own' }, null).querySelector('.layer-card-pictures')).toBeNull();
+  });
 });

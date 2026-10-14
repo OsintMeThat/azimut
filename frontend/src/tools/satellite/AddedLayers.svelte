@@ -38,6 +38,8 @@
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import LayerTimeStrip from './LayerTimeStrip.svelte';
+  import LayerTimeCursor from './LayerTimeCursor.svelte';
+  import { isTracked } from '../../lib/map/layerHistory.js';
   import MarkerSymbol from './MarkerSymbol.svelte';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { caseState } from '../../lib/state.svelte.js';
@@ -84,6 +86,10 @@
     dates,
     /** `(layer, period, commit)`: the time strip moved, or was let go. */
     onperiod,
+    /** `(layer) => moments`: when a tracked layer changes (`layerHistory.js`). */
+    moments = null,
+    /** `(layer, patch)`: a tracked layer's cursor, trail or gains moved. */
+    ontime = null,
   } = $props();
   $effect(() => { if (rows.some((row) => row.editable)) layerPalette.load(caseState.current?.id); });
 
@@ -343,7 +349,11 @@
         <!-- Only on a layer being drawn, and only once its features are in hand
              and turn out to be dated: a filter over marks nobody can see would
              be a control with nothing to show for it. -->
-        {#if row.enabled}
+        {#if row.enabled && isTracked(row) && ontime}
+          <!-- A tracked layer is read at one moment rather than filtered by a period. -->
+          <LayerTimeCursor time={row.time} moments={moments?.(row) ?? []} precision={row.track?.precision ?? 'day'}
+            zone={row.track?.zone ?? 'UTC'} label={`${row.title}: moment`} onchange={(patch) => ontime(row, patch)} />
+        {:else if row.enabled}
           {@const index = dates?.(row)}
           {#if index}
             <LayerTimeStrip

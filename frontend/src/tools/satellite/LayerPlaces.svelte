@@ -1,12 +1,12 @@
 <script>
   /**
-   * The layers a proof's point is already in, under the point: one line each,
-   * to open the marker where it is edited or take it back out.
+   * The layers a case item is already in, one line each (a proof's point, a
+   * file on the map): open the marker where it is edited, or take it back out.
    */
   import Icon from '../../components/Icon.svelte';
-  import MarkerSymbol from '../satellite/MarkerSymbol.svelte';
+  import MarkerSymbol from './MarkerSymbol.svelte';
 
-  /** `places`: `{ layer, group, marker }` for this point (`placesOf`). */
+  /** `places`: `{ layer, group, marker }` on this point (`placesOf`, `placesAt`). */
   let { places = [], busy = false, onopen, onremove } = $props();
 </script>
 

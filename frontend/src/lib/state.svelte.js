@@ -197,7 +197,7 @@ export const caseState = $state({
  * Settings edits one, so the composers' "start from a template" menus stay
  * current without re-fetching. Each entry: { id, name, updated_at, data }.
  */
-export const templatesState = $state({ proof: [], post: [] });
+export const templatesState = $state({ proof: [], post: [], map: [] });
 
 /**
  * The Post composer's live draft, mirrored for the template editor's preview so
@@ -211,6 +211,7 @@ export async function loadTemplates() {
     const t = await api.get('/api/templates');
     templatesState.proof = Array.isArray(t.proof) ? t.proof : [];
     templatesState.post = Array.isArray(t.post) ? t.post : [];
+    templatesState.map = Array.isArray(t.map) ? t.map : [];
   } catch {
     /* templates are a convenience; an empty store is a fine fallback */
   }
@@ -261,6 +262,8 @@ export const uiState = $state({
   openCollage: null, // collage name to reopen in the Collage tool
   openCompare: null, // compare-session name to reopen in the Compare tool
   openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
+  openPlate: null, // map plate name to reopen in the Map plate tool
+  openPlateTemplate: null, // map template id to edit in the Map plate tool, from Settings
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
@@ -648,6 +651,7 @@ function clearCaseHandoffs() {
   uiState.openCollage = null;
   uiState.openCompare = null;
   uiState.openHorizonView = null;
+  uiState.openPlate = null;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;
