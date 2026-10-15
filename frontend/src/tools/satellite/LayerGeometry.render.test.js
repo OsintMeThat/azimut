@@ -70,6 +70,33 @@ describe('layer geometry handles', () => {
     unmount(held); held = null; expect(removed).toHaveBeenCalledTimes(2);
   });
 
+  it('closes a box drawn out to the pointer on the second click, no handle in the way', async () => {
+    const { controller, callbacks, api, canvas } = await setup('Rectangle'); api.post.mockClear();
+    callbacks.get('click')({ lon: 2, lat: 4 });
+    // the box follows the pointer, its far corner under it: a handle there would take the click
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 60, clientY: 100, bubbles: true })); flushSync();
+    expect(controller.sketch.rings[0]).toEqual([[2, 4], [5, 4], [5, 8], [2, 8]]);
+    expect(document.querySelector('.vertex')).toBeNull();
+    callbacks.get('click')({ lon: 5, lat: 8 });
+    await controller.whenSaved(); await new Promise((done) => setTimeout(done)); flushSync();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/shapes', expect.objectContaining({
+      geometry: { type: 'Polygon', coordinates: [[[2, 4], [5, 4], [5, 8], [2, 8], [2, 4]]] } }));
+    expect(controller.sketch).toBeNull();
+  });
+
+  it('saves a circle drawn out to the pointer with Enter', async () => {
+    const { controller, callbacks, api, canvas } = await setup('Circle'); api.post.mockClear();
+    callbacks.get('click')({ lon: 2, lat: 4 });
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(api.post).not.toHaveBeenCalled();
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 60, clientY: 100, bubbles: true })); flushSync();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await controller.whenSaved(); await new Promise((done) => setTimeout(done)); flushSync();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/shapes', expect.objectContaining({ geometry: expect.objectContaining({ type: 'Polygon' }) }));
+    expect(api.post.mock.calls.at(-1)[1].geometry.coordinates[0]).toHaveLength(65);
+    expect(controller.sketch).toBeNull();
+  });
+
   it('picks a feature on a press, and a drag moves it as one edit the toast can undo', async () => {
     const { controller, api, canvas, notify } = await setup(null, [point('a', 2, 4), point('b', 30, 30)]);
     api.post.mockClear();

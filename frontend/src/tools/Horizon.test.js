@@ -103,7 +103,8 @@ describe('the Horizon layout', () => {
 describe('the small map\'s layers', () => {
   it('offers every layer the other maps do, from the shared catalogue and store', () => {
     expect(source).toContain("const mapLayers = createLayerSet({");
-    expect(source).toContain("initial: ['boundaries', 'placenames', 'saved']");
+    expect(source).toContain("const HORIZON_LAYERS = ['boundaries', 'placenames', 'saved'];");
+    expect(source).toContain("createMapLayerMemory('horizon', HORIZON_LAYERS)");
     expect(source).toContain("const myLayers = addedLayers.scope('horizon');");
     expect(markup).toContain('<LayerList');
     expect(markup).toContain('bind:folded={layersFolded}');

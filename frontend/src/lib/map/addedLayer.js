@@ -252,6 +252,53 @@ export function hatchImage(colour, kind, make = defaultCanvas) {
   return ctx.getImageData(0, 0, HATCH_PIXELS, HATCH_PIXELS);
 }
 
+/** The head drawn on a line's end, in its own colour, pointing up before it is turned. */
+export const ARROW_PIXELS = 26;
+export function arrowHeadImage(colour, make = defaultCanvas) {
+  const canvas = make(ARROW_PIXELS, ARROW_PIXELS);
+  const ctx = canvas?.getContext?.('2d');
+  if (!ctx) return null;
+  const middle = ARROW_PIXELS / 2;
+  ctx.beginPath();
+  ctx.moveTo(middle, 2);
+  ctx.lineTo(ARROW_PIXELS - 4, ARROW_PIXELS - 4);
+  ctx.lineTo(middle, ARROW_PIXELS - 9);
+  ctx.lineTo(4, ARROW_PIXELS - 4);
+  ctx.closePath();
+  ctx.fillStyle = colour; ctx.fill();
+  ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineJoin = 'round'; ctx.stroke();
+  return ctx.getImageData(0, 0, ARROW_PIXELS, ARROW_PIXELS);
+}
+
+/** How a confidence is drawn when the feature names no dash of its own: probable dashed, claimed dotted. */
+export const CONFIDENCE_DASH = { probable: 'dashed', claimed: 'dotted' };
+/** …and how strongly a point of each confidence is drawn. */
+export const CONFIDENCE_OPACITY = { probable: 0.8, claimed: 0.55 };
+
+/** The degrees from north a line leaves its last point by, read off its last two. */
+export function endBearing(line, atStart = false) {
+  const points = atStart ? [line[1], line[0]] : [line.at(-2), line.at(-1)];
+  if (!points[0] || !points[1]) return 0;
+  const [[lon1, lat1], [lon2, lat2]] = points;
+  const dx = (lon2 - lon1) * Math.cos((((lat1 + lat2) / 2) * Math.PI) / 180);
+  return ((Math.atan2(dx, lat2 - lat1) * 180) / Math.PI + 360) % 360;
+}
+
+/** The arrowheads a feature's line ends carry, as points the map turns its head image on. */
+export function arrowHeads(feature) {
+  const ends = feature?.properties?.line_arrow;
+  const geometry = feature?.geometry;
+  if (!ends || !geometry || !String(geometry.type).includes('LineString')) return [];
+  const lines = geometry.type === 'LineString' ? [geometry.coordinates] : geometry.coordinates;
+  const heads = [];
+  for (const line of lines) {
+    if (line.length < 2) continue;
+    heads.push({ at: line.at(-1), angle: endBearing(line) });
+    if (ends === 'both') heads.push({ at: line[0], angle: endBearing(line, true) });
+  }
+  return heads;
+}
+
 export function bearingImage(make = defaultCanvas) {
   const canvas = make(BEARING_PIXELS, BEARING_PIXELS), context = canvas.getContext('2d');
   if (!context) return null;
@@ -385,7 +432,7 @@ export function periodFilter(period = null) {
 export function createAddedLayer(
   engine,
   { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null,
-    editable = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage } = {}
+    editable = false, history = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage } = {}
 ) {
   const map = engine.impl;
   const prefix = `added-${++layers}`;
@@ -399,6 +446,12 @@ export function createAddedLayer(
   const HIT_OWN = `${prefix}-hit-own`;
   const BEARING = `${prefix}-bearing`;
   const LABEL = `${prefix}-label`;
+  // A personal feature's own line look, a hatched fill, and the heads on its line ends.
+  const LINE_DASH = `${prefix}-line-dash`;
+  const LINE_DOT = `${prefix}-line-dot`;
+  const FILL_HATCH = `${prefix}-fill-hatch`;
+  const ARROW = `${prefix}-arrow`;
+  const ARROW_SOURCE = `${prefix}-arrow-src`;
   // A tracked layer's past, under what it is now (`layerHistory.js`): the
   // state before, dashed, and an area's gains and losses, hatched.
   const CHANGE_FILL = `${prefix}-change-fill`;
@@ -410,17 +463,23 @@ export function createAddedLayer(
   const NEW_RING = `${prefix}-new-ring`;
   // A source draws no text and no direction: its names are read in the card,
   // and a personal layer is the one whose analyst asks for either.
-  const PAINTED = [FILL, LINE, DOT, ...(editable ? [BEARING] : []), MARK, OWN,
-    ...(editable ? [LABEL, HIT, HIT_OWN] : [])];
+  // a dash is drawn on any layer, a plate setting one for a source layer as for the analyst's own
+  const PAINTED = [FILL, ...(editable ? [FILL_HATCH] : []), LINE, LINE_DASH, LINE_DOT, DOT,
+    ...(editable ? [BEARING] : []), MARK, OWN, ...(editable ? [LABEL, HIT, HIT_OWN] : [])];
   // Drawn, never clicked: the past says nothing a card on the feature would not.
-  const DECOR = editable ? [CHANGE_FILL, CHANGE_LINE, TRAIL_LINE, TRAIL_DOT, NEW_LINE, NEW_RING] : [];
-  const DRAWN = [...DECOR, ...PAINTED];
+  // Only a layer followed over time has a past, so only it pays for these.
+  const DECOR = editable && history ? [CHANGE_FILL, CHANGE_LINE, TRAIL_LINE, TRAIL_DOT, NEW_LINE, NEW_RING] : [];
+  const DRAWN = [...DECOR, ...PAINTED, ...(editable ? [ARROW] : [])];
   // A merge makes multi-part lines and areas, so each kind names both forms.
   const POINT = ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]];
   const NOW = ['!', ['any', ['has', '$trail'], ['has', '$change']]];
   const BASE = {
     [FILL]: ['all', NOW, ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]]],
-    [LINE]: ['all', NOW, ['!', POINT]],
+    [LINE]: ['all', NOW, ['!', POINT], ['!', ['has', '$dash']]],
+    [LINE_DASH]: ['all', NOW, ['!', POINT], ['==', ['get', '$dash'], 'dashed']],
+    [LINE_DOT]: ['all', NOW, ['!', POINT], ['==', ['get', '$dash'], 'dotted']],
+    [FILL_HATCH]: ['all', NOW, ['has', '$fillhatch']],
+    [ARROW]: NOW,
     [DOT]: ['all', NOW, POINT],
     [BEARING]: ['all', NOW, POINT, ['has', 'bearing']],
     // The two symbol layers split the points between them on the one
@@ -469,7 +528,7 @@ export function createAddedLayer(
       attribution,
     });
     const colour = ['to-color', ['get', '$colour']];
-    if (editable) {
+    if (DECOR.length) {
       map.addLayer({ id: CHANGE_FILL, type: 'fill', source: SOURCE, filter: BASE[CHANGE_FILL],
         paint: { 'fill-pattern': ['get', '$hatch'] } });
       map.addLayer({ id: CHANGE_LINE, type: 'line', source: SOURCE, filter: BASE[CHANGE_LINE],
@@ -495,8 +554,11 @@ export function createAddedLayer(
       type: 'fill',
       source: SOURCE,
       filter: BASE[FILL],
-      paint: { 'fill-color': colour, 'fill-opacity': ['case', ['has', '$fade'], 0.07, 0.18] },
+      paint: { 'fill-color': colour, 'fill-opacity': ['case', ['has', '$fade'], 0.07, ['==', ['get', 'area_fill'], 'none'], 0,
+        ['coalesce', ['get', 'fill_opacity'], 0.18]] },
     });
+    if (editable) map.addLayer({ id: FILL_HATCH, type: 'fill', source: SOURCE, filter: BASE[FILL_HATCH],
+      paint: { 'fill-pattern': ['get', '$fillhatch'] } });
     map.addLayer({
       id: LINE,
       type: 'line',
@@ -505,6 +567,20 @@ export function createAddedLayer(
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2], 'line-opacity': ['case', ['has', '$fade'], 0.35, 0.9] },
     });
+    // a dash cannot be read off a feature, so each look is its own layer
+    for (const [id, dash, cap] of [[LINE_DASH, [3, 2], 'butt'], [LINE_DOT, [0.1, 2], 'round']]) {
+      map.addLayer({ id, type: 'line', source: SOURCE, filter: BASE[id], layout: { 'line-cap': cap, 'line-join': 'round' },
+        paint: { 'line-color': colour, 'line-width': ['coalesce', ['get', 'stroke_width'], 2],
+          'line-opacity': ['case', ['has', '$fade'], 0.35, 0.9], 'line-dasharray': dash } });
+    }
+    if (editable) {
+      map.addSource(ARROW_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({ id: ARROW, type: 'symbol', source: ARROW_SOURCE, filter: BASE[ARROW],
+        layout: { 'icon-image': ['get', '$arrowicon'], 'icon-rotate': ['get', '$angle'], 'icon-rotation-alignment': 'map',
+          'icon-size': ['max', 0.45, ['*', 0.22, ['coalesce', ['get', 'stroke_width'], 2]]],
+          'icon-allow-overlap': true, 'icon-ignore-placement': true },
+        paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.35, 0.95] } });
+    }
     // Under the symbols, and only while they are being dropped: far out, the
     // collision below hides most of a dense layer, and a dot per feature is what
     // keeps the map honest about how much is really there. Close in, every
@@ -562,7 +638,7 @@ export function createAddedLayer(
       paint: {
         'icon-color': colour,
         // an event past its day reads faintly, as what has happened rather than what stands
-        'icon-opacity': ['case', ['has', '$fade'], 0.4, 0.95],
+        'icon-opacity': ['case', ['has', '$fade'], 0.4, ['coalesce', ['get', '$opacity'], 0.95]],
         'icon-halo-color': ICON_OUTLINE,
         'icon-halo-width': ICON_OUTLINE_WIDTH,
         'icon-halo-blur': 0.2,
@@ -594,7 +670,7 @@ export function createAddedLayer(
         'icon-ignore-placement': editable,
         'symbol-sort-key': ['get', 'index'],
       },
-      paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.4, 0.95] },
+      paint: { 'icon-opacity': ['case', ['has', '$fade'], 0.4, ['coalesce', ['get', '$opacity'], 0.95]] },
     });
     // A group's names, written under its marks once the analyst asks for them.
     if (editable) map.addLayer({
@@ -605,7 +681,7 @@ export function createAddedLayer(
       layout: {
         'text-field': ['get', 'name'],
         'text-font': LABEL_FONT,
-        'text-size': 11,
+        'text-size': ['coalesce', ['get', 'label_size'], 11],
         'text-anchor': 'top',
         'text-offset': [0, 0.9],
         'text-max-width': 10,
@@ -763,6 +839,35 @@ export function createAddedLayer(
     return arrived;
   }
 
+  /** What a personal feature's own look adds to its properties: its dash, its hatching, its strength. */
+  function lookOf(feature, colour) {
+    const properties = feature.properties ?? {};
+    const point = String(feature.geometry?.type).includes('Point');
+    const look = {};
+    const dash = properties.line_dash || (editable ? CONFIDENCE_DASH[properties.confidence] : '');
+    if (!point && (dash === 'dashed' || dash === 'dotted')) look.$dash = dash;
+    if (!editable) return Object.keys(look).length ? look : null;
+    if (point && CONFIDENCE_OPACITY[properties.confidence]) look.$opacity = CONFIDENCE_OPACITY[properties.confidence];
+    if (String(feature.geometry?.type).includes('Polygon') && properties.area_fill === 'hatch') {
+      const id = `${prefix}-fillhatch-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
+      if (!map.hasImage(id)) {
+        const pixels = buildHatch(colour, 'gained');
+        if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+      }
+      if (map.hasImage(id)) look.$fillhatch = id;
+    }
+    return Object.keys(look).length ? look : null;
+  }
+
+  function arrowIcon(colour) {
+    const id = `${prefix}-arrowhead-${String(colour).replace(/[^0-9a-z]/gi, '')}`;
+    if (!map.hasImage(id)) {
+      const pixels = arrowHeadImage(colour);
+      if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+    }
+    return id;
+  }
+
   function applyVisibility() {
     for (const layer of DRAWN) {
       if (map.getLayer(layer)) {
@@ -802,6 +907,8 @@ export function createAddedLayer(
           }
           return { ...feature, properties: { ...feature.properties, $hatch: id } };
         }
+        const own = lookOf(feature, colour);
+        if (own) feature = { ...feature, properties: { ...feature.properties, ...own } };
         const native = editable && !isBadge(symbol) && !ready.has(feature.properties?.icon);
         if (feature.geometry?.type === 'Point' && (isBadge(symbol) || native)) {
           const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
@@ -825,12 +932,20 @@ export function createAddedLayer(
             : null),
         },
       }; });
+      if (editable) map.getSource(ARROW_SOURCE)?.setData({ type: 'FeatureCollection', features: features.flatMap((feature) => {
+        const heads = arrowHeads(feature);
+        if (!heads.length) return [];
+        const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
+        const icon = arrowIcon(feature.properties?.colour || categoryColour(groups[groupAt], groupAt));
+        return heads.map(({ at, angle }) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: at },
+          properties: { ...feature.properties, $angle: angle, $arrowicon: icon } }));
+      }) });
       const symbols = [...new Set(features.map((feature) => feature.properties.symbol))]
         .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
       registerIcons(map, iconImage, symbols);
       map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
       for (const layer of DRAWN) {
-        if ([OWN, HIT, HIT_OWN, BEARING, LABEL, CHANGE_FILL, NEW_LINE, NEW_RING].includes(layer) || !map.getLayer(layer)) continue;
+        if ([OWN, HIT, HIT_OWN, BEARING, LABEL, CHANGE_FILL, NEW_LINE, NEW_RING, FILL_HATCH, ARROW].includes(layer) || !map.getLayer(layer)) continue;
         const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color'
           : layer === TRAIL_DOT ? 'circle-stroke-color' : 'line-color';
         map.setPaintProperty(layer, property, featureColour(colour));
@@ -964,6 +1079,7 @@ export function createAddedLayer(
           if (map.getLayer(layer)) map.removeLayer(layer);
         }
         if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+        if (map.getSource(ARROW_SOURCE)) map.removeSource(ARROW_SOURCE);
       }
       for (const id of badgeIcons) if (map.hasImage(id)) map.removeImage?.(id);
       badgeIcons.clear();

@@ -198,7 +198,7 @@ describe('personal layers', () => {
     source.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith(path, { links: ['https://x.com/a/1'] });
     expect(document.querySelector('.chip a').textContent).toBe('x.com');
-    byText('Someone else').click(); await controller.whenSaved(); flushSync();
+    byText('Others').click(); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith(path, { provenance: 'external' });
     expect(api.patch).toHaveBeenCalledTimes(4);
     expect(byText('Save changes')).toBeUndefined();
@@ -215,7 +215,7 @@ describe('personal layers', () => {
     expect(sheet.textContent).toContain('Several days');
     byText('Intact').click();
     expect(updateSelection).toHaveBeenCalledWith({ status: null });
-    byText('Someone else').click();
+    byText('Others').click();
     expect(updateSelection).toHaveBeenCalledWith({ provenance: 'external' });
   });
 
@@ -315,7 +315,6 @@ describe('personal layers', () => {
 
   it('keeps the editor open while clicks are still being saved', () => {
     show(MyLayers, { controller: { editor: { title: 'Working map' }, features: [], pending: 2 } });
-    expect(byText('Done').disabled).toBe(true);
     expect(document.querySelector('[role="status"]').textContent).toBe('Saving 2…');
   });
 
@@ -450,5 +449,38 @@ describe('a feature with a history', () => {
     show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: false } }, cursor: null }) });
     const buttons = [...document.querySelectorAll('[aria-label="Feature history"] button')];
     expect(buttons.every((button) => button.disabled)).toBe(true);
+  });
+
+  it('draws a line or an area as the analyst says, says how sure it is, and keeps status to markers', async () => {
+    const line = { type: 'Feature', properties: { key: 'l1', name: 'Front', group: 'g' }, geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48]] } };
+    const area = { type: 'Feature', properties: { key: 'a1', name: 'Pocket', group: 'g' }, geometry: { type: 'Polygon', coordinates: [[[2, 48], [2.1, 48], [2, 48.1], [2, 48]]] } };
+    const { controller, api } = await editing({ features: [line, area] });
+    controller.select('l1');
+    show(MyLayers, { controller });
+    const sheet = () => document.querySelector('[aria-label="Feature"]');
+    // a line has no status: it is not damaged or destroyed
+    expect(sheet().querySelector('[aria-label="Feature status"]')).toBeNull();
+    sheet().querySelector('[aria-label="Line dash"] button:nth-child(2)').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/l1', { line_dash: 'dashed' });
+    sheet().querySelector('[aria-label="Line arrow"] button:nth-child(2)').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/l1', { line_arrow: 'end' });
+    sheet().querySelector('[aria-label="Feature confidence"] button:nth-child(4)').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/l1', { confidence: 'claimed' });
+    controller.select('a1'); flushSync();
+    expect(sheet().querySelector('[aria-label="Line arrow"]')).toBeNull();
+    sheet().querySelector('[aria-label="Area fill"] button:nth-child(2)').click(); await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/a1', { area_fill: 'hatch' });
+  });
+
+  it('finds a feature by its note and writes its day as a reader would', async () => {
+    const features = [{ type: 'Feature', properties: { key: 'k1', name: 'Point 12', group: 'g', date: '2026-10-14', description: 'Burnt hangar by the runway' },
+      geometry: { type: 'Point', coordinates: [2, 48] } }];
+    const { controller } = await editing({ features });
+    show(MyLayers, { controller });
+    expect(document.querySelector('.features .day').textContent).toBe('14 Oct 2026');
+    expect(document.querySelector('.features .name').textContent).toContain('Burnt hangar');
+    const find = document.querySelector('[aria-label="Find in this layer"]'); find.value = 'hangar';
+    find.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(document.body.textContent).toContain('1 found');
   });
 });

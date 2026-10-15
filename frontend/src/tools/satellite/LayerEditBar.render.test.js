@@ -23,6 +23,31 @@ function editor(extra = {}) {
 const button = (label) => document.querySelector(`[aria-label="${label}"]`);
 
 describe('the layer edit bar', () => {
+  it('draws circles and boxes, takes edits back and forth, and never greys out while saving', () => {
+    const controller = editor({ pending: 3, canUndo: true, canRedo: false, startShape: vi.fn(), undo: vi.fn(), redo: vi.fn() });
+    show(LayerEditBar, { controller, ondone: vi.fn() });
+    expect(button('Add markers').disabled).toBe(false);
+    button('Draw a circle').click();
+    button('Draw a box').click();
+    expect(controller.startShape.mock.calls).toEqual([['Circle'], ['Rectangle']]);
+    button('Undo the last edit').click();
+    expect(controller.undo).toHaveBeenCalledOnce();
+    expect(button('Redo the last edit').disabled).toBe(true);
+  });
+
+  it('extends a line being reshaped from either end, and draws freehand while a new one is drawn', () => {
+    const extendFrom = vi.fn();
+    const reshaping = editor({ sketch: { type: 'LineString', key: 'l1', rings: [[[0, 0], [1, 1]]] }, extendFrom, complete: true });
+    show(LayerEditBar, { controller: reshaping, ondone: vi.fn() });
+    button('Extend from its start').click();
+    expect(extendFrom).toHaveBeenCalledWith('start');
+    unmount(held); held = null; document.body.innerHTML = '';
+    const drawing = editor({ sketch: { type: 'LineString', key: null, rings: [[]] }, freehand: false });
+    show(LayerEditBar, { controller: drawing, ondone: vi.fn() });
+    button('Draw freehand').click();
+    expect(drawing.freehand).toBe(true);
+  });
+
   it('styles the next markers, and the group they go into, when nothing is selected', () => {
     const controller = editor();
     show(LayerEditBar, { controller, ondone: vi.fn() });

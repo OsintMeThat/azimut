@@ -20,7 +20,9 @@
   let { controller, vertex = null, ondone } = $props();
   const selection = $derived(controller.selection ?? []);
   const chosen = $derived(controller.features.filter((feature) => selection.includes(feature.properties.key)));
-  const busy = $derived(controller.pending > 0 || controller.loading);
+  // Saves queue behind each other, so the bar never waits on one: only opening the layer holds it.
+  const busy = $derived(controller.loading);
+  const saving = $derived(controller.pending > 0);
   const sketch = $derived(controller.sketch);
   const selecting = $derived(!controller.placing && !sketch && !controller.lassoing);
   /** A line being reshaped cuts at the corner last touched, never at its two ends. */
@@ -39,11 +41,47 @@
   const hint = $derived(controller.lassoing ? 'Draw round what to select. Shift adds to the selection.'
     : controller.placing ? 'Click the map to add markers in the style shown. Esc to stop.'
       : sketch?.type === 'Selection' ? 'Drag the handle to move the selection. Enter to save, Esc to cancel.'
-        : sketch?.key ? 'Drag a corner to move it, + to add one. Enter to save, Esc to cancel.'
-          : sketch ? 'Click to add points. Enter to save, Esc to cancel.'
-            : onePoint ? 'Drag to move. Turn the ring to set where it faces.'
-              : selection.length ? 'Drag to move. Shift-click adds. Right-click for more.'
-                : 'Click a feature to select it, drag to move it. Right-click for more.');
+        : sketch?.shape ? (sketch.anchor ? 'Click again where it ends, or press Enter.' : sketch.shape === 'circle' ? 'Click the centre, then how far it reaches.' : 'Click one corner, then the opposite one.')
+          : sketch?.key && sketch.type === 'LineString' ? `Drag a corner, + to add one, a click on the map extends it from its ${sketch.extend === 'start' ? 'start' : 'end'}. Enter to save.`
+            : sketch?.key ? 'Drag a corner to move it, + to add one. Ctrl+Z takes a step back. Enter to save, Esc to cancel.'
+              : sketch && controller.freehand ? 'Drag to draw, as many strokes as it takes. Enter to save, Esc to cancel.'
+                : sketch ? 'Click to add points; a corner near another lands on it, Alt lets it go. Enter or a double click saves, Ctrl+Z steps back.'
+                  : onePoint ? 'Drag to move. Turn the ring to set where it faces.'
+                    : selection.length ? 'Drag what is picked to move it. Shift-click adds. Ctrl+Z undoes, Ctrl+Shift+Z redoes.'
+                      : 'Click to pick. A marker drags at once, a line or an area once picked. Right-click for more.');
+  /** The style palette is open over the map: the tips step aside rather than hide under it. */
+  let styling = $state(false);
+  /**
+   * Upright on a map too short for it, the bar folds into two columns rather than run
+   * off the map: `rows` is how many each column holds, 0 while one column fits.
+   */
+  let barEl = $state(null);
+  let rows = $state(0);
+  /** What the bar adds round its buttons (padding, gaps), read while it stands in one column. */
+  let overhead = 30;
+  /** Lying along a map too narrow for it, the bar wraps onto two lines, `wrap` its width then. */
+  let wrap = $state(0);
+  function fold() {
+    if (barEl && !upright(place) && frame.width) {
+      rows = 0;
+      const items = [...barEl.children];
+      const long = items.reduce((sum, node) => sum + node.offsetWidth + 2, 12);
+      const room = frame.width - 24;
+      wrap = long > room ? Math.ceil(Math.min(room, long / 2 + 40)) : 0;
+      return;
+    }
+    wrap = 0;
+    if (!barEl || !upright(place) || !frame.height) { rows = 0; return; }
+    const items = [...barEl.children];
+    const tall = items.reduce((sum, node) => sum + node.offsetHeight, 0);
+    if (!rows) overhead = Math.max(0, barEl.offsetHeight - tall);
+    // the room along its edge, between what sits above it (the zoom buttons) and below it
+    const column = place.edge === 'left' ? [12, 12 + width] : [frame.width - 12 - width, frame.width - 12];
+    const across = obstacles.filter((other) => other.left < column[1] && other.right > column[0]);
+    const top = across.filter((other) => other.top < frame.height / 2).reduce((most, other) => Math.max(most, other.bottom + 8), 12);
+    const bottom = across.filter((other) => other.top >= frame.height / 2).reduce((least, other) => Math.min(least, other.top - 8), frame.height - 12);
+    rows = tall + overhead > bottom - top ? Math.ceil(items.length / 2) : 0;
+  }
 
   let place = $state(loadPlace());
   let tips = $state(loadTips());
@@ -92,6 +130,8 @@
   });
   // The panel beside the map grows and shrinks with what is selected.
   $effect(() => { void selection.length; void controller.selected; void controller.loading; void vertical; requestAnimationFrame?.(measure); });
+  // What the bar holds changes with what is drawn and picked: it folds again.
+  $effect(() => { void vertical; void frame.height; void frame.width; void obstacles; void sketch; void selection.length; void tracked; requestAnimationFrame?.(fold); });
 
   function settle(next) {
     place = next;
@@ -126,10 +166,10 @@
   }
 </script>
 
-<div class="edit-dock" bind:this={dock} class:vertical class:placed={!!box} class:held={!!held}
-  style:left={box ? `${box.left}px` : null} style:top={box ? `${box.top}px` : null}>
+<div class="edit-dock" bind:this={dock} class:vertical class:two={vertical && rows > 0} class:wrapped={!vertical && wrap > 0} class:placed={!!box} class:held={!!held}
+  style:left={box ? `${box.left}px` : null} style:top={box ? `${box.top}px` : null} style:--rows={rows || null} style:--wrap={wrap ? `${wrap}px` : null}>
   <div class="edit-bar" role="toolbar" aria-label="Layer tools" aria-orientation={vertical ? 'vertical' : 'horizontal'}
-    bind:offsetWidth={width} bind:offsetHeight={height}>
+    bind:this={barEl} bind:offsetWidth={width} bind:offsetHeight={height}>
     <button type="button" class="grip" aria-label="Move the tool bar" title="Drag to move it. Double-click puts it back."
       onpointerdown={grab} ondblclick={() => settle({ ...DEFAULT_PLACE })} onkeydown={nudge}><Icon name="grip" size={14} stroke={2.5} /></button>
     {#if !vertical}
@@ -157,19 +197,35 @@
     <button type="button" aria-label="Add markers" title="Add markers" aria-pressed={controller.placing} disabled={busy}
       onclick={() => (controller.placing ? controller.stop() : controller.start())}><Icon name="pin" size={15} /></button>
     <button type="button" aria-label="Draw line" title="Draw a line" aria-pressed={sketch?.type === 'LineString' && !sketch.key} disabled={busy}
-      onclick={() => controller.startShape('LineString')}><Icon name="line" size={15} /></button>
-    <button type="button" aria-label="Draw area" title="Draw an area" aria-pressed={sketch?.type === 'Polygon' && !sketch.key} disabled={busy}
-      onclick={() => controller.startShape('Polygon')}><Icon name="polygon" size={15} /></button>
+      onclick={() => (sketch?.type === 'LineString' && !sketch.key ? controller.stop() : controller.startShape('LineString'))}><Icon name="line" size={15} /></button>
+    <button type="button" aria-label="Draw area" title="Draw an area" aria-pressed={sketch?.type === 'Polygon' && !sketch.key && !sketch.shape} disabled={busy}
+      onclick={() => (sketch?.type === 'Polygon' && !sketch.key && !sketch.shape ? controller.stop() : controller.startShape('Polygon'))}><Icon name="polygon" size={15} /></button>
+    <button type="button" aria-label="Draw a circle" title="A circle: its centre, then its reach" aria-pressed={sketch?.shape === 'circle'} disabled={busy}
+      onclick={() => (sketch?.shape === 'circle' ? controller.stop() : controller.startShape('Circle'))}><Icon name="circle" size={15} /></button>
+    <button type="button" aria-label="Draw a box" title="A box: one corner, then the other" aria-pressed={sketch?.shape === 'rect'} disabled={busy}
+      onclick={() => (sketch?.shape === 'rect' ? controller.stop() : controller.startShape('Rectangle'))}><Icon name="square" size={15} /></button>
     <button type="button" aria-label="Paste a position" title="Paste coordinates, a map link or a post" disabled={busy}
       onclick={() => controller.openPaste()}><Icon name="clipboard" size={15} /></button>
     <button type="button" aria-label="Add from the case" title="Add places, proofs and files of the case" disabled={busy}
       onclick={() => controller.openLinking()}><Icon name="link" size={15} /></button>
     <span class="rule" aria-hidden="true"></span>
-    <LayerSelectionStyle {controller} label="Style" disabled={busy || (!!sketch && sketch.type !== 'Selection')} />
+    <LayerSelectionStyle {controller} label="Style" disabled={busy || (!!sketch && sketch.type !== 'Selection')} onopen={(open) => (styling = open)} />
     {#if sketch}
       <span class="rule" aria-hidden="true"></span>
-      {#if !sketch.key}<button type="button" aria-label="Undo last point" title="Undo last point" disabled={busy || !sketch.rings[0]?.length}
-        onclick={() => controller.undoVertex()}><Icon name="undo" size={15} /></button>{/if}
+      {#if !sketch.key && !sketch.shape && ['LineString', 'Polygon'].includes(sketch.type)}
+        <button type="button" aria-label="Draw freehand" title="Freehand: drag to draw" aria-pressed={controller.freehand}
+          onclick={() => (controller.freehand = !controller.freehand)}><Icon name="freehand" size={15} /></button>
+      {/if}
+      {#if sketch.key && sketch.type === 'LineString'}
+        <button type="button" aria-label="Extend from its start" title="A click on the map extends it from its start" aria-pressed={sketch.extend === 'start'}
+          onclick={() => controller.extendFrom('start')}><Icon name="chevronLeft" size={15} /></button>
+        <button type="button" aria-label="Extend from its end" title="A click on the map extends it from its end" aria-pressed={sketch.extend !== 'start'}
+          onclick={() => controller.extendFrom('end')}><Icon name="chevronRight" size={15} /></button>
+      {/if}
+      <button type="button" aria-label="Undo the last corner change" title="Undo the last corner added, moved or removed (Ctrl+Z)"
+        disabled={busy || !controller.canUndoSketch} onclick={() => controller.undoSketch()}><Icon name="undo" size={15} /></button>
+      <button type="button" aria-label="Redo the corner change" title="Redo (Ctrl+Shift+Z)"
+        disabled={busy || !controller.canRedoSketch} onclick={() => controller.redoSketch()}><Icon name="redo" size={15} /></button>
       <button type="button" class="save" aria-label="Save geometry" title="Save (Enter)" disabled={busy || !controller.complete}
         onclick={() => controller.saveGeometry()}><Icon name="check" size={13} />{#if !vertical}<span>Save</span>{/if}</button>
       <button type="button" aria-label="Cancel geometry edit" title="Cancel (Esc)" onclick={() => controller.stop()}><Icon name="x" size={15} /></button>
@@ -188,6 +244,11 @@
         disabled={busy || !selection.length} onclick={() => controller.removeSelection()}><Icon name="trash" size={15} /></button>
     {/if}
     <span class="rule" aria-hidden="true"></span>
+    {#if !sketch}
+      <button type="button" aria-label="Undo the last edit" title="Undo the last edit (Ctrl+Z)" disabled={!controller.canUndo} onclick={() => controller.undo()}><Icon name="undo" size={15} /></button>
+      <button type="button" aria-label="Redo the last edit" title="Redo (Ctrl+Shift+Z)" disabled={!controller.canRedo} onclick={() => controller.redo()}><Icon name="redo" size={15} /></button>
+      <span class="rule" aria-hidden="true"></span>
+    {/if}
     <button type="button" class="tips" aria-label="Tips" title={tips ? 'Hide the tips' : 'Show the tips'} aria-pressed={tips}
       onclick={() => { tips = !tips; saveTips(tips); }}><Icon name="help" size={14} /></button>
     <!-- As the panel's Done: the press leaves the focus in a field Done saves itself. -->
@@ -195,7 +256,7 @@
       onmousedown={(event) => event.preventDefault()} onclick={ondone}>
       <Icon name="check" size={13} />{#if !vertical}<span>Done</span>{/if}</button>
   </div>
-  {#if tips || busy}<p class={`hint ${side}`} role="status">{busy ? 'Saving…' : hint}</p>{/if}
+  {#if (tips || busy || saving) && !styling}<p class={`hint ${side}`} role="status">{busy ? 'Opening…' : saving && !tips ? 'Saving…' : hint}</p>{/if}
 </div>
 
 <style>
@@ -207,6 +268,8 @@
   .edit-bar { display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 0; padding: 4px; overflow: auto; scrollbar-width: none;
     background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--shadow-2); pointer-events: auto; white-space: nowrap; }
   .vertical .edit-bar { flex-direction: column; }
+  .wrapped .edit-bar { flex-wrap: wrap; justify-content: center; width: var(--wrap); overflow: visible; }
+  .vertical.two .edit-bar { display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--rows), auto); justify-items: center; column-gap: 2px; }
   .held .edit-bar { box-shadow: 0 8px 28px #0006; opacity: .92; }
   .grip { cursor: grab; color: var(--text-3); width: 20px; }
   .vertical .grip { width: 30px; height: 20px; }

@@ -130,10 +130,30 @@ describe('personal marker symbols', () => {
     expect([...source.map.layers.keys()].some((id) => id.endsWith('-bearing') || id.endsWith('-label'))).toBe(false);
   });
 
+  it('draws a feature\'s own look: a dash on any layer, a confidence, a hatch and arrowheads on the analyst\'s own', async () => {
+    const engine = stubEngine();
+    const line = (properties) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] },
+      properties: { index: 0, category: 'Front', colour: '#d55e00', ...properties } });
+    const source = createAddedLayer(engine);
+    await source.set({ type: 'FeatureCollection', features: [line({ line_dash: 'dotted', confidence: 'claimed' })] });
+    const sourceData = [...engine.map.sources.values()][0].data.features[0].properties;
+    // a plate's dash reaches a source layer; a confidence is the analyst's own word
+    expect(sourceData.$dash).toBe('dotted');
+    const engine2 = stubEngine();
+    const own = createAddedLayer(engine2, { editable: true, buildHatch: () => ({ width: 12, height: 12, data: new Uint8Array(12 * 12 * 4) }) });
+    await own.set({ type: 'FeatureCollection', features: [line({ confidence: 'probable', line_arrow: 'both' }),
+      { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }, properties: { index: 1, category: 'Front', colour: '#0072b2', area_fill: 'hatch' } }] });
+    const [main, heads] = [...engine2.map.sources.values()];
+    expect(main.data.features[0].properties.$dash).toBe('dashed');
+    expect(main.data.features[1].properties.$fillhatch).toMatch(/fillhatch-0072b2$/);
+    expect(heads.data.features).toHaveLength(2);
+    expect(heads.data.features.map((feature) => Math.round(feature.properties.$angle))).toEqual([45, 225]);
+  });
+
   it('draws a tracked layer\'s past under it, dashed and hatched, and never on the layers that answer clicks', async () => {
     const engine = stubEngine();
     const buildHatch = vi.fn(() => ({ width: 12, height: 12, data: new Uint8Array(12 * 12 * 4) }));
-    const layer = createAddedLayer(engine, { editable: true, buildHatch });
+    const layer = createAddedLayer(engine, { editable: true, history: true, buildHatch });
     const square = { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] };
     await layer.set({ type: 'FeatureCollection', features: [
       { type: 'Feature', geometry: square, properties: { index: 0, category: 'Front', colour: '#d55e00', $change: 'gained' } },
@@ -151,7 +171,7 @@ describe('personal marker symbols', () => {
     // what is new keeps its own colour, whatever the feature's
     expect(layers.find((entry) => entry.id.endsWith('-new-line')).paint['line-color']).toBe('#ffd400');
     expect(layers.find((entry) => entry.id.endsWith('-new-ring')).filter).toContainEqual(['has', '$new']);
-    expect(layers.find((entry) => entry.id.endsWith('-mark')).paint['icon-opacity']).toEqual(['case', ['has', '$fade'], 0.4, 0.95]);
+    expect(layers.find((entry) => entry.id.endsWith('-mark')).paint['icon-opacity']).toEqual(['case', ['has', '$fade'], 0.4, ['coalesce', ['get', '$opacity'], 0.95]]);
   });
 
   it('holds dragged features off the map until the move is drawn, keeping the other filters', async () => {
@@ -496,10 +516,13 @@ describe('an added layer on the map', () => {
 
     expect(engine.map.sources.size).toBe(1);
     // Two symbol layers, because a source's own icons are plain PNGs and ours
-    // are SDFs, and MapLibre does not render both out of one.
+    // are SDFs, and MapLibre does not render both out of one; three line layers,
+    // because a dash cannot be read off a feature (solid, dashed, dotted).
     expect([...engine.map.layers.values()].map((layer) => layer.type).sort()).toEqual([
       'circle',
       'fill',
+      'line',
+      'line',
       'line',
       'symbol',
       'symbol',
@@ -636,7 +659,7 @@ describe('an added layer on the map', () => {
     const ids = [...engine.map.layers.keys()];
     const own = (layer) => ids.filter((id) => id.startsWith(layer.floor().replace(/-fill$/, '-')));
     expect(ids).toEqual([...own(upper), ...own(lower)]);
-    expect(own(upper).map((id) => id.split('-').pop())).toEqual(['fill', 'line', 'dot', 'mark', 'own']);
+    expect(own(upper).map((id) => id.split('-').pop())).toEqual(['fill', 'line', 'dash', 'dot', 'dot', 'mark', 'own']);
   });
 
   it('moves nothing while either layer is still unbuilt', async () => {

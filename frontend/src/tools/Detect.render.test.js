@@ -179,6 +179,7 @@ beforeEach(() => {
   uiState.mapPoint = null;
   prefs.detectView = undefined;
   prefs.mapSync = false;
+  localStorage.removeItem('azimut:map-layers:case-a');
 });
 afterEach(() => {
   if (live) unmount(live);
@@ -304,8 +305,9 @@ describe('Detect', () => {
     expect(target.querySelector('.dock-tabs.rail')).not.toBe(null);
   });
 
-  it('restores the Detect basemap and overlays without requesting a pass', async () => {
-    prefs.detectView = { collapsed: false, basemap: 'osm', overlays: ['roads'] };
+  it('restores the Detect basemap and the case\'s layers without requesting a pass', async () => {
+    prefs.detectView = { collapsed: false, basemap: 'osm' };
+    localStorage.setItem('azimut:map-layers:case-a', JSON.stringify({ maps: { detect: ['roads'] } }));
     await open();
     expect(showBasemap).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'osm' }), 'osm', expect.anything());
     expect(setOverlay).toHaveBeenCalledWith('roads', true, null);
@@ -343,13 +345,23 @@ describe('Detect', () => {
     expect(put.mock.lastCall[1].detect_view).not.toHaveProperty('saved');
   });
 
-  it('drops a retired layer from the saved overlays, so the next save is not refused', async () => {
-    prefs.detectView = { collapsed: false, basemap: 'esri-world-imagery', overlays: ['labels', 'roads'] };
+  it('keeps its layers per case in the browser, never in the settings', async () => {
+    // a retired layer (Labels) kept by an older version is read past
+    localStorage.setItem('azimut:map-layers:case-a', JSON.stringify({ maps: { detect: ['labels', 'roads'] } }));
     await open();
     expect(setOverlay).not.toHaveBeenCalledWith('labels', true, expect.anything());
+    starts('Layers').click(); await settle();
+    chip('Power lines').click(); await settle();
+    expect(JSON.parse(localStorage.getItem('azimut:map-layers:case-a')).maps.detect).toEqual(['roads', 'power']);
     target.querySelector('[aria-label="Collapse Detect panel"]').click(); await settle();
-    expect(put).toHaveBeenLastCalledWith('/api/settings/prefs', {
-      detect_view: expect.objectContaining({ overlays: ['roads'] }) });
+    expect(put.mock.lastCall[1].detect_view).not.toHaveProperty('overlays');
+  });
+
+  it('writes nothing for a case still on the defaults, so it keeps following them', async () => {
+    await open();
+    starts('Layers').click(); await settle();
+    expect(chip('Borders').getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('azimut:map-layers:case-a')).toBeNull();
   });
 
   it('takes the current view as an area to sweep', async () => {

@@ -23,9 +23,12 @@
     groups = [], group = '', groupLabel = 'Group', ongroup = null,
     note = '', caseId = null, disabled = false, size = 20, title = 'Style',
     onpick,
+    /** `(open)`, as the palette opens and closes, for what must step aside from it. */
+    onopen = null,
   } = $props();
 
   let open = $state(false);
+  $effect(() => { onopen?.(open); });
   let trigger = $state(null);
   const picked = $derived(choices.find((choice) => choice.id === symbol) ?? choices[0]);
   const colourName = $derived(layerPalette.nameOf(colour));

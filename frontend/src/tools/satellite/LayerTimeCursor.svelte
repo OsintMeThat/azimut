@@ -51,6 +51,9 @@
   $effect(() => { clock = at?.includes('T') ? at.slice(11) : ''; });
 
   const set = (patch) => onchange?.(patch);
+  /** What the past button says is drawn now, in a few words. */
+  const pastSaid = $derived([time?.trail !== false ? 'Before' : '', time?.since ? `± ${time.since === 'previous' ? 'last' : momentLabel(time.since).replace(/ \d{4}/, '')}` : '']
+    .filter(Boolean).join(' · ') || 'The past');
   const go = (value) => set({ at: value });
 
   function dayAt(clientX) {
@@ -122,6 +125,9 @@
       aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay ?? last}
       aria-valuetext={at ? momentLabel(at) : 'Now'} onkeydown={key}></span>
   </div>
+  {#if moments.length > 1}
+    <div class="ends" aria-hidden="true"><span>{momentLabel(moments[0]).replace(/ \d{4}$/, '')}</span><span>{momentLabel(moments.at(-1)).replace(/ \d{4}$/, '')}</span></div>
+  {/if}
 
   <div class="line">
     <button type="button" class="icon-act" aria-label="Previous change" title="Previous change"
@@ -134,9 +140,11 @@
       <button type="button" class="text-act" title="Read the layer as it is now" onclick={() => go(null)}>Now</button>
     {/if}
     <span class="grow"></span>
-    {#if time?.since}<span class="badge" title="Gains and losses are hatched">±</span>{/if}
-    <button type="button" class="icon-act" aria-label="What the map shows of the past" title="Trail, gains and losses"
-      aria-expanded={menu} bind:this={menuAnchor} onclick={() => (menu = !menu)}><Icon name="more" size={13} /></button>
+    <!-- what the map draws of the past, said on the button that sets it: a menu nobody finds sets nothing -->
+    <button type="button" class="past" class:set={time?.trail !== false || !!time?.since} aria-label="What the map shows of the past"
+      title="The state before, dashed; an area's gains and losses, hatched; how long events stay"
+      aria-expanded={menu} bind:this={menuAnchor} onclick={() => (menu = !menu)}>
+      <span>{pastSaid}</span><Icon name="chevronDown" size={10} /></button>
   </div>
   {#if precision === 'time'}
     <label class="clock">
@@ -148,7 +156,8 @@
   {/if}
 
   {#if picking}
-    <MonthGrid value={at ? at.slice(0, 10) : isoDay(today)} label="Day the layer is read at" onpick={pickDay} />
+    <!-- a state is what was seen, so no day after today is offered -->
+    <MonthGrid value={at ? at.slice(0, 10) : isoDay(today)} max={isoDay(today)} label="Day the layer is read at" onpick={pickDay} />
   {/if}
 </div>
 
@@ -192,12 +201,17 @@
   .now .handle { background: var(--text-2); }
   .handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .line { display: flex; align-items: center; gap: 2px; min-height: 24px; }
+  .ends { display: flex; justify-content: space-between; margin-top: -2px; color: var(--text-3); font-size: 9.5px; font-variant-numeric: tabular-nums; }
   .moment { padding: 2px 6px; border-radius: var(--r-sm); color: var(--text-1); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
   .moment:hover, .moment.open { background: var(--bg-3); }
   .now .moment { color: var(--text-2); font-weight: 500; }
   .grow { flex: 1; }
-  .badge { padding: 0 5px; border-radius: 999px; background: var(--accent-soft); color: var(--text-1); font-size: 10px; font-weight: 700; }
-  .icon-act { display: grid; place-items: center; flex: none; width: 22px; height: 22px; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; }
+  .past { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 150px; height: 22px; padding: 0 7px; border: 1px solid var(--border);
+    border-radius: 999px; background: var(--bg-2); color: var(--text-2); font-size: 10.5px; cursor: pointer; white-space: nowrap; }
+  .past span { overflow: hidden; text-overflow: ellipsis; }
+  .past.set { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--text-1); }
+  .past:hover, .past[aria-expanded='true'] { border-color: var(--accent); color: var(--text-1); }
+  .icon-act { display: grid; place-items: center; flex: none; width: 22px; height: 22px; color: var(--text-2); border-radius: var(--r-sm); cursor: pointer; }
   .icon-act:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); }
   .icon-act:disabled { opacity: .35; cursor: default; }
   .text-act { padding: 2px 4px; color: var(--text-3); font-size: 10px; cursor: pointer; }

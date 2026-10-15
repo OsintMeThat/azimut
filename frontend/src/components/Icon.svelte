@@ -139,6 +139,23 @@
     eyeOff: 'M9.9 9.9a3 3 0 1 0 4.2 4.2M10.7 5.7A9.8 9.8 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.8 17.8 0 0 1-2.2 3M6.6 6.6C4 8.4 2.5 12 2.5 12S6 18.5 12 18.5c1.5 0 2.9-.4 4.1-1.1M3 3l18 18',
     key: 'm21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4',
     lock: 'M7 11V7a5 5 0 0 1 10 0v4M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+    unlock: 'M7 11V7a5 5 0 0 1 9.6-2M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+    // turning a map: an arc round to the left or the right, its head where it is going
+    rotateLeft: 'M4 4v5h5M4.6 9A8 8 0 1 1 6 16.9',
+    rotateRight: 'M20 4v5h-5m4.4 0A8 8 0 1 0 18 16.9',
+    // laying several things out on a page
+    alignLeft: 'M4 3v18M8 7h10M8 14h6',
+    alignCentreH: 'M12 3v18M6 7h12M8 14h8',
+    alignRight: 'M20 3v18M6 7h10M10 14h6',
+    alignTop: 'M3 4h18M7 8v10M14 8v6',
+    alignCentreV: 'M3 12h18M7 6v12M14 8v8',
+    alignBottom: 'M3 20h18M7 6v10M14 10v6',
+    distributeH: 'M4 3v18M20 3v18M10 8h4v8h-4z',
+    distributeV: 'M3 4h18M3 20h18M8 10h8v4H8z',
+    qr: 'M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h2v2h-2zm4 0h2v2h-2zm-4 4h2v2h-2zm4 0h2v2h-2zM6.5 6.5h1v1h-1zm10 0h1v1h-1zm-10 10h1v1h-1z',
+    // the app's own mark, two flanks of the north arrow
+    brand: 'M12 1.8 5.8 21.4 12 16.4ZM12 1.8 18.2 21.4 12 16.4Z',
+    rings: 'M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0M12 12m-9.5 0a9.5 9.5 0 1 0 19 0a9.5 9.5 0 1 0-19 0',
     shield: 'M12 21.5s7.5-3.7 7.5-9.3V5.4L12 2.5 4.5 5.4v6.8c0 5.6 7.5 9.3 7.5 9.3Z',
     chart: 'M3.5 3.5v17h17m-4-5v-6m-5 6V8m-5 8.5v-3',
     // a ridge over its baseline: the elevation profile

@@ -39,7 +39,31 @@ MAX_LINKS = 10
 MAX_LINK = 2000
 _LINK = re.compile(r"^https?://[^\s]+$", re.IGNORECASE)
 #: The marker fields an edit may clear by sending nothing for them.
-CLEARABLE = ("date", "status", "bearing", "links", "provenance")
+#: How a feature is drawn beyond its colour and icon, each cleared by sending nothing:
+#: its line's width and dash, an area's fill and its opacity, an arrow on a line's end,
+#: a marker's size, its name on the map and that name's size.
+STYLE_FIELDS = ("line_width", "line_dash", "line_arrow", "area_fill", "fill_opacity", "marker_size",
+                "label", "label_size")
+#: How sure the analyst is of a feature, which a dash says on the map.
+CONFIDENCES = ("confirmed", "probable", "claimed")
+CLEARABLE = ("date", "status", "bearing", "links", "provenance", "confidence", "credit") + STYLE_FIELDS
+#: The group fields a feature inherits when it sets none of its own.
+GROUP_STYLE = ("line_dash", "line_arrow", "area_fill", "fill_opacity")
+#: What each choice-valued style field may hold.
+STYLE_CHOICES: dict[str, tuple[str, ...]] = {
+    "line_dash": ("dashed", "dotted"),
+    "line_arrow": ("end", "both"),
+    "area_fill": ("none", "hatch"),
+    "label": ("on", "off"),
+}
+#: The bounds of each number-valued style field.
+STYLE_RANGES: dict[str, tuple[float, float]] = {
+    "line_width": (0.5, 12.0),
+    "fill_opacity": (0.0, 1.0),
+    "marker_size": (0.5, 3.0),
+    "label_size": (6.0, 32.0),
+}
+MAX_CREDIT = 300
 #: The case's named colours: "Side A" in one, "Side B" in another. Kept with the
 #: case, offered in every layer's palette, read by the legend and the card.
 PALETTE_KEY = "layer_palette"
@@ -146,9 +170,12 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
         properties = feature["properties"]
         group = groups[properties["group"]]
         properties["category"] = group["name"]
-        properties["icon_scale"] = group["size"]
-        properties["stroke_width"] = group["stroke"]
-        if group.get("labels"):
+        properties["icon_scale"] = properties.get("marker_size") or group["size"]
+        properties["stroke_width"] = properties.get("line_width") or group["stroke"]
+        for field in GROUP_STYLE:
+            if field not in properties and group.get(field) not in (None, ""):
+                properties[field] = group[field]
+        if (group.get("labels") and properties.get("label") != "off") or properties.get("label") == "on":
             properties["show_label"] = True
         # an event fades after its day on a tracked layer, where a lasting thing stays
         if group.get("events"):
@@ -417,6 +444,49 @@ def apply_fields(properties: dict[str, Any], changes: dict[str, Any]) -> None:
             properties["provenance"] = provenance
         else:
             properties.pop("provenance", None)
+    if "confidence" in changes:
+        confidence = changes["confidence"] or ""
+        if confidence and confidence not in CONFIDENCES:
+            raise maplayers.LayerError("a feature is confirmed, probable or claimed")
+        if confidence:
+            properties["confidence"] = confidence
+        else:
+            properties.pop("confidence", None)
+    if "credit" in changes:
+        credit = maplayers._text(changes["credit"] or "", MAX_CREDIT)
+        if credit:
+            properties["credit"] = credit
+        else:
+            properties.pop("credit", None)
+    apply_style(properties, changes)
+
+
+def apply_style(target: dict[str, Any], changes: dict[str, Any]) -> None:
+    """Check and set how a feature, or a group, is drawn (`STYLE_FIELDS`)."""
+    for field, choices in STYLE_CHOICES.items():
+        if field not in changes:
+            continue
+        value = changes[field] or ""
+        if value and value not in choices:
+            raise maplayers.LayerError(f"{field.replace('_', ' ')} is one of {', '.join(choices)}")
+        if value:
+            target[field] = value
+        else:
+            target.pop(field, None)
+    for field, (low, high) in STYLE_RANGES.items():
+        if field not in changes:
+            continue
+        value = changes[field]
+        if value is None or value == "":
+            target.pop(field, None)
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise maplayers.LayerError(f"{field.replace('_', ' ')} is a number") from exc
+        if not math.isfinite(number) or not low <= number <= high:
+            raise maplayers.LayerError(f"{field.replace('_', ' ')} is between {low:g} and {high:g}")
+        target[field] = round(number, 2)
 
 
 # -- a layer followed over time ------------------------------------------------------
@@ -846,6 +916,7 @@ def update_group(case: Case, layer: str, key: str, changes: dict[str, Any]) -> d
         for field in ("mode", "colour", "symbol", "size", "stroke"):
             if field in changes:
                 group[field] = changes[field]
+        apply_style(group, {field: changes[field] for field in GROUP_STYLE if field in changes})
         if "labels" in changes:
             if changes["labels"]:
                 group["labels"] = True
@@ -1017,6 +1088,42 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
         if offset:
             answer.update(batch=undo, kept=len(keys) - len(moving))
         return answer
+
+
+def revert(case: Case, layer: str, put: list[dict[str, Any]], drop: list[str]) -> dict[str, Any]:
+    """Put features back as they were and take out the ones an edit made: the editor's undo.
+
+    `put` are whole features as the layer held them before an edit (or after it, for a
+    redo), each found by its key and replaced, or added back at the end; `drop` the
+    keys of features to take out. Every geometry is checked as a drawn one is, and a
+    feature whose group is gone joins the first.
+    """
+    with case.lock:
+        spec = _spec(case, layer)
+        features = [f for f in spec["document"]["features"] if f["properties"]["key"] not in set(drop)]
+        groups = _groups(spec)
+        ids = {group["id"]: group for group in groups}
+        by_key = {f["properties"]["key"]: index for index, f in enumerate(features)}
+        for raw in put:
+            properties = raw.get("properties") if isinstance(raw, dict) else None
+            if not isinstance(properties, dict) or not isinstance(properties.get("key"), str) or not properties["key"]:
+                raise maplayers.LayerError("each feature put back carries its key")
+            kept: dict[str, Any] = copy.deepcopy(properties)
+            if kept.get("group") not in ids:
+                kept["group"] = groups[0]["id"]
+            kept["category"] = ids[kept["group"]]["name"]
+            feature = {"type": "Feature", "geometry": validate_geometry(raw.get("geometry")), "properties": kept}
+            key = kept["key"]
+            if key in by_key:
+                features[by_key[key]] = feature
+            else:
+                by_key[key] = len(features)
+                features.append(feature)
+        if len(features) > maplayers.MAX_FEATURES:
+            raise maplayers.LayerError("this layer has reached its feature limit")
+        spec["document"]["features"] = features
+        _save(case, layer, spec)
+        return read(case, layer)
 
 
 def restore_selection(case: Case, layer: str, batch_id: str) -> dict[str, Any]:

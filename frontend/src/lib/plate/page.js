@@ -12,131 +12,332 @@ export const PX_PER_MM = 96 / 25.4;
 /** Points to millimetres: text sizes are set in points, as on paper. */
 export const MM_PER_PT = 25.4 / 72;
 
-/** Paper in millimetres, portrait (`engine/mapplates.PAPERS`). */
+/** Paper in millimetres, portrait (`engine/mapplates.PAPERS`). `custom` reads the page's own size. */
 export const PAPERS = {
   a5: { label: 'A5', size: [148, 210] },
   a4: { label: 'A4', size: [210, 297] },
   a3: { label: 'A3', size: [297, 420] },
   letter: { label: 'Letter', size: [215.9, 279.4] },
-  screen: { label: 'Screen 16:9', size: [190.5, 338.67] },
-  square: { label: 'Square', size: [200, 200] },
+  screen: { label: 'Screen 16:9, story 9:16', size: [190.5, 338.67] },
+  square: { label: 'Square 1:1', size: [200, 200] },
+  social: { label: 'Post 4:5', size: [216, 270] },
+  custom: { label: 'Custom size', size: null },
 };
 
+/**
+ * The faces a plate is set in, each with the Arabic face behind it so a place name in
+ * Arabic script is drawn rather than boxed. The files are loaded by `plateFontFaces.js`.
+ */
+const ARABIC = '"Noto Sans Arabic"';
 export const FONTS = {
-  inter: { label: 'Inter', family: 'Inter' },
-  barlow: { label: 'Barlow Condensed', family: '"Barlow Condensed"' },
-  oxanium: { label: 'Oxanium', family: 'Oxanium' },
-  plexmono: { label: 'IBM Plex Mono', family: '"IBM Plex Mono"' },
+  inter: { label: 'Inter', family: `Inter, ${ARABIC}` },
+  barlow: { label: 'Barlow Condensed', family: `"Barlow Condensed", ${ARABIC}` },
+  condensed: { label: 'Roboto Condensed', family: `"Roboto Condensed", ${ARABIC}` },
+  serif: { label: 'Source Serif', family: `"Source Serif 4", ${ARABIC}` },
+  oxanium: { label: 'Oxanium', family: `Oxanium, ${ARABIC}` },
+  plexmono: { label: 'IBM Plex Mono', family: `"IBM Plex Mono", ${ARABIC}` },
+};
+/** The family a font id names, for a canvas or an engine's text. */
+export const fontFamily = (id) => (FONTS[id] ?? FONTS.inter).family;
+
+export const DEFAULT_THEME = { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' };
+
+/**
+ * Looks a plate is set in at one press: the paper, the ink and the accent, the face,
+ * and the ground its maps are drawn on.
+ */
+/** The imagery as it comes: what every look but a grey one leaves it as. */
+export const NEUTRAL_TONE = Object.freeze({ opacity: 1, saturation: 0, brightness: 1, contrast: 0, hue: 0 });
+
+export const THEMES = {
+  press: { label: 'Press', theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter' }, ground: 'plain' },
+  sand: { label: 'Sand', theme: { paper: '#efe6d2', ink: '#3a2f1f', accent: '#9b3b1a', font: 'condensed' }, ground: 'plain',
+    plain: { ground: '#e9dfc7', water: '#b9c7c9', wood: '#d9d3b4', urban: '#e2d6bb', road: '#f6efe0', border: '#7d6a4f', name: '#4a3d2b' } },
+  night: { label: 'Night', theme: { paper: '#12161b', ink: '#e8ebef', accent: '#f2b134', font: 'inter' }, ground: 'plain-dark' },
+  report: { label: 'Report', theme: { paper: '#ffffff', ink: '#1f2a44', accent: '#0072b2', font: 'serif' }, ground: 'plain' },
+  mono: { label: 'Black and white', theme: { paper: '#ffffff', ink: '#000000', accent: '#000000', font: 'plexmono' }, ground: 'plain',
+    plain: { ground: '#f2f2f2', water: '#cfcfcf', wood: '#e3e3e3', urban: '#e8e8e8', road: '#ffffff', border: '#6f6f6f', name: '#2b2b2b' },
+    tone: { saturation: -1 } },
 };
 
-export const DEFAULT_THEME = { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter' };
+/**
+ * A plate in one of the looks: the page's paper, ink, accent and face, every map's
+ * plain ground and its palette, and the imagery's whole tone, which a look that is
+ * not grey sets back to as it comes. The backings of the legend, the scale and the
+ * north follow the paper.
+ */
+export function inLook(spec, id) {
+  const preset = THEMES[id];
+  if (!preset) return spec;
+  return {
+    ...spec,
+    theme: { ...spec.theme, ...preset.theme, preset: id },
+    elements: spec.elements.map((element) => {
+      if (element.kind === 'map' || element.kind === 'inset') {
+        const plain = String(element.basemap ?? 'plain').startsWith('plain');
+        return { ...element, ...(plain ? { basemap: preset.ground, plain: { ...(element.plain ?? {}), colours: { ...(preset.plain ?? {}) } } } : {}),
+          tone: { ...NEUTRAL_TONE, ...(preset.tone ?? {}) } };
+      }
+      // what wore the page's paper, ink or accent wears the new ones; a colour of its own stays
+      const swap = (hex) => {
+        const was = String(hex ?? '').toLowerCase();
+        if (!was) return hex;
+        if (was === String(spec.theme.paper).toLowerCase()) return preset.theme.paper;
+        if (was === String(spec.theme.ink).toLowerCase()) return preset.theme.ink;
+        if (was === String(spec.theme.accent).toLowerCase()) return preset.theme.accent;
+        return hex;
+      };
+      if (element.kind === 'qr') return element;
+      return { ...element, ...(element.fill ? { fill: swap(element.fill) } : {}), ...(element.colour ? { colour: swap(element.colour) } : {}) };
+    }),
+  };
+}
 
 /** What each kind of element is called where the analyst reads it. */
 export const KIND_LABELS = {
   map: 'Map', inset: 'Inset map', legend: 'Legend', text: 'Text', scale: 'Scale bar', north: 'North arrow',
-  image: 'Picture', label: 'Label', arrow: 'Arrow', credits: 'Credits',
+  image: 'Picture', label: 'Label', arrow: 'Arrow', credits: 'Credits', shape: 'Shape', ring: 'Range rings',
+  cone: 'View cone', zone: 'Zone', measure: 'Distance', key: 'Numbered list', table: 'Table', qr: 'QR code',
+  timeline: 'Date strip', signature: 'Signature', brand: 'Made with Azimut', video: 'Video',
 };
 
-/** A label's box round its words, from its top left corner: about the width its longest line takes. */
-export function labelBox(element) {
+/** The kinds that stand on a map's ground: placed by a press on a map, kept out of templates. */
+export const ON_THE_GROUND = ['label', 'arrow', 'ring', 'cone', 'zone', 'measure'];
+/** The kinds a plate draws as maps, under everything else. */
+export const MAP_KINDS = ['map', 'inset'];
+
+/**
+ * A label's box round its words, from its top left corner: the width its longest line
+ * takes. `measure(line)` gives a line's width in millimetres when the face is known
+ * (`textMeasurer`); without it, a fair guess from the letter count.
+ */
+export function labelBox(element, measure = null) {
   const lines = String(element.text || ' ').split('\n');
-  const longest = Math.max(...lines.map((line) => line.length));
   const size = element.size ?? 9;
   const framed = element.style && element.style !== 'plain';
-  const width = Math.min(120, Math.max(8, longest * size * 0.19 + (framed ? 3 : 1)));
-  const height = Math.max(4, lines.length * size * 0.44 + (framed ? 2 : 0.5));
-  return [element.box[0], element.box[1], Math.round(width * 10) / 10, Math.round(height * 10) / 10];
+  if (element.style === 'number') {
+    const side = Math.max(4, size * MM_PER_PT * 1.7);
+    return [element.box[0], element.box[1], round(side), round(side)];
+  }
+  const longest = measure ? Math.max(...lines.map((line) => measure(line, element))) : Math.max(...lines.map((line) => line.length)) * size * 0.19;
+  const width = Math.min(160, Math.max(8, longest + (framed ? 3 : 1)));
+  const height = Math.max(4, lines.length * size * MM_PER_PT * (element.leading ?? 1.2) + (framed ? 2 : 0.5));
+  return [element.box[0], element.box[1], round(width), round(height)];
 }
 
-/** The page's width and height in millimetres, turned as it is set. */
+/** A canvas measure of a line in millimetres, in the element's face, size and weight. */
+export function textMeasurer(theme, ctx = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')) {
+  return (line, element) => {
+    if (!ctx) return String(line).length * (element.size ?? 9) * 0.19;
+    const size = (element.size ?? 9) * MM_PER_PT * 10;
+    ctx.font = `${element.italic ? 'italic ' : ''}${element.weight ?? 600} ${size}px ${fontFamily(element.font ?? theme?.font)}, sans-serif`;
+    const text = element.upper ? String(line).toUpperCase() : String(line);
+    return (ctx.measureText(text).width + text.length * size * (element.tracking ?? 0) / 100) / 10;
+  };
+}
+
+/** The page's width and height in millimetres, turned as it is set; a custom paper as given. */
 export function pageSize(page) {
-  const [width, height] = (PAPERS[page?.paper] ?? PAPERS.a4).size;
+  if (page?.paper === 'custom' && Array.isArray(page.size)) return { width: page.size[0], height: page.size[1] };
+  const [width, height] = (PAPERS[page?.paper]?.size ?? PAPERS.a4.size);
   return page?.orientation === 'portrait' ? { width, height } : { width: height, height: width };
+}
+
+/** Whether a paper can be turned: a square, or a size typed in, cannot. */
+export const turnable = (page) => page?.paper !== 'square' && page?.paper !== 'custom';
+
+/** How far the editor zooms the page: from a tenth of its true size up to eight times it. */
+export const PAGE_ZOOM = { min: 0.1, max: 8 };
+
+/**
+ * Where the editor shows the page when it fits the window, a margin round it:
+ * `{ scale, x, y }`, x and y where the page's corner stands in the window.
+ */
+export function fitPage(page, viewport, margin = 24) {
+  const scale = Math.max(PAGE_ZOOM.min, Math.min((viewport.width - 2 * margin) / page.width, (viewport.height - 2 * margin) / page.height));
+  return { scale, x: (viewport.width - page.width * scale) / 2, y: (viewport.height - page.height * scale) / 2 };
+}
+
+/** The most pixels the editor's drawing of a page holds, about 64 MB. */
+export const DECOR_MAX_PIXELS = 16_000_000;
+
+/**
+ * Canvas pixels a CSS pixel of the page holds while the editor shows it at `scale`
+ * (`page` in CSS pixels), so a page zoomed past its true size is drawn again sharp
+ * rather than stretched. It climbs in steps of √2, so a wheel turn redraws a few
+ * times, and stops at `DECOR_MAX_PIXELS`.
+ */
+export function decorDensity(page, scale, dpr = 1) {
+  if (!(scale > 1)) return dpr;
+  const wanted = dpr * scale;
+  const stepped = Math.SQRT2 ** Math.ceil(Math.log(wanted) / Math.log(Math.SQRT2) - 1e-9);
+  const room = Math.sqrt(DECOR_MAX_PIXELS / Math.max(1, page.width * page.height));
+  return Math.max(dpr, Math.min(stepped, room));
+}
+
+/** The page zoomed by `factor` round a point of the window, which keeps the paper under it. */
+export function zoomPageAt(camera, factor, [px, py]) {
+  const scale = Math.min(PAGE_ZOOM.max, Math.max(PAGE_ZOOM.min, camera.scale * factor));
+  const k = scale / camera.scale;
+  return { scale, x: px - (px - camera.x) * k, y: py - (py - camera.y) * k };
 }
 
 let counter = 0;
 /** A fresh element id, unique within the session and short enough for the backend's bound. */
 export function newId(kind) {
   counter += 1;
-  return `${kind}${Date.now().toString(36).slice(-4)}${counter.toString(36)}`;
+  return `${kind}${Date.now().toString(36)}${counter.toString(36)}`.slice(-40);
 }
 
-/** The plate's main map: the first one placed. */
+/** The plate's main map: the first one placed that is not a detail of another. */
 export function mainMap(spec) {
-  return spec?.elements?.find((element) => element.kind === 'map') ?? null;
+  const maps = spec?.elements?.filter((element) => element.kind === 'map') ?? [];
+  return maps.find((element) => !element.of) ?? maps[0] ?? null;
+}
+
+/**
+ * Maps first, the rest after, each keeping its order. Maps are drawn under the page's
+ * writing, so a list where a map came later would pick it over what is drawn on it.
+ */
+export function mapsFirst(elements) {
+  return [...elements.filter((element) => MAP_KINDS.includes(element.kind)),
+    ...elements.filter((element) => !MAP_KINDS.includes(element.kind))];
+}
+
+/** The ids of the house layout, which a change of paper lays out again rather than stretches. */
+export const HOUSE_IDS = ['map', 'title', 'subtitle', 'legend', 'inset', 'cartouche', 'scale', 'north', 'credits'];
+
+/** The boxes of the house layout on a page: a column beside the map when landscape, a band under it when upright. */
+function houseBoxes(page) {
+  const { width, height } = pageSize(page);
+  const margin = Math.max(6, Math.round(Math.min(width, height) * 0.045));
+  const band = 16;
+  const mapTop = margin + band;
+  if (height > width * 1.05) {
+    // upright: the map across the page, the legend, the inset and the cartouche under it
+    const under = Math.round(Math.min(70, height * 0.24));
+    const mapWidth = width - 2 * margin;
+    const mapHeight = height - mapTop - margin - under - 10;
+    const row = mapTop + mapHeight + 7;
+    const third = (mapWidth - 8) / 3;
+    return {
+      map: [margin, mapTop, mapWidth, mapHeight],
+      title: [margin, margin - 1, mapWidth, 9],
+      subtitle: [margin, margin + 8, mapWidth, 6],
+      credits: [margin, mapTop + mapHeight + 1, mapWidth, 5],
+      legend: [margin, row, third * 1.4, under],
+      inset: [margin + third * 1.4 + 4, row, third * 0.9, under],
+      cartouche: [margin + third * 2.3 + 8, row, third * 0.7, under],
+      scale: [margin + 4, mapTop + mapHeight - 10, 40, 6],
+      north: [margin + mapWidth - 12, mapTop + 4, 8, 12],
+    };
+  }
+  const column = Math.min(70, Math.round(width * 0.24));
+  const mapWidth = width - 2 * margin - column - 6;
+  const mapHeight = height - mapTop - margin - 7;
+  const right = margin + mapWidth + 6;
+  const legendHeight = Math.round(mapHeight * 0.45);
+  const insetHeight = Math.round(mapHeight * 0.28);
+  return {
+    map: [margin, mapTop, mapWidth, mapHeight],
+    title: [margin, margin - 1, mapWidth, 9],
+    subtitle: [margin, margin + 8, mapWidth, 6],
+    credits: [margin, mapTop + mapHeight + 1, mapWidth, 5],
+    legend: [right, mapTop, column, legendHeight],
+    inset: [right, mapTop + legendHeight + 4, column, insetHeight],
+    cartouche: [right, mapTop + legendHeight + insetHeight + 8, column, mapHeight - legendHeight - insetHeight - 8],
+    scale: [margin + 4, mapTop + mapHeight - 10, 40, 6],
+    north: [margin + mapWidth - 12, mapTop + 4, 8, 12],
+  };
 }
 
 /**
  * The house layout a new plate opens on, for a page of that paper: a title band, the
- * map, a column with the legend, an inset and the cartouche, the scale and the north
- * on the map, and the credits under it.
+ * map, the legend, an inset and the cartouche (beside the map, or under it on an
+ * upright page), the scale and the north on the map, and the credits under it.
+ * The title names the case by its token, so a template made from it names the next one.
  */
-export function houseLayout({ paper = 'a4', orientation = 'landscape', view = null, layers = [], title = '' } = {}) {
+export function houseLayout({ paper = 'a4', orientation = 'landscape', view = null, layers = [] } = {}) {
   const page = { paper, orientation };
-  const { width, height } = pageSize(page);
-  const margin = Math.max(6, Math.round(Math.min(width, height) * 0.045));
-  const band = 16;
-  const column = Math.min(70, Math.round(width * 0.24));
-  const mapWidth = width - 2 * margin - column - 6;
-  const mapTop = margin + band;
-  const mapHeight = height - mapTop - margin - 6;
-  const right = margin + mapWidth + 6;
-  const map = { id: 'map', kind: 'map', box: [margin, mapTop, mapWidth, mapHeight],
+  const boxes = houseBoxes(page);
+  const box = (id) => boxes[id].map(round);
+  const map = { id: 'map', kind: 'map', box: box('map'),
     view: view ?? { lat: 48.85, lon: 2.35, zoom: 9, bearing: 0 }, basemap: 'plain', overlays: ['relief'],
-    layers: layers.map((name) => ({ name, hidden: [], stroke: 1 })), grid: 'none' };
-  const legendHeight = Math.round(mapHeight * 0.45);
-  const insetHeight = Math.round(mapHeight * 0.28);
+    layers: layers.map((name) => ({ name, hidden: [], stroke: 1, icons: 1 })), grid: 'none' };
   return {
     page,
     theme: { ...DEFAULT_THEME },
     time: { at: null, trail: true, since: null, window: 7 },
     elements: [
       map,
-      { id: 'title', kind: 'text', box: [margin, margin - 1, mapWidth, 9], text: title || 'Title', size: 18, weight: 700, align: 'left' },
-      { id: 'subtitle', kind: 'text', box: [margin, margin + 8, mapWidth, 6], text: 'Situation as of {date}', size: 10, weight: 400, align: 'left' },
-      { id: 'legend', kind: 'legend', box: [right, mapTop, column, legendHeight], of: 'map', size: 8, border: true, columns: 1 },
-      { id: 'inset', kind: 'inset', box: [right, mapTop + legendHeight + 4, column, insetHeight], of: 'map', zoom: null, border: true },
-      { id: 'cartouche', kind: 'text', box: [right, mapTop + legendHeight + insetHeight + 8, column, mapHeight - legendHeight - insetHeight - 8],
-        text: '{case}\nMade {today}', size: 7, weight: 400, align: 'left', border: true },
-      { id: 'scale', kind: 'scale', box: [margin + 4, mapTop + mapHeight - 10, 40, 6], of: 'map', fill: '#ffffff' },
-      { id: 'north', kind: 'north', box: [margin + mapWidth - 12, mapTop + 4, 8, 12], of: 'map' },
-      { id: 'credits', kind: 'credits', box: [margin, mapTop + mapHeight + 1, mapWidth, 4], of: 'map', size: 5.5, align: 'right' },
+      { id: 'inset', kind: 'inset', box: box('inset'), of: 'map', zoom: null, border: true },
+      { id: 'title', kind: 'text', box: box('title'), text: '{case}', size: 18, weight: 700, align: 'left', name: 'Title' },
+      { id: 'subtitle', kind: 'text', box: box('subtitle'), text: 'Situation as of {date}', size: 10, weight: 400, align: 'left', name: 'Subtitle' },
+      { id: 'legend', kind: 'legend', box: box('legend'), of: 'map', size: 8, border: true, columns: 1 },
+      { id: 'cartouche', kind: 'text', box: box('cartouche'), text: '{case}\nMade {today}', size: 7, weight: 400, align: 'left', border: true, name: 'Cartouche' },
+      { id: 'scale', kind: 'scale', box: box('scale'), of: 'map', fill: '#ffffff' },
+      { id: 'north', kind: 'north', box: box('north'), of: 'map', fill: '#ffffff' },
+      { id: 'credits', kind: 'credits', box: box('credits'), of: 'map', size: 5.5, align: 'right' },
     ],
   };
 }
 
+/** The kinds whose drawing has its own proportions: on another paper they grow evenly, never stretch. */
+const EVEN = ['north', 'scale', 'image', 'qr', 'label', 'key'];
+
 /**
- * The same plate on another paper or turned: every element keeps its share of the
- * page, so the layout reads the same, larger or smaller.
+ * The same plate on another paper or turned. The house layout's own elements are laid
+ * out again for the new page, so an upright page gets the upright layout; everything
+ * else keeps its share of the page, and what has its own proportions (a north arrow, a
+ * picture, a label) keeps them.
  */
 export function onPaper(spec, page) {
   const before = pageSize(spec.page);
   const after = pageSize(page);
   const sx = after.width / before.width;
   const sy = after.height / before.height;
+  const even = Math.min(sx, sy);
+  const house = HOUSE_IDS.every((id) => spec.elements.some((element) => element.id === id));
+  const boxes = house ? houseBoxes(page) : null;
   return {
     ...spec,
     page,
-    elements: spec.elements.map((element) => ({
-      ...element,
-      box: [element.box[0] * sx, element.box[1] * sy, element.box[2] * sx, element.box[3] * sy].map(round),
-    })),
+    elements: spec.elements.map((element) => {
+      if (boxes?.[element.id]) return { ...element, box: boxes[element.id].map(round) };
+      const [x, y, w, h] = element.box;
+      const box = EVEN.includes(element.kind)
+        ? [(x + w / 2) * sx - (w * even) / 2, (y + h / 2) * sy - (h * even) / 2, w * even, h * even]
+        : element.kind === 'text' ? [x * sx, y * sy, w * sx, h * Math.max(even, Math.min(sx, sy, 1))]
+          : [x * sx, y * sy, w * sx, h * sy];
+      return { ...element, box: box.map(round) };
+    }),
   };
 }
 
 const round = (value) => Math.round(value * 10) / 10;
 
-/** A plate's layout with its data taken out, as a template keeps it (`engine/mapplates.template_of`). */
+/**
+ * A plate's layout with its data taken out, as a template keeps it
+ * (`engine/mapplates.template_of`): no ground, no layers, no case pictures, no days.
+ * A picture kept inside the plate, or the signature, is layout and stays.
+ */
 export function templateOf(spec) {
   return {
     page: { ...spec.page },
     theme: { ...spec.theme },
     time: {},
     elements: spec.elements
-      .filter((element) => element.kind !== 'label' && element.kind !== 'arrow')
-      .map(({ view, layers, src, names, ...kept }) => kept),
+      .filter((element) => !ON_THE_GROUND.includes(element.kind) && element.kind !== 'video' && !element.step)
+      // eslint-disable-next-line no-unused-vars
+      .map(({ view, layers, names, release, onward, until, layer, at, to, ref, points, step, carry, ...kept }) => {
+        if (kept.src && kept.src !== SIGNATURE) delete kept.src;
+        return kept;
+      }),
   };
 }
+
+/** A picture's `src` naming the signature badge set in Settings. */
+export const SIGNATURE = '@signature';
 
 /**
  * A new plate from a template: its maps look where `view` says and draw `layers`.
@@ -148,12 +349,12 @@ export function fromTemplate(data, { view, layers = [] } = {}) {
     page: { ...data.page },
     theme: { ...DEFAULT_THEME, ...data.theme },
     time: { at: null, trail: true, since: null, window: 7 },
-    elements: data.elements
+    elements: mapsFirst(data.elements
       .filter((element) => !element.of || maps.has(element.of))
       .map((element) => element.kind === 'map'
         ? { ...element, view: { ...(view ?? { lat: 48.85, lon: 2.35, zoom: 9, bearing: 0 }) },
-          layers: layers.map((name) => ({ name, hidden: [], stroke: 1 })) }
-        : { ...element }),
+          layers: layers.map((name) => ({ name, hidden: [], stroke: 1, icons: 1 })) }
+        : { ...element })),
   };
 }
 
@@ -169,14 +370,161 @@ export function longDay(moment) {
 }
 
 /**
- * The words a plate's text stands for: `{date}` the day the plate is drawn on (today
- * when it has none), `{today}`, `{case}` and `{title}`.
+ * The words a plate's text stands for: `{date}` the day the plate is drawn on, else
+ * the day its layers last changed (`updated`), else today; `{today}`, `{case}`,
+ * `{title}`, `{updated}`, `{scale}` (the main map's, as `1:25,000`), `{imagery}` (the
+ * date of the Wayback release the main map shows) and `{handle}` (the signature's,
+ * from Settings).
  */
-export function fillTokens(text, { date = null, caseName = '', title = '', today = new Date() } = {}) {
+export function fillTokens(text, { date = null, updated = '', imagery = '', caseName = '', title = '', scale = '', handle = '', today = new Date() } = {}) {
   const iso = today.toISOString().slice(0, 10);
   return String(text ?? '')
-    .replaceAll('{date}', longDay(date) || longDay(iso))
+    .replaceAll('{date}', longDay(date) || longDay(updated) || longDay(iso))
     .replaceAll('{today}', longDay(iso))
+    .replaceAll('{updated}', longDay(updated) || longDay(iso))
     .replaceAll('{case}', caseName)
-    .replaceAll('{title}', title);
+    .replaceAll('{title}', title)
+    .replaceAll('{scale}', scale)
+    .replaceAll('{imagery}', imagery)
+    .replaceAll('{handle}', handle);
 }
+
+/** The words `fillTokens` knows, as the inspector lists them. */
+export const TOKENS = ['{date}', '{today}', '{updated}', '{case}', '{title}', '{scale}', '{imagery}', '{handle}'];
+
+// -- the days an annotation is shown on ------------------------------------------------
+
+/** The plate's day as an annotation names it: a moment, or "now". */
+export const dayOf = (at) => at ?? 'now';
+
+/** Whether `a` comes before `b`, "now" after every moment. */
+export function dayBefore(a, b) {
+  if (a === b) return false;
+  if (a === 'now') return false;
+  if (b === 'now') return true;
+  return a < b;
+}
+
+/** Whether the last day `until` is over by `day`: a day without its time lasts until it ends. */
+const over = (until, day) => dayBefore(until, day === 'now' ? day : day.slice(0, until.length));
+
+/** Whether an element belongs to some days rather than to every day. */
+export const dated = (element) => !!(element.onward || element.until);
+
+/** The element shown from `day` on, its end pulled along when it came before. No day: from the first. */
+export function startOn(element, day) {
+  const onward = day || null;
+  const pulled = onward && element.until && over(element.until, onward);
+  return { ...element, onward, until: pulled ? (onward === 'now' ? null : onward) : element.until ?? null };
+}
+
+/** The element shown up to `day`, its start pulled back when it came after. No day, or now: up to now. */
+export function endOn(element, day) {
+  const until = day && day !== 'now' ? day : null;
+  const pulled = until && element.onward && over(until, element.onward);
+  return { ...element, onward: pulled ? until : element.onward ?? null, until };
+}
+
+/** The element's days stretched to reach the day `at`, the ones between with them. */
+export function bringTo(element, at) {
+  if (shownOn(element, at)) return element;
+  const day = dayOf(at);
+  return element.onward && dayBefore(day, element.onward) ? startOn(element, day) : endOn(element, day);
+}
+
+/** The element shown on `at` and every day after it. */
+export const carryOn = (element, at) => endOn(bringTo(element, at), null);
+
+/** The days an element is shown on, in a few words; `label` names a day. */
+export function periodSaid(element, label) {
+  const { onward, until } = element;
+  if (!onward && !until) return 'Every day';
+  if (onward === 'now') return 'Only now';
+  if (onward === until) return `Only on ${label(onward)}`;
+  if (!until) return `From ${label(onward)} on`;
+  return onward ? `${label(onward)} to ${label(until)}` : `Up to ${label(until)}`;
+}
+
+/** A new annotation on a played plate belongs to the day it is made on. */
+export const bornOn = (at, playable) => (playable ? endOn(startOn({}, dayOf(at)), dayOf(at)) : {});
+
+// -- the steps of a day ------------------------------------------------------------------
+
+/** How long a step without a video holds, in seconds, unless it is set. */
+export const STEP_SECONDS = 3;
+/** At most this many steps on one day. */
+export const MAX_STEPS = 30;
+
+/** The steps of the plate's day `at`, in order. */
+export const stepsOf = (spec, at) => spec?.steps?.[dayOf(at)] ?? [];
+
+/**
+ * Where the plate is within its day, as `shownOn` reads it: the ids of the day's
+ * steps, and the one shown (-1 for the day itself, before any step).
+ */
+export function placeOf(spec, at, step = spec?.time?.step ?? null) {
+  const steps = stepsOf(spec, at).map((item) => item.id);
+  return { steps, index: step ? steps.indexOf(step) : -1 };
+}
+
+/** The step the plate is on, when its day holds it, else null: the day itself. */
+export function currentStep(spec, at, step = spec?.time?.step ?? null) {
+  return (step && stepsOf(spec, at).find((item) => item.id === step)) || null;
+}
+
+/**
+ * Whether an element is shown on the plate's day `at`, at the step `place` says. An
+ * element of a step is shown on that step only, or on it and the steps after it when
+ * it is carried; an element of the day shows on every step of it. An element of the
+ * day is shown from `onward` to `until`, both kept; without `onward` it runs from the
+ * first day, without `until` up to now, and with neither it is shown every day.
+ */
+export function shownOn(element, at, place = null) {
+  if (element.step) {
+    const index = place?.steps?.indexOf(element.step) ?? -1;
+    if (index < 0) return false;
+    return element.carry ? place.index >= index : place.index === index;
+  }
+  const day = dayOf(at);
+  if (element.onward && dayBefore(day, element.onward)) return false;
+  return !element.until || !over(element.until, day);
+}
+
+/** A new element made while the plate is on a step belongs to it, else to the day as `bornOn` says. */
+export const bornAt = (at, playable, step) => (step ? { step, carry: false, onward: null, until: null } : bornOn(at, playable));
+
+/** A new step for the day `at`, after the step `after` (null: first), and the plate's steps with it. */
+export function addStep(spec, at, after = null, step = { id: newId('s'), name: '', duration: STEP_SECONDS }) {
+  const day = dayOf(at);
+  const list = [...stepsOf(spec, at)];
+  const index = after ? list.findIndex((item) => item.id === after) + 1 : 0;
+  list.splice(Math.max(0, index), 0, step);
+  return { steps: { ...(spec.steps ?? {}), [day]: list.slice(0, MAX_STEPS) }, step };
+}
+
+/**
+ * The plate without the step `id`, and without what belongs to it. A day left
+ * without steps is no longer listed.
+ */
+export function withoutStep(spec, id) {
+  const steps = {};
+  for (const [day, list] of Object.entries(spec.steps ?? {})) {
+    const kept = list.filter((item) => item.id !== id);
+    if (kept.length) steps[day] = kept;
+  }
+  return { ...spec, steps, elements: spec.elements.filter((element) => element.step !== id),
+    time: { ...spec.time, step: spec.time?.step === id ? null : spec.time?.step ?? null } };
+}
+
+/** The day's steps with `id` moved to `index`. */
+export function movedStep(spec, at, id, index) {
+  const list = [...stepsOf(spec, at)];
+  const from = list.findIndex((item) => item.id === id);
+  if (from < 0) return spec.steps ?? {};
+  const [step] = list.splice(from, 1);
+  list.splice(Math.max(0, Math.min(list.length, index > from ? index - 1 : index)), 0, step);
+  return { ...(spec.steps ?? {}), [dayOf(at)]: list };
+}
+
+/** Whether the plate holds a step on any day. */
+export const hasSteps = (spec) => Object.values(spec?.steps ?? {}).some((list) => list.length > 0);

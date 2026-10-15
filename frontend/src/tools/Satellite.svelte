@@ -10,6 +10,7 @@
   import { createRadarState } from './satellite/state/radar.svelte.js';
   import { createWaybackState } from './satellite/state/wayback.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { createMapLayerMemory } from '../lib/map/layerMemory.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
   import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
@@ -208,8 +209,7 @@
   // where they are added and worked; the other maps only switch them on.
   let savedSearchOpen = $state(false);
   // Map layer: on from the start, on the Media position, so a case opens on its
-  // footage already placed. Session-only: the tool stays mounted across tabs, so a
-  // switch pressed off stays off until the app reloads, and nothing is saved.
+  // footage already placed. Kept per case with the other layers (`openLayers`).
   let savedOverlay = $state(true);
   /**
    * The located files the panel is playing, or null for the saved-work list.
@@ -265,6 +265,31 @@
     seamarks: false,
     gpstraces: false,
   });
+  /**
+   * The catalogue layers each case was left on, kept in this browser
+   * (`lib/map/layerMemory.js`): borders, place names and the saved work for a
+   * case that never said otherwise. The fire and night layers are not among them.
+   */
+  const switchMemory = createMapLayerMemory('satellite', ['boundaries', 'placenames', 'saved']);
+  /** The case the switches were last set for, which is the case they are kept under. */
+  let layersFor = null;
+  const switchedOn = $derived(
+    [
+      ...Object.keys(refLayers).filter((id) => refLayers[id]),
+      railOverlay && 'railway',
+      savedOverlay && 'saved',
+    ].filter(Boolean)
+  );
+  function openLayers(id) {
+    layersFor = id ?? null;
+    const ids = switchMemory.recall(layersFor);
+    untrack(() => {
+      for (const key of Object.keys(refLayers)) refLayers[key] = ids.includes(key);
+    });
+    railOverlay = ids.includes('railway');
+    savedOverlay = ids.includes('saved');
+  }
+  $effect(() => switchMemory.keep(layersFor, switchedOn));
   /**
    * The night lights: one night's VIIRS pass from NASA GIBS, or the 2016
    * composite. Key-less, and nothing is asked until the layer is on.
@@ -1521,6 +1546,7 @@
     caseState.rev; // re-fetch when the case is reloaded elsewhere (e.g. sidebar delete)
     if (openFor !== id) {
       openFor = id;
+      openLayers(id);
       savedSearchOpen = false;
       hoveredSavedId = null;
       revealSavedId = null;
@@ -2381,6 +2407,7 @@
         caseId={caseState.current?.id ?? ''}
         layers={uiState.tool === 'satellite' ? addedLayers.drawn : []}
         drawing={addedLayers.drawing}
+        watch={addedLayers.watch}
         picked={addedLayers.picked}
         onmenu={onMapContextMenu}
         interactive={!armedCursor}
@@ -2709,6 +2736,7 @@
           openScreenshot={() => (capture.shotOpen = true)}
           openExtensionGate={() => (capture.extGate = true)}
           openFigure={isSentinel ? openFigure : null}
+          openPlate={caseState.current ? () => { uiState.newPlate = true; uiState.tool = 'plate'; } : null}
         />
         {/if}
       </MapStatusBar>

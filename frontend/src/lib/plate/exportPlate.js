@@ -38,8 +38,14 @@ export function composePage(spec, scale, context, makeCanvas = () => document.cr
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
   const ctx = canvas.getContext('2d');
-  drawPage(ctx, spec, { ...context, scale, paper: true });
+  drawPage(ctx, spec, { ...context, scale, paper: true, editing: false });
   return canvas;
+}
+
+/** The page's picture put on the clipboard, as a PNG. */
+export async function copyPage(canvas) {
+  const blob = await canvasBlob(canvas);
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
 }
 
 /**
@@ -74,14 +80,24 @@ export function canvasBlob(canvas, type = 'image/png', quality = 0.92) {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('the page could not be encoded'))), type, quality));
 }
 
-/** Post one export: `frames` are blobs, one for a page, one per day for a played plate. */
-export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900 }, post = api.post) {
+/**
+ * Post one export: `frames` are blobs, one for a page, one per day for a played
+ * plate. A plate played through its steps sends `beats`, one per frame (how long it
+ * holds, the clips running over it), and `overs`, what stands over those clips.
+ */
+export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, overs = [] },
+  post = api.post) {
   const body = new FormData();
   frames.forEach((blob, index) => body.append('frames', blob, `${index}.${blob.type === 'image/jpeg' ? 'jpg' : 'png'}`));
+  if (beats) {
+    body.append('beats', JSON.stringify(beats));
+    overs.forEach((blob, index) => body.append('overs', blob, `over${index}.png`));
+  }
   body.append('format', format);
   body.append('filename', filename);
   body.append('width_mm', String(widthMm));
   body.append('height_mm', String(heightMm));
   body.append('interval', String(interval));
+  if (transparent) body.append('transparent', 'true');
   return post(`/api/cases/${caseId}/map-plates/export`, body);
 }

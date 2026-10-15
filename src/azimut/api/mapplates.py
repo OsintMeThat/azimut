@@ -7,18 +7,21 @@ macOS too, and a rename carries the preview along.
 
 What a plate exports is drawn in the browser, which is where its maps are, and
 posted here to be written into the folder saved for views: a PNG, a PDF of the
-paper size, or the page played through its days as a GIF or an MP4.
+paper size, or the page played through its days as a GIF or an MP4. A plate with
+steps sends its sequence too: how long each picture holds, and the clips of the
+case's videos that run over it, which are read here from the case itself.
 """
 
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from .. import __version__, errors, layout
 from ..engine import artifacts as artifact_engine
@@ -33,6 +36,8 @@ router = APIRouter(prefix="/api", tags=["map plates"])
 
 #: Read by `server.BulkBodyLimit` before an export is parsed.
 MAX_EXPORT_BODY_BYTES = mapplates.MAX_EXPORT_BODY_BYTES
+#: A plate's save: its layout, with the pictures it keeps inside it, and its title.
+MAX_PLATE_BODY_BYTES = mapplates.MAX_SPEC_CHARS + 100_000
 
 
 class PlateIn(BaseModel):
@@ -52,7 +57,11 @@ def _read(case: Case, name: str) -> dict[str, Any] | None:
         saved = json.loads(path.read_text(encoding="utf-8"))
     except (CaseError, OSError, ValueError):
         return None
-    return saved if isinstance(saved, dict) and saved.get("azimut_plate") == mapplates.VERSION else None
+    if not isinstance(saved, dict) or saved.get("azimut_plate") != mapplates.VERSION:
+        return None
+    if isinstance(saved.get("spec"), dict):
+        mapplates.as_periods(saved["spec"])
+    return saved
 
 
 def _thumb_of(case: Case, name: str) -> str | None:
@@ -182,6 +191,24 @@ async def save_plate_thumb(case_id: str, name: str, file: UploadFile = File()) -
     return {"thumb": thumb}
 
 
+def clip_files(case: Case, sequence: list[mapplates.Beat]) -> dict[str, Path]:
+    """The case's videos a sequence's clips name, each found inside the case; `ExportError` for any that is not."""
+    files: dict[str, Path] = {}
+    for clip in (clip for beat in sequence for clip in beat.clips):
+        if clip.src in files:
+            continue
+        try:
+            path = case.resolve_inside(clip.src)
+        except (CaseError, ValueError) as exc:
+            raise mapplates.ExportError("a clip names a file outside the case") from exc
+        if not path.is_file():
+            raise mapplates.ExportError(f"the video {PurePosixPath(clip.src).name} is no longer in the case")
+        if media_engine.media_kind(path.name) != "video":
+            raise mapplates.ExportError(f"{PurePosixPath(clip.src).name} is not a video")
+        files[clip.src] = path
+    return files
+
+
 @router.delete("/cases/{case_id}/map-plates/{name}")
 def delete_plate(case_id: str, name: str) -> dict[str, Any]:
     """Send the plate and its preview to the Trash. What it exported stays where it went."""
@@ -202,18 +229,29 @@ async def export_plate(
     width_mm: float = Form(default=297, gt=0, le=mapplates.MAX_EDGE_MM),
     height_mm: float = Form(default=210, gt=0, le=mapplates.MAX_EDGE_MM),
     interval: int = Form(default=900, ge=150, le=6000),
+    transparent: bool = Form(default=False),
+    beats: str = Form(default="", max_length=400_000),
+    overs: list[UploadFile] = File(default=[]),
 ) -> dict[str, Any]:
     """Write one export of a plate into the folder saved for views.
 
     A PNG or a PDF is one page; a GIF or an MP4 is the page on each of its days,
-    two to `MAX_FRAMES` of them, each shown `interval` milliseconds.
+    two to `MAX_FRAMES` of them, each shown `interval` milliseconds. A transparent
+    PNG keeps the paper see-through.
+
+    A plate played through its steps sends `beats`, one per picture: how long it
+    holds and, for an MP4, the clips that run over it (a video of the case, the part
+    of it, its box in pixels) with `overs`, the see-through pictures of what stands
+    over the clips. A clip's file is found inside the case, and must be a video.
     """
     case = get_case(case_id)
     played = format in ("gif", "mp4")
     if not played and len(frames) != 1:
         raise HTTPException(status_code=422, detail="a page is one picture")
-    if played and not 2 <= len(frames) <= mapplates.MAX_FRAMES:
+    if played and not (1 if beats else 2) <= len(frames) <= mapplates.MAX_FRAMES:
         raise HTTPException(status_code=422, detail=f"a played plate holds 2 to {mapplates.MAX_FRAMES} days")
+    if len(overs) > mapplates.MAX_FRAMES:
+        raise HTTPException(status_code=422, detail="too many pictures for one sequence")
     try:
         if played:
             pictures = [mapplates.picture(await frame.read(mapplates.MAX_FRAME_BYTES + 1),
@@ -221,10 +259,20 @@ async def export_plate(
                         for frame in frames]
             if max(pictures[0].size) > mapplates.MAX_VIDEO_EDGE:
                 raise mapplates.ExportError("a played plate is at most 3840 pixels across")
-            data = mapplates.gif_bytes(pictures, interval) if format == "gif" else mapplates.mp4_bytes(pictures, interval)
+            sequence = mapplates.read_beats(beats, len(pictures), len(overs)) if beats else None
+            if sequence is None:
+                data = await run_in_threadpool(mapplates.gif_bytes if format == "gif" else mapplates.mp4_bytes, pictures, interval)
+            elif format == "gif":
+                data = await run_in_threadpool(mapplates.gif_bytes, pictures, interval, [round(beat.seconds * 1000) for beat in sequence])
+            else:
+                files = clip_files(case, sequence)
+                above = [mapplates.picture(await over.read(mapplates.MAX_FRAME_BYTES + 1), max_bytes=mapplates.MAX_FRAME_BYTES,
+                                           max_pixels=mapplates.MAX_FRAME_PIXELS, alpha=True) for over in overs]
+                data = await run_in_threadpool(mapplates.sequence_mp4, pictures, sequence, above, files)
         else:
             raw = await frames[0].read(mapplates.MAX_PAGE_BYTES + 1)
-            page = mapplates.picture(raw, max_bytes=mapplates.MAX_PAGE_BYTES, max_pixels=mapplates.MAX_PAGE_PIXELS)
+            page = mapplates.picture(raw, max_bytes=mapplates.MAX_PAGE_BYTES, max_pixels=mapplates.MAX_PAGE_PIXELS,
+                                     alpha=transparent and format == "png")
             data = (mapplates.pdf_bytes(page, width_mm, height_mm, filename) if format == "pdf"
                     else mapplates.png_bytes(page))
     except mapplates.ExportError as exc:

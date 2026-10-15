@@ -780,3 +780,62 @@ def test_group_line_width_reaches_drawn_shapes(client, owner):
     client.post(f"{url}/shapes", json={"geometry": {"type": "LineString", "coordinates": [[2, 48], [3, 49]]}})
     assert client.patch(f"{url}/groups/{group['id']}", json={"stroke": 5.5}).status_code == 200
     assert client.get(f"{url}/data").json()["features"][0]["properties"]["stroke_width"] == 5.5
+
+
+def test_a_feature_carries_its_own_look_and_how_sure_it_is(client, owner):
+    """Width, dash, arrow, fill, size and its name on the map, each cleared by sending nothing."""
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    line = client.post(f"{url}/shapes", json={"geometry": {"type": "LineString", "coordinates": [[2.3, 48.8], [2.4, 48.9]]},
+                                               "line_width": 5, "line_dash": "dashed", "line_arrow": "end", "confidence": "claimed",
+                                               "credit": "GeoConfirmed — geoconfirmed.org"})
+    assert line.status_code == 200, line.text
+    key = line.json()["key"]
+    drawn = client.get(f"{url}/data").json()["features"][0]["properties"]
+    assert (drawn["stroke_width"], drawn["line_dash"], drawn["line_arrow"], drawn["confidence"]) == (5, "dashed", "end", "claimed")
+    assert drawn["credit"] == "GeoConfirmed — geoconfirmed.org"
+    cleared = client.patch(f"{url}/markers/{key}", json={"line_dash": None, "line_width": None, "label": "on", "label_size": 14})
+    assert cleared.status_code == 200, cleared.text
+    drawn = client.get(f"{url}/data").json()["features"][0]["properties"]
+    assert "line_dash" not in drawn and drawn["stroke_width"] == 2 and drawn["show_label"] is True and drawn["label_size"] == 14
+    for wrong in ({"line_dash": "wavy"}, {"line_width": 40}, {"confidence": "maybe"}, {"area_fill": "plaid"}):
+        assert client.patch(f"{url}/markers/{key}", json=wrong).status_code == 422
+
+
+def test_a_group_lends_its_look_to_features_that_set_none(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    area = client.post(f"{url}/shapes", json={"geometry": {"type": "Polygon", "coordinates": [[[2.3, 48.8], [2.4, 48.8], [2.4, 48.9], [2.3, 48.8]]]}})
+    own = client.post(f"{url}/shapes", json={"geometry": {"type": "Polygon", "coordinates": [[[2.5, 48.8], [2.6, 48.8], [2.6, 48.9], [2.5, 48.8]]]},
+                                              "area_fill": "none"})
+    group = read(client, owner, row)["groups"][0]["id"]
+    assert client.patch(f"{url}/groups/{group}", json={"area_fill": "hatch", "line_dash": "dotted"}).status_code == 200
+    drawn = {feature["properties"]["key"]: feature["properties"] for feature in client.get(f"{url}/data").json()["features"]}
+    assert drawn[area.json()["key"]]["area_fill"] == "hatch"
+    assert drawn[own.json()["key"]]["area_fill"] == "none"
+    # null clears a group's look
+    assert client.patch(f"{url}/groups/{group}", json={"area_fill": None}).status_code == 200
+    drawn = {feature["properties"]["key"]: feature["properties"] for feature in client.get(f"{url}/data").json()["features"]}
+    assert "area_fill" not in drawn[area.json()["key"]]
+
+
+def test_revert_puts_features_back_and_drops_the_ones_an_edit_made(client, owner):
+    """The editor's undo and redo: whole features back by their key, new ones out."""
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    first = marker(client, owner, row, name="Depot")
+    before = read(client, owner, row)["document"]["features"][0]
+    client.patch(f"{url}/markers/{first['properties']['key']}", json={"name": "Moved depot"})
+    second = marker(client, owner, row, name="Bridge")
+    answer = client.post(f"{url}/revert", json={"put": [before], "drop": [second["properties"]["key"]]})
+    assert answer.status_code == 200, answer.text
+    features = read(client, owner, row)["document"]["features"]
+    assert [feature["properties"]["name"] for feature in features] == ["Depot"]
+    # a feature put back after it was removed comes back with its key
+    client.delete(f"{url}/markers/{first['properties']['key']}")
+    assert client.post(f"{url}/revert", json={"put": [before], "drop": []}).status_code == 200
+    assert read(client, owner, row)["document"]["features"][0]["properties"]["key"] == first["properties"]["key"]
+    # what is put back is checked as a drawn feature is
+    broken = {**before, "geometry": {"type": "Point", "coordinates": [500, 48]}}
+    assert client.post(f"{url}/revert", json={"put": [broken], "drop": []}).status_code == 422
+    assert client.post(f"{url}/revert", json={"put": [{"geometry": before["geometry"], "properties": {}}], "drop": []}).status_code == 422

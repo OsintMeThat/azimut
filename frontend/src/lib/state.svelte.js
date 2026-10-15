@@ -13,6 +13,7 @@ import { shouldShowUpdate } from './appUpdate.js';
 import { extensionVersion, pingExtensions, extensionState } from './extBridge.js';
 import { classify } from './extInstall.js';
 import { loadRelationTypes } from './relations.svelte.js';
+import { layerMemory } from './map/layerMemory.js';
 
 /**
  * App-wide display preferences (Settings → General), mirrored from
@@ -24,7 +25,7 @@ export const prefs = $state({
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
   mapSync: true, // Satellite, Compare, Detect and Horizon share one camera
-  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery', overlays: ['boundaries', 'placenames'] },
+  detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery' },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
@@ -264,6 +265,7 @@ export const uiState = $state({
   openHorizonView: null, // saved Horizon view name to reopen in the Horizon tab
   openPlate: null, // map plate name to reopen in the Map plate tool
   openPlateTemplate: null, // map template id to edit in the Map plate tool, from Settings
+  newPlate: false, // the Map asked for a plate of what it shows: the Map plate tool opens one
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
@@ -652,6 +654,7 @@ function clearCaseHandoffs() {
   uiState.openCompare = null;
   uiState.openHorizonView = null;
   uiState.openPlate = null;
+  uiState.newPlate = false;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;
@@ -691,6 +694,8 @@ export function closeCase() {
  */
 export async function deleteCase(id) {
   await api.del(`/api/cases/${id}`);
+  // the layers each map had on in it, kept in this browser (lib/map/layerMemory)
+  layerMemory.forget(id);
   if (caseState.current?.id === id) closeCase();
   await refreshCaseList();
 }

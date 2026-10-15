@@ -104,6 +104,7 @@
   import { createFireKey } from '../lib/map/fireKey.svelte.js';
   import { createLayerSet } from '../lib/map/layerSet.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { createMapLayerMemory } from '../lib/map/layerMemory.js';
   import { savedRow } from '../lib/geoTree.js';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import MapNavigation from './horizon/MapNavigation.svelte';
@@ -755,11 +756,13 @@
   $effect(() => () => fireKey.destroy());
   /**
    * Every layer the other maps offer (lib/map/layerSet), with borders, place
-   * names and the case's saved work on from the start: they say where one is.
+   * names and the case's saved work on in a case that never said otherwise: they
+   * say where one is. Each case opens on the layers it was left on.
    */
+  const HORIZON_LAYERS = ['boundaries', 'placenames', 'saved'];
   const mapLayers = createLayerSet({
     fireKey,
-    initial: ['boundaries', 'placenames', 'saved'],
+    initial: HORIZON_LAYERS,
     imagery: () => baseIsImagery,
     onsettings: () => {
       uiState.settingsTab = 'imagery';
@@ -767,6 +770,15 @@
     },
   });
   const overlays = $derived(mapLayers.overlays);
+  const switchMemory = createMapLayerMemory('horizon', HORIZON_LAYERS);
+  let layersFor;
+  $effect(() => {
+    const id = caseState.current?.id ?? null;
+    if (id === layersFor) return;
+    layersFor = id;
+    mapLayers.restore(switchMemory.recall(id));
+  });
+  $effect(() => switchMemory.keep(layersFor, mapLayers.ids));
   /** The menu's folded headings, kept while it is closed and opened again. */
   let layersFolded = $state({});
   /** The case's own layers, drawn on this small map only while Horizon is on screen. */
@@ -1748,6 +1760,7 @@
           caseId={caseState.current?.id ?? ''}
           layers={uiState.tool === 'horizon' ? myLayers.drawn : []}
           drawing={addedLayers.drawing}
+          watch={myLayers.watch}
           interactive={!!personalLayers.editor && !personalLayers.armed}
           onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
           onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}

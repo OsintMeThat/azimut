@@ -10,16 +10,21 @@
    *
    * A tracked layer is drawn as it stood on the plate's day, with its trail and its
    * gains and losses when the plate asks (`layerHistory.asOf`). A plate draws a
-   * layer's groups less the ones it hides, at its own weight (`stroke`).
+   * layer's groups less the ones it hides, at its own weight, size, colour and dash.
+   * The ground is the quiet plain one (its colours, roads, names and their language
+   * the plate's own), or imagery shown faded, greyed or tinted as the plate says,
+   * a Wayback release among them.
    */
   import { onMount, untrack } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
-  import { createBasemaps } from '../../lib/map/basemap.js';
+  import { IMAGERY_SOURCE, createBasemaps } from '../../lib/map/basemap.js';
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { asOf, isTracked } from '../../lib/map/layerHistory.js';
   import { showPlain } from '../../lib/plate/plainBasemap.js';
-  import { PX_PER_MM } from '../../lib/plate/page.js';
+  import { PX_PER_MM, fontFamily } from '../../lib/plate/page.js';
+  import { sameView } from '../../lib/plate/geo.js';
+  import { WAYBACK_ID, waybackId } from '../../lib/wayback.js';
   import { layerCell } from '../../lib/usage.js';
 
   let {
@@ -33,8 +38,12 @@
     rows = [],
     providers = [],
     relief = null,
+    /** The plate's face, which the plain ground writes its names in. */
+    font = 'inter',
     /** True while the hand frames this map: it pans, zooms and turns. */
     interactive = false,
+    /** The map belongs to another step than the one shown: it stays up, unseen. */
+    away = false,
     /** `(view, frame)` as the map moves, and once it is up. */
     onview = null,
     /** `(handle)` once the map is drawn: `{ snapshot(ratio) }`. */
@@ -49,7 +58,6 @@
   let ready = $state(false);
   let engine = null;
   let basemaps = null;
-  let provider = null;
   /** name → { layer, key }: a layer is redrawn when what it draws changes. */
   const drawn = new Map();
   let settingView = false;
@@ -72,6 +80,24 @@
     return () => { gone = true; teardown?.(); };
   });
 
+  /** The ground's own settings, as one key: a change rebuilds the plain ground, never the map. */
+  const plainKey = $derived(JSON.stringify([element.basemap, element.plain ?? {}, element.relief ?? 1, (element.overlays ?? []).includes('relief'), font]));
+
+  function showGround(map) {
+    const ground = untrack(() => element.basemap) || 'plain';
+    if (ground.startsWith('plain')) {
+      const plain = untrack(() => element.plain) ?? {};
+      showPlain(map, { palette: ground === 'plain-dark' ? 'dark' : 'light',
+        relief: untrack(() => element.overlays ?? []).includes('relief') ? untrack(() => relief) : null,
+        intensity: untrack(() => element.relief) ?? 1, font: fontFamily(untrack(() => font)), ...plain });
+      return;
+    }
+    const provider = untrack(() => providers).find((entry) => entry.id === ground) ?? null;
+    if (!provider) return;
+    const id = ground === WAYBACK_ID ? waybackId(ground, untrack(() => element.release)) : provider.id;
+    basemaps.show(provider, id, layerCell(provider, Math.round(map.getZoom() + 1)));
+  }
+
   async function build() {
     const start = untrack(() => view);
     try {
@@ -86,15 +112,8 @@
     map.jumpTo({ center: [start.lon, start.lat], zoom: start.zoom, bearing: start.bearing ?? 0 });
     map.on('move', report);
     basemaps = createBasemaps(engine);
-    const ground = untrack(() => element.basemap) || 'plain';
-    const overlays = untrack(() => element.overlays) ?? [];
-    if (ground.startsWith('plain')) {
-      showPlain(map, { palette: ground === 'plain-dark' ? 'dark' : 'light', relief: overlays.includes('relief') ? untrack(() => relief) : null });
-    } else {
-      provider = untrack(() => providers).find((entry) => entry.id === ground) ?? null;
-      if (provider) basemaps.show(provider, provider.id, layerCell(provider, Math.round(start.zoom + 1)));
-    }
-    for (const id of overlays) if (id !== 'relief') basemaps.setOverlay(id, true);
+    showGround(map);
+    for (const id of untrack(() => element.overlays) ?? []) if (id !== 'relief') basemaps.setOverlay(id, true);
     applyGestures(untrack(() => interactive));
     report();
     ready = true;
@@ -109,6 +128,35 @@
     };
   }
 
+  // The plain ground's colours, roads, names or relief changed: it is laid again.
+  let lastPlain = '';
+  $effect(() => {
+    const key = plainKey;
+    if (!ready || !engine) return;
+    if (!lastPlain) { lastPlain = key; return; }
+    if (key === lastPlain) return;
+    lastPlain = key;
+    if (String(untrack(() => element.basemap)).startsWith('plain')) untrack(() => showGround(engine.impl));
+  });
+
+  // The imagery's tone: faded, greyed, lit, contrasted, tinted, set on the ground's own layer.
+  $effect(() => {
+    const tone = element.tone ?? {};
+    const basemap = element.basemap;
+    if (!ready || !engine || String(basemap).startsWith('plain')) return;
+    const map = engine.impl;
+    const apply = () => {
+      if (!map.getLayer(IMAGERY_SOURCE)) return false;
+      map.setPaintProperty(IMAGERY_SOURCE, 'raster-opacity', tone.opacity ?? 1);
+      map.setPaintProperty(IMAGERY_SOURCE, 'raster-saturation', tone.saturation ?? 0);
+      map.setPaintProperty(IMAGERY_SOURCE, 'raster-brightness-max', tone.brightness ?? 1);
+      map.setPaintProperty(IMAGERY_SOURCE, 'raster-contrast', tone.contrast ?? 0);
+      map.setPaintProperty(IMAGERY_SOURCE, 'raster-hue-rotate', tone.hue ?? 0);
+      return true;
+    };
+    if (!apply()) map.once('styledata', apply);
+  });
+
   function applyGestures(on) {
     const map = engine?.impl;
     if (!map) return;
@@ -119,15 +167,14 @@
   }
   $effect(() => { if (ready) applyGestures(interactive); });
 
-  // A view set from outside (the inspector, an inset following its map) moves the camera.
+  // A view set from outside (the inspector, an inset following its map, a drag on the page) moves the camera.
   $effect(() => {
     const next = view;
     const map = ready ? engine?.impl : null;
     if (!map || !next) return;
+    // the map's own move comes back rounded as the plate keeps it: a jump there would stop the drag
     const centre = map.getCenter();
-    const same = Math.abs(centre.lat - next.lat) < 1e-9 && Math.abs(centre.lng - next.lon) < 1e-9
-      && Math.abs(map.getZoom() - next.zoom) < 1e-6 && Math.abs(map.getBearing() - (next.bearing ?? 0)) < 1e-6;
-    if (same) return;
+    if (sameView({ lat: centre.lat, lon: centre.lng, zoom: map.getZoom(), bearing: map.getBearing() }, next)) return;
     settingView = element.kind === 'inset';
     map.jumpTo({ center: [next.lon, next.lat], zoom: next.zoom, bearing: next.bearing ?? 0 });
     settingView = false;
@@ -137,14 +184,16 @@
   // The frame's size on the page changed: the canvas follows.
   $effect(() => { void width; void height; queueMicrotask(() => { engine?.resize(); report(); }); });
 
-  /** What one of the plate's layers draws: its features as the plate's day and weight say. */
+  /** What one of the plate's layers draws: its features as the plate's day, weight, size, colour and dash say. */
   function features(entry, row, collection) {
     let data = collection;
     if (isTracked(row)) data = asOf(collection, time?.at ?? null, { trail: time?.trail !== false, since: time?.since ?? null, window: time?.window ?? 7 });
-    if ((entry.stroke ?? 1) === 1) return data;
-    const k = entry.stroke;
+    const stroke = entry.stroke ?? 1;
+    const icons = entry.icons ?? stroke;
+    if (stroke === 1 && icons === 1 && !entry.colour && !entry.dash) return data;
     return { ...data, features: data.features.map((feature) => ({ ...feature, properties: { ...feature.properties,
-      stroke_width: (feature.properties.stroke_width ?? 2) * k, icon_scale: (feature.properties.icon_scale ?? 1) * k } })) };
+      stroke_width: (feature.properties.stroke_width ?? 2) * stroke, icon_scale: (feature.properties.icon_scale ?? 1) * icons,
+      ...(entry.colour ? { colour: entry.colour } : {}), ...(entry.dash ? { line_dash: entry.dash } : {}) } })) };
   }
 
   // The case's layers, as the plate draws them, the first listed on top.
@@ -159,13 +208,16 @@
       for (const entry of wanted) {
         const row = available.find((item) => item.name === entry.name);
         if (!row) continue;
-        const key = JSON.stringify([row.sha256, entry.stroke ?? 1, isTracked(row) ? moment : '', entry.hidden]);
-        const held = drawn.get(entry.name);
+        const key = JSON.stringify([row.sha256, entry.stroke ?? 1, entry.icons ?? 1, entry.colour ?? '', entry.dash ?? '',
+          isTracked(row) ? moment : '', entry.hidden]);
+        let held = drawn.get(entry.name);
         if (held?.key === key) continue;
-        const layer = held?.layer ?? createAddedLayer(engine, { editable: !!row.editable,
+        // a layer switched to tracked, or back, needs the engine layers its past is drawn on
+        if (held && held.tracked !== isTracked(row)) { held.layer.destroy(); drawn.delete(entry.name); held = null; }
+        const layer = held?.layer ?? createAddedLayer(engine, { editable: !!row.editable, history: isTracked(row),
           iconUrl: row.icons ? (icon) => `/api/cases/${caseId}/map-layers/${encodeURIComponent(row.name)}/icons/${icon}` : null });
         layer.interactive(false);
-        drawn.set(entry.name, { layer, key });
+        drawn.set(entry.name, { layer, key, tracked: isTracked(row) });
         addedLayers.drawing(caseId, row.name).then((collection) => {
           if (drawn.get(entry.name)?.layer !== layer) return;
           layer.set(features(entry, row, collection), { categories: row.categories, hidden: entry.hidden ?? [], period: null });
@@ -206,9 +258,10 @@
   }
 </script>
 
-<div class="plate-map" class:live={interactive} bind:this={container}
+<div class="plate-map" class:live={interactive} class:dim={element.hidden} bind:this={container}
   style:left="{element.box[0] * PX_PER_MM}px" style:top="{element.box[1] * PX_PER_MM}px"
-  style:width="{width}px" style:height="{height}px">
+  style:width="{width}px" style:height="{height}px" style:opacity={element.hidden ? 0.15 : element.opacity ?? 1}
+  style:visibility={away ? 'hidden' : null}>
   {#if failed}<p class="refused">This browser cannot draw the map.</p>{/if}
 </div>
 

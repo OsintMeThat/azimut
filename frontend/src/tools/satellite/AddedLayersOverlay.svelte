@@ -44,15 +44,47 @@
     ondeleteplace = null,
     /** A source feature handed over to be copied into one of the analyst's layers. */
     oncopyfeature = null,
+    /** `{ start(name), end(name, outcome) }`: told when a layer begins drawing and
+     *  how it ended (`drawn`, `failed` or `dropped`), which is what lets a case
+     *  put its layers back in turn and leave off one that took the page down. */
+    watch = null,
   } = $props();
 
   async function copy(text) {
     await copyText(text);
   }
 
-  /** name → { layer, sha, moment, collection } so a refreshed snapshot redraws, a
-   *  tracked layer's moved cursor redraws from what is in hand, and nothing else does. */
+  /** name → { layer, sha, moment, collection, settled } so a refreshed snapshot
+   *  redraws, a tracked layer's moved cursor redraws from what is in hand, and
+   *  nothing else does. `settled` once `watch` heard how its drawing ended. */
   const live = new Map();
+
+  /** Say once how one layer's drawing ended. */
+  function settle(name, entry, outcome) {
+    if (entry.settled) return;
+    entry.settled = true;
+    watch?.end(name, outcome);
+  }
+
+  /**
+   * Once the map has drawn what it was handed: the engine tiles a layer off the
+   * page's thread, so a layer is only drawn when the map next goes idle. Bounded,
+   * since a map kept moving never does.
+   */
+  function idle() {
+    const map = engine?.impl;
+    if (!map?.once) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, 10000);
+      map.once('idle', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  /** What a layer's engine layers are built for: a change of it builds them again. */
+  const shapeOf = (row) => JSON.stringify([!!row.editable, isTracked(row), row.icons ?? 0, row.title]);
 
   /** What a tracked layer's cursor reads, as one key: a change redraws it. */
   const momentKey = (row) => isTracked(row) ? JSON.stringify(row.time ?? null) : '';
@@ -65,7 +97,7 @@
   }
 
   function paint(row, entry) {
-    entry.layer.set(drawn(row, entry.collection), {
+    return entry.layer.set(drawn(row, entry.collection), {
       categories: row.categories,
       hidden: row.hidden,
       period: row.period,
@@ -104,7 +136,9 @@
   }
 
   function drop(name) {
-    live.get(name)?.layer.destroy();
+    const entry = live.get(name);
+    if (entry) settle(name, entry, 'dropped');
+    entry?.layer.destroy();
     live.delete(name);
   }
 
@@ -133,6 +167,21 @@
     }
     for (const row of layers) {
       const existing = live.get(row.name);
+      // A layer edited or refreshed keeps its engine layers and takes its new features
+      // in place: tearing them down and building them again is what each edit waited
+      // on, and what made the map flash under the hand.
+      if (existing && existing.sha !== row.sha256 && existing.settled && existing.shape === shapeOf(row)) {
+        existing.sha = row.sha256;
+        const entry = existing;
+        drawing(caseId, row.name).then((collection) => {
+          if (live.get(row.name) !== entry || entry.sha !== row.sha256) return;
+          entry.collection = collection;
+          const current = layers.find((item) => item.name === row.name) ?? row;
+          entry.moment = momentKey(current);
+          paint(current, entry);
+        }).catch(() => {});
+        continue;
+      }
       if (existing && existing.sha === row.sha256) {
         if (existing.moment !== momentKey(row)) {
           existing.moment = momentKey(row);
@@ -146,6 +195,7 @@
       if (existing) drop(row.name);
       const layer = createAddedLayer(engine, {
         editable: !!row.editable,
+        history: isTracked(row),
         card: (properties, point) => {
           const card = layerCard(row.title, { coords: fmtCoords, copy, pictures: followedPictures })(properties, point);
           const own = row.editable && properties.key;
@@ -213,20 +263,28 @@
           onmenu?.(properties ? { ...at, feature: properties.name || UNNAMED, layer: row.title } : at),
       });
       layer.interactive(untrack(() => interactive));
-      const entry = { layer, sha: row.sha256, moment: momentKey(row), collection: null };
+      const entry = { layer, sha: row.sha256, moment: momentKey(row), collection: null, settled: false, shape: shapeOf(row) };
       live.set(row.name, entry);
+      watch?.start(row.name);
       drawing(caseId, row.name)
-        .then((collection) => {
+        .then(async (collection) => {
           // the layer may have been switched off while its features were loading
           if (live.get(row.name) !== entry) return;
           entry.collection = collection;
           // the row as it is now: its cursor may have moved while this loaded
           const current = layers.find((item) => item.name === row.name) ?? row;
           entry.moment = momentKey(current);
-          paint(current, entry);
+          const painted = paint(current, entry);
           restack();
+          await painted;
+          await idle();
+          if (live.get(row.name) === entry) settle(row.name, entry, 'drawn');
         })
-        .catch(() => { if (live.get(row.name)?.layer === layer) drop(row.name); });
+        .catch(() => {
+          if (live.get(row.name) !== entry) return;
+          settle(row.name, entry, 'failed');
+          drop(row.name);
+        });
     }
     restack();
   });

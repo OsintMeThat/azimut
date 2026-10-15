@@ -74,6 +74,9 @@ describe('the moment a tracked layer is read at', () => {
 
   it('says when gains and losses are hatched', () => {
     show({ at: null, trail: true, since: 'previous' });
-    expect(document.body.querySelector('.badge')).not.toBeNull();
+    // the button that sets the past says what is drawn of it, rather than a ⋯ nobody finds
+    expect(document.body.querySelector('.past').textContent).toContain('Before · ± last');
+    show({ at: null, trail: false, since: null });
+    expect([...document.body.querySelectorAll('.past')].at(-1).textContent).toContain('The past');
   });
 });

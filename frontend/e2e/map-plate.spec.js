@@ -62,6 +62,50 @@ test('a new plate opens on the house layout and saves itself', async ({ page }) 
   await expect.poll(() => lastSave(store).title).toBe('Front, October');
 });
 
+test('the page zooms round the wheel, moves by a drag, and Fit brings it back', async ({ page }) => {
+  await plateFixture(page);
+  await page.goto('/#plate');
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  const paper = page.locator('.page');
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  const fitted = await paper.boundingBox();
+  const viewport = await page.locator('.viewport').boundingBox();
+  // a drag round the page moves it
+  await page.mouse.move(viewport.x + 6, viewport.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(viewport.x + 66, viewport.y + 46, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(async () => (await paper.boundingBox()).x).toBeCloseTo(fitted.x + 60, 0);
+  // the wheel zooms round the pointer
+  await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2);
+  await page.mouse.wheel(0, -400);
+  await expect.poll(async () => (await paper.boundingBox()).width).toBeGreaterThan(fitted.width * 1.3);
+  await page.getByRole('button', { name: 'Fit', exact: true }).click();
+  await expect.poll(async () => (await paper.boundingBox()).width).toBeCloseTo(fitted.width, 0);
+  await expect(page.getByRole('button', { name: 'Fit', exact: true })).toBeDisabled();
+});
+
+test('a framed map goes as far as the hand drags it', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  const map = page.locator('.plate-map').first();
+  const box = await map.boundingBox();
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator('.plate-map.live')).toHaveCount(1);
+  const mainOf = (spec) => spec.elements.find((element) => element.kind === 'map').view;
+  const before = mainOf(lastSave(store).spec);
+  const scale = parseInt(await page.locator('.zoom-value').textContent(), 10) / 100;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 150, box.y + box.height / 2, { steps: 15 });
+  await page.mouse.up();
+  // 150 screen pixels are 150 / scale pixels of the map: the ground follows the whole drag
+  const expected = ((150 / scale) * 360) / (512 * 2 ** before.zoom);
+  await expect.poll(() => mainOf(lastSave(store).spec).lon - before.lon).toBeGreaterThan(expected * 0.8);
+});
+
 test('an element moves by the keyboard, goes with Delete, and Undo brings it back', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
@@ -112,4 +156,52 @@ test('a plate kept as a template starts the next one', async ({ page }) => {
   await page.getByRole('button', { name: 'Back to the plates' }).click();
   await page.locator('.tile.template', { hasText: 'Slide' }).click();
   await expect.poll(() => lastSave(store)?.spec.page.paper).toBe('screen');
+});
+
+test('a day plays its steps, and a step plays a video of the case', async ({ page }) => {
+  const store = await plateFixture(page);
+  const strike = { path: 'media/strike.mp4', title: 'Strike', kind: 'video', thumbnail: null,
+    source: { type: 'download', uploader: 'GeoWatch', webpage_url: 'https://x.com/geo/status/1', upload_date: '20261012' } };
+  await page.route(`**/api/cases/${CASE_ID}/media/page**`, (route) => route.fulfill({ json: { items: [strike], next_cursor: null, total: 1, facets: {} } }));
+  await page.route(`**/api/cases/${CASE_ID}/media/item**`, (route) => route.fulfill({ json: strike }));
+  await page.goto('/#plate');
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  // a plate with no layer followed over time still takes steps
+  await page.locator('.add-step').click();
+  const tiles = page.locator('.steps [role="option"]');
+  await expect(tiles).toHaveCount(2);
+  await expect(page.locator('.on-step')).toHaveText('Step 1: what you add belongs to it');
+  await page.locator('.adds button', { hasText: 'Text' }).click();
+  await page.getByLabel('Text', { exact: true }).fill('First strike');
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    return !!spec && spec.elements.find((element) => element.text === 'First strike')?.step === spec.steps?.now?.[0]?.id;
+  }).toBe(true);
+  await expect(page.locator('.list .tag.step')).toHaveCount(1);
+  // the day itself leaves the step's text out
+  await tiles.first().click();
+  await expect(page.locator('.on-step')).toHaveCount(0);
+  await expect(page.locator('.list .row', { hasText: 'First strike' })).toHaveCount(0);
+  // a video goes on a step of its own, after the last, and says where it comes from
+  await page.locator('.adds button', { hasText: 'Video' }).click();
+  await expect(tiles).toHaveCount(3);
+  await page.getByRole('button', { name: 'Choose a video' }).click();
+  await page.locator('.float-menu button[title="Strike"]').click();
+  await expect(page.getByLabel('Source line', { exact: true })).toHaveValue('GeoWatch · x.com · 12 October 2026');
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    const video = spec?.elements.find((element) => element.kind === 'video');
+    return video && [video.src, video.step === spec.steps.now[1].id, video.clip];
+  }).toEqual(['media/strike.mp4', true, [0, 10]]);
+  // the MP4 is the page, then each step, the video running over its own
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[value="mp4"]').check();
+  await expect(dialog.getByText(/Runs 0:1\d/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect.poll(() => store.exports.length, { timeout: 60_000 }).toBe(1);
+  expect(store.exports[0]).toContain('name="beats"');
+  expect(store.exports[0]).toContain('"src":"media/strike.mp4"');
+  expect(store.exports[0]).toContain('name="overs"');
 });

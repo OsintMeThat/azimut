@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMyLayersState } from './myLayers.svelte.js';
+import { createMyLayersState, difference, shapeRing } from './myLayers.svelte.js';
 
 const ROW = { name: 'working', title: 'Working map', editable: true, features: 0 };
 const feature = (key, properties = {}) => ({ type: 'Feature',
@@ -325,7 +325,8 @@ describe('personal layer editing', () => {
     const [, , , action] = notify.mock.calls.at(-1);
     api.post.mockResolvedValueOnce({ layer: ROW, document: { features: lines } });
     await action.onClick();
-    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection/merge-1/restore', {});
+    // the merge taken back puts the feature it swallowed back as it was
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [lines[1]], drop: [] });
   });
 
   it('cuts a line at a corner and selects both halves', async () => {
@@ -404,7 +405,7 @@ describe('personal layer editing', () => {
     api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [feature('m1')] } });
     await undo.onClick();
     expect(editor.features[0].properties.key).toBe('m1');
-    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/m1/restore', {});
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/revert', { put: [feature('m1')], drop: [] });
   });
 
   it('can remove directly from a popup without opening the editor or deleting a case place', async () => {
@@ -477,6 +478,173 @@ describe('editing a layer followed over time', () => {
     await editor.setTrack({ on: false });
     expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/edit', { track: { on: false } });
     expect(editor.cursor).toBeNull();
+  });
+});
+
+
+describe('Ctrl+Z in the layer editor', () => {
+  const at = (key, coordinates) => ({ ...feature(key), geometry: { type: 'Point', coordinates } });
+
+  it('takes back any edit, one step at a time, and makes it again', async () => {
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [at('one', [2, 48])] } });
+    api.post.mockImplementation(async (path, body) => (path.endsWith('/selection')
+      ? { layer: ROW, document: { features: [at('one', [2, 49])] }, kept: 0 }
+      : { layer: ROW, document: { features: body.put?.length ? body.put : [at('one', [2, 48])] } }));
+    const editor = store(); await editor.open(ROW);
+    expect(editor.undo()).toBe(false);
+    await editor.moveFeatures(['one'], [0, 1]);
+    expect(editor.canUndo).toBe(true);
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved(); await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [at('one', [2, 48])], drop: [] });
+    expect(notify).toHaveBeenLastCalledWith('Undone: move', 'ok', 1600);
+    expect(editor.canRedo).toBe(true);
+    expect(editor.redo()).toBe(true);
+    await editor.whenSaved(); await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [at('one', [2, 49])], drop: [] });
+    expect(editor.features[0].geometry.coordinates).toEqual([2, 49]);
+  });
+
+  it('brings a removed marker back, and takes back a marker just added', async () => {
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [feature('one')] } });
+    api.del.mockResolvedValue({ layer: ROW, document: { features: [] }, removed: 'one' });
+    api.post.mockResolvedValue({ layer: ROW, document: { features: [feature('one')] } });
+    const editor = store(); await editor.open(ROW);
+    await editor.remove('one');
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved(); await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [feature('one')], drop: [] });
+    // a marker added is dropped by its undo
+    api.post.mockResolvedValueOnce({ layer: ROW, marker: feature('two') });
+    editor.start();
+    editor.addPoint({ lat: 48, lon: 2 });
+    await editor.whenSaved();
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved(); await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [], drop: ['two'] });
+  });
+
+  it('says how many features a group with one style restyles, and takes the style back', async () => {
+    const groups = [{ id: 'g', name: 'Posts', mode: 'uniform', colour: '#0072b2', symbol: 'pin' }];
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [feature('a'), feature('b')].map((one) => ({ ...one, properties: { ...one.properties, group: 'g' } })) }, groups });
+    api.patch.mockResolvedValueOnce({ layer: ROW, groups: [{ ...groups[0], colour: '#d55e00' }] });
+    const editor = store(); await editor.open(ROW);
+    await editor.updateGroup('g', { colour: '#d55e00' });
+    const [text, , , action] = notify.mock.calls.at(-1);
+    expect(text).toBe('Restyled the 2 features of Posts');
+    api.patch.mockResolvedValueOnce({ layer: ROW, groups });
+    await action.onClick();
+    await editor.whenSaved();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/groups/g', { colour: '#0072b2' });
+  });
+});
+
+describe('what an edit changed', () => {
+  it('is the features to put back and the ones to drop, each way, and the group settings it moved', () => {
+    const a = { properties: { key: 'a' }, geometry: { type: 'Point', coordinates: [0, 0] } };
+    const moved = { ...a, geometry: { type: 'Point', coordinates: [1, 1] } };
+    const b = { properties: { key: 'b' }, geometry: { type: 'Point', coordinates: [2, 2] } };
+    const change = difference([a], [moved, b], [{ id: 'g', size: 1, labels: true }], [{ id: 'g', size: 2 }]);
+    expect(change.undo).toEqual({ put: [a], drop: ['b'] });
+    expect(change.redo).toEqual({ put: [moved, b], drop: [] });
+    expect(change.groups).toEqual([{ id: 'g', back: { size: 1, labels: true }, forth: { size: 2, labels: false } }]);
+    expect(difference([a], [a])).toBeNull();
+  });
+
+  it('draws a circle and a box from two points', () => {
+    const box = shapeRing('rect', [0, 0], [1, 2]);
+    expect(box).toEqual([[0, 0], [1, 0], [1, 2], [0, 2]]);
+    const round = shapeRing('circle', [10, 20], [10.01, 20]);
+    expect(round).toHaveLength(64);
+    expect(round[0][1]).toBeCloseTo(20 + 0.0094, 3);
+  });
+
+  it('closes a circle or a box as drawn out to the pointer, never on its first spot again', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.startShape('Rectangle');
+    editor.addPoint({ lon: 2, lat: 48 });
+    expect(editor.complete).toBe(false);
+    // a second press on the first spot, or a box flat as a line, encloses nothing
+    editor.addPoint({ lon: 2, lat: 48 });
+    expect(editor.sketch.anchor).toEqual([2, 48]);
+    editor.preview({ lon: 2, lat: 49 });
+    expect(editor.complete).toBe(false);
+    // drawn out, it is whole: Enter or Save takes it as it stands
+    editor.preview({ lon: 3, lat: 49 });
+    expect(editor.complete).toBe(true);
+    await editor.saveGeometry();
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/shapes', expect.objectContaining({
+      geometry: { type: 'Polygon', coordinates: [[[2, 48], [3, 48], [3, 49], [2, 49], [2, 48]]] },
+    }));
+    expect(editor.sketch).toBeNull();
+    // the second press closes and saves it too
+    editor.startShape('Circle');
+    editor.addPoint({ lon: 2, lat: 48 }); editor.addPoint({ lon: 2.01, lat: 48 });
+    await editor.whenSaved();
+    expect(api.post.mock.calls.at(-1)[1].geometry.coordinates[0]).toHaveLength(65);
+    expect(editor.sketch).toBeNull();
+  });
+
+  it('puts down a drawing tool with nothing drawn on Done, and keeps a half-drawn shape with a reason', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.startShape('Circle'); editor.addPoint({ lon: 2, lat: 48 });
+    expect(await editor.done()).toBe(false);
+    expect(notify).toHaveBeenCalledWith('Finish the shape, or Esc to drop it', 'danger', 4000);
+    expect(editor.sketch).not.toBeNull();
+    editor.startShape('Rectangle');
+    expect(await editor.done()).toBe(true);
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/edit/finish', expect.anything());
+    expect(editor.editor).toBeNull();
+  });
+
+  it('reads the cursor ticks from the features it holds, not from a map that drew the layer', async () => {
+    const tracked = feature('m1', { states: [{ at: '2026-10-14', status: 'damaged' }, { at: '2026-08-24' }] });
+    api.get.mockResolvedValueOnce({ layer: { ...ROW, track: { on: true } }, document: { features: [tracked, feature('m2', { date: '2026-09-01' })] } });
+    const editor = store(); await editor.open(ROW);
+    expect(editor.moments).toEqual(['2026-08-24', '2026-09-01', '2026-10-14']);
+  });
+
+  it('opens on now, wherever an earlier press left the layer cursor', async () => {
+    let at = '2026-09-01';
+    layers.time = () => ({ at });
+    layers.setTime = vi.fn((name, patch) => { at = patch.at; });
+    api.get.mockResolvedValueOnce({ layer: { ...ROW, track: { on: true } }, document: { features: [] } });
+    const editor = store(); await editor.open(ROW);
+    expect(layers.setTime).toHaveBeenCalledWith('working', { at: null });
+    expect(editor.cursor).toBeNull();
+  });
+});
+
+describe('the history of a shape being drawn', () => {
+  it('takes back corners added, moved, put in and taken out, one at a time, and makes them again', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.startShape('Polygon');
+    editor.addPoint({ lon: 0, lat: 0 });
+    editor.addPoint({ lon: 1, lat: 0 });
+    editor.addPoint({ lon: 1, lat: 1 });
+    // a corner dragged is one step, however many moves the drag makes
+    editor.beginVertexMove();
+    editor.moveVertex(0, 1, { lon: 2, lat: 0 });
+    editor.moveVertex(0, 1, { lon: 3, lat: 0 });
+    editor.insertVertex(0, 1, { lon: 0.5, lat: 0 });
+    const corners = () => editor.sketch.rings[0].map(([lon]) => lon);
+    expect(corners()).toEqual([0, 0.5, 3, 1]);
+    expect(editor.undoSketch()).toBe(true);
+    expect(corners()).toEqual([0, 3, 1]);
+    expect(editor.undoSketch()).toBe(true);
+    expect(corners()).toEqual([0, 1, 1]);
+    expect(editor.undoSketch()).toBe(true);
+    expect(corners()).toEqual([0, 1]);
+    expect(editor.redoSketch()).toBe(true);
+    expect(editor.redoSketch()).toBe(true);
+    expect(corners()).toEqual([0, 3, 1]);
+    // a new change drops what was taken back
+    editor.removeVertex(0, 0);
+    expect(editor.canRedoSketch).toBe(false);
+    expect(editor.canUndoSketch).toBe(true);
+    // the layer's own edits are not touched by a shape's undo
+    expect(api.post).not.toHaveBeenCalledWith(expect.stringContaining('/revert'), expect.anything());
   });
 });
 

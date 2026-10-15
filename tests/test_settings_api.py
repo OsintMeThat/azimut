@@ -1255,26 +1255,15 @@ def test_scrapers_live_in_the_workspace_not_the_install(client):
     assert config.runtime_dir().parent == config.internal_dir()
 
 
-def test_detect_prefs_drop_the_retired_labels_layer(client):
-    # A preference saved while the Labels layer existed is not refused for it.
-    saved = client.put(
-        "/api/settings/prefs",
-        json={"detect_view": {"overlays": ["labels", "boundaries", "roads"]}},
-    )
-    assert saved.status_code == 200, saved.text
-    assert saved.json()["detect_view"]["overlays"] == ["boundaries", "roads"]
-
-
-def test_detect_opens_with_the_borders_and_the_place_names(client):
-    assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["boundaries", "placenames"]
-
-
-def test_detect_prefs_keep_the_place_names(client):
-    # Every layer Detect lists can be remembered, the place names included.
-    everything = ["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]
-    saved = client.put("/api/settings/prefs", json={"detect_view": {"overlays": everything}})
-    assert saved.status_code == 200, saved.text
-    assert saved.json()["detect_view"]["overlays"] == everything
+def test_detect_layers_are_no_longer_a_setting(client):
+    # Each map keeps its layers per case in the browser. A settings file written
+    # while Detect kept them app-wide reads back without them, and the field is gone.
+    config.update_settings(lambda settings: settings.update(
+        detect_view={"collapsed": True, "overlays": ["labels", "roads"]}))
+    view = client.get("/api/settings").json()["detect_view"]
+    assert view == {"collapsed": True, "width": 380, "basemap": "esri-world-imagery"}
+    refused = client.put("/api/settings/prefs", json={"detect_view": {"overlays": ["roads"]}})
+    assert refused.status_code == 422
 
 
 def test_a_source_run_has_every_part_a_binary_can_lose(client):

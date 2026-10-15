@@ -21,6 +21,7 @@
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import LayerTrackPanel from './LayerTrackPanel.svelte';
   import { axisZone } from '../../lib/caseAxis.svelte.js';
+  import ClockField from '../../components/ClockField.svelte';
 
   let { controller, ondone, onfly, ondeleteplace } = $props();
   $effect(() => layerPalette.load(controller.editor?.caseId));
@@ -44,7 +45,7 @@
   let groupList = $state(null);
   let limits = $state({});
   const selection = $derived(controller.selection ?? []);
-  const busy = $derived(controller.loading || controller.pending > 0);
+  const busy = $derived(controller.loading);
   // The new-group field goes away on a press outside it.
   $effect(() => {
     if (!newGroup) return;
@@ -53,7 +54,21 @@
     return () => window.removeEventListener('click', outside, true);
   });
   const needle = $derived(query.trim().toLowerCase());
-  const matches = (feature) => !needle || `${feature.properties.name ?? ''} ${feature.properties.entity_label ?? ''}`.toLowerCase().includes(needle);
+  /** A search reads what a feature says: its name, its note, its day, its status, its sources. */
+  const matches = (feature) => {
+    if (!needle) return true;
+    const said = feature.properties;
+    return [said.name, said.entity_label, said.description, said.date, said.status, said.confidence, ...(said.links ?? [])]
+      .some((value) => String(value ?? '').toLowerCase().includes(needle));
+  };
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  /** A feature's day as the list writes it: `14 Oct 2026`. */
+  const day = (value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
+    return match ? `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}` : '';
+  };
+  /** The first words of a feature's note, under a name that says little. */
+  const gist = (feature) => String(feature.properties.description ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
   const membersByGroup = $derived.by(() => {
     const result = new Map();
     for (const feature of controller.features) {
@@ -186,6 +201,20 @@
     await tick(); root?.querySelector(`[data-group-grip="${CSS.escape(group.id)}"]`)?.focus();
   }
 
+  /**
+   * Pick from the list without the list jumping: the sheet opening above it pushes the
+   * rows down, so the panel scrolls by as much and the pressed row stays under the pointer.
+   */
+  async function keepPlace(row, act) {
+    const before = row?.getBoundingClientRect().top ?? 0;
+    act();
+    await tick();
+    const after = row?.isConnected ? row.getBoundingClientRect().top : before;
+    let scroller = root?.parentElement;
+    while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    if (scroller && scroller !== document.body && Math.abs(after - before) > 1) scroller.scrollTop += after - before;
+  }
+
   function fold(id) {
     const next = new Set(folded);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -206,11 +235,12 @@
     <Icon name="stack" size={13} />
     <input class="title" aria-label="Layer name" title="Rename the layer" bind:value={layerDetails.title} maxlength="200"
       disabled={controller.loading} onchange={saveDetails} onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
-    <button type="button" class="icon-act" aria-label="Layer actions" title="More" aria-expanded={layerMenu}
+    <button type="button" class="icon-act more-btn" aria-label="Layer actions" title="Description, time, download, discard" aria-expanded={layerMenu}
       bind:this={layerMenuAnchor} disabled={controller.loading} onclick={() => (layerMenu = !layerMenu)}><Icon name="more" size={14} /></button>
-    <!-- The press keeps the focus where it is: leaving a field would save it, and
-         the saving would disable Done before the click lands. Done saves it anyway. -->
-    <button class="btn btn-primary btn-sm done" disabled={busy || !layerDetails.title.trim() || (controller.sketch && !controller.complete)}
+    <!-- Leaving the layer from the panel too, where the eye is. The press keeps the focus where
+         it is: leaving a field would save it, and Done saves it anyway. -->
+    <button class="btn btn-primary btn-sm done" title="Save what is left in a field and stop editing this layer"
+      disabled={busy || !layerDetails.title.trim() || (controller.sketch && !controller.complete)}
       onmousedown={(event) => event.preventDefault()} onclick={done}><Icon name="check" size={12} /> Done</button>
   </header>
   {#if describing || controller.editor.description || layerDetails.description}
@@ -227,7 +257,8 @@
     <p class="note">Opening layer…</p>
   {:else}
     {#if controller.pending}<p class="saving" role="status">Saving {controller.pending}…</p>{/if}
-    <LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} />
+    <!-- the sheet stays in view at the top while the list scrolls under it -->
+    <div class="sheet-dock"><LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} /></div>
 
     <input type="search" class="find" aria-label="Find in this layer" placeholder="Find in this layer" bind:value={query} />
     {#if needle}<p class="note">{found ? `${found} found` : 'Nothing by that name.'}</p>{/if}
@@ -254,7 +285,7 @@
               {:else}<span class="group-dot" style={`--swatch:${group.colour}`}></span>{/if}
               <span class="name">{group.name}</span><span class="count">{members.length}</span>
             </button>
-            <button class="icon-act more" aria-label={`Settings of group ${group.name}`} title="Group settings" aria-expanded={groupMenu?.id === group.id}
+            <button class="icon-act more more-btn" aria-label={`Settings of group ${group.name}`} title="Group settings" aria-expanded={groupMenu?.id === group.id}
               onclick={(event) => { controller.group = group.id; groupMenu = groupMenu?.id === group.id ? null : { id: group.id, anchor: event.currentTarget }; }}>
               <Icon name="more" size={14} />
             </button>
@@ -278,15 +309,15 @@
                   title={feature.properties.$absent ? 'Not on the map on the layer\'s day' : null}
                   class:active={selection.includes(feature.properties.key) || selected?.properties.key === feature.properties.key}
                   onclick={async (event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) controller.toggleSelected(feature.properties.key, members.toReversed().map((feature) => feature.properties.key), event.shiftKey);
-                    else { controller.select(feature.properties.key); onfly?.(feature); } await tick(); root?.querySelector('.sheet')?.scrollIntoView?.({ block: 'nearest' }); }}>
+                    else { await keepPlace(event.currentTarget, () => controller.select(feature.properties.key)); onfly?.(feature); } }}>
                   <span class="feature-symbol" style={`color:${paint}`}>
                     {#if feature.geometry.type === 'Point'}
                       <MarkerSymbol symbol={(group.mode === 'uniform' ? group.symbol : feature.properties.symbol) || 'pin'} colour={paint}
                         status={feature.properties.status ?? ''} external={feature.properties.provenance === 'external'} size={15} />
                     {:else}<Icon name={String(feature.geometry.type).includes('Line') ? 'line' : 'polygon'} size={12} />{/if}
                   </span>
-                  <span class="name">{feature.properties.name || 'Unnamed feature'}</span>
-                  {#if feature.properties.date}<span class="day">{feature.properties.date}</span>{/if}
+                  <span class="name" title={gist(feature) || null}>{feature.properties.name || 'Unnamed feature'}{#if gist(feature)}<small>{gist(feature)}</small>{/if}</span>
+                  {#if feature.properties.date}<span class="day">{day(feature.properties.date)}</span>{/if}
                   {#if feature.properties.entity_id}<Icon name="link" size={10} />{/if}
                 </button></li>
               {/each}
@@ -322,6 +353,18 @@
     <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={!!controller.editor.track?.on} disabled={busy} onclick={switchTrack}>
       <Icon name="clock" size={14} /><span class="fm-grow">Track over time</span>
       {#if controller.editor.track?.on}<Icon name="check" size={13} />{/if}</button>
+    {#if controller.editor.track?.on}
+      <!-- how a tracked layer dates its states: set once, so kept in the menu rather than over the list -->
+      <div class="fm-sub" role="group" aria-label="Date states by">
+        <span>Dated to</span>
+        <button type="button" class="fm-pill" aria-pressed={(controller.editor.track.precision ?? 'day') === 'day'} disabled={busy}
+          onclick={() => controller.setTrack({ precision: 'day' })}>the day</button>
+        <button type="button" class="fm-pill" aria-pressed={controller.editor.track.precision === 'time'} disabled={busy}
+          onclick={() => controller.setTrack({ precision: 'time' })}>day and time</button>
+      </div>
+      <div class="fm-sub"><span>Clock</span><ClockField value="" clock={{ zone: controller.editor.track.zone ?? 'UTC', fixed: '' }} timed={false} disabled={busy}
+        onpick={(zone) => { if (zone) controller.setTrack({ zone }); }} /></div>
+    {/if}
     <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={download}>
       <Icon name="download" size={14} /><span class="fm-grow">Download layer</span></button>
     <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={sendToMyMaps}>
@@ -342,12 +385,14 @@
   .editor { padding: 8px 8px 0; font-size: var(--fs-xs); }
   .editor-head, .new-group { display: flex; align-items: center; gap: 4px; }
   .editor-head { position: sticky; top: 0; z-index: 8; margin: -8px -8px 0; padding: 8px 8px 6px; background: var(--bg-1); }
+  .done { flex: none; min-height: 27px; gap: 4px; }
+  .sheet-dock { position: sticky; top: 40px; z-index: 7; max-height: 60vh; overflow-y: auto; background: var(--bg-1); }
+  .sheet-dock:empty { display: none; }
   .editor-head > :global(svg) { flex: none; color: var(--text-3); }
   .title { flex: 1; min-width: 0; height: 28px; padding: 3px 6px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent;
     color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
   .title:hover { border-color: var(--border); }
   .title:focus { border-color: var(--accent); background: var(--bg-2); }
-  .done { flex: none; min-height: 27px; gap: 4px; }
   .description { width: 100%; margin: 2px 0 0; padding: 4px 6px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent;
     color: var(--text-2); font-size: var(--fs-xs); line-height: 1.4; resize: vertical; }
   .description:hover { border-color: var(--border); }
@@ -376,12 +421,17 @@
   .group { margin-bottom: 2px; }
   .group-head { display: flex; align-items: center; gap: 1px; min-height: 30px; padding-right: 2px; border-radius: var(--r-sm); }
   .group-head:hover { background: var(--bg-2); }
-  .group-head .more { opacity: .6; }
-  .group-head:hover .more, .group-head .more[aria-expanded='true'] { opacity: 1; }
+  /* a menu button reads as one: a ⋯ nobody sees is a menu nobody opens */
+  .more-btn { border: 1px solid var(--border); background: var(--bg-2); color: var(--text-1); }
+  .more-btn:hover:not(:disabled), .more-btn[aria-expanded='true'] { border-color: var(--accent); }
   .group-title { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 2px; text-align: left; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
   .active-group .group-title { color: var(--text-1); }
   .group-dot { width: 10px; height: 10px; background: var(--swatch); border-radius: 3px; flex: none; }
   .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .name small { margin-left: 6px; color: var(--text-3); font-size: 10px; }
+  .fm-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 3px 10px 5px 32px; color: var(--text-3); font-size: 11px; }
+  .fm-pill { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2); font-size: 11px; cursor: pointer; }
+  .fm-pill[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
   .count, .day { font-size: 10px; font-weight: 400; color: var(--text-3); }
   ul { list-style: none; margin: 0; padding: 0; }
   .features .feature-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 26px; padding: 3px 6px; border-radius: var(--r-sm); text-align: left; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }

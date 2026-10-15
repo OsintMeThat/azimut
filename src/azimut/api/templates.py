@@ -36,6 +36,8 @@ router = APIRouter(prefix="/api", tags=["templates"])
 # low enough that a runaway client can't bloat the workspace file unbounded.
 MAX_PER_KIND = 50
 MAX_DATA_BYTES = 64 * 1024
+#: A map template may keep a logo or a paper picture inside it (`mapplates.Picture`).
+MAX_MAP_DATA_BYTES = 720 * 1024
 MAX_POST_TWEETS = 20
 
 Color = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
@@ -234,10 +236,11 @@ def list_templates() -> dict[str, Any]:
 @router.post("/templates/{kind}")
 def save_template(kind: str, body: TemplateIn) -> dict[str, Any]:
     _require_kind(kind)
-    if _data_size(body.data) > MAX_DATA_BYTES:
+    bound = MAX_MAP_DATA_BYTES if kind == "map" else MAX_DATA_BYTES
+    if _data_size(body.data) > bound:
         raise HTTPException(status_code=413, detail="template data too large")
     data = _canonical_data(kind, body.data)
-    if _data_size(data) > MAX_DATA_BYTES:
+    if _data_size(data) > bound:
         raise HTTPException(status_code=413, detail="template data too large")
 
     record: dict[str, Any] = {}

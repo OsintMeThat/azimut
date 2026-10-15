@@ -630,6 +630,16 @@ async function personalFixture(page, { imported = false, shared = false, count =
       removed.set(`${name}/${key}`, { marker: features.splice(at, 1)[0], at });
       changed(); return route.fulfill({ json: answer() });
     }
+    if (action === 'revert' && method === 'POST') {
+      // the editor's undo and redo: whole features back by their key, the ones an edit made out
+      const { put = [], drop = [] } = route.request().postDataJSON();
+      const keep = features.filter((feature) => !drop.includes(feature.properties.key)); features.splice(0, features.length, ...keep);
+      for (const feature of put) {
+        const at = features.findIndex((entry) => entry.properties.key === feature.properties.key);
+        if (at >= 0) features[at] = structuredClone(feature); else features.push(structuredClone(feature));
+      }
+      changed(); return route.fulfill({ json: answer() });
+    }
     if (action === 'markers' && last === 'restore') {
       const { marker, at } = removed.get(`${name}/${key}`);
       features.splice(at, 0, marker); changed(); return route.fulfill({ json: answer() });
@@ -904,4 +914,37 @@ test('a right-click on a marker opens its menu, and its status and style change 
   await page.screenshot({ path: test.info().outputPath('feature-right-click-menu.png') });
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
+});
+
+test('a layer followed over time dates a move to the day its cursor is on', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  const moves = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/selection')) moves.push(request.postDataJSON());
+  });
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Front');
+  const map = await page.locator('.map').boundingBox();
+  const pin = { x: map.x + map.width * .4, y: map.y + map.height * .45 };
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await page.mouse.click(pin.x, pin.y); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  // off until asked for: nothing of time shows
+  await expect(page.getByRole('group', { name: 'Time', exact: true })).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+  await page.getByRole('menu', { name: 'Layer actions', exact: true }).getByRole('menuitemcheckbox', { name: 'Track over time' }).click();
+  await expect.poll(() => fixture.rows[0].track?.on).toBe(true);
+  const time = page.getByRole('group', { name: 'Time', exact: true });
+  await expect(time).toBeVisible();
+  await expect(time.getByText('Now: an edit corrects what a feature is now.')).toBeVisible();
+  // a day back from now: the bar says an edit starts a state there
+  await time.getByRole('slider').press('ArrowLeft');
+  await expect(time.getByText(/^An edit starts a state on /)).toBeVisible();
+  await expect(tools(page).getByRole('button', { name: 'Fix', exact: true })).toBeVisible();
+  await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
+  await page.mouse.move(pin.x + 60, pin.y - 18, { steps: 8 }); await page.mouse.up();
+  await expect.poll(() => moves.at(-1)?.at ?? null).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(moves.at(-1).fix).toBeUndefined();
+  await tools(page).getByRole('button', { name: 'Fix', exact: true }).click();
+  await expect(time.getByText(/^An edit corrects the state in force on /)).toBeVisible();
 });

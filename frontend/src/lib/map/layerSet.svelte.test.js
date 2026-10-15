@@ -89,10 +89,9 @@ describe('one map’s layers', () => {
     expect(layers.rows().find((row) => row.id === 'nightlights').note).toBe("The picture's day is outside NOAA-20's record.");
   });
 
-  it('keeps only the reference layers, so nothing reaches NASA on the next visit', () => {
-    const layers = createLayerSet({ fireKey: keyed(), initial: ['boundaries', 'firms', 'nightlights', 'saved'] });
-    expect(layers.kept).toEqual(['boundaries']);
+  it('puts back what was kept but the fire and night layers, so nothing reaches NASA on the next visit', () => {
+    const layers = createLayerSet({ fireKey: keyed(), initial: ['boundaries'] });
     layers.restore(['firms', 'roads', 'nightlights', 'saved', 'labels']);
-    expect(layers.ids).toEqual(['roads']);
+    expect(layers.ids).toEqual(['roads', 'saved']);
   });
 });

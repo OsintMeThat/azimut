@@ -142,6 +142,17 @@ class MarkerFields(BaseModel):
     bearing: float | None = Field(default=None, allow_inf_nan=False)
     links: list[Link] | None = Field(default=None, max_length=layerediting.MAX_LINKS)
     provenance: str | None = Field(default=None, max_length=20)
+    confidence: str | None = Field(default=None, max_length=20)
+    #: Whose work a copied feature is, said in the credits of a plate that draws it.
+    credit: str | None = Field(default=None, max_length=layerediting.MAX_CREDIT)
+    line_width: float | None = Field(default=None, allow_inf_nan=False)
+    line_dash: str | None = Field(default=None, max_length=10)
+    line_arrow: str | None = Field(default=None, max_length=10)
+    area_fill: str | None = Field(default=None, max_length=10)
+    fill_opacity: float | None = Field(default=None, allow_inf_nan=False)
+    marker_size: float | None = Field(default=None, allow_inf_nan=False)
+    label: str | None = Field(default=None, max_length=10)
+    label_size: float | None = Field(default=None, allow_inf_nan=False)
 
 
 #: A moment on a tracked layer's clock: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, "" for always.
@@ -206,6 +217,11 @@ class GroupUpdateIn(BaseModel):
     labels: bool | None = None
     #: Its features are events: on a tracked layer they fade after their day.
     events: bool | None = None
+    #: The look its features take when they set none of their own (`layerediting.GROUP_STYLE`).
+    line_dash: str | None = Field(default=None, max_length=10)
+    line_arrow: str | None = Field(default=None, max_length=10)
+    area_fill: str | None = Field(default=None, max_length=10)
+    fill_opacity: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
 
     @field_validator("symbol")
     @classmethod
@@ -263,6 +279,12 @@ class SelectionIn(BaseModel):
     at: Moment | None = None
     #: …or, set, the state in force then that each feature corrects.
     fix: bool = False
+
+
+class RevertIn(BaseModel):
+    #: Whole features as they were, found by their key.
+    put: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
+    drop: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=5000)
 
 
 class GroupOrderIn(BaseModel):
@@ -423,6 +445,15 @@ def restore_layer_selection(case_id: str, name: str, batch: str) -> dict[str, An
         raise _refused(exc) from exc
 
 
+@router.post("/{case_id}/map-layers/{name}/revert")
+def revert_layer_features(case_id: str, name: str, body: RevertIn) -> dict[str, Any]:
+    """Put features back as an edit found them: the layer editor's undo and redo."""
+    try:
+        return layerediting.revert(get_case(case_id), _stem(name), body.put, body.drop)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
 @router.post("/{case_id}/map-layers/{name}/shapes")
 def add_layer_shape(case_id: str, name: str, body: ShapeIn) -> dict[str, Any]:
     try:
@@ -450,8 +481,9 @@ def add_layer_group(case_id: str, name: str, body: GroupIn) -> dict[str, Any]:
 @router.patch("/{case_id}/map-layers/{name}/groups/{key}")
 def edit_layer_group(case_id: str, name: str, key: str, body: GroupUpdateIn) -> dict[str, Any]:
     try:
-        return layerediting.update_group(get_case(case_id), _stem(name), key,
-                                         body.model_dump(exclude_none=True))
+        changes = {field: value for field, value in body.model_dump(exclude_unset=True).items()
+                   if value is not None or field in layerediting.GROUP_STYLE}
+        return layerediting.update_group(get_case(case_id), _stem(name), key, changes)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 

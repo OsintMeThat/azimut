@@ -395,13 +395,15 @@ def test_a_backup_with_an_unreadable_template_id_still_restores(client):
     assert body["post_mention"] == "@kept"
 
 
-def test_a_backup_naming_the_retired_labels_layer_still_imports(client):
+def test_a_backup_naming_detect_layers_still_imports(client):
+    # Detect's layers were a setting until they moved to the browser, per case.
     res = client.post(
         "/api/settings/import",
         json={"settings": {"detect_view": {"collapsed": True, "overlays": ["labels", "roads"]}}},
     )
     assert res.status_code == 200, res.text
-    assert client.get("/api/settings").json()["detect_view"]["overlays"] == ["roads"]
+    view = client.get("/api/settings").json()["detect_view"]
+    assert view["collapsed"] is True and "overlays" not in view
 
 
 def test_a_backup_from_an_unpaired_machine_keeps_this_ones_pairing(client):

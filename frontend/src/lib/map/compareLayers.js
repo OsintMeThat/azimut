@@ -53,8 +53,8 @@ export function toggledLayer(ids, id) {
   return ids.includes(id) ? ids.filter((entry) => entry !== id) : knownLayers([...ids, id]);
 }
 
-/** A new pair's list. */
-export const freshLayers = () => ({ ids: [...DEFAULT_LAYERS], side: 'ab' });
+/** A new pair's list: `ids`, the layers this case last had on, else the defaults. */
+export const freshLayers = (ids = DEFAULT_LAYERS) => ({ ids: knownLayers(ids), side: 'ab' });
 
 /** The switcher after A and B trade places, so the list stays on the picture it was on. */
 export const tradedSide = (side) => (side === 'a' ? 'b' : side === 'b' ? 'a' : side);
@@ -86,18 +86,18 @@ export function sideNight(night, which, pictureDay = '') {
 
 /**
  * The list and the switcher of a saved comparison or a handed-over pair. A pair
- * that says nothing of layers (a handoff) starts as a new one does. A side alone
+ * that says nothing of layers (a handoff) starts as a new one does, on `start`. A side alone
  * holding layers sets the switcher on it. Two different lists, saved before the
  * switcher, are both drawn on both sides, so nothing saved goes missing. Fire and
  * night days come back as each side held them, picked rather than followed, so
  * the pair shows what was saved.
  */
-export function restoredLayers(left = {}, right = {}) {
+export function restoredLayers(left = {}, right = {}, start = DEFAULT_LAYERS) {
   const fresh = !Array.isArray(left?.overlays) && !Array.isArray(right?.overlays);
   const layers = { a: knownLayers(left?.overlays), b: knownLayers(right?.overlays) };
   const either = (id) => layers.a.includes(id) || layers.b.includes(id);
   const list = fresh
-    ? freshLayers()
+    ? freshLayers(start)
     : layers.a.length && !layers.b.length
       ? { ids: layers.a, side: 'a' }
       : layers.b.length && !layers.a.length

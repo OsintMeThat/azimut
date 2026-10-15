@@ -354,6 +354,13 @@ a:hover {
   font-size: var(--fs-xs);
 }
 
+/* The size of a panel's own small print, for the acts that sit among its fields. */
+.btn-xs {
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
 /* A field and the one act that belongs to it, in a single box: the calendar that
    builds a date, the map that moves a point, the tab a source opens in, the
    mark that says a point is where the camera stood.

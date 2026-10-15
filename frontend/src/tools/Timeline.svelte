@@ -2071,7 +2071,7 @@
       {#if fullscreen}<button class="btn btn-sm" onclick={toggleFullscreen}>Exit full screen</button>{/if}
       <div class="more" bind:this={moreElement}>
         <button class="btn btn-sm more-btn" aria-expanded={moreMenu} aria-label="More" title="Tracks, grouping, legend, full screen" onclick={() => (moreMenu = !moreMenu)}>
-          <Icon name="more" size={15} stroke={2.6} />
+          <Icon name="sliders" size={14} /><span>View</span><Icon name="chevronDown" size={11} />
         </button>
         {#if moreMenu}
           <div class="more-menu">
@@ -2941,7 +2941,7 @@
   /* What `⋯` holds, grouped the way it is asked for: a track to add, how lanes split,
      the period handed on, what the marks mean, the whole screen. */
   .more { position: relative; }
-  .more-btn { display: grid; place-items: center; width: 30px; padding: 0; }
+  .more-btn { display: inline-flex; align-items: center; gap: 4px; }
   .more-menu {
     position: absolute; z-index: 70; top: calc(100% + 5px); right: 0; width: 264px;
     max-height: min(70vh, 560px); overflow: auto; display: grid; gap: 4px; padding: 7px;

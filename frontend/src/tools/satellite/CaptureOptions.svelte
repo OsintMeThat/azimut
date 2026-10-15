@@ -27,6 +27,8 @@
      *  build: a figure is several renderings of one Copernicus acquisition.
      *  What is missing for this one is the dialog's to say, not the menu's. */
     openFigure = null,
+    /** Lay a map plate out round this view, with the layers on it. */
+    openPlate = null,
   } = $props();
 </script>
 
@@ -79,6 +81,12 @@
                 title="Several renderings of this acquisition, laid out and captioned"
               >
                 Figure…
+              </button>
+            {/if}
+            {#if openPlate}
+              <button class="chip" onclick={() => { menuOpen = false; openPlate(); }}
+                title="A page laid out round this view, its layers, a legend, a scale and the credits on it">
+                Map plate…
               </button>
             {/if}
           </div>

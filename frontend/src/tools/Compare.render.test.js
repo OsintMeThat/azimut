@@ -277,6 +277,8 @@ async function add(slot, provider = 'Esri World Imagery', { unfold = true } = {}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // the layers a pair starts on are kept per case in the browser: each test starts clean
+  for (const key of Object.keys(localStorage)) if (key.startsWith('azimut:map-layers:')) localStorage.removeItem(key);
   engines.length = 0;
   releases = [];
   changes = null;
@@ -800,6 +802,33 @@ describe('Compare', () => {
     expect(button('AB', sides).getAttribute('aria-pressed')).toBe('true');
     // reopening is not an edit
     expect(target.querySelector('.badge')).toBeNull();
+  });
+
+  it('starts a new pair on the layers last switched in this case, fires left off', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const eye = (label) => target.querySelector(`.layer-menu button.eye[aria-label="${label}"]`);
+    eye('Roads').click();
+    flushSync();
+    eye('Night lights').click();
+    flushSync();
+    expect(JSON.parse(localStorage.getItem('azimut:map-layers:case-a')).maps.compare)
+      .toEqual(['boundaries', 'placenames', 'roads']);
+    unmount(live);
+    live = null;
+    target.remove();
+
+    await open();
+    await add('A');
+    await add('B');
+    target.querySelector('.layer-menu > button').click();
+    flushSync();
+    const on = [...target.querySelectorAll('.layer-menu button.eye[aria-pressed="true"]')]
+      .map((entry) => entry.getAttribute('aria-label'));
+    expect(on).toEqual(['Borders', 'Place names', 'Roads']);
   });
 
   it('moves the whole list onto A, B or both from the switcher, AB by default', async () => {

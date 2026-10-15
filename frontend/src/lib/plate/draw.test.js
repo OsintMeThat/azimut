@@ -19,7 +19,7 @@ describe('drawing a plate page', () => {
   });
 
   it('draws every element of the house layout, the words filled and the credits forced', () => {
-    const spec = houseLayout({ view: { lat: 48.85, lon: 2.35, zoom: 10, bearing: 0 }, title: 'Front' });
+    const spec = houseLayout({ view: { lat: 48.85, lon: 2.35, zoom: 10, bearing: 0 } });
     spec.elements.push({ id: 'l', kind: 'label', box: [60, 60, 30, 8], of: 'map', at: [2.36, 48.86], text: 'Depot', style: 'bubble' });
     spec.elements.push({ id: 'a', kind: 'arrow', box: [0, 0, 1, 1], of: 'map', at: [2.3, 48.8], to: [2.4, 48.9], width: 1.2 });
     const ctx = recorder();
@@ -28,7 +28,7 @@ describe('drawing a plate page', () => {
       scale: 3.78, paper: true,
       views: { map: { view: spec.elements[0].view, frame: { width: 700, height: 600 } },
         inset: { view: { lat: 48.85, lon: 2.35, zoom: 5, bearing: 0 }, frame: { width: 200, height: 150 } } },
-      legend: { map: [{ key: 'front/Lines', label: 'Front line', kind: 'line', colour: '#d55e00' },
+      legend: { legend: [{ key: 'front/Lines', label: 'Front line', kind: 'line', colour: '#d55e00' },
         { key: 'front/Posts', label: 'Posts', kind: 'point', colour: '#0072b2', symbol: 'badge-tank' },
         { key: 'gained', label: 'Gained since 3 Oct', kind: 'gained', colour: '#15181e' }] },
       credits: { map: '© OpenMapTiles' },
@@ -36,8 +36,8 @@ describe('drawing a plate page', () => {
       tokens: { date: '2026-10-12', caseName: 'Kupiansk', today: new Date('2026-10-14T00:00:00Z') },
     });
     const written = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
-    expect(written).toEqual(expect.arrayContaining(['Front', 'Situation as of 12 October 2026', 'Legend', 'Front line',
-      'Kupiansk', '© OpenMapTiles', 'N', 'Depot']));
+    expect(written).toEqual(expect.arrayContaining(['Kupiansk', 'Situation as of 12 October 2026', 'Legend', 'Front line',
+      '© OpenMapTiles', 'N', 'Depot']));
     expect(markerImage).toHaveBeenCalledWith('badge-tank', '#0072b2', { status: '' });
     // the paper first, then the frames and the rest over it
     expect(ctx.calls[0][0]).toBe('fillRect');
@@ -53,4 +53,130 @@ describe('drawing a plate page', () => {
     expect(first).toBeGreaterThan(0);
     expect(first).toBeLessThan(firstText);
   });
+
+  it('leaves the editor\'s placeholders out of an export', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 'pic', kind: 'image', box: [10, 10, 20, 20] });
+    const drawn = (editing) => {
+      const ctx = recorder();
+      drawPage(ctx, spec, { scale: 3, paper: !editing, editing, views: {}, legend: {} });
+      return ctx;
+    };
+    const said = (ctx) => ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    expect(said(drawn(true))).toContain('What the map draws is listed here');
+    expect(said(drawn(false))).not.toContain('What the map draws is listed here');
+    const dashed = (ctx) => ctx.calls.some(([name, pattern]) => name === 'setLineDash' && pattern?.length);
+    expect(dashed(drawn(true))).toBe(true);
+    expect(dashed(drawn(false))).toBe(false);
+  });
+
+  it('draws an annotation only on its days, another day\'s faintly in the editor when asked', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 'note', kind: 'text', box: [10, 10, 40, 8], text: 'Shelling reported', onward: '2026-10-01', until: '2026-10-01' });
+    const said = (context) => {
+      const ctx = recorder();
+      drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, ...context });
+      return ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    };
+    expect(said({ at: '2026-10-01' })).toContain('Shelling reported');
+    expect(said({ at: '2026-10-02' })).not.toContain('Shelling reported');
+    expect(said({ at: '2026-10-02', editing: true, ghosts: true })).toContain('Shelling reported');
+  });
+
+  it('says which boxes their words run past, and never cuts the credits', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 'tight', kind: 'text', box: [10, 10, 10, 3], text: 'A sentence far too long for the room it has', size: 10 });
+    const credits = spec.elements.find((element) => element.kind === 'credits');
+    credits.box = [credits.box[0], credits.box[1], 20, 2];
+    const ctx = recorder();
+    const ran = drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: { map: 'Esri, Maxar, Earthstar Geographics · OpenFreeMap © OpenMapTiles' } });
+    expect(ran.has('tight')).toBe(true);
+    expect(ran.has(credits.id)).toBe(true);
+    const written = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text).join(' ');
+    // every word of the credits is written, however small the box
+    for (const word of ['Esri,', 'Maxar,', 'OpenFreeMap', 'OpenMapTiles']) expect(written).toContain(word);
+  });
+
+  it('sets the credits over a map on a plain band rather than a halo, which blurs letters this small', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    const map = spec.elements.find((element) => element.kind === 'map');
+    const credits = spec.elements.find((element) => element.kind === 'credits');
+    credits.box = [map.box[0] + 5, map.box[1] + map.box[3] - 6, map.box[2] - 10, 5];
+    const ctx = recorder();
+    drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, credits: { map: '© OpenMapTiles' } });
+    const at = ctx.calls.findIndex(([name, text]) => name === 'fillText' && text === '© OpenMapTiles');
+    expect(at).toBeGreaterThan(-1);
+    expect(ctx.calls.some(([name, text]) => name === 'strokeText' && text === '© OpenMapTiles')).toBe(false);
+    // the band is laid just before the words, about as wide as them
+    const band = ctx.calls.slice(0, at).findLast(([name]) => name === 'fillRect');
+    expect(band[3]).toBeGreaterThan('© OpenMapTiles'.length * 5);
+    expect(band[3]).toBeLessThan('© OpenMapTiles'.length * 5 + 20);
+  });
+
+  it('draws what stands on the ground: a zone with its spotlight, rings, a cone, a distance, a curved arrow', () => {
+    const spec = houseLayout({ view: { lat: 48.85, lon: 2.35, zoom: 12, bearing: 0 } });
+    const view = spec.elements[0].view;
+    spec.elements.push(
+      { id: 'z', kind: 'zone', of: 'map', box: [0, 0, 1, 1], points: [[2.34, 48.84], [2.36, 48.84], [2.35, 48.86]], look: 'hatch', mask: { on: true, darkness: 0.5 }, text: 'Area' },
+      { id: 'r', kind: 'ring', of: 'map', box: [0, 0, 1, 1], at: [2.35, 48.85], radii: [1, 2] },
+      { id: 'c', kind: 'cone', of: 'map', box: [0, 0, 1, 1], at: [2.35, 48.85], bearing: 45, spread: 40, reach: 1 },
+      { id: 'd', kind: 'measure', of: 'map', box: [0, 0, 1, 1], at: [2.34, 48.85], to: [2.36, 48.85] },
+      { id: 'a', kind: 'arrow', of: 'map', box: [0, 0, 1, 1], at: [2.34, 48.84], to: [2.36, 48.86], bend: 0.4, heads: 'both', shape: 'offensive', text: 'Advance' },
+    );
+    const ctx = recorder();
+    drawPage(ctx, spec, { scale: 3, views: { map: { view, frame: { width: 700, height: 600 } } }, legend: {} });
+    const written = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    expect(written).toEqual(expect.arrayContaining(['Area', '1.0 km', '2.0 km', 'Advance']));
+    expect(written.some((text) => /^1\.\d km · 9\d°$/.test(text))).toBe(true);
+    // the spotlight dims round the zone with one even-odd fill
+    expect(ctx.calls.some(([name, rule]) => name === 'fill' && rule === 'evenodd')).toBe(true);
+  });
+
+  it('draws a QR code for a link, and the numbered list of the day\'s numbered labels', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 'q', kind: 'qr', box: [10, 10, 20, 20], text: 'https://example.org/report' });
+    spec.elements.push({ id: 'k', kind: 'key', box: [40, 10, 50, 30], text: 'Sites' });
+    const ctx = recorder();
+    drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, numbered: [{ id: 'l1', number: 1, text: 'Depot' }, { id: 'l2', number: 2, text: 'Bridge' }] });
+    const squares = ctx.calls.filter(([name]) => name === 'fillRect').length;
+    expect(squares).toBeGreaterThan(100);
+    const written = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    expect(written).toEqual(expect.arrayContaining(['Sites', '1', 'Depot', '2', 'Bridge']));
+  });
+
+  it('signs the page with the analyst\'s picture and words, and says it was made with Azimut', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 's', kind: 'signature', box: [200, 190, 60, 10], text: '{handle}', size: 7, align: 'right' });
+    spec.elements.push({ id: 'b', kind: 'brand', box: [240, 200, 50, 5], text: 'Made with', size: 6, align: 'right' });
+    const picture = { width: 200, height: 100 };
+    const traced = [];
+    const ctx = recorder();
+    globalThis.Path2D = class { constructor(d) { traced.push(d); } };
+    try {
+      drawPage(ctx, spec, { scale: 3, views: {}, legend: {}, images: new Map([['@signature', picture]]), tokens: { handle: '@desk' } });
+    } finally { delete globalThis.Path2D; }
+    expect(ctx.calls.some(([name, image]) => name === 'drawImage' && image === picture)).toBe(true);
+    const written = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    expect(written).toEqual(expect.arrayContaining(['@desk', 'Made with']));
+    // the mark's two flanks and the wordmark's letters, from the app's own paths
+    expect(traced).toContain('M12 1.8 5.8 21.4 12 16.4Z');
+    expect(traced.length).toBeGreaterThan(5);
+  });
+
+  it('sets the Made with lockup tight, without the air of the app\'s corner', async () => {
+    const { signatureWidth } = await import('../brandMark.js');
+    expect(signatureWidth(10, { tight: true })).toBeLessThan(signatureWidth(10) * 0.8);
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    spec.elements.push({ id: 'b', kind: 'brand', box: [100, 100, 60, 5], text: 'Made with', size: 6, align: 'left' });
+    const ctx = recorder();
+    globalThis.Path2D = class {};
+    try {
+      drawPage(ctx, spec, { scale: 3, views: {}, legend: {} });
+    } finally { delete globalThis.Path2D; }
+    // the mark's air hangs left of the words' end, so its flank starts right after the space
+    const lead = 'Made with '.length * 5;
+    const shift = ctx.calls.find(([name, x]) => name === 'translate' && x < 300 + lead && x > 290);
+    expect(shift).toBeTruthy();
+  });
 });
+

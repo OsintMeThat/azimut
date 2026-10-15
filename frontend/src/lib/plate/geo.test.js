@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { corners, degreeLabel, graticule, metresPerPixel, project, roundLength, scaleBar, unproject } from './geo.js';
+import { bearingTo, circle, corners, decimalLabel, degreeLabel, distance, fromUTM, graticule, inFrame, metresPerPixel, project, roundLength, sameView, scaleBar,
+  scaleRatio, sector, toUTMIn, travel, unproject, utmGrid, utmLabel } from './geo.js';
 
 const frame = { width: 800, height: 600 };
 
@@ -58,5 +59,60 @@ describe('the scale and the graticule', () => {
     expect(lines.filter((line) => line.axis === 'lon').length).toBeGreaterThanOrEqual(3);
     expect(degreeLabel(48.75, 'lat', 0.25)).toBe('48°45′N');
     expect(degreeLabel(-2, 'lon', 1)).toBe('2°W');
+  });
+});
+
+describe('a view coming back', () => {
+  it('is the same camera once rounded as a plate keeps it, across the antimeridian too', () => {
+    const live = { lat: 48.8566123, lon: 2.3522449, zoom: 12.34567, bearing: 12.34 };
+    const kept = { lat: 48.856612, lon: 2.352245, zoom: 12.346, bearing: 12.3 };
+    expect(sameView(live, kept)).toBe(true);
+    expect(sameView({ ...live, lon: 362.3522449 }, kept)).toBe(true);
+    expect(sameView({ ...live, bearing: 180 }, { ...kept, bearing: -179.96 })).toBe(true);
+    expect(sameView(live, { ...kept, lat: 48.8567 })).toBe(false);
+    expect(sameView(live, { ...kept, zoom: 12.4 })).toBe(false);
+    expect(sameView(live, { ...kept, bearing: 13 })).toBe(false);
+  });
+});
+
+describe('what a frame shows, and shapes on the ground', () => {
+  const view = { lat: 10, lon: 20, zoom: 10, bearing: 0 };
+  const frame = { width: 400, height: 300 };
+
+  it('says whether a feature is drawn in the frame: a point, a line crossing it, an area round it', () => {
+    expect(inFrame({ type: 'Point', coordinates: [20, 10] }, view, frame)).toBe(true);
+    expect(inFrame({ type: 'Point', coordinates: [25, 10] }, view, frame)).toBe(false);
+    expect(inFrame({ type: 'LineString', coordinates: [[19, 10], [21, 10]] }, view, frame)).toBe(true);
+    expect(inFrame({ type: 'LineString', coordinates: [[19, 12], [21, 12]] }, view, frame)).toBe(false);
+    expect(inFrame({ type: 'Polygon', coordinates: [[[19, 9], [21, 9], [21, 11], [19, 11], [19, 9]]] }, view, frame)).toBe(true);
+  });
+
+  it('travels a distance on a bearing and measures it back', () => {
+    const there = travel([20, 10], 90, 5000);
+    expect(distance([20, 10], there)).toBeCloseTo(5000, -1);
+    expect(bearingTo([20, 10], there)).toBeCloseTo(90, 0);
+    const ring = circle([20, 10], 1000, 12);
+    expect(ring).toHaveLength(13);
+    expect(sector([20, 10], 0, 90, 1000, 4)).toHaveLength(7);
+  });
+
+  it('turns a UTM point back into the ground it came from', () => {
+    for (const point of [[20.3, 10.2], [2.35, 48.85], [-70.6, -33.4]]) {
+      const zone = Math.floor((point[0] + 180) / 6) + 1;
+      const utm = toUTMIn(zone, point);
+      const [lon, lat] = fromUTM(zone, utm.north, utm.easting, utm.northing);
+      expect(lon).toBeCloseTo(point[0], 6);
+      expect(lat).toBeCloseTo(point[1], 6);
+    }
+    const grid = utmGrid(view, frame);
+    expect(grid.zone).toBe(34);
+    expect(grid.lines.length).toBeGreaterThan(4);
+    expect(utmLabel(482000, 1000)).toBe('482');
+    expect(utmLabel(482000, 1000, true)).toBe('82');
+  });
+
+  it('writes a decimal label and the plate\'s scale as a ratio', () => {
+    expect(decimalLabel(48.856, 'lat', 0.01)).toBe('48.86°N');
+    expect(scaleRatio({ lat: 0, lon: 0, zoom: 12, bearing: 0 }, 96 / 25.4)).toMatch(/^1:\d{1,3}(,\d{3})+$/);
   });
 });

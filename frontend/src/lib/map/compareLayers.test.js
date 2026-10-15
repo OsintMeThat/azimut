@@ -52,6 +52,10 @@ describe('the switcher over the list', () => {
     expect(freshLayers()).toEqual({ ids: ['boundaries', 'placenames'], side: 'ab' });
   });
 
+  it('starts it on the layers the case last had on, when it kept any', () => {
+    expect(freshLayers(['roads', 'labels', 'boundaries'])).toEqual({ ids: ['boundaries', 'roads'], side: 'ab' });
+  });
+
   it('moves the whole list onto the side it names', () => {
     const ids = ['boundaries', 'roads'];
     expect(sideLayers(ids, 'ab')).toEqual({ a: ids, b: ids });
@@ -74,6 +78,11 @@ describe('the switcher over the list', () => {
 describe('a saved comparison read back', () => {
   it('starts a handed-over pair, which names no layer, as a new one', () => {
     expect(restoredLayers({ provider: 'esri-wayback' }, { provider: 'esri-world-imagery' })).toMatchObject(freshLayers());
+    expect(restoredLayers({}, {}, ['power'])).toMatchObject({ ids: ['power'], side: 'ab' });
+  });
+
+  it('reopens a saved comparison on its own layers, whatever the case last had on', () => {
+    expect(restoredLayers({ overlays: ['roads'] }, { overlays: ['roads'] }, ['power'])).toMatchObject({ ids: ['roads'] });
   });
 
   it('reopens on the side that alone held layers, or on both', () => {

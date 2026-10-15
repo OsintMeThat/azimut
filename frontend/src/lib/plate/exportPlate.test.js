@@ -31,5 +31,16 @@ describe('a plate out of the tab', () => {
     expect(path).toBe('/api/cases/case 1/map-plates/export');
     expect(body.getAll('frames')).toHaveLength(2);
     expect([body.get('format'), body.get('interval'), body.get('width_mm')]).toEqual(['mp4', '700', '297']);
+    expect(body.has('beats')).toBe(false);
+  });
+
+  it('posts a stepped plate\'s beats and what stands over its clips', async () => {
+    const post = vi.fn(async () => ({ file: 'x.mp4' }));
+    const frames = [new Blob(['a'], { type: 'image/jpeg' }), new Blob(['b'], { type: 'image/jpeg' })];
+    const beats = [{ seconds: 0.9 }, { seconds: 8, clips: [{ src: 'media/a.mp4', start: 2, end: 10, box: [10, 10, 320, 180] }], over: 0 }];
+    await postExport('c', { format: 'mp4', frames, filename: 'Strike', widthMm: 297, heightMm: 210, beats, overs: [new Blob(['o'], { type: 'image/png' })] }, post);
+    const [, body] = post.mock.calls[0];
+    expect(JSON.parse(body.get('beats'))).toEqual(beats);
+    expect(body.getAll('overs')).toHaveLength(1);
   });
 });

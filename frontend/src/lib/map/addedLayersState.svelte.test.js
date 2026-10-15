@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAddedLayersState } from './addedLayersState.svelte.js';
+import { createLayerMemory } from './layerMemory.js';
 
 /**
  * The store that owns this feature's one network rule.
@@ -35,6 +36,17 @@ let notify;
 let reloadCase;
 let rows;
 let collection;
+/** This browser's storage, shared by every store a test makes, as a reload shares it. */
+let storage;
+
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => data.set(key, String(value)),
+    removeItem: (key) => data.delete(key),
+  };
+}
 
 function store() {
   return createAddedLayersState({
@@ -42,14 +54,19 @@ function store() {
     notify,
     ensureCase: async () => ({ id: 'c1' }),
     reloadCase,
+    memory: createLayerMemory(() => storage),
   });
 }
+
+/** What this browser kept for one case. */
+const kept = (caseId = 'c1') => JSON.parse(storage.getItem(`azimut:map-layers:${caseId}`) ?? '{}');
 
 /** Let the store's own promise chain settle — `load` is deliberately not awaited. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
   calls = [];
+  storage = memoryStorage();
   rows = [FILE_LAYER];
   collection = { type: 'FeatureCollection', features: [] };
   notify = vi.fn();
@@ -84,9 +101,7 @@ describe('opening a case', () => {
     expect(layers.rows.map((row) => row.name)).toEqual(['Sightings', 'Roadblocks']);
   });
 
-  it('draws nothing: every layer starts off, whatever it was before the reload', async () => {
-    // a layer heavy enough to take the tab down would take it down again on
-    // every reload if the switch were remembered
+  it('draws nothing in a case that never switched a layer on', async () => {
     rows = [FILE_LAYER, followed()];
     const layers = store();
     layers.load('c1');
@@ -96,7 +111,7 @@ describe('opening a case', () => {
     expect(layers.drawn).toEqual([]);
   });
 
-  it('forgets what was on in the previous store, as a reload does', async () => {
+  it('puts back what was on in the previous store, as a reload does', async () => {
     const before = store();
     before.load('c1');
     await settle();
@@ -107,7 +122,7 @@ describe('opening a case', () => {
     after.load('c1');
     await settle();
 
-    expect(after.drawn).toEqual([]);
+    expect(after.drawn.map((row) => row.name)).toEqual(['Sightings']);
   });
 });
 
@@ -141,7 +156,7 @@ describe('switching a layer on', () => {
     expect(layers.drawn).toHaveLength(2);
   });
 
-  it('stores nothing: the switch is never sent to the backend', async () => {
+  it('never sends the switch to the backend', async () => {
     const layers = store();
     layers.load('c1');
     await settle();
@@ -876,5 +891,198 @@ describe('one store, every map', () => {
     expect(detect.rows.map((row) => row.name)).toEqual(['Sightings']);
     expect(detect.drawn).toEqual([]);
     expect(layers.drawn).toEqual([]);
+  });
+});
+
+/**
+ * Each map's switches, kept per case in this browser, and the guard that keeps a
+ * layer heavy enough to take the tab down from doing it on every reload.
+ */
+describe('kept between sessions', () => {
+  const three = () => [
+    FILE_LAYER,
+    { ...FILE_LAYER, name: 'Checkpoints', title: 'Checkpoints', sha256: 'c' },
+    { ...FILE_LAYER, name: 'Strikes', title: 'Strikes', sha256: 'd' },
+  ];
+
+  /** A store reopened on c1 after each map had switched layers on in an earlier one. */
+  async function reopened(byScope) {
+    storage.setItem('azimut:map-layers:c1', JSON.stringify({ added: byScope }));
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    return layers;
+  }
+
+  it('keeps every map apart, and each case apart', async () => {
+    const layers = store();
+    const detect = layers.scope('detect');
+    layers.load('c1');
+    await settle();
+    await detect.toggle('c1', detect.rows[0]);
+
+    expect(kept().added).toEqual({ detect: ['Sightings'] });
+    const again = store();
+    again.load('c1');
+    await settle();
+    expect(again.scope('detect').drawn.map((row) => row.name)).toEqual(['Sightings']);
+    expect(again.drawn).toEqual([]);
+
+    again.load('c2');
+    await settle();
+    expect(again.scope('detect').drawn).toEqual([]);
+    expect(storage.getItem('azimut:map-layers:c2')).toBeNull();
+  });
+
+  it('puts the layers back one at a time, each once the one before is drawn', async () => {
+    rows = three();
+    const layers = await reopened({ satellite: ['Sightings', 'Checkpoints', 'Strikes'] });
+
+    // every one listed as on, one drawn
+    expect(layers.rows.every((row) => row.enabled)).toBe(true);
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Sightings']);
+
+    layers.watch.start('Sightings');
+    layers.watch.end('Sightings', 'drawn');
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Sightings', 'Checkpoints']);
+
+    layers.watch.start('Checkpoints');
+    layers.watch.end('Checkpoints', 'drawn');
+    expect(layers.drawn).toHaveLength(3);
+  });
+
+  it('waits on a map hidden before its layer was drawn, rather than moving on', async () => {
+    rows = three();
+    const layers = await reopened({ satellite: ['Sightings', 'Checkpoints'] });
+
+    layers.watch.start('Sightings');
+    layers.watch.end('Sightings', 'dropped');
+
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Sightings']);
+    expect(kept().drawing).toEqual([]);
+  });
+
+  it('lets the next one in when the one being drawn is switched off', async () => {
+    rows = three();
+    const layers = await reopened({ satellite: ['Sightings', 'Checkpoints', 'Strikes'] });
+
+    await layers.toggle('c1', layers.rows[0]); // Sightings off, mid-draw
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Checkpoints']);
+    await layers.toggle('c1', layers.rows[2]); // Strikes off, still waiting
+
+    expect(kept().added.satellite).toEqual(['Checkpoints']);
+    layers.watch.start('Checkpoints');
+    layers.watch.end('Checkpoints', 'drawn');
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Checkpoints']);
+  });
+
+  it('asks nothing of a followed layer it puts back: it draws the snapshot on disk', async () => {
+    rows = [followed()];
+    const layers = await reopened({ satellite: ['Roadblocks'] });
+
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Roadblocks']);
+    expect(calls).toEqual([['GET', '/api/cases/c1/map-layers']]);
+  });
+
+  it('drops a layer the case no longer has, and forgets it', async () => {
+    const layers = await reopened({ satellite: ['Gone', 'Sightings'] });
+
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Sightings']);
+    expect(kept().added.satellite).toEqual(['Sightings']);
+  });
+
+  it('forgets a removed layer', async () => {
+    const layers = await reopened({ satellite: ['Sightings'], detect: ['Sightings'] });
+
+    await layers.remove('c1', layers.rows[0]);
+
+    expect(kept().added).toEqual({ satellite: [], detect: [] });
+  });
+
+  it('leaves off a layer the last session stopped while drawing, and says which', async () => {
+    rows = three();
+    const before = await reopened({ satellite: ['Sightings', 'Checkpoints'] });
+    before.watch.start('Sightings');
+    expect(kept().drawing).toEqual(['Sightings']);
+    // …and the tab dies here: no end, no pagehide
+
+    const after = store();
+    after.load('c1');
+    await settle();
+
+    expect(after.rows.find((row) => row.name === 'Sightings').enabled).toBe(false);
+    expect(after.drawn.map((row) => row.name)).toEqual(['Checkpoints']);
+    expect(notify).toHaveBeenCalledWith(
+      'Sightings was left off: the last session stopped while drawing it', 'warn', 10000);
+    expect(kept()).toMatchObject({ added: { satellite: ['Checkpoints'] }, drawing: [] });
+  });
+
+  it('draws it again once switched back on, and keeps it on if it holds', async () => {
+    storage.setItem('azimut:map-layers:c1', JSON.stringify({ added: { satellite: ['Sightings'] }, drawing: ['Sightings'] }));
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    expect(layers.drawn).toEqual([]);
+
+    await layers.toggle('c1', layers.rows[0]);
+    layers.watch.start('Sightings');
+    layers.watch.end('Sightings', 'drawn');
+
+    expect(kept()).toMatchObject({ added: { satellite: ['Sightings'] }, drawing: [] });
+  });
+
+  it('blames nothing when the page was closed on purpose mid-draw', async () => {
+    const before = await reopened({ satellite: ['Sightings'] });
+    before.watch.start('Sightings');
+    before.leave(); // pagehide
+
+    const after = store();
+    after.load('c1');
+    await settle();
+
+    expect(after.drawn.map((row) => row.name)).toEqual(['Sightings']);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('clears the mark only once every map drawing a layer is done with it', async () => {
+    const layers = await reopened({ compare: ['Sightings'] });
+    const compare = layers.scope('compare');
+
+    compare.watch.start('Sightings'); // A
+    compare.watch.start('Sightings'); // B
+    compare.watch.end('Sightings', 'drawn');
+    expect(kept().drawing).toEqual(['Sightings']);
+    compare.watch.end('Sightings', 'drawn');
+    expect(kept().drawing).toEqual([]);
+  });
+
+  it('switches off a layer that could not be drawn, everywhere and said once', async () => {
+    const layers = await reopened({ satellite: ['Sightings'], compare: ['Sightings'] });
+    const compare = layers.scope('compare');
+
+    compare.watch.start('Sightings');
+    layers.watch.start('Sightings');
+    compare.watch.end('Sightings', 'failed');
+    layers.watch.end('Sightings', 'failed');
+
+    expect(layers.drawn).toEqual([]);
+    expect(compare.drawn).toEqual([]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('Sightings could not be drawn and was switched off', 'error');
+    expect(kept().added).toEqual({ satellite: [], compare: [] });
+  });
+
+  it('marks nothing of a case it has since left', async () => {
+    const layers = await reopened({ satellite: ['Sightings'] });
+    layers.watch.start('Sightings');
+
+    rows = [];
+    layers.load('c2');
+    await settle();
+    layers.watch.end('Sightings', 'failed');
+
+    expect(kept('c1').drawing).toEqual([]);
+    expect(storage.getItem('azimut:map-layers:c2')).toBeNull();
+    expect(notify).not.toHaveBeenCalled();
   });
 });

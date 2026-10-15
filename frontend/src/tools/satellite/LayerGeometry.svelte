@@ -31,6 +31,13 @@
   let dragCleanup = null;
   /** Past this many pixels a press on a feature is a drag, short of it a click. */
   const DRAG_PIXELS = 4;
+  /** A corner drawn this near one already in the layer lands on it; Alt held lets it go free. */
+  const SNAP_PIXELS = 10;
+  /** The corner a press would land on now, while a shape is drawn, in screen pixels. */
+  let snapTarget = $state(null);
+  let altHeld = false;
+  /** Whether the last press was on this map: a Delete after a press on a button of the panel removes nothing. */
+  let pressedOnMap = false;
 
   const editing = $derived(active && !!engine && !!controller.editor && !controller.loading);
   const groups = $derived(new Map((controller.groups ?? []).map((group) => [group.id, group])));
@@ -138,27 +145,73 @@
     return { key: feature.properties.key, centre, radius, north, bearing, knob: knobAt(centre, radius, bearing ?? 0, north) };
   });
 
+  /**
+   * The corner of the layer nearest a point of the ground, within `SNAP_PIXELS` on the
+   * screen, so a line drawn to meet another meets it exactly; the point itself when
+   * none is near or Alt is held. A feature being reshaped is not its own target.
+   */
+  function snapped(point, except = null) {
+    if (altHeld || !engine) return point;
+    const at = engine.latLngToContainerPoint(point);
+    let best = null;
+    const walk = (node) => (typeof node?.[0] === 'number' ? [node] : (node ?? []).flatMap(walk));
+    for (const feature of shown) {
+      if (except && feature.properties.key === except) continue;
+      for (const [lon, lat] of walk(feature.geometry.coordinates)) {
+        const p = project(lon, lat);
+        const gap = Math.hypot(p.x - at.x, p.y - at.y);
+        if (gap <= SNAP_PIXELS && (!best || gap < best.gap)) best = { gap, lon, lat, x: p.x, y: p.y };
+      }
+    }
+    return best ? { lon: best.lon, lat: best.lat, $snap: { x: best.x, y: best.y } } : point;
+  }
+  const drawing = () => !!controller.sketch && !['Point', 'Selection'].includes(controller.sketch.type);
+
   $effect(() => {
     if (!active || !engine) return;
     // A click on bare ground lets the selection go; a feature's own click never gets here.
     const off = [engine.on('view-move', () => frame += 1), engine.on('click', (point) => {
-      if (!controller.addPoint(point) && controller.editor && !controller.armed && controller.selection?.length) controller.select(null);
+      const placed = drawing() ? snapped(point, controller.sketch?.key) : point;
+      if (!controller.addPoint({ lat: placed.lat, lon: placed.lon }) && controller.editor && !controller.armed && controller.selection?.length) controller.select(null);
     })];
-    return () => { off.forEach((release) => release()); dragCleanup?.(); };
+    const keys = (event) => { altHeld = event.altKey; };
+    const pressed = (event) => { pressedOnMap = !!engine.container?.contains?.(event.target); };
+    window.addEventListener('keydown', keys); window.addEventListener('keyup', keys);
+    window.addEventListener('pointerdown', pressed, true);
+    return () => {
+      off.forEach((release) => release()); dragCleanup?.();
+      window.removeEventListener('keydown', keys); window.removeEventListener('keyup', keys);
+      window.removeEventListener('pointerdown', pressed, true);
+    };
   });
 
   /** Keys while a tool is armed, and Delete and Escape on a selection. */
   $effect(() => {
     if (!active || !controller.editor) return;
     const key = (event) => {
+      // Enter saves a shape being drawn even from the layer's search field or with the style palette open:
+      // neither has anything of its own to do with it, and a shape left unsaved is work lost
+      const finishing = event.key === 'Enter' && !event.repeat && controller.sketch && controller.complete
+        && !event.target?.closest?.('textarea, select, [contenteditable="true"], [role="alertdialog"], [role="dialog"]')
+        && (!event.target?.closest?.('input') || event.target.closest('.find'))
+        && !document.querySelector('[role="alertdialog"], [role="dialog"]');
+      if (finishing) { event.preventDefault(); event.stopImmediatePropagation(); controller.saveGeometry(); return; }
       if (event.defaultPrevented || event.repeat || event.target?.closest?.('input, textarea, select, .float-menu, [role="alertdialog"], [role="dialog"], [contenteditable="true"]')
         || document.querySelector('[role="alertdialog"], [role="dialog"], .float-menu')) return;
-      if (event.key === 'Escape' && controller.armed) controller.stop();
+      const ctrl = event.ctrlKey || event.metaKey;
+      const undoKey = ctrl && !event.shiftKey && event.key.toLowerCase() === 'z';
+      const redoKey = ctrl && ((event.shiftKey && event.key.toLowerCase() === 'z') || event.key.toLowerCase() === 'y');
+      // while a shape is drawn or reshaped, Ctrl+Z walks the shape's own steps, never the layer's saved edits
+      if (undoKey && controller.sketch) controller.undoSketch();
+      else if (redoKey && controller.sketch) controller.redoSketch();
+      else if (undoKey) { if (!controller.undo()) return; }
+      else if (redoKey) { if (!controller.redo()) return; }
+      else if (event.key === 'Escape' && controller.armed) controller.stop();
       else if (event.key === 'Escape' && controller.selection?.length) controller.select(null);
       else if (event.key === 'Enter' && controller.sketch && controller.complete) controller.saveGeometry();
       else if (event.key === 'Backspace' && controller.sketch && !controller.sketch.key && !event.target?.closest?.('.vertex')) controller.undoVertex();
       else if ((event.key === 'Delete' || event.key === 'Backspace') && !controller.armed && controller.selection?.length
-        && !event.target?.closest?.('.vertex, .turn-knob')) controller.removeSelection();
+        && !event.target?.closest?.('.vertex, .turn-knob') && (pressedOnMap || event.target === document.body)) controller.removeSelection();
       else return;
       event.preventDefault(); event.stopImmediatePropagation();
     };
@@ -195,6 +248,14 @@
     const ours = (event) => event.target?.tagName !== 'CANVAS';
     function down(event) {
       swallow = false;
+      // a freehand stroke: every point the pointer passes, thinned, until it is let go
+      const sketch = controller.sketch;
+      if (event.button === 0 && !ours(event) && controller.freehand && sketch && !sketch.key && !sketch.shape
+        && ['LineString', 'Polygon'].includes(sketch.type)) {
+        swallow = true; event.preventDefault(); event.stopPropagation();
+        stroke(local(event), local);
+        return;
+      }
       // A right press on a feature opens its menu; the map must not start turning under it.
       if (event.button === 2 && !ours(event) && !controller.armed && hitFeature(shown, project, local(event))) {
         swallow = true; event.preventDefault(); event.stopPropagation();
@@ -209,12 +270,37 @@
       }
       const key = hitFeature(shown, project, at);
       if (!key) return;
+      const feature = shown.find((one) => one.properties.key === key);
+      const add = event.shiftKey || event.ctrlKey || event.metaKey;
+      if (feature?.geometry?.type !== 'Point' && !add && !(controller.selection ?? []).includes(key)) {
+        // A line or an area not picked yet: a press picks it, a drag across it pans the
+        // map, which a big area would otherwise never let go of.
+        const up = (next) => {
+          window.removeEventListener('pointerup', up, true);
+          const end = local(next);
+          if (Math.hypot(end.x - at.x, end.y - at.y) >= DRAG_PIXELS) return;
+          swallow = true;
+          controller.chooseKeys([key]);
+        };
+        window.addEventListener('pointerup', up, true);
+        return;
+      }
       swallow = true; event.preventDefault(); event.stopPropagation();
       press(event, key, at, local);
     }
     const block = (event) => { if (swallow) { event.stopPropagation(); if (event.cancelable && event.type !== 'touchstart') event.preventDefault(); } };
     const click = (event) => { if (swallow) { event.stopPropagation(); event.preventDefault(); swallow = false; } };
     function dblclick(event) {
+      // a double click ends a line or an area being drawn, its second click not a corner of its own
+      const sketch = controller.sketch;
+      if (!ours(event) && sketch && !sketch.key && !sketch.shape && ['LineString', 'Polygon'].includes(sketch.type)) {
+        event.stopPropagation(); event.preventDefault();
+        const ring = sketch.rings[0];
+        const near = (a, b) => { const p = project(a[0], a[1]), q = project(b[0], b[1]); return Math.hypot(p.x - q.x, p.y - q.y) < 5; };
+        while (ring.length > 1 && near(ring.at(-1), ring.at(-2))) ring.pop();
+        if (controller.complete) controller.saveGeometry();
+        return;
+      }
       if (ours(event) || controller.armed) return;
       const key = hitFeature(shown, project, local(event));
       const feature = key && controller.features.find((one) => one.properties.key === key);
@@ -232,6 +318,20 @@
       if (!(controller.selection ?? []).includes(key)) controller.chooseKeys([key]);
       featureMenu = { x: event.clientX, y: event.clientY };
     }
+    /** While a circle or a box is drawn, it follows the pointer; while a shape is drawn, the corner it would snap to shows. */
+    let hovering = 0;
+    function hover(event) {
+      // once a frame: a layer with long shapes has many corners to look at
+      if (hovering) return;
+      hovering = requestAnimationFrame(() => { hovering = 0; });
+      const sketch = controller.sketch;
+      if (!sketch || ['Point', 'Selection'].includes(sketch.type)) { snapTarget = null; return; }
+      const point = engine.containerPointToLatLng(local(event));
+      if (sketch.shape) controller.preview(point);
+      const near = snapped(point, sketch.key);
+      snapTarget = near.$snap ?? null;
+    }
+    box.addEventListener('pointermove', hover);
     box.addEventListener('pointerdown', down, true);
     box.addEventListener('mousedown', block, true);
     box.addEventListener('touchstart', block, true);
@@ -239,6 +339,8 @@
     box.addEventListener('dblclick', dblclick, true);
     box.addEventListener('contextmenu', menu, true);
     return () => {
+      box.removeEventListener('pointermove', hover);
+      snapTarget = null;
       box.removeEventListener('pointerdown', down, true);
       box.removeEventListener('mousedown', block, true);
       box.removeEventListener('touchstart', block, true);
@@ -282,6 +384,32 @@
       dragCleanup = null;
     };
     const cancel = () => { cleanup(); controller.drag(null); };
+    dragCleanup = cancel;
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel);
+  }
+
+  /** A freehand stroke, laid into the shape being drawn when the pointer lets go. */
+  function stroke(start, local) {
+    const points = [start];
+    loop = { points, add: false, stroke: true };
+    dragCleanup?.();
+    const move = (event) => {
+      const at = local(event);
+      const last = points.at(-1);
+      if (Math.hypot(at.x - last.x, at.y - last.y) < 6) return;
+      points.push(at);
+      loop = { points: [...points], add: false, stroke: true };
+    };
+    const end = () => {
+      cleanup();
+      loop = null;
+      if (points.length > 1) controller.addStroke(points.map((point) => engine.containerPointToLatLng(point)));
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
+      dragCleanup = null;
+    };
+    const cancel = () => { cleanup(); loop = null; };
     dragCleanup = cancel;
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel);
   }
@@ -353,7 +481,14 @@
     event.preventDefault(); event.stopPropagation();
     vertex = ring === 0 ? index : null;
     dragCleanup?.();
-    const move = (event) => { if (controller.sketch) controller.moveVertex(ring, index, pointAt(event)); };
+    let stepped = false;
+    const move = (event) => {
+      if (!controller.sketch) return;
+      if (!stepped) { stepped = true; controller.beginVertexMove(); }
+      const near = snapped(pointAt(event), controller.sketch.key);
+      snapTarget = near.$snap ?? null;
+      controller.moveVertex(ring, index, { lat: near.lat, lon: near.lon });
+    };
     const end = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); dragCleanup = null; };
     dragCleanup = end;
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
@@ -365,6 +500,7 @@
     }
     else if (moves[event.key]) {
       const [dx, dy] = moves[event.key], step = event.shiftKey ? 10 : 1;
+      controller.beginVertexMove();
       controller.moveVertex(ring, index, engine.containerPointToLatLng({ x: point.x + dx * step, y: point.y + dy * step }));
     } else return;
     event.preventDefault(); event.stopPropagation();
@@ -378,7 +514,8 @@
       {#if halos.path}<path class="halo" d={halos.path} />{/if}
       {#each halos.discs as disc}<circle class="halo" cx={disc.x} cy={disc.y} r={disc.r + 3} />{/each}
       {#if ghosts.path}<path class="ghost" d={ghosts.path} />{/if}
-      {#if loop}<path class="loop" d={`M${loop.points.map((point) => `${point.x},${point.y}`).join(' L')} Z`} />{/if}
+      {#if loop}<path class="loop" class:stroke={loop.stroke} d={`M${loop.points.map((point) => `${point.x},${point.y}`).join(' L')}${loop.stroke ? '' : ' Z'}`} />{/if}
+      {#if snapTarget}<circle class="snap" cx={snapTarget.x} cy={snapTarget.y} r="8" />{/if}
     </svg>
     {#if ring}
       <svg class="ring" aria-hidden="true">
@@ -415,7 +552,8 @@
     <svg aria-hidden="true"><path d={sketch.type === 'Selection' ? selectionPreview.path : path} fill={['Polygon', 'MultiPolygon'].includes(sketch.type) ? '#f5a62325' : 'none'} fill-rule="evenodd" stroke="#f5a623" stroke-width="2" />
       {#each selectionPreview.points as point}<circle cx={point.x} cy={point.y} r="5" fill="#f5a62355" stroke="#f5a623" />{/each}
     </svg>
-    {#each rings as ring, ri}
+    <!-- a circle or a box being drawn follows the pointer: a handle under it would take the press that closes it -->
+    {#each sketch.shape ? [] : rings as ring, ri}
       {#each ring as point, index}
         <button type="button" class="vertex" class:chosen={ri === 0 && index === vertex} style:left={`${point.x}px`} style:top={`${point.y}px`}
           aria-label={`Move vertex ${ri + 1}.${index + 1}`} title={['Point', 'Selection'].includes(sketch.type) ? 'Drag to move' : 'Drag to move; Delete to remove'}
@@ -449,6 +587,8 @@
   path.halo { stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
   .ghost { fill: none; stroke: #f5a623; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
   .loop { fill: #f5a62318; stroke: #f5a623; stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .loop.stroke { fill: none; stroke-width: 2.5; stroke-dasharray: none; }
+  .snap { fill: none; stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 1px #000c); }
   .ghost-mark { position: absolute; transform: translate(-50%, -100%); opacity: .9; }
   .ghost-mark.badge { transform: translate(-50%, -50%); }
   .vertex, .midpoint { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; border: 1px solid #fff; border-radius: 50%; background: #f5a623; width: 11px; height: 11px; padding: 0; box-shadow: 0 0 0 1px #222; cursor: grab; touch-action: none; }

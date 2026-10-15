@@ -10,7 +10,17 @@
   import { usedStyles } from '../../lib/map/layerStyle.js';
 
   let { controller, group, anchor, members = 0, onclose } = $props();
-  const busy = $derived(controller.pending > 0);
+  const busy = $derived(controller.loading);
+  const DASHES = [['', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']];
+  const FILLS = [['', 'Filled'], ['hatch', 'Hatched'], ['none', 'Outline']];
+  /** The group's features a name says little about, which a place can name. */
+  const unnamed = $derived(controller.unnamed?.(group.id) ?? []);
+  let naming = $state(null);
+  async function nameAll() {
+    naming = { done: 0, total: unnamed.length, stop: false };
+    await controller.nameAfterPlaces(unnamed.map((feature) => feature.properties.key), (done) => { if (naming) naming.done = done; }, () => naming?.stop);
+    naming = null;
+  }
   const uniform = $derived(group.mode === 'uniform');
   // A slider shows where it is held while it moves, and saves where it is let go.
   let size = $state(null);
@@ -54,14 +64,37 @@
       oninput={(event) => { stroke = Number(event.currentTarget.value); }}
       onchange={() => slide('stroke', stroke ?? group.stroke ?? 2, () => (stroke = null))} />
     <output>{stroke ?? group.stroke ?? 2}px</output></label>
+  <div class="field"><span>Lines</span>
+    <span class="pills" role="group" aria-label={`Line dash for ${group.name}`}>
+      {#each DASHES as [value, label] (value)}
+        <button type="button" class="pill" aria-pressed={(group.line_dash ?? '') === value} disabled={busy}
+          onclick={() => controller.updateGroup(group.id, { line_dash: value || null })}>{label}</button>
+      {/each}
+    </span></div>
+  <div class="field"><span>Areas</span>
+    <span class="pills" role="group" aria-label={`Area fill for ${group.name}`}>
+      {#each FILLS as [value, label] (value)}
+        <button type="button" class="pill" aria-pressed={(group.area_fill ?? '') === value} disabled={busy}
+          onclick={() => controller.updateGroup(group.id, { area_fill: value || null })}>{label}</button>
+      {/each}
+    </span></div>
   <div class="fm-sep"></div>
+  {#if unnamed.length}
+    {#if naming}
+      <div class="field progress"><span>Naming</span>{naming.done} of {naming.total}
+        <button type="button" class="pill" onclick={() => { if (naming) naming.stop = true; }}>Stop</button></div>
+    {:else}
+      <button type="button" class="fm-item" disabled={busy} title="Asks OpenStreetMap's Nominatim for the place each one stands in, one a second"
+        onclick={nameAll}><Icon name="pin" size={14} /><span class="fm-grow">Name {unnamed.length} after their place</span></button>
+    {/if}
+  {/if}
   {#if members > 1}
     <button type="button" class="fm-item" onclick={() => { controller.selectGroup(group.id); onclose?.(); }}>
       <Icon name="cursor" size={14} /><span class="fm-grow">Select all {members}</span></button>
   {/if}
   {#if (controller.groups ?? []).length > 1}
     <button type="button" class="fm-item danger" disabled={busy} onclick={() => { controller.removeGroup(group.id); onclose?.(); }}>
-      <Icon name="trash" size={14} /><span class="fm-grow">Remove the group, keep its features</span></button>
+      <Icon name="trash" size={14} /><span class="fm-grow" title="Its features move to the first group">Ungroup</span></button>
   {/if}
 </FloatingMenu>
 
@@ -72,4 +105,8 @@
   .slider input { flex: 1; min-width: 0; height: 18px; padding: 0; accent-color: var(--accent); }
   .slider output { width: 34px; text-align: right; color: var(--text-2); }
   .switch { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 6px; color: var(--text-1); font-size: var(--fs-xs); cursor: pointer; }
+  .field > .pills { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; width: auto; min-width: 0; }
+  .pill { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2); font-size: 10.5px; cursor: pointer; }
+  .pill[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
+  .progress { color: var(--text-2); }
 </style>

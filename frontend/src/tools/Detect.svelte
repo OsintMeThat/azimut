@@ -22,6 +22,7 @@
   import { createFireKey } from '../lib/map/fireKey.svelte.js';
   import { createLayerSet } from '../lib/map/layerSet.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { createMapLayerMemory } from '../lib/map/layerMemory.js';
   import { savedRow } from '../lib/geoTree.js';
   import { copyText } from '../lib/clipboard.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
@@ -101,6 +102,8 @@
   const PASSES = [SENTINEL, RADAR_ID];
   /** Whether the fire layer can be used, read from our own backend. */
   const fireKey = createFireKey({ api });
+  /** What a case that never said otherwise opens Detect's map on. */
+  const DETECT_LAYERS = ['boundaries', 'placenames'];
   /**
    * The map's layers, every one the catalogue offers (lib/map/layerSet). The
    * fires and the night lights start on the day of the picture on screen, which
@@ -108,7 +111,7 @@
    */
   const mapLayers = createLayerSet({
     fireKey,
-    initial: ['boundaries', 'placenames'],
+    initial: DETECT_LAYERS,
     follow: "Picture's day",
     pictureDay: () => dated?.date ?? '',
     imagery: () => imagery.find(providerId)?.imagery ?? true,
@@ -117,6 +120,17 @@
       uiState.tool = 'settings';
     },
   });
+  // Each case opens on the layers it was left on (lib/map/layerMemory), kept
+  // under the case the switches were set for.
+  const switchMemory = createMapLayerMemory('detect', DETECT_LAYERS);
+  let layersFor;
+  $effect(() => {
+    const id = caseState.current?.id ?? null;
+    if (id === layersFor) return;
+    layersFor = id;
+    mapLayers.restore(switchMemory.recall(id));
+  });
+  $effect(() => switchMemory.keep(layersFor, mapLayers.ids));
   // The case's saved places, captures and located files, as the other maps draw
   // them. Off at first: Detect opens on its own findings.
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
@@ -315,9 +329,6 @@
       fitDock();
       chosenBasemap = saved?.basemap && !PASSES.includes(saved.basemap) ? saved.basemap : 'esri-world-imagery';
       providerId = chosenBasemap;
-      // Only the layers still offered: a retired one (Labels) would be sent back
-      // with the next save and refused.
-      mapLayers.restore(saved?.overlays ?? ['boundaries', 'placenames']);
       prefsLoaded = true;
       home = { ...prefs.homeView };
       // Where the other map tabs left the window, when they share a camera.
@@ -348,8 +359,7 @@
   let lastPrefs = '';
   $effect(() => {
     if (!prefsLoaded) return;
-    const value = { collapsed, width: savedDockWidth, basemap: chosenBasemap,
-      overlays: mapLayers.kept };
+    const value = { collapsed, width: savedDockWidth, basemap: chosenBasemap };
     const key = JSON.stringify(value);
     if (!lastPrefs) { lastPrefs = key; return; }
     if (key === lastPrefs) return;
@@ -796,6 +806,7 @@
           caseId={caseState.current?.id ?? ''}
           layers={uiState.tool === 'detect' && !bare ? myLayers.drawn : []}
           drawing={addedLayers.drawing}
+          watch={myLayers.watch}
           onmenu={onMapContextMenu}
           interactive={!personalLayers.armed && !measuring && drawing === 'select' && !manual && !builder?.pinning}
           onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}

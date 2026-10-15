@@ -3,6 +3,7 @@
    * The few things a plate's map is changed by, on the map itself while it is
    * picked: framing it by the hand, turning it, and the ground it is drawn on.
    *
+   * - **Zoom**: a half step in or out, round the map's middle.
    * - **Turn**: a step to either side, or the compass dragged round; a press on the
    *   compass puts north back up. While the map is framed, a right-drag or a
    *   Ctrl-drag turns it too.
@@ -30,6 +31,9 @@
   const tidy = (value) => Math.round((((value + 180) % 360 + 360) % 360 - 180) * 10) / 10;
   function turn(by) {
     element.view = { ...element.view, bearing: tidy(bearing + by) };
+  }
+  function zoom(by) {
+    element.view = { ...element.view, zoom: Math.max(0, Math.min(22, Math.round(((element.view?.zoom ?? 10) + by) * 100) / 100)) };
   }
 
   /** The compass dragged round: north follows the pointer. */
@@ -66,10 +70,12 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" onpointerdown={(event) => event.stopPropagation()}>
   {#if isMap}
-    <button type="button" class:on={framing} aria-pressed={framing} title={framing ? 'Done framing (Esc)' : 'Frame the map by the hand'}
+    <button type="button" class:on={framing} aria-pressed={framing} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a right-drag'}
       aria-label="Frame the map" onclick={onframe}><Icon name="move" size={14} />{#if framing}<span>Done</span>{/if}</button>
+    <button type="button" aria-label="Zoom the map out" title="Zoom out" onclick={() => zoom(-0.5)}><Icon name="minus" size={13} /></button>
+    <button type="button" aria-label="Zoom the map in" title="Zoom in" onclick={() => zoom(0.5)}><Icon name="plus" size={13} /></button>
     <span class="rule"></span>
-    <button type="button" aria-label="Turn the map left" title="Turn 15° left" onclick={() => turn(15)}><Icon name="undo" size={14} /></button>
+    <button type="button" aria-label="Turn the map left" title="Turn 15° left" onclick={() => turn(15)}><Icon name="rotateLeft" size={14} /></button>
     <button type="button" class="dial" bind:this={dial} aria-label={`Compass, ${Math.round(-bearing + 360) % 360}°`}
       title="Drag to turn the map. A press puts north up." onpointerdown={grabDial}>
       <svg viewBox="-12 -12 24 24" width="22" height="22" aria-hidden="true">
@@ -80,7 +86,7 @@
         </g>
       </svg>
     </button>
-    <button type="button" aria-label="Turn the map right" title="Turn 15° right" onclick={() => turn(-15)}><Icon name="redo" size={14} /></button>
+    <button type="button" aria-label="Turn the map right" title="Turn 15° right" onclick={() => turn(-15)}><Icon name="rotateRight" size={14} /></button>
     <span class="rule"></span>
   {/if}
   <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title="The ground the map is drawn on"

@@ -21,7 +21,6 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     ValidationError,
     ValidationInfo,
-    field_validator,
     model_serializer,
     model_validator,
 )
@@ -106,26 +105,20 @@ def stored(model: type[M], data: Any) -> M:
     return model.model_validate(data, context=STORED)
 
 
-#: Map layers that no longer exist. A saved preference or a settings backup that
-#: still names one drops it rather than being refused: CARTO's labels went when
-#: their tiles began asking for a key, and the place names now come from
-#: OpenFreeMap under an id of their own.
+#: Map layers that no longer exist. A saved comparison that still names one
+#: drops it rather than being refused: CARTO's labels went when their tiles began
+#: asking for a key, and the place names now come from OpenFreeMap under an id of
+#: their own.
 RETIRED_OVERLAYS = frozenset({"labels"})
 
 
 class DetectPrefs(Model):
+    """Detect's panel and basemap. Its layers are kept per case in the browser, as
+    every map's are, so an older file's `overlays` is read past."""
+
     collapsed: bool = False
     width: int = Field(default=380, ge=300, le=720)
     basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
-    overlays: list[Literal["boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces"]] = (
-        Field(default=["boundaries", "placenames"], max_length=7))
-
-    @field_validator("overlays", mode="before")
-    @classmethod
-    def _drop_retired(cls, value: Any) -> Any:
-        if isinstance(value, list):
-            return [entry for entry in value if entry not in RETIRED_OVERLAYS]
-        return value
 
 
 class Parameters(Model):

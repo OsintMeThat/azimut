@@ -52,10 +52,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The Copernicus layer Detect's radar methods read: one the user added to
     # their configuration with Sentinel-1 as its source. Empty until found.
     "sentinel1_layer": "",
-    "detect_view": {
-        "collapsed": False, "width": 380, "basemap": "esri-world-imagery",
-        "overlays": ["boundaries", "placenames"],
-    },
+    "detect_view": {"collapsed": False, "width": 380, "basemap": "esri-world-imagery"},
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.
     "schema": SETTINGS_SCHEMA,

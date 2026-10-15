@@ -11,13 +11,19 @@
  * mount.** Opening a case reads the layers already on disk and draws none of
  * them.
  *
- * **Whether a layer is on lives here and nowhere else**, so every layer starts
- * off when the app or the page is opened again: one heavy enough to take the tab
- * down would otherwise take it down again on every reload. Each map keeps its own
- * switches (a scope per tool), so a layer is drawn only where it was asked for.
+ * **Whether a layer is on lives here**, and is kept per case in this browser
+ * (`layerMemory.js`), so a case opens again on the layers each map had on. Each
+ * map keeps its own switches (a scope per tool), so a layer is drawn only where it
+ * was asked for. A case opening puts them back **one at a time**, each once the
+ * one before is drawn, and a layer being drawn is marked as such until it is: a
+ * layer heavy enough to take the tab down leaves its mark behind, and the next
+ * session leaves that one off and says so rather than going down with it again. A
+ * layer whose features cannot be read or drawn is switched off where it is.
+ *
  * Switching a followed layer on for the first time in the session, in any map, is
- * what re-reads it, when it asked to be; an off layer never costs a request, and
- * one switched on offline draws the snapshot it holds.
+ * what re-reads it, when it asked to be; one put back as the case opens draws the
+ * snapshot it holds and asks nothing. An off layer never costs a request, and one
+ * switched on offline draws the snapshot it holds.
  *
  * The parsed GeoJSON is kept here rather than in the overlay component so that
  * switching a layer off and on again does not re-read a file the browser already
@@ -28,6 +34,8 @@
  * @param {(message: string, kind?: string, ms?: number) => void} deps.notify
  * @param {() => Promise<object>} deps.ensureCase the case to add into, made if needed
  * @param {() => Promise<any>} deps.reloadCase
+ * @param {ReturnType<import('./layerMemory.js').createLayerMemory>} [deps.memory]
+ *   where the switches are kept between sessions
  */
 import { api as appApi } from '../api.js';
 import { ensureCase as appEnsureCase, reloadCase as appReloadCase, toast } from '../state.svelte.js';
@@ -41,6 +49,7 @@ import {
 } from './addedLayers.js';
 import { active, indexDates, within } from './layerDates.js';
 import { isTracked, moments as momentsOf } from './layerHistory.js';
+import { layerMemory } from './layerMemory.js';
 
 /** How a tracked layer is read when nobody moved its cursor: as it is now, with its trail. */
 export const NOW = Object.freeze({ at: null, trail: true, since: null, window: 7 });
@@ -48,7 +57,7 @@ export const NOW = Object.freeze({ at: null, trail: true, since: null, window: 7
 /** The Map's switches, where layers are added: what `rows`, `drawn` and `toggle` read. */
 const MAP = 'satellite';
 
-export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) {
+export function createAddedLayersState({ api, notify, ensureCase, reloadCase, memory = layerMemory }) {
   let rows = $state([]);
   let open = $state(true);
   let busy = $state(''); // the layer name an act is running on
@@ -75,8 +84,17 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   let loadedFor = null; // the case every row was read for
   let readFor = ''; // …and the reload it was read at, so four maps ask once
   let asked = 0; // the latest list read, so an older answer lands nowhere
-  /** scope → the layers switched on in that map. Never stored: see the header. */
+  /** scope → the layers switched on in that map, kept per case: see the header. */
   let on = $state({});
+  /** scope → the layers the case opened with that are still to be drawn there,
+   *  in turn. Listed as on, drawn once the one before them is. */
+  let waiting = $state({});
+  /** scope → the layer being put back there now, whose drawing lets the next one in. */
+  let heads = {};
+  /** The case whose kept switches were put back, so a reload does not do it twice. */
+  let restoredFor = null;
+  /** name → `{ caseId, count }`: the layers being drawn, and in how many maps. */
+  const inFlight = new Map();
   /** name → the period a strip is being dragged to, ahead of the stored one, so
    *  the map and the counter follow the pointer and the backend hears the end. */
   let drafts = $state({});
@@ -100,7 +118,17 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     held = new Set();
     picked = null;
     on = {};
+    waiting = {};
+    heads = {};
+    restoredFor = null;
     renewed.clear();
+    settleAll();
+  }
+
+  /** Nothing is being drawn any more, in whichever case it was. */
+  function settleAll() {
+    for (const [name, { caseId }] of inFlight) memory.markDrawing(caseId, name, false);
+    inFlight.clear();
   }
 
   function show(scope, name, visible) {
@@ -110,21 +138,131 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     on = { ...on, [scope]: next };
   }
 
+  const isOn = (scope, name) => Boolean(on[scope]?.has(name) || waiting[scope]?.includes(name));
+
+  /** Take a layer out of one map's turn, letting the next one in if it was drawing. */
+  function unqueue(scope, name) {
+    if (waiting[scope]?.includes(name)) {
+      waiting = { ...waiting, [scope]: waiting[scope].filter((entry) => entry !== name) };
+    }
+    if (heads[scope] === name) advance(scope);
+  }
+
+  /** The next layer a map was opened with, now that the one before it is drawn. */
+  function advance(scope) {
+    const [next, ...rest] = waiting[scope] ?? [];
+    if (!next) {
+      delete heads[scope];
+      return;
+    }
+    waiting = { ...waiting, [scope]: rest };
+    heads[scope] = next;
+    show(scope, next, true);
+  }
+
   /** Off in every map: what a removed layer is. */
   function hide(name) {
     on = Object.fromEntries(
       Object.entries(on).map(([scope, names]) => [scope, new Set([...names].filter((entry) => entry !== name))])
     );
+    for (const scope of Object.keys(waiting)) unqueue(scope, name);
   }
+
+  /**
+   * Keep every map's switches for this case, the ones still waiting their turn
+   * included. Not before they were put back, or a case opening would forget them.
+   */
+  function keep() {
+    if (!loadedFor || restoredFor !== loadedFor) return;
+    const scopes = new Set([...Object.keys(on), ...Object.keys(waiting)]);
+    memory.keepAdded(
+      loadedFor,
+      Object.fromEntries([...scopes].map((scope) => [scope, [...(on[scope] ?? []), ...(waiting[scope] ?? [])]]))
+    );
+  }
+
+  /**
+   * Put back what each map had on in this case, the first layer of each now and
+   * the rest in turn. A layer the last session was still drawing when it stopped
+   * stays off, and the toast says which.
+   */
+  function restore(list) {
+    restoredFor = loadedFor;
+    const present = list.map((row) => row.name);
+    const stalled = memory.drawing(loadedFor).filter((name) => present.includes(name));
+    memory.clearDrawing(loadedFor);
+    const kept = memory.added(loadedFor);
+    for (const [scope, names] of Object.entries(kept)) {
+      const wanted = present.filter((name) => names.includes(name) && !stalled.includes(name) && !isOn(scope, name));
+      if (!wanted.length) continue;
+      waiting = { ...waiting, [scope]: wanted };
+      if (!heads[scope]) advance(scope);
+    }
+    keep();
+    if (!stalled.length) return;
+    const title = list.find((row) => row.name === stalled[0])?.title || stalled[0];
+    notify(
+      stalled.length === 1
+        ? `${title} was left off: the last session stopped while drawing it`
+        : `${stalled.length} layers were left off: the last session stopped while drawing them`,
+      'warn',
+      10000
+    );
+  }
+
+  /** A map began drawing a layer: marked until it is drawn, so a tab dying on it is known. */
+  function started(name) {
+    if (!loadedFor) return;
+    const held = inFlight.get(name);
+    if (held) {
+      held.count += 1;
+      return;
+    }
+    inFlight.set(name, { caseId: loadedFor, count: 1 });
+    memory.markDrawing(loadedFor, name, true);
+  }
+
+  /**
+   * A map is done with a layer: `drawn`, `failed` (its features could not be read
+   * or drawn), or `dropped` (switched off, or the map hidden, before it was).
+   */
+  function ended(scope, name, outcome) {
+    const held = inFlight.get(name);
+    if (!held) return; // a case since left
+    held.count -= 1;
+    if (held.count <= 0) {
+      inFlight.delete(name);
+      memory.markDrawing(held.caseId, name, false);
+    }
+    if (held.caseId !== loadedFor) return;
+    if (outcome === 'failed') failed(name);
+    else if (outcome === 'drawn' && heads[scope] === name) advance(scope);
+  }
+
+  /** Off everywhere, and said once however many maps were drawing it. */
+  function failed(name) {
+    if (!Object.keys({ ...on, ...waiting }).some((scope) => isOn(scope, name))) return;
+    hide(name);
+    keep();
+    const title = rows.find((row) => row.name === name)?.title || name;
+    notify(`${title} could not be drawn and was switched off`, 'error');
+  }
+
+  /** What a map's overlay reports its drawing to. */
+  const watcher = (scope) => ({
+    start: (name) => started(name),
+    end: (name, outcome) => ended(scope, name, outcome),
+  });
+  const mapWatch = watcher(MAP);
 
   /** The rows as one map reads them, each saying whether it is on there. */
   function listed(scope = MAP) {
-    const shown = on[scope];
     return rows.map((row) => {
+      const enabled = isOn(scope, row.name);
       // a tracked layer is read at a moment, not filtered by a period
-      if (isTracked(row)) return { ...row, enabled: Boolean(shown?.has(row.name)), period: null, time: times[row.name] ?? NOW };
+      if (isTracked(row)) return { ...row, enabled, period: null, time: times[row.name] ?? NOW };
       const period = row.name in drafts ? drafts[row.name] : (row.period ?? null);
-      const listing = { ...row, enabled: Boolean(shown?.has(row.name)), period };
+      const listing = { ...row, enabled, period };
       const index = active(period) ? datesOf(row.name) : null;
       if (!index) return listing;
       // what a period leaves on the map, which the counter and the legend state
@@ -161,8 +299,14 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     else rows = rows.map((entry) => (entry.name === row.name ? row : entry));
   }
 
+  /** What one map draws: its rows that are on, less the ones still waiting their turn. */
+  function drawnIn(scope) {
+    return drawable(listed(scope)).filter((row) => on[scope]?.has(row.name));
+  }
+
   /**
-   * Read this case's layers. Disk only, and every one of them starts off.
+   * Read this case's layers. Disk only, and each map's kept switches are put back
+   * from the first read that answers.
    *
    * Every mounted map calls it when the case opens or reloads, so it reads once
    * per case and reload (`rev`): a layer Detect files from its findings reaches
@@ -181,7 +325,9 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     api
       .get(`/api/cases/${caseId}/map-layers`)
       .then((list) => {
-        if (ticket === asked) rows = Array.isArray(list) ? list : [];
+        if (ticket !== asked) return;
+        rows = Array.isArray(list) ? list : [];
+        if (Array.isArray(list) && restoredFor !== caseId) restore(rows);
       })
       .catch(() => {
         if (ticket === asked) rows = [];
@@ -268,6 +414,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
       replace(row);
       // on, since it was added to be looked at, and just read
       show(MAP, row.name, true);
+      keep();
       justAdded = row.name;
       renewed.add(row.name);
       adding = false;
@@ -325,10 +472,12 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     return row;
   }
 
-  /** The eye on a row in one map, which stores nothing. */
+  /** The eye on a row in one map, kept for the case in this browser only. */
   function toggleIn(scope, caseId, layer) {
-    const visible = !on[scope]?.has(layer.name);
+    const visible = !isOn(scope, layer.name);
     show(scope, layer.name, visible);
+    if (!visible) unqueue(scope, layer.name);
+    keep();
     if (visible && !renewed.has(layer.name) && renewsOnShow(layer)) {
       return renew(caseId, layer);
     }
@@ -340,23 +489,29 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
       return listed();
     },
     get drawn() {
-      return drawable(listed());
+      return drawnIn(MAP);
     },
+    /** What the Map's overlay reports its drawing to. */
+    watch: mapWatch,
     /**
      * One map's own switches over the same layers: Compare, Detect and Horizon
      * each ask with their tool's id, and draw only what they switched on.
      */
     scope(name) {
+      const watch = watcher(name);
       return {
         get rows() {
           return listed(name);
         },
         get drawn() {
-          return drawable(listed(name));
+          return drawnIn(name);
         },
         toggle: (caseId, layer) => toggleIn(name, caseId, layer),
+        watch,
       };
     },
+    /** The page is closing on its own: nothing it was drawing took it down. */
+    leave: settleAll,
     get open() {
       return open;
     },
@@ -514,9 +669,9 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     },
 
     /**
-     * The eye on the Map's row, which stores nothing. Off costs nothing and asks
-     * for nothing; the first time on in the session re-reads a followed layer
-     * that asked for it, while the snapshot already on disk is drawn.
+     * The eye on the Map's row. Off costs nothing and asks for nothing; the
+     * first time on in the session re-reads a followed layer that asked for it,
+     * while the snapshot already on disk is drawn.
      */
     toggle(caseId, layer) {
       return toggleIn(MAP, caseId, layer);
@@ -595,6 +750,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
           const result = await api.del(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}`);
           forget(layer.name);
           hide(layer.name);
+          keep();
           renewed.delete(layer.name);
           rows = rows.filter((entry) => entry.name !== layer.name);
           await reloadCase();
@@ -614,3 +770,7 @@ export const addedLayers = createAddedLayersState({
   ensureCase: appEnsureCase,
   reloadCase: appReloadCase,
 });
+
+// A page closed or reloaded on purpose was not taken down by what it was drawing.
+// One that dies never gets here, which is what leaves its mark behind.
+globalThis.addEventListener?.('pagehide', () => addedLayers.leave());

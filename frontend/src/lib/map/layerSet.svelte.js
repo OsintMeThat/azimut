@@ -11,10 +11,9 @@
  * night layers then start on that day: the fires the picture can show, the night
  * after it. The analyst can still pick any window or night.
  *
- * Nothing is asked of NASA until the fire or night layer is on. A tool keeps only
- * the reference layers between visits (`kept`): the fire and night layers would
- * reach out on their own after a reload, and the case's saved work is switched
- * per session, as on the Map.
+ * Nothing is asked of NASA until the fire or night layer is on. A tool keeps its
+ * switches per case (`layerMemory.js`), all but the fire and night layers, which
+ * would reach out on their own after a reload and show another day.
  *
  * @param {object} deps
  * @param {ReturnType<import('./fireKey.svelte.js').createFireKey>} deps.fireKey
@@ -36,6 +35,7 @@ import {
   tileParams as firmsTileParams,
 } from './firms.js';
 import { layerInfo, LAYERS, knownLayers } from './layerCatalog.js';
+import { keptLayers } from './layerMemory.js';
 import {
   askable as nightAskable,
   COMPOSITE,
@@ -110,13 +110,10 @@ export function createLayerSet({
     get ids() {
       return on;
     },
-    /** What a tool keeps between visits: the reference layers. */
-    get kept() {
-      return on.filter((id) => layerInfo(id)?.group === 'reference');
-    },
-    /** Put back what a tool kept; an unknown or retired id is dropped. */
+    /** Put back what a tool kept; an unknown or retired id is dropped, and so
+     *  are the fire and night layers, which are never kept. */
     restore(ids) {
-      on = knownLayers(ids).filter((id) => layerInfo(id)?.group === 'reference');
+      on = keptLayers(ids);
     },
     has(id) {
       return on.includes(id);

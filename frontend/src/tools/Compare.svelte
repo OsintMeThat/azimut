@@ -95,6 +95,7 @@
     compareNightControls,
     compareNightNote,
     compareNightWords,
+    DEFAULT_LAYERS,
     freshFires,
     freshLayers,
     freshNight,
@@ -109,6 +110,7 @@
     tradedSides,
   } from '../lib/map/compareLayers.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
+  import { createMapLayerMemory } from '../lib/map/layerMemory.js';
   import { savedRow } from '../lib/geoTree.js';
   import { isGround } from '../lib/map/basemap.js';
   import { isRegistered, sourceRect } from '../lib/screenCrop.js';
@@ -300,6 +302,11 @@
    * day the fires and the night lights are drawn for, each side's own.
    */
   let layerIds = $state(freshLayers().ids);
+  /** The layers a new pair starts on: the ones last switched in this case, kept in
+   *  this browser (lib/map/layerMemory), else borders and place names. A saved
+   *  comparison reopens on its own. */
+  const switchMemory = createMapLayerMemory('compare', DEFAULT_LAYERS);
+  const startingLayers = () => switchMemory.recall(caseState.current?.id ?? null);
   /** Which map draws the list: 'a' | 'b' | 'ab'. */
   let layerSide = $state('ab');
   /** The list as each side draws it. */
@@ -1328,11 +1335,11 @@
 
   /** The list and the switcher, read back from what a session or a handoff holds. */
   function applyLayers(left, right) {
-    ({ ids: layerIds, side: layerSide, fires, night } = restoredLayers(left, right));
+    ({ ids: layerIds, side: layerSide, fires, night } = restoredLayers(left, right, startingLayers()));
   }
 
   function resetLayers() {
-    ({ ids: layerIds, side: layerSide } = freshLayers());
+    ({ ids: layerIds, side: layerSide } = freshLayers(startingLayers()));
     fires = freshFires();
     night = freshNight();
   }
@@ -1342,6 +1349,7 @@
     if (id === 'firms' && !fireKey.keyed) return;
     if (id === 'saved' && !savedWork.rows.length && !savedWork.media.length) return;
     layerIds = toggledLayer(layerIds, id);
+    switchMemory.keep(caseState.current?.id ?? null, layerIds);
   }
 
   // None of these asks Difference to read again: it reads the picture without
@@ -2668,6 +2676,7 @@
             caseId={caseState.current?.id ?? ''}
             layers={drawnOn('a')}
             drawing={addedLayers.drawing}
+            watch={myLayers.watch}
             onmenu={(at) => onMapContextMenu('a', at)}
             interactive={!personalLayers.armed}
             onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}
@@ -2779,6 +2788,7 @@
             caseId={caseState.current?.id ?? ''}
             layers={drawnOn('b')}
             drawing={addedLayers.drawing}
+            watch={myLayers.watch}
             onmenu={(at) => onMapContextMenu('b', at)}
             interactive={!personalLayers.armed}
             onedit={async (row, key) => { if (personalLayers.editor?.name !== row.name) await personalLayers.open(row); personalLayers.select(key); }}

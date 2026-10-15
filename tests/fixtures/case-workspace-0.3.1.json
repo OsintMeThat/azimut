@@ -1695,6 +1695,7 @@
    "horizon": 1,
    "inspect": 3,
    "map-layers": 1,
+   "map-plate": 1,
    "media-library": 3,
    "post-composer": 1,
    "proof-composer": 3,
@@ -1703,7 +1704,7 @@
    "user": 20
   },
   "by_status": {
-   "confirmed": 46,
+   "confirmed": 47,
    "suggested": 1
   },
   "by_type": {
@@ -1721,6 +1722,7 @@
    "horizon-view": 1,
    "inspect-session": 1,
    "map-layer": 1,
+   "map-plate": 1,
    "media": 6,
    "network": 1,
    "note": 1,
@@ -1752,6 +1754,7 @@
     "horizon-view": 1,
     "inspect-session": 1,
     "map-layer": 1,
+    "map-plate": 1,
     "media": 6,
     "network": 1,
     "note": 1,
@@ -1764,7 +1767,7 @@
     "structure": 1,
     "vessel": 1
    },
-   "unfiled": 45
+   "unfiled": 46
   },
   "countable": 1,
   "lacks": {
@@ -1790,8 +1793,8 @@
    "structure": 4,
    "vessel": 6
   },
-  "total": 47,
-  "unlinked": 10
+  "total": 48,
+  "unlinked": 11
  },
  "views": {
   "Actors frozen": {
