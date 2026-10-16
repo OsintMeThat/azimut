@@ -30,12 +30,31 @@ const text = (value) => [...document.body.querySelectorAll('button')].find((node
 
 describe('the moment a tracked layer is read at', () => {
   it('reads now by default, a tick per change, and steps back to the last change', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
     show();
-    expect(document.body.querySelector('.moment').textContent).toBe('Now');
+    // now says its day
+    expect(document.body.querySelector('.moment').textContent).toBe('Now · 25 Oct 2026');
     expect(document.body.querySelectorAll('.tick')).toHaveLength(3);
     expect(button('Next change').disabled).toBe(true);
     button('Previous change').click();
     expect(changes).toEqual([{ at: '2026-10-20' }]);
+    vi.useRealTimers();
+  });
+
+  it('reads a change dated today as now, never the same day under two names', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
+    show();
+    // from now, the change before is the one before today's
+    button('Previous change').click();
+    expect(changes).toEqual([{ at: '2026-10-12' }]);
+    unmount(held);
+    show({ at: '2026-10-12', trail: true, since: null });
+    // and the change after the 12th, today's, is now
+    button('Next change').click();
+    expect(changes).toEqual([{ at: null }]);
+    vi.useRealTimers();
   });
 
   it('steps from change to change, and goes back to now', () => {

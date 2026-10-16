@@ -716,7 +716,7 @@
   <div class="stage">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="surface-shell" oncontextmenu={onOverlayMenu}>
-    <div class="search cmp-glass">
+    <div class="search cmp-glass" data-bar-obstacle>
       <PlaceSearch
         bind:value={searchText}
         centre={{ lat: view.lat, lon: view.lon }}

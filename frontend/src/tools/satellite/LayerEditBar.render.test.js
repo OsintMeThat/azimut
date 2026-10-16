@@ -17,7 +17,7 @@ const point = (key, properties = {}, coordinates = [0.1, 0.1]) => ({ type: 'Feat
 function editor(extra = {}) {
   return { editor: { title: 'Working map', caseId: 'case' }, features: [], groups, group: 'g', selection: [], selected: null,
     draft: { colour: '#0072b2', symbol: 'pin' }, pending: 0, loading: false, placing: false, lassoing: false, sketch: null,
-    updateSelection: vi.fn(async () => ({})), updateGroup: vi.fn(async () => ({})), update: vi.fn(async () => ({})),
+    updateSelection: vi.fn(async () => ({})), updateGroup: vi.fn(async () => ({})), aim: vi.fn(async () => ({})),
     editGeometry: vi.fn(), chooseKeys: vi.fn(), removeSelection: vi.fn(), select: vi.fn(), stop: vi.fn(), addPoint: vi.fn(() => false), ...extra };
 }
 const button = (label) => document.querySelector(`[aria-label="${label}"]`);
@@ -132,15 +132,14 @@ describe('the map while a layer is edited', () => {
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 908 })); flushSync();
     expect(document.querySelector('.turn-label').textContent).toBe('90° E');
     window.dispatchEvent(new PointerEvent('pointerup', {})); flushSync();
-    expect(controller.update).toHaveBeenCalledExactlyOnceWith('a', { bearing: 90 });
-    // held at 90° until the layer has saved it; this stand-in layer keeps 0°
-    expect(document.querySelector('.turn-knob').getAttribute('aria-label')).toBe('Direction 90° E');
-    await Promise.resolve(); await Promise.resolve(); flushSync();
+    expect(controller.aim).toHaveBeenCalledExactlyOnceWith('a', 90);
+    // once let go the knob reads the layer, which turns the marker at once (`aim`); this stand-in keeps 0°
+    expect(document.querySelector('.turn-label')).toBeNull();
     expect(document.querySelector('.turn-knob').getAttribute('aria-label')).toBe('Direction 0° N');
     knob.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    expect(controller.update).toHaveBeenLastCalledWith('a', { bearing: null });
+    expect(controller.aim).toHaveBeenLastCalledWith('a', null);
     knob.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, shiftKey: true }));
-    expect(controller.update).toHaveBeenLastCalledWith('a', { bearing: 15 });
+    expect(controller.aim).toHaveBeenLastCalledWith('a', 15);
   });
 
   it('shows no ring for several features or for a line', () => {
@@ -162,5 +161,55 @@ describe('the map while a layer is edited', () => {
     canvas.dispatchEvent(onFeature); flushSync();
     expect(onFeature.defaultPrevented).toBe(true);
     expect(controller.chooseKeys).toHaveBeenCalledWith(['a']);
+  });
+});
+
+describe('what the bar dates an edit to', () => {
+  const tracked = (extra) => editor({ editor: { title: 'Working map', caseId: 'case', track: { on: true } }, timeMode: 'new', changeOn: vi.fn(), ...extra });
+  const pressed = (label) => button(label).getAttribute('aria-pressed') === 'true';
+
+  it('greys out Reshape on a line a date holds, and says why', () => {
+    const line = { type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] }, properties: { key: 'l', name: 'Front', group: 'g' } };
+    show(LayerEditBar, { controller: tracked({ cursor: null, features: [line], selection: ['l'], dateHolds: () => '2026-10-08' }), ondone: vi.fn() });
+    expect(button('Reshape').disabled).toBe(true);
+    expect(button('Reshape').title).toBe('Moved on 8 Oct 2026: pick a day to reshape it');
+  });
+
+  it('says nothing of time on a layer not followed over time', () => {
+    show(LayerEditBar, { controller: editor({ cursor: null }), ondone: vi.fn() });
+    expect(document.querySelector('[aria-label="What your edits are dated to"]')).toBeNull();
+  });
+
+  it('carries no date at now, and a day picked dates the edits from it', () => {
+    const controller = tracked({ cursor: null });
+    show(LayerEditBar, { controller, ondone: vi.fn() });
+    expect(pressed('No date')).toBe(true);
+    expect(pressed('Date your edits from a day')).toBe(false);
+    // only the mode on says itself in words
+    expect(button('Date your edits from a day').textContent.trim()).toBe('');
+    expect(button('No date').textContent.trim()).toBe('No date');
+    button('Date your edits from a day').click(); flushSync();
+    const day = document.querySelector('.float-menu button.day:not(:disabled):not(.out)');
+    day.click(); flushSync();
+    expect(controller.changeOn).toHaveBeenCalledWith(day.title);
+    expect(document.querySelector('.float-menu')).toBeNull();
+  });
+
+  it('dates from the day shown until no date is chosen, and back again in one press', () => {
+    const controller = tracked({ cursor: '2026-10-12' });
+    show(LayerEditBar, { controller, ondone: vi.fn() });
+    expect(pressed('From 12 Oct 2026')).toBe(true);
+    expect(button('From 12 Oct 2026').textContent.trim()).toBe('From 12 Oct');
+    expect(button('No date').textContent.trim()).toBe('');
+    button('No date').click();
+    expect(controller.timeMode).toBe('fix');
+    unmount(held); document.body.innerHTML = '';
+    const fixing = tracked({ cursor: '2026-10-12', timeMode: 'fix' });
+    show(LayerEditBar, { controller: fixing, ondone: vi.fn() });
+    expect(pressed('No date')).toBe(true);
+    button('From 12 Oct 2026').click(); flushSync();
+    // dating again takes one press, with no calendar in the way
+    expect(fixing.timeMode).toBe('new');
+    expect(document.querySelector('.float-menu')).toBeNull();
   });
 });

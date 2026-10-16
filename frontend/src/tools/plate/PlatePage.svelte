@@ -15,8 +15,11 @@
    *   boxes (Alt lets go of them). A locked element stays where it is.
    * - **A drag inside a map moves the ground under it**; its frame is moved by its
    *   edge. A double click (or the bar's button) frames it fully: pan, zoom, turn.
-   * - What stands on the ground (a label's point, an arrow, a zone, rings, a cone,
-   *   a distance) is dragged there, by its handles or by its body.
+   * - What stands on the ground (a label's point, an arrow, a zone, a line, rings, a
+   *   cone, a distance) is dragged there, by its handles or by its body. A text on the
+   *   map, a label without a leader, takes its point along when it is moved.
+   * - On a played plate, a day or a step frames a map its own way only once it lets
+   *   go of the previous framing; until then the map holds still there.
    * - A step's videos stand under the writing, on their first frame, and run while
    *   the plate plays that step.
    */
@@ -25,8 +28,8 @@
   import PlateVideo from './PlateVideo.svelte';
   import { drawPage } from '../../lib/plate/draw.js';
   import Icon from '../../components/Icon.svelte';
-  import { ON_THE_GROUND, decorDensity, fitPage, PX_PER_MM, pageSize, shownOn, zoomPageAt } from '../../lib/plate/page.js';
-  import { bearingTo, circle, distance, project, sector, travel, unproject } from '../../lib/plate/geo.js';
+  import { BOXED_ON_THE_GROUND, ON_THE_GROUND, decorDensity, fitPage, insetView, PX_PER_MM, pageSize, shownOn, standsOver, zoomPageAt } from '../../lib/plate/page.js';
+  import { bearingTo, circle, distance, project as flatProject, sameView, sector, travel, unproject as flatUnproject } from '../../lib/plate/geo.js';
 
   let {
     spec,
@@ -59,6 +62,20 @@
     grounds = [],
     /** Draw the annotations of the plate's other days, faintly. */
     ghosts = false,
+    /** How a map is framed on the day or step shown: `{ view, own, first }` (`page.framingOf`). */
+    framingFor = (map) => ({ view: map.view, own: false, first: true }),
+    /** `(map, view)`: the map framed by the hand, written where the day or step shown keeps it. */
+    onmapview = (map, view) => { map.view = view; },
+    /** `(map, keep)`: the day or step shown keeps the framing before it, or frames the map its own way. */
+    onkeep = null,
+    /** The day or step shown, as its framing is kept (`page.beatKey`). */
+    beat = '',
+    /** Milliseconds a map takes to reach the next framing while the plate plays. */
+    glide = 0,
+    /** Pixels kept clear over the page when it fits, for a bar floating there. */
+    top = 0,
+    /** The plate as written (`JSON.stringify(spec)`), when the editor has it already: the drawing follows it. */
+    written = '',
   } = $props();
 
   const size = $derived(pageSize(spec.page));
@@ -68,7 +85,7 @@
   let viewportHeight = $state(600);
   /** Where the page stands in the window, `{ scale, x, y }`: null while it fits the window. */
   let camera = $state(null);
-  const shown = $derived(camera ?? fitPage({ width, height }, { width: viewportWidth, height: viewportHeight }));
+  const shown = $derived(camera ?? fitPage({ width, height }, { width: viewportWidth, height: viewportHeight }, 24, top));
   const scale = $derived(shown.scale);
   let viewportEl = $state();
   let panning = $state(false);
@@ -92,13 +109,13 @@
 
   const maps = $derived(spec.elements.filter((element) => element.kind === 'map' || element.kind === 'inset'));
 
-  /** The view a map is drawn at: its own, or an inset's, over its map's centre. */
+  /** The view a map is drawn at: as the day or step shown frames it, or an inset's, over its map's centre. */
   function viewOf(element) {
-    if (element.kind === 'map') return element.view;
+    if (element.kind === 'map') return framingFor(element).view;
     const of = spec.elements.find((item) => item.id === element.of);
-    const live = of ? views[of.id]?.view ?? of.view : null;
+    const live = of ? views[of.id]?.view ?? framingFor(of).view : null;
     if (!live) return { lat: 0, lon: 0, zoom: 2, bearing: 0 };
-    return { lat: live.lat, lon: live.lon, zoom: element.zoom ?? Math.max(0, live.zoom - 4.5), bearing: 0 };
+    return insetView(element, live);
   }
 
   /**
@@ -106,20 +123,29 @@
    * label's words, a picture pointing at the ground) moves with the point it names,
    * so a reframed map never leaves its labels behind.
    */
-  /** The plate the last report came from: an undo or a new paper hands over another, whose labels are already in place. */
+  /**
+   * The plate and the day or step the last report came from: an undo, a new paper, or
+   * another day framed otherwise hands over a map that moved without the hand, whose
+   * labels are already where they belong.
+   */
   const reportedFor = new Map();
-  function reported(element, view, frame) {
+  function reported(element, view, frame, placer = null) {
     const before = views[element.id];
-    views = { ...views, [element.id]: { view, frame } };
+    views = { ...views, [element.id]: { view, frame, ...(placer ?? {}) } };
     if (element.kind !== 'map') return;
-    const same = reportedFor.get(element.id) === spec;
-    reportedFor.set(element.id, spec);
-    element.view = { lat: round(view.lat, 6), lon: round(view.lon, 6), zoom: round(view.zoom, 3), bearing: round(view.bearing, 1) };
-    if (!same || !before || (before.view.lat === view.lat && before.view.lon === view.lon && before.view.zoom === view.zoom && before.view.bearing === view.bearing)) return;
+    const same = reportedFor.get(element.id)?.spec === spec && reportedFor.get(element.id)?.beat === beat;
+    reportedFor.set(element.id, { spec, beat });
+    // a played plate shows its framings without keeping one; a day holding the one before keeps none of its own
+    const framed = framingFor(element);
+    if (playing || (!framed.own && !framed.first)) return;
+    const kept = { lat: round(view.lat, 6), lon: round(view.lon, 6), zoom: round(view.zoom, 3), bearing: round(view.bearing, 1),
+      ...((view.pitch ?? 0) > 0.05 ? { pitch: round(view.pitch, 1) } : {}) };
+    if (!sameView(kept, framed.view)) onmapview(element, kept);
+    if (!same || !before || sameView(before.view, view)) return;
     for (const item of spec.elements) {
       if (item.of !== element.id || !item.at || !['label', 'image', 'video'].includes(item.kind)) continue;
-      const [ox, oy] = project(before.view, before.frame, item.at);
-      const [nx, ny] = project(view, frame, item.at);
+      const [ox, oy] = flatProject(before.view, before.frame, item.at);
+      const [nx, ny] = flatProject(view, frame, item.at);
       if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
       item.box = [round(item.box[0] + (nx - ox) / PX_PER_MM, 1), round(item.box[1] + (ny - oy) / PX_PER_MM, 1), item.box[2], item.box[3]];
     }
@@ -136,7 +162,7 @@
   // Everything that is not a map, drawn again whenever anything it reads moves.
   $effect(() => {
     if (!canvas) return;
-    void JSON.stringify(spec); void fontsReady; void decor; void ghosts; void views;
+    void (written || JSON.stringify(spec)); void fontsReady; void decor; void ghosts; void views;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -163,23 +189,38 @@
     return [(event.clientX - rect.left) / scale / PX_PER_MM, (event.clientY - rect.top) / scale / PX_PER_MM];
   }
 
+  /** A map's frame point to the ground and back: through its own camera when it is in 3D. */
+  const project = (live, point) => (live.project ? live.project(point) : flatProject(live.view, live.frame, point));
+  const unproject = (live, at) => (live.unproject ? live.unproject(at) : flatUnproject(live.view, live.frame, at));
+
   /** The ground under a page point, on the map whose frame holds it, or null. */
   function groundAt(element, [mx, my]) {
     const live = views[element.id];
     if (!live) return null;
     const [x, y] = element.box;
-    return unproject(live.view, live.frame, [(mx - x) * PX_PER_MM, (my - y) * PX_PER_MM]);
+    return unproject(live, [(mx - x) * PX_PER_MM, (my - y) * PX_PER_MM]);
   }
 
   /** Where a point of the ground stands on the page, in millimetres, through a map. */
   function onMap(map, point) {
     const live = map && views[map.id];
     if (!live || !point) return null;
-    const [px, py] = project(live.view, live.frame, point);
+    const [px, py] = project(live, point);
     return [map.box[0] + px / PX_PER_MM, map.box[1] + py / PX_PER_MM];
   }
   const mapOf = (element) => spec.elements.find((item) => item.id === element.of);
   const onPage = (element, point) => onMap(mapOf(element), point);
+  /** Where an element shows on the page: a text on the map over its point, anything else in its box. */
+  function shownBox(element) {
+    const point = standsOver(element) ? onPage(element, element.at) : null;
+    return point ? [point[0] - element.box[2] / 2, point[1] - element.box[3] / 2, element.box[2], element.box[3]] : element.box;
+  }
+  /** Whether a text on the map has its point outside its map's frame on the day or step shown, so it is not there to pick. */
+  function offMap(element) {
+    const map = standsOver(element) ? mapOf(element) : null;
+    const point = map && onPage(element, element.at);
+    return !!point && (point[0] < map.box[0] || point[1] < map.box[1] || point[0] > map.box[0] + map.box[2] || point[1] > map.box[1] + map.box[3]);
+  }
 
   const CATCH = 1.4;
   /** The lines a moving box can catch on: the page's edges and middle, and every other box's. */
@@ -225,8 +266,11 @@
     if (handle === 'move') pick(element, event.shiftKey);
     if (framing && framing !== element.id) framing = '';
     if (event.shiftKey && handle === 'move') return;
+    // a text on the map is moved from where it shows, over its point
+    if (standsOver(element) && !element.locked) element.box = shownBox(element).map((value) => Math.round(value * 10) / 10);
     const moving = handle === 'move'
-      ? spec.elements.filter((item) => selection.includes(item.id) && !item.locked && !ON_THE_GROUND.includes(item.kind))
+      // a label's words are placed on the page by the hand, its point stays on the ground
+      ? spec.elements.filter((item) => selection.includes(item.id) && !item.locked && (!ON_THE_GROUND.includes(item.kind) || BOXED_ON_THE_GROUND.includes(item.kind)))
       : element.locked ? [] : [element];
     if (!moving.length) return;
     const start = toMm(event);
@@ -276,11 +320,35 @@
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
+      // a text or a symbol on the map stands where its point is: moved, it takes its point along; a symbol sized stays square
+      if (started) for (const item of moving) if (standsOver(item)) { if (item.kind === 'symbol' && handle !== 'move') squared(item); else carryPoint(item); }
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
   }
+
+  /** The ground under the middle of a label's box becomes its point. */
+  function carryPoint(item) {
+    const map = mapOf(item);
+    const point = map && groundAt(map, [item.box[0] + item.box[2] / 2, item.box[1] + item.box[3] / 2]);
+    if (point) item.at = [round(point[0], 6), Math.max(-85, Math.min(85, round(point[1], 6)))];
+  }
+  /** A symbol sized by a handle: as wide as it was pulled, square, still over its point. */
+  function squared(item) {
+    const side = round(Math.max(2, item.box[2], item.box[3]), 1);
+    item.box = [item.box[0], item.box[1], side, side];
+  }
+
+  /** Says, a moment, why the map did not move: the day or step shown holds the framing before it. */
+  let held = $state('');
+  let heldTimer = null;
+  function sayHeld() {
+    held = 'This map keeps the framing before it here. Untick “Keep the previous framing” to move it.';
+    clearTimeout(heldTimer);
+    heldTimer = setTimeout(() => { held = ''; }, 3200);
+  }
+  const lockedMap = (element) => element.kind === 'map' && !framingFor(element).own && !framingFor(element).first;
 
   /** How near a map's edge, in screen pixels, a press takes its frame rather than its ground. */
   const EDGE_PIXELS = 10;
@@ -307,13 +375,14 @@
     let started = false;
     const move = (next) => {
       if (!started && Math.hypot(next.clientX - screen[0], next.clientY - screen[1]) < DRAG_PIXELS) return;
+      if (!started && lockedMap(element)) { sayHeld(); up(); return; }
       started = true;
       panning = true;
       const [mx, my] = toMm(next);
       const dx = (mx - start[0]) * PX_PER_MM;
       const dy = (my - start[1]) * PX_PER_MM;
-      const [lon, lat] = unproject(from, live.frame, [live.frame.width / 2 - dx, live.frame.height / 2 - dy]);
-      element.view = { ...from, lat: Math.max(-85, Math.min(85, round(lat, 6))), lon: round(lon, 6) };
+      const [lon, lat] = flatUnproject({ ...from, pitch: 0 }, live.frame, [live.frame.width / 2 - dx, live.frame.height / 2 - dy]);
+      onmapview(element, { ...from, lat: Math.max(-85, Math.min(85, round(lat, 6))), lon: round(lon, 6) });
     };
     const up = () => {
       panning = false;
@@ -390,8 +459,11 @@
 
   let draft = $state(null);
   /** A zone being drawn: its corners on the ground, on its map. */
+  /** A zone or a line being drawn, point by point: its kind, its map, its points on the ground. */
   let zoneDraft = $state(null);
-  $effect(() => { if (placing?.kind !== 'zone') zoneDraft = null; });
+  $effect(() => { if (placing?.kind !== 'zone' && placing?.kind !== 'line') zoneDraft = null; });
+  /** The fewest points a drawn shape closes on. */
+  const fewest = (kind) => (kind === 'line' ? 2 : 3);
 
   /**
    * A press on a map while placing: a label or a picture's point where it is pressed,
@@ -406,11 +478,11 @@
     const from = groundAt(map, start);
     if (!from) return;
     const kind = placing.kind;
-    if (kind === 'label' || kind === 'callout') { onplace?.({ map, at: from, page: start }); return; }
-    if (kind === 'zone') {
+    if (kind === 'label' || kind === 'callout' || kind === 'symbol') { onplace?.({ map, at: from, page: start }); return; }
+    if (kind === 'zone' || kind === 'line') {
       const points = [...(zoneDraft?.map === map.id ? zoneDraft.points : []), from];
-      zoneDraft = { map: map.id, points };
-      if (event.detail >= 2 && points.length >= 3) finishZone();
+      zoneDraft = { kind, map: map.id, points };
+      if (event.detail >= 2 && points.length >= fewest(kind)) finishZone();
       return;
     }
     let to = from;
@@ -430,7 +502,7 @@
   }
 
   function finishZone() {
-    if (!zoneDraft || zoneDraft.points.length < 3) return;
+    if (!zoneDraft || zoneDraft.points.length < fewest(zoneDraft.kind)) return;
     const map = spec.elements.find((item) => item.id === zoneDraft.map);
     const points = zoneDraft.points;
     zoneDraft = null;
@@ -443,6 +515,7 @@
     if (!map) return null;
     const at = (point) => onMap(map, point);
     if (element.kind === 'zone') return { ring: element.points.map(at), handles: element.points.map((p, i) => [`points.${i}`, at(p)]) };
+    if (element.kind === 'line') return { path: element.points.map(at), handles: element.points.map((p, i) => [`points.${i}`, at(p)]) };
     if (element.kind === 'ring') {
       const reach = (element.radii?.[0] ?? 1) * 1000;
       const outer = Math.max(...(element.radii?.length ? element.radii : [1])) * 1000;
@@ -539,11 +612,13 @@
   const HINTS = {
     label: 'Press the map where the label points.',
     callout: 'Press the map where the picture points.',
+    symbol: 'Press the map where each symbol goes.',
     arrow: 'Drag on the map from where the arrow starts to where it points.',
     measure: 'Drag on the map from one end of the distance to the other.',
     ring: 'Press the centre, drag out to the first ring.',
     cone: 'Press where the view is from, drag toward what it sees.',
     zone: 'Click each corner. Double-click or Enter closes the zone, Backspace takes a corner back.',
+    line: 'Click each point of the line. Double-click or Enter ends it, Backspace takes a point back.',
   };
 </script>
 
@@ -556,8 +631,8 @@
     style:background={paperStyle} role="presentation">
     {#each maps as element (`${element.id}:${element.basemap}:${element.release ?? ''}:${(element.overlays ?? []).join(',')}`)}
       <PlateMap {element} view={viewOf(element)} {time} {caseId} {rows} {providers} {relief} font={spec.theme.font}
-        interactive={framing === element.id} away={!shownOn(element, at, stepPlace)}
-        onview={(view, frame) => reported(element, view, frame)}
+        interactive={framing === element.id} away={!shownOn(element, at, stepPlace)} glide={playing ? glide : 0}
+        onview={(view, frame, placer) => reported(element, view, frame, placer)}
         onready={(handle) => onmap?.(element.id, handle)} />
     {/each}
     {#each spec.elements.filter((item) => item.kind === 'video' && !item.hidden && shownOn(item, at, stepPlace)) as element (element.id)}
@@ -566,7 +641,7 @@
     <canvas class="decor" bind:this={canvas} width={Math.round(width * density)} height={Math.round(height * density)}
       style:width="{width}px" style:height="{height}px"></canvas>
 
-    <div class="hand">
+    <div class="hand" class:placing={!!placing} class:framing={!!framing}>
       {#each spec.elements as element (element.id)}
         {#if visible(element) && framing !== element.id && !ON_THE_GROUND.includes(element.kind)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -576,16 +651,20 @@
             data-element={element.id}
             onpointerdown={(event) => placing && element.kind === 'map' ? place(event, element)
               : element.kind === 'map' ? panMap(event, element) : grab(event, element)}
-            ondblclick={() => { if (element.kind === 'map') framing = element.id; }}></div>
+            ondblclick={() => { if (element.kind !== 'map') return; if (lockedMap(element)) sayHeld(); else framing = element.id; }}></div>
         {/if}
       {/each}
 
       <!-- what stands on the ground is picked by its own drawing, never by a box round it -->
       <svg class="ground-hits" viewBox="0 0 {size.width} {size.height}" preserveAspectRatio="none">
         <!-- a map being framed takes every press on it, its zones' and arrows' included -->
-        {#each spec.elements.filter((item) => ON_THE_GROUND.includes(item.kind) && item.kind !== 'label' && visible(item) && framing !== item.of) as element (element.id)}
+        {#each spec.elements.filter((item) => ON_THE_GROUND.includes(item.kind) && !BOXED_ON_THE_GROUND.includes(item.kind) && visible(item) && framing !== item.of) as element (element.id)}
           {@const drawn = shape(element)}
-          {#if drawn?.line}
+          {#if drawn?.path}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <polyline class="hit-line" class:selected={selection.includes(element.id)} points={polygon(drawn.path)}
+              stroke-width={Math.max(2, 9 / scale / PX_PER_MM)} onpointerdown={(event) => grabGround(event, element, 'body')}></polyline>
+          {:else if drawn?.line}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <line class="hit-line" class:selected={selection.includes(element.id)} x1={drawn.line[0]?.[0]} y1={drawn.line[0]?.[1]}
               x2={drawn.line[1]?.[0]} y2={drawn.line[1]?.[1]} stroke-width={Math.max(2, 9 / scale / PX_PER_MM)}
@@ -608,23 +687,25 @@
         {/if}
       </svg>
 
-      {#each spec.elements.filter((item) => item.kind === 'label' && visible(item)) as element (element.id)}
+      {#each spec.elements.filter((item) => BOXED_ON_THE_GROUND.includes(item.kind) && visible(item) && !offMap(item)) as element (element.id)}
         {#if framing !== element.of}
+          {@const box = shownBox(element)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="hit" class:selected={selection.includes(element.id)} class:locked={element.locked} class:ghost={!shownOn(element, at, stepPlace)}
-            style:left={px(element.box[0])} style:top={px(element.box[1])} style:width={px(element.box[2])} style:height={px(element.box[3])}
+            style:left={px(box[0])} style:top={px(box[1])} style:width={px(box[2])} style:height={px(box[3])}
             data-element={element.id} onpointerdown={(event) => grab(event, element)}></div>
         {/if}
       {/each}
 
       {#if selection.length === 1}
         {#each spec.elements.filter((item) => item.id === selected && framing !== item.id) as element (element.id)}
-          {#if !ON_THE_GROUND.includes(element.kind) || element.kind === 'label'}
+          {#if !ON_THE_GROUND.includes(element.kind) || BOXED_ON_THE_GROUND.includes(element.kind)}
             {#if !element.locked}
+              {@const box = shownBox(element)}
               {#each HANDLES as handle (handle)}
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div class="handle {handle}" style:left={px(element.box[0] + (handle.includes('w') ? 0 : handle.includes('e') ? element.box[2] : element.box[2] / 2))}
-                  style:top={px(element.box[1] + (handle.includes('n') ? 0 : handle.includes('s') ? element.box[3] : element.box[3] / 2))}
+                <div class="handle {handle}" style:left={px(box[0] + (handle.includes('w') ? 0 : handle.includes('e') ? box[2] : box[2] / 2))}
+                  style:top={px(box[1] + (handle.includes('n') ? 0 : handle.includes('s') ? box[3] : box[3] / 2))}
                   style:transform="translate(-50%, -50%) scale({1 / scale})"
                   onpointerdown={(event) => grab(event, element, handle)}></div>
               {/each}
@@ -646,9 +727,12 @@
 
       {#each spec.elements.filter((item) => (item.id === selected || item.id === framing) && (item.kind === 'map' || item.kind === 'inset')) as element (element.id)}
         <!-- the picked map's own bar, at the size of the window rather than of the page -->
+        {@const framed = element.kind === 'map' ? framingFor(element) : null}
         <div class="bar" style:left={px(element.box[0])} style:top={px(element.box[1])} style:transform="scale({1 / scale}) translate(6px, 6px)">
-          <PlateMapBar {element} {grounds} framing={framing === element.id}
-            onframe={() => { framing = framing === element.id ? '' : element.id; selection = [element.id]; }} />
+          <PlateMapBar {element} {grounds} framing={framing === element.id} view={framed?.view ?? element.view}
+            keep={framed && !framed.first ? !framed.own : null} onview={(next) => onmapview(element, next)}
+            onkeep={(keep) => onkeep?.(element, keep)}
+            onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }} />
         </div>
       {/each}
 
@@ -663,8 +747,9 @@
     <button type="button" aria-label="Zoom in" title="Zoom in" onclick={() => zoomBy(1.25)}><Icon name="plus" size={12} /></button>
     <button type="button" class="fit" disabled={!camera} title="Fit the page to the window" onclick={() => (camera = null)}>Fit</button>
   </div>
-  {#if framing}<p class="framing">Drag and scroll to frame the map, right-drag or Ctrl-drag to turn it. Esc when done.</p>
-  {:else if placing}<p class="framing">{HINTS[placing.kind] ?? ''} Esc to stop.</p>{/if}
+  {#if held}<p class="tip" role="status">{held}</p>
+  {:else if framing}<p class="tip">Drag and scroll to frame the map, right-drag or Ctrl-drag to turn it. Esc when done.</p>
+  {:else if placing}<p class="tip">{HINTS[placing.kind] ?? ''} Esc to stop.</p>{/if}
 </div>
 
 <style>
@@ -681,8 +766,12 @@
   .hit.map:hover { box-shadow: inset 0 0 0 3px rgba(64, 132, 255, .25); }
   .hit.locked { cursor: default; }
   .hit.placing { cursor: crosshair; }
+  /* while something is being placed, a press goes through what stands over a map to the map */
+  .hand.placing .hit:not(.map), .hand.placing .hit-line, .hand.placing .hit-area, .hand.placing .handle, .hand.placing .ground { pointer-events: none; }
+  /* a map in the hand takes every press on it, a map under it included; a press beside it lets it go */
+  .hand.framing .hit, .hand.framing .hit-line, .hand.framing .hit-area { pointer-events: none; }
   .ground-hits { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
-  .hit-line { stroke: transparent; pointer-events: stroke; cursor: move; }
+  .hit-line { fill: none; stroke: transparent; pointer-events: stroke; cursor: move; }
   .hit-line.selected { stroke: rgba(59, 130, 246, .35); }
   .hit-area { fill: transparent; stroke: transparent; pointer-events: visiblePainted; cursor: move; }
   .hit-area.outline { fill: none; pointer-events: stroke; }
@@ -710,6 +799,7 @@
   .zoom button:hover:not(:disabled) { background: var(--bg-2); color: var(--text-1); }
   .zoom button:disabled { opacity: .45; cursor: default; }
   .zoom-value { min-width: 40px; text-align: center; color: var(--text-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-  .framing { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); margin: 0; padding: 4px 12px; border-radius: 999px;
+  /* the pill saying what a press does now; not `.framing`, which the hand layer takes while a map is framed */
+  .tip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); margin: 0; padding: 4px 12px; border-radius: 999px;
     background: rgba(0, 0, 0, .72); color: #fff; font-size: 12px; pointer-events: none; max-width: 80%; text-align: center; }
 </style>

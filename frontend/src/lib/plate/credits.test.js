@@ -16,4 +16,12 @@ describe('a plate\'s credits', () => {
     expect(said.split(' · ')).toEqual(['© OpenMapTiles © OpenStreetMap contributors · OpenFreeMap'.split(' · ')[0],
       'OpenFreeMap', '© Mapterhorn', 'GeoConfirmed — geoconfirmed.org', 'Esri, Maxar']);
   });
+
+  it('owes the heights to a topographic ground and to a map drawn in 3D, shaded or not', () => {
+    const relief = { sources: [{ attribution: '© Mapterhorn' }] };
+    const providers = [{ id: 'esri-world-imagery', attribution: 'Esri' }];
+    expect(mapCredits({ kind: 'map', basemap: 'plain-topo', overlays: [] }, { relief })).toContain('© Mapterhorn');
+    expect(mapCredits({ kind: 'map', basemap: 'esri-world-imagery', overlays: [], terrain: 1.5 }, { providers, relief })).toEqual(['Esri', '© Mapterhorn']);
+    expect(mapCredits({ kind: 'map', basemap: 'plain', overlays: [] }, { relief })).not.toContain('© Mapterhorn');
+  });
 });

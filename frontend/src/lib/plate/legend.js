@@ -33,16 +33,17 @@ export function kindOf(geometry) {
  *
  * `context`:
  * - `rows`: the case's layers; `collection(name)`: a layer's features, or null while unread;
- * - `view`, `frame`: where the map looks, as it reports it (no frame: everything counts);
+ * - `view`, `frame`: where the map looks, as it reports it (no frame: everything counts); `place`, how a
+ *   map in 3D places a point of the ground on its frame through its own camera;
  * - `days`: the moments the legend speaks for (`[null]` for now);
  * - `standing(row, feature, at)`: the feature as it stands then, or null when absent;
  * - `past(row, collection, at)`: the trail, new and gained or lost features the map draws;
  * - `colourName(hex)`, `symbolName(id)`, `categoryColour(group, index)`, `newColour`, `ink`.
  */
 export function legendRows(map, context) {
-  const { rows = [], collection, view = null, frame = null, days = [null], standing, past, colourName = () => '',
+  const { rows = [], collection, view = null, frame = null, place = null, days = [null], standing, past, colourName = () => '',
     symbolName = (id) => id, categoryColour = (group) => group?.colour ?? '#888888', newColour = '#ffd400', ink = '#15181e' } = context;
-  const drawn = (geometry) => map.offmap || !view || !frame || inFrame(geometry, view, frame);
+  const drawn = (geometry) => map.offmap || !view || !frame || inFrame(geometry, view, frame, 6, place);
   const looks = new Map();
   const changes = new Set();
   for (const entry of map.layers ?? []) {
@@ -60,19 +61,25 @@ export function legendRows(map, context) {
       });
       continue;
     }
+    // read once a layer, not once a feature: the groups and the hidden ones are the page's live state
+    const hidden = new Set(entry.hidden ?? []);
+    const groups = [...(row.categories ?? [])];
+    const groupIndex = new Map();
+    groups.forEach((group, index) => { if (!groupIndex.has(group.name)) groupIndex.set(group.name, index); });
     for (const at of days) {
       for (const feature of features.features ?? []) {
         const state = standing ? standing(row, feature, at) : feature;
         const properties = state?.properties;
-        if (!properties || entry.hidden?.includes(properties.category) || !drawn(state.geometry)) continue;
+        if (!properties || hidden.has(properties.category)) continue;
         const kind = kindOf(state.geometry);
-        const groupAt = row.categories?.findIndex((group) => group.name === properties.category) ?? -1;
-        const group = row.categories?.[groupAt];
+        const groupAt = groupIndex.get(properties.category) ?? -1;
+        const group = groups[groupAt];
         const colour = String(entry.colour || properties.colour || categoryColour(group, Math.max(0, groupAt))).toLowerCase();
         const symbol = kind === 'point' ? properties.symbol || group?.symbol || 'pin' : '';
         const status = kind === 'point' ? properties.status ?? '' : '';
         const key = [row.name, properties.category, kind, colour, symbol, status].join('/');
-        if (looks.has(key)) continue;
+        // a look already listed needs no other feature placed in the frame
+        if (looks.has(key) || !drawn(state.geometry)) continue;
         const named = colourName(colour);
         const uniform = group?.mode === 'uniform';
         let label = uniform ? group.name : kind === 'point' ? symbolName(symbol) : named || properties.category || row.title;
@@ -81,11 +88,10 @@ export function legendRows(map, context) {
         looks.set(key, { key, label, kind, colour, symbol, status, group: properties.category || row.title });
       }
       if (past) for (const feature of past(row, features, at)) {
-        if (!drawn(feature.geometry)) continue;
         const said = feature.properties ?? {};
-        if (said.$new) changes.add('$new');
-        if (said.$trail) changes.add('$trail');
-        if (said.$change) changes.add(said.$change);
+        const brings = [said.$new && '$new', said.$trail && '$trail', said.$change].filter((mark) => mark && !changes.has(mark));
+        if (!brings.length || !drawn(feature.geometry)) continue;
+        for (const mark of brings) changes.add(mark);
       }
     }
   }

@@ -83,15 +83,17 @@ export function canvasBlob(canvas, type = 'image/png', quality = 0.92) {
 /**
  * Post one export: `frames` are blobs, one for a page, one per day for a played
  * plate. A plate played through its steps sends `beats`, one per frame (how long it
- * holds, the clips running over it), and `overs`, what stands over those clips.
+ * holds, the clips running over it, the transition it opens on), `overs`, what stands
+ * over those clips, and `tweens`, the frames of its transitions.
  */
-export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, overs = [] },
+export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, overs = [], tweens = [] },
   post = api.post) {
   const body = new FormData();
   frames.forEach((blob, index) => body.append('frames', blob, `${index}.${blob.type === 'image/jpeg' ? 'jpg' : 'png'}`));
   if (beats) {
     body.append('beats', JSON.stringify(beats));
     overs.forEach((blob, index) => body.append('overs', blob, `over${index}.png`));
+    tweens.forEach((blob, index) => body.append('tweens', blob, `tween${index}.jpg`));
   }
   body.append('format', format);
   body.append('filename', filename);

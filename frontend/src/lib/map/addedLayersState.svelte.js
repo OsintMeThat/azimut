@@ -72,6 +72,8 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
 
   /** name → the parsed collection, once something has asked to draw it. */
   const drawings = new Map();
+  /** `case, name, version` → the read of a layer under way, which every map asking meanwhile shares. */
+  const asking = new Map();
   /** …and which of them are in hand, as state, because a search box already open
    *  has to fill the moment its layer's features land. The collections
    *  themselves stay out of it: they run to a hundred thousand features and
@@ -363,6 +365,13 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
    */
   async function drawing(caseId, name) {
     if (drawings.has(name)) return drawings.get(name);
+    // several maps opening on one layer share its read rather than each asking for it
+    const key = `${caseId}\u0000${name}\u0000${rows.find((row) => row.name === name)?.sha256 ?? ''}`;
+    if (!asking.has(key)) asking.set(key, readDrawing(caseId, name).finally(() => asking.delete(key)));
+    return asking.get(key);
+  }
+
+  async function readDrawing(caseId, name) {
     const owner = loadedFor;
     const version = rows.find((row) => row.name === name)?.sha256;
     const data = await api.get(`/api/cases/${caseId}/map-layers/${encodeURIComponent(name)}/data`, {

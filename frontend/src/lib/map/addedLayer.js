@@ -880,8 +880,12 @@ export function createAddedLayer(
     /**
      * Put a parsed collection on the map. Every feature, every time: the source
      * is the whole layer and the engine culls what is off screen.
+     *
+     * `held`, when given, is what `hide` holds off the map from now on, changed
+     * with the data rather than before it: features the editor dragged come back
+     * where they landed, never for a frame where they were.
      */
-    async set(data, { categories: groups = [], hidden = [], period = null, attribution } = {}) {
+    async set(data, { categories: groups = [], hidden = [], period = null, attribution, held = null } = {}) {
       build(attribution);
       categories = groups;
       collection = data;
@@ -950,8 +954,28 @@ export function createAddedLayer(
           : layer === TRAIL_DOT ? 'circle-stroke-color' : 'line-color';
         map.setPaintProperty(layer, property, featureColour(colour));
       }
+      if (held) hiddenKeys = new Set(held);
       filtered = '';
       this.filter(hidden, period);
+    },
+
+    /**
+     * Once the map has drawn what `set` last handed it. The engine cuts a layer's
+     * tiles off the page's thread, so new data is on screen some frames after it
+     * was set. Bounded, since a map kept busy may not say so for a while.
+     */
+    drawn(ms = 400) {
+      if (!built || typeof map.isSourceLoaded !== 'function') return Promise.resolve();
+      const sources = [SOURCE, ...(editable ? [ARROW_SOURCE] : [])];
+      return new Promise((resolve) => {
+        let timer = null;
+        const done = () => { clearTimeout(timer); map.off('render', check); resolve(); };
+        // a frame is only drawn from tiles that were cut before it began
+        function check() { if (sources.every((id) => !map.getSource(id) || map.isSourceLoaded(id))) done(); }
+        timer = setTimeout(done, ms);
+        map.on('render', check);
+        map.triggerRepaint?.();
+      });
     },
 
     /**
@@ -1027,7 +1051,7 @@ export function createAddedLayer(
 
     /**
      * Hold these features off the map, or none: the editor draws them where the
-     * analyst is dragging them until the move is saved and the layer redrawn.
+     * analyst is dragging them until the layer draws them where they landed.
      */
     hide(keys = []) {
       const next = new Set(keys);

@@ -176,7 +176,7 @@ proof for publication.
 | ✅ **Points into a layer** | Follows places, proofs and files of the case as they move and as they are saved (a proof and its footage are one marker, named by the proof's description), reads pasted coordinates, map links and posts, and takes a Geo Proof point, a file played on the map or another layer's feature from the same step-by-step menu. |
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
-| ✅ **Layers followed over time** | Keeps a personal layer's features as dated states, by the day or the minute on one clock, reads it on any day with the state before dashed, what is new that day ringed, events fading and an area's gains and losses hatched, and downloads it as it stood or with every state dated. |
+| ✅ **Layers followed over time** | Keeps a personal layer's features as dated states, by the day or the minute on one clock, reads it on any day with the state before dashed, what is new that day ringed, events fading and an area's gains and losses hatched, says in its editor when each feature shows and what an edit is dated to, and downloads it as it stood or with every state dated. |
 | ✅ **Layers kept per case** | Reopens each case on the layers every map had on, fires and night lights excepted, and leaves off with a toast a layer that stopped the last session while drawing. |
 | ✅ **Send to My Maps** | Saves a layer as it stood on one day as a KMZ, opens the analyst's My Maps beside it and says the three steps that replace its layer. |
 | ✅ **Map plates** | Lays a page out round the case's maps (title, legend of what the frame draws, scale, north, inset, detail maps, grids, labels, numbers, arrows, zones, rings, cones, distances, tables, QR codes, pictures and forced credits) on a quiet or a toned ground, and exports it as a PNG, a print PDF, or its days as an MP4, a GIF or an evolution sheet. |
@@ -184,6 +184,10 @@ proof for publication.
 | ✅ **Annotations by day** | Ties what is added on a played plate to the day it is made on, then shows it from a first to a last day picked on a calendar, so a video shows each day's annotations only. |
 | ✅ **Plate steps & videos** | Plays a plate's day then its steps, each holding its own annotations, and runs a case video on a step (its clip, sound and source line set in the inspector) inside the exported MP4. |
 | ✅ **Map templates** | Keeps a plate's layout as a template, from the plate or in Settings, shares it as a file and starts new plates from it. |
+| ✅ **Plate words & marks** | Sets the words of every plate element the same way (size, face, weight, style, colour, halo or box behind them), draws lines, texts and the layers' symbols on the map, and keeps the credits sharp at any zoom. |
+| ✅ **Topographic & 3D plates** | Draws a plate's map on a topographic or staff-map ground (heights in colour, contour lines, summits, the Map's key-less layers), or in 3D on its heights with its ridge lines. |
+| ✅ **Plate framing & transitions** | Frames a map day by day or step by step, and goes from one to the next in the MP4 by a fade, the map flying there drawn frame by frame (blurred or sharp) and what is new fading in or drawn. |
+| ✅ **Plate workspace** | Widens or puts away the plate's list and inspector, folds the inspector's sections, finds what to add by a word, gives the page the whole screen in focus, and opens a plate in a tab of its own, edited in one tab at a time. |
 | ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
@@ -321,6 +325,8 @@ stops making sense.
 - **Update ffmpeg from the app:** download a static build into the workspace and prefer it at runtime, like the scraper update, if the bundled copy ever lags in a way users hit.
 - **Vector text in plate PDFs:** the PDF holds the page as one print-resolution picture; selectable text needs the plate's faces as TTF on the Python side.
 - **Place names kept whole at a plate map's edge:** the engine cuts a name the frame crosses; placing them away from the frame would need its own label pass.
+- **Copernicus imagery as a plate ground:** a Sentinel-2 pass per day of a played plate, which spends the analyst's quota on every export.
+- **Say what a new plate starts from:** the ground and the layers it opens on, chosen before it opens, rather than the Map's view or a default place.
 - **Place names in their own script:** the Arabic or Cyrillic name under the Latin one, for searching local sources. Needs the engine's right-to-left text plugin, bundled rather than fetched.
 - **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.

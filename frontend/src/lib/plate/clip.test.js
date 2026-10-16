@@ -57,6 +57,10 @@ describe('a played plate', () => {
 
   it('plays now last, when steps stand on it', () => {
     expect(playDays(spec, ['2026-10-14'])).toEqual(['2026-10-14']);
-    expect(playDays({ steps: { now: [{ id: 'n' }] } }, ['2026-10-14'])).toEqual(['2026-10-14', null]);
+    expect(playDays({ steps: { now: [{ id: 'n' }] } }, ['2026-10-14'], '2026-10-20')).toEqual(['2026-10-14', null]);
+    // today is now: its change is played once, as now, unless steps stand on that day itself
+    expect(playDays({ steps: { now: [{ id: 'n' }] } }, ['2026-10-14', '2026-10-15'], '2026-10-15')).toEqual(['2026-10-14', null]);
+    expect(playDays({ steps: { now: [{ id: 'n' }], '2026-10-15': [{ id: 't' }] } }, ['2026-10-15'], '2026-10-15')).toEqual(['2026-10-15', null]);
+    expect(playDays(spec, ['2026-10-15'], '2026-10-15')).toEqual(['2026-10-15']);
   });
 });

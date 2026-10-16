@@ -160,9 +160,11 @@ function settleOnLevel(map, following) {
  *   draws its own scale, in print, and is framed by the hand
  * @param {[number, number]} [opts.maxCanvasSize] the largest canvas, raised by a
  *   plate drawn again at print resolution
+ * @param {boolean} [opts.fade] names and marks fade in as they are placed; a plate's
+ *   are put down at once, so a new day costs a frame or two rather than a fade's worth
  */
 export async function createMapEngine(container, { view, imperial = false, settle = true, controls = true,
-  maxCanvasSize = undefined } = {}) {
+  maxCanvasSize = undefined, fade = true } = {}) {
   const map = new MapLibreMap({
     container,
     style: EMPTY_STYLE,
@@ -182,6 +184,7 @@ export async function createMapEngine(container, { view, imperial = false, settl
     // more levels of tiles is what spares it loading them all again.
     maxTileCacheZoomLevels: 8,
     ...(maxCanvasSize ? { maxCanvasSize } : {}),
+    ...(fade ? {} : { fadeDuration: 0 }),
   });
   const mapId = `m${(mapsMade += 1)}`;
   maps.set(mapId, map);

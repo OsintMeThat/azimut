@@ -1559,7 +1559,7 @@ cut the menu off.
 **Reverse Search starts from Inspect's file list.** Every image and video in the
 case, filterable and searchable, with no worked-on row since the tab keeps nothing.
 The engines' own pages sit beside it, for a file that is not in the case. Once a
-picture is picked, **Change file** and the cross in the header work as in Inspect,
+picture is picked, **Change file** and **Files** in the header work as in Inspect,
 and a case change drops the picture with its handoff.
 
 **Reverse Search opens on the picture it was sent.** From a Media Library row it
@@ -1592,8 +1592,8 @@ its own. **Clear work** sends it to the Trash, so the reset can be undone.
 **The empty state is the file list.** Every image and video, the files already worked
 on first with their frame count, filterable by kind and searchable, with the folder
 browser behind `…`. **Change file** in the header opens the same list over the
-file; the cross closes it and goes back. Neither asks anything, since nothing is
-unsaved.
+file, and **Files**, first in the header, closes it and goes back. Neither asks
+anything, since nothing is unsaved.
 
 **A strip instead of tabs.** Under the viewer, a video leads the strip and the frames
 cut from it follow, labelled by timecode. Clicking a tile is what the viewer and the
@@ -1635,8 +1635,9 @@ collage, so it follows a rename and the Trash and travels in a bundle. Entity pi
 show the same picture. A collage with no preview yet shows its pieces'
 outlines. A small green check means the picture it exports is in the case as the
 layout stands. Once there are two, a search box narrows the list to the names holding
-every word typed, whatever their accents. **Close** in the header of an open collage waits
-for the last save and goes back to the list; a save that failed keeps it open.
+every word typed, whatever their accents. **Collages**, first in the header of an open
+collage, waits for the last save and goes back to the list; a save that failed keeps it
+open. **Open** lists the collages over the one open.
 
 **0.3.0 sessions come over on open.** The sessions of one file merge into its work:
 frames are joined, the latest session carries on, typed names and notes are kept in
@@ -1921,14 +1922,17 @@ Horizon; Compare puts it on one of its two maps.
 
 The bar moves by its grip. Let go near an edge, it docks there, upright on the
 left or the right; anywhere else it stays where it was dropped. It keeps clear of
-the zoom buttons and the layer's panel, remembers its place in this browser, and a
-double-click on the grip puts it back at the top.
+the zoom buttons, the place search, the map's own controls (imagery, date, compass,
+relief) and the layer's panel, folds to two rows when its row has no room between
+them, remembers its place in this browser, and a double-click on the grip puts it
+back at the top.
 
 With **Select**, a click on a feature picks it and opens its sheet in the panel,
 Shift-click adds to the selection, and a click on bare ground lets it go. A marker
 drags at once; a line or an area drags once it is picked, so a drag across one
 that is not pans the map. Dragging moves the whole selection with it, the map does
-not pan under the drag, and the toast offers **Undo**. Ctrl+Z takes back any edit
+not pan under the drag, and the toast offers **Undo**. What is let go is drawn where
+it landed at once and saves behind; a move the layer refuses goes back. Ctrl+Z takes back any edit
 of the session, one step at a time (an added marker, a restyle, a reshape, a move, a
 removal, a merge, a split, a group's settings), and Ctrl+Shift+Z or Ctrl+Y makes it
 again; while a shape is drawn Ctrl+Z takes its last point. **Select an area** draws a
@@ -1944,7 +1948,8 @@ corner back. A corner placed within ten pixels of one already in the layer lands
 it, so a line drawn to meet another meets it exactly; a white ring shows where, and
 Alt lets it go free. **Freehand**, while a line or an area is drawn, lays a stroke
 of the pointer instead of a corner per click. A line being reshaped grows by a click
-on the map, from its end or, with the bar's other arrow, from its start. A corner
+on the map, from its end or, with the bar's other arrow, from its start. An area
+being reshaped takes no click: its corners are dragged, and **+** puts one in. A corner
 of a line being reshaped can be pressed, then **Cut the line here** splits it there.
 
 **Merge** makes the selected lines, or areas, one feature. Lines that meet end to
@@ -2050,7 +2055,9 @@ map**. Its day is changed on the layer, not by dragging it on the axis.
 instead of overwriting them. It is off until asked for, and a layer that stays
 off behaves as above. On, the layer's row and its editor read it at one moment
 on a cursor: a tick per change, steps to the one before and the next, **Now**,
-and a calendar, which offers no day after today: a state is what was seen. The axis
+and a calendar, which offers no day after today: a state is what was seen. Now says
+its date, and a change dated today is read as now, so the same day never shows under
+two names; a played plate plays it once, as now. The axis
 writes its first and last change under it. Every map reads the same cursor, which
 is never stored, so a layer opens on now, and opening the editor puts it back on
 now wherever an earlier press left it. The editor's ticks come from the features
@@ -2059,13 +2066,32 @@ dated, to **the day** or **day and time**, and the one clock they are read on, t
 case's clock until another is picked; set once, they stay out of the panel.
 Switching precision rewrites nothing: a day stays a day.
 
-At **Now** an edit corrects what each feature is now. At a moment the edit bar
-says what an edit does there: **New** starts a state on that day (a move, a
-reshape, a status), **Fix** corrects the state in force then. A feature added at
-a moment appears then; one with no day is there always. A feature's sheet lists
-its states in place of its day, each pressed to read the layer then and × to take
-it out, and its ⋯ says it is **Gone from** the cursor's day. Merge and split work
-on features with no history yet.
+The panel says which day the map shows (**Shown on the map**) and keeps it in view
+above the selected feature. The edit bar says what an edit is dated to, in two
+buttons, the one on saying itself in words: **From** the day shown, where what is
+drawn appears that day and a move, a reshape or a status changes from it, and
+**No date**, where what is drawn shows on every day and a change counts on every
+day alike. That only works on what never changed by date: a feature that moved on
+a day stays put with no date (a drag says why, Reshape greys out) and moves from
+a day, and so does a status that changed on one. To correct one of its dates,
+press that date in its history. At **Now** edits carry no date, and the calendar
+on the day button picks a day to date them from, which moves the map there too.
+**No date** holds for the day it was chosen on; at another day, edits are dated
+again.
+
+Under its name, a feature's sheet says when it shows: the day it first shows
+(**Always** for none) and the day it leaves the map (**Still there** for none),
+each pressed for a calendar that offers the day shown first. A start stays before
+the next change and an end after the last; an event has its day only. The round
+**+** goes to a day picked to change the feature from. Its history lists each date
+with what it brought (**Appears**, **Moved**, **Destroyed**, **Gone**), pressed to
+show the layer then and × to take it out. A pencil marks the date an edit will
+change, and a dashed **Next edit** row shows where a dated edit would start a new
+one, so a feature with no date shows that a move now gives it a history. With no
+date, a line under it says what a date holds (**Moved on 8 Oct**). Each row
+of the layer's list says the same in a few words (**Always**, **From 12 Oct**,
+**3 Oct → 14 Oct**), with a yellow dot on what changes on the day shown. Merge and
+split work on features with no history yet.
 
 What the cursor reads is drawn alone, never between two states: the state before
 dashed under it, and an area's gains and losses since the state before or since a
@@ -3852,8 +3878,8 @@ says what it is checking.
   geolocations, 8 proofs* — and opens the one already built rather than a twin, then the
   templates, then a file, a paste or a worklist over a type. Reopening the last sheet by
   itself answered "where was I" and nothing else, and a case with no sheet opened on a
-  lecture about what a sheet is for. **Close** in the header saves what was typed and goes
-  back to the home.
+  lecture about what a sheet is for. **Sheets**, first in the header, saves what was typed
+  and goes back to the home.
 - **The file is the artifact.** `sheets/<name>.csv`, readable in any spreadsheet, written
   with a byte-order mark so Excel on Windows reads its accents instead of the machine's
   legacy codepage, and replaced by **rename rather than in place** so a save that dies
@@ -4615,7 +4641,7 @@ north and the credits, the column beside the map on a wide page and a band under
 on an upright one. The plate saves itself into the case it was opened in; its name
 is its file, renaming it in the header moves it, and a name another plate holds is
 refused with the reason, the plate keeping the name it had. The case's own column
-folds while a plate is open. The list of plates offers **Open**, **Duplicate**,
+folds while a plate is open, and **Plates**, first in the header, goes back to the list. The list of plates offers **Open**, **Duplicate**,
 **Rename** and the Trash; templates are drawn as their page, with **New plate from
 it**, **Edit**, **Rename** and **Delete**.
 
@@ -4623,17 +4649,31 @@ The page is laid out in millimetres and shown at its true size, scaled to the
 window, so a line weighs on the screen what it weighs on the paper. The wheel
 zooms the page round the pointer, a drag on its empty paper or round it (or a
 middle-button drag anywhere) moves it, and **Fit** brings it back; an undo keeps
-where the page is. **Add** groups what goes on a page by where it goes:
+where the page is. **Add** in the header (or the A key) opens a panel whose field
+finds an element by a word, Enter adding the first one found, and groups what
+goes on a page by where it goes:
 **Maps** (a map, a **Detail** of the main map with lines to the ground it shows,
-an inset), **On the map** (a label, a number, an arrow, a distance, range rings, a
-view cone, a zone, a spotlight, each placed by pressing the map), **Round the map**
+an inset, a **3D view** of the main map's ground), **On the map** (a label, a **Map
+text**, a **Symbol**, a number, an arrow, a **Line**, a distance, range rings, a view cone, a zone, a
+spotlight, each placed by pressing the map), **Round the map**
 (legend, scale bar, north arrow, credits, a date strip), **Writing** (text, banner,
 stamp, the numbered list, a table, a QR code), **Signing** (the analyst's signature:
 the picture set in Settings → Publishing beside `{handle}` and the day, rewritten at
 will; and **Made with Azimut**, the app's mark and name set tight beside the words,
-without the air of the app's corner) and **Pictures and shapes** (a picture, a video, the signature picture as a logo,
-a box, an ellipse, a rule). A tool placed by pressing the map is put down by a second press
+without the air of the app's corner), **Pictures and shapes** (a picture, the signature picture as a logo,
+a box, an ellipse, a rule) and **Playing** (a step, a video). A tool placed by pressing the map is put down by a second press
 on it, or Esc.
+
+The list of elements on the left and the inspector on the right are widened by
+dragging their edge, a double click putting the width back, and put away from the
+header; both stay as they were left. The inspector's sections fold by their title,
+on every element at once, and a wide inspector sets them side by side. **Focus**
+(F) gives the page the whole screen: the app's bars and the plate's header step
+aside, and a bar over the page keeps Add, Undo, Export and the two panels, which
+come back floating over the page. F or Esc gives the screen back; a browser that
+refuses the screen leaves the page the whole window. **Open in its own
+tab** puts the plate alone in a new tab, for another screen. A plate is edited in
+one tab at a time: opening it in another tab sends this one back to the list.
 
 A press picks an element, Shift adds to the picked ones, and elements put in one
 group (Ctrl+G, Ctrl+Shift+G to undo it) are picked together. A drag moves what is
@@ -4645,16 +4685,28 @@ right-drag or a Ctrl-drag to turn, Esc when done). The arrow keys move, Delete
 removes, Ctrl+C and Ctrl+V copy to this plate or another, Ctrl+D duplicates and
 Ctrl+Z undoes, after a press on the page: a key pressed on a button of the
 inspector never deletes. Escape lets the picked elements go. Maps stay under the
-page's writing, whatever their place in the list. The list, top first, restacks by
-a drag, names an element by a double click, and hides or locks it from its row.
+page's writing, at the foot of the list. The list, top first, restacks by a drag
+that offers only the places a row can take, and the inspector's arrows step an
+element among the rows listed. A double click names an element, and its row hides
+or locks it.
 Several picked elements are lined up, spaced evenly, given one size, grouped,
 locked or removed together from the inspector.
 
-What stands on the ground (a label's point, an arrow's two ends, a zone's corners,
-the rings' centre and reach, the cone's eye and tip, a distance's two ends) is
-dragged there by its handles, or as a whole by its own drawing. A label beside a
+What stands on the ground (a label's point, an arrow's two ends, a zone's corners, a
+line's points, the rings' centre and reach, the cone's eye and tip, a distance's two
+ends) is dragged there by its handles, or as a whole by its own drawing. A label beside a
 map keeps its place by the point it names when the map is moved or zoomed, and an
-arrow, a distance or a zone goes with the ground. A label is plain, a bubble, a box
+arrow, a line, a distance or a zone goes with the ground. A **Map text** is words
+without a leader standing over their point: moved by the hand, it takes its point
+along, and on a day or a step framed otherwise it stays over it. A **Symbol** is one of
+the markers the case's layers draw (a tank, a drone, a checkpoint…), stamped by a press
+on the map, the tool staying in hand for the next; it stands over its point the same
+way, picked from the layers' palette with its colour, sized, turned, and shown damaged
+or destroyed, and the next one takes the last marker set. While something is placed,
+a press goes through what already stands on the map. A **Line** is clicked
+point by point, ended by a double click or Enter (Backspace takes a point back), drawn
+straight from point to point or curved through them, solid, dashed or dotted, with a
+head at its end, both or none, and words along it. A label is plain, a bubble, a box
 or a number; its leader is straight, elbowed or curved and ends in a dot, an arrow
 or nothing. The numbers count in page order and the **Numbered list** writes what
 each one stands for. An arrow bends, has one head, two or none, is solid, dashed or
@@ -4665,14 +4717,27 @@ the proofs and footage the main map's features carry, set pointing at their plac
 
 A map picked on the page carries its own bar: **Frame**, a half step of zoom
 either way, a step to either side and a compass to turn it, and **Ground**: Plain,
-Plain dark, Esri imagery, **World Imagery Wayback, dated** (a release picked in the
-inspector, its date said in the credits and in `{imagery}`), OpenStreetMap or
-OpenTopoMap, with relief shading, borders and names over it. The inspector sets the
+Plain dark, **Topographic** and **Staff map**, Esri imagery, **World Imagery Wayback,
+dated** (a release picked in the inspector, its date said in the credits and in
+`{imagery}`), OpenStreetMap or OpenTopoMap, with relief shading, borders and names,
+roads, railways, power lines, sea marks, GPS traces or night lights over it, the Map's
+key-less layers each credited on the page. **Topographic** (a national survey's
+colours) and **Staff map** (a military map's khaki and olive) tint the heights from
+lowland green to rock and snow, shade them, trace contour lines every ten metres to a
+kilometre by the map's scale (every fifth one bolder and written with its height), and
+name the summits with theirs; each of the three can be left off.
+
+**3D** stands a map on its heights, tilted (from the bar, or to the degree in the
+inspector), the heights drawn as they are or up to three times as tall, said under it.
+**Ridge lines** traces the crests over it. A tilted map has no scale bar and no grid;
+labels, numbers, arrows and zones stay on their ground, its legend lists what its
+camera shows, and its inset outlines the ground it looks at, from its foot to short of
+the horizon. The inspector sets the
 rest: the zoom and the turn to the decimal; a grid in latitude and longitude
 (degrees and minutes or decimal), UTM or MGRS, at a chosen step, labelled on two
 sides or four, or as ticks on the frame only, its ink light over imagery and dark
-over a pale ground unless set; the plain ground's colours, its roads, buildings and
-names, the language and the number of those names, and the relief's strength; the
+over a pale ground unless set; the plain ground's colours, its roads, railways,
+buildings and names, the language and the number of those names, and the relief's strength; the
 imagery's strength, colour, light, contrast and tint, with **Greyed**, **Faded** and
 **Darkened** as starts; and the case's layers it draws, each with its groups left
 out or in, its lines and its marks sized apart, its own colour and dash on this
@@ -4684,18 +4749,25 @@ The legend lists only what the map draws in its frame on the plate's day, one ro
 look, named after the group when it has one style, else after its icon and the
 case's name for its colour, with the status after it. **List what the layers hold
 off the map too** brings the rest back. Each row is renamed, moved up or down, and
-removed by its ×, kept under **Removed** to be put back; rows are written by hand. Texts are set in their own face,
-weight, italic or capitals, spacing and line height, aligned across and down, given
-a halo over a map, turned, and faded; a box the words run past says so, and **Fit
-the box** grows it. They fill in `{date}` (the plate's day, else the day its layers
+removed by its ×, kept under **Removed** to be put back; rows are written by hand.
+
+**Words** sets what every element writes the same way, a text, a label, the words
+of a zone, an arrow, a line, rings, a cone or a distance, the legend, the table, the
+credits, the scale, a video's source line: their size, face, weight, italic or
+capitals, colour, and what stands behind them (nothing, a halo, or a box of a colour).
+Words on the ground are bold on a halo until set otherwise. Texts are also set in their
+spacing and line height, aligned across and down, turned, and faded; a box the words
+run past says so, and **Fit the box** grows it. They fill in `{date}` (the plate's day, else the day its layers
 last changed), `{today}`, `{updated}`, `{case}`, `{title}`, `{scale}`, `{imagery}` and
 `{handle}`. The credits are what the sources are owed, a copied feature's credit
-among them: they stay on the page, shrink rather than lose a source, and wear a halo
-of the paper over a map. A table lists the dated features as a chronology, up to the
+among them: they stay on the page, shrink rather than lose a source, and stand on a
+band of the paper over a map. The page is drawn again at the zoom it is shown at, so
+the smallest words stay sharp. A table lists the dated features as a chronology, up to the
 plate's day, or each source the features cite. A QR code carries a link.
 
 With nothing picked, the inspector sets the page: **Looks** (Press, Sand, Night,
-Report, Black and white) set the paper, ink, accent and face, every map's ground and
+Report, Black and white, **Survey** on the topographic ground, **Staff** on the staff
+map) set the paper, ink, accent and face, every map's ground and
 its imagery's whole tone (a look that is not grey gives the imagery its colour back),
 and what wore the page's colours, at one press; the paper (A5, A4, A3, Letter, 16:9 or 9:16, a square, a 4:5 post, or a
 size typed in), turned either way when it can be; the face (Inter, Barlow Condensed,
@@ -4716,10 +4788,11 @@ to now; both open is every day, and an end moved past the other pulls it along.
 one to reach this day or carries it from this day on, and draws them faintly when
 asked. So a video shows each day's annotations, and only those.
 
-**A day can hold steps**, played after it one by one. **+ Step** at the end of the
-bar under the page adds the first; from then on a strip over the bar shows the day
-itself and each step with how long it lasts, and its **+** adds a step after the one
-shown. A plate with no layer followed over time takes steps too, on its one day.
+**A day can hold steps**, played after it one by one. **Step**, in Add or at the end
+of the bar under the page, adds the first; from then on the bar shows the day itself
+and each step with how long it lasts, beside the plate's days, and its **+** adds a
+step after the one shown. A plate with no layer followed over time takes steps too,
+on its one day, and has no bar under the page until it does.
 While a step is shown, a pill over the page says so and **what is added belongs to
 that step**, over what the day shows: the element list holds the day's elements and
 that step's, the step's marked. The inspector keeps a step's element on **This
@@ -4727,6 +4800,12 @@ step** or **And after** (the steps after it, on the same day), or puts it back o
 the whole day; an element of the day goes **Only on** the step shown by a press. A
 step is dragged to another place in the strip, and its ⋯ names it, sets how long it
 holds, moves it, or removes it with what stands on it.
+
+**A day or a step frames a map its own way.** Past the first, each one shows the map
+as the one before it does, the map bar's **Keep the previous framing** ticked and the
+map holding still. Unticked, the map is framed there on its own, and the steps after it
+follow until one frames it too. A label keeps its place on the page; on a day framed
+otherwise, its leader reaches to its point.
 
 **Video** puts a video on a step: on the one shown while it holds none, else on a new
 step after it. **Choose a video** lists the footage placed on the map first, set
@@ -4748,7 +4827,14 @@ of them draws so it stays still. A plate with steps plays each day and then its
 steps, and says how long the video runs: in an MP4 each step's clips run in their
 boxes, with their sound when it is kept, the frame and the source line over them; a
 GIF shows a clip by its first frame, and the evolution sheet keeps to the days.
-Everything goes into the folder saved for views.
+With **Video transitions** on (the page's inspector, once the plate plays), the MP4
+goes from one day or step to the next in the time set: the page fades into the next, a
+map framed otherwise flies there, rising over a long way, drawn again at each frame so
+its marks keep their size, blurred as it goes fastest or sharp, its inset following
+and what is written over it placed through its camera as it leans,
+and what is new fades in or is drawn along its lines, or comes at once. The frames play
+at the video's own 30 a second. A step's ⋯ can cut straight into it.
+Play shows the maps moving too. Everything goes into the folder saved for views.
 The PDF holds the page as one picture at print resolution.
 
 **Keep as template** keeps the layout, its paper and colours, and the pictures kept

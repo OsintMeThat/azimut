@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { inLook, addStep, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
-  labelBox, longDay, mainMap, mapsFirst, movedStep, onPaper, PAGE_ZOOM, pageSize, periodSaid, placeOf, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
+import { inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
+  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE_ZOOM, pageSize, periodSaid, placeOf, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
   turnable, withoutStep, zoomPageAt } from './page.js';
 
 describe('a plate page', () => {
@@ -213,6 +213,13 @@ describe('the page on the screen', () => {
     expect(camera.y).toBeCloseTo(149);
   });
 
+  it('keeps clear the top a floating bar stands on', () => {
+    const camera = fitPage({ width: 1000, height: 1000 }, { width: 1048, height: 1048 }, 24, 100);
+    expect(camera.scale).toBeCloseTo(0.9);
+    expect(camera.y).toBeCloseTo(124);
+    expect(camera.x).toBeCloseTo(74);
+  });
+
   it('zooms round the pointer, which keeps the paper under it, within its bounds', () => {
     const camera = { scale: 0.5, x: 24, y: 149 };
     const next = zoomPageAt(camera, 2, [124, 199]);
@@ -318,5 +325,121 @@ describe('the steps of a day', () => {
     const data = templateOf({ page: {}, theme: {}, elements: plate().elements });
     expect(data.elements.map((element) => element.id)).toEqual(['title']);
     expect(data.steps).toBeUndefined();
+  });
+});
+
+describe('the order of the page', () => {
+  // page order, bottom first: two maps, then the writing; `hers` waits on step s1
+  const plate = () => ({
+    time: { at: '2026-10-15', step: 's2' },
+    steps: { '2026-10-15': [{ id: 's1' }, { id: 's2' }] },
+    elements: [
+      { id: 'map', kind: 'map' }, { id: 'inset', kind: 'inset' },
+      { id: 'legend', kind: 'legend' }, { id: 'hers', kind: 'label', step: 's1' }, { id: 'title', kind: 'text' }, { id: 'north', kind: 'north' },
+    ],
+  });
+  const ids = (elements) => elements.map((element) => element.id);
+  const listed = (spec) => listedOf(spec, '2026-10-15', placeOf(spec, '2026-10-15', 's2'));
+
+  it('lists the writing on top and the maps under it, leaving another step\'s elements out', () => {
+    expect(ids(listed(plate()))).toEqual(['north', 'title', 'legend', 'inset', 'map']);
+  });
+
+  it('moves a row above the one it is let go on, the left-out ones keeping their places', () => {
+    const spec = plate();
+    // the legend to the top
+    expect(ids(restacked(spec.elements, listed(spec), 'legend', 0))).toEqual(['map', 'inset', 'hers', 'title', 'north', 'legend']);
+    // the north arrow down under the title: the label of the other step stays between them as it was
+    expect(ids(restacked(spec.elements, listed(spec), 'north', 2))).toEqual(['map', 'inset', 'legend', 'north', 'hers', 'title']);
+    // let go where it stands, nothing moves
+    expect(restacked(spec.elements, listed(spec), 'title', 1)).toBe(spec.elements);
+    expect(restacked(spec.elements, listed(spec), 'title', 2)).toBe(spec.elements);
+  });
+
+  it('keeps the writing above the maps and a map among them, wherever it is let go', () => {
+    const spec = plate();
+    const list = listed(spec);
+    expect(landingIn(list, 'north', 5)).toBe(3);
+    expect(landingIn(list, 'map', 0)).toBe(3);
+    expect(ids(restacked(spec.elements, list, 'north', 5))).toEqual(['map', 'inset', 'north', 'legend', 'hers', 'title']);
+    expect(ids(restacked(spec.elements, list, 'map', 0))).toEqual(['inset', 'map', 'legend', 'hers', 'title', 'north']);
+  });
+
+  it('steps a row forward or back among what the list shows, and says when it can go no further', () => {
+    const list = listed(plate());
+    expect(stepOf(list, 'title', 1)).toBe(0);
+    expect(stepOf(list, 'title', -1)).toBe(3);
+    expect(stepOf(list, 'north', 1)).toBeNull();
+    expect(stepOf(list, 'legend', -1)).toBeNull();
+    expect(stepOf(list, 'inset', 1)).toBeNull();
+    expect(stepOf(list, 'inset', -1)).toBe(5);
+    expect(stepOf(list, 'map', -1)).toBeNull();
+    expect(stepOf(list, 'hers', 1)).toBeNull();
+  });
+});
+
+describe('a map framed day by day', () => {
+  const map = { id: 'map', kind: 'map', view: { lat: 1, lon: 1, zoom: 5, bearing: 0 } };
+  const near = { lat: 2, lon: 2, zoom: 9, bearing: 10 };
+  const order = ['2026-10-01', 's1', 's2', '2026-10-02'];
+
+  it('keeps the map\'s own view on the first day, and the framing before it on the next', () => {
+    const spec = { framing: {} };
+    expect(framingOf(spec, map, order, '2026-10-01')).toEqual({ view: map.view, own: false, first: true });
+    expect(framingOf(spec, map, order, 's2')).toEqual({ view: map.view, own: false, first: false });
+    // a day the play does not go through shows, and frames, the map's own view
+    expect(framingOf(spec, map, order, 'now').first).toBe(true);
+  });
+
+  it('frames a step its own way, and the steps after it follow until one frames it too', () => {
+    const spec = { framing: framedAs({}, 's1', 'map', near) };
+    expect(framingOf(spec, map, order, 's1')).toEqual({ view: near, own: true, first: false });
+    expect(framingOf(spec, map, order, 's2')).toEqual({ view: near, own: false, first: false });
+    expect(framingOf(spec, map, order, '2026-10-01').view).toBe(map.view);
+    // let go, the step keeps the one before it again, and nothing is left of it
+    expect(framedAs(spec, 's1', 'map', null)).toEqual({});
+  });
+
+  it('names a day or a step as its framing is kept, in the order a play goes through them', () => {
+    expect(beatKey('2026-10-01', null)).toBe('2026-10-01');
+    expect(beatKey(null, null)).toBe('now');
+    expect(beatKey('2026-10-01', 's1')).toBe('s1');
+    expect(beatKeys([{ day: '2026-10-01', step: null }, { day: '2026-10-01', step: 's1' }])).toEqual(['2026-10-01', 's1']);
+  });
+
+  it('forgets a step\'s framing with the step', () => {
+    const spec = { steps: { now: [{ id: 's1' }] }, framing: { s1: { map: near }, now: { map: near } }, elements: [], time: {} };
+    expect(Object.keys(withoutStep(spec, 's1').framing)).toEqual(['now']);
+  });
+});
+
+describe('the video\'s transitions', () => {
+  it('are off until asked for, and fill in what a plate leaves out', () => {
+    expect(transitionsOf({})).toEqual(TRANSITIONS);
+    expect(TRANSITIONS.on).toBe(false);
+    expect(transitionsOf({ transitions: { on: true, blur: false } })).toEqual({ ...TRANSITIONS, on: true, blur: false });
+  });
+
+  it('go with a template, as part of how its plates look', () => {
+    const spec = { page: { paper: 'a4' }, theme: {}, elements: [], transitions: { on: true, seconds: 1.2 } };
+    expect(templateOf(spec).transitions).toEqual({ on: true, seconds: 1.2 });
+    expect(fromTemplate(templateOf(spec), {}).transitions).toEqual({ on: true, seconds: 1.2 });
+  });
+});
+
+describe('a text on the map', () => {
+  it('is a label without a leader, tied to its point', () => {
+    expect(standsOver({ kind: 'label', leader: 'none', at: [1, 2], of: 'map' })).toBe(true);
+    expect(standsOver({ kind: 'label', leader: 'straight', at: [1, 2], of: 'map' })).toBe(false);
+    // a symbol stands over its point too
+    expect(standsOver({ kind: 'symbol', at: [1, 2], of: 'map' })).toBe(true);
+    expect(standsOver({ kind: 'symbol', of: 'map' })).toBe(false);
+    expect(standsOver({ kind: 'text', leader: 'none', at: [1, 2], of: 'map' })).toBe(false);
+  });
+
+  it('can be set in a survey\'s or a staff map\'s look, on their topographic grounds', () => {
+    const spec = houseLayout({});
+    expect(inLook(spec, 'survey').elements.find((element) => element.id === 'map').basemap).toBe('plain-topo');
+    expect(inLook(spec, 'staff').elements.find((element) => element.id === 'map').basemap).toBe('plain-staff');
   });
 });

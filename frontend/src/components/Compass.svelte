@@ -22,7 +22,7 @@
   }
 </script>
 
-<div class="rotate-ctl" class:turned={shown !== 0}>
+<div class="rotate-ctl" class:turned={shown !== 0} data-bar-obstacle>
   <button
     class="compass"
     onclick={() => onbearing(0)}

@@ -16,6 +16,7 @@
   import Icon from '../../components/Icon.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
   import LayerStylePalette from './LayerStylePalette.svelte';
+  import { LAYER_HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
 
   let {
     /** The case's layers, the one used last first, and the `layer|group` keys the item is already in. */
@@ -28,7 +29,6 @@
   let style = $state({ symbol: 'pin', colour: '#0072b2' });
   /** What the item shows, as the marker will say it: '' intact, or damaged, or destroyed. */
   let status = $state('');
-  const STATUSES = [['', 'Intact'], ['damaged', 'Damaged'], ['destroyed', 'Destroyed']];
   /** A layer just made for the item, opened as soon as the list holds it. */
   let made = $state('');
   const layer = $derived(step ? targets.find((one) => one.name === step.layer) ?? null : null);
@@ -62,9 +62,10 @@
 </script>
 
 {#snippet state()}
-  <div class="state" role="group" aria-label="What it shows">
-    {#each STATUSES as [value, label] (value)}
-      <button type="button" aria-pressed={status === value} onclick={() => (status = value)}>{label}</button>
+  <div class="state" role="group" aria-label="What it shows" title={LAYER_HELP.status}>
+    {#each STATUS_CHOICES as [value, label, said] (value)}
+      <button type="button" class:short={!value} aria-pressed={status === value} aria-label={value ? label : said} title={said}
+        onclick={() => (status = value)}>{label}</button>
     {/each}
   </div>
 {/snippet}
@@ -127,6 +128,7 @@
   .state { display: flex; margin: 2px 4px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; background: var(--bg-1); }
   .state button { flex: 1; min-width: 0; padding: 4px 3px; color: var(--text-2); font-size: 11px; cursor: pointer; }
   .state button + button { border-left: 1px solid var(--border); }
+  .state button.short { flex: 0 0 26px; }
   .state button:hover { background: var(--bg-3); }
   .state button[aria-pressed='true'] { background: var(--accent-soft); color: var(--text-1); font-weight: 600; }
   .dot { width: 12px; height: 12px; margin: 0 2px; border-radius: 3px; background: var(--swatch); flex: none; }

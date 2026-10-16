@@ -19,12 +19,24 @@
    * shows; a video stands on a step, and the step runs as long as its clip. So one
    * day can play several videos one after another, each beside its place.
    *
+   * A day or a step after the first keeps the framing before it until its map bar's
+   * "Keep the previous framing" is unticked; then its maps are framed for it alone.
+   * With the video's transitions on, the MP4 goes from one to the next by a fade, the
+   * maps moving to their new framing, and what is new fading in or drawn.
+   *
    * A template is the same page with the data taken out. A plate can be kept as one,
    * and a new plate opened from one; Settings lists them too, and editing one opens
    * it here, over the Map's ground.
+   *
+   * Round the page, the list and the inspector are widened by their edge and put
+   * away from the header, and kept so (`lib/plate/layout.svelte.js`). Focus (F) gives
+   * the page the whole screen: the app's bars step aside and the panels come back
+   * over the page when called. A plate opens in a tab of its own, on another screen,
+   * and is only ever edited in one tab at a time (`lib/plate/oneTab.js`).
    */
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import NoCase from '../components/NoCase.svelte';
   import Modal from '../components/Modal.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
@@ -33,6 +45,8 @@
   import PlateInspector from './plate/PlateInspector.svelte';
   import PlateExportDialog from './plate/PlateExportDialog.svelte';
   import PlateSteps from './plate/PlateSteps.svelte';
+  import PlateAdd from './plate/PlateAdd.svelte';
+  import PanelEdge from '../components/PanelEdge.svelte';
   import LayerTimeCursor from './satellite/LayerTimeCursor.svelte';
   import { api } from '../lib/api.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
@@ -42,21 +56,29 @@
   import { categoryColour } from '../lib/map/addedLayers.js';
   import { NEW_COLOUR, badgeImage, personalMarkerImage } from '../lib/map/addedLayer.js';
   import { layerPalette } from '../lib/map/layerPalette.svelte.js';
-  import { isBadge } from '../lib/map/markerGlyphs.js';
+  import { MARKER_PIXELS, drawMarker, isBadge } from '../lib/map/markerGlyphs.js';
   import symbols from '../lib/map/layerSymbols.json';
   import { asOf, hasHistory, isTracked, momentLabel, stateAt } from '../lib/map/layerHistory.js';
   import { revealPlates } from '../lib/plateExport.js';
   import '../lib/plateFontFaces.js';
   import { plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, scaleFor, scaleForWidth } from '../lib/plate/exportPlate.js';
-  import { MAP_KINDS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, inLook, addStep, bornAt, currentStep, dayOf, fromTemplate, hasSteps, houseLayout,
-    labelBox, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, shownOn, stepsOf, templateOf, textMeasurer, withoutStep } from '../lib/plate/page.js';
+  import { MAP_KINDS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, inLook, addStep, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+    fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
+    transitionsOf, withoutStep, restacked, stepOf } from '../lib/plate/page.js';
+  import { changes, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
+  import { defaultSize } from '../lib/plate/words.js';
   import { FIRST_SECONDS, beatClips, beats, clipRange, playDays, posterKey, posterOf, totalSeconds } from '../lib/plate/clip.js';
   import { legendRows } from '../lib/plate/legend.js';
   import { numbered, pasted, placeLabels, tableRows } from '../lib/plate/arrange.js';
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
   import { inFrame, project, scaleRatio } from '../lib/plate/geo.js';
   import { WAYBACK_ID } from '../lib/wayback.js';
+  import { inspectorWidth, layout, listWidth, togglePanel } from '../lib/plate/layout.svelte.js';
+  import { plateTabs } from '../lib/plate/oneTab.js';
+  import { buildHash, readSolo, splitHash } from '../lib/hash.js';
+  import { settlePlace } from '../lib/backButton.js';
+  import { followFullscreen } from '../lib/fullscreen.js';
 
   const caseId = $derived(caseState.current?.id ?? null);
   $effect(() => addedLayers.load(caseId, caseState.rev));
@@ -72,6 +94,8 @@
   const selected = $derived(selection.at(-1) ?? '');
   let framing = $state('');
   let placing = $state(null);
+  /** The symbol set last, which the next one placed takes: its marker, colour and size. */
+  let lastSymbol = $state({ ...SYMBOL, colour: null });
   let views = $state({});
   let plates = $state([]);
   let templates = $state([]);
@@ -98,12 +122,23 @@
   let overflow = $state(new Set());
   let menu = $state(null);
   let templateMenu = $state(null);
+  /** The button the Add panel opens under, while it is open. */
+  let adding = $state(null);
+  let addButton = $state(null);
+  let focusAdd = $state(null);
+  /** The page alone, the panels called back over it one by one. Never kept: it is a moment. */
+  let focus = $state(false);
+  let floating = $state({ list: false, inspector: false });
+  /** The play bar's height, which the panels floating in focus stop above. */
+  let barHeight = $state(0);
+  /** What focus hands the screen to. */
+  let toolEl = $state(null);
   const handles = new Map();
   let images = $state(new Map());
 
   // What the plate offers to draw its maps on, read once: free grounds, no quota spent.
   const FREE = ['esri-world-imagery', WAYBACK_ID, 'osm', 'opentopomap'];
-  const grounds = $derived([['plain', 'Plain'], ['plain-dark', 'Plain, dark'],
+  const grounds = $derived([['plain', 'Plain'], ['plain-dark', 'Plain, dark'], ['plain-topo', 'Topographic, heights in colour'], ['plain-staff', 'Staff map'],
     ...providers.filter((entry) => FREE.includes(entry.id)).map((entry) => [entry.id, entry.id === WAYBACK_ID ? 'World Imagery Wayback, dated' : entry.label ?? entry.id])]);
   let asked = false;
   $effect(() => {
@@ -171,7 +206,7 @@
     plate = { ...next, caseId };
     opened += 1;
     titleField = next.title;
-    saved = JSON.stringify([next.title, next.spec]);
+    saved = signed(next.title, next.spec);
     remember();
     tuckSidebar(true);
   }
@@ -238,6 +273,96 @@
     refresh();
   }
 
+  // -- room round the page -------------------------------------------------------------
+
+  const listShown = $derived(focus ? floating.list : layout.list);
+  const inspectorShown = $derived(focus ? floating.inspector : layout.inspector);
+  /** The list or the inspector put away or brought back: beside the page, or over it in focus. */
+  function panel(which) {
+    if (focus) floating = { ...floating, [which]: !floating[which] };
+    else togglePanel(which);
+  }
+  /**
+   * Focus on, and the screen asked for at the same press, as browsers want; a
+   * browser that refuses leaves the page the whole window instead. Off, the screen
+   * is given back.
+   */
+  function setFocus(on) {
+    focus = on;
+    floating = { list: false, inspector: false };
+    adding = null;
+    if (on && toolEl?.requestFullscreen && !document.fullscreenElement) toolEl.requestFullscreen().catch(() => {});
+    if (!on && toolEl && document.fullscreenElement === toolEl) document.exitFullscreen().catch(() => {});
+  }
+  // Esc leaves the screen without asking the page: focus ends with it
+  $effect(() => toolEl ? followFullscreen(toolEl, (held) => { if (!held && focus) setFocus(false); }) : undefined);
+  // focus ends with the plate or the tool; while it holds, the app's bars and rail step aside
+  $effect(() => { if (uiState.tool !== 'plate' || !plate) untrack(() => { if (focus) setFocus(false); }); });
+  $effect(() => { uiState.focusMode = focus; });
+  const toggleAdd = (anchor) => { adding = adding ? null : anchor; };
+
+  // -- a tab of its own ----------------------------------------------------------------
+
+  const opening = splitHash(location.hash);
+  /** This tab is the plate on its own, opened from another (`lib/hash.js`): the app takes its bars away. */
+  const solo = readSolo(opening.params);
+  /** The plate the address names, opened once its case is. */
+  let waiting = solo && opening.route === 'plate' && opening.params.get('plate')
+    ? { caseId: opening.params.get('case'), name: opening.params.get('plate') } : null;
+  $effect(() => {
+    if (!waiting || !caseId || uiState.tool !== 'plate') return;
+    const { caseId: owner, name } = waiting;
+    waiting = null;
+    if (!owner || owner === caseId) untrack(() => open(name));
+  });
+  // the address keeps naming the plate shown, so a reload opens it again
+  $effect(() => {
+    if (!solo || uiState.tool !== 'plate') return;
+    const params = { case: caseId ?? '', plate: plate && !plate.template ? plate.name ?? '' : '', solo: '1' };
+    untrack(() => settlePlace('plate', params));
+  });
+
+  /**
+   * The plate in a tab of its own, to put on another screen. It is written first so
+   * the tab opens on what is here, and this tab goes back to the list rather than
+   * saving over it. The tab is opened at the press, as browsers allow, and pointed
+   * at the plate once it is written.
+   */
+  async function detach() {
+    if (!plate || plate.template) return;
+    const tab = window.open('', '_blank');
+    if (!tab) { toast('The browser refused a new tab. Allow pop-ups for this page', 'warn', 8000); return; }
+    const doc = plate;
+    try { await autosave.flush(); } catch { /* the save status says what was not written */ }
+    if (!doc.name || !doc.caseId) { tab.close(); toast('The plate could not be written, so it stays here', 'warn'); return; }
+    tab.location.href = `${location.pathname}${location.search}${buildHash('plate', { case: doc.caseId, plate: doc.name, solo: '1' })}`;
+    if (plate === doc) await close();
+    toast(`“${doc.title}” is open in its own tab`, 'info', 3000);
+  }
+
+  /** One plate, one tab: a tab that opens this plate takes it, and this one writes what it has and lets it go. */
+  const tabs = plateTabs({
+    onlost: async (held) => {
+      const doc = plate;
+      if (!doc || doc.caseId !== held.caseId || doc.name !== held.name) return;
+      try { await autosave.flush(); } catch { /* the save status says what was not written */ }
+      if (plate === doc) { plate = null; refresh(); }
+      tabs.saved(held.caseId, held.name);
+      toast(`“${doc.title}” is open in another tab now`, 'info', 4000);
+    },
+    // written by the tab that let it go after this one read it: read it again, unless something was done here meanwhile
+    onsaved: (held) => {
+      if (plate?.name !== held.name || plate.caseId !== held.caseId || canUndo) return;
+      if (signed(plate.title, plate.spec) === saved) open(held.name);
+    },
+  });
+  onDestroy(() => tabs.close());
+  $effect(() => {
+    const owner = plate && !plate.template ? plate.caseId : null;
+    const name = plate?.name ?? null;
+    untrack(() => tabs.hold(owner, name));
+  });
+
   async function remove(row) {
     try {
       await api.del(`/api/cases/${caseId}/map-plates/${encodeURIComponent(row.name)}`);
@@ -269,10 +394,14 @@
   // -- saving --------------------------------------------------------------------------
 
   let saved = '';
+  /** The plate as written, worked out once a change for the save, the undo and the page, which all watch it. */
+  const written = $derived(plate ? JSON.stringify(plate.spec) : '');
+  /** What a save is compared on: the name and the plate. */
+  const signed = (title, spec, text = JSON.stringify(spec)) => `${title}\u0000${text}`;
   const autosave = createAutosave({ write: () => write() });
   $effect(() => {
     if (!plate) return;
-    const signature = JSON.stringify([plate.title, plate.spec]);
+    const signature = signed(plate.title, null, written);
     if (signature !== saved) untrack(() => autosave.schedule());
   });
   $effect(() => { if (uiState.tool !== 'plate') untrack(() => autosave.flush()); });
@@ -286,7 +415,7 @@
   async function write() {
     const doc = plate;
     if (!doc) return;
-    const signature = JSON.stringify([doc.title, doc.spec]);
+    const signature = signed(doc.title, doc.spec);
     if (signature === saved) return;
     if (doc.template) {
       await saveTemplate('map', { id: doc.template.id, name: doc.title, data: templateOf(doc.spec) });
@@ -308,12 +437,12 @@
       throw error;
     }
     if (plate !== doc) return;
-    saved = JSON.stringify([answer.title, doc.spec]);
+    saved = signed(answer.title, doc.spec);
     if (doc.name !== answer.name || doc.title !== answer.title) {
       doc.name = answer.name;
       doc.title = answer.title;
       titleField = answer.title;
-      saved = JSON.stringify([doc.title, doc.spec]);
+      saved = signed(doc.title, doc.spec);
     }
     keepPreview();
   }
@@ -352,7 +481,7 @@
   function remember() { last = JSON.stringify(plate?.spec ?? null); }
   $effect(() => {
     if (!plate) return;
-    const now = JSON.stringify(plate.spec);
+    const now = written;
     untrack(() => {
       clearTimeout(undoTimer);
       undoTimer = setTimeout(() => {
@@ -407,6 +536,8 @@
   const stepId = $derived(playBeat ? playBeat.step : exportTime ? exportStep : currentStep(spec, at)?.id ?? null);
   const place = $derived(spec ? placeOf(spec, at, stepId) : null);
   const daySteps = $derived(spec ? stepsOf(spec, at) : []);
+  /** The play bar under the page: the plate's days, the day's steps; nothing on a plate that plays nothing. */
+  const barShown = $derived(!!plate && !plate.template && (moments.length > 0 || daySteps.length > 0));
   const stepIndex = $derived(daySteps.findIndex((item) => item.id === stepId));
 
   function pickStep(id) {
@@ -432,8 +563,31 @@
   const stepName = (index, day = at) => stepsOf(spec, day)[index]?.name || `Step ${index + 1}`;
   /** The days and steps the play goes through, from the plate's day when it has none followed over time. */
   const sequence = $derived(spec ? beats(spec, playable ? playDays(spec, moments) : [at], 1100) : []);
-  /** How long a played export runs over `days`, each day held `interval` milliseconds. */
-  const runtime = (days, interval) => totalSeconds(beats(spec, playable ? playDays(spec, days) : [at], interval));
+  /** How long a played export runs over `days`, each day held `interval` milliseconds, an MP4's transitions included. */
+  const runtime = (days, interval, format = 'mp4') => {
+    const list = beats(spec, playable ? playDays(spec, days) : [at], interval);
+    const moves = transitionsOf(spec);
+    return totalSeconds(list) + (moves.on && format === 'mp4' ? (list.length - 1) * moves.seconds : 0);
+  };
+
+  // -- framing a map day by day ---------------------------------------------------------
+
+  /** The days and steps in the order they are played, as their framings are kept. */
+  const order = $derived(beatKeys(sequence));
+  /** The day or the step shown, as its framing is kept. */
+  const shownKey = $derived(beatKey(at, stepId));
+  /** How a map is framed on the day or step shown. */
+  const framingFor = (map) => framingOf(spec, map, order, shownKey);
+  /** The map framed by the hand on the day or step shown: its own framing there, or the map's view on the first. */
+  function mapView(map, view) {
+    const framed = framingFor(map);
+    if (framed.own) spec.framing = framedAs(spec, shownKey, map.id, view);
+    else if (framed.first) map.view = view;
+  }
+  /** The day or step shown keeps the framing before it, or takes a copy of it to frame the map its own way. */
+  function keepFraming(map, keep) {
+    spec.framing = framedAs(spec, shownKey, map.id, keep ? null : { ...framingFor(map).view });
+  }
 
   function changeStep(id, patch) {
     const list = stepsOf(spec, at).map((item) => (item.id === id ? { ...item, ...patch } : item));
@@ -490,10 +644,12 @@
 
   function add(kind) {
     if (!spec) return;
+    if (kind === 'step') { if (!plate.template) newStep(); return; }
     const was = placing;
     placing = null;
     const main = mainMap(spec);
-    const placed = { label: 'label', number: 'label', arrow: 'arrow', measure: 'measure', ring: 'ring', cone: 'cone', zone: 'zone', spotlight: 'zone' };
+    const placed = { label: 'label', number: 'label', note: 'label', arrow: 'arrow', measure: 'measure', ring: 'ring', cone: 'cone', zone: 'zone',
+      spotlight: 'zone', line: 'line', symbol: 'symbol' };
     if (placed[kind]) {
       if (!main) { toast('Put a map on the page first', 'warn'); return; }
       // a second press on the armed tool puts it down
@@ -511,6 +667,14 @@
     switch (kind) {
       case 'map': element = { id, kind: 'map', box: box(width * 0.3, height * 0.3, width * 0.4, height * 0.4), view: { ...(main?.view ?? mapGround()) },
         basemap: main?.basemap ?? 'plain', overlays: [...(main?.overlays ?? ['relief'])], layers: JSON.parse(JSON.stringify(main?.layers ?? [])), grid: 'none' }; break;
+      case 'view3d': {
+        // the main map's ground seen from the side, standing on its heights
+        const from = main ? framingFor(main).view : mapGround();
+        element = { id, kind: 'map', name: '3D view', box: box(width * 0.3, height * 0.3, width * 0.4, height * 0.4),
+          view: { ...from, zoom: Math.max(1, (from.zoom ?? 10) - 0.5), pitch: 60 }, terrain: 1.5, ridges: false,
+          basemap: main?.basemap ?? 'plain', overlays: [...(main?.overlays ?? ['relief'])], layers: JSON.parse(JSON.stringify(main?.layers ?? [])), grid: 'none' };
+        break;
+      }
       case 'detail': element = { id, kind: 'map', of, box: box(mx + mw - 64, my + 4, 60, 45), view: { ...main.view, zoom: Math.min(20, main.view.zoom + 2.5) },
         basemap: main.basemap, overlays: [...(main.overlays ?? [])], layers: JSON.parse(JSON.stringify(main.layers ?? [])), grid: 'none', name: 'Detail' }; break;
       case 'inset': element = { id, kind: 'inset', of, box: box(mx + mw - 52, my + mh - 42, 48, 38), border: true, zoom: null }; break;
@@ -564,22 +728,41 @@
       return;
     }
     let element;
-    if (kind === 'label') {
+    // words on the ground are given their size, so the plate saved and opened again writes them as it does now
+    const size = (of) => ({ size: defaultSize(of) });
+    if (kind === 'label' && preset === 'note') {
+      // a text on the map: no leader, standing over its point, moved with it
+      element = { id: newId('label'), kind: 'label', name: 'Text on the map', of, at: point.map((value) => Math.round(value * 1e6) / 1e6),
+        box: [page[0], page[1], 20, 6], text: 'Text', size: 10, weight: 600, style: 'plain', leader: 'none', end: 'none', ...day };
+      const [, , w, h] = labelBox(element, measure);
+      element.box = [Math.round((page[0] - w / 2) * 10) / 10, Math.round((page[1] - h / 2) * 10) / 10, w, h];
+    } else if (kind === 'label') {
       element = { id: newId('label'), kind: 'label', of, at: point.map((value) => Math.round(value * 1e6) / 1e6), box: [page[0] + 3, page[1] - 9, 28, 6],
         text: preset === 'number' ? 'What this number marks' : 'Label', size: 9, weight: 600, style: preset === 'number' ? 'number' : 'bubble', ...day };
       element.box = labelBox(element, measure);
       if (preset === 'number') element.box = [page[0] + 2, page[1] - 8, element.box[2], element.box[3]];
-    } else if (kind === 'arrow') element = { id: newId('arrow'), kind: 'arrow', of, at: point, to, box: [0, 0, 1, 1], width: 1.2, ...day };
-    else if (kind === 'measure') element = { id: newId('measure'), kind: 'measure', of, at: point, to, box: [0, 0, 1, 1], width: 1, line: 'dashed', ...day };
+    } else if (kind === 'arrow') element = { id: newId('arrow'), kind: 'arrow', of, at: point, to, box: [0, 0, 1, 1], width: 1.2, ...size('arrow'), ...day };
+    else if (kind === 'measure') element = { id: newId('measure'), kind: 'measure', of, at: point, to, box: [0, 0, 1, 1], width: 1, line: 'dashed', ...size('measure'), ...day };
     else if (kind === 'ring') {
       const km = Math.max(0.01, Math.round((distanceKm(point, to)) * 100) / 100);
-      element = { id: newId('ring'), kind: 'ring', of, at: point, box: [0, 0, 1, 1], radii: [km, km * 2, km * 3].map((value) => Math.round(value * 100) / 100), look: 'outline', width: 1, ...day };
+      element = { id: newId('ring'), kind: 'ring', of, at: point, box: [0, 0, 1, 1], radii: [km, km * 2, km * 3].map((value) => Math.round(value * 100) / 100), look: 'outline', width: 1,
+        ...size('ring'), ...day };
     } else if (kind === 'cone') {
       element = { id: newId('cone'), kind: 'cone', of, at: point, box: [0, 0, 1, 1], bearing: Math.round(bearing(point, to)), spread: 60,
-        reach: Math.max(0.01, Math.round(distanceKm(point, to) * 100) / 100), look: 'fill', width: 1, ...day };
+        reach: Math.max(0.01, Math.round(distanceKm(point, to) * 100) / 100), look: 'fill', width: 1, ...size('cone'), ...day };
     } else if (kind === 'zone') {
       element = { id: newId('zone'), kind: 'zone', of, points, box: [0, 0, 1, 1], look: preset === 'spotlight' ? 'outline' : 'hatch', width: 1,
-        ...(preset === 'spotlight' ? { mask: { on: true, darkness: 0.55 } } : {}), ...day };
+        ...(preset === 'spotlight' ? { mask: { on: true, darkness: 0.55 } } : {}), ...size('zone'), ...day };
+    } else if (kind === 'line') {
+      element = { id: newId('line'), kind: 'line', of, points, box: [0, 0, 1, 1], width: 1.4, line: 'solid', shape: 'line', heads: 'none', ...size('line'), ...day };
+    } else if (kind === 'symbol') {
+      // the last symbol set, standing over its point; the tool stays in hand for the next one
+      const side = lastSymbol.size;
+      element = { id: newId('symbol'), kind: 'symbol', of, at: point.map((value) => Math.round(value * 1e6) / 1e6), symbol: lastSymbol.symbol,
+        colour: lastSymbol.colour ?? spec.theme.accent, box: [Math.round((page[0] - side / 2) * 10) / 10, Math.round((page[1] - side / 2) * 10) / 10, side, side], ...day };
+      put(element);
+      placing = { kind: 'symbol', preset: 'symbol' };
+      return;
     }
     if (element) put(element);
   }
@@ -618,22 +801,16 @@
     const copies = pasted([element], mainMap(spec)?.id, new Set(spec.elements.map((item) => item.id)));
     if (copies.length) put(...copies);
   }
-  function order(element, step) {
-    const list = [...spec.elements];
-    const index = list.indexOf(element);
-    const to = Math.max(0, Math.min(list.length - 1, index + step));
-    list.splice(index, 1);
-    list.splice(to, 0, element);
-    spec.elements = mapsFirst(list);
+  /** The elements as the list shows them, top first: one step forward or back is among these. */
+  const listed = $derived(spec ? listedOf(spec, at, place) : []);
+  /** One step forward (`by` 1) or back (-1) among the rows the list shows; nothing when it can go no further. */
+  function restackBy(element, by) {
+    const to = stepOf(listed, element.id, by);
+    if (to !== null) spec.elements = restacked(spec.elements, listed, element.id, to);
   }
-  /** The list's drag: `index` is the place in the list, top first, which is the page's order turned over. */
+  /** The list's drag: the element let go above the row at `index` of the list, top first. */
   function restack(id, index) {
-    const shown = [...spec.elements].reverse();
-    const from = shown.findIndex((item) => item.id === id);
-    if (from < 0) return;
-    const [element] = shown.splice(from, 1);
-    shown.splice(index > from ? index - 1 : index, 0, element);
-    spec.elements = mapsFirst(shown.reverse());
+    spec.elements = restacked(spec.elements, listed, id, index);
   }
   function paper(page) {
     plate.spec = onPaper(plate.spec, page);
@@ -664,10 +841,11 @@
       const standing = isTracked(row) && hasHistory(feature) ? stateAt(feature, day) : feature;
       const name = String(standing?.properties?.name ?? '').trim();
       const key = standing?.properties?.key ?? '';
-      if (!standing || !name || (key && labelled.has(key)) || !inFrame(standing.geometry, live.view, live.frame, 0)) continue;
+      // a map in 3D places its ground through its own camera
+      if (!standing || !name || (key && labelled.has(key)) || !inFrame(standing.geometry, live.view, live.frame, 0, live.project)) continue;
       const point = anchor(standing.geometry);
       if (!point) continue;
-      const [px, py] = project(live.view, live.frame, point);
+      const [px, py] = live.project ? live.project(point) : project(live.view, live.frame, point);
       found.push({ name, key, point, x: map.box[0] + px / PX_PER_MM, y: map.box[1] + py / PX_PER_MM });
     }
     const chosen = found.slice(0, 40);
@@ -736,6 +914,14 @@
     if (event.key === 'Escape') {
       if (placing) { placing = null; return; }
       if (!framing && selection.length) { selection = []; return; }
+      if (!framing && focus) { setFocus(false); return; }
+    }
+    // A opens Add, F gives the page the whole window and gives it back
+    if (!ctrl && !event.altKey && !event.repeat && (key === 'a' || key === 'f')) {
+      event.preventDefault();
+      if (key === 'a') adding = focus ? focusAdd : addButton;
+      else setFocus(!focus);
+      return;
     }
     if (ctrl && key === 'v') { event.preventDefault(); pasteSelection(); return; }
     const chosen = spec.elements.filter((item) => selection.includes(item.id));
@@ -753,7 +939,7 @@
       const step = event.shiftKey ? 5 : 1;
       const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
       for (const element of chosen) {
-        if (element.locked || ON_THE_GROUND.includes(element.kind)) continue;
+        if (element.locked || (ON_THE_GROUND.includes(element.kind) && element.kind !== 'label')) continue;
         element.box = [element.box[0] + dx, element.box[1] + dy, element.box[2], element.box[3]];
       }
     }
@@ -771,7 +957,7 @@
       if (!map) continue;
       const live = views[map.id];
       out[element.id] = legendRows({ ...map, offmap: element.offmap, off: element.off, order: element.order, names: element.names, extra: element.extra }, {
-        rows, collection: (name) => addedLayers.collection(name), view: live?.view, frame: live?.frame,
+        rows, collection: (name) => addedLayers.collection(name), view: live?.view, frame: live?.frame, place: live?.project,
         days: legendDays ?? [at],
         standing: (row, feature, day) => (isTracked(row) && hasHistory(feature) ? stateAt(feature, day ?? '￿') : feature),
         past: (row, collection, day) => (isTracked(row) ? asOf(collection, day, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? 7 }).features : []),
@@ -874,15 +1060,24 @@
   });
 
   const markers = new Map();
-  function markerImage(symbol, colour, marks = {}) {
-    const key = `${symbol}|${colour}|${marks.status ?? ''}`;
+  /** A marker's picture, `pixels` wide at least: drawn larger for a symbol on a print, in steps so few are kept. */
+  function markerImage(symbol, colour, marks = {}, pixels = MARKER_PIXELS) {
+    const times = Math.max(1, Math.min(8, Math.ceil(pixels / MARKER_PIXELS)));
+    const key = `${symbol}|${colour}|${marks.status ?? ''}|${times}`;
     if (markers.has(key)) return markers.get(key);
-    const data = isBadge(symbol) ? badgeImage(symbol, colour, marks) : personalMarkerImage(symbol, colour, marks);
     let canvas = null;
-    if (data) {
+    if (times > 1) {
       canvas = document.createElement('canvas');
-      canvas.width = data.width; canvas.height = data.height;
-      canvas.getContext('2d')?.putImageData(data, 0, 0);
+      canvas.width = canvas.height = MARKER_PIXELS * times;
+      const ctx = canvas.getContext('2d');
+      if (ctx) drawMarker(ctx, symbol, colour, marks, times);
+    } else {
+      const data = isBadge(symbol) ? badgeImage(symbol, colour, marks) : personalMarkerImage(symbol, colour, marks);
+      if (data) {
+        canvas = document.createElement('canvas');
+        canvas.width = data.width; canvas.height = data.height;
+        canvas.getContext('2d')?.putImageData(data, 0, 0);
+      }
     }
     markers.set(key, canvas);
     return canvas;
@@ -894,12 +1089,23 @@
   // -- export --------------------------------------------------------------------------
 
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** At most this many frames of transitions in one video (`engine/mapplates.MAX_TWEENS`). */
+  const MAX_TWEENS = 480;
 
   /**
    * The page drawn at `scale` canvas pixels a millimetre, on the day `day` and its
    * step `step` (`day` undefined: the plate's own day and step, as shown).
    */
-  async function render(scale, day, { quick = false, transparent = false, step = null } = {}) {
+  async function render(scale, day, options = {}) {
+    return (await drawBeat(scale, day, options)).canvas;
+  }
+
+  /**
+   * The page drawn as `render` draws it, with what it was drawn from: `{ canvas, context }`,
+   * the context holding the maps' pictures, which a transition carries to the next beat.
+   * The paper is see-through only when a PNG asks for it, whatever the page says.
+   */
+  async function drawBeat(scale, day, { quick = false, transparent = false, step = null } = {}) {
     if (day !== undefined) { exportTime = { ...spec.time, at: day }; exportStep = step; await tick(); await wait(quick ? 0 : 250); }
     const maps = {};
     const ratio = quick ? Math.min(2, window.devicePixelRatio || 1) : scale / PX_PER_MM;
@@ -907,9 +1113,9 @@
       const handle = handles.get(element.id);
       if (handle && !element.hidden && shownOn(element, at, place)) maps[element.id] = await handle.snapshot(ratio);
     }
-    const page = transparent ? { ...spec, page: { ...spec.page, transparent: true } } : spec;
-    return composePage(page, scale, { ...decor, views, maps, at: (exportTime ?? time).at,
-      tokens: { ...tokens, date: (exportTime ?? time).at } });
+    const page = { ...spec, page: { ...spec.page, transparent } };
+    const context = { ...decor, views, maps, at: (exportTime ?? time).at, tokens: { ...tokens, date: (exportTime ?? time).at } };
+    return { canvas: composePage(page, scale, context), context };
   }
 
   /** What stands over the running clips of the step drawn now, on a see-through page of the same size. */
@@ -966,9 +1172,29 @@
           const frames = [];
           const sent = [];
           const overs = [];
+          // an MP4 goes from one beat to the next by the plate's transitions, drawn here from the two beats
+          const moves = format === 'mp4' ? transitionsOf(spec) : { on: false };
+          const tweens = [];
+          let before = null;
           for (const [index, beat] of list.entries()) {
             progress = `Drawing ${momentLabel(beat.day) || 'the page'}${beat.step ? `, ${stepName(stepsOf(spec, beat.day).findIndex((item) => item.id === beat.step), beat.day)}` : ''} (${index + 1} of ${list.length})…`;
-            frames.push(await canvasBlob(await render(scale, beat.day, { step: beat.step }), 'image/jpeg', 0.9));
+            const drawn = await drawBeat(scale, beat.day, { step: beat.step });
+            frames.push(await canvasBlob(drawn.canvas, 'image/jpeg', 0.9));
+            let tween = null;
+            if (before && moves.on) {
+              const changed = changes(spec, before, drawn);
+              const cut = !!beat.step && stepsOf(spec, beat.day).find((item) => item.id === beat.step)?.transition === 'none';
+              const plan = transitionPlan(moves, changed, { cut });
+              if (plan && tweens.length + plan.frames <= MAX_TWEENS) {
+                const start = tweens.length;
+                // a map on the move is drawn again by its own engine at each frame of the way
+                const sitting = (id) => handles.get(id)?.sitting?.(scale / PX_PER_MM) ?? null;
+                if (plan.move) progress = `Drawing the move to ${momentLabel(beat.day) || 'the next step'}…`;
+                for await (const canvas of tweenFrames(spec, scale, before, drawn, plan, changed, { sitting })) tweens.push(await canvasBlob(canvas, 'image/jpeg', 0.88));
+                tween = [start, tweens.length - start];
+              }
+            }
+            before = drawn;
             const clips = format === 'mp4' ? beatClips(spec, beat).map((element) => {
               const [start, end] = clipRange(element);
               const [x, y, w, h] = element.box.map((value) => Math.round(value * scale));
@@ -976,10 +1202,10 @@
                 sound: !!element.sound, volume: element.volume ?? 1 };
             }) : [];
             if (clips.length) overs.push(await canvasBlob(overPage(scale)));
-            sent.push({ seconds: Math.round(beat.seconds * 1000) / 1000, ...(clips.length ? { clips, over: overs.length - 1 } : {}) });
+            sent.push({ seconds: Math.round(beat.seconds * 1000) / 1000, ...(clips.length ? { clips, over: overs.length - 1 } : {}), ...(tween ? { tween } : {}) });
           }
           progress = format === 'mp4' && overs.length ? 'Making the video, clips included…' : 'Writing…';
-          answer = await postExport(caseId, { format, frames, widthMm, heightMm, interval, filename: name, beats: stepped ? sent : null, overs });
+          answer = await postExport(caseId, { format, frames, widthMm, heightMm, interval, filename: name, beats: stepped || tweens.length ? sent : null, overs, tweens });
         }
       }
       toast(`${answer.file} written`, 'ok', 5200, { label: 'Show', onClick: () => revealPlates(caseId).catch((error) => toast(error.message, 'warn')) });
@@ -1027,10 +1253,11 @@
 
 <svelte:window onkeydown={keydown} onpointerdowncapture={press} />
 
-<div class="tool">
+<div class="tool" bind:this={toolEl}>
   {#if plate}
+    {#if !focus}
     <div class="tool-header">
-      <button class="btn btn-ghost btn-sm" title="Back to the plates" aria-label="Back to the plates" onclick={close}><Icon name="chevronLeft" size={14} /></button>
+      <BackButton label="Plates" title="Back to the plates" onclick={close} />
       {#if plate.template}<span class="kind">Template</span>{/if}
       <input class="input title-input" bind:value={titleField} onblur={commitTitle} maxlength="200"
         onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} aria-label="Plate name" />
@@ -1041,8 +1268,21 @@
         <button class="btn btn-ghost btn-xs" onclick={() => autosave.flush()}>Retry</button>
       {/if}
       <div class="spacer"></div>
+      <button class="btn btn-sm add-btn" class:on={!!adding} bind:this={addButton} aria-haspopup="dialog" aria-expanded={!!adding}
+        title="Add to the page (A)" onclick={() => toggleAdd(addButton)}><Icon name="plus" size={14} /> Add</button>
+      <span class="rule" role="presentation"></span>
       <button class="btn btn-ghost btn-sm" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}><Icon name="undo" size={15} /></button>
       <button class="btn btn-ghost btn-sm" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}><Icon name="redo" size={15} /></button>
+      <span class="rule" role="presentation"></span>
+      <button class="btn btn-ghost btn-sm toggle" class:on={layout.list} aria-pressed={layout.list} aria-label="The list"
+        title={layout.list ? 'Hide the list' : 'Show the list'} onclick={() => panel('list')}><Icon name="panelLeft" size={15} /></button>
+      <button class="btn btn-ghost btn-sm toggle" class:on={layout.inspector} aria-pressed={layout.inspector} aria-label="The inspector"
+        title={layout.inspector ? 'Hide the inspector' : 'Show the inspector'} onclick={() => panel('inspector')}><Icon name="panelRight" size={15} /></button>
+      <button class="btn btn-ghost btn-sm" aria-label="Focus on the page" title="Focus on the page, full screen (F)" onclick={() => setFocus(true)}><Icon name="maximize" size={15} /></button>
+      {#if !solo && !plate.template}
+        <button class="btn btn-ghost btn-sm" aria-label="Open in its own tab" title="Open in its own tab, for another screen" onclick={detach}><Icon name="external" size={15} /></button>
+      {/if}
+      <span class="rule" role="presentation"></span>
       {#if !plate.template}
         <button class="btn btn-sm" onclick={() => (naming = { value: plate.title })} title="Keep this layout, without its data, to start other plates from">
           <Icon name="save" size={14} /> Keep as template</button>
@@ -1052,38 +1292,68 @@
           <Icon name="check" size={14} /> Done</button>
       {/if}
     </div>
+    {/if}
 
-    <div class="work">
-      <PlateElements spec={plate.spec} bind:selection {at} {place} {playable} bind:ghosts {placing} {tokens} onadd={add} onrestack={restack} />
+    <div class="work" class:focus style:--below="{barShown ? barHeight : 0}px">
+      {#if listShown}
+        <div class="dock left" style:width="{layout.listW}px">
+          <PlateElements spec={plate.spec} bind:selection {at} {place} {playable} bind:ghosts {tokens} onrestack={restack} onhide={() => panel('list')} />
+          <PanelEdge bind:width={layout.listW} helpers={listWidth} side="right" label="Resize the list" />
+        </div>
+      {/if}
 
       <div class="centre">
         {#key opened}
           <PlatePage spec={plate.spec} bind:selection bind:framing {placing} onplace={placed} caseId={plate.caseId ?? caseId ?? ''} {rows} {providers} {relief}
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
-            onmap={(id, handle) => handles.set(id, handle)} />
+            {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} {written}
+            glide={transitionsOf(plate.spec).on && transitionsOf(plate.spec).move ? (transitionsOf(plate.spec).seconds * 1000) / speed : 0}
+            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} />
         {/key}
+        {#if focus}
+          <div class="focus-bar" role="toolbar" aria-label="The plate">
+            <button type="button" class="fb add" class:on={!!adding} bind:this={focusAdd} aria-haspopup="dialog" aria-expanded={!!adding}
+              title="Add to the page (A)" onclick={() => toggleAdd(focusAdd)}><Icon name="plus" size={14} /> Add</button>
+            <span class="fb-rule" role="presentation"></span>
+            <button type="button" class="fb" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}><Icon name="undo" size={15} /></button>
+            <button type="button" class="fb" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}><Icon name="redo" size={15} /></button>
+            <span class="fb-rule" role="presentation"></span>
+            <button type="button" class="fb" class:on={floating.list} aria-pressed={floating.list} aria-label="The list"
+              title={floating.list ? 'Hide the list' : 'Show the list'} onclick={() => panel('list')}><Icon name="panelLeft" size={15} /></button>
+            <button type="button" class="fb" class:on={floating.inspector} aria-pressed={floating.inspector} aria-label="The inspector"
+              title={floating.inspector ? 'Hide the inspector' : 'Show the inspector'} onclick={() => panel('inspector')}><Icon name="panelRight" size={15} /></button>
+            {#if autosave.state.status === 'error'}
+              <button type="button" class="fb error" title={`Not saved: ${autosave.state.error}. Press to try again`} onclick={() => autosave.flush()}>
+                <Icon name="alert" size={13} /> Not saved</button>
+            {/if}
+            <span class="fb-rule" role="presentation"></span>
+            {#if !plate.template}
+              <button type="button" class="fb" aria-label="Export" title="Export" onclick={openExport}><Icon name="download" size={15} /></button>
+            {/if}
+            <button type="button" class="fb" aria-label="Leave focus" title="Leave focus (F or Esc)" onclick={() => setFocus(false)}><Icon name="minimize" size={15} /></button>
+          </div>
+        {/if}
         {#if stepId && !playing}
           <p class="on-step">{stepName(stepIndex)}: what you add belongs to it</p>
         {/if}
-        {#if !plate.template}
-          {#if daySteps.length}
-            <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : playable ? 'Now' : 'The page'} elements={plate.spec.elements}
-              caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
-              onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} />
-          {/if}
-          <div class="timebar" class:slim={!moments.length}>
-            {#if moments.length || stepped}
-              <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their steps' : 'Play the steps'}
-                disabled={sequence.length < 2} onclick={play}><Icon name={playing ? 'pause' : 'play'} size={14} /></button>
-              <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
-              <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>
-            {/if}
+        {#if barShown}
+          <!-- the plate's days and the day's steps on one bar; a plate that plays nothing has none, Add holds its first step -->
+          <div class="timebar" bind:clientHeight={barHeight}>
+            <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their steps' : 'Play the steps'}
+              disabled={sequence.length < 2} onclick={play}><Icon name={playing ? 'pause' : 'play'} size={14} /></button>
+            <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
+            <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>
             {#if moments.length}
               <div class="cursor"><LayerTimeCursor time={time} {moments} precision={tracked[0]?.track?.precision ?? 'day'}
                 zone={tracked[0]?.track?.zone ?? 'UTC'} label="The plate's day"
                 onchange={(patch) => { if (playing) stop(); if ('at' in patch && patch.at !== plate.spec.time.at) plate.spec.time.step = null; Object.assign(plate.spec.time, patch); }} /></div>
-            {:else}<span class="spacer"></span>{/if}
-            {#if !daySteps.length}
+            {/if}
+            {#if daySteps.length}
+              <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : playable ? 'Now' : 'The page'} elements={plate.spec.elements}
+                transitions={transitionsOf(plate.spec).on}
+                caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
+                onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} />
+            {:else}
               <button type="button" class="speed add-step" onclick={newStep}
                 title="Add a step, played after the day"><Icon name="plus" size={11} /> Step</button>
             {/if}
@@ -1091,12 +1361,23 @@
         {/if}
       </div>
 
-      <PlateInspector spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {legend} {framing} {at} moments={playable ? moments : []}
-        {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
-        {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={order} ongroup={group} onwayback={readReleases}
-        onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlabels={labelFeatures}
-        onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />
+      {#if inspectorShown}
+        <div class="dock right" style:width="{layout.inspectorW}px">
+          <PanelEdge bind:width={layout.inspectorW} helpers={inspectorWidth} side="left" label="Resize the inspector" />
+          <PlateInspector spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {legend} {framing} {at} moments={playable ? moments : []}
+            {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
+            {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases}
+            {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
+            onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
+            onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlabels={labelFeatures}
+            onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />
+        </div>
+      {/if}
     </div>
+
+    {#if adding}
+      <PlateAdd anchor={adding} {placing} template={!!plate.template} onadd={add} onclose={() => (adding = null)} />
+    {/if}
   {:else if !caseState.current}
     <NoCase icon="plate" what="lay out a map plate" />
   {:else}
@@ -1203,19 +1484,49 @@
 
 <style>
   .tool { display: flex; flex-direction: column; height: 100%; }
+  .tool:fullscreen { background: var(--bg-0, #0d0f12); }
   .tool-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .title-input { width: 280px; }
   .kind { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--text-1); font-size: 11px; font-weight: 600; }
   .status { display: flex; align-items: center; gap: 4px; color: var(--text-3); font-size: var(--fs-xs); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status.error { color: var(--danger); }
   .spacer { flex: 1; }
-  .work { flex: 1; min-height: 0; display: flex; }
+  .tool-header .rule { width: 1px; height: 20px; margin: 0 3px; background: var(--border); }
+  .add-btn { gap: 5px; }
+  .add-btn.on, .toggle.on { color: var(--text-1); }
+  .add-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+  .toggle { color: var(--text-3); }
+  .work { position: relative; flex: 1; min-height: 0; display: flex; }
   .centre { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .dock { position: relative; flex: none; display: flex; min-height: 0; background: var(--bg-1); }
+  .dock.left { border-right: 1px solid var(--border); }
+  .dock.right { border-left: 1px solid var(--border); }
+  /* in focus the panels float over the page rather than push it, and stop above the play bar */
+  .work.focus .dock { position: absolute; z-index: 9; top: 62px; bottom: calc(var(--below, 0px) + 12px); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow-2); animation: rise .16s ease-out; }
+  .work.focus .dock.left { left: 12px; }
+  /* the inspector stops over the page's zoom, which stays in reach */
+  .work.focus .dock.right { right: 12px; top: 12px; bottom: calc(var(--below, 0px) + 58px); }
+  .work.focus .dock > :global(aside) { border-radius: inherit; }
+  @keyframes rise { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .focus-bar { position: absolute; top: 12px; left: 12px; z-index: 8; display: flex; align-items: center; gap: 2px; padding: 4px;
+    border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    box-shadow: var(--shadow-2); backdrop-filter: blur(8px); animation: rise .16s ease-out; }
+  .fb { display: inline-flex; align-items: center; gap: 5px; height: 30px; min-width: 30px; justify-content: center; padding: 0 7px;
+    border-radius: 7px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
+  .fb:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); }
+  .fb:disabled { opacity: .35; cursor: default; }
+  .fb.on { background: var(--accent-soft); color: var(--text-1); }
+  .fb.add { padding: 0 10px; background: var(--accent); color: var(--accent-text); }
+  .fb.add:hover { background: var(--accent); filter: brightness(1.08); color: var(--accent-text); }
+  .fb.error { color: var(--danger); }
+  .fb-rule { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
   .on-step { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7; margin: 0; padding: 3px 12px; border-radius: 999px;
     background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; }
-  .timebar { display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; border-top: 1px solid var(--border); background: var(--bg-1); }
-  .timebar.slim { padding-top: 5px; padding-bottom: 5px; }
-  .cursor { flex: 1; min-width: 0; max-width: 720px; }
+  .timebar { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
+  .cursor { flex: 1 1 320px; min-width: 220px; max-width: 720px; }
+  .timebar > :global(.steps) { flex: 0 1 auto; }
+  .cursor + :global(.steps) { padding-left: 10px; border-left: 1px solid var(--border); }
   .add-step { display: inline-flex; align-items: center; gap: 3px; flex: none; }
   .cursor :global(.cursor) { padding-left: 0; }
   .play { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-text); cursor: pointer; }

@@ -9,10 +9,14 @@
  *
  * What only the editor shows (a placeholder, an annotation of another day drawn
  * faintly, the guides) is drawn when `context.editing` says so, never in an export.
+ *
+ * A video's transition draws the page again while what is new on a beat appears
+ * (`context.reveal`): faded in, or drawn along its lines as far as `t` has gone.
  */
-import { MM_PER_PT, PX_PER_MM, fillTokens, fontFamily, pageSize, shownOn } from './page.js';
+import { MM_PER_PT, PX_PER_MM, fillTokens, fontFamily, pageSize, shownOn, standsOver } from './page.js';
 import { posterKey } from './clip.js';
-import { bearingTo, circle, corners, decimalLabel, degreeLabel, distance, graticule, project, scaleBar, sector, utmGrid, utmLabel } from './geo.js';
+import { bearingTo, circle, corners, decimalLabel, degreeLabel, distance, graticule, project, scaleBar, sector, travel, utmGrid, utmLabel } from './geo.js';
+import { backColourOf, backOf, defaultSize, inkOf } from './words.js';
 import { qrMatrix } from './qr.js';
 import { drawSignature, signatureWidth } from '../brandMark.js';
 
@@ -60,10 +64,33 @@ function frameOfMap(map, context) {
   const box = boxPx(map, context.scale);
   const ratio = context.scale / PX_PER_MM;
   return { map, box, view: live.view, frame: live.frame,
+    // a map in 3D places the ground through its own camera, the heights included
     at: (point) => {
-      const [px, py] = project(live.view, live.frame, point);
+      const [px, py] = live.project ? live.project(point) : project(live.view, live.frame, point);
       return [box.x + px * ratio, box.y + py * ratio];
     } };
+}
+
+/** Whether a map is tilted, so what assumes a flat map (a scale, a grid) says it does not hold. */
+const tilted = (view) => (view?.pitch ?? 0) > 0.5;
+
+/** The first `t` of a line of canvas points, by its length: what a line drawn along its way has reached. */
+export function partOf(points, t = 1) {
+  if (t >= 1 || points.length < 2) return points;
+  const lengths = points.slice(1).map((point, index) => Math.hypot(point[0] - points[index][0], point[1] - points[index][1]));
+  let left = Math.max(0, t) * lengths.reduce((sum, value) => sum + value, 0);
+  const out = [points[0]];
+  for (const [index, length] of lengths.entries()) {
+    const [a, b] = [points[index], points[index + 1]];
+    if (length >= left) {
+      const k = length ? left / length : 0;
+      out.push([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]);
+      return out;
+    }
+    out.push(b);
+    left -= length;
+  }
+  return out;
 }
 
 /** The dash a line style draws, scaled to its width. */
@@ -153,8 +180,9 @@ function writeBox(ctx, element, context, text) {
 function writeCredits(ctx, element, context, text) {
   const box = boxPx(element, context.scale);
   const theme = context.spec.theme;
-  const pad = (element.fill || element.border ? 1.2 : 0) * context.scale;
-  if (element.fill) { ctx.fillStyle = element.fill; ctx.fillRect(box.x, box.y, box.w, box.h); }
+  const back = backOf(element);
+  const pad = (back === 'box' || element.border ? 1.2 : 0) * context.scale;
+  if (back === 'box') { ctx.fillStyle = backColourOf(element, theme); ctx.fillRect(box.x, box.y, box.w, box.h); }
   let size = element.size ?? 5.5;
   ctx.font = font(theme, size, 400, context.scale, element);
   const lineHeight = (pt) => pt * MM_PER_PT * context.scale * 1.25;
@@ -164,7 +192,7 @@ function writeCredits(ctx, element, context, text) {
   }
   const overMap = context.spec.elements.some((map) => MAP_KINDS.includes(map.kind) && overlaps(map.box, element.box));
   writeLines(ctx, { ...element, valign: element.valign ?? 'bottom' }, context, text, box,
-    { pad, clip: false, sizePt: size, colour: element.colour || theme.ink, backing: overMap && !element.fill ? `${theme.paper}d9` : null });
+    { pad, clip: false, sizePt: size, colour: element.colour || theme.ink, backing: overMap && back === 'band' ? `${theme.paper}d9` : null });
   return wrap(ctx, text, box.w - 2 * pad).length * lineHeight(size) > box.h + 0.5;
 }
 
@@ -202,7 +230,8 @@ function edgeCrossings(points, frame) {
 
 function drawGrid(ctx, element, context) {
   const live = context.views?.[element.id];
-  if (!live || element.grid === 'none' || !element.grid) return;
+  // a grid's lines are straight only on a flat map
+  if (!live || element.grid === 'none' || !element.grid || tilted(live.view)) return;
   const { scale, spec } = context;
   const box = boxPx(element, scale);
   const ratio = scale / PX_PER_MM;
@@ -273,6 +302,7 @@ function drawFootprint(ctx, outer, inner, context, { connect = false } = {}) {
   if (!outerLive || !innerLive) return;
   const ratio = scale / PX_PER_MM;
   const ob = boxPx(outer, scale);
+  // a leaning map outlines the ground it looks at, short of the horizon
   const ring = corners(innerLive.view, innerLive.frame).map((point) => {
     const [px, py] = project(outerLive.view, outerLive.frame, point);
     return [ob.x + px * ratio, ob.y + py * ratio];
@@ -400,9 +430,9 @@ function drawLegend(ctx, element, context) {
   return pad * 2 + line * (perColumn + 1.25) > box.h + 0.5;
 }
 
-function drawBar(ctx, context, x, top, length, height, segments, label, style, theme) {
+function drawBar(ctx, context, x, top, length, height, segments, label, style, theme, ink = theme.ink) {
   const { scale } = context;
-  ctx.strokeStyle = theme.ink; ctx.lineWidth = Math.max(1, 0.2 * scale);
+  ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, 0.2 * scale);
   if (style === 'line') {
     ctx.beginPath(); ctx.moveTo(x, top + height); ctx.lineTo(x + length, top + height);
     ctx.moveTo(x, top); ctx.lineTo(x, top + height); ctx.moveTo(x + length, top); ctx.lineTo(x + length, top + height); ctx.stroke();
@@ -415,12 +445,12 @@ function drawBar(ctx, context, x, top, length, height, segments, label, style, t
     ctx.stroke();
   } else {
     for (let index = 0; index < segments; index += 1) {
-      ctx.fillStyle = index % 2 ? (theme.paper ?? '#fff') : theme.ink;
+      ctx.fillStyle = index % 2 ? (theme.paper ?? '#fff') : ink;
       ctx.fillRect(x + (length / segments) * index, top, length / segments, height);
     }
     ctx.strokeRect(x, top, length, height);
   }
-  ctx.fillStyle = theme.ink; ctx.textBaseline = 'top';
+  ctx.fillStyle = ink; ctx.textBaseline = 'top';
   ctx.fillText('0', x - 0.5 * scale, top + height + 0.6 * scale);
   const width = ctx.measureText(label).width;
   ctx.fillText(label, x + length - width / 2, top + height + 0.6 * scale);
@@ -432,6 +462,11 @@ function drawScale(ctx, element, context) {
   if (!map) return;
   const box = boxPx(element, scale);
   const theme = spec.theme;
+  if (tilted(map.view)) {
+    // the ground shrinks toward the horizon of a tilted map: no one length holds across it
+    if (context.editing) haloText(ctx, 'No scale on a tilted map', box.x + box.w / 2, box.y + box.h / 2, theme.ink, context, 6);
+    return;
+  }
   if (element.fill) { ctx.fillStyle = element.fill; ctx.globalAlpha = 0.85; ctx.fillRect(box.x, box.y, box.w, box.h); ctx.globalAlpha = 1; }
   const ratio = scale / PX_PER_MM;
   const pad = 1.2 * scale;
@@ -442,7 +477,8 @@ function drawScale(ctx, element, context) {
   bars.forEach((imperial, index) => {
     const bar = scaleBar(map.view, (box.w - 2 * pad) / ratio * 0.72, imperial);
     const height = Math.max(2, Math.min(share * 0.32, 1.3 * scale));
-    drawBar(ctx, context, box.x + pad, box.y + pad + index * share, bar.pixels * ratio, height, bar.segments, bar.label, element.variant ?? 'bar', theme);
+    drawBar(ctx, context, box.x + pad, box.y + pad + index * share, bar.pixels * ratio, height, bar.segments, bar.label, element.variant ?? 'bar', theme,
+      element.colour || theme.ink);
   });
 }
 
@@ -556,10 +592,12 @@ function drawVideo(ctx, element, context, { over = false } = {}) {
     const sizePt = element.size ?? 7;
     const band = Math.min(box.h * 0.4, sizePt * MM_PER_PT * context.scale * 1.9);
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
-    ctx.fillRect(box.x, box.y + box.h - band, box.w, band);
+    if (backOf(element) === 'box') {
+      ctx.fillStyle = element.fill ? `${element.fill}9e` : 'rgba(0, 0, 0, 0.62)';
+      ctx.fillRect(box.x, box.y + box.h - band, box.w, band);
+    }
     ctx.font = font(theme, sizePt, 600, context.scale, element);
-    ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.fillStyle = inkOf(element, theme); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     const pad = 1.2 * context.scale;
     let line = String(element.text);
     while (line.length > 1 && ctx.measureText(line).width > box.w - 2 * pad) line = `${line.slice(0, -2)}…`;
@@ -636,9 +674,22 @@ function drawLeader(ctx, element, context, box, { colour }) {
 }
 
 function drawLabel(ctx, element, context) {
+  // a text on the map stands over its point, wherever this day or step frames the map, and on it only
+  const map = standsOver(element) ? frameOf(element, context) : null;
+  const point = map?.at(element.at);
+  if (!point) return drawLabelIn(ctx, element, context, boxPx(element, context.scale));
+  const box = boxPx(element, context.scale);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(map.box.x, map.box.y, map.box.w, map.box.h); ctx.clip();
+  const ran = drawLabelIn(ctx, element, context, { ...box, x: point[0] - box.w / 2, y: point[1] - box.h / 2 });
+  ctx.restore();
+  return ran;
+}
+
+/** A label's words, in their look, in `box` on the canvas, and its leader to its point. */
+function drawLabelIn(ctx, element, context, box) {
   const { scale, spec } = context;
   const theme = spec.theme;
-  const box = boxPx(element, scale);
   const colour = element.colour || theme.ink;
   drawLeader(ctx, element, context, box, { colour });
   ctx.save();
@@ -663,7 +714,8 @@ function drawLabel(ctx, element, context) {
     ctx.fill(); ctx.stroke();
   }
   ctx.restore();
-  return writeLines(ctx, { ...element, align: element.align ?? 'center', valign: 'middle', weight: element.weight ?? 600, halo: element.style === 'plain' ? element.fill || true : element.halo },
+  const plainHalo = element.back === 'none' ? false : element.fill || true;
+  return writeLines(ctx, { ...element, align: element.align ?? 'center', valign: 'middle', weight: element.weight ?? 600, halo: (element.style ?? 'plain') === 'plain' ? plainHalo : element.halo },
     context, element.text || '', box, { pad: element.style === 'plain' ? 0 : 1 * scale, clip: false, colour });
 }
 
@@ -680,7 +732,7 @@ function arrowPath(a, b, bend) {
   });
 }
 
-function drawArrow(ctx, element, context) {
+function drawArrow(ctx, element, context, t = 1) {
   const { scale, spec } = context;
   const map = frameOf(element, context);
   if (!map) return;
@@ -689,9 +741,15 @@ function drawArrow(ctx, element, context) {
   const width = Math.max(1, (element.width ?? 1) * scale);
   const head = Math.max(width * 3.2, 2.5 * scale) * (element.head ?? 1);
   const colour = element.colour || spec.theme.accent;
-  const path = arrowPath(a, b, element.bend ?? 0);
+  // drawn along its way, an arrow is the part of itself it has reached, its head at the tip
+  const whole = arrowPath(a, b, element.bend ?? 0);
+  const path = partOf(whole, t);
+  const tip = path.at(-1);
   const angleAt = (index) => Math.atan2(path[index][1] - path[index - 1][1], path[index][0] - path[index - 1][0]);
+  if (path.length < 2) return;
   ctx.save();
+  // cut at its map's frame, as everything on the ground is
+  ctx.beginPath(); ctx.rect(map.box.x, map.box.y, map.box.w, map.box.h); ctx.clip();
   ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   if (element.shape === 'offensive') {
     // the broad arrow of an advance: a band that narrows toward its head
@@ -700,7 +758,7 @@ function drawArrow(ctx, element, context) {
     const left = [];
     const right = [];
     const last = path.length - 1;
-    const stop = Math.max(1, Math.round(last * (1 - Math.min(0.45, (head * 1.6) / Math.max(1, Math.hypot(b[0] - a[0], b[1] - a[1]))))));
+    const stop = Math.max(1, Math.round(last * (1 - Math.min(0.45, (head * 1.6) / Math.max(1, Math.hypot(tip[0] - a[0], tip[1] - a[1]))))));
     for (let index = 0; index <= stop; index += 1) {
       const angle = angleAt(Math.max(1, index));
       const half = tail + (neck - tail) * (index / stop);
@@ -713,41 +771,144 @@ function drawArrow(ctx, element, context) {
     ctx.beginPath();
     left.forEach(([x, y], index) => { if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
     ctx.lineTo(base[0] - Math.sin(angle) * wide, base[1] + Math.cos(angle) * wide);
-    ctx.lineTo(b[0], b[1]);
+    ctx.lineTo(tip[0], tip[1]);
     ctx.lineTo(base[0] + Math.sin(angle) * wide, base[1] - Math.cos(angle) * wide);
     right.toReversed().forEach(([x, y]) => ctx.lineTo(x, y));
     ctx.closePath();
-    ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.globalAlpha *= 0.85; ctx.fill(); ctx.globalAlpha /= 0.85;
     ctx.strokeStyle = spec.theme.ink; ctx.lineWidth = Math.max(1, 0.15 * scale); ctx.stroke();
   } else {
-    const heads = element.heads ?? 'end';
-    ctx.lineWidth = width;
-    ctx.setLineDash(dashFor(element.line, width));
-    // the line stops short of a head so its round cap does not show past the point
-    const short = head * 0.7;
-    const trimmed = path.filter(([x, y]) => (heads === 'none' || Math.hypot(b[0] - x, b[1] - y) >= short)
-      && (heads !== 'both' || Math.hypot(a[0] - x, a[1] - y) >= short));
-    if (trimmed.length < 2) trimmed.splice(0, trimmed.length, a, b);
-    ctx.beginPath();
-    trimmed.forEach(([x, y], index) => { if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-    ctx.stroke();
-    ctx.setLineDash([]);
-    if (heads !== 'none') arrowHead(ctx, b, angleAt(path.length - 1), head);
-    if (heads === 'both') arrowHead(ctx, a, angleAt(1) + Math.PI, head);
-  }
-  if (element.text) {
-    // its words along its middle, on the side away from the bend
-    const middle = path[Math.floor(path.length / 2)];
-    let angle = angleAt(Math.floor(path.length / 2) + 1);
-    if (angle > Math.PI / 2 || angle < -Math.PI / 2) angle += Math.PI;
-    ctx.translate(middle[0], middle[1]); ctx.rotate(angle);
-    ctx.font = font(spec.theme, element.size ?? 8, 700, scale, element);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-    ctx.lineWidth = Math.max(2, 0.7 * scale); ctx.strokeStyle = spec.theme.paper ?? HALO; ctx.lineJoin = 'round';
-    ctx.strokeText(element.text, 0, -width - 0.6 * scale);
-    ctx.fillStyle = colour; ctx.fillText(element.text, 0, -width - 0.6 * scale);
+    strokeWithHeads(ctx, path, { width, head, line: element.line, heads: element.heads ?? 'end' });
   }
   ctx.restore();
+  if (element.text && t >= 1) wordsAlong(ctx, element, context, whole, width);
+}
+
+/**
+ * A line of canvas points stroked with its heads: `end`, `both` or `none`. The line
+ * stops short of a head so its round cap does not show past the point.
+ */
+function strokeWithHeads(ctx, path, { width, head, line, heads }) {
+  const a = path[0];
+  const b = path.at(-1);
+  const angleAt = (index) => Math.atan2(path[index][1] - path[index - 1][1], path[index][0] - path[index - 1][0]);
+  ctx.lineWidth = width;
+  ctx.setLineDash(dashFor(line, width));
+  const short = head * 0.7;
+  const trimmed = path.filter(([x, y]) => (heads === 'none' || Math.hypot(b[0] - x, b[1] - y) >= short)
+    && (heads !== 'both' || Math.hypot(a[0] - x, a[1] - y) >= short));
+  if (trimmed.length < 2) trimmed.splice(0, trimmed.length, a, b);
+  ctx.beginPath();
+  trimmed.forEach(([x, y], index) => { if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (heads !== 'none') arrowHead(ctx, b, angleAt(path.length - 1), head);
+  if (heads === 'both') arrowHead(ctx, a, angleAt(1) + Math.PI, head);
+}
+
+/** An element's words along the middle of its line, turned to read upright, above it. */
+function wordsAlong(ctx, element, context, path, width) {
+  const { scale } = context;
+  const lengths = path.slice(1).map((point, index) => Math.hypot(point[0] - path[index][0], point[1] - path[index][1]));
+  let left = lengths.reduce((sum, value) => sum + value, 0) / 2;
+  let index = 0;
+  while (index < lengths.length - 1 && left > lengths[index]) { left -= lengths[index]; index += 1; }
+  const [a, b] = [path[index], path[index + 1] ?? path[index]];
+  const k = lengths[index] ? left / lengths[index] : 0;
+  let angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  if (angle > Math.PI / 2 || angle < -Math.PI / 2) angle += Math.PI;
+  ctx.save();
+  // the words stay on their map, as the line does
+  const map = frameOf(element, context);
+  if (map) { ctx.beginPath(); ctx.rect(map.box.x, map.box.y, map.box.w, map.box.h); ctx.clip(); }
+  ctx.translate(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k); ctx.rotate(angle);
+  groundWords(ctx, element.text, 0, -width / 2 - 0.6 * scale, element, context, { baseline: 'bottom' });
+  ctx.restore();
+}
+
+/**
+ * Words written over the ground, in the element's face, weight, style and colour:
+ * on a halo of the paper (as they always were), on nothing, or in a box of its fill.
+ */
+function groundWords(ctx, text, x, y, element, context, { sizePt = element.size ?? defaultSize(element.kind), baseline = 'middle' } = {}) {
+  const { scale, spec } = context;
+  const words = element.upper ? String(text).toUpperCase() : String(text);
+  ctx.save();
+  ctx.font = font(spec.theme, sizePt, element.weight ?? 700, scale, element);
+  ctx.textAlign = 'center'; ctx.textBaseline = baseline;
+  const back = backOf(element);
+  if (back === 'box') {
+    const em = sizePt * MM_PER_PT * scale;
+    const width = ctx.measureText(words).width;
+    const top = baseline === 'bottom' ? y - em * 1.2 : baseline === 'top' ? y - em * 0.15 : y - em * 0.68;
+    ctx.fillStyle = backColourOf(element, spec.theme);
+    ctx.fillRect(x - width / 2 - 0.35 * em, top, width + 0.7 * em, em * 1.36);
+  } else if (back === 'halo') {
+    ctx.lineWidth = Math.max(2, 0.7 * scale); ctx.strokeStyle = spec.theme.paper ?? HALO; ctx.lineJoin = 'round';
+    ctx.strokeText(words, x, y);
+  }
+  ctx.fillStyle = inkOf(element, spec.theme); ctx.fillText(words, x, y);
+  ctx.restore();
+}
+
+/** A line of ground points through which a curve runs smoothly (Catmull-Rom), as canvas points. */
+export function smoothThrough(points, steps = 12) {
+  if (points.length < 3) return points;
+  const out = [points[0]];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[Math.max(0, index - 1)];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[Math.min(points.length - 1, index + 2)];
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      out.push([0, 1].map((axis) => 0.5 * ((2 * p1[axis]) + (-p0[axis] + p2[axis]) * t + (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * t2
+        + (-p0[axis] + 3 * p1[axis] - 3 * p2[axis] + p3[axis]) * t3)));
+    }
+  }
+  return out;
+}
+
+/**
+ * A symbol, one of the markers the case's layers draw, standing over its point of the
+ * ground however the map is framed: as wide as its box, turned as it is set, cut at its
+ * map's frame. The marker is drawn at the size it prints at (`context.markerImage`).
+ */
+function drawSymbol(ctx, element, context) {
+  const map = frameOf(element, context);
+  const point = map?.at(element.at);
+  if (!point) return;
+  const side = Math.min(element.box[2], element.box[3]) * context.scale;
+  const picture = context.markerImage?.(element.symbol || 'pin', element.colour || context.spec.theme.accent, { status: element.status || '' }, side);
+  if (!picture) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(map.box.x, map.box.y, map.box.w, map.box.h); ctx.clip();
+  ctx.translate(point[0], point[1]);
+  if (element.rotate) ctx.rotate((element.rotate * Math.PI) / 180);
+  ctx.drawImage(picture, -side / 2, -side / 2, side, side);
+  ctx.restore();
+}
+
+/** A line on the ground: from point to point, or curved through them, dashed or not, with heads, and its words along it. */
+function drawLine(ctx, element, context, t = 1) {
+  const { scale, spec } = context;
+  const map = frameOf(element, context);
+  if (!map || (element.points?.length ?? 0) < 2) return;
+  const through = element.points.map((point) => map.at(point));
+  const whole = element.shape === 'curve' ? smoothThrough(through) : through;
+  const path = partOf(whole, t);
+  if (path.length < 2) return;
+  const width = Math.max(1, 0.3 * scale * (element.width ?? 1));
+  const head = Math.max(width * 3.2, 2.5 * scale) * (element.head ?? 1);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(map.box.x, map.box.y, map.box.w, map.box.h); ctx.clip();
+  ctx.strokeStyle = element.colour || spec.theme.accent; ctx.fillStyle = ctx.strokeStyle;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  strokeWithHeads(ctx, path, { width, head, line: element.line, heads: element.heads ?? 'none' });
+  ctx.restore();
+  if (element.text && t >= 1) wordsAlong(ctx, element, context, whole, width);
 }
 
 /** A ring of ground points as a path on the canvas. */
@@ -824,9 +985,17 @@ export function lengthLabel(metres, imperial = false) {
   return metres >= 1000 ? `${(metres / 1000).toFixed(metres >= 10000 ? 0 : 1)} km` : `${Math.round(metres)} m`;
 }
 
-function drawGround(ctx, element, context) {
+/** What stands on the ground, cut at its map's frame like the ground itself: its words and marks never spill onto the page. */
+function drawGround(ctx, element, context, t = 1) {
   const map = frameOf(element, context);
   if (!map) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(map.box.x, map.box.y, map.box.w, map.box.h); ctx.clip();
+  groundIn(ctx, map, element, context, t);
+  ctx.restore();
+}
+
+function groundIn(ctx, map, element, context, t) {
   const { scale, spec } = context;
   const colour = element.colour || spec.theme.accent;
   if (element.kind === 'zone') {
@@ -835,7 +1004,7 @@ function drawGround(ctx, element, context) {
     if (element.text) {
       const middle = element.points.reduce((sum, [lon, lat]) => [sum[0] + lon / element.points.length, sum[1] + lat / element.points.length], [0, 0]);
       const [x, y] = map.at(middle);
-      haloText(ctx, element.text, x, y, colour, context, element.size ?? 8, element);
+      groundWords(ctx, element.text, x, y, element, context);
     }
   } else if (element.kind === 'ring') {
     const radii = element.radii?.length ? element.radii : [1];
@@ -843,31 +1012,40 @@ function drawGround(ctx, element, context) {
       const ring = circle(element.at, km * 1000);
       paintArea(ctx, map, ring, { ...element, look: element.look === 'fill' ? 'outline' : element.look }, context);
       const [x, y] = map.at(ring[0]);
-      haloText(ctx, lengthLabel(km * 1000, context.imperial), x, y, colour, context, element.size ?? 7, element);
+      groundWords(ctx, lengthLabel(km * 1000, context.imperial), x, y, element, context);
     }
     const [cx, cy] = map.at(element.at);
     ctx.save(); ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.5, 0.6 * scale), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    if (element.text) groundWords(ctx, element.text, cx, cy - 2.4 * scale, element, context, { baseline: 'bottom' });
   } else if (element.kind === 'cone') {
-    paintArea(ctx, map, sector(element.at, element.bearing ?? 0, element.spread ?? 60, (element.reach ?? 1) * 1000), element, context);
+    const reach = (element.reach ?? 1) * 1000;
+    paintArea(ctx, map, sector(element.at, element.bearing ?? 0, element.spread ?? 60, reach), element, context);
     const [cx, cy] = map.at(element.at);
     ctx.save(); ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(cx, cy, Math.max(2, 0.8 * scale), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    if (element.text) {
+      // its words in the middle of what it sees
+      const [x, y] = map.at(travel(element.at, element.bearing ?? 0, reach * 0.6));
+      groundWords(ctx, element.text, x, y, element, context);
+    }
   } else if (element.kind === 'measure') {
     const a = map.at(element.at);
-    const b = map.at(element.to);
+    const whole = map.at(element.to);
+    const b = partOf([a, whole], t).at(-1);
     const width = Math.max(1, 0.3 * scale * (element.width ?? 1));
     ctx.save();
     ctx.strokeStyle = colour; ctx.lineWidth = width; ctx.setLineDash(dashFor(element.line ?? 'dashed', width));
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     ctx.setLineDash([]);
-    const angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const angle = Math.atan2(whole[1] - a[1], whole[0] - a[0]);
     const tick = 1.4 * scale;
-    for (const [x, y] of [a, b]) {
+    for (const [x, y] of t >= 1 ? [a, b] : [a]) {
       ctx.beginPath(); ctx.moveTo(x - Math.sin(angle) * tick, y + Math.cos(angle) * tick); ctx.lineTo(x + Math.sin(angle) * tick, y - Math.cos(angle) * tick); ctx.stroke();
     }
     ctx.restore();
+    if (t < 1) return;
     const metres = distance(element.at, element.to);
     const said = element.text || `${lengthLabel(metres, context.imperial)} · ${Math.round(bearingTo(element.at, element.to))}°`;
-    haloText(ctx, said, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - 2 * scale, colour, context, element.size ?? 7, element);
+    groundWords(ctx, said, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - 2 * scale, element, context);
   }
 }
 
@@ -1117,6 +1295,8 @@ function drawPageFrame(ctx, spec, context) {
  *   `moments`, `dayLabel`, `refShown(element)`, and for an export `paper` (fill the page)
  *   and `maps` (`{ id: canvas }`, each map's picture at this scale). `editing` draws
  *   what only the editor shows; `ghosts` draws other days' annotations faintly.
+ *   `reveal` (`{ ids, t, mode }`) draws the elements of `ids` as far as a transition
+ *   has brought them in, `t` from 0 to 1: faded in, or drawn along (`mode` "draw").
  * @returns {Set<string>} the elements whose words run past their box
  */
 export function drawPage(ctx, spec, context) {
@@ -1133,13 +1313,18 @@ export function drawPage(ctx, spec, context) {
       ctx.restore();
     }
   }
+  const reveal = context.reveal ?? null;
   for (const element of spec.elements) {
     if (element.hidden) continue;
     const today = shownOn(element, context.at ?? null, context.place) && (context.refShown?.(element) ?? true);
     if (!today && !(context.editing && context.ghosts)) continue;
+    // what a transition brings in: faded in, or drawn as far as it has gone
+    const coming = reveal?.ids?.has(element.id) ? Math.max(0, Math.min(1, reveal.t)) : 1;
+    const drawn = reveal?.mode === 'draw' && ['arrow', 'line', 'measure'].includes(element.kind);
+    if (coming <= 0) continue;
     ctx.save();
-    ctx.globalAlpha = (element.opacity ?? 1) * (today ? 1 : 0.22);
-    if (element.rotate && !['map', 'inset', 'arrow', 'zone', 'ring', 'cone', 'measure', 'video'].includes(element.kind)) {
+    ctx.globalAlpha = (element.opacity ?? 1) * (today ? 1 : 0.22) * (drawn ? 1 : coming);
+    if (element.rotate && !['map', 'inset', 'arrow', 'zone', 'ring', 'cone', 'measure', 'line', 'video', 'symbol'].includes(element.kind)) {
       const box = boxPx(element, scale);
       ctx.translate(box.x + box.w / 2, box.y + box.h / 2);
       ctx.rotate((element.rotate * Math.PI) / 180);
@@ -1157,11 +1342,13 @@ export function drawPage(ctx, spec, context) {
       case 'image': drawImage(ctx, element, full); break;
       case 'video': drawVideo(ctx, element, full); break;
       case 'label': ran = drawLabel(ctx, element, full); break;
-      case 'arrow': drawArrow(ctx, element, full); break;
+      case 'symbol': drawSymbol(ctx, element, full); break;
+      case 'arrow': drawArrow(ctx, element, full, drawn ? coming : 1); break;
+      case 'line': drawLine(ctx, element, full, drawn ? coming : 1); break;
       case 'zone':
       case 'ring':
       case 'cone':
-      case 'measure': drawGround(ctx, element, full); break;
+      case 'measure': drawGround(ctx, element, full, drawn ? coming : 1); break;
       case 'shape': drawShape(ctx, element, full); break;
       case 'key': ran = drawKey(ctx, element, full); break;
       case 'table': ran = drawTable(ctx, element, full); break;

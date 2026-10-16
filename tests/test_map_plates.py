@@ -414,3 +414,142 @@ def test_a_played_plate_runs_its_steps_clips_with_their_sound(client, owner):
     read = json.loads(probe.stdout)
     assert sorted(stream["codec_type"] for stream in read["streams"]) == ["audio", "video"]
     assert 1.8 <= float(read["format"]["duration"]) <= 2.4
+
+
+# -- words, lines, framing and transitions -----------------------------------------------
+
+
+def test_words_on_the_ground_keep_their_look_and_older_plates_stay_bold(client, owner):
+    spec = plate_spec()
+    spec["elements"] += [
+        {"id": "z", "kind": "zone", "of": "map", "box": [0, 0, 1, 1], "points": [[0, 0], [1, 0], [1, 1]], "text": "Depot",
+         "size": 9, "weight": 600, "ink": "#112233", "back": "box", "fill": "#ffeedd", "upper": True},
+        {"id": "l", "kind": "line", "of": "map", "box": [0, 0, 1, 1], "points": [[0, 0], [0.5, 0.2], [1, 1]], "shape": "curve",
+         "heads": "end", "text": "Road"},
+    ]
+    assert save(client, owner, spec=spec).status_code == 200
+    kept = {element["id"]: element for element in client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"]}
+    assert (kept["z"]["weight"], kept["z"]["ink"], kept["z"]["back"], kept["z"]["fill"]) == (600, "#112233", "box", "#ffeedd")
+    assert kept["l"]["shape"] == "curve" and len(kept["l"]["points"]) == 3
+    # a plate saved before words on the ground had a look wrote them all regular, which they never were
+    path = Case.open(owner).resolve_inside(".mapplates/Situation.json")
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    for element in saved["spec"]["elements"]:
+        element.pop("back", None)
+        element["weight"] = 400
+    path.write_text(json.dumps(saved), encoding="utf-8")
+    read = {element["id"]: element for element in client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"]}
+    assert "weight" not in read["z"] and "weight" not in read["l"]
+    # words written on the page keep the weight they were saved with
+    assert read["title"]["weight"] == 400
+
+
+def test_a_map_saved_without_saying_keeps_its_frame(client, owner):
+    """A map is framed unless the analyst unticks it: a plate opened again draws it as it was."""
+    assert save(client, owner).status_code == 200
+    elements = {element["id"]: element for element in client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"]}
+    assert elements["map"]["border"] is None and elements["title"]["border"] is None
+
+
+@pytest.mark.parametrize("element", [
+    {"id": "l", "kind": "line", "of": "map", "box": [0, 0, 1, 1], "points": [[0, 0]]},
+    {"id": "l", "kind": "line", "box": [0, 0, 1, 1], "points": [[0, 0], [1, 1]]},
+    {"id": "t", "kind": "text", "box": [0, 0, 10, 10], "back": "glow"},
+    {"id": "t", "kind": "text", "box": [0, 0, 10, 10], "ink": "red"},
+])
+def test_a_line_or_a_look_that_does_not_hold_is_refused(client, owner, element):
+    spec = {"elements": [{"id": "map", "kind": "map", "box": [0, 0, 100, 100], "view": {"lat": 0, "lon": 0, "zoom": 3}}, element]}
+    assert save(client, owner, spec=spec).status_code == 422
+
+
+def test_a_symbol_stands_on_its_point_and_is_one_of_the_layers_markers(client, owner):
+    spec = plate_spec()
+    spec["elements"].append({"id": "s", "kind": "symbol", "of": "map", "box": [40, 40, 8, 8], "at": [2.35, 48.85],
+                             "symbol": "badge-tank", "colour": "#c8102e", "status": "destroyed", "rotate": 30})
+    assert save(client, owner, spec=spec).status_code == 200
+    kept = {element["id"]: element for element in client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"]}
+    assert (kept["s"]["symbol"], kept["s"]["status"], kept["s"]["at"], kept["s"]["rotate"]) == ("badge-tank", "destroyed", [2.35, 48.85], 30)
+    # without its point, its map, or with a marker that is no id, it does not hold
+    for broken in ({"at": None}, {"of": None}, {"symbol": "../tank"}, {"status": "burnt"}):
+        bad = plate_spec()
+        bad["elements"].append({**kept["s"], **broken})
+        assert save(client, owner, spec=bad).status_code == 422, broken
+    # a template keeps no ground, so no symbol
+    data = mapplates.template_of({**plate_spec(), "elements": [*plate_spec()["elements"], kept["s"]]})
+    assert "symbol" not in [element["kind"] for element in data["elements"]]
+    leaking = {**data, "elements": [*data["elements"], kept["s"]]}
+    assert client.post("/api/templates/map", json={"name": "Symbols", "data": leaking}).status_code == 422
+    assert client.post("/api/templates/map", json={"name": "Symbols", "data": data}).status_code == 200
+
+
+def test_a_day_or_a_step_frames_its_maps_its_own_way(client, owner):
+    spec = stepped_spec()
+    spec["framing"] = {"2026-10-12": {"map": {"lat": 48.9, "lon": 2.3, "zoom": 13, "bearing": 0}},
+                       "s2": {"map": {"lat": 48.8, "lon": 2.2, "zoom": 14, "bearing": 30, "pitch": 55}}}
+    spec["transitions"] = {"on": True, "seconds": 1.2, "appear": "draw"}
+    spec["steps"]["now"][1]["transition"] = "none"
+    assert save(client, owner, spec=spec).status_code == 200
+    loaded = client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]
+    assert loaded["framing"]["s2"]["map"]["pitch"] == 55
+    assert loaded["transitions"] == {"on": True, "seconds": 1.2, "fade": True, "move": True, "blur": True, "appear": "draw"}
+    assert loaded["steps"]["now"][1]["transition"] == "none"
+    for framing in ({"s9": {"map": {"lat": 0, "lon": 0, "zoom": 3}}}, {"now": {"nowhere": {"lat": 0, "lon": 0, "zoom": 3}}},
+                    {"now": {"map": {"lat": 0, "lon": 0, "zoom": 3, "pitch": 90}}}):
+        assert save(client, owner, spec={**spec, "framing": framing}).status_code == 422
+    # a template keeps how the video moves, never how a day of a case is framed
+    data = mapplates.template_of(loaded)
+    assert data["transitions"]["on"] is True and "framing" not in data
+    assert client.post("/api/templates/map", json={"name": "Framed", "data": {**data, "framing": {"now": {}}}}).status_code == 422
+
+
+def test_a_3d_map_keeps_its_tilt_its_heights_and_its_ridges(client, owner):
+    spec = plate_spec()
+    spec["elements"][0].update({"view": {"lat": 45.8, "lon": 6.8, "zoom": 12, "bearing": 40, "pitch": 60}, "terrain": 1.5, "ridges": True,
+                                "basemap": "plain-topo", "plain": {"contours": False, "peaks": True, "rails": False},
+                                "overlays": ["relief", "railway", "power", "seamarks"]})
+    assert save(client, owner, spec=spec).status_code == 200
+    map_ = client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"][0]
+    assert (map_["view"]["pitch"], map_["terrain"], map_["ridges"]) == (60, 1.5, True)
+    assert (map_["plain"]["contours"], map_["plain"]["tints"], map_["plain"]["rails"], map_["plain"]["roads"]) == (False, True, False, True)
+    assert map_["overlays"] == ["relief", "railway", "power", "seamarks"]
+
+
+def test_a_transition_plays_its_frames_before_its_beat_holds(tmp_path):
+    command = mapplates.tween_command("ffmpeg", tmp_path / "t%04d.png", 3, 24, tmp_path / "w.mp4")
+    at = command.index(str(tmp_path / "t%04d.png"))
+    # twenty-four frames at the video's own thirty a second: counted on the way in, never on the way out
+    assert command[at - 7:at] == ["-framerate", str(mapplates.TWEEN_FPS), "-start_number", "3", "-t", "0.800", "-i"]
+    assert "-frames:v" not in command
+    # encoded as a beat is, so the two join as they are
+    assert command[command.index("-r") + 1] == str(mapplates.VIDEO_FPS) and "aac" in command
+    assert mapplates.TWEEN_FPS == mapplates.VIDEO_FPS
+    beats = mapplates.read_beats(json.dumps([{"seconds": 1}, {"seconds": 1, "tween": [0, 16]}]), 2, 0, 16)
+    assert beats[1].tween == (0, 16)
+    with pytest.raises(mapplates.ExportError):
+        mapplates.read_beats(json.dumps([{"seconds": 1}, {"seconds": 1, "tween": [8, 16]}]), 2, 0, 16)
+
+
+def test_only_a_video_plays_transitions(client, owner):
+    files = [("frames", ("0.png", io.BytesIO(png()), "image/png")), ("frames", ("1.png", io.BytesIO(png()), "image/png")),
+             ("tweens", ("t.jpg", io.BytesIO(png(fmt="JPEG")), "image/jpeg"))]
+    beats = json.dumps([{"seconds": 1}, {"seconds": 1, "tween": [0, 1]}])
+    answer = client.post(f"/api/cases/{owner}/map-plates/export", files=files, data={"format": "gif", "filename": "G", "beats": beats})
+    assert answer.status_code == 422
+
+
+@pytest.mark.skipif(not ffmpeg.ffmpeg_available(), reason="no ffmpeg on this machine")
+def test_a_played_plate_opens_its_beats_on_their_transitions(client, owner):
+    import subprocess
+    from pathlib import Path
+
+    tweens = [("tweens", (f"t{index}.jpg", io.BytesIO(png((320, 240), (index * 15, 0, 0), fmt="JPEG")), "image/jpeg")) for index in range(15)]
+    files = [("frames", ("0.png", io.BytesIO(png((320, 240))), "image/png")), ("frames", ("1.png", io.BytesIO(png((320, 240), (0, 0, 0))), "image/png")),
+             *tweens]
+    beats = json.dumps([{"seconds": 0.5}, {"seconds": 1, "tween": [0, 15]}])
+    answer = client.post(f"/api/cases/{owner}/map-plates/export", files=files, data={"format": "mp4", "filename": "Moving", "beats": beats})
+    assert answer.status_code == 200, answer.text
+    written = Path(answer.json()["path"]) / answer.json()["file"]
+    probe = subprocess.run([ffmpeg.ffprobe_exe(), "-v", "error", "-show_entries", "format=duration", "-of", "json", str(written)],
+                           check=True, capture_output=True, text=True, timeout=60)
+    # half a second, half a second of transition at 30 frames a second, then one second held
+    assert 1.9 <= float(json.loads(probe.stdout)["format"]["duration"]) <= 2.15

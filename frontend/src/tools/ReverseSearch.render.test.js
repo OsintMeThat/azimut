@@ -101,7 +101,7 @@ describe('a picture handed over by another tool', () => {
     };
     open();
 
-    buttonNamed('Close file').click();
+    buttonNamed('Files').click();
     flushSync();
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:frame');
@@ -146,7 +146,7 @@ describe('the landing', () => {
     expect(target.querySelector('.tool-header .name').textContent).toBe('Quai');
     expect(target.querySelector('.start')).toBeNull();
 
-    buttonNamed('Close file').click();
+    buttonNamed('Files').click();
     flushSync();
     expect(cardTitles()).toEqual(['Quai', 'Convoy clip']);
   });

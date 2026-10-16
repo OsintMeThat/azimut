@@ -183,6 +183,53 @@ test('on the map a pin drags without the map moving, a loop picks two lines that
   await page.screenshot({ path: test.info().outputPath('map-edit-bar.png') });
 });
 
+/** How many pixels of a marker's default blue the page shows in a box. */
+async function bluePixels(page, clip) {
+  const picture = await page.screenshot({ clip });
+  return page.evaluate(async (bytes) => {
+    const image = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    let blue = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] < 70 && data[i + 2] > 120 && data[i + 2] > data[i + 1] + 30) blue += 1;
+    return blue;
+  }, [...picture]);
+}
+
+test('a pin let go is drawn where it lands at once, before the layer has saved it', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Landing');
+  const map = await page.locator('.map').boundingBox();
+  const pin = { x: map.x + map.width * .4, y: map.y + map.height * .45 };
+  // the pin stands on its point, so its body is above it
+  const blue = (x) => bluePixels(page, { x: x - 15, y: pin.y - 40, width: 30, height: 40 });
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await page.mouse.click(pin.x, pin.y); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  await expect.poll(() => blue(pin.x)).toBeGreaterThan(20);
+  const features = fixture.collections.get(fixture.rows[0].name);
+  const before = features[0].geometry.coordinates[0];
+  // the save is held: whatever the map shows meanwhile is the page's own drawing
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route('**/selection', async (route) => { await held; await route.fallback(); });
+  await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
+  await page.mouse.move(pin.x + 120, pin.y - 18, { steps: 8 }); await page.mouse.up();
+  // the dragged copy goes once the map has drawn the pin where it landed
+  await expect(page.locator('.ghost-mark')).toHaveCount(0);
+  expect(await blue(pin.x + 120)).toBeGreaterThan(20);
+  expect(await blue(pin.x)).toBe(0);
+  const reread = page.waitForResponse((response) => response.url().endsWith('/data'));
+  release();
+  await reread;
+  expect(features[0].geometry.coordinates[0] - before).toBeGreaterThan(0.001);
+  // and the layer read back keeps it there
+  await expect.poll(() => blue(pin.x + 120)).toBeGreaterThan(20);
+  expect(await blue(pin.x)).toBe(0);
+});
+
 test('a source feature is copied into one of the analyst\'s layers as somebody else\'s point', async ({ page }) => {
   const fixture = await personalFixture(page, { imported: true });
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
@@ -936,15 +983,25 @@ test('a layer followed over time dates a move to the day its cursor is on', asyn
   await expect.poll(() => fixture.rows[0].track?.on).toBe(true);
   const time = page.getByRole('group', { name: 'Time', exact: true });
   await expect(time).toBeVisible();
-  await expect(time.getByText('Now: an edit corrects what a feature is now.')).toBeVisible();
-  // a day back from now: the bar says an edit starts a state there
+  // at now the bar says edits carry no date
+  const undated = tools(page).getByRole('button', { name: 'No date', exact: true });
+  await expect(undated).toHaveAttribute('aria-pressed', 'true');
+  // a day back from now: the bar dates the edits from it
   await time.getByRole('slider').press('ArrowLeft');
-  await expect(time.getByText(/^An edit starts a state on /)).toBeVisible();
-  await expect(tools(page).getByRole('button', { name: 'Fix', exact: true })).toBeVisible();
+  const dated = tools(page).getByRole('button', { name: /^From / });
+  await expect(dated).toHaveAttribute('aria-pressed', 'true');
+  await expect(undated).toHaveAttribute('aria-pressed', 'false');
+  await page.screenshot({ path: test.info().outputPath('layer-dated-edits.png') });
   await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
   await page.mouse.move(pin.x + 60, pin.y - 18, { steps: 8 }); await page.mouse.up();
   await expect.poll(() => moves.at(-1)?.at ?? null).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(moves.at(-1).fix).toBeUndefined();
-  await tools(page).getByRole('button', { name: 'Fix', exact: true }).click();
-  await expect(time.getByText(/^An edit corrects the state in force on /)).toBeVisible();
+  // with no date, a move carries none: it counts on every day
+  await undated.click();
+  await expect(undated).toHaveAttribute('aria-pressed', 'true');
+  const count = moves.length;
+  await page.mouse.move(pin.x + 60, pin.y - 18); await page.mouse.down();
+  await page.mouse.move(pin.x + 100, pin.y - 18, { steps: 8 }); await page.mouse.up();
+  await expect.poll(() => moves.length).toBeGreaterThan(count);
+  expect(moves.at(-1).at).toBeUndefined();
 });

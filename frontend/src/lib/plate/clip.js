@@ -53,8 +53,18 @@ export function beats(spec, days, dayMs) {
   return out;
 }
 
-/** The days a played plate goes through: the moments asked, then now when steps stand on it. */
-export const playDays = (spec, moments) => [...moments, ...(spec?.steps?.now?.length ? [null] : [])];
+/** Today, as a layer's moment to the day. */
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The days a played plate goes through: the moments asked, then now when steps stand
+ * on it. Today is then now: a change dated today is not played twice under two names,
+ * unless steps stand on that day of its own.
+ */
+export function playDays(spec, moments, today = todayIso()) {
+  if (!spec?.steps?.now?.length) return moments;
+  return [...moments.filter((day) => day !== today || spec.steps[today]?.length), null];
+}
 
 /** The whole of a sequence, in seconds. */
 export const totalSeconds = (list) => list.reduce((sum, beat) => sum + beat.seconds, 0);

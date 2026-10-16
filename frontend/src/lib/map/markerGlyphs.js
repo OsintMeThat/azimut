@@ -430,13 +430,13 @@ export function partTransform(part) {
   return `translate(${part.offset} ${part.offset}) scale(${part.scale})${turn}`;
 }
 
-/** Draws a marker into a 2D context the size of `MARKER_PIXELS`. */
-export function drawMarker(context, symbol, colour, marks = {}) {
-  context.clearRect(0, 0, MARKER_PIXELS, MARKER_PIXELS);
+/** Draws a marker into a 2D context the size of `MARKER_PIXELS`, or `scale` times it for a larger print. */
+export function drawMarker(context, symbol, colour, marks = {}, scale = 1) {
+  context.clearRect(0, 0, MARKER_PIXELS * scale, MARKER_PIXELS * scale);
   context.lineCap = 'round';
   context.lineJoin = 'round';
   for (const part of markerParts(symbol, colour, marks)) {
-    context.setTransform(part.scale, 0, 0, part.scale, part.offset, part.offset);
+    context.setTransform(part.scale * scale, 0, 0, part.scale * scale, part.offset * scale, part.offset * scale);
     if (part.rotate) {
       context.translate(12, 12);
       context.rotate((part.rotate * Math.PI) / 180);

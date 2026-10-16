@@ -24,6 +24,7 @@
   import { openFollowed } from '../../lib/map/followed.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { asOf, isTracked } from '../../lib/map/layerHistory.js';
+  import { landAt } from '../../lib/map/landings.js';
 
   let {
     engine = null,
@@ -54,10 +55,13 @@
     await copyText(text);
   }
 
-  /** name → { layer, sha, moment, collection, settled } so a refreshed snapshot
+  /** name → { layer, sha, moment, collection, settled, landed } so a refreshed snapshot
    *  redraws, a tracked layer's moved cursor redraws from what is in hand, and
-   *  nothing else does. `settled` once `watch` heard how its drawing ended. */
+   *  nothing else does. `settled` once `watch` heard how its drawing ended;
+   *  `landed`, the editor's edits drawn on it until a read of the layer holds them. */
   const live = new Map();
+  /** The editor's landings this map has already taken, so none is put on twice. */
+  const taken = new WeakSet();
 
   /** Say once how one layer's drawing ended. */
   function settle(name, entry, outcome) {
@@ -96,12 +100,20 @@
     return asOf(collection, time.at ?? null, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? 7 });
   }
 
+  /** What the editor holds off a layer while the analyst drags it; nothing once it is let go. */
+  function heldOff(name) {
+    const drag = untrack(() => personalLayers.dragging);
+    return drag?.offset && !drag.landing && drag.name === name ? drag.keys : [];
+  }
+
   function paint(row, entry) {
-    return entry.layer.set(drawn(row, entry.collection), {
+    const collection = drawn(row, entry.collection);
+    return entry.layer.set(entry.landed.length && collection ? { ...collection, features: landAt(collection.features, entry.landed) } : collection, {
       categories: row.categories,
       hidden: row.hidden,
       period: row.period,
       attribution: attribution(row),
+      held: heldOff(row.name),
     });
   }
 
@@ -139,6 +151,8 @@
     const entry = live.get(name);
     if (entry) settle(name, entry, 'dropped');
     entry?.layer.destroy();
+    // a map that goes keeps no dragged copy waiting on it
+    for (const landing of entry?.landed ?? []) personalLayers.landed(landing);
     live.delete(name);
   }
 
@@ -173,9 +187,13 @@
       if (existing && existing.sha !== row.sha256 && existing.settled && existing.shape === shapeOf(row)) {
         existing.sha = row.sha256;
         const entry = existing;
+        // the landings saved before this read was asked for are in it, so it stops drawing them
+        const through = entry.landed.filter((landing) => landing.saved);
         drawing(caseId, row.name).then((collection) => {
           if (live.get(row.name) !== entry || entry.sha !== row.sha256) return;
           entry.collection = collection;
+          entry.read = row.sha256;
+          entry.landed = entry.landed.filter((landing) => !through.includes(landing));
           const current = layers.find((item) => item.name === row.name) ?? row;
           entry.moment = momentKey(current);
           paint(current, entry);
@@ -263,7 +281,7 @@
           onmenu?.(properties ? { ...at, feature: properties.name || UNNAMED, layer: row.title } : at),
       });
       layer.interactive(untrack(() => interactive));
-      const entry = { layer, sha: row.sha256, moment: momentKey(row), collection: null, settled: false, shape: shapeOf(row) };
+      const entry = { layer, sha: row.sha256, read: null, moment: momentKey(row), collection: null, settled: false, shape: shapeOf(row), landed: [] };
       live.set(row.name, entry);
       watch?.start(row.name);
       drawing(caseId, row.name)
@@ -271,6 +289,7 @@
           // the layer may have been switched off while its features were loading
           if (live.get(row.name) !== entry) return;
           entry.collection = collection;
+          entry.read = entry.sha;
           // the row as it is now: its cursor may have moved while this loaded
           const current = layers.find((item) => item.name === row.name) ?? row;
           entry.moment = momentKey(current);
@@ -295,10 +314,37 @@
   });
 
   // The features being dragged in the editor leave the map while their copies move.
+  // Once let go, the drawing that puts them where they landed brings them back.
   $effect(() => {
     const drag = personalLayers.dragging;
     void layers;
-    for (const [name, { layer }] of live) layer.hide(drag?.offset && drag.name === name ? drag.keys : []);
+    for (const [name, { layer }] of live) if (!(drag?.landing && drag.name === name)) layer.hide(heldOff(name));
+  });
+
+  /**
+   * An edit let go on the map is drawn where it landed at once, and the dragged
+   * copies over it go once it is on screen. One the layer refused goes back; a
+   * saved one is drawn until a read of the layer holds it.
+   */
+  $effect(() => {
+    const landings = personalLayers.landings;
+    untrack(() => {
+      for (const [name, entry] of live) {
+        // refused, or saved into the very read this map holds (nothing changed): drawn right without it
+        const gone = entry.landed.filter((landing) => !landings.includes(landing) && (!landing.saved || landing.sha === entry.read));
+        const fresh = landings.filter((landing) => landing.name === name && !taken.has(landing));
+        if (!gone.length && !fresh.length) continue;
+        fresh.forEach((landing) => taken.add(landing));
+        entry.landed = [...entry.landed.filter((landing) => !gone.includes(landing)), ...fresh];
+        const row = layers.find((item) => item.name === name);
+        if (!entry.collection || !row) continue;
+        fresh.forEach((landing) => personalLayers.claim(landing));
+        paint(row, entry)
+          .then(() => entry.layer.drawn?.())
+          .catch(() => {})
+          .finally(() => fresh.forEach((landing) => personalLayers.landed(landing)));
+      }
+    });
   });
 
   /**

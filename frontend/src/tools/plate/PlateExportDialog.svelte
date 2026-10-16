@@ -17,7 +17,7 @@
     moments = [],
     /** The plate holds steps, so it plays even on one day. */
     stepped = false,
-    /** `(days, interval)`: how long the played plate runs, in seconds. */
+    /** `(days, interval, format)`: how long the played plate runs, in seconds. */
     runtime = null,
     /** `({ format, quality, width, days, interval, filename, pixels, transparent })`, resolving when the file is written. */
     onexport,
@@ -62,7 +62,7 @@
   /** A played plate goes through two days at least, or through its steps. */
   const playsOn = (id) => (id === 'sheet' ? moments.length >= 2 : moments.length >= 2 || stepped);
   const ready = $derived((!played || (format === 'sheet' ? days.length >= 2 : days.length >= 2 || stepped)) && filename.trim().length > 0);
-  const seconds = $derived(played && format !== 'sheet' && runtime ? runtime(days, interval) : 0);
+  const seconds = $derived(played && format !== 'sheet' && runtime ? runtime(days, interval, format) : 0);
 
   async function run() {
     busy = true;

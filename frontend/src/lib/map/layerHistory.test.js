@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  asOf, changes, editMoment, inForce, isTracked, lifeline, moment, momentLabel, moments, previousState, seenAt,
-  stateAt, stepMoment,
+  asOf, changedBy, changes, changesOn, inForce, isTracked, lifeline, lifeRows, moment, momentLabel, moments,
+  previousState, seenAt, shortMoment, spanLabel, spanOf, stateAt, stepMoment,
 } from './layerHistory.js';
 
 const square = (x, size = 1) => ({ type: 'Polygon', coordinates: [[[x, 0], [x + size, 0], [x + size, size], [x, size], [x, 0]]] });
@@ -80,14 +80,6 @@ describe('a feature at a moment', () => {
 });
 
 describe('editing at the cursor', () => {
-  it('writes a new state at the cursor, or corrects the one in force', () => {
-    expect(editMoment(front, '2026-10-15', 'new')).toBe('2026-10-15');
-    expect(editMoment(front, '2026-10-15', 'fix')).toBe('2026-10-12');
-    const plain = { geometry: line(0), properties: {} };
-    expect(editMoment(plain, '2026-10-15', 'fix')).toBeNull();
-    expect(editMoment(front, null, 'new')).toBeNull();
-  });
-
   it('lists the lifeline with the state at the cursor marked', () => {
     expect(lifeline(front, '2026-10-15').map((state) => [state.at, state.current, state.gone]))
       .toEqual([['2026-10-03', false, false], ['2026-10-12', true, false], ['2026-10-20', false, true]]);
@@ -178,5 +170,126 @@ describe('the day the layer is read on', () => {
     const last = point({ date: '2025-01-12' });
     const [kept] = read([strike, last], null);
     expect(kept.properties.$fade).toBe(true);
+  });
+});
+
+describe('a reading kept', () => {
+  const point = (properties) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] }, properties: { key: Math.random(), ...properties } });
+
+  it('hands back the same reading for a day where nothing moved, and a new one when something did', () => {
+    const layer = { features: [front, point({ date: '2026-10-01' })] };
+    const fifth = asOf(layer, '2026-10-05');
+    expect(asOf(layer, '2026-10-08')).toBe(fifth);
+    // the 12th moves the front and rings it, the 13th only takes the ring off
+    const twelfth = asOf(layer, '2026-10-12');
+    expect(twelfth).not.toBe(fifth);
+    expect(asOf(layer, '2026-10-13')).not.toBe(twelfth);
+    expect(asOf(layer, '2026-10-14')).toBe(asOf(layer, '2026-10-13'));
+    // what the map draws of the past is part of the reading
+    expect(asOf(layer, '2026-10-05', { trail: true })).not.toBe(fifth);
+  });
+
+  it('takes an event fading or going as a change', () => {
+    const layer = { features: [point({ date: '2026-10-05', event: true })] };
+    const day = asOf(layer, '2026-10-05');
+    const faded = asOf(layer, '2026-10-06');
+    expect(faded).not.toBe(day);
+    expect(asOf(layer, '2026-10-09')).toBe(faded);
+    expect(asOf(layer, '2026-10-20').features).toHaveLength(0);
+  });
+
+  it('reads every day of a busy layer as a fresh reading would', () => {
+    let seed = 3;
+    const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const features = Array.from({ length: 40 }, (_, index) => {
+      if (index % 4 === 3) return point({ date: `2026-10-${String(1 + Math.floor(random() * 20)).padStart(2, '0')}`, event: index % 8 === 3 });
+      const states = [];
+      for (let day = 1 + Math.floor(random() * 6); day <= 28; day += 3 + Math.floor(random() * 9)) {
+        states.push(random() < 0.15 ? { at: `2026-10-${String(day).padStart(2, '0')}`, gone: true }
+          : { at: `2026-10-${String(day).padStart(2, '0')}${random() < 0.3 ? 'T14:00' : ''}`, geometry: square(random()) });
+      }
+      return tracked(states);
+    });
+    const layer = { features };
+    for (const options of [{}, { trail: true }, { trail: true, since: 'previous' }, { since: '2026-10-10', window: 3 }]) {
+      for (let day = 1; day <= 30; day += 1) {
+        for (const at of [`2026-10-${String(day).padStart(2, '0')}`, `2026-10-${String(day).padStart(2, '0')}T18:00`]) {
+          expect(asOf(layer, at, options)).toEqual(asOf(structuredClone(layer), at, options));
+        }
+      }
+      expect(asOf(layer, null, options)).toEqual(asOf(structuredClone(layer), null, options));
+    }
+  });
+});
+
+describe('when a feature shows, as the editor says it', () => {
+  const plain = (properties = {}) => ({ type: 'Feature', geometry: line(0), properties: { key: 'p', ...properties } });
+
+  it('reads a plain feature from its days and a history from its states', () => {
+    expect(spanOf(plain())).toEqual({ start: '', end: '', ends: 'last', changes: 0 });
+    expect(spanOf(plain({ date: '2026-10-03', date_end: '2026-10-09' }))).toEqual({ start: '2026-10-03', end: '2026-10-09', ends: 'last', changes: 0 });
+    expect(spanOf(front)).toEqual({ start: '2026-10-03', end: '2026-10-20', ends: 'gone', changes: 1 });
+    const always = tracked([{ at: '', geometry: line(0) }, { at: '2026-10-12', geometry: line(1) }]);
+    expect(spanOf(always)).toEqual({ start: '', end: '', ends: 'gone', changes: 1 });
+  });
+
+  it('says it in a few words, the year only when it is not this one', () => {
+    const year = 2026;
+    expect(spanLabel(spanOf(plain()), { year })).toBe('Always');
+    expect(spanLabel({ start: '2026-10-12', end: '' }, { year })).toBe('From 12 Oct');
+    expect(spanLabel({ start: '', end: '2026-10-20' }, { year })).toBe('Until 20 Oct');
+    expect(spanLabel({ start: '2025-12-30', end: '2026-01-02' }, { year })).toBe('30 Dec 2025 → 2 Jan');
+    expect(spanLabel({ start: '2026-10-12', end: '' }, { year, event: true })).toBe('12 Oct');
+    expect(spanLabel({ start: '', end: '' }, { year, event: true })).toBe('No day');
+    expect(shortMoment('2026-10-12T14:00', year)).toBe('12 Oct 14:00');
+  });
+
+  it('says what each state brought', () => {
+    expect(lifeline(front, null).map((row) => row.what)).toEqual(['Appears', 'Reshaped · Damaged', 'Gone']);
+    const marker = { type: 'Feature', geometry: { type: 'Point', coordinates: [1, 1] }, properties: { key: 'm', states: [
+      { at: '', geometry: { type: 'Point', coordinates: [0, 0] } },
+      { at: '2026-10-05', gone: true },
+      { at: '2026-10-08', geometry: { type: 'Point', coordinates: [0, 0] } },
+      { at: '2026-10-09', geometry: { type: 'Point', coordinates: [1, 1] } },
+      { at: '2026-10-10', geometry: { type: 'Point', coordinates: [1, 1] }, status: 'destroyed' },
+    ] } };
+    expect(lifeline(marker, null).map((row) => row.what)).toEqual(['Shown', 'Gone', 'Back', 'Moved', 'Destroyed']);
+  });
+
+  it('marks the state a dated edit rewrites, or where a new one goes', () => {
+    const shown = (rows) => rows.map((row) => [row.at, row.editing, row.ghost]);
+    // at now, or with no date, an edit counts on every day alike: no row is its own
+    expect(shown(lifeRows(front, null))).toEqual([['2026-10-03', false, false], ['2026-10-12', false, false], ['2026-10-20', false, false]]);
+    expect(shown(lifeRows(front, '2026-10-15', 'fix'))).toEqual(shown(lifeRows(front, null)));
+    // a day between two states: a new one there
+    expect(shown(lifeRows(front, '2026-10-15', 'new'))).toEqual([
+      ['2026-10-03', false, false], ['2026-10-12', false, false], ['2026-10-15', false, true], ['2026-10-20', false, false]]);
+    // on a state's own day the edit rewrites it
+    expect(lifeRows(front, '2026-10-12', 'new').filter((row) => row.editing).map((row) => row.at)).toEqual(['2026-10-12']);
+    // where it is not shown, nothing is edited
+    expect(lifeRows(front, '2026-10-25', 'new').some((row) => row.editing || row.ghost)).toBe(false);
+  });
+
+  it('knows what a feature changed by date, which an edit with no date leaves alone', () => {
+    expect(changedBy(front)).toEqual({ shape: '2026-10-12', status: '2026-10-12' });
+    const struck = tracked([{ at: '', geometry: line(0) }, { at: '2026-10-08', geometry: line(0), status: 'destroyed' }, { at: '2026-10-09', gone: true }]);
+    expect(changedBy(struck)).toEqual({ shape: '', status: '2026-10-08' });
+    expect(changedBy(plain({ date: '2026-10-03' }))).toEqual({ shape: '', status: '' });
+  });
+
+  it('shows a plain feature the history a dated edit would give it', () => {
+    expect(lifeRows(plain(), null)).toHaveLength(1);
+    expect(lifeRows(plain(), '2026-10-15', 'fix')).toHaveLength(1);
+    expect(lifeRows(plain(), '2026-10-15', 'new').map((row) => [row.at, row.what, row.ghost])).toEqual([['', 'Shown', false], ['2026-10-15', 'Next edit', true]]);
+    expect(lifeRows(plain({ date: '2026-10-20' }), '2026-10-15', 'new')).toHaveLength(1);
+  });
+
+  it('knows what happens on the day the layer is shown at', () => {
+    expect(changesOn(front, '2026-10-12T09:00')).toBe(true);
+    expect(changesOn(front, '2026-10-20')).toBe(true);
+    expect(changesOn(front, '2026-10-15')).toBe(false);
+    expect(changesOn(plain({ date: '2026-10-15' }), '2026-10-15')).toBe(true);
+    expect(changesOn(plain(), '2026-10-15')).toBe(false);
+    expect(changesOn(front, null)).toBe(false);
   });
 });

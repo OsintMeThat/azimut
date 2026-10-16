@@ -52,6 +52,20 @@ describe('a plate legend', () => {
     expect(all).toHaveLength(2);
   });
 
+  it('places in the frame only the features that would bring a row, and a feature off it still lets a later one in', () => {
+    const many = { front: { features: [point(40, 40, { category: 'Sites', symbol: 'badge-home', colour: '#0072b2' }),
+      ...Array.from({ length: 200 }, (_, index) => point(index * 1e-5, 0, { category: 'Sites', symbol: 'badge-home', colour: '#0072b2' })),
+      { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] }, properties: { category: 'Sites', symbol: 'badge-home', colour: '#0072b2', $trail: true } }] } };
+    const flat = { lon: 0, lat: 0 };
+    let placed = 0;
+    const place = ([lon, lat]) => { placed += 1; return [200 + (lon - flat.lon) * 1e4, 150 - (lat - flat.lat) * 1e4]; };
+    const past = (row, collection) => [collection.features.at(-1), collection.features.at(-1)];
+    const rowsOf = legendRows(map, context({ collection: (name) => many[name], place, past }));
+    expect(rowsOf.map((row) => row.label)).toEqual(['Home', 'The state before']);
+    // the one off the frame, the first in it, and the trail once
+    expect(placed).toBe(3);
+  });
+
   it('keeps the analyst\'s order, names, rows left out and rows written by hand', () => {
     const entries = [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }, { key: 'c', label: 'C' }];
     const said = arrange(entries, { order: ['c'], off: ['b'], names: { a: 'Alpha' } });

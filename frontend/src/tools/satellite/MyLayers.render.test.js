@@ -5,6 +5,7 @@ import MyLayers from './MyLayers.svelte';
 import LayerFeatureSheet from './LayerFeatureSheet.svelte';
 import NewLayerDialog from './NewLayerDialog.svelte';
 import { createMyLayersState } from './state/myLayers.svelte.js';
+import { shortMoment } from '../../lib/map/layerHistory.js';
 
 // the case palette is read from the server; here, a case that names no colours
 vi.mock('../../lib/api.js', () => ({ api: { get: vi.fn(async () => ({ colours: [] })), post: vi.fn(), patch: vi.fn(), put: vi.fn(), del: vi.fn() } }));
@@ -50,6 +51,11 @@ function picked(feature, extra = {}) {
 }
 const type = (node, value) => { node.value = value; node.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); };
 const leave = (node) => { node.dispatchEvent(new Event('change', { bubbles: true })); flushSync(); };
+/** Open the sheet's Look rows, which stay as the last sheet left them. */
+function openLook() {
+  const look = document.querySelector('button.look');
+  if (look?.getAttribute('aria-expanded') === 'false') { look.click(); flushSync(); }
+}
 const menuItem = (label) => [...document.querySelectorAll('.float-menu .fm-item')].find((node) => node.textContent.trim() === label);
 
 describe('personal layers', () => {
@@ -183,7 +189,8 @@ describe('personal layers', () => {
     show(MyLayers, { controller });
     const path = '/api/cases/case/map-layers/work/markers/m1';
     byText('Destroyed').click(); await controller.whenSaved(); flushSync();
-    expect(api.patch).toHaveBeenLastCalledWith(path, { status: 'destroyed' });
+    // a status is the day shown's: it goes for what is picked, never from the sheet's form
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/selection', { keys: ['m1'], changes: { status: 'destroyed' } });
     // the direction is set on the map; the sheet says it and clears it
     expect(document.querySelector('[aria-label="Feature"]').textContent).toContain('90° E');
     document.querySelector('[aria-label="Clear the direction"]').click(); await controller.whenSaved(); flushSync();
@@ -200,21 +207,23 @@ describe('personal layers', () => {
     expect(document.querySelector('.chip a').textContent).toBe('x.com');
     byText('Others').click(); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith(path, { provenance: 'external' });
-    expect(api.patch).toHaveBeenCalledTimes(4);
+    expect(api.patch).toHaveBeenCalledTimes(3);
     expect(byText('Save changes')).toBeUndefined();
   });
 
   it('changes several selected features together and says where they differ', () => {
     const features = [{ properties: { key: 'a', name: 'A', group: 'g', date: '2026-03-01', status: 'damaged' }, geometry: { type: 'Point' } },
       { properties: { key: 'b', name: 'B', group: 'g', date: '2026-03-02', status: 'damaged' }, geometry: { type: 'Point' } }];
-    const updateSelection = vi.fn();
+    const updateSelection = vi.fn(), setStatus = vi.fn();
     show(MyLayers, { controller: { editor: { title: 'Working map' }, features, groups: [{ id: 'g', name: 'Markers' }],
-      selection: ['a', 'b'], pending: 0, updateSelection } });
+      selection: ['a', 'b'], pending: 0, updateSelection, setStatus } });
     const sheet = document.querySelector('[aria-label="Selected features"]');
     expect(sheet.querySelector('[aria-pressed="true"]').textContent).toBe('Damaged');
     expect(sheet.textContent).toContain('Several days');
-    byText('Intact').click();
-    expect(updateSelection).toHaveBeenCalledWith({ status: null });
+    // nothing said is the first choice, not "Intact": most markers are no building
+    expect(byText('Intact')).toBeUndefined();
+    sheet.querySelector('[aria-label="No damage said, drawn plain"]').click();
+    expect(setStatus).toHaveBeenCalledWith('');
     byText('Others').click();
     expect(updateSelection).toHaveBeenCalledWith({ provenance: 'external' });
   });
@@ -396,7 +405,7 @@ describe('new layer', () => {
     const oncreate = vi.fn();
     show(NewLayerDialog, { oncreate, onclose: vi.fn() });
     byText('Create layer').click();
-    expect(oncreate).toHaveBeenCalledWith('My layer', null, '');
+    expect(oncreate).toHaveBeenCalledWith('My layer', null, '', null);
     expect(byText('From a file')).toBeTruthy();
   });
 
@@ -405,7 +414,7 @@ describe('new layer', () => {
     show(NewLayerDialog, { oncreate, onclose: vi.fn() });
     const description = document.querySelector('textarea'); description.value = 'Layer context';
     description.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-    byText('Create layer').click(); expect(oncreate).toHaveBeenCalledWith('My layer', null, 'Layer context');
+    byText('Create layer').click(); expect(oncreate).toHaveBeenCalledWith('My layer', null, 'Layer context', null);
   });
 
   it('requires a file when starting from a file', () => {
@@ -422,33 +431,97 @@ describe('a feature with a history', () => {
   const front = { type: 'Feature', geometry: line(1), properties: { key: 'f', name: 'Front line', states: [
     { at: '2026-10-03', geometry: line(0) }, { at: '2026-10-12', geometry: line(1), status: 'damaged' }] } };
 
-  it('lists its states instead of a day, and a state pressed reads the layer then', async () => {
+  const TRACKED = { name: 'work', title: 'Working map', track: { on: true } };
+  const rows = () => [...document.querySelectorAll('[aria-label="Feature history"] li')];
+  const said = (row) => [...row.querySelectorAll('.at, .what')].map((node) => node.textContent.trim());
+
+  it('says when it shows under its name, lists what each date brought, and shows the layer on a date pressed', async () => {
     const { addedLayers } = await import('../../lib/map/addedLayersState.svelte.js');
     const dropState = vi.fn();
-    show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: true } }, cursor: null, dropState }) });
-    const states = [...document.querySelectorAll('[aria-label="Feature history"] .state')];
-    expect(states.map((node) => node.textContent.trim())).toEqual(['3 Oct 2026', '12 Oct 2026 · damaged']);
-    expect(states[1].classList.contains('current')).toBe(true);
+    show(MyLayers, { controller: picked(front, { editor: TRACKED, cursor: null, timeMode: 'new', dropState }) });
+    expect(document.querySelector('[aria-label="When it first shows"]').textContent.trim()).toBe(`From ${shortMoment('2026-10-03')}`);
+    expect(document.querySelector('[aria-label="When it leaves the map"]').textContent.trim()).toBe('Still there');
+    expect(rows().map(said)).toEqual([[shortMoment('2026-10-03'), 'Appears'], [shortMoment('2026-10-12'), 'Reshaped · Damaged']]);
+    // at now the latest date is shown, and an edit carries no date: no row is its own
+    expect(rows()[1].classList.contains('current')).toBe(true);
+    expect(document.querySelector('[aria-label="Feature history"] .pen')).toBeNull();
     expect(document.querySelector('[aria-label="Feature day"]')).toBeNull();
-    states[0].querySelector('button').click();
+    rows()[0].querySelector('.moment').click();
     expect(addedLayers.time('work').at).toBe('2026-10-03');
-    document.querySelector('[aria-label="Remove the state of 12 Oct 2026"]').click();
+    document.querySelector('[aria-label="Remove the change of 12 Oct 2026"]').click();
     expect(dropState).toHaveBeenCalledWith('f', '2026-10-12');
     addedLayers.setTime('work', { at: null });
   });
 
-  it('can be said gone from the moment the layer is read at', () => {
-    const markGone = vi.fn();
-    show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: true } }, cursor: '2026-10-15', markGone }) });
-    document.querySelector('[aria-label="Feature actions"]').click(); flushSync();
-    menuItem('Gone from 15 Oct 2026').click();
-    expect(markGone).toHaveBeenCalledWith('f');
+  it('says what a date holds while edits carry none, and locks a status that changed on a day', () => {
+    const marker = { type: 'Feature', geometry: { type: 'Point', coordinates: [30, 1] }, properties: { key: 'm', name: 'Depot', states: [
+      { at: '2026-10-03', geometry: { type: 'Point', coordinates: [30, 1] } },
+      { at: '2026-10-12', geometry: { type: 'Point', coordinates: [30, 1] }, status: 'destroyed' }] } };
+    const held = () => ({ shape: '', status: '2026-10-12' });
+    show(MyLayers, { controller: picked(marker, { editor: TRACKED, cursor: null, timeMode: 'new', held }) });
+    expect(document.querySelector('.held').textContent.trim()).toBe(`Status changes on ${shortMoment('2026-10-12')}: pick a day to set it.`);
+    const statuses = [...document.querySelectorAll('[aria-label="Feature status"] button')];
+    expect(statuses.every((button) => button.disabled)).toBe(true);
+    expect(statuses[0].title).toBe('Changes on 12 Oct 2026: pick a day to set it');
+  });
+
+  it('shows where a dated edit goes before it is made', () => {
+    show(MyLayers, { controller: picked(front, { editor: TRACKED, cursor: '2026-10-15', timeMode: 'new' }) });
+    expect(rows().map(said)).toEqual([[shortMoment('2026-10-03'), 'Appears'], [shortMoment('2026-10-12'), 'Reshaped · Damaged'],
+      [shortMoment('2026-10-15'), 'Next edit']]);
+    expect(rows()[2].classList.contains('ghost')).toBe(true);
+  });
+
+  it('gives an undated feature no history until a dated edit is about to', () => {
+    const always = { type: 'Feature', geometry: line(1), properties: { key: 'a', name: 'Checkpoint' } };
+    show(MyLayers, { controller: picked(always, { editor: TRACKED, cursor: null, timeMode: 'new' }) });
+    expect(document.querySelector('[aria-label="When it first shows"]').textContent.trim()).toBe('Always');
+    expect(document.querySelector('[aria-label="When it first shows"]').classList.contains('open-ended')).toBe(true);
+    expect(document.querySelector('[aria-label="Feature history"]')).toBeNull();
+  });
+
+  it('sets when it first shows and when it leaves, from the calendar or the day shown', () => {
+    const setStart = vi.fn(), setEnd = vi.fn();
+    show(MyLayers, { controller: picked(front, { editor: TRACKED, cursor: '2026-10-15', timeMode: 'new', setStart, setEnd }) });
+    document.querySelector('[aria-label="When it first shows"]').click(); flushSync();
+    menuItem('Always').click(); flushSync();
+    expect(setStart).toHaveBeenCalledWith('f', '');
+    document.querySelector('[aria-label="When it first shows"]').click(); flushSync();
+    // a start stays before the next change, so the 12th is the last day offered
+    expect(document.querySelector('.float-menu button.day[title="2026-10-11"]').disabled).toBe(false);
+    expect(document.querySelector('.float-menu button.day[title="2026-10-12"]').disabled).toBe(true);
+    document.querySelector('.float-menu button.day[title="2026-10-05"]').click(); flushSync();
+    expect(setStart).toHaveBeenLastCalledWith('f', '2026-10-05');
+    document.querySelector('[aria-label="When it leaves the map"]').click(); flushSync();
+    [...document.querySelectorAll('.float-menu .fm-item')].find((node) => node.textContent.includes('day shown')).click(); flushSync();
+    expect(setEnd).toHaveBeenCalledWith('f', '2026-10-15');
+  });
+
+  it('goes to a day picked to change it from', () => {
+    const changeOn = vi.fn();
+    show(MyLayers, { controller: picked(front, { editor: TRACKED, cursor: '2026-10-15', timeMode: 'new', changeOn }) });
+    document.querySelector('[aria-label="Change it from a day"]').click(); flushSync();
+    expect(document.querySelector('.float-menu button.day[title="2026-10-03"]').disabled).toBe(true);
+    document.querySelector('.float-menu button.day[title="2026-10-08"]').click(); flushSync();
+    expect(changeOn).toHaveBeenCalledWith('2026-10-08');
+  });
+
+  it('tags each row of the list with when it shows, and dots what changes on the day shown', () => {
+    const point = (key, group, properties = {}) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [2, 48] },
+      properties: { key, name: key, group, ...properties } });
+    const features = [point('checkpoint', 'g'), point('position', 'g', { date: '2026-10-03' }), point('strike', 'e', { date: '2026-10-10' })];
+    const groups = [{ id: 'g', name: 'Markers', mode: 'individual', colour: '#0072b2' }, { id: 'e', name: 'Strikes', mode: 'individual', colour: '#d55e00', events: true }];
+    show(MyLayers, { controller: { ...picked(features[0], { editor: TRACKED, cursor: '2026-10-10', timeMode: 'new' }), features, groups, selection: [], selected: null } });
+    const tags = Object.fromEntries([...document.querySelectorAll('.features li')].map((row) =>
+      [row.dataset.featureKey, [row.querySelector('.day').textContent.trim(), !!row.querySelector('.today')]]));
+    expect(tags).toEqual({ checkpoint: ['Always', false], position: [`From ${shortMoment('2026-10-03')}`, false], strike: [shortMoment('2026-10-10'), true] });
   });
 
   it('keeps a switched-off history read-only', () => {
     show(MyLayers, { controller: picked(front, { editor: { name: 'work', title: 'Working map', track: { on: false } }, cursor: null }) });
-    const buttons = [...document.querySelectorAll('[aria-label="Feature history"] button')];
-    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(document.querySelector('[aria-label="When it shows"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Feature day"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Feature"]').textContent).toContain(`From ${shortMoment('2026-10-03')}`);
   });
 
   it('draws a line or an area as the analyst says, says how sure it is, and keeps status to markers', async () => {
@@ -460,6 +533,7 @@ describe('a feature with a history', () => {
     const sheet = () => document.querySelector('[aria-label="Feature"]');
     // a line has no status: it is not damaged or destroyed
     expect(sheet().querySelector('[aria-label="Feature status"]')).toBeNull();
+    openLook();
     sheet().querySelector('[aria-label="Line dash"] button:nth-child(2)').click(); await controller.whenSaved(); flushSync();
     expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/l1', { line_dash: 'dashed' });
     sheet().querySelector('[aria-label="Line arrow"] button:nth-child(2)').click(); await controller.whenSaved(); flushSync();
@@ -482,5 +556,55 @@ describe('a feature with a history', () => {
     const find = document.querySelector('[aria-label="Find in this layer"]'); find.value = 'hangar';
     find.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
     expect(document.body.textContent).toContain('1 found');
+  });
+});
+
+describe('what the sheet says on hover', () => {
+  const line = { type: 'Feature', properties: { key: 'l1', name: 'Front', group: 'g', line_width: 4, line_dash: 'dashed' },
+    geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48]] } };
+  const looks = { line_width: 4, line_dash: 'dashed', line_arrow: '', area_fill: '', fill_opacity: '', marker_size: '', label: '', label_size: '', confidence: '' };
+
+  it('explains every row, and folds how a feature is drawn under Look, saying what it sets', () => {
+    const controller = picked(line, { groups: [{ id: 'g', name: 'Markers', stroke: 2 }, { id: 'h', name: 'Posts' }] });
+    controller.form = { ...controller.form, ...looks };
+    show(LayerFeatureSheet, { controller });
+    const look = document.querySelector('button.look');
+    if (look.getAttribute('aria-expanded') === 'true') { look.click(); flushSync(); }
+    // what it says comes first, each row named on hover
+    const keys = [...document.querySelectorAll('.rows .key')].filter((key) => key.textContent !== 'Length');
+    expect(keys.map((key) => key.textContent)).toEqual(['Group', 'How sure', 'Day', 'Sources', 'Geolocated by', 'Note']);
+    expect(keys.every((key) => key.title)).toBe(true);
+    expect(document.querySelector('[aria-label="Line dash"]')).toBeNull();
+    expect(look.title).toBe('How it is drawn: its size, line, fill and name');
+    expect(look.textContent).toContain('Width · Dash');
+    look.click(); flushSync();
+    const drawn = [...document.querySelectorAll('.look-rows .key')];
+    expect(drawn.map((key) => key.textContent)).toEqual(['Width', 'Dash', 'Arrow', 'Name']);
+    expect(drawn.every((key) => key.title)).toBe(true);
+    // a slider says its value, and goes back to its group's with Reset
+    const width = document.querySelector('[aria-label="Line width"]').closest('.slider');
+    expect(width.textContent).toContain('4 px');
+    expect(width.querySelector('button').textContent).toBe('Reset');
+  });
+
+  it('says a marker\'s status by what it draws, nothing said first', () => {
+    const marker = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    const setStatus = vi.fn();
+    show(LayerFeatureSheet, { controller: picked(marker, { groups: [{ id: 'g', name: 'Markers' }], setStatus }) });
+    const buttons = [...document.querySelectorAll('[aria-label="Feature status"] button')];
+    expect(buttons.map((button) => [button.textContent, button.title])).toEqual([
+      ['–', 'No damage said, drawn plain'], ['Damaged', 'Drawn with a stroke across it'], ['Destroyed', 'Drawn with a cross over it']]);
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
+    buttons[2].click();
+    expect(setStatus).toHaveBeenCalledWith('destroyed');
+  });
+
+  it('says a feature is not on the map on the day shown, and keeps its status there', () => {
+    const away = { type: 'Feature', properties: { key: 's', name: 'Store', group: 'g', $absent: true,
+      states: [{ at: '2026-10-10', geometry: { type: 'Point', coordinates: [2, 48] } }] }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    show(LayerFeatureSheet, { controller: picked(away, { editor: { name: 'work', title: 'Working', track: { on: true } }, cursor: '2026-10-05',
+      timeMode: 'new', groups: [{ id: 'g', name: 'Markers' }] }) });
+    expect(document.querySelector('.away').textContent.trim()).toBe('Not on the map on 5 Oct 2026: set when it shows to change it there.');
+    expect([...document.querySelectorAll('[aria-label="Feature status"] button')].every((button) => button.disabled)).toBe(true);
   });
 });

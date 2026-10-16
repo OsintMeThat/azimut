@@ -24,7 +24,7 @@
   let vertex = $state(null);
   /** The loop being drawn, in screen pixels, and whether it adds to the selection. */
   let loop = $state(null);
-  /** A marker's direction while its ring is turned, until the layer has saved it. */
+  /** A marker's direction while its ring is turned, until it is let go. */
   let turning = $state(null);
   /** Where a right-click on a feature opened its menu, in window pixels. */
   let featureMenu = $state(null);
@@ -107,7 +107,8 @@
     frame;
     const drag = controller.dragging;
     if (!editing || !drag?.offset) return { marks: [], path: '' };
-    const keys = new Set(drag.keys), [dx, dy] = drag.offset;
+    // once let go, the features stand where they landed: the copies wait over them for the map to draw them
+    const keys = new Set(drag.keys), [dx, dy] = drag.landing ? [0, 0] : drag.offset;
     const marks = [], paths = [];
     for (const feature of shown) {
       if (!keys.has(feature.properties.key)) continue;
@@ -326,6 +327,8 @@
       hovering = requestAnimationFrame(() => { hovering = 0; });
       const sketch = controller.sketch;
       if (!sketch || ['Point', 'Selection'].includes(sketch.type)) { snapTarget = null; return; }
+      // an area being reshaped takes no click, so only a corner being dragged shows where it would land
+      if (sketch.key && sketch.type !== 'LineString') { if (!dragCleanup) snapTarget = null; return; }
       const point = engine.containerPointToLatLng(local(event));
       if (sketch.shape) controller.preview(point);
       const near = snapped(point, sketch.key);
@@ -361,14 +364,16 @@
     }
     const keys = (controller.selection ?? []).includes(key) ? [...controller.selection] : [key];
     const linked = new Set(controller.features.filter((one) => one.properties.entity_id).map((one) => one.properties.key));
-    const movable = keys.filter((one) => !linked.has(one));
+    // a marker following a case item stays on it; so, while edits carry no date, does a feature moved on a day
+    const movable = keys.filter((one) => !linked.has(one) && !controller.dateHolds?.(one));
     const origin = engine.containerPointToLatLng(start);
     let offset = null;
+    let told = false;
     dragCleanup?.();
     const move = (event) => {
       const at = local(event);
       if (!offset && Math.hypot(at.x - start.x, at.y - start.y) < DRAG_PIXELS) return;
-      if (!movable.length) return;
+      if (!movable.length) { if (!told) { told = true; controller.heldBack?.(keys); } return; }
       const here = engine.containerPointToLatLng(at);
       offset = [here.lon - origin.lon, here.lat - origin.lat];
       if (!(controller.selection ?? []).includes(key)) controller.chooseKeys(keys);
@@ -452,8 +457,9 @@
     const end = () => {
       cleanup();
       const chosen = turning;
-      if (!moved || !chosen) { turning = null; return; }
-      controller.update(chosen.key, { bearing: chosen.bearing }).finally(() => { if (turning === chosen) turning = null; });
+      turning = null;
+      // the marker faces its new way at once, the save catching up behind
+      if (moved && chosen) controller.aim(chosen.key, chosen.bearing);
     };
     const cleanup = () => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
@@ -466,8 +472,8 @@
   /** The knob from the keyboard: arrows turn by five degrees, fifteen with Shift; Delete clears. */
   function turnKey(event, at) {
     const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[event.key];
-    if (step) controller.update(at.key, { bearing: (((at.bearing ?? 0) + step * (event.shiftKey ? 15 : 5)) % 360 + 360) % 360 });
-    else if (event.key === 'Delete' || event.key === 'Backspace') controller.update(at.key, { bearing: null });
+    if (step) controller.aim(at.key, (((at.bearing ?? 0) + step * (event.shiftKey ? 15 : 5)) % 360 + 360) % 360);
+    else if (event.key === 'Delete' || event.key === 'Backspace') controller.aim(at.key, null);
     else return;
     event.preventDefault(); event.stopPropagation();
   }
@@ -537,7 +543,7 @@
       aria-label={ring.bearing === null ? 'Set the direction' : `Direction ${facingLabel(ring.bearing)}`}
       title={ring.bearing === null ? 'Drag to set where it faces' : `Faces ${facingLabel(ring.bearing)}. Drag to turn it, double-click to clear.`}
       onpointerdown={(event) => turn(event, ring)} onclick={(event) => event.stopPropagation()}
-      ondblclick={(event) => { event.stopPropagation(); controller.update(ring.key, { bearing: null }); }}
+      ondblclick={(event) => { event.stopPropagation(); controller.aim(ring.key, null); }}
       onkeydown={(event) => turnKey(event, ring)}></button>
     {#if turning?.key === ring.key}
       <span class="turn-label" style:left={`${ring.knob.x}px`} style:top={`${ring.knob.y}px`}>{facingLabel(turning.bearing)}</span>

@@ -142,6 +142,7 @@
   import { SHEET_TEMPLATES, sheetTemplate, templateMeta } from '../lib/sheetTemplates.js';
   import { canBuild, columnKinds } from '../lib/sheetBuild.js';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
@@ -3721,8 +3722,13 @@
 
 <div class="tool">
   <header class="tool-header">
-    <Icon name="table" size={17} />
-    <h2>Sheet</h2>
+    {#if openId}
+      <!-- back to the home, saved first: the way out every document tool has, first in its header -->
+      <BackButton label="Sheets" title="Save and go back to the sheets" onclick={goHome} />
+    {:else}
+      <Icon name="table" size={17} />
+      <h2>Sheet</h2>
+    {/if}
     {#if openId}
       <input
         class="input title-input"
@@ -3901,10 +3907,6 @@
       <button class="btn btn-sm btn-danger" title="Delete this sheet"
               onclick={() => (confirming = { kind: 'sheet' })}>
         <Icon name="trash" size={13} />
-      </button>
-      <!-- Back to the home, saved first: the way out Collage has, under the same word. -->
-      <button class="btn btn-ghost btn-sm" onclick={goHome} title="Save and go back to the sheets">
-        <Icon name="x" size={14} /> Close
       </button>
     {/if}
     <!-- The grid keeps its power under a right-click, which is right — and a right-click

@@ -170,4 +170,50 @@ describe('layer geometry handles', () => {
     }
     expect(bar.textContent).toContain('Done');
   });
+
+  describe('what the map shows once a feature is let go', () => {
+    const zone = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }, properties: { key: 'zone', group: 'g' } };
+
+    it('reshapes an area on a double click, and a click after it adds no corner', async () => {
+      const { controller, canvas, callbacks } = await setup(null, [zone]);
+      canvas.dispatchEvent(new MouseEvent('dblclick', { clientX: 70, clientY: 40, bubbles: true, cancelable: true })); flushSync();
+      expect(controller.sketch).toMatchObject({ key: 'zone', type: 'Polygon' });
+      expect(document.querySelectorAll('.vertex')).toHaveLength(3);
+      callbacks.get('click')({ lon: 50, lat: 50 }); flushSync();
+      expect(document.querySelectorAll('.vertex')).toHaveLength(3);
+      expect(controller.sketch.rings[0]).toEqual([[0, 0], [10, 0], [10, 10]]);
+      // nor does hovering promise one: only a corner being dragged shows where it would land
+      canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 12, clientY: 22, bubbles: true })); flushSync();
+      expect(document.querySelector('.snap')).toBeNull();
+    });
+
+    it('stands where it landed while the move saves: copies, halo and grip, never at its old place', async () => {
+      const { controller, api, canvas } = await setup(null, [point('a', 2, 4), point('b', 30, 30)]);
+      let answer;
+      api.post.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+      press(canvas, 30, 60);
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 40, clientY: 60 }));
+      window.dispatchEvent(new PointerEvent('pointerup')); flushSync();
+      expect(controller.features.find((one) => one.properties.key === 'a').geometry.coordinates).toEqual([3, 4]);
+      expect(document.querySelector('.ghost-mark').style.left).toBe('30px');
+      expect(document.querySelector('circle.halo').getAttribute('cx')).toBe('30');
+      answer({ layer: { name: 'work' }, document: { features: [point('a', 3, 4), point('b', 30, 30)] }, kept: 0 });
+      await controller.whenSaved(); flushSync();
+      expect(document.querySelector('.ghost-mark')).toBeNull();
+      expect(document.querySelector('circle.halo').getAttribute('cx')).toBe('30');
+    });
+
+    it('turns a marker the moment its knob is let go', async () => {
+      const { controller, api } = await setup(null, [point('a', 2, 4)]);
+      api.patch = vi.fn(() => new Promise(() => {}));
+      controller.select('a'); flushSync();
+      const knob = document.querySelector('.turn-knob');
+      knob.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 30, clientY: 30, bubbles: true }));
+      // this test map draws north down the screen, so east is to the left of the marker
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 0, clientY: 60 }));
+      window.dispatchEvent(new PointerEvent('pointerup')); flushSync();
+      expect(controller.features[0].properties.bearing).toBe(90);
+      expect(document.querySelector('.turn-knob').getAttribute('aria-label')).toBe('Direction 90° E');
+    });
+  });
 });

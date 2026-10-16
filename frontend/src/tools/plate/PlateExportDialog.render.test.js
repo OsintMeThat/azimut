@@ -35,6 +35,8 @@ describe('exporting a plate', () => {
     radio('mp4').click(); flushSync();
     expect(document.body.querySelector('select[aria-label="First day"]')).toBeNull();
     expect(document.body.textContent).toContain('Runs 1:23');
+    // an MP4 counts its transitions, a GIF has none
+    expect(runtime).toHaveBeenLastCalledWith([], 900, 'mp4');
     go().click(); await settle();
     expect(onexport).toHaveBeenCalledWith(expect.objectContaining({ format: 'mp4', days: [] }));
   });

@@ -16,6 +16,7 @@
   import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
   import { offerNote, withdrawNote } from '../lib/noteHere.svelte.js';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import SourcePicker from '../components/SourcePicker.svelte';
@@ -749,6 +750,7 @@
 <div class="tool">
   {#if work.source}
     <div class="tool-header">
+      <BackButton label="Files" title="Back to the file list" onclick={leave} />
       <span class="file">
         <Icon name={isVideo ? 'video' : 'image'} size={14} />
         <input
@@ -779,9 +781,6 @@
       {/if}
       <button class="btn btn-sm" onclick={() => (pickerOpen = true)} title="Open another image or video">
         <Icon name="folderOpen" size={14} /> Change file
-      </button>
-      <button class="btn btn-ghost btn-sm" onclick={leave} title="Back to the file list" aria-label="Close file">
-        <Icon name="x" size={15} />
       </button>
     </div>
   {/if}

@@ -41,7 +41,7 @@
   }
 </script>
 
-<div class="relief-ctl" class:on>
+<div class="relief-ctl" class:on data-bar-obstacle>
   <button
     class="toggle"
     aria-pressed={on}

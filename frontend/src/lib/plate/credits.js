@@ -7,7 +7,7 @@
  */
 import { overlayAttribution } from '../map/basemap.js';
 import { attribution as layerCredit } from '../map/addedLayers.js';
-import { PLAIN_ATTRIBUTION } from './plainBasemap.js';
+import { PLAIN_ATTRIBUTION, topographic } from './plainBasemap.js';
 
 const strip = (text) => String(text ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 
@@ -15,14 +15,17 @@ const strip = (text) => String(text ?? '').replace(/<[^>]+>/g, '').replace(/\s+/
 export function mapCredits(element, { providers = [], rows = [], relief = null, releases = [] } = {}) {
   const parts = [];
   const ground = element.basemap || 'plain';
+  // the heights are read by the shading, by a topographic ground's tints and lines, and by a map in 3D
+  const heights = relief && ((ground.startsWith('plain') && (element.overlays?.includes('relief') || topographic(ground))) || (element.terrain ?? 0) > 0);
   if (ground.startsWith('plain')) {
     parts.push(PLAIN_ATTRIBUTION);
-    if (relief && element.overlays?.includes('relief')) parts.push(relief.sources?.[0]?.attribution ?? '');
+    if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
   } else {
     parts.push(providers.find((entry) => entry.id === ground)?.attribution ?? '');
     // a Wayback map names the release it shows, the date a reader can check
     const release = releases.find((entry) => entry.release === element.release) ?? (ground === 'esri-wayback' ? releases[0] : null);
     if (ground === 'esri-wayback' && release?.date) parts.push(`World Imagery Wayback, release of ${release.date}`);
+    if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
   }
   for (const id of element.overlays ?? []) if (id !== 'relief') parts.push(overlayAttribution(id));
   for (const entry of element.layers ?? []) {

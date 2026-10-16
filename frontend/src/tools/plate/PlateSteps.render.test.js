@@ -50,4 +50,16 @@ describe('the steps of a day', () => {
     [...document.body.querySelectorAll('.fm-item')].find((item) => item.textContent.includes('later')).click(); flushSync();
     expect(calls.onmove).toHaveBeenCalledWith('s1', 2);
   });
+
+  it('cuts straight into a step when the video\'s transitions are on, and says nothing of it when they are off', () => {
+    const calls = show({ transitions: true });
+    document.body.querySelector('button[aria-label="Set Strike"]').click(); flushSync();
+    const cut = document.body.querySelector('.cut input');
+    cut.click();
+    expect(calls.onchange).toHaveBeenLastCalledWith('s1', { transition: 'none' });
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ transitions: false });
+    document.body.querySelector('button[aria-label="Set Strike"]').click(); flushSync();
+    expect(document.body.querySelector('.cut')).toBeNull();
+  });
 });

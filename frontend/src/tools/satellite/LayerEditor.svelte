@@ -20,8 +20,10 @@
   import { openFollowed } from '../../lib/map/followed.js';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import LayerTrackPanel from './LayerTrackPanel.svelte';
+  import { changesOn, spanLabel, spanOf } from '../../lib/map/layerHistory.js';
   import { axisZone } from '../../lib/caseAxis.svelte.js';
   import ClockField from '../../components/ClockField.svelte';
+  import { LAYER_HELP } from '../../lib/map/layerHelp.js';
 
   let { controller, ondone, onfly, ondeleteplace } = $props();
   $effect(() => layerPalette.load(controller.editor?.caseId));
@@ -67,6 +69,9 @@
     const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
     return match ? `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}` : '';
   };
+  const tracked = $derived(!!controller.editor.track?.on);
+  /** When a feature shows, as its row says it on a layer followed over time. */
+  const when = (feature, group) => spanLabel(spanOf(feature), { event: !!group.events });
   /** The first words of a feature's note, under a name that says little. */
   const gist = (feature) => String(feature.properties.description ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
   const membersByGroup = $derived.by(() => {
@@ -252,13 +257,15 @@
   {#if controller.editor.origin}
     <p class="note">Copy of {controller.editor.origin.source.name || controller.editor.origin.source.url}</p>
   {/if}
-  {#if controller.editor.track?.on && !controller.loading}<LayerTrackPanel {controller} />{/if}
   {#if controller.loading}
     <p class="note">Opening layer…</p>
   {:else}
     {#if controller.pending}<p class="saving" role="status">Saving {controller.pending}…</p>{/if}
-    <!-- the sheet stays in view at the top while the list scrolls under it -->
-    <div class="sheet-dock"><LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} /></div>
+    <!-- the day shown and the sheet stay in view at the top while the list scrolls under them -->
+    <div class="sheet-dock">
+      {#if controller.editor.track?.on}<LayerTrackPanel {controller} />{/if}
+      <LayerFeatureSheet {controller} onfollowed={(id) => openFollowed(caseState.current?.id, id)} {ondeleteplace} />
+    </div>
 
     <input type="search" class="find" aria-label="Find in this layer" placeholder="Find in this layer" bind:value={query} />
     {#if needle}<p class="note">{found ? `${found} found` : 'Nothing by that name.'}</p>{/if}
@@ -317,7 +324,11 @@
                     {:else}<Icon name={String(feature.geometry.type).includes('Line') ? 'line' : 'polygon'} size={12} />{/if}
                   </span>
                   <span class="name" title={gist(feature) || null}>{feature.properties.name || 'Unnamed feature'}{#if gist(feature)}<small>{gist(feature)}</small>{/if}</span>
-                  {#if feature.properties.date}<span class="day">{day(feature.properties.date)}</span>{/if}
+                  {#if tracked}
+                    {#if changesOn(feature, controller.cursor)}<span class="today" title="Changes on the day shown"></span>{/if}
+                    {@const said = when(feature, group)}
+                    <span class="day" class:open-ended={said === 'Always' || said === 'No day'}>{said}</span>
+                  {:else if feature.properties.date}<span class="day">{day(feature.properties.date)}</span>{/if}
                   {#if feature.properties.entity_id}<Icon name="link" size={10} />{/if}
                 </button></li>
               {/each}
@@ -350,19 +361,19 @@
   <FloatingMenu anchor={layerMenuAnchor} align="end" width={220} label="Layer actions" onclose={() => (layerMenu = false)}>
     <button type="button" class="fm-item" onclick={() => { layerMenu = false; describing = true; }}>
       <Icon name="note" size={14} /><span class="fm-grow">{controller.editor.description ? 'Edit the description' : 'Add a description'}</span></button>
-    <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={!!controller.editor.track?.on} disabled={busy} onclick={switchTrack}>
+    <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={!!controller.editor.track?.on} disabled={busy} title={LAYER_HELP.track} onclick={switchTrack}>
       <Icon name="clock" size={14} /><span class="fm-grow">Track over time</span>
       {#if controller.editor.track?.on}<Icon name="check" size={13} />{/if}</button>
     {#if controller.editor.track?.on}
       <!-- how a tracked layer dates its states: set once, so kept in the menu rather than over the list -->
-      <div class="fm-sub" role="group" aria-label="Date states by">
+      <div class="fm-sub" role="group" aria-label="Date states by" title={LAYER_HELP.precision}>
         <span>Dated to</span>
         <button type="button" class="fm-pill" aria-pressed={(controller.editor.track.precision ?? 'day') === 'day'} disabled={busy}
           onclick={() => controller.setTrack({ precision: 'day' })}>the day</button>
         <button type="button" class="fm-pill" aria-pressed={controller.editor.track.precision === 'time'} disabled={busy}
           onclick={() => controller.setTrack({ precision: 'time' })}>day and time</button>
       </div>
-      <div class="fm-sub"><span>Clock</span><ClockField value="" clock={{ zone: controller.editor.track.zone ?? 'UTC', fixed: '' }} timed={false} disabled={busy}
+      <div class="fm-sub" title={LAYER_HELP.clock}><span>Clock</span><ClockField value="" clock={{ zone: controller.editor.track.zone ?? 'UTC', fixed: '' }} timed={false} disabled={busy}
         onpick={(zone) => { if (zone) controller.setTrack({ zone }); }} /></div>
     {/if}
     <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={download}>
@@ -433,6 +444,10 @@
   .fm-pill { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2); font-size: 11px; cursor: pointer; }
   .fm-pill[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
   .count, .day { font-size: 10px; font-weight: 400; color: var(--text-3); }
+  .day { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .day.open-ended { opacity: .7; }
+  /* the map rings what changes on the day shown; the list marks it the same yellow */
+  .today { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #ffd400; /* addedLayer.js NEW_COLOUR */ }
   ul { list-style: none; margin: 0; padding: 0; }
   .features .feature-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 26px; padding: 3px 6px; border-radius: var(--r-sm); text-align: left; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
   .features .feature-row:hover, .features .feature-row.active { background: var(--bg-3); color: var(--text-1); }

@@ -58,6 +58,9 @@ export const THEMES = {
   mono: { label: 'Black and white', theme: { paper: '#ffffff', ink: '#000000', accent: '#000000', font: 'plexmono' }, ground: 'plain',
     plain: { ground: '#f2f2f2', water: '#cfcfcf', wood: '#e3e3e3', urban: '#e8e8e8', road: '#ffffff', border: '#6f6f6f', name: '#2b2b2b' },
     tone: { saturation: -1 } },
+  // the heights in colour and the contour lines of a survey's map, and the khaki of a staff map
+  survey: { label: 'Survey', theme: { paper: '#ffffff', ink: '#2b2a26', accent: '#b4232a', font: 'condensed' }, ground: 'plain-topo' },
+  staff: { label: 'Staff', theme: { paper: '#efe9d4', ink: '#24221a', accent: '#8a1c1c', font: 'barlow' }, ground: 'plain-staff' },
 };
 
 /**
@@ -98,13 +101,33 @@ export const KIND_LABELS = {
   map: 'Map', inset: 'Inset map', legend: 'Legend', text: 'Text', scale: 'Scale bar', north: 'North arrow',
   image: 'Picture', label: 'Label', arrow: 'Arrow', credits: 'Credits', shape: 'Shape', ring: 'Range rings',
   cone: 'View cone', zone: 'Zone', measure: 'Distance', key: 'Numbered list', table: 'Table', qr: 'QR code',
-  timeline: 'Date strip', signature: 'Signature', brand: 'Made with Azimut', video: 'Video',
+  timeline: 'Date strip', signature: 'Signature', brand: 'Made with Azimut', video: 'Video', line: 'Line', symbol: 'Symbol',
 };
 
 /** The kinds that stand on a map's ground: placed by a press on a map, kept out of templates. */
-export const ON_THE_GROUND = ['label', 'arrow', 'ring', 'cone', 'zone', 'measure'];
+export const ON_THE_GROUND = ['label', 'arrow', 'ring', 'cone', 'zone', 'measure', 'line', 'symbol'];
+/** The kinds on the ground held by a box of their own on the page, moved and sized by it: a label, a symbol. */
+export const BOXED_ON_THE_GROUND = ['label', 'symbol'];
 /** The kinds a plate draws as maps, under everything else. */
 export const MAP_KINDS = ['map', 'inset'];
+
+/** The view an inset is drawn at over its map's view `of`: the same centre, its own zoom or four and a half levels out, north up. */
+export const insetView = (inset, of) => ({ lat: of.lat, lon: of.lon, zoom: inset.zoom ?? Math.max(0, of.zoom - 4.5), bearing: 0 });
+
+/**
+ * What a plate's map can lay over its ground: the relief shading, then the key-less
+ * layers the Map draws (`map/basemap.js`), each credited on the page. Live fires are
+ * left out: they need a key and say "now", where a plate says its own day.
+ */
+export const PLATE_OVERLAYS = [['relief', 'Relief shading'], ['boundaries', 'Borders and big names'], ['placenames', 'Town and village names'],
+  ['roads', 'Roads, drawn over imagery'], ['railway', 'Railways'], ['power', 'Power lines and plants'], ['seamarks', 'Sea marks'],
+  ['gpstraces', 'GPS traces'], ['nightlights', 'Night lights']];
+
+/** A text on the map, a label without a leader, or a symbol: it stands over its point however the map is framed. */
+export const standsOver = (element) => (element.kind === 'symbol' || (element.kind === 'label' && element.leader === 'none')) && !!element.at && !!element.of;
+
+/** The symbol a new one is: a marker of the case's layers (`map/layerSymbols.json`). */
+export const SYMBOL = Object.freeze({ symbol: 'badge-crosshair', size: 7 });
 
 /**
  * A label's box round its words, from its top left corner: the width its longest line
@@ -151,11 +174,13 @@ export const PAGE_ZOOM = { min: 0.1, max: 8 };
 
 /**
  * Where the editor shows the page when it fits the window, a margin round it:
- * `{ scale, x, y }`, x and y where the page's corner stands in the window.
+ * `{ scale, x, y }`, x and y where the page's corner stands in the window. `top`
+ * is kept clear over it, for a bar floating there.
  */
-export function fitPage(page, viewport, margin = 24) {
-  const scale = Math.max(PAGE_ZOOM.min, Math.min((viewport.width - 2 * margin) / page.width, (viewport.height - 2 * margin) / page.height));
-  return { scale, x: (viewport.width - page.width * scale) / 2, y: (viewport.height - page.height * scale) / 2 };
+export function fitPage(page, viewport, margin = 24, top = 0) {
+  const tall = viewport.height - top;
+  const scale = Math.max(PAGE_ZOOM.min, Math.min((viewport.width - 2 * margin) / page.width, (tall - 2 * margin) / page.height));
+  return { scale, x: (viewport.width - page.width * scale) / 2, y: top + (tall - page.height * scale) / 2 };
 }
 
 /** The most pixels the editor's drawing of a page holds, about 64 MB. */
@@ -202,6 +227,46 @@ export function mainMap(spec) {
 export function mapsFirst(elements) {
   return [...elements.filter((element) => MAP_KINDS.includes(element.kind)),
     ...elements.filter((element) => !MAP_KINDS.includes(element.kind))];
+}
+
+// -- the order the editor lists ------------------------------------------------------
+
+/** The elements the editor lists, top first: the day's and the shown step's, another step's waiting on it. */
+export function listedOf(spec, at, place) {
+  return [...spec.elements].reverse().filter((element) => !element.step || shownOn(element, at, place));
+}
+
+/** The place in that list, top first, a row taken to `index` can have: the writing stays above the maps, a map among them. */
+export function landingIn(list, id, index) {
+  const maps = list.findIndex((element) => MAP_KINDS.includes(element.kind));
+  const floor = maps < 0 ? list.length : maps;
+  if (MAP_KINDS.includes(list.find((element) => element.id === id)?.kind)) return Math.min(list.length, Math.max(floor, index));
+  return Math.max(0, Math.min(floor, index));
+}
+
+/**
+ * The page's elements once `id` lands at `index` of the list (`listedOf`), above the
+ * row listed there. What the list leaves out keeps its place; the same elements come
+ * back when the row would not move.
+ */
+export function restacked(elements, list, id, index) {
+  const from = list.findIndex((element) => element.id === id);
+  const to = landingIn(list, id, index);
+  if (from < 0 || to === from || to === from + 1) return elements;
+  const whole = [...elements].reverse();
+  const [moved] = whole.splice(whole.findIndex((element) => element.id === id), 1);
+  const above = list[to];
+  const at = above ? whole.findIndex((element) => element.id === above.id) : whole.findIndex((element) => element.id === list.at(-1).id) + 1;
+  whole.splice(at, 0, moved);
+  return mapsFirst(whole.reverse());
+}
+
+/** Where one step forward (`by` 1) or back (-1) takes a row of the list, or null when it can go no further. */
+export function stepOf(list, id, by) {
+  const from = list.findIndex((element) => element.id === id);
+  if (from < 0) return null;
+  const to = landingIn(list, id, by > 0 ? from - 1 : from + 2);
+  return to === from || to === from + 1 ? null : to;
 }
 
 /** The ids of the house layout, which a change of paper lays out again rather than stretches. */
@@ -326,6 +391,7 @@ export function templateOf(spec) {
     page: { ...spec.page },
     theme: { ...spec.theme },
     time: {},
+    ...(spec.transitions ? { transitions: { ...spec.transitions } } : {}),
     elements: spec.elements
       .filter((element) => !ON_THE_GROUND.includes(element.kind) && element.kind !== 'video' && !element.step)
       // eslint-disable-next-line no-unused-vars
@@ -349,6 +415,7 @@ export function fromTemplate(data, { view, layers = [] } = {}) {
     page: { ...data.page },
     theme: { ...DEFAULT_THEME, ...data.theme },
     time: { at: null, trail: true, since: null, window: 7 },
+    ...(data.transitions ? { transitions: { ...data.transitions } } : {}),
     elements: mapsFirst(data.elements
       .filter((element) => !element.of || maps.has(element.of))
       .map((element) => element.kind === 'map'
@@ -512,7 +579,8 @@ export function withoutStep(spec, id) {
     const kept = list.filter((item) => item.id !== id);
     if (kept.length) steps[day] = kept;
   }
-  return { ...spec, steps, elements: spec.elements.filter((element) => element.step !== id),
+  const framing = Object.fromEntries(Object.entries(spec.framing ?? {}).filter(([key]) => key !== id));
+  return { ...spec, steps, framing, elements: spec.elements.filter((element) => element.step !== id),
     time: { ...spec.time, step: spec.time?.step === id ? null : spec.time?.step ?? null } };
 }
 
@@ -528,3 +596,47 @@ export function movedStep(spec, at, id, index) {
 
 /** Whether the plate holds a step on any day. */
 export const hasSteps = (spec) => Object.values(spec?.steps ?? {}).some((list) => list.length > 0);
+
+// -- a map framed day by day -------------------------------------------------------------
+
+/** The key a day or a step frames its maps under: the step's id, else the day. */
+export const beatKey = (at, step = null) => step || dayOf(at);
+
+/**
+ * How a map is framed on the beat `key`, among the beats a play goes through, in
+ * `order` (their keys): `{ view, own, first }`. A beat framing the map its own way is
+ * `own`. Another keeps the framing of the last beat before it that has one, else the
+ * map's own view. The first beat, and a beat the play does not go through, show the
+ * map's own view, which is what framing the map there moves.
+ */
+export function framingOf(spec, map, order, key) {
+  const own = spec?.framing?.[key]?.[map.id];
+  if (own) return { view: own, own: true, first: false };
+  const index = order.indexOf(key);
+  if (index <= 0) return { view: map.view, own: false, first: true };
+  for (let before = index - 1; before >= 0; before -= 1) {
+    const found = spec?.framing?.[order[before]]?.[map.id];
+    if (found) return { view: found, own: false, first: false };
+  }
+  return { view: map.view, own: false, first: false };
+}
+
+/** The plate's framings with the map `id` framed `view` on the beat `key`; `view` null lets the beat keep the one before. */
+export function framedAs(spec, key, id, view) {
+  const framing = { ...(spec.framing ?? {}) };
+  const maps = { ...(framing[key] ?? {}) };
+  if (view) maps[id] = view; else delete maps[id];
+  if (Object.keys(maps).length) framing[key] = maps; else delete framing[key];
+  return framing;
+}
+
+/** The keys of the beats a play goes through, in order (`clip.beats`). */
+export const beatKeys = (list) => list.map((beat) => beatKey(beat.day, beat.step));
+
+// -- how the video goes from one beat to the next ------------------------------------------
+
+/** A plate's transitions when it sets none: off, and when on, a fade, the maps moving blurred, what is new fading in. */
+export const TRANSITIONS = Object.freeze({ on: false, seconds: 0.8, fade: true, move: true, blur: true, appear: 'fade' });
+
+/** The plate's transitions, every setting it leaves out as `TRANSITIONS` has it. */
+export const transitionsOf = (spec) => ({ ...TRANSITIONS, ...(spec?.transitions ?? {}) });

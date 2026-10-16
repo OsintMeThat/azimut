@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { drawPage, wrap } from './draw.js';
-import { houseLayout } from './page.js';
+import { drawPage, partOf, smoothThrough, wrap } from './draw.js';
+import { PX_PER_MM, houseLayout } from './page.js';
 
 /** A canvas context that records what is written and drawn, measuring a character as 5 pixels. */
 function recorder() {
@@ -180,3 +180,131 @@ describe('drawing a plate page', () => {
   });
 });
 
+
+describe('what stands on the ground, written and drawn', () => {
+  const view = { lat: 48.85, lon: 2.35, zoom: 12, bearing: 0 };
+  const base = () => {
+    const spec = houseLayout({ view });
+    spec.elements = spec.elements.filter((element) => element.kind === 'map');
+    return spec;
+  };
+  const context = (spec, extra = {}) => ({ scale: 3, views: { map: { view, frame: { width: 700, height: 600 } } }, legend: {}, ...extra });
+
+  it('draws a line through its points, curved when asked, its heads at its end and its words along it', () => {
+    const spec = base();
+    spec.elements.push({ id: 'l', kind: 'line', of: 'map', box: [0, 0, 1, 1], points: [[2.33, 48.84], [2.35, 48.86], [2.37, 48.85]],
+      shape: 'curve', heads: 'end', line: 'dashed', text: 'Road', ink: '#123456' });
+    const ctx = recorder();
+    drawPage(ctx, spec, context(spec));
+    const lines = ctx.calls.filter(([name]) => name === 'lineTo').length;
+    // a curve through three points is drawn smooth, many short strokes rather than two
+    expect(lines).toBeGreaterThan(10);
+    expect(ctx.calls.some(([name, dash]) => name === 'setLineDash' && dash.length === 2)).toBe(true);
+    expect(ctx.calls.some(([name, text]) => name === 'fillText' && text === 'Road')).toBe(true);
+    expect(ctx.fillStyle).toBe('#123456');
+  });
+
+  it('sets words on the ground in their own weight, case and backing', () => {
+    const spec = base();
+    spec.elements.push({ id: 'z', kind: 'zone', of: 'map', box: [0, 0, 1, 1], points: [[2.34, 48.84], [2.36, 48.84], [2.36, 48.86]], text: 'Depot',
+      weight: 400, upper: true, back: 'box', fill: '#eeeeee' });
+    const ctx = recorder();
+    const fonts = [];
+    const proxy = new Proxy(ctx, { set(target, key, value) { if (key === 'font') fonts.push(value); target[key] = value; return true; } });
+    drawPage(proxy, spec, context(spec));
+    expect(ctx.calls.some(([name, text]) => name === 'fillText' && text === 'DEPOT')).toBe(true);
+    // a box behind them, no halo round them
+    expect(ctx.calls.some(([name, text]) => name === 'strokeText' && text === 'DEPOT')).toBe(false);
+    expect(fonts.some((value) => value.startsWith('400 '))).toBe(true);
+  });
+
+  it('stands a symbol over its point, drawn at the size it prints at, turned, and cut at its map', () => {
+    const spec = base();
+    spec.elements.push({ id: 's', kind: 'symbol', of: 'map', box: [0, 0, 8, 8], at: [view.lon, view.lat], symbol: 'badge-tank', colour: '#123456',
+      status: 'damaged', rotate: 30 });
+    const asked = [];
+    const picture = { width: 128, height: 128 };
+    const ctx = recorder();
+    drawPage(ctx, spec, context(spec, { markerImage: (...args) => { asked.push(args); return picture; } }));
+    // the marker the case's layers draw, as large as its box prints
+    expect(asked).toEqual([['badge-tank', '#123456', { status: 'damaged' }, 24]]);
+    const map = spec.elements.find((element) => element.id === 'map').box.map((value) => value * 3);
+    const at = ctx.calls.findIndex(([name, x, y]) => name === 'translate' && Math.abs(x - (map[0] + 350 * (3 / PX_PER_MM))) < 1e-6
+      && Math.abs(y - (map[1] + 300 * (3 / PX_PER_MM))) < 1e-6);
+    expect(at).toBeGreaterThan(0);
+    expect(ctx.calls.slice(at)).toEqual(expect.arrayContaining([['rotate', Math.PI / 6], ['drawImage', picture, -12, -12, 24, 24]]));
+    expect(ctx.calls.slice(0, at).some(([name]) => name === 'clip')).toBe(true);
+  });
+
+  it('cuts what stands on the ground at its map\'s frame, its words with it', () => {
+    const spec = base();
+    // a zone far off the frame, its words in the middle of it
+    spec.elements.push({ id: 'z', kind: 'zone', of: 'map', box: [0, 0, 1, 1], points: [[8, 48], [8.2, 48], [8.1, 48.2]], text: 'Far away' });
+    const ctx = recorder();
+    drawPage(ctx, spec, context(spec));
+    // the clips standing when the words are written, through the saves and restores before them
+    const written = ctx.calls.findIndex(([name, text]) => name === 'fillText' && text === 'Far away');
+    expect(written).toBeGreaterThan(0);
+    let clips = [];
+    const saved = [];
+    let path = [];
+    for (const [name, ...args] of ctx.calls.slice(0, written)) {
+      if (name === 'save') saved.push(clips);
+      else if (name === 'restore') clips = saved.pop() ?? [];
+      else if (name === 'beginPath') path = [];
+      else if (name === 'rect') path.push(args);
+      else if (name === 'clip') clips = [...clips, ...path];
+    }
+    const map = spec.elements.find((element) => element.id === 'map').box.map((value) => value * 3);
+    expect(clips.some((rect) => rect.every((value, at) => Math.abs(value - map[at]) < 1e-6))).toBe(true);
+  });
+
+  it('brings in what a transition reveals: faded, or drawn as far as it has gone', () => {
+    const spec = base();
+    spec.elements.push({ id: 'a', kind: 'arrow', of: 'map', box: [0, 0, 1, 1], at: [2.33, 48.84], to: [2.37, 48.86] });
+    const alphas = [];
+    const ctx = recorder();
+    const proxy = new Proxy(ctx, { set(target, key, value) { if (key === 'globalAlpha') alphas.push(value); target[key] = value; return true; } });
+    drawPage(proxy, spec, context(spec, { reveal: { ids: new Set(['a']), t: 0.25, mode: 'fade' } }));
+    expect(alphas).toContain(0.25);
+    const drawn = recorder();
+    drawPage(drawn, spec, context(spec, { reveal: { ids: new Set(['a']), t: 0.25, mode: 'draw' } }));
+    const whole = recorder();
+    drawPage(whole, spec, context(spec));
+    const reach = (rec) => Math.max(...rec.calls.filter(([name]) => name === 'lineTo').map(([, x]) => x));
+    expect(reach(drawn)).toBeLessThan(reach(whole));
+    // nothing yet at the very start
+    const none = recorder();
+    drawPage(none, spec, context(spec, { reveal: { ids: new Set(['a']), t: 0, mode: 'draw' } }));
+    expect(none.calls.filter(([name]) => name === 'lineTo')).toHaveLength(0);
+  });
+
+  it('places the ground through a map\'s own camera when it is in 3D, and gives it no scale', () => {
+    const spec = base();
+    spec.elements.push({ id: 'n', kind: 'label', of: 'map', box: [10, 10, 20, 6], at: [2.35, 48.85], leader: 'none', style: 'plain', text: 'Ridge' });
+    spec.elements.push({ id: 's', kind: 'scale', of: 'map', box: [5, 5, 40, 6] });
+    const project = vi.fn(() => [100, 50]);
+    const ctx = recorder();
+    drawPage(ctx, spec, { scale: 3, legend: {}, views: { map: { view: { ...view, pitch: 60 }, frame: { width: 700, height: 600 }, project } } });
+    expect(project).toHaveBeenCalledWith([2.35, 48.85]);
+    // the text stands over its point: its middle where the camera puts the point
+    const written = ctx.calls.find(([name, text]) => name === 'fillText' && text === 'Ridge');
+    expect(written).toBeTruthy();
+    // a tilted map has no length that holds across it
+    expect(ctx.calls.some(([name, text]) => name === 'fillText' && text === '0')).toBe(false);
+  });
+});
+
+describe('the drawing of lines', () => {
+  it('takes the part of a line a share of its length reaches', () => {
+    expect(partOf([[0, 0], [10, 0], [10, 10]], 0.75)).toEqual([[0, 0], [10, 0], [10, 5]]);
+    expect(partOf([[0, 0], [10, 0]], 1)).toEqual([[0, 0], [10, 0]]);
+  });
+
+  it('runs a curve through every point it is given', () => {
+    const through = [[0, 0], [10, 10], [20, 0]];
+    const curve = smoothThrough(through, 4);
+    for (const point of through) expect(curve.some(([x, y]) => Math.abs(x - point[0]) < 1e-9 && Math.abs(y - point[1]) < 1e-9)).toBe(true);
+    expect(curve.length).toBe(9);
+  });
+});

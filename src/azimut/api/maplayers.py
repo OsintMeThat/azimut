@@ -189,12 +189,11 @@ class MarkerUpdateIn(MarkerFields):
     unlink: bool | None = None
     #: On a tracked layer: the moment a change of shape or status is dated to…
     at: Moment | None = None
-    #: …the feature no longer there from it…
-    gone: bool | None = None
     #: …or the state written at it taken out of the history.
     drop_state: bool | None = None
-    #: Correct the state in force at `at` rather than start one there.
-    fix: bool | None = None
+    #: When the feature first shows and when it leaves the map, "" for always and still there.
+    start: Moment | None = None
+    end: Moment | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -275,16 +274,30 @@ class SelectionIn(BaseModel):
     changes: MarkerUpdateIn | None = None
     offset: list[Annotated[float, Field(ge=-360, le=360, allow_inf_nan=False)]] | None = Field(default=None, min_length=2, max_length=2)
     remove: bool = False
-    #: On a tracked layer, the moment a move or a status is dated to…
+    #: On a tracked layer, the moment a move or a status is dated to; none changes it on every day.
     at: Moment | None = None
-    #: …or, set, the state in force then that each feature corrects.
-    fix: bool = False
+
+
+class GroupBackIn(GroupUpdateIn):
+    """A group an edit took out, as the editor held it, and its place in the layer's order."""
+
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    #: Where it stood among the groups, the first being 0.
+    at: int = Field(default=0, ge=0, le=2000)
+    #: An imported group can stand outside the sliders' range; it comes back clamped.
+    size: float | None = Field(default=None, allow_inf_nan=False)
+    stroke: float | None = Field(default=None, allow_inf_nan=False)
 
 
 class RevertIn(BaseModel):
     #: Whole features as they were, found by their key.
     put: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
     drop: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=5000)
+    #: Groups an edit took out, put back before the features return to them.
+    groups: list[GroupBackIn] = Field(default_factory=list, max_length=50)
+    #: Groups an edit made, taken out once the features have left them.
+    drop_groups: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=50)
 
 
 class GroupOrderIn(BaseModel):
@@ -432,7 +445,7 @@ def edit_layer_selection(case_id: str, name: str, body: SelectionIn) -> dict[str
         changes = _changes(body.changes) if body.changes else {}
         return layerediting.edit_selection(get_case(case_id), _stem(name), body.keys,
                                            changes=changes, offset=body.offset, remove=body.remove,
-                                           at=body.at, fix=body.fix)
+                                           at=body.at)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
@@ -449,7 +462,8 @@ def restore_layer_selection(case_id: str, name: str, batch: str) -> dict[str, An
 def revert_layer_features(case_id: str, name: str, body: RevertIn) -> dict[str, Any]:
     """Put features back as an edit found them: the layer editor's undo and redo."""
     try:
-        return layerediting.revert(get_case(case_id), _stem(name), body.put, body.drop)
+        return layerediting.revert(get_case(case_id), _stem(name), body.put, body.drop,
+                                   [group.model_dump(exclude_none=True) for group in body.groups], body.drop_groups)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 

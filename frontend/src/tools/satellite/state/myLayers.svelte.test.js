@@ -7,9 +7,9 @@ const feature = (key, properties = {}) => ({ type: 'Feature',
   geometry: { type: 'Point', coordinates: [2.35, 48.85] },
   properties: { key, name: key, colour: '#0072b2', symbol: 'pin', ...properties } });
 function deferred() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 let owner, api, layers, notify, reloadCase, sequence;
 const store = () => createMyLayersState({ api, layers, caseId: () => owner, notify, reloadCase,
@@ -70,7 +70,8 @@ describe('personal layer editing', () => {
     api.patch.mockResolvedValueOnce({ layer: ROW, marker: { ...original, geometry: { type: 'Point', coordinates: [3, 49] } } });
     await editor.saveGeometry(); expect(editor.form.name).toBe('Draft title');
     api.patch.mockResolvedValueOnce({ layer: ROW, marker: feature('m1', { name: 'Draft title' }) });
-    await editor.update('m1', { name: 'Draft title' });
+    await editor.saveForm();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/m1', { name: 'Draft title' });
     expect(editor.changed).toBe(false);
   });
   it('keeps a draft name while accepting its new group after a direct drop', async () => {
@@ -89,7 +90,7 @@ describe('personal layer editing', () => {
     await editor.open(ROW);
     expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/edit', {});
     api.patch.mockResolvedValueOnce({ layer: { ...ROW, edit_revision: 'b'.repeat(64), edit_changed: true }, marker: feature('m1') });
-    await editor.update('m1', { name: 'Changed' });
+    await editor.aim('m1', 90);
     expect(editor.changed).toBe(true);
     api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [feature('m1')] } });
     expect(await editor.finish()).toBe(true);
@@ -350,12 +351,12 @@ describe('personal layer editing', () => {
   it('saves only what the sheet changed, and clears a field with nothing', async () => {
     api.get.mockResolvedValueOnce({ layer: ROW, document: { features: [feature('m1', { status: 'damaged', date: '2026-01-02' })] } });
     const editor = store(); await editor.open(ROW); editor.select('m1');
-    editor.form.status = ''; editor.form.links = ['  ', 'https://a.example/x '];
+    editor.form.date = ''; editor.form.links = ['  ', 'https://a.example/x '];
     expect(editor.formChanged).toBe(true);
     api.patch.mockResolvedValueOnce({ layer: ROW, marker: feature('m1') });
     await editor.saveForm();
     expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/m1',
-      { status: null, links: ['https://a.example/x'] });
+      { date: null, links: ['https://a.example/x'] });
   });
 
   it('copies a source feature into the open layer as an external point with its day and addresses', async () => {
@@ -442,36 +443,88 @@ describe('editing a layer followed over time', () => {
     expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], offset: [0, 1] });
   });
 
-  it('dates a move to the cursor, or corrects the state in force when set to fix', async () => {
+  it('dates a move to the cursor, or sends it with no date when none is chosen', async () => {
     const editor = store(); await editor.open(TRACKED);
     cursorAt = '2026-10-12';
     expect(editor.cursor).toBe('2026-10-12');
     await editor.moveFeatures(['front'], [0, 1]);
     expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], offset: [0, 1], at: '2026-10-12' });
-    editor.timeMode = 'fix';
     api.patch.mockResolvedValue({ layer: TRACKED, marker: feature('front') });
-    await editor.update('front', { name: 'kept' });
-    editor.select('front'); editor.form.status = 'destroyed';
-    await editor.saveForm();
-    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { status: 'destroyed', at: '2026-10-12', fix: true });
+    await editor.refresh();
+    editor.timeMode = 'fix';
+    editor.select('front');
+    await editor.setStatus('destroyed');
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], changes: { status: 'destroyed' } });
   });
 
-  it('adds new features at the cursor whatever the mode', async () => {
+  it('holds what a feature changed by date while edits carry none, and says why', async () => {
+    const moved = feature('front', { name: 'Front', states: [
+      { at: '2026-10-03', geometry: { type: 'Point', coordinates: [2.35, 48.85] } },
+      { at: '2026-10-08', geometry: { type: 'Point', coordinates: [2.36, 48.85] } }] });
+    api.get.mockResolvedValue({ layer: TRACKED, document: { features: [moved, feature('base')] } });
     const editor = store(); await editor.open(TRACKED);
-    cursorAt = '2026-10-12T14:00'; editor.timeMode = 'fix';
+    // at now edits carry no date: the shape moved on the 8th is held
+    expect(editor.dateHolds('front')).toBe('2026-10-08');
+    expect(editor.dateHolds('base')).toBe('');
+    editor.heldBack(['front']);
+    expect(notify).toHaveBeenLastCalledWith('Front moved on 8 Oct 2026: pick a day on the bar to move it', 'info', 5000);
+    editor.select('front'); editor.editGeometry();
+    expect(editor.sketch).toBeNull();
+    // dated, it moves from that day
+    cursorAt = '2026-10-10';
+    expect(editor.dateHolds('front')).toBe('');
+    editor.timeMode = 'fix';
+    expect(editor.held(editor.features.find((one) => one.properties.key === 'front'))).toEqual({ shape: '2026-10-08', status: '' });
+  });
+
+  it('adds new features at the cursor, or with no date when edits carry none', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    cursorAt = '2026-10-12T14:00';
     editor.start(); editor.addPoint({ lat: 50, lon: 30 });
     await editor.whenSaved();
     expect(api.post.mock.calls.at(-1)[1]).toMatchObject({ lat: 50, lon: 30, at: '2026-10-12T14:00' });
+    editor.timeMode = 'fix';
+    editor.addPoint({ lat: 51, lon: 30 });
+    await editor.whenSaved();
+    expect(api.post.mock.calls.at(-1)[1]).toMatchObject({ lat: 51, lon: 30 });
+    expect(api.post.mock.calls.at(-1)[1].at).toBeUndefined();
     expect(api.post.mock.calls.at(-1)[1].fix).toBeUndefined();
   });
 
-  it('says a feature is gone from the cursor, drops one state and switches tracking', async () => {
+  it('keeps no date for the day it was chosen on, and dates again on the next', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    cursorAt = '2026-10-12';
+    editor.timeMode = 'fix';
+    expect(editor.timeMode).toBe('fix');
+    cursorAt = '2026-10-20';
+    expect(editor.timeMode).toBe('new');
+    cursorAt = '2026-10-12';
+    expect(editor.timeMode).toBe('fix');
+  });
+
+  it('goes to a day to change a feature from it', async () => {
+    const editor = store(); await editor.open(TRACKED);
+    layers.setTime = vi.fn((name, patch) => { cursorAt = patch.at; });
+    cursorAt = '2026-10-12'; editor.timeMode = 'fix';
+    editor.changeOn('2026-10-25');
+    expect(layers.setTime).toHaveBeenLastCalledWith('working', { at: '2026-10-25' });
+    expect(editor.cursor).toBe('2026-10-25');
+    cursorAt = '2026-10-12';
+    // asked for a change, the mode is dated even back on the day no date was chosen
+    expect(editor.timeMode).toBe('new');
+  });
+
+  it('says when a feature shows and leaves, drops one state and switches tracking', async () => {
     const editor = store(); await editor.open(TRACKED);
     api.patch.mockResolvedValue({ layer: TRACKED, marker: feature('front') });
-    expect(await editor.markGone('front')).toBeNull();
-    cursorAt = '2026-10-20';
-    await editor.markGone('front');
-    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { at: '2026-10-20', gone: true });
+    await editor.setStart('front', '');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { start: '' });
+    await editor.setStart('front', '2026-10-03');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { start: '2026-10-03' });
+    await editor.setEnd('front', '2026-10-20');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { end: '2026-10-20' });
+    await editor.setEnd('front', '');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { end: '' });
     await editor.dropState('front', '2026-10-12');
     expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/front', { at: '2026-10-12', drop_state: true });
     api.patch.mockResolvedValue({ layer: { ...TRACKED, track: { on: false } } });
@@ -545,8 +598,8 @@ describe('what an edit changed', () => {
     const moved = { ...a, geometry: { type: 'Point', coordinates: [1, 1] } };
     const b = { properties: { key: 'b' }, geometry: { type: 'Point', coordinates: [2, 2] } };
     const change = difference([a], [moved, b], [{ id: 'g', size: 1, labels: true }], [{ id: 'g', size: 2 }]);
-    expect(change.undo).toEqual({ put: [a], drop: ['b'] });
-    expect(change.redo).toEqual({ put: [moved, b], drop: [] });
+    expect(change.undo).toEqual({ put: [a], drop: ['b'], addGroups: [], dropGroups: [] });
+    expect(change.redo).toEqual({ put: [moved, b], drop: [], addGroups: [], dropGroups: [] });
     expect(change.groups).toEqual([{ id: 'g', back: { size: 1, labels: true }, forth: { size: 2, labels: false } }]);
     expect(difference([a], [a])).toBeNull();
   });
@@ -648,3 +701,225 @@ describe('the history of a shape being drawn', () => {
   });
 });
 
+
+describe('an edit made on the map', () => {
+  const at = (key, lon, lat, properties = {}) => ({ ...feature(key, properties), geometry: { type: 'Point', coordinates: [lon, lat] } });
+  const area = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }, properties: { key: 'zone', name: 'Zone' } };
+  const line = { type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] }, properties: { key: 'road', name: 'Road' } };
+  const where = (editor, key) => editor.features.find((item) => item.properties.key === key);
+  beforeEach(() => {
+    api.get.mockResolvedValue({ layer: { ...ROW, sha256: 'a' }, document: { features: [at('a', 2, 48), at('b', 5, 50), area, line] } });
+  });
+
+  it('stands where it was let go before the save answers, and once saved is not moved twice', async () => {
+    const editor = store(); await editor.open(ROW);
+    const answer = deferred();
+    api.post.mockReturnValueOnce(answer.promise);
+    editor.drag(['a'], [1, 0]);
+    const moving = editor.moveFeatures(['a'], [1, 0]);
+    expect(where(editor, 'a').geometry.coordinates).toEqual([3, 48]);
+    expect(where(editor, 'b').geometry.coordinates).toEqual([5, 50]);
+    const [landing] = editor.landings;
+    expect(landing).toMatchObject({ name: 'working', keys: ['a'], offset: [1, 0], saved: false });
+    // the dragged copies stay over it, now standing where it landed
+    expect(editor.dragging.landing).toBe(landing);
+    answer.resolve({ layer: { ...ROW, sha256: 'b' }, document: { features: [at('a', 3, 48), at('b', 5, 50), area, line] }, kept: 0 });
+    await moving;
+    expect(where(editor, 'a').geometry.coordinates).toEqual([3, 48]);
+    expect(landing).toMatchObject({ saved: true, sha: 'b' });
+    expect(editor.landings).toEqual([]);
+    // no map drew it, so the copies went with the answer
+    expect(editor.dragging).toBeNull();
+  });
+
+  it('keeps the dragged copies until the map drawing it has, and goes back when the layer refuses', async () => {
+    const editor = store(); await editor.open(ROW);
+    const answer = deferred();
+    api.post.mockReturnValueOnce(answer.promise);
+    editor.drag(['a'], [1, 0]);
+    const moving = editor.moveFeatures(['a'], [1, 0]);
+    const [landing] = editor.landings;
+    editor.claim(landing);
+    answer.resolve({ layer: { ...ROW, sha256: 'b' }, document: { features: [at('a', 3, 48)] } });
+    await moving;
+    expect(editor.dragging.landing).toBe(landing);
+    editor.landed(landing);
+    expect(editor.dragging).toBeNull();
+
+    api.post.mockRejectedValueOnce(new Error('keep the selection inside valid coordinates'));
+    editor.drag(['a'], [500, 0]);
+    await editor.moveFeatures(['a'], [500, 0]);
+    expect(where(editor, 'a').geometry.coordinates).toEqual([3, 48]);
+    expect(editor.landings).toEqual([]);
+    expect(editor.dragging).toBeNull();
+    expect(notify).toHaveBeenCalledWith('keep the selection inside valid coordinates', 'danger', 5000);
+  });
+
+  it('draws a reshaped shape as it saves, and a refused one back as it was, its outline kept', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.select('zone'); editor.editGeometry();
+    editor.beginVertexMove(); editor.moveVertex(0, 1, { lon: 2, lat: 0 });
+    api.patch.mockRejectedValueOnce(new Error('The layer is busy'));
+    const saving = editor.saveGeometry();
+    expect(where(editor, 'zone').geometry.coordinates).toEqual([[[0, 0], [2, 0], [1, 1], [0, 0]]]);
+    await saving;
+    expect(where(editor, 'zone').geometry).toEqual(area.geometry);
+    expect(editor.sketch.rings[0][1]).toEqual([2, 0]);
+  });
+
+  it('moves a selection by its handle at once, leaving the markers that follow a case item on it', async () => {
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [at('a', 2, 48), at('kept', 4, 49, { entity_id: 'place-1' })] } });
+    const editor = store(); await editor.open(ROW);
+    editor.chooseKeys(['a', 'kept']); editor.moveSelection();
+    editor.moveVertex(0, 0, { lon: editor.sketch.origin[0] + 1, lat: editor.sketch.origin[1] });
+    const answer = deferred();
+    api.post.mockReturnValueOnce(answer.promise);
+    const saving = editor.saveGeometry();
+    expect(editor.landings[0].keys).toEqual(['a']);
+    expect(where(editor, 'a').geometry.coordinates).toEqual([3, 48]);
+    expect(where(editor, 'kept').geometry.coordinates).toEqual([4, 49]);
+    answer.resolve({ layer: ROW, document: { features: [at('a', 3, 48), at('kept', 4, 49, { entity_id: 'place-1' })] }, kept: 1 });
+    await saving;
+    expect(editor.sketch).toBeNull();
+  });
+
+  it('turns a marker at once, the sheet with it, and back when the layer refuses', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.select('a');
+    const answer = deferred();
+    api.patch.mockReturnValueOnce(answer.promise);
+    const aiming = editor.aim('a', 90);
+    expect(where(editor, 'a').properties.bearing).toBe(90);
+    expect(editor.form.bearing).toBe(90);
+    // nothing left in the sheet to save back over it
+    expect(editor.formChanged).toBe(false);
+    answer.reject(new Error('The layer is busy'));
+    await aiming;
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/a', { bearing: 90 });
+    expect(where(editor, 'a').properties.bearing).toBeUndefined();
+    expect(editor.form.bearing).toBe('');
+    expect(editor.formChanged).toBe(false);
+  });
+
+  it('adds no corner to an area being reshaped on a click, where a line being reshaped grows', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.select('zone'); editor.editGeometry();
+    expect(editor.addPoint({ lon: 9, lat: 9 })).toBe(true);
+    expect(editor.sketch.rings).toEqual([[[0, 0], [1, 0], [1, 1]]]);
+    expect(editor.canUndoSketch).toBe(false);
+    editor.select('road'); editor.editGeometry();
+    editor.addPoint({ lon: 2, lat: 2 });
+    expect(editor.sketch.rings).toEqual([[[0, 0], [1, 1], [2, 2]]]);
+  });
+});
+
+describe('the edits around an undo', () => {
+  const at = (key, coordinates, extra = {}) => ({ ...feature(key, extra), geometry: { type: 'Point', coordinates } });
+
+  it('takes back the edit still saving when Ctrl+Z is pressed, not the one before it', async () => {
+    let held = [at('a', [1, 48]), at('b', [2, 48])];
+    const move = deferred();
+    api.get.mockResolvedValue({ layer: ROW, document: { features: held } });
+    api.patch.mockImplementation(async () => {
+      held = [at('a', [1, 48], { name: 'Renamed' }), held[1]];
+      return { layer: ROW, document: { features: held } };
+    });
+    api.post.mockImplementation(async (path, body) => {
+      if (path.endsWith('/selection')) {
+        await move.promise;
+        held = [held[0], at('b', [7, 48])];
+        return { layer: ROW, document: { features: held }, kept: 0 };
+      }
+      return { layer: ROW, document: { features: held } };
+    });
+    const editor = store(); await editor.open(ROW);
+    editor.select('a'); editor.form.name = 'Renamed'; await editor.saveForm();
+    const moving = editor.moveFeatures(['b'], [5, 0]);
+    // the move is drawn where it landed and still saving: Ctrl+Z means it
+    expect(editor.undo()).toBe(true);
+    move.resolve(); await moving; await editor.whenSaved();
+    const revert = api.post.mock.calls.find(([path]) => path.endsWith('/revert'));
+    expect(revert[1].put).toEqual([at('b', [2, 48])]);
+    expect(editor.canUndo).toBe(true);
+    expect(editor.canRedo).toBe(true);
+  });
+
+  it('makes again an undo still saving when Ctrl+Y follows it at once', async () => {
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [at('one', [2, 48])] } });
+    api.post.mockImplementation(async (path, body) => (path.endsWith('/selection')
+      ? { layer: ROW, document: { features: [at('one', [2, 49])] }, kept: 0 }
+      : { layer: ROW, document: { features: body.put?.length ? body.put : [at('one', [2, 48])] } }));
+    const editor = store(); await editor.open(ROW);
+    await editor.moveFeatures(['one'], [0, 1]);
+    expect(editor.undo()).toBe(true);
+    expect(editor.redo()).toBe(true);
+    await editor.whenSaved();
+    expect(api.post.mock.calls.filter(([path]) => path.endsWith('/revert')).map(([, body]) => body.put[0].geometry.coordinates))
+      .toEqual([[2, 48], [2, 49]]);
+    expect(editor.features[0].geometry.coordinates).toEqual([2, 49]);
+  });
+
+  it('brings a group taken out back where it stood, with its features, and takes a new group back out', async () => {
+    const groups = [{ id: 'g1', name: 'Markers', mode: 'individual', colour: '#0072b2', symbol: 'pin' },
+      { id: 'g2', name: 'Strikes', mode: 'uniform', colour: '#d55e00', symbol: 'badge-blast', labels: true }];
+    const struck = feature('s', { group: 'g2' });
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [struck] }, groups });
+    api.del.mockResolvedValue({ layer: ROW, document: { features: [{ ...struck, properties: { ...struck.properties, group: 'g1', colour: '#d55e00' } }] },
+      groups: [groups[0]] });
+    api.post.mockResolvedValue({ layer: ROW, document: { features: [struck] }, groups });
+    const editor = store(); await editor.open(ROW);
+    await editor.removeGroup('g2');
+    expect(notify.mock.calls.at(-1)[0]).toBe('Strikes ungrouped into Markers');
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert',
+      { put: [struck], drop: [], groups: [{ ...groups[1], at: 1 }], drop_groups: [] });
+    expect(editor.groups.map((group) => group.name)).toEqual(['Markers', 'Strikes']);
+    // a group just made goes on Undo, its redo making it again
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [struck] }, groups: [...groups, { id: 'g3', name: 'New', mode: 'uniform' }],
+      group: { id: 'g3', name: 'New' } });
+    await editor.addGroup('New');
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [], drop: [], groups: [], drop_groups: ['g3'] });
+  });
+});
+
+describe('leaving a layer for another', () => {
+  it('saves its sheet and ends its session before the other opens, so a later Discard goes back no further', async () => {
+    const other = { ...ROW, name: 'other', title: 'Other map' };
+    api.get.mockImplementation(async (path) => ({ layer: { ...(path.includes('/other/') ? other : ROW), edit_revision: 'b'.repeat(64) },
+      document: { features: [feature('m1')] }, checkpoint: 'c'.repeat(32) }));
+    api.patch.mockResolvedValue({ layer: ROW, marker: feature('m1', { name: 'Typed' }) });
+    api.post.mockResolvedValue({ layer: ROW });
+    const editor = store(); await editor.open(ROW);
+    editor.select('m1'); editor.form.name = 'Typed';
+    await editor.open(other);
+    await editor.whenSaved();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/m1', { name: 'Typed' });
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/edit/finish',
+      { token: 'c'.repeat(32), revision: 'b'.repeat(64), discard: false });
+    expect(editor.editor.name).toBe('other');
+  });
+
+  it('ends the session of a layer left for another case', async () => {
+    api.get.mockResolvedValue({ layer: { ...ROW, edit_revision: 'b'.repeat(64) }, document: { features: [] }, checkpoint: 'c'.repeat(32) });
+    api.post.mockResolvedValue({ layer: ROW });
+    const editor = store(); await editor.open(ROW);
+    owner = 'second';
+    editor.leave();
+    expect(editor.editor).toBeNull();
+    await editor.whenSaved();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/first/map-layers/working/edit/finish',
+      { token: 'c'.repeat(32), revision: 'b'.repeat(64), discard: false });
+  });
+
+  it('follows a new layer over time from the start when asked', async () => {
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [] }, checkpoint: 'c'.repeat(32) });
+    api.patch.mockResolvedValue({ layer: { ...ROW, track: { on: true, zone: 'Asia/Aden' } } });
+    const editor = store();
+    await editor.create('Front', null, '', { on: true, zone: 'Asia/Aden' });
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/edit', { track: { on: true, zone: 'Asia/Aden' } });
+    expect(editor.editor.track).toEqual({ on: true, zone: 'Asia/Aden' });
+  });
+});

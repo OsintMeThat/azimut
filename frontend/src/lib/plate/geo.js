@@ -68,12 +68,59 @@ export function metresPerPixel(view) {
 export function sameView(a, b) {
   const lon = ((a.lon - b.lon + 540) % 360) - 180;
   return Math.abs(a.lat - b.lat) < 1e-6 && Math.abs(lon) < 1e-6
-    && Math.abs(a.zoom - b.zoom) < 1e-3 && Math.abs(((a.bearing ?? 0) - (b.bearing ?? 0) + 540) % 360 - 180) < 0.1;
+    && Math.abs(a.zoom - b.zoom) < 1e-3 && Math.abs(((a.bearing ?? 0) - (b.bearing ?? 0) + 540) % 360 - 180) < 0.1
+    && Math.abs((a.pitch ?? 0) - (b.pitch ?? 0)) < 0.1;
 }
 
-/** The ground the frame shows, as its four corners: what an inset outlines. */
+/** The engine's field of view, top to bottom, in degrees: a leaning camera sees the ground through it. */
+const FOV = 36.86989764584402;
+/** How far beyond the frame's middle a leaning map's outline reaches, as many times as its near edge falls short of it. */
+const FAR_REACH = 3;
+
+/**
+ * The ground the frame shows, as its four corners: what an inset outlines.
+ *
+ * A leaning map sees its ground in perspective, from its near edge, at the frame's
+ * foot, up to the horizon. Its outline is worked out from the engine's camera over a
+ * flat ground through the frame's middle (the heights left out), and stops short of the
+ * horizon, `FAR_REACH` times as far beyond the middle as the near edge is before it, so
+ * an inset draws where the map looks rather than a wedge to the end of the world.
+ */
 export function corners(view, frame) {
-  return [[0, 0], [frame.width, 0], [frame.width, frame.height], [0, frame.height]].map((point) => unproject(view, frame, point));
+  const { width: w, height: h } = frame;
+  const pitch = Math.min(85, view.pitch ?? 0) * RAD;
+  if (pitch < 0.5 * RAD) return [[0, 0], [w, 0], [w, h], [0, h]].map((point) => unproject(view, frame, point));
+  // the camera stands back from the middle and above it, looking down the bearing
+  const reach = h / 2 / Math.tan((FOV / 2) * RAD);
+  const back = reach * Math.sin(pitch);
+  const high = reach * Math.cos(pitch);
+  /** Where the ray through the frame's point `(u, v)` from its middle, `v` downward, meets the ground: `[right, forward]` pixels. */
+  const ground = (u, v) => {
+    const down = high + v * Math.sin(pitch);
+    if (down <= 0) return null;
+    const t = high / down;
+    return [t * u, -back + t * (back - v * Math.cos(pitch))];
+  };
+  const near = ground(0, h / 2)[1];
+  // the far edge: the frame's top, or the row that reaches as far as the outline may go
+  let far = -h / 2;
+  const beyond = (v) => { const hit = ground(0, v); return !hit || hit[1] > -near * FAR_REACH; };
+  if (beyond(far)) {
+    let [out, inside] = [-h / 2, 0];
+    for (let step = 0; step < 24; step += 1) {
+      const middle = (out + inside) / 2;
+      if (beyond(middle)) out = middle; else inside = middle;
+    }
+    far = inside;
+  }
+  const turn = (view.bearing ?? 0) * RAD;
+  const [cx, cy] = toWorld([view.lon, view.lat], view.zoom);
+  // right and forward on the ground, as world pixels: forward is where the bearing points
+  const place = ([right, forward]) => {
+    const [lon, lat] = fromWorld([cx + right * Math.cos(turn) + forward * Math.sin(turn), cy + right * Math.sin(turn) - forward * Math.cos(turn)], view.zoom);
+    return [((((lon + 180) % 360) + 360) % 360) - 180, lat];
+  };
+  return [[-w / 2, far], [w / 2, far], [w / 2, h / 2], [-w / 2, h / 2]].map(([u, v]) => place(ground(u, v)));
 }
 
 /** A round length a scale bar can say, at most `most` metres. */
@@ -178,13 +225,14 @@ function within(point, ring) {
  * Whether a feature's geometry is drawn in a map's frame: a point inside it (a marker's
  * half-width of slack, `margin` pixels), a line crossing it, an area overlapping it.
  */
-export function inFrame(geometry, view, frame, margin = 6) {
+export function inFrame(geometry, view, frame, margin = 6, place = null) {
   if (!geometry || !view || !frame) return false;
   const type = String(geometry.type);
-  const at = (point) => project(view, frame, point);
+  // a map in 3D places the ground through its own camera (`place`), the flat sum would miss what it shows
+  const at = place ?? ((point) => project(view, frame, point));
   if (type === 'Point') return inside(at(geometry.coordinates), frame, margin);
   if (type === 'MultiPoint') return geometry.coordinates.some((point) => inside(at(point), frame, margin));
-  if (type === 'GeometryCollection') return (geometry.geometries ?? []).some((part) => inFrame(part, view, frame, margin));
+  if (type === 'GeometryCollection') return (geometry.geometries ?? []).some((part) => inFrame(part, view, frame, margin, place));
   const lines = type === 'LineString' ? [geometry.coordinates]
     : type === 'MultiLineString' || type === 'Polygon' ? geometry.coordinates
       : type === 'MultiPolygon' ? geometry.coordinates.flat() : [];

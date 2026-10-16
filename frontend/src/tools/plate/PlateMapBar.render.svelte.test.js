@@ -58,4 +58,41 @@ describe('a plate map\'s own bar', () => {
     button('Frame the map').click();
     expect(framed).toBe(1);
   });
+
+  it('holds a day\'s framing to the one before until it is let go, and frames it there on its own after', () => {
+    const element = { kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [] };
+    const seen = [];
+    const kept = [];
+    show(element, { view: { lat: 1, lon: 1, zoom: 9, bearing: 0 }, keep: true, onview: (next) => seen.push(next), onkeep: (keep) => kept.push(keep) });
+    const box = document.body.querySelector('.keep input');
+    expect(box.checked).toBe(true);
+    // held: the hand frames nothing here
+    expect(button('Zoom the map in').disabled).toBe(true);
+    expect(button('Turn the map left').disabled).toBe(true);
+    box.click();
+    expect(kept).toEqual([false]);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show(element, { view: { lat: 1, lon: 1, zoom: 9, bearing: 0 }, keep: false, onview: (next) => seen.push(next) });
+    button('Zoom the map in').click();
+    // the day's own framing moves, never the map's view under it
+    expect(seen.at(-1)).toEqual({ lat: 1, lon: 1, zoom: 9.5, bearing: 0 });
+    expect(element.view.zoom).toBe(5);
+  });
+
+  it('says nothing of the framing before on the first day, and leans a map in 3D', () => {
+    const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0, pitch: 50 }, terrain: 1.5, basemap: 'plain', overlays: [] });
+    expect(document.body.querySelector('.keep')).toBeNull();
+    button('Tilt the map more').click();
+    expect(element.view.pitch).toBe(60);
+    button('Tilt the map less').click(); button('Tilt the map less').click();
+    expect(element.view.pitch).toBe(40);
+  });
+
+  it('lays the key-less layers of the Map over any ground', () => {
+    const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'esri-world-imagery', overlays: [] });
+    button('Ground').click(); flushSync();
+    item('Railways').click(); flushSync();
+    item('Power lines and plants').click(); flushSync();
+    expect(element.overlays).toEqual(['railway', 'power']);
+  });
 });

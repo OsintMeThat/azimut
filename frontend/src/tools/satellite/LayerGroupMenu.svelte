@@ -8,6 +8,7 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import LayerStyleButton from './LayerStyleButton.svelte';
   import { usedStyles } from '../../lib/map/layerStyle.js';
+  import { LAYER_HELP as HELP } from '../../lib/map/layerHelp.js';
 
   let { controller, group, anchor, members = 0, onclose } = $props();
   const busy = $derived(controller.loading);
@@ -34,44 +35,44 @@
 </script>
 
 <FloatingMenu {anchor} align="end" width={250} role="group" label={`Settings of group ${group.name}`} {onclose}>
-  <label class="field"><span>Name</span>
+  <label class="field" title={HELP.groupName}><span>Name</span>
     <input aria-label="Group name" value={group.name} maxlength="200"
       onchange={(event) => controller.updateGroup(group.id, { name: event.currentTarget.value })}
       onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></label>
-  <label class="switch"><input type="checkbox" aria-label="One style for the whole group" checked={uniform} disabled={busy}
+  <label class="switch" title={HELP.uniform}><input type="checkbox" aria-label="One style for the whole group" checked={uniform} disabled={busy}
     onchange={(event) => controller.updateGroup(group.id, { mode: event.currentTarget.checked ? 'uniform' : 'individual' })} />
     One style for the whole group</label>
   {#if uniform}
-    <div class="field"><span>Style</span>
+    <div class="field" title={HELP.groupStyle}><span>Style</span>
       <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} {used} caseId={controller.editor?.caseId ?? null}
         disabled={busy} onpick={(changes) => controller.updateGroup(group.id, changes)} /></div>
   {/if}
-  <label class="switch"><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}
+  <label class="switch" title={HELP.labels}><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}
     onchange={(event) => controller.updateGroup(group.id, { labels: event.currentTarget.checked })} /> Names on the map</label>
   {#if controller.editor?.track?.on}
     <!-- a strike fades after its day where a position stays: what the layer's cursor reads -->
-    <label class="switch" title="Each one fades after its day, and leaves the map some days later"><input type="checkbox"
+    <label class="switch" title={HELP.events}><input type="checkbox"
       aria-label={`${group.name} are events`} checked={!!group.events} disabled={busy}
       onchange={(event) => controller.updateGroup(group.id, { events: event.currentTarget.checked })} /> Events: fade after their day</label>
   {/if}
-  <label class="field slider"><span>Icon size</span>
+  <label class="field slider" title={HELP.iconSize}><span>Icon size</span>
     <input type="range" min="0.5" max="3" step="0.25" value={size ?? group.size ?? 1} aria-label={`Icon size for ${group.name}`}
       oninput={(event) => { size = Number(event.currentTarget.value); }}
       onchange={() => slide('size', size ?? group.size ?? 1, () => (size = null))} />
     <output>{Math.round((size ?? group.size ?? 1) * 100)}%</output></label>
-  <label class="field slider"><span>Line width</span>
+  <label class="field slider" title={HELP.groupLine}><span>Line width</span>
     <input type="range" min="0.5" max="12" step="0.5" value={stroke ?? group.stroke ?? 2} aria-label={`Line width for ${group.name}`}
       oninput={(event) => { stroke = Number(event.currentTarget.value); }}
       onchange={() => slide('stroke', stroke ?? group.stroke ?? 2, () => (stroke = null))} />
     <output>{stroke ?? group.stroke ?? 2}px</output></label>
-  <div class="field"><span>Lines</span>
+  <div class="field" title={HELP.lines}><span>Lines</span>
     <span class="pills" role="group" aria-label={`Line dash for ${group.name}`}>
       {#each DASHES as [value, label] (value)}
         <button type="button" class="pill" aria-pressed={(group.line_dash ?? '') === value} disabled={busy}
           onclick={() => controller.updateGroup(group.id, { line_dash: value || null })}>{label}</button>
       {/each}
     </span></div>
-  <div class="field"><span>Areas</span>
+  <div class="field" title={HELP.areas}><span>Areas</span>
     <span class="pills" role="group" aria-label={`Area fill for ${group.name}`}>
       {#each FILLS as [value, label] (value)}
         <button type="button" class="pill" aria-pressed={(group.area_fill ?? '') === value} disabled={busy}
@@ -93,8 +94,9 @@
       <Icon name="cursor" size={14} /><span class="fm-grow">Select all {members}</span></button>
   {/if}
   {#if (controller.groups ?? []).length > 1}
-    <button type="button" class="fm-item danger" disabled={busy} onclick={() => { controller.removeGroup(group.id); onclose?.(); }}>
-      <Icon name="trash" size={14} /><span class="fm-grow" title="Its features move to the first group">Ungroup</span></button>
+    <button type="button" class="fm-item danger" disabled={busy} title="Its features move to the first group"
+      onclick={() => { controller.removeGroup(group.id); onclose?.(); }}>
+      <Icon name="trash" size={14} /><span class="fm-grow">Ungroup</span></button>
   {/if}
 </FloatingMenu>
 

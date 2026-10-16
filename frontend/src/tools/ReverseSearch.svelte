@@ -23,6 +23,7 @@
   import { MAX_HANDOFF_BYTES, UPLOAD_PAGES } from '../lib/reverseSearch.js';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import SourcePicker from '../components/SourcePicker.svelte';
   import { shortcut } from '../lib/keys.js';
 
@@ -312,6 +313,7 @@
 <div class="tool">
   {#if selected}
     <div class="tool-header">
+      <BackButton label="Files" title="Back to the file list" onclick={discard} />
       <span class="file">
         <Icon name={selected.kind === 'video' ? 'video' : 'image'} size={14} />
         <span class="name" title={selected.path}>{nameOf(selected)}</span>
@@ -319,9 +321,6 @@
       <div class="spacer"></div>
       <button class="btn btn-sm" onclick={() => (pickerOpen = true)} title="Pick another image or video">
         <Icon name="folderOpen" size={14} /> Change file
-      </button>
-      <button class="btn btn-ghost btn-sm" onclick={discard} title="Back to the file list" aria-label="Close file">
-        <Icon name="x" size={15} />
       </button>
     </div>
   {/if}

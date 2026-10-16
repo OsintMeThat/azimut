@@ -7,10 +7,15 @@
    * - **Turn**: a step to either side, or the compass dragged round; a press on the
    *   compass puts north back up. While the map is framed, a right-drag or a
    *   Ctrl-drag turns it too.
+   * - **Tilt**: a map drawn in 3D leans further or less.
    * - **Ground**: the basemaps a plate offers, and what can be laid over them.
+   * - **Keep the previous framing**: on a played plate, a day or a step after the
+   *   first holds the framing before it until this is unticked; then the map moves
+   *   for it alone.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import { PLATE_OVERLAYS } from '../../lib/plate/page.js';
 
   let {
     element,
@@ -18,11 +23,22 @@
     grounds = [],
     framing = false,
     onframe,
+    /** The map's view on the day or step shown (its own when none is given), and `(view)` to frame it otherwise. */
+    view: given = null,
+    onview = (next) => { element.view = next; },
+    /** Whether the day or step shown keeps the framing before it; null on the first, which has none before it. */
+    keep = null,
+    /** `(keep)`: the day or step shown keeps the framing before it, or frames the map its own way. */
+    onkeep = null,
   } = $props();
 
-  const OVERLAYS = [['relief', 'Relief shading'], ['boundaries', 'Borders and big names'], ['placenames', 'Town and village names']];
   const isMap = $derived(element.kind === 'map');
-  const bearing = $derived(element.view?.bearing ?? 0);
+  const view = $derived(given ?? element.view);
+  const bearing = $derived(view?.bearing ?? 0);
+  const pitch = $derived(view?.pitch ?? 0);
+  const leans = $derived((element.terrain ?? 0) > 0 || pitch > 0);
+  /** The framing is held to the one before: the hand frames nothing here. */
+  const held = $derived(keep === true);
   const ground = $derived(grounds.find(([id]) => id === element.basemap)?.[1] ?? 'Ground');
   let menu = $state(false);
   let anchor = $state(null);
@@ -30,15 +46,18 @@
 
   const tidy = (value) => Math.round((((value + 180) % 360 + 360) % 360 - 180) * 10) / 10;
   function turn(by) {
-    element.view = { ...element.view, bearing: tidy(bearing + by) };
+    onview({ ...view, bearing: tidy(bearing + by) });
   }
   function zoom(by) {
-    element.view = { ...element.view, zoom: Math.max(0, Math.min(22, Math.round(((element.view?.zoom ?? 10) + by) * 100) / 100)) };
+    onview({ ...view, zoom: Math.max(0, Math.min(22, Math.round(((view?.zoom ?? 10) + by) * 100) / 100)) });
+  }
+  function tilt(by) {
+    onview({ ...view, pitch: Math.max(0, Math.min(85, Math.round(pitch + by))) });
   }
 
   /** The compass dragged round: north follows the pointer. */
   function grabDial(event) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || held) return;
     event.preventDefault();
     event.stopPropagation();
     const box = dial.getBoundingClientRect();
@@ -50,12 +69,12 @@
       if (!moved && Math.hypot(dx, dy) < 6) return;
       moved = true;
       // the needle points where north is on screen; the map's bearing is the other way round
-      element.view = { ...element.view, bearing: tidy(-((Math.atan2(dx, -dy) * 180) / Math.PI)) };
+      onview({ ...view, bearing: tidy(-((Math.atan2(dx, -dy) * 180) / Math.PI)) });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      if (!moved) element.view = { ...element.view, bearing: 0 };
+      if (!moved) onview({ ...view, bearing: 0 });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -70,13 +89,24 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" onpointerdown={(event) => event.stopPropagation()}>
   {#if isMap}
-    <button type="button" class:on={framing} aria-pressed={framing} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a right-drag'}
+    {#if keep !== null}
+      <label class="keep" title="On, this day or step shows the map as the one before it does. Off, you frame it here on its own.">
+        <input type="checkbox" checked={keep} onchange={(event) => onkeep?.(event.currentTarget.checked)} /> Keep the previous framing</label>
+      <span class="rule"></span>
+    {/if}
+    <button type="button" class:on={framing} aria-pressed={framing} disabled={held} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a right-drag'}
       aria-label="Frame the map" onclick={onframe}><Icon name="move" size={14} />{#if framing}<span>Done</span>{/if}</button>
-    <button type="button" aria-label="Zoom the map out" title="Zoom out" onclick={() => zoom(-0.5)}><Icon name="minus" size={13} /></button>
-    <button type="button" aria-label="Zoom the map in" title="Zoom in" onclick={() => zoom(0.5)}><Icon name="plus" size={13} /></button>
+    <button type="button" aria-label="Zoom the map out" title="Zoom out" disabled={held} onclick={() => zoom(-0.5)}><Icon name="minus" size={13} /></button>
+    <button type="button" aria-label="Zoom the map in" title="Zoom in" disabled={held} onclick={() => zoom(0.5)}><Icon name="plus" size={13} /></button>
     <span class="rule"></span>
-    <button type="button" aria-label="Turn the map left" title="Turn 15° left" onclick={() => turn(15)}><Icon name="rotateLeft" size={14} /></button>
-    <button type="button" class="dial" bind:this={dial} aria-label={`Compass, ${Math.round(-bearing + 360) % 360}°`}
+    {#if leans}
+      <button type="button" aria-label="Tilt the map less" title="Lean less" disabled={held || pitch <= 0} onclick={() => tilt(-10)}><Icon name="chevronDown" size={13} /></button>
+      <span class="pitch" title="How far the map leans">{Math.round(pitch)}°</span>
+      <button type="button" aria-label="Tilt the map more" title="Lean more" disabled={held || pitch >= 85} onclick={() => tilt(10)}><Icon name="chevronUp" size={13} /></button>
+      <span class="rule"></span>
+    {/if}
+    <button type="button" aria-label="Turn the map left" title="Turn 15° left" disabled={held} onclick={() => turn(15)}><Icon name="rotateLeft" size={14} /></button>
+    <button type="button" class="dial" bind:this={dial} aria-label={`Compass, ${Math.round(-bearing + 360) % 360}°`} disabled={held}
       title="Drag to turn the map. A press puts north up." onpointerdown={grabDial}>
       <svg viewBox="-12 -12 24 24" width="22" height="22" aria-hidden="true">
         <circle r="10.5" class="ring" />
@@ -86,7 +116,7 @@
         </g>
       </svg>
     </button>
-    <button type="button" aria-label="Turn the map right" title="Turn 15° right" onclick={() => turn(-15)}><Icon name="rotateRight" size={14} /></button>
+    <button type="button" aria-label="Turn the map right" title="Turn 15° right" disabled={held} onclick={() => turn(-15)}><Icon name="rotateRight" size={14} /></button>
     <span class="rule"></span>
   {/if}
   <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title="The ground the map is drawn on"
@@ -102,7 +132,7 @@
         {#if element.basemap === id}<Icon name="check" size={13} />{/if}</button>
     {/each}
     <div class="fm-sep"></div>
-    {#each OVERLAYS as [id, label] (id)}
+    {#each PLATE_OVERLAYS as [id, label] (id)}
       {#if id !== 'relief' || element.basemap?.startsWith('plain')}
         <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={(element.overlays ?? []).includes(id)}
           onclick={() => toggleOverlay(id)}>
@@ -118,7 +148,10 @@
     background: var(--bg-1); box-shadow: var(--shadow-2); white-space: nowrap; }
   button { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px;
     border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
-  button:hover { background: var(--bg-3); color: var(--text-1); }
+  button:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); }
+  button:disabled { opacity: .4; cursor: default; }
+  .keep { display: flex; align-items: center; gap: 5px; padding: 0 6px; color: var(--text-1); font-size: var(--fs-xs); cursor: pointer; }
+  .pitch { min-width: 26px; color: var(--text-2); font-size: var(--fs-xs); text-align: center; font-variant-numeric: tabular-nums; }
   button.on { background: var(--accent); color: var(--accent-text); }
   .rule { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
   .dial { padding: 0; cursor: grab; }
@@ -133,5 +166,7 @@
   .swatch.esri-world-imagery { background: linear-gradient(135deg, #4a5a33, #8b7d5a); }
   .swatch.osm { background: linear-gradient(135deg, #f2efe9 55%, #f7c46c 55%); }
   .swatch.opentopomap { background: linear-gradient(135deg, #d7e3b8, #b9a27a); }
+  .swatch.plain-topo { background: linear-gradient(135deg, #c3dba9 35%, #efdcab 35% 65%, #d4ad84 65%); }
+  .swatch.plain-staff { background: linear-gradient(135deg, #d8d4ae 40%, #a8b886 40% 70%, #7f5f33 70%); }
   .room { flex: none; width: 14px; }
 </style>

@@ -669,9 +669,73 @@ def drop_state(feature: dict[str, Any], at: str) -> None:
         raise maplayers.LayerError("a feature can only be gone after it first appears")
     properties["states"] = states
     _mirror(feature)
+    _plain_again(feature)
+
+
+def _plain_again(feature: dict[str, Any]) -> None:
+    """One state dated to a day, or always, is a plain feature again."""
+    states = feature["properties"].get("states") or []
     if len(states) == 1 and "T" not in states[0]["at"]:
-        # One state dated to a day is a plain feature again.
-        properties.pop("states")
+        feature["properties"].pop("states")
+
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _said(at: str) -> str:
+    """A moment as a sentence names it: `12 Oct 2026`, or `12 Oct 2026, 14:00`."""
+    day = datetime.fromisoformat(at[:10])
+    text = f"{day.day} {_MONTHS[day.month - 1]} {day.year}"
+    return f"{text}, {at[11:]}" if "T" in at else text
+
+
+def set_start(feature: dict[str, Any], at: str) -> None:
+    """Say when a feature first shows: "" for always, else a moment before its next change.
+
+    A plain feature's start is its day. One started at a time of day, or one with
+    a history, has its first state moved.
+    """
+    properties = feature["properties"]
+    at = instant(at)
+    if not properties.get("states") and "T" not in at:
+        if at:
+            properties["date"] = at
+            if str(properties.get("date_end") or "") <= at:
+                properties.pop("date_end", None)
+        else:
+            properties.pop("date", None)
+        return
+    states = _seeded(feature)
+    if not properties.get("states") and properties.get("date_end"):
+        # a plain feature's end is its last day; a history says it is gone the day after
+        last = datetime.fromisoformat(properties["date_end"]).toordinal() + 1
+        states.append({"at": datetime.fromordinal(last).date().isoformat(), "gone": True})
+    if len(states) > 1 and at >= states[1]["at"]:
+        raise maplayers.LayerError(f"start it before {_said(states[1]['at'])}")
+    states[0]["at"] = at
+    properties["states"] = states
+    _mirror(feature)
+    _plain_again(feature)
+
+
+def set_end(feature: dict[str, Any], at: str) -> None:
+    """Say when a feature leaves the map: "" for still there, else a moment after its last change."""
+    properties = feature["properties"]
+    at = instant(at)
+    states = properties.get("states") or []
+    ended = bool(states) and bool(states[-1].get("gone"))
+    if not at:
+        if ended:
+            drop_state(feature, states[-1]["at"])
+        properties.pop("date_end", None)
+        return
+    last = [state for state in _seeded(feature) if not state.get("gone")][-1]["at"]
+    if at <= last:
+        raise maplayers.LayerError(f"end it after {_said(last)}")
+    if ended:
+        states.pop()
+    properties.pop("date_end", None)
+    write_state(feature, at, gone=True)
 
 
 def as_of(feature: dict[str, Any], at: str) -> dict[str, Any] | None:
@@ -697,25 +761,47 @@ def as_of(feature: dict[str, Any], at: str) -> dict[str, Any] | None:
     return answer
 
 
-def _timed(spec: dict[str, Any], feature: dict[str, Any], at: str | None, fix: bool = False) -> str | None:
-    """The moment an edit to this feature is written at, or None for a plain edit.
+def _timed(spec: dict[str, Any], feature: dict[str, Any], at: str | None) -> str | None:
+    """The moment an edit to this feature is written at, or None for an edit with no date.
 
-    `fix` corrects the state the feature is in at `at` rather than starting one
-    there; a feature with no history is then simply rewritten.
+    With no date, a feature with a history on a tracked layer changes on every day
+    it has (`_undated`); on a layer no longer tracked an edit corrects its latest
+    state, the history kept as it was.
     """
     if at is not None:
         if not track(spec):
             raise maplayers.LayerError("switch “Track over time” on to date an edit")
-        moment = instant(at)
-        if not fix:
-            return moment
-        if not feature["properties"].get("states"):
-            return None
-        state = in_force(feature["properties"]["states"], moment)
-        return state["at"] if state and not state.get("gone") else moment
-    if feature["properties"].get("states"):
+        return instant(at)
+    if feature["properties"].get("states") and not track(spec):
         return latest(feature)
     return None
+
+
+def _undated(feature: dict[str, Any], *, geometry: dict[str, Any] | None = None, status: Any = _KEEP) -> None:
+    """Change a feature with a history on every day it has.
+
+    Only what never changed by date can be: a shape that moved on a day is moved
+    from a day, and a status that changed on one is set from a day.
+    """
+    properties = feature["properties"]
+    live = [state for state in properties["states"] if not state.get("gone")]
+    name = properties.get("name") or "this feature"
+    if geometry is not None:
+        moved = next((state for state in live[1:] if state["geometry"] != live[0]["geometry"]), None)
+        if moved is not None:
+            raise maplayers.LayerError(f"“{name}” moves on {_said(moved['at'])}: pick a day on the bar to move it")
+        for state in live:
+            state["geometry"] = copy.deepcopy(geometry)
+    if status is not _KEEP:
+        changed = next((state for state in live[1:] if state.get("status", "") != live[0].get("status", "")), None)
+        if changed is not None:
+            raise maplayers.LayerError(f"“{name}” changes status on {_said(changed['at'])}: pick a day on the bar to set it")
+        for state in live:
+            if status:
+                state["status"] = status
+            else:
+                state.pop("status", None)
+    _mirror(feature)
 
 
 def _time_fields(feature: dict[str, Any]) -> dict[str, Any]:
@@ -794,11 +880,13 @@ def _marker(spec: dict[str, Any], key: str) -> dict[str, Any]:
 
 def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Change one feature. On a tracked layer `at` dates the change of shape or
-    status, `gone` says the feature is no longer there from `at`, and
-    `drop_state` takes the state at `at` out of its history.
+    status, and `drop_state` takes the state at `at` out of its history.
+    `start` and `end` say when it first shows and when it leaves the map, ""
+    for always and still there.
 
-    A feature with a history and no `at` has its latest state changed, which
-    is what correcting it means.
+    With no `at`, a feature with a history changes on every day it has, which
+    only what never changed by date can (`_undated`); on a layer no longer
+    tracked its latest state is corrected.
     """
     with case.lock:
         spec = _spec(case, layer)
@@ -808,8 +896,11 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
         stored = next(f for f in spec["document"]["features"] if f["properties"]["key"] == key)
         properties = stored["properties"]
         changes = dict(changes)
-        moment = _timed(spec, stored, changes.pop("at", None), bool(changes.pop("fix", False)))
-        gone, drop = bool(changes.pop("gone", False)), bool(changes.pop("drop_state", False))
+        start, end = changes.pop("start", None), changes.pop("end", None)
+        if (start is not None or end is not None) and not track(spec):
+            raise maplayers.LayerError("switch “Track over time” on to say when it shows")
+        moment = _timed(spec, stored, changes.pop("at", None))
+        drop = bool(changes.pop("drop_state", False))
         if moment is not None and properties.get("states") and "date" in changes:
             raise maplayers.LayerError("this feature's days are its history; change them there")
         shape = None
@@ -829,7 +920,7 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
                 geometry = validate_geometry(value)
                 if geometry["type"] != stored["geometry"]["type"]:
                     raise maplayers.LayerError("keep the feature's geometry type")
-                if moment is None:
+                if moment is None and not properties.get("states"):
                     stored["geometry"] = geometry
                 else:
                     shape = geometry
@@ -838,19 +929,23 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
         fields = {field: value for field, value in changes.items() if field in CLEARABLE}
         # A tracked feature's status is part of what it was at a moment.
         status: Any = _KEEP
-        if moment is not None and "status" in fields:
+        if (moment is not None or properties.get("states")) and "status" in fields:
             status = fields.pop("status") or ""
         if status is not _KEEP and status not in ("", *STATUSES):
             raise maplayers.LayerError("a status is damaged or destroyed")
         apply_fields(properties, fields)
         if moment is not None and drop:
             drop_state(stored, moment)
-        elif moment is not None and gone:
-            write_state(stored, moment, gone=True)
         elif moment is not None and (shape is not None or status is not _KEEP):
             write_state(stored, moment, geometry=shape, status=status)
-        elif drop or gone:
+        elif drop:
             raise maplayers.LayerError("date the change on a layer tracked over time")
+        elif shape is not None or status is not _KEEP:
+            _undated(stored, geometry=shape, status=status)
+        if start is not None:
+            set_start(stored, start)
+        if end is not None:
+            set_end(stored, end)
         # Choosing an app symbol replaces the imported pictogram on this marker.
         if "symbol" in changes or "colour" in changes:
             properties["icon"] = ""
@@ -1015,8 +1110,7 @@ def _undo(spec: dict[str, Any], *, removed: list[dict[str, Any]] | None = None,
 
 
 def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str, Any],
-                   offset: list[float] | None, remove: bool, at: str | None = None,
-                   fix: bool = False) -> dict[str, Any]:
+                   offset: list[float] | None, remove: bool, at: str | None = None) -> dict[str, Any]:
     """Apply one atomic edit to selected features, without touching case entities.
 
     A move skips the markers that follow a case item, since their point is that
@@ -1054,12 +1148,18 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
         undo = _undo(spec, before=[{"key": key, "geometry": copy.deepcopy(by_key[key]["geometry"]),
                                     "time": _time_fields(by_key[key])}
                                    for key in moving]) if moving else None
-        moments = {key: _timed(spec, by_key[key], at, fix) for key in keys}
+        moments = {key: _timed(spec, by_key[key], at) for key in keys}
         for key in moving:
             feature = by_key[key]
             dated = moments[key]
-            if dated is None:
+            if dated is None and not feature["properties"].get("states"):
                 feature["geometry"]["coordinates"] = shifted(feature["geometry"]["coordinates"])
+                continue
+            if dated is None:
+                # with no date it moves on every day, which only a shape that never moved can
+                base = copy.deepcopy(next(state for state in feature["properties"]["states"] if not state.get("gone"))["geometry"])
+                base["coordinates"] = shifted(base["coordinates"])
+                _undated(feature, geometry=base)
                 continue
             base = copy.deepcopy(_live_before(_seeded(feature), dated)["geometry"])
             base["coordinates"] = shifted(base["coordinates"])
@@ -1069,6 +1169,8 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
             moment = moments[key]
             if moment is not None and "status" in changes:
                 write_state(by_key[key], moment, status=changes["status"] or "")
+            elif props.get("states") and "status" in changes:
+                _undated(by_key[key], status=changes["status"] or "")
             for field, value in changes.items():
                 if field == "group" and target:
                     props.update(group=target["id"], category=target["name"])
@@ -1079,7 +1181,7 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
                 elif field in ("colour", "symbol"):
                     props[field] = value
             apply_fields(props, {field: value for field, value in changes.items() if field in CLEARABLE
-                                 and not (moment is not None and field == "status")
+                                 and not ((moment is not None or props.get("states")) and field == "status")
                                  and not (props.get("states") and field == "date")})
             if "symbol" in changes or "colour" in changes:
                 props["icon"] = ""
@@ -1090,18 +1192,46 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
         return answer
 
 
-def revert(case: Case, layer: str, put: list[dict[str, Any]], drop: list[str]) -> dict[str, Any]:
+def _group_back(raw: dict[str, Any]) -> dict[str, Any]:
+    """A group as an undo puts it back, from what the editor held of it, checked as an edit would be."""
+    group: dict[str, Any] = {"id": raw["id"], "name": maplayers._text(raw["name"], maplayers.MAX_NAME),
+                             "mode": raw.get("mode") if raw.get("mode") in ("uniform", "individual") else "individual",
+                             "colour": raw.get("colour") or "#0072b2", "symbol": raw.get("symbol") or "pin",
+                             "size": min(3.0, max(0.5, float(raw.get("size") or 1))),
+                             "stroke": min(12.0, max(0.5, float(raw.get("stroke") or 2)))}
+    if not group["name"]:
+        raise maplayers.LayerError("a group put back carries its name")
+    apply_style(group, {field: raw[field] for field in GROUP_STYLE if raw.get(field) not in (None, "")})
+    for flag in ("labels", "events"):
+        if raw.get(flag):
+            group[flag] = True
+    return group
+
+
+def revert(case: Case, layer: str, put: list[dict[str, Any]], drop: list[str],
+           groups_back: list[dict[str, Any]] | None = None, drop_groups: list[str] | None = None) -> dict[str, Any]:
     """Put features back as they were and take out the ones an edit made: the editor's undo.
 
     `put` are whole features as the layer held them before an edit (or after it, for a
     redo), each found by its key and replaced, or added back at the end; `drop` the
     keys of features to take out. Every geometry is checked as a drawn one is, and a
     feature whose group is gone joins the first.
+
+    `groups_back` are groups an edit took out, each put back at its place `at` before
+    the features return to it; `drop_groups` the ids of groups an edit made, taken out
+    once the features have left them. The layer always keeps one group.
     """
     with case.lock:
         spec = _spec(case, layer)
         features = [f for f in spec["document"]["features"] if f["properties"]["key"] not in set(drop)]
         groups = _groups(spec)
+        for raw in sorted(groups_back or [], key=lambda item: int(item.get("at") or 0)):
+            if any(group["id"] == raw["id"] for group in groups):
+                continue
+            back = _group_back(raw)
+            if any(group["name"] == back["name"] for group in groups):
+                raise maplayers.LayerError(f"another group is named {back['name']}; rename it first")
+            groups.insert(min(max(0, int(raw.get("at") or 0)), len(groups)), back)
         ids = {group["id"]: group for group in groups}
         by_key = {f["properties"]["key"]: index for index, f in enumerate(features)}
         for raw in put:
@@ -1121,6 +1251,14 @@ def revert(case: Case, layer: str, put: list[dict[str, Any]], drop: list[str]) -
                 features.append(feature)
         if len(features) > maplayers.MAX_FEATURES:
             raise maplayers.LayerError("this layer has reached its feature limit")
+        for key in drop_groups or []:
+            gone = next((group for group in groups if group["id"] == key), None)
+            if gone is None or len(groups) == 1:
+                continue
+            groups.remove(gone)
+            for feature in features:
+                if feature["properties"].get("group") == key:
+                    feature["properties"].update(group=groups[0]["id"], category=groups[0]["name"])
         spec["document"]["features"] = features
         _save(case, layer, spec)
         return read(case, layer)

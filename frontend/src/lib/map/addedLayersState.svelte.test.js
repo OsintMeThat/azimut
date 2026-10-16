@@ -230,6 +230,18 @@ describe('drawing', () => {
     expect(calls.filter(([, path]) => path.endsWith('/data'))).toHaveLength(1);
   });
 
+  it('shares one read between the maps that ask for a layer while it is still coming', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+
+    const drawn = await Promise.all([layers.drawing('c1', 'Sightings'), layers.drawing('c1', 'Sightings'), layers.drawing('c1', 'Sightings')]);
+
+    expect(calls.filter(([, path]) => path.endsWith('/data'))).toHaveLength(1);
+    expect(drawn[1]).toBe(drawn[0]);
+    expect(drawn[2]).toBe(drawn[0]);
+  });
+
   it('asks the server for the features, past whatever the browser kept', async () => {
     // the address is the same through every refresh, and Chrome had kept one
     // it filled before the backend said no-cache

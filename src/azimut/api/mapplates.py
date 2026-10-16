@@ -232,6 +232,7 @@ async def export_plate(
     transparent: bool = Form(default=False),
     beats: str = Form(default="", max_length=400_000),
     overs: list[UploadFile] = File(default=[]),
+    tweens: list[UploadFile] = File(default=[]),
 ) -> dict[str, Any]:
     """Write one export of a plate into the folder saved for views.
 
@@ -243,6 +244,7 @@ async def export_plate(
     holds and, for an MP4, the clips that run over it (a video of the case, the part
     of it, its box in pixels) with `overs`, the see-through pictures of what stands
     over the clips. A clip's file is found inside the case, and must be a video.
+    An MP4's beat can open on its transition, frames of `tweens` played before it holds.
     """
     case = get_case(case_id)
     played = format in ("gif", "mp4")
@@ -252,6 +254,10 @@ async def export_plate(
         raise HTTPException(status_code=422, detail=f"a played plate holds 2 to {mapplates.MAX_FRAMES} days")
     if len(overs) > mapplates.MAX_FRAMES:
         raise HTTPException(status_code=422, detail="too many pictures for one sequence")
+    if tweens and (format != "mp4" or not beats):
+        raise HTTPException(status_code=422, detail="only a video plays transitions")
+    if len(tweens) > mapplates.MAX_TWEENS:
+        raise HTTPException(status_code=422, detail="too many transition frames for one video")
     try:
         if played:
             pictures = [mapplates.picture(await frame.read(mapplates.MAX_FRAME_BYTES + 1),
@@ -259,7 +265,7 @@ async def export_plate(
                         for frame in frames]
             if max(pictures[0].size) > mapplates.MAX_VIDEO_EDGE:
                 raise mapplates.ExportError("a played plate is at most 3840 pixels across")
-            sequence = mapplates.read_beats(beats, len(pictures), len(overs)) if beats else None
+            sequence = mapplates.read_beats(beats, len(pictures), len(overs), len(tweens)) if beats else None
             if sequence is None:
                 data = await run_in_threadpool(mapplates.gif_bytes if format == "gif" else mapplates.mp4_bytes, pictures, interval)
             elif format == "gif":
@@ -268,7 +274,9 @@ async def export_plate(
                 files = clip_files(case, sequence)
                 above = [mapplates.picture(await over.read(mapplates.MAX_FRAME_BYTES + 1), max_bytes=mapplates.MAX_FRAME_BYTES,
                                            max_pixels=mapplates.MAX_FRAME_PIXELS, alpha=True) for over in overs]
-                data = await run_in_threadpool(mapplates.sequence_mp4, pictures, sequence, above, files)
+                between = [mapplates.picture(await tween.read(mapplates.MAX_TWEEN_BYTES + 1), max_bytes=mapplates.MAX_TWEEN_BYTES,
+                                             max_pixels=mapplates.MAX_FRAME_PIXELS) for tween in tweens]
+                data = await run_in_threadpool(mapplates.sequence_mp4, pictures, sequence, above, files, between)
         else:
             raw = await frames[0].read(mapplates.MAX_PAGE_BYTES + 1)
             page = mapplates.picture(raw, max_bytes=mapplates.MAX_PAGE_BYTES, max_pixels=mapplates.MAX_PAGE_PIXELS,

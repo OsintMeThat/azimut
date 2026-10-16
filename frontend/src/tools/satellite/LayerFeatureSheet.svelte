@@ -1,3 +1,8 @@
+<script module>
+  /** Whether the Look rows are open, kept from one feature to the next while the app is open. */
+  let lookShown = false;
+</script>
+
 <script>
   /**
    * What the selected features of a personal layer say, as a sheet of rows:
@@ -8,24 +13,23 @@
    * Every row saves as it is set; a name or a note when the field is left, or
    * before the selection moves on (`commitForm` in the editor state). One
    * feature shows its own values; several show what they share and change
-   * together, a row they disagree on reading "Several".
+   * together, a row they disagree on reading "Several". How a feature is drawn
+   * (its size, line, fill and name) folds under Look, after what it says.
    */
   import Icon from '../../components/Icon.svelte';
   import DayPicker from '../../components/DayPicker.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
+  import LayerFeatureWhen from './LayerFeatureWhen.svelte';
   import { linesOf } from '../../lib/map/layerHit.js';
   import { facingLabel } from '../../lib/map/turnRing.js';
   import { formatArea, formatDistance, pathLength, polygonArea } from '../../lib/measure.js';
   import { caseState, prefs } from '../../lib/state.svelte.js';
   import { fileUrl } from '../../lib/fileUrl.js';
-  import { hasHistory, lifeline, momentLabel, stateAt } from '../../lib/map/layerHistory.js';
-  import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
+  import { hasHistory, momentLabel, spanLabel, spanOf } from '../../lib/map/layerHistory.js';
+  import { CONFIDENCE_CHOICES, LAYER_HELP as HELP, ORIGIN_CHOICES, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
 
   let { controller, onfollowed = null, ondeleteplace = null } = $props();
-  const STATUSES = [['', 'Intact'], ['damaged', 'Damaged'], ['destroyed', 'Destroyed']];
-  const ORIGINS = [['', 'Me', 'Geolocated by me'], ['external', 'Others', 'Geolocated by someone else']];
-  const CONFIDENCES = [['', '–', 'Not said'], ['confirmed', 'Sure', 'Confirmed'], ['probable', 'Likely', 'Probable: drawn dashed'], ['claimed', 'Claimed', 'Claimed: drawn dotted']];
   const DASHES = [['', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']];
   const ARROWS = [['', 'None'], ['end', 'At its end'], ['both', 'Both ends']];
   const FILLS = [['', 'Filled'], ['hatch', 'Hatched'], ['none', 'Outline']];
@@ -68,9 +72,10 @@
     const values = new Set(chosen.map((feature) => feature.properties[field] ?? fallback));
     return values.size === 1 ? [...values][0] : null;
   }
-  /** One feature: set the field and save it. Several: change them all at once. */
+  /** One feature: set the field and save it. Several: change them all at once. A status is the day shown's, never the form's. */
   function set(field, value) {
-    if (one && form) { form[field] = value; controller.saveForm(); }
+    if (field === 'status') controller.setStatus(value);
+    else if (one && form) { form[field] = value; controller.saveForm(); }
     else controller.updateSelection({ [field]: value === '' ? null : value });
   }
   const host = (link) => { try { return new URL(link).hostname.replace(/^www\./, ''); } catch { return link; } };
@@ -97,18 +102,38 @@
     return null;
   });
   // on a tracked layer read at a moment, the status the feature had then
-  const status = $derived(one ? (controller.editor?.track?.on && controller.cursor !== null ? one.properties.status ?? '' : form?.status ?? '') : shared('status'));
+  const status = $derived(one ? one.properties.status ?? '' : shared('status'));
   const origin = $derived(one ? form?.provenance ?? '' : shared('provenance'));
   const day = $derived(one ? form?.date ?? '' : shared('date'));
   const group = $derived(one ? form?.group ?? '' : shared('group'));
-  /** The layer is followed over time, and the moment it is read at (null for now). */
+  /** The layer is followed over time: when a feature shows is said under its name. */
   const tracked = $derived(!!controller.editor?.track?.on);
-  const cursor = $derived(controller.cursor);
-  const history = $derived(one && hasHistory(one) ? lifeline(one, cursor) : []);
-  /** Whether the selected feature stands at the cursor, so it can be said gone from it. */
-  const standing = $derived(!!one && cursor !== null && !!stateAt(one, cursor));
+  /** While edits carry no date, the day a status changed on holds it: it is set from a day. */
+  const statusHeld = $derived(chosen.map((feature) => controller.held?.(feature).status ?? '').find(Boolean) ?? '');
+  /** Picked features not on the map on the day shown: what is dated there would move their days. */
+  const away = $derived(tracked && controller.cursor !== null && chosen.some((feature) => feature.properties.$absent));
+  /** The group the picked features share, whose look they draw in when they set none of their own. */
+  const their = $derived(groups.find((option) => option.id === group) ?? null);
+  let look = $state(lookShown);
+  function showLook() { look = !look; lookShown = look; }
+  /** The look rows set on what is picked, said on the folded Look line. */
+  const lookSet = $derived([['marker_size', 'Size'], ['line_width', 'Width'], ['line_dash', 'Dash'], ['line_arrow', 'Arrow'],
+    ['area_fill', 'Fill'], ['fill_opacity', 'Strength'], ['label', 'Name'], ['label_size', 'Name size']]
+    .filter(([field]) => (one ? form?.[field] : shared(field, '')) ?? '').map(([, label]) => label));
+  /** Its group's features are events, there on their day and fading after it. */
+  const inEvents = $derived(!!groups.find((option) => option.id === one?.properties.group)?.events);
   const blur = (event) => { if (event.key === 'Enter') event.currentTarget.blur(); };
 </script>
+
+<!-- a slider shows its value, quieter while its group sets it, and goes back to the group's with Reset -->
+{#snippet slider(field, label, range, fallback, said, help)}
+  {@const own = valueOf(field, '')}
+  <span class="slider" title={help}><input type="range" aria-label={label} min={range[0]} max={range[1]} step={range[2]} value={own || fallback}
+      oninput={(event) => slide(field, Number(event.currentTarget.value))} onchange={() => release(field)} />
+    <span class="unit" class:quiet={!own}>{said(own || fallback)}</span>
+    {#if own}<button type="button" class="text-act" title={field === 'label_size' ? 'Back to the usual size' : HELP.toGroup} disabled={busy}
+      onclick={() => set(field, '')}>Reset</button>{/if}</span>
+{/snippet}
 
 {#if one && form || chosen.length > 1}
   <div class="sheet" role="group" aria-label={one ? 'Feature' : 'Selected features'}>
@@ -120,11 +145,13 @@
       {:else}
         <span class="name count">{chosen.length} selected</span>
       {/if}
-      <button type="button" class="icon-act more-btn" aria-label="Feature actions" title="Save as a place, gone from a day, remove" aria-expanded={menu}
+      <button type="button" class="icon-act more-btn" aria-label="Feature actions" title="Save as a place, remove" aria-expanded={menu}
         bind:this={menuAnchor} onclick={() => (menu = !menu)}><Icon name="more" size={14} /></button>
       <button type="button" class="icon-act" aria-label="Clear the selection" title="Close"
         onclick={() => controller.select(null)}><Icon name="x" size={13} /></button>
     </div>
+
+    {#if one && tracked}<LayerFeatureWhen {controller} feature={one} event={inEvents} />{/if}
 
     {#if one?.properties.entity_id}
       {@const said = one.properties}
@@ -157,119 +184,60 @@
       </div>
     {/if}
 
+    {#if away}
+      <p class="away" role="note">{one ? 'Not' : 'Some are not'} on the map on {momentLabel(controller.cursor)}: set when {one ? 'it shows' : 'they show'} to change {one ? 'it' : 'them'} there.</p>
+    {/if}
+
     <div class="rows">
       {#if groups.length > 1}
-        <span class="key">Group</span>
-        <select aria-label="Feature group" value={group ?? ''} disabled={busy} onchange={(event) => set('group', event.currentTarget.value)}>
+        <span class="key" title={HELP.group}>Group</span>
+        <select aria-label="Feature group" title={HELP.group} value={group ?? ''} disabled={busy} onchange={(event) => set('group', event.currentTarget.value)}>
           {#if group === null}<option value="" disabled>Several</option>{/if}
           {#each groups as option (option.id)}<option value={option.id}>{option.name}</option>{/each}
         </select>
       {/if}
 
       {#if only('point')}
-        <span class="key">Status</span>
+        <span class="key" title={HELP.status}>Status</span>
         <div class="segments" role="group" aria-label="Feature status">
-          {#each STATUSES as [value, label] (value)}
-            <button type="button" aria-pressed={status === value} disabled={busy} title={label} onclick={() => set('status', value)}>{label}</button>
+          {#each STATUS_CHOICES as [value, label, said] (value)}
+            <button type="button" class:short={!value} aria-pressed={status === value} aria-label={value ? label : said} disabled={busy || !!statusHeld || away}
+              title={statusHeld ? `Changes on ${momentLabel(statusHeld)}: pick a day to set it` : said} onclick={() => set('status', value)}>{label}</button>
           {/each}
         </div>
       {/if}
 
-      <span class="key">How sure</span>
+      <span class="key" title={HELP.confidence}>How sure</span>
       <div class="segments" role="group" aria-label="Feature confidence">
-        {#each CONFIDENCES as [value, label, said] (value)}
+        {#each CONFIDENCE_CHOICES as [value, label, said] (value)}
           <button type="button" class:short={!value} aria-pressed={(one ? form?.confidence ?? '' : shared('confidence')) === value} disabled={busy} title={said}
             onclick={() => set('confidence', value)}>{label}</button>
         {/each}
       </div>
 
-      {#if only('point')}
-        <span class="key">Size</span>
-        <span class="slider"><input type="range" aria-label="Marker size" min="0.5" max="3" step="0.25" value={valueOf('marker_size', '') || 1}
-          oninput={(event) => slide('marker_size', Number(event.currentTarget.value))} onchange={() => release('marker_size')} />
-          {#if valueOf('marker_size', '')}<button type="button" class="text-act" title="Back to its group's size" onclick={() => set('marker_size', '')}>Group</button>{/if}</span>
-      {:else if kinds.size && !kinds.has('point')}
-        <span class="key">Line</span>
-        <span class="slider"><input type="range" aria-label="Line width" min="0.5" max="12" step="0.5" value={valueOf('line_width', '') || 2}
-          oninput={(event) => slide('line_width', Number(event.currentTarget.value))} onchange={() => release('line_width')} />
-          <span class="unit">{valueOf('line_width', '') || 'group'}</span></span>
-        <span class="key">Dash</span>
-        <div class="segments" role="group" aria-label="Line dash">
-          {#each DASHES as [value, label] (value)}
-            <button type="button" aria-pressed={(one ? form?.line_dash ?? '' : shared('line_dash')) === value} disabled={busy} onclick={() => set('line_dash', value)}>{label}</button>
-          {/each}
-        </div>
-        {#if only('line')}
-          <span class="key">Arrow</span>
-          <div class="segments" role="group" aria-label="Line arrow">
-            {#each ARROWS as [value, label] (value)}
-              <button type="button" aria-pressed={(one ? form?.line_arrow ?? '' : shared('line_arrow')) === value} disabled={busy} onclick={() => set('line_arrow', value)}>{label}</button>
-            {/each}
-          </div>
-        {/if}
-        {#if only('area')}
-          <span class="key">Fill</span>
-          <div class="segments" role="group" aria-label="Area fill">
-            {#each FILLS as [value, label] (value)}
-              <button type="button" aria-pressed={(one ? form?.area_fill ?? '' : shared('area_fill')) === value} disabled={busy} onclick={() => set('area_fill', value)}>{label}</button>
-            {/each}
-          </div>
-          {#if (one ? form?.area_fill ?? '' : shared('area_fill')) === ''}
-            <span class="key">Strength</span>
-            <span class="slider"><input type="range" aria-label="Fill strength" min="0.05" max="0.9" step="0.05" value={valueOf('fill_opacity', '') || 0.18}
-              oninput={(event) => slide('fill_opacity', Number(event.currentTarget.value))} onchange={() => release('fill_opacity')} /></span>
-          {/if}
-        {/if}
-      {/if}
-
-      <span class="key">Name</span>
-      <div class="segments" role="group" aria-label="Name on the map">
-        {#each NAMES as [value, label] (value)}
-          <button type="button" aria-pressed={(one ? form?.label ?? '' : shared('label')) === value} disabled={busy}
-            title={value ? `${label} on the map` : 'As its group says'} onclick={() => set('label', value)}>{label}</button>
-        {/each}
-      </div>
-      {#if (one ? form?.label : shared('label')) === 'on'}
-        <span class="key">Name size</span>
-        <span class="slider"><input type="range" aria-label="Name size" min="6" max="32" step="1" value={valueOf('label_size', '') || 11}
-          oninput={(event) => slide('label_size', Number(event.currentTarget.value))} onchange={() => release('label_size')} /></span>
-      {/if}
-
-      {#if history.length}
-        <!-- A feature with a history is dated by it: each state, pressed to read the layer then. -->
-        <span class="key">History</span>
-        <div class="lifeline" role="list" aria-label="Feature history">
-          {#each history as state (state.at)}
-            <span class="state" role="listitem" class:current={state.current} class:gone={state.gone}>
-              <button type="button" disabled={!tracked || !state.at} title={tracked ? 'Read the layer then' : 'Switch Track over time on to read it'}
-                onclick={() => addedLayers.setTime(controller.editor.name, { at: state.at })}>
-                {state.gone ? 'Gone ' : ''}{momentLabel(state.at)}{state.status ? ` · ${state.status}` : ''}</button>
-              {#if tracked && history.length > 1}
-                <button type="button" class="drop" aria-label={`Remove the state of ${momentLabel(state.at)}`} title="Remove this state" disabled={busy}
-                  onclick={() => controller.dropState(one.properties.key, state.at)}><Icon name="x" size={9} /></button>
-              {/if}
-            </span>
-          {/each}
-        </div>
-      {:else}
-        <span class="key">Day</span>
+      <!-- on a layer followed over time, the When line under the name says it -->
+      {#if !tracked && one && hasHistory(one)}
+        <span class="key" title={HELP.days}>Days</span>
+        <span class="value quiet" title={HELP.days}>{spanLabel(spanOf(one))}</span>
+      {:else if !tracked}
+        <span class="key" title={HELP.day}>Day</span>
         <DayPicker value={day ?? ''} label="Feature day" placeholder={day === null ? 'Several days' : 'No day'} clearable
           onpick={(picked) => set('date', picked)} />
       {/if}
 
       {#if point}
-        <span class="key">Facing</span>
+        <span class="key" title={HELP.facing}>Facing</span>
         {#if form.bearing !== '' && form.bearing !== null}
           <span class="value">{facingLabel(form.bearing)}
             <button type="button" class="icon-act" aria-label="Clear the direction" title="Clear" disabled={busy}
               onclick={() => set('bearing', '')}><Icon name="x" size={11} /></button></span>
         {:else}
-          <span class="value quiet">Turn the ring on the map</span>
+          <span class="value quiet" title={HELP.facing}>Turn the ring on the map</span>
         {/if}
       {/if}
 
       {#if one}
-        <span class="key">Sources</span>
+        <span class="key" title={HELP.sources}>Sources</span>
         <div class="sources">
           {#each form.links as link, index (link)}
             <span class="chip">
@@ -284,31 +252,86 @@
               onkeydown={(event) => { if (event.key === 'Enter') addSource(); else if (event.key === 'Escape') { event.stopPropagation(); adding = false; refused = ''; } }}
               onblur={addSource} />
           {:else if form.links.length < 10}
-            <button type="button" class="add-source" aria-label="Add a source" onclick={() => (adding = true)}><Icon name="plus" size={11} /> Add</button>
+            <button type="button" class="add-source" aria-label="Add a source" title="Add the address of a post, a page or a map" onclick={() => (adding = true)}><Icon name="plus" size={11} /> Add</button>
           {/if}
           {#if refused}<p class="refused" role="alert">{refused}</p>{/if}
         </div>
       {/if}
 
-      <span class="key">Geolocated by</span>
+      <span class="key" title={HELP.origin}>Geolocated by</span>
       <div class="segments" role="group" aria-label="Geolocated by">
-        {#each ORIGINS as [value, label, said] (value)}
+        {#each ORIGIN_CHOICES as [value, label, said] (value)}
           <button type="button" aria-pressed={origin === value} disabled={busy} title={said} onclick={() => set('provenance', value)}>{label}</button>
         {/each}
       </div>
       {#if one?.properties.credit}
-        <span class="key">Credit</span>
-        <span class="value quiet" title="Said in the credits of a plate that draws it">{one.properties.credit}</span>
+        <span class="key" title={HELP.credit}>Credit</span>
+        <span class="value quiet" title={HELP.credit}>{one.properties.credit}</span>
       {/if}
 
       {#if one}
-        <span class="key">Note</span>
-        <textarea aria-label="Feature note" bind:value={form.description} maxlength="4000" rows="2" placeholder="What it shows, what it rests on"
+        <span class="key" title={HELP.note}>Note</span>
+        <textarea aria-label="Feature note" title={HELP.note} bind:value={form.description} maxlength="4000" rows="2" placeholder="What it shows, what it rests on"
           onchange={() => controller.saveForm()}></textarea>
       {/if}
 
       {#if measured}<span class="key">{measured[0]}</span><span class="value">{measured[1]}</span>{/if}
     </div>
+
+    <!-- how it is drawn comes after what it says, folded until asked for -->
+    <button type="button" class="look" aria-expanded={look} title={HELP.look} onclick={showLook}>
+      <Icon name={look ? 'chevronDown' : 'chevronRight'} size={11} /><span>Look</span>
+      {#if !look && lookSet.length}<span class="look-set">{lookSet.join(' · ')}</span>{/if}
+    </button>
+    {#if look}
+      <div class="rows look-rows">
+        {#if only('point')}
+          <span class="key" title={HELP.size}>Size</span>
+          {@render slider('marker_size', 'Marker size', [0.5, 3, 0.25], 1, (value) => `${Math.round(value * 100)}%`, HELP.size)}
+        {:else if kinds.size && !kinds.has('point')}
+          <span class="key" title={HELP.lineWidth}>Width</span>
+          {@render slider('line_width', 'Line width', [0.5, 12, 0.5], their?.stroke ?? 2, (value) => `${value} px`, HELP.lineWidth)}
+          <span class="key" title={HELP.dash}>Dash</span>
+          <div class="segments" role="group" aria-label="Line dash" title={HELP.dash}>
+            {#each DASHES as [value, label] (value)}
+              <button type="button" aria-pressed={(one ? form?.line_dash ?? '' : shared('line_dash')) === value} disabled={busy} onclick={() => set('line_dash', value)}>{label}</button>
+            {/each}
+          </div>
+          {#if only('line')}
+            <span class="key" title={HELP.arrow}>Arrow</span>
+            <div class="segments" role="group" aria-label="Line arrow" title={HELP.arrow}>
+              {#each ARROWS as [value, label] (value)}
+                <button type="button" aria-pressed={(one ? form?.line_arrow ?? '' : shared('line_arrow')) === value} disabled={busy} onclick={() => set('line_arrow', value)}>{label}</button>
+              {/each}
+            </div>
+          {/if}
+          {#if only('area')}
+            <span class="key" title={HELP.fill}>Fill</span>
+            <div class="segments" role="group" aria-label="Area fill" title={HELP.fill}>
+              {#each FILLS as [value, label] (value)}
+                <button type="button" aria-pressed={(one ? form?.area_fill ?? '' : shared('area_fill')) === value} disabled={busy} onclick={() => set('area_fill', value)}>{label}</button>
+              {/each}
+            </div>
+            {#if (one ? form?.area_fill ?? '' : shared('area_fill')) === ''}
+              <span class="key" title={HELP.strength}>Strength</span>
+              {@render slider('fill_opacity', 'Fill strength', [0.05, 0.9, 0.05], their?.fill_opacity ?? 0.18, (value) => `${Math.round(value * 100)}%`, HELP.strength)}
+            {/if}
+          {/if}
+        {/if}
+
+        <span class="key" title={HELP.name}>Name</span>
+        <div class="segments" role="group" aria-label="Name on the map">
+          {#each NAMES as [value, label] (value)}
+            <button type="button" aria-pressed={(one ? form?.label ?? '' : shared('label')) === value} disabled={busy}
+              title={value ? `${label} on the map` : 'As its group says'} onclick={() => set('label', value)}>{label}</button>
+          {/each}
+        </div>
+        {#if (one ? form?.label : shared('label')) === 'on'}
+          <span class="key" title={HELP.nameSize}>Name size</span>
+          {@render slider('label_size', 'Name size', [6, 32, 1], 11, (value) => `${value} px`, HELP.nameSize)}
+        {/if}
+      </div>
+    {/if}
 
   </div>
 
@@ -322,10 +345,6 @@
         {#if one.properties.entity_type === 'place' && one.properties.entity_id && ondeleteplace}
           <button type="button" class="fm-item danger" onclick={() => { menu = false; ondeleteplace(one.properties.entity_id); }}>
             <Icon name="trash" size={14} /><span class="fm-grow">Delete case place</span></button>
-        {/if}
-        {#if tracked && standing}
-          <button type="button" class="fm-item" disabled={busy} onclick={() => { menu = false; controller.markGone(one.properties.key); }}>
-            <Icon name="clock" size={14} /><span class="fm-grow">Gone from {momentLabel(cursor)}</span></button>
         {/if}
         <button type="button" class="fm-item danger" disabled={busy} onclick={() => { menu = false; controller.remove(one.properties.key); }}>
           <Icon name="x" size={14} /><span class="fm-grow">Remove from the layer</span></button>
@@ -350,7 +369,14 @@
   .rows { display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 7px 6px; }
   .slider { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .slider input { flex: 1; min-width: 0; }
-  .unit { color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .unit { flex: none; min-width: 34px; color: var(--text-1); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+  .unit.quiet { color: var(--text-3); }
+  .look { display: flex; align-items: center; gap: 5px; width: 100%; margin: 9px 0 0; padding: 6px 0 0; border-top: 1px solid var(--border);
+    color: var(--text-2); font-size: 11px; font-weight: 600; text-align: left; cursor: pointer; }
+  .look:hover { color: var(--text-1); }
+  .look-set { min-width: 0; overflow: hidden; color: var(--text-3); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+  .look-rows { margin-top: 7px; }
+  .away { margin: 0 0 8px; padding: 4px 7px; border-radius: var(--r-sm); background: var(--bg-1); color: var(--text-2); font-size: 10.5px; line-height: 1.4; }
   .key { color: var(--text-3); font-size: 11px; }
   .value { display: flex; align-items: center; gap: 4px; min-height: 24px; color: var(--text-1); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
   .value.quiet { color: var(--text-3); }
@@ -363,6 +389,7 @@
   .segments button.short { flex: 0 0 22px; }
   .segments button:hover:not(:disabled) { background: var(--bg-3); }
   .segments button[aria-pressed='true'] { background: var(--accent-soft); color: var(--text-1); font-weight: 600; }
+  .segments button:disabled { opacity: .5; cursor: default; }
   .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
   .chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 1px 2px 1px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-1); font-size: 11px; }
   .chip a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); text-decoration: none; }
@@ -372,15 +399,6 @@
   .add-source { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: 1px dashed var(--border); border-radius: 999px; color: var(--text-3); font-size: 11px; cursor: pointer; }
   .add-source:hover { border-color: var(--text-3); color: var(--text-1); }
   .refused { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 10px; }
-  .lifeline { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-  .state { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-1); font-size: 11px; }
-  .state > button:first-child { padding: 1px 7px; color: var(--text-2); cursor: pointer; font-variant-numeric: tabular-nums; }
-  .state > button:first-child:disabled { cursor: default; }
-  .state.current { border-color: var(--accent); background: var(--accent-soft); }
-  .state.current > button:first-child { color: var(--text-1); font-weight: 600; }
-  .state.gone > button:first-child { color: var(--text-3); font-style: italic; }
-  .state .drop { display: grid; place-items: center; width: 16px; height: 16px; margin-right: 2px; border-radius: 50%; color: var(--text-3); cursor: pointer; }
-  .state .drop:hover:not(:disabled) { background: var(--bg-3); color: var(--danger); }
   .follows { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding-bottom: 7px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: 10px; }
   .follow-pictures { display: flex; gap: 6px; }
   .follow-picture { position: relative; flex: 1; min-width: 0; max-width: 50%; height: 72px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: #000; overflow: hidden; cursor: pointer; }

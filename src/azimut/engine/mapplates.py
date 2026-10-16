@@ -22,17 +22,24 @@ shown on that step only (or carried to the steps after it), over what the day
 shows. A video only stands on a step: it names a file of the case and the part
 of it the clip runs, and the step lasts as long as its longest clip.
 
+**A day or a step can frame a map its own way** (`framing`, by the day or the
+step's id, then the map's id). One that does not keeps the framing of the one
+played before it, and the first keeps the map's own view.
+
 **Exports** are written by the browser and filed here in the folder saved for
 views, as the analysis plates are: a PNG, a PDF of the paper size holding the
 page at print resolution, or the page played through its days and steps as a
 GIF or an MP4 (the bundled ffmpeg). In an MP4, each step's clips run in their
-boxes over the page's picture, with their sound when it is asked for.
+boxes over the page's picture, with their sound when it is asked for, and a beat
+can open on its transition: frames the browser drew (a fade, a map moving, the
+annotations appearing), played before the beat holds still.
 """
 
 from __future__ import annotations
 
 import io
 import json
+import re
 import subprocess
 import tempfile
 import warnings
@@ -66,11 +73,13 @@ PAPERS: dict[str, tuple[float, float]] = {
 #: The fonts shipped with the app, so a plate reads the same on every machine.
 FONTS = ("inter", "barlow", "oxanium", "plexmono", "serif", "condensed")
 KINDS = ("map", "inset", "legend", "text", "scale", "north", "image", "label", "arrow", "credits",
-         "shape", "ring", "cone", "zone", "measure", "key", "table", "qr", "timeline", "signature", "brand", "video")
+         "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol")
 #: The kinds that read one map of the plate, named by `of`.
-OF_A_MAP = ("inset", "legend", "scale", "north", "label", "arrow", "credits", "ring", "cone", "zone", "measure")
+OF_A_MAP = ("inset", "legend", "scale", "north", "label", "arrow", "credits", "ring", "cone", "zone", "measure", "line", "symbol")
 #: The kinds that stand on a map's ground, so a template, which keeps no ground, leaves them out.
-ON_THE_GROUND = ("label", "arrow", "ring", "cone", "zone", "measure")
+ON_THE_GROUND = ("label", "arrow", "ring", "cone", "zone", "measure", "line", "symbol")
+#: The kinds that write their words over the ground, bold unless the analyst says otherwise.
+GROUND_WORDS = ("arrow", "ring", "cone", "zone", "measure", "line")
 
 MAX_ELEMENTS = 160
 #: At most this many steps on one day, and this many days holding steps.
@@ -141,12 +150,13 @@ class Theme(Strict):
 
 
 class View(Strict):
-    """Where a map looks: its centre, the engine's own zoom (fractional), its bearing."""
+    """Where a map looks: its centre, the engine's own zoom (fractional), its bearing, and its tilt in 3D."""
 
     lat: FiniteFloat = Field(ge=-85, le=85)
     lon: FiniteFloat = Field(ge=-180, le=180)
     zoom: FiniteFloat = Field(ge=0, le=22)
     bearing: FiniteFloat = Field(default=0, ge=-360, le=360)
+    pitch: FiniteFloat = Field(default=0, ge=0, le=85)
 
 
 class FrameLayer(Strict):
@@ -180,11 +190,16 @@ class Plain(Strict):
 
     colours: dict[Literal["ground", "water", "wood", "urban", "road", "border", "name"], Hex] = Field(default_factory=dict)
     roads: bool = True
+    rails: bool = True
     buildings: bool = True
     names: bool = True
     lang: Literal["latin", "local", "en", "fr", "ar", "ru", "uk"] = "latin"
     #: How many place names it writes: fewer, as usual, or more.
     density: Literal["low", "normal", "high"] = "normal"
+    #: On a topographic ground: the heights tinted, the contour lines, the summits named.
+    tints: bool = True
+    contours: bool = True
+    peaks: bool = True
 
 
 class Grid(Strict):
@@ -240,12 +255,28 @@ class Step(Strict):
     id: Ident
     name: Annotated[str, Field(max_length=80)] = ""
     duration: FiniteFloat = Field(default=3, ge=0.5, le=120)
+    #: How the video comes to it: as the plate's transitions say, or cut straight in.
+    transition: Literal["", "none"] = ""
+
+
+class Transitions(Strict):
+    """How a played plate's video goes from one beat to the next, when they are on."""
+
+    on: bool = False
+    seconds: FiniteFloat = Field(default=0.8, ge=0.2, le=3)
+    #: The page fades into the next one.
+    fade: bool = True
+    #: A map framed otherwise on the next beat moves there, blurred as it goes when `blur` says so.
+    move: bool = True
+    blur: bool = True
+    #: What is new on the next beat appears: fading in, drawn along its lines, or at once.
+    appear: Literal["none", "fade", "draw"] = "fade"
 
 
 class Element(Strict):
     id: Ident
     kind: Literal["map", "inset", "legend", "text", "scale", "north", "image", "label", "arrow", "credits",
-                  "shape", "ring", "cone", "zone", "measure", "key", "table", "qr", "timeline", "signature", "brand", "video"]
+                  "shape", "ring", "cone", "zone", "measure", "line", "key", "table", "qr", "timeline", "signature", "brand", "video", "symbol"]
     #: Left, top, width and height on the page, in millimetres.
     box: tuple[Mm, Mm, Size, Size]
     #: The map an element reads, by its id. A map with one is a detail of that map.
@@ -275,10 +306,15 @@ class Element(Strict):
     tone: Tone = Field(default_factory=Tone)
     plain: Plain = Field(default_factory=Plain)
     relief: FiniteFloat = Field(default=1, ge=0, le=2)
+    #: A map drawn in 3D stands on the ground's heights, this many times as tall; 0 is flat.
+    terrain: FiniteFloat = Field(default=0, ge=0, le=3)
+    #: A 3D map traces the ridges' crests over its ground.
+    ridges: bool = False
     # writing
     text: str = Field(default="", max_length=MAX_TEXT)
     size: FiniteFloat = Field(default=10, ge=4, le=200)
-    weight: Literal[400, 600, 700] = 400
+    #: None: the weight the kind writes in (regular, a label semi-bold, words on the ground bold).
+    weight: Literal[400, 600, 700] | None = None
     align: Literal["left", "center", "right"] = "left"
     valign: Literal["top", "middle", "bottom"] = "top"
     font: Font | None = None
@@ -292,7 +328,12 @@ class Element(Strict):
     opacity: FiniteFloat = Field(default=1, ge=0.05, le=1)
     colour: Hex | None = None
     fill: Hex | None = None
-    border: bool = False
+    #: A frame round the element; None draws it as its kind does (a map framed, a text not).
+    border: bool | None = None
+    #: The words' own colour, where `colour` paints the element's lines or its frame.
+    ink: Hex | None = None
+    #: What stands behind the words: as the kind does it, nothing, a halo, or a box of `fill`.
+    back: Literal["", "none", "halo", "box"] = ""
     # a picture: a file of the case by its path, "@signature", or kept inside the plate
     src: Annotated[str, Field(max_length=500)] = ""
     data: Picture | None = None
@@ -305,19 +346,23 @@ class Element(Strict):
     # on the ground: where a label points, where an arrow goes from and to
     at: Point | None = None
     to: Point | None = None
-    #: A zone's corners on the ground.
+    #: A zone's corners, or a line's points, on the ground.
     points: list[Point] = Field(default_factory=list, max_length=400)
     style: Literal["plain", "bubble", "box", "number"] = "plain"
     leader: Literal["straight", "elbow", "curve", "none"] = "straight"
     end: Literal["dot", "arrow", "none"] = "dot"
     ref: FeatureRef | None = None
+    #: A symbol: one of the markers the case's layers draw, by its id, and the state it shows.
+    symbol: Annotated[str, Field(max_length=40, pattern=r"^[a-z][a-z0-9-]*$")] = "pin"
+    status: Literal["", "damaged", "destroyed"] = ""
     width: FiniteFloat = Field(default=1.0, ge=0.2, le=12)
     # an arrow
     bend: FiniteFloat = Field(default=0, ge=-1, le=1)
     heads: Literal["end", "both", "none"] = "end"
     line: Literal["solid", "dashed", "dotted"] = "solid"
     head: FiniteFloat = Field(default=1, ge=0.4, le=4)
-    shape: Literal["line", "offensive", "rect", "ellipse"] = "line"
+    #: An arrow's kind, a shape's, or a line drawn straight from point to point or curved through them.
+    shape: Literal["line", "offensive", "rect", "ellipse", "curve"] = "line"
     # a ring, a cone, a zone
     radii: list[Annotated[float, Field(gt=0, le=20_000)]] = Field(default_factory=list, max_length=8)
     bearing: FiniteFloat = Field(default=0, ge=-360, le=360)
@@ -357,12 +402,14 @@ class Element(Strict):
     def _whole(self) -> Element:
         if self.kind in OF_A_MAP and not self.of:
             raise ValueError(f"a {self.kind} reads one of the plate's maps")
-        if self.kind in ("label", "arrow", "ring", "cone", "measure") and self.at is None:
+        if self.kind in ("label", "arrow", "ring", "cone", "measure", "symbol") and self.at is None:
             raise ValueError(f"a {self.kind} stands on the ground")
         if self.kind in ("arrow", "measure") and self.to is None:
             raise ValueError(f"a {self.kind} goes somewhere")
         if self.kind == "zone" and len(self.points) < 3:
             raise ValueError("a zone has three corners at least")
+        if self.kind == "line" and len(self.points) < 2:
+            raise ValueError("a line has two points at least")
         if self.kind == "video" and not self.step:
             raise ValueError("a video stands on a step")
         if self.clip is not None:
@@ -375,12 +422,24 @@ class Element(Strict):
         return self
 
 
+DAY = re.compile(r"now|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?")
+#: A day (a moment, or "now") or a step, by its id: what a framing is kept under.
+BeatKey = Annotated[str, Field(pattern=r"^(now|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?|[A-Za-z0-9_-]{1,40})$")]
+#: At most this many days and steps frame their maps their own way, each at most this many maps.
+MAX_FRAMED_BEATS = 400
+MAX_FRAMED_MAPS = 20
+
+
 class PlateSpec(Strict):
     page: Page = Field(default_factory=Page)
     theme: Theme = Field(default_factory=Theme)
     time: Time = Field(default_factory=Time)
     #: The steps each day holds, in the order they are played.
     steps: dict[Day, Annotated[list[Step], Field(max_length=MAX_STEPS)]] = Field(default_factory=dict, max_length=MAX_STEP_DAYS)
+    #: The days and steps that frame a map their own way: their key, then the map's id.
+    framing: dict[BeatKey, Annotated[dict[Ident, View], Field(max_length=MAX_FRAMED_MAPS)]] = Field(
+        default_factory=dict, max_length=MAX_FRAMED_BEATS)
+    transitions: Transitions = Field(default_factory=Transitions)
     elements: list[Element] = Field(default_factory=list, max_length=MAX_ELEMENTS)
 
     @model_validator(mode="after")
@@ -400,6 +459,11 @@ class PlateSpec(Strict):
                 raise ValueError(f"the {element.kind} reads a map the plate does not hold")
             if element.kind == "map" and element.of == element.id:
                 raise ValueError("a map is not a detail of itself")
+        for key, framed in self.framing.items():
+            if not (DAY.fullmatch(key) or key in steps):
+                raise ValueError("a framing belongs to a day or to a step the plate holds")
+            if any(map_id not in maps for map_id in framed):
+                raise ValueError("a framing names a map the plate does not hold")
         return self
 
 
@@ -417,6 +481,8 @@ class TemplateData(PlateSpec):
                 raise ValueError("a template keeps nothing that stands on a case's ground")
         if self.steps:
             raise ValueError("a template keeps no steps")
+        if self.framing:
+            raise ValueError("a template keeps no framing of a day")
         return self
 
 
@@ -430,11 +496,17 @@ def paper_mm(page: dict[str, Any]) -> tuple[float, float]:
 
 
 def as_periods(spec: dict[str, Any]) -> dict[str, Any]:
-    """A plate whose annotations listed their days, read as the one period each list spans.
+    """A plate as this version reads it, whichever version saved it.
 
     Plates saved before an annotation took a first and a last day kept a list of days
     and a day from which on; the period runs from the earliest to the latest of them.
+    Plates saved before the words on the ground could be set wrote every element's
+    weight as regular, which those words never were: the weight is let go, so they
+    stay bold.
     """
+    for element in spec.get("elements", []):
+        if isinstance(element, dict) and element.get("kind") in GROUND_WORDS and "back" not in element:
+            element.pop("weight", None)
     for element in spec.get("elements", []):
         if not isinstance(element, dict) or "days" not in element:
             continue
@@ -465,7 +537,8 @@ def template_of(spec: dict[str, Any]) -> dict[str, Any]:
         if kept.get("src") and kept["src"] != SIGNATURE:
             kept.pop("src")
         elements.append(kept)
-    return {"page": spec.get("page", {}), "theme": spec.get("theme", {}), "time": {}, "elements": elements}
+    return {"page": spec.get("page", {}), "theme": spec.get("theme", {}), "time": {}, "elements": elements,
+            **({"transitions": spec["transitions"]} if spec.get("transitions") else {})}
 
 
 # -- exports -------------------------------------------------------------------------
@@ -478,8 +551,12 @@ MAX_FRAMES = 120
 MAX_FRAME_BYTES = 8_000_000
 MAX_FRAME_PIXELS = 4096 * 4096
 MAX_VIDEO_EDGE = 3840
+#: A transition's frames, drawn by the browser, play at this rate: at most this many of them, each this large.
+TWEEN_FPS = 30
+MAX_TWEENS = 480
+MAX_TWEEN_BYTES = 2_000_000
 #: The body of the largest export, enforced before it is read (`server.BulkBodyLimit`).
-MAX_EXPORT_BODY_BYTES = max(MAX_PAGE_BYTES, MAX_FRAMES * MAX_FRAME_BYTES) + 2_000_000
+MAX_EXPORT_BODY_BYTES = max(MAX_PAGE_BYTES, MAX_FRAMES * MAX_FRAME_BYTES) + MAX_TWEENS * MAX_TWEEN_BYTES + 2_000_000
 #: How long ffmpeg may take over one video, or over one beat of a sequence.
 VIDEO_TIMEOUT = 300
 #: A played plate with steps runs at most half an hour, its beats at most four clips each.
@@ -604,9 +681,11 @@ class Beat(Strict):
     clips: list[ClipOut] = Field(default_factory=list, max_length=MAX_CLIPS_PER_BEAT)
     #: Which of the see-through pictures lies over the clips, by its place in the upload.
     over: int | None = Field(default=None, ge=0)
+    #: The transition the beat opens on: the first of its frames in the upload, and how many, played at `TWEEN_FPS`.
+    tween: tuple[Annotated[int, Field(ge=0, lt=MAX_TWEENS)], Annotated[int, Field(ge=1, le=MAX_TWEENS)]] | None = None
 
 
-def read_beats(raw: str, frames: int, overs: int) -> list[Beat]:
+def read_beats(raw: str, frames: int, overs: int, tweens: int = 0) -> list[Beat]:
     """The beats the browser sent, one per frame, checked whole; `ExportError` when they are not."""
     try:
         listed = json.loads(raw)
@@ -619,7 +698,9 @@ def read_beats(raw: str, frames: int, overs: int) -> list[Beat]:
         raise ExportError("each beat of the sequence has its picture")
     if any(beat.over is not None and beat.over >= overs for beat in beats):
         raise ExportError("a beat names a picture that did not come")
-    if sum(beat.seconds for beat in beats) > MAX_SEQUENCE_SECONDS:
+    if any(beat.tween is not None and beat.tween[0] + beat.tween[1] > tweens for beat in beats):
+        raise ExportError("a beat names a transition that did not come")
+    if sum(beat.seconds + (beat.tween[1] / TWEEN_FPS if beat.tween else 0) for beat in beats) > MAX_SEQUENCE_SECONDS:
         raise ExportError("a sequence runs half an hour at most")
     return beats
 
@@ -679,11 +760,28 @@ def beat_command(exe: str, still: Path, seconds: float, clips: list[tuple[ClipOu
     return command
 
 
-def sequence_mp4(frames: list[Image.Image], beats: list[Beat], overs: list[Image.Image], files: dict[str, Path]) -> bytes:
+def tween_command(exe: str, pattern: Path, start: int, count: int, target: Path) -> list[str]:
+    """The ffmpeg line making a transition: `count` of its frames (`pattern`, from `start`) at `TWEEN_FPS`, over silence.
+
+    Encoded as a beat is, so the two join without a new encode.
+    """
+    held = f"{count / TWEEN_FPS:.3f}"
+    # the frames are counted on the way in, at their own rate: out at the video's, there are more of them
+    return [exe, "-hide_banner", "-loglevel", "error", "-y",
+            "-framerate", str(TWEEN_FPS), "-start_number", str(start), "-t", held, "-i", str(pattern),
+            "-f", "lavfi", "-t", held, "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-filter_complex", "[0:v]setsar=1,format=yuv420p[v]", "-map", "[v]", "-map", "1:a",
+            "-t", held, "-r", str(VIDEO_FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", str(target)]
+
+
+def sequence_mp4(frames: list[Image.Image], beats: list[Beat], overs: list[Image.Image], files: dict[str, Path],
+                 tweens: list[Image.Image] | None = None) -> bytes:
     """A video of a plate's days and steps: each beat its frame held, its clips running in their boxes.
 
     `files` are the case's videos the clips name, already found inside the case. Each beat is
-    made on its own, then the beats are joined as they are.
+    made on its own, after the transition it opens on when it has one (`tweens`), then the
+    beats are joined as they are.
     """
     exe = ffmpeg.ffmpeg_path()
     if not exe:
@@ -696,8 +794,16 @@ def sequence_mp4(frames: list[Image.Image], beats: list[Beat], overs: list[Image
         for index, layer in enumerate(overs):
             shown = layer if layer.size == size else layer.resize(size, Image.Resampling.LANCZOS)
             shown.crop((0, 0, width, height)).save(root / f"o{index:04d}.png")
+        for index, picture in enumerate(tweens or []):
+            shown = picture if picture.size == size else picture.resize(size, Image.Resampling.LANCZOS)
+            shown.crop((0, 0, width, height)).save(root / f"t{index:04d}.png")
         listing = []
         for index, (frame, beat) in enumerate(zip(frames, beats, strict=True)):
+            if beat.tween is not None and tweens:
+                lead = root / f"w{index:04d}.mp4"
+                _run(tween_command(exe, root / "t%04d.png", beat.tween[0], beat.tween[1], lead),
+                     "the video took too long to make", "ffmpeg could not make the video")
+                listing.append(f"file '{lead.name}'")
             still = root / f"f{index:04d}.png"
             (frame if frame.size == size else frame.resize(size, Image.Resampling.LANCZOS)).crop((0, 0, width, height)).save(still)
             clips = []

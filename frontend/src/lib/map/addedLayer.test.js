@@ -186,6 +186,54 @@ describe('personal marker symbols', () => {
     expect(fill()).not.toContain('"k1"');
     expect(fill()).toContain('"Old"');
   });
+
+  it('lets held features back with the data that draws them where they landed, in the one filter', async () => {
+    const engine = stubEngine();
+    const layer = createAddedLayer(engine, { editable: true });
+    await layer.set(COLLECTION, { hidden: ['Old'] });
+    const fill = () => JSON.stringify([...engine.map.layers.values()].find((entry) => entry.id.endsWith('-fill')).filter);
+    layer.hide(['k1']);
+    const filters = [];
+    const setFilter = engine.map.setFilter;
+    engine.map.setFilter = (id, filter) => { if (id.endsWith('-fill')) filters.push(JSON.stringify(filter)); setFilter(id, filter); };
+    await layer.set(COLLECTION, { hidden: ['Old'], held: [] });
+    // one filter, written after the data: never one that shows them where they were
+    expect(filters).toHaveLength(1);
+    expect(fill()).not.toContain('"k1"');
+    expect(fill()).toContain('"Old"');
+    // and a set without it keeps what is held
+    layer.hide(['k2']);
+    await layer.set(COLLECTION, { hidden: ['Old'] });
+    expect(fill()).toContain('"k2"');
+  });
+
+  it('says once the map has drawn what it was handed, and stops waiting after a while', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = stubEngine();
+      let loaded = false;
+      Object.assign(engine.map, { isSourceLoaded: () => loaded, triggerRepaint: vi.fn() });
+      const layer = createAddedLayer(engine, { editable: true });
+      await layer.set(COLLECTION);
+      const render = () => engine.map.handlers.filter(([type]) => type === 'render').forEach(([, run]) => run());
+      let drawn = false;
+      layer.drawn().then(() => { drawn = true; });
+      expect(engine.map.triggerRepaint).toHaveBeenCalled();
+      render(); await Promise.resolve();
+      expect(drawn).toBe(false);
+      loaded = true;
+      render(); await Promise.resolve();
+      expect(drawn).toBe(true);
+      expect(engine.map.handlers.some(([type]) => type === 'render')).toBe(false);
+      loaded = false;
+      let late = false;
+      layer.drawn(400).then(() => { late = true; });
+      await vi.advanceTimersByTimeAsync(400);
+      expect(late).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /**

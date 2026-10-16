@@ -87,6 +87,29 @@ describe('what a frame shows, and shapes on the ground', () => {
     expect(inFrame({ type: 'Polygon', coordinates: [[[19, 9], [21, 9], [21, 11], [19, 11], [19, 9]]] }, view, frame)).toBe(true);
   });
 
+  it('outlines the ground a leaning map looks at, from its foot to short of the horizon', () => {
+    // flat, the frame's four corners
+    expect(corners(view, frame)).toEqual([[0, 0], [400, 0], [400, 300], [0, 300]].map((point) => unproject(view, frame, point)));
+    // leaning north, the near edge stands south of the middle and the far one north of it, wider
+    const [farLeft, farRight, nearRight, nearLeft] = corners({ ...view, pitch: 60 }, frame);
+    expect(nearLeft[1]).toBeLessThan(view.lat);
+    expect(farLeft[1]).toBeGreaterThan(view.lat);
+    expect(farRight[0] - farLeft[0]).toBeGreaterThan(nearRight[0] - nearLeft[0]);
+    // looking at the horizon, the outline stops three times as far beyond the middle as its foot falls short
+    const [far, , , near] = corners({ ...view, pitch: 85 }, frame);
+    expect((far[1] - view.lat) / (view.lat - near[1])).toBeCloseTo(3, 1);
+    // turned east, it looks east
+    const [east] = corners({ ...view, pitch: 60, bearing: 90 }, frame);
+    expect(east[0]).toBeGreaterThan(view.lon);
+  });
+
+  it('asks a map in 3D where its camera puts the ground, which the flat sum would miss', () => {
+    // leaning toward the horizon, the camera shows ground far beyond the flat frame
+    const place = ([lon]) => [frame.width / 2, frame.height / 2 - (lon - 20) * 20];
+    expect(inFrame({ type: 'Point', coordinates: [25, 10] }, view, frame, 6, place)).toBe(true);
+    expect(inFrame({ type: 'Point', coordinates: [40, 10] }, view, frame, 6, place)).toBe(false);
+  });
+
   it('travels a distance on a bearing and measures it back', () => {
     const there = travel([20, 10], 90, 5000);
     expect(distance([20, 10], there)).toBeCloseTo(5000, -1);

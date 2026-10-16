@@ -12,9 +12,12 @@
    * (`lib/map/editBarPlace.js`). Double-clicking the grip puts it back.
    */
   import Icon from '../../components/Icon.svelte';
+  import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import MonthGrid from '../../components/MonthGrid.svelte';
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
+  import { isoDay } from '../../lib/map/layerDates.js';
   import { mergeable, splittable } from '../../lib/map/layerHit.js';
-  import { DEFAULT_PLACE, barBox, loadPlace, loadTips, savePlace, saveTips, snapPlace, upright } from '../../lib/map/editBarPlace.js';
+  import { DEFAULT_PLACE, barBox, loadPlace, loadTips, rowRoom, savePlace, saveTips, snapPlace, upright } from '../../lib/map/editBarPlace.js';
   import { momentLabel } from '../../lib/map/layerHistory.js';
 
   let { controller, vertex = null, ondone } = $props();
@@ -32,12 +35,29 @@
   /** A marker is moved by dragging it; a line or an area is reshaped corner by corner. */
   const reshapable = $derived(chosen.length === 1 && !chosen[0].properties.entity_id
     && ['LineString', 'Polygon', 'MultiLineString', 'MultiPolygon'].includes(chosen[0].geometry.type));
+  /** While edits carry no date, the day a picked line or area moved on holds its shape. */
+  const heldAt = $derived(reshapable ? controller.dateHolds?.(chosen[0].properties.key) ?? '' : '');
+  /** On a layer followed over time, a picked shape not on the map on the day shown keeps its days until they are changed. */
+  const away = $derived(reshapable && chosen[0].properties.$absent ? controller.cursor : null);
   const onePoint = $derived(chosen.length === 1 && chosen[0].geometry.type === 'Point');
-  /** A tracked layer read at a moment: what an edit does then, said and switched on the bar. */
+  /**
+   * A tracked layer: what the next edit is dated to, said and switched on the bar.
+   * From a day, what is drawn appears then and what is changed changes from then;
+   * with no date, what is drawn shows on every day and a change corrects.
+   */
   const tracked = $derived(!!controller.editor?.track?.on);
   const cursor = $derived(controller.cursor);
+  const dated = $derived(cursor !== null && controller.timeMode === 'new');
   /** `12 Oct`, or `12 Oct 14:00`: the year is in the panel. */
   const short = $derived(cursor ? momentLabel(cursor).replace(/ \d{4}/, '').replace(' · ', ' ') : '');
+  /** The calendar a day is picked from, under the bar's day button. */
+  let picking = $state(false);
+  let dayButton = $state(null);
+  function pickDay() {
+    // a press on the day while edits carry no date dates them again; on the day itself it opens the month
+    if (cursor !== null && !dated) controller.timeMode = 'new';
+    else picking = !picking;
+  }
   const hint = $derived(controller.lassoing ? 'Draw round what to select. Shift adds to the selection.'
     : controller.placing ? 'Click the map to add markers in the style shown. Esc to stop.'
       : sketch?.type === 'Selection' ? 'Drag the handle to move the selection. Enter to save, Esc to cancel.'
@@ -66,7 +86,7 @@
       rows = 0;
       const items = [...barEl.children];
       const long = items.reduce((sum, node) => sum + node.offsetWidth + 2, 12);
-      const room = frame.width - 24;
+      const room = rowRoom(frame, place, obstacles, Math.max(0, ...items.map((node) => node.offsetHeight)) + 10);
       wrap = long > room ? Math.ceil(Math.min(room, long / 2 + 40)) : 0;
       return;
     }
@@ -98,6 +118,9 @@
   /** The tips go where there is room: beside an upright bar, under one in the top half. */
   const side = $derived(place.edge === 'left' ? 'right' : place.edge === 'right' ? 'left'
     : box && box.top > frame.height / 2 ? 'above' : 'below');
+  /** How wide the tips can run on the side they show, so a narrow map wraps them rather than cuts them. */
+  const hintRoom = $derived(!box || !frame.width ? 420 : side === 'right' ? frame.width - box.left - width - 18
+    : side === 'left' ? box.left - 18 : frame.width - 24);
 
   async function split() {
     if (cut !== null) {
@@ -107,7 +130,7 @@
     } else if (chosen.length === 1) await controller.split(chosen[0].properties.key);
   }
 
-  /** What the bar steps aside from: the map's zoom buttons and the layer's panel, which both ask for it. */
+  /** What the bar steps aside from: the map's zoom buttons, its place search and the layer's panel, which all ask for it. */
   function measure() {
     if (!frameEl) return;
     frame = { width: frameEl.clientWidth, height: frameEl.clientHeight };
@@ -177,16 +200,18 @@
     {/if}
     {#if tracked}
       <span class="rule" aria-hidden="true"></span>
-      {#if cursor === null}
-        <span class="when" title="Edits correct what each feature is now. Move the layer's day to date a change.">Now</span>
-      {:else}
-        <span class="when-mode" role="group" aria-label={`Edits on ${momentLabel(cursor)}`}>
-          <button type="button" class="mode" aria-pressed={controller.timeMode === 'new'} title={`Start a state on ${momentLabel(cursor)}`}
-            onclick={() => (controller.timeMode = 'new')}><Icon name="clock" size={12} />{#if !vertical}<span>{short}</span>{/if}</button>
-          <button type="button" class="mode" aria-pressed={controller.timeMode === 'fix'} title="Correct the state in force then"
-            onclick={() => (controller.timeMode = 'fix')}>{vertical ? 'F' : 'Fix'}</button>
-        </span>
-      {/if}
+      <!-- the mode on says what it does in words; the other is its icon, named by its tip -->
+      <span class="when-mode" role="group" aria-label="What your edits are dated to">
+        <button type="button" class="mode" aria-pressed={dated} aria-expanded={picking} bind:this={dayButton}
+          aria-label={cursor === null ? 'Date your edits from a day' : `From ${momentLabel(cursor)}`}
+          title={cursor === null ? 'Pick a day: what you draw appears then, what you change changes from then'
+            : dated ? `What you draw appears on ${momentLabel(cursor)}, what you change changes from then. Press for another day`
+              : `Date your edits from ${momentLabel(cursor)}`}
+          onclick={pickDay}><Icon name="calendar" size={12} />{#if !vertical && dated}<span>From {short}</span>{/if}</button>
+        <button type="button" class="mode" aria-pressed={!dated} aria-label="No date"
+          title="What you draw or change counts on every day; what moved on a day moves from a day"
+          onclick={() => { picking = false; controller.timeMode = 'fix'; }}><Icon name="always" size={13} />{#if !vertical && !dated}<span>No date</span>{/if}</button>
+      </span>
     {/if}
     <span class="rule" aria-hidden="true"></span>
     <button type="button" aria-label="Select" title="Select and move" aria-pressed={selecting} disabled={busy}
@@ -233,7 +258,9 @@
     {#if selection.length || cut !== null}
       <span class="rule" aria-hidden="true"></span>
       {#if reshapable && !sketch}
-        <button type="button" aria-label="Reshape" title="Move its corners (or double-click it on the map)" disabled={busy}
+        <button type="button" aria-label="Reshape" disabled={busy || !!heldAt || !!away}
+          title={away ? `Not on the map on ${momentLabel(away)}: change its days first` : heldAt ? `Moved on ${momentLabel(heldAt)}: pick a day to reshape it`
+            : 'Move its corners (or double-click it on the map)'}
           onclick={() => controller.editGeometry()}><Icon name="edit" size={15} /></button>
       {/if}
       <button type="button" aria-label="Merge" title="Make the selected lines, or areas, one feature"
@@ -256,8 +283,18 @@
       onmousedown={(event) => event.preventDefault()} onclick={ondone}>
       <Icon name="check" size={13} />{#if !vertical}<span>Done</span>{/if}</button>
   </div>
-  {#if (tips || busy || saving) && !styling}<p class={`hint ${side}`} role="status">{busy ? 'Opening…' : saving && !tips ? 'Saving…' : hint}</p>{/if}
+  {#if (tips || busy || saving) && !styling}<p class={`hint ${side}`} role="status" style:--hint-room={`${Math.max(160, Math.round(hintRoom))}px`}>{busy ? 'Opening…' : saving && !tips ? 'Saving…' : hint}</p>{/if}
 </div>
+
+{#if picking && tracked}
+  <FloatingMenu anchor={dayButton} width={248} label="Date your edits from" onclose={() => (picking = false)}>
+    <p class="fm-head">Date your edits from</p>
+    <!-- a change is what was seen, so no day after today -->
+    <MonthGrid value={cursor ? cursor.slice(0, 10) : ''} max={isoDay(Math.floor(Date.now() / 86_400_000))} label="Day your edits start from"
+      onpick={(iso) => { picking = false; if (iso) controller.changeOn(iso); }} />
+    <p class="fm-note">The layer shows that day too.</p>
+  </FloatingMenu>
+{/if}
 
 <style>
   /* Centred at the top until the map is measured, then wherever it was put. */
@@ -277,10 +314,11 @@
   .layer { display: flex; align-items: center; gap: 5px; flex: none; padding: 0 6px 0 2px; color: var(--text-2); font-size: var(--fs-xs); }
   .title { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .layer :global(svg) { flex: none; color: var(--text-3); }
-  .when { flex: none; padding: 0 6px; color: var(--text-3); font-size: var(--fs-xs); }
   .when-mode { display: flex; flex: none; gap: 1px; padding: 1px; border: 1px solid var(--border); border-radius: var(--r-sm); }
   .vertical .when-mode { flex-direction: column; }
-  .mode { display: flex; gap: 4px; width: auto; min-width: 26px; height: 26px; padding: 0 7px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+  .mode { display: flex; gap: 5px; width: auto; min-width: 26px; height: 26px; padding: 0 8px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+    transition: background-color .12s, color .12s; }
+  .vertical .mode { padding: 0; justify-content: center; }
   .rule { width: 1px; height: 20px; margin: 0 3px; background: var(--border); flex: none; }
   .vertical .rule { width: 20px; height: 1px; margin: 3px 0; }
   button { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
@@ -293,7 +331,9 @@
   .done { display: flex; gap: 5px; width: auto; min-width: 30px; padding: 0 10px; background: var(--accent); color: var(--accent-text); font-size: var(--fs-xs); font-weight: 600; }
   .vertical .save, .vertical .done { padding: 0; justify-content: center; }
   .done:hover:not(:disabled) { background: var(--accent-hover); color: var(--accent-text); }
-  .hint { position: absolute; margin: 0; padding: 3px 9px; border-radius: 999px; background: rgba(0, 0, 0, .62); color: #fff; font-size: 11px; pointer-events: none; white-space: nowrap; }
+  /* one line where the map has room for it, wrapped on a narrow one rather than cut by its edge */
+  .hint { position: absolute; width: max-content; max-width: min(420px, var(--hint-room, 420px)); margin: 0; padding: 3px 9px; border-radius: 11px; background: rgba(0, 0, 0, .62);
+    color: #fff; font-size: 11px; line-height: 1.45; pointer-events: none; }
   .hint.below { top: calc(100% + 5px); left: 50%; transform: translateX(-50%); }
   .hint.above { bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%); }
   .hint.right { top: 4px; left: calc(100% + 6px); }

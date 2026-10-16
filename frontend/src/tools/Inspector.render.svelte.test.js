@@ -154,7 +154,7 @@ describe('leaving a file', () => {
     button('Duplicate').click();
     flushSync();
 
-    target.querySelector('button[aria-label="Close file"]').click();
+    button('Files').click();
     await settle(10);
 
     expect(put).toHaveBeenCalledTimes(1);

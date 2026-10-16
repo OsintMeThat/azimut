@@ -2599,7 +2599,7 @@
           <!-- Stacked in the corner as Detect's column is: where to go, then how
                the shared camera stands. -->
           <div class="view-col">
-            <div class="search-chip cmp-glass">
+            <div class="search-chip cmp-glass" data-bar-obstacle>
             <PlaceSearch
               bind:value={coordsText}
               savedRows={[]}

@@ -7,6 +7,8 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from azimut.engine import layerediting
+
 NS = {"k": "http://www.opengis.net/kml/2.2"}
 LINE = [[30.0, 50.0], [30.1, 50.0]]
 MOVED = [[30.0, 50.1], [30.1, 50.1]]
@@ -95,13 +97,29 @@ def test_an_undated_line_moved_on_a_day_was_there_always_before_it(client, owner
     assert "date" not in feature(client, owner, row, key)["properties"]
 
 
-def test_an_edit_with_no_moment_corrects_the_latest_state(client, owner):
+def test_an_edit_with_no_date_is_refused_on_a_feature_moved_by_date(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03", name="Front")
+    edit(client, owner, row, key, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    before = feature(client, owner, row, key)
+    answer = edit(client, owner, row, key, geometry={"type": "LineString", "coordinates": FURTHER})
+    assert answer.status_code == 422
+    assert answer.json()["detail"] == "“Front” moves on 12 Oct 2026: pick a day on the bar to move it"
+    assert feature(client, owner, row, key) == before
+
+
+def test_an_edit_with_no_date_moves_a_feature_on_every_day_when_only_its_status_changed(client, owner):
     row = create(client, owner)
     key = add_line(client, owner, row, date="2026-10-03")
-    edit(client, owner, row, key, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
-    edit(client, owner, row, key, geometry={"type": "LineString", "coordinates": FURTHER})
-    states = feature(client, owner, row, key)["properties"]["states"]
-    assert [state["geometry"]["coordinates"] for state in states] == [LINE, FURTHER]
+    edit(client, owner, row, key, at="2026-10-12", status="damaged")
+    edit(client, owner, row, key, end="2026-10-20")
+    moved = edit(client, owner, row, key, geometry={"type": "LineString", "coordinates": FURTHER}).json()["marker"]
+    states = moved["properties"]["states"]
+    assert [state.get("geometry", {}).get("coordinates") for state in states] == [FURTHER, FURTHER, None]
+    assert moved["geometry"]["coordinates"] == FURTHER
+    # its status changed on a date, so with no date it is not set
+    refused = edit(client, owner, row, key, status="destroyed")
+    assert refused.status_code == 422 and "changes status on 12 Oct 2026" in refused.json()["detail"]
 
 
 def test_a_state_written_twice_on_one_moment_is_rewritten_not_doubled(client, owner):
@@ -139,7 +157,7 @@ def test_a_status_on_a_day_keeps_the_shape_and_mirrors_the_latest(client, owner)
 def test_gone_from_a_day_then_taken_back(client, owner):
     row = create(client, owner)
     key = add_line(client, owner, row, date="2026-10-03")
-    gone = edit(client, owner, row, key, at="2026-10-20", gone=True).json()["marker"]["properties"]
+    gone = edit(client, owner, row, key, end="2026-10-20").json()["marker"]["properties"]
     assert gone["states"][-1] == {"at": "2026-10-20", "gone": True}
     assert gone["date_end"] == "2026-10-20"
     back = edit(client, owner, row, key, at="2026-10-20", drop_state=True).json()["marker"]["properties"]
@@ -147,9 +165,78 @@ def test_gone_from_a_day_then_taken_back(client, owner):
     assert "states" not in back and back["date"] == "2026-10-03" and "date_end" not in back
 
 
+def test_an_end_moved_replaces_the_old_one_and_still_there_takes_it_away(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03")
+    edit(client, owner, row, key, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    edit(client, owner, row, key, end="2026-10-20")
+    moved = edit(client, owner, row, key, end="2026-10-25").json()["marker"]["properties"]
+    assert [state["at"] for state in moved["states"]] == ["2026-10-03", "2026-10-12", "2026-10-25"]
+    assert moved["date_end"] == "2026-10-25"
+    kept = edit(client, owner, row, key, end="").json()["marker"]["properties"]
+    assert [state["at"] for state in kept["states"]] == ["2026-10-03", "2026-10-12"]
+    assert "date_end" not in kept
+
+
+def test_a_plain_last_day_is_taken_away_by_still_there():
+    # a last day brought in by a proof or a file is a plain bound, not a state
+    plain = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": LINE},
+             "properties": {"date": "2026-10-03", "date_end": "2026-10-09"}}
+    layerediting.set_end(plain, "")
+    assert plain["properties"] == {"date": "2026-10-03"}
+
+
+@pytest.mark.parametrize(("start", "said"), [("2026-10-08", {"date": "2026-10-08"}), ("", {})])
+def test_a_plain_feature_starts_on_a_day_or_always(client, owner, start, said):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03")
+    properties = edit(client, owner, row, key, start=start).json()["marker"]["properties"]
+    assert "states" not in properties
+    assert {field: properties[field] for field in ("date",) if field in properties} == said
+
+
+def test_a_start_moves_the_first_state_and_stays_before_the_next(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03")
+    edit(client, owner, row, key, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    always = edit(client, owner, row, key, start="").json()["marker"]["properties"]
+    assert [state["at"] for state in always["states"]] == ["", "2026-10-12"] and "date" not in always
+    later = edit(client, owner, row, key, start="2026-10-10").json()["marker"]["properties"]
+    assert [state["at"] for state in later["states"]] == ["2026-10-10", "2026-10-12"]
+    refused = edit(client, owner, row, key, start="2026-10-12")
+    assert refused.status_code == 422 and refused.json()["detail"] == "start it before 12 Oct 2026"
+
+
+def test_an_end_comes_after_the_last_change(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03")
+    edit(client, owner, row, key, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    refused = edit(client, owner, row, key, end="2026-10-12")
+    assert refused.status_code == 422 and refused.json()["detail"] == "end it after 12 Oct 2026"
+
+
+def test_a_start_at_a_time_gives_a_plain_feature_a_history_that_keeps_its_last_day():
+    plain = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": LINE},
+             "properties": {"date": "2026-10-03", "date_end": "2026-10-09"}}
+    layerediting.set_start(plain, "2026-10-04T08:00")
+    states = plain["properties"]["states"]
+    # the last day it showed becomes gone the day after, so it still leaves on time
+    assert [(state["at"], bool(state.get("gone"))) for state in states] == [("2026-10-04T08:00", False), ("2026-10-10", True)]
+    assert plain["properties"]["date"] == "2026-10-04" and plain["properties"]["date_end"] == "2026-10-10"
+
+
+def test_when_it_shows_needs_the_layer_tracked(client, owner):
+    row = create(client, owner, tracked=False)
+    key = add_line(client, owner, row, date="2026-10-03")
+    for changes in ({"start": ""}, {"end": "2026-10-09"}):
+        answer = edit(client, owner, row, key, **changes)
+        assert answer.status_code == 422 and "Track over time" in answer.json()["detail"]
+
+
 @pytest.mark.parametrize("changes", [
-    {"at": "2026-10-03", "gone": True},
-    {"at": "2026-10-01", "gone": True},
+    {"end": "2026-10-03"},
+    {"end": "2026-10-01"},
+    {"start": "2026-10-20"},
     {"at": "2026-10-05", "drop_state": True},
     {"at": "2026-13-40", "status": "damaged"},
     {"at": "12/10/2026", "status": "damaged"},
@@ -234,7 +321,7 @@ def test_the_layer_as_it_stood_on_a_day_is_what_a_my_maps_is_sent(client, owner)
     edit(client, owner, row, front, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
     later = add_line(client, owner, row, FURTHER, date="2026-10-15")
     gone = add_line(client, owner, row, [[31, 50], [31.1, 50]], date="2026-10-01")
-    edit(client, owner, row, gone, at="2026-10-05", gone=True)
+    edit(client, owner, row, gone, end="2026-10-05")
     always = add_line(client, owner, row, [[32, 50], [32.1, 50]])
     document = json.loads(_export(client, owner, row, "geojson", at="2026-10-10"))
     by_name = {f["properties"]["name"]: f for f in document["features"]}
@@ -248,7 +335,7 @@ def test_the_whole_history_goes_out_as_dated_spans(client, owner):
     row = create(client, owner, precision="time", zone="Europe/Kyiv")
     key = add_line(client, owner, row, at="2026-10-03")
     edit(client, owner, row, key, at="2026-10-12T14:00", geometry={"type": "LineString", "coordinates": MOVED})
-    edit(client, owner, row, key, at="2026-10-20", gone=True)
+    edit(client, owner, row, key, end="2026-10-20")
     root = ET.fromstring(_export(client, owner, row, "kml", history=True))
     spans = [(span.findtext("k:begin", namespaces=NS), span.findtext("k:end", namespaces=NS))
              for span in root.iterfind(".//k:Placemark/k:TimeSpan", NS)]
@@ -267,23 +354,24 @@ def test_a_my_maps_address_is_kept_and_anything_else_refused(client, owner):
     assert client.patch(f"{url_of(owner, row)}/edit", json={"mymaps": ""}).json()["layer"]["mymaps"] == ""
 
 
-def test_fixing_at_a_moment_corrects_the_state_in_force_for_each_feature(client, owner):
+def test_a_selection_moved_with_no_date_moves_on_every_day_or_not_at_all(client, owner):
     row = create(client, owner)
-    first = add_line(client, owner, row, date="2026-10-03")
-    edit(client, owner, row, first, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    steady = add_line(client, owner, row, date="2026-10-03")
+    edit(client, owner, row, steady, at="2026-10-12", status="damaged")
     plain = add_line(client, owner, row, FURTHER)
-    answer = client.post(f"{url_of(owner, row)}/selection",
-                         json={"keys": [first, plain], "offset": [0, 1], "at": "2026-10-15", "fix": True})
+    answer = client.post(f"{url_of(owner, row)}/selection", json={"keys": [steady, plain], "offset": [0, 1]})
     assert answer.status_code == 200, answer.text
-    states = feature(client, owner, row, first)["properties"]["states"]
-    assert [state["at"] for state in states] == ["2026-10-03", "2026-10-12"]
-    assert states[1]["geometry"]["coordinates"] == [[30.0, 51.1], [30.1, 51.1]]
-    # a feature with no history is simply rewritten
+    states = feature(client, owner, row, steady)["properties"]["states"]
+    assert [state["geometry"]["coordinates"] for state in states] == [[[30.0, 51.0], [30.1, 51.0]]] * 2
     rewritten = feature(client, owner, row, plain)
     assert "states" not in rewritten["properties"]
     assert rewritten["geometry"]["coordinates"] == [[30.0, 51.2], [30.1, 51.2]]
-    fixed = edit(client, owner, row, first, at="2026-10-05", fix=True, status="damaged").json()["marker"]["properties"]
-    assert [state.get("status") for state in fixed["states"]] == ["damaged", None]
+    # one feature moved by date holds the whole selection back, as one edit refused
+    edit(client, owner, row, steady, at="2026-10-15", geometry={"type": "LineString", "coordinates": MOVED})
+    before = [feature(client, owner, row, key) for key in (steady, plain)]
+    answer = client.post(f"{url_of(owner, row)}/selection", json={"keys": [steady, plain], "offset": [0, 1]})
+    assert answer.status_code == 422 and "moves on 15 Oct 2026" in answer.json()["detail"]
+    assert [feature(client, owner, row, key) for key in (steady, plain)] == before
 
 
 def test_a_group_of_events_marks_its_features_for_the_map(client, owner):

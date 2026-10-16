@@ -18,16 +18,20 @@
   import { buildMediaQuery } from '../../lib/mediaQuery.js';
   import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
   import { prefs } from '../../lib/state.svelte.js';
-  import { FONTS, KIND_LABELS, PAPERS, SIGNATURE, THEMES, TOKENS, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
-    pageSize, shownOn, startOn, textMeasurer, turnable } from '../../lib/plate/page.js';
+  import { FONTS, KIND_LABELS, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
+    pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
   import { FIRST_SECONDS, captionOf, clipRange, readTimecode, timecode } from '../../lib/plate/clip.js';
   import { GRATICULE_STEPS } from '../../lib/plate/geo.js';
   import { align, distribute, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
   import { moveRow } from '../../lib/plate/legend.js';
-  import { PALETTES } from '../../lib/plate/plainBasemap.js';
+  import { PALETTES, groundPalette, topographic } from '../../lib/plate/plainBasemap.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
   import PlateColour from './PlateColour.svelte';
+  import PlateSection from './PlateSection.svelte';
+  import PlateWords from './PlateWords.svelte';
+  import LayerStyleButton from '../satellite/LayerStyleButton.svelte';
+  import { LAYER_HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
 
   let {
     spec,
@@ -54,13 +58,23 @@
     onremove,
     onduplicate,
     onorder,
+    /** `(element, by)`: whether a step forward (1) or back (-1) can move it, among the rows the list shows. */
+    canorder = () => true,
     onframe,
     onlabels,
+    /** `(style)` once a symbol's marker, colour or size is set, which the next symbol placed takes. */
+    onsymbol = null,
     onpoint,
     ongroup,
     onwayback,
     /** The pictures the main map's features carry (a proof's plate, a video's frame), each with its point. */
     featurePictures = [],
+    /** How a map is framed on the day or step shown (`page.framingOf`), `(map, view)` to frame it, `(map, keep)` to hold the one before. */
+    framingFor = (map) => ({ view: map.view, own: false, first: true }),
+    onmapview = (map, view) => { map.view = view; },
+    onkeep = null,
+    /** The plate plays: through days followed over time, or through steps. */
+    plays = false,
   } = $props();
 
   const picked = $derived(spec.elements.filter((item) => selection.includes(item.id)));
@@ -76,8 +90,8 @@
   let fileInput = $state(null);
   let backgroundInput = $state(null);
 
-  const OVERLAYS = [['relief', 'Relief shading'], ['boundaries', 'Borders and big names'], ['placenames', 'Town and village names']];
   const PLAIN_COLOURS = [['ground', 'Land'], ['water', 'Water'], ['wood', 'Woods'], ['urban', 'Towns'], ['road', 'Roads'], ['border', 'Borders'], ['name', 'Names']];
+  const GRIDS = [['none', 'None'], ['latlon', 'Lat · lon'], ['utm', 'UTM'], ['mgrs', 'MGRS']];
   const LANGS = [['latin', 'Latin letters'], ['local', 'As written there'], ['en', 'English'], ['fr', 'French'], ['ar', 'Arabic'], ['ru', 'Russian'], ['uk', 'Ukrainian']];
   const TONES = { none: ['As it is', { opacity: 1, saturation: 0, brightness: 1, contrast: 0, hue: 0 }],
     grey: ['Greyed', { opacity: 1, saturation: -0.85, brightness: 0.9, contrast: 0.05, hue: 0 }],
@@ -223,10 +237,11 @@
 </script>
 
 <aside class="inspector" aria-label="Plate inspector">
+  <div class="flow">
   {#if alertText}<p class="warn" role="alert">{alertText} <button type="button" class="text-act" onclick={() => (alertText = '')}>OK</button></p>{/if}
   {#if !picked.length}
     <h3>Page</h3>
-    <h4>Looks</h4>
+    <PlateSection title="Looks" summary={THEMES[spec.theme.preset]?.label ?? 'Own colours'}>
     <div class="themes">
       {#each Object.entries(THEMES) as [id, preset] (id)}
         <button type="button" class="theme" class:on={spec.theme.preset === id} onclick={() => theme(id)} title={`Set the page and its maps as ${preset.label}`}>
@@ -234,8 +249,10 @@
           <span>{preset.label}</span></button>
       {/each}
     </div>
+    </PlateSection>
+    <PlateSection title="Paper" summary={PAPERS[spec.page.paper]?.label ?? ''}>
     <div class="rows">
-      <span class="key">Paper</span>
+      <span class="key">Size</span>
       <select aria-label="Paper" value={spec.page.paper}
         onchange={(event) => { const paper = event.currentTarget.value; onpaper({ ...spec.page, paper, ...(paper === 'custom' ? { size: [pageSize(spec.page).width, pageSize(spec.page).height] } : {}) }); }}>
         {#each Object.entries(PAPERS) as [id, paper] (id)}<option value={id}>{paper.label}</option>{/each}
@@ -258,14 +275,7 @@
           {/each}
         </div>
       {/if}
-      <span class="key">Font</span>
-      <select aria-label="Font" bind:value={spec.theme.font}>
-        {#each Object.entries(FONTS) as [id, font] (id)}<option value={id}>{font.label}</option>{/each}
-      </select>
-      <span class="key">Paper colour</span><input type="color" aria-label="Paper colour" bind:value={spec.theme.paper} />
-      <span class="key">Ink</span><input type="color" aria-label="Ink colour" bind:value={spec.theme.ink} />
-      <span class="key">Accent</span><input type="color" aria-label="Accent colour" bind:value={spec.theme.accent} />
-      <span class="key">Paper</span>
+      <span class="key">Fill</span>
       <div class="segments" role="group" aria-label="Paper background">
         {#each [['solid', 'Plain'], ['gradient', 'Gradient'], ['image', 'Picture']] as [value, label] (value)}
           <button type="button" aria-pressed={(spec.page.background?.kind ?? 'solid') === value}
@@ -290,11 +300,54 @@
       <label><input type="checkbox" bind:checked={spec.page.guides} /> Show the margins and the feed crop</label>
       <label><input type="checkbox" bind:checked={spec.page.transparent} /> See-through paper in a PNG</label>
     </div>
+    </PlateSection>
+    <PlateSection title="Face and colours" summary={FONTS[spec.theme.font]?.label ?? ''}>
+    <div class="rows">
+      <span class="key">Font</span>
+      <select aria-label="Font" bind:value={spec.theme.font}>
+        {#each Object.entries(FONTS) as [id, font] (id)}<option value={id}>{font.label}</option>{/each}
+      </select>
+      <span class="key">Colours</span>
+      <div class="swatches">
+        <label class="swatch"><input type="color" aria-label="Paper colour" bind:value={spec.theme.paper} /><span>Paper</span></label>
+        <label class="swatch"><input type="color" aria-label="Ink colour" bind:value={spec.theme.ink} /><span>Ink</span></label>
+        <label class="swatch"><input type="color" aria-label="Accent colour" bind:value={spec.theme.accent} /><span>Accent</span></label>
+      </div>
+    </div>
+    </PlateSection>
+    {#if plays}
+      {@const moves = transitionsOf(spec)}
+      <PlateSection title="Video transitions" summary={moves.on ? `${moves.seconds.toFixed(1)} s` : 'Off'}>
+      <label class="check"><input type="checkbox" checked={moves.on} onchange={(event) => (spec.transitions = { ...moves, on: event.currentTarget.checked })} />
+        Between the days and the steps</label>
+      {#if moves.on}
+        <div class="rows">
+          <span class="key">Length</span>
+          <span class="pair"><input type="range" aria-label="Transition length" min="0.2" max="3" step="0.1" value={moves.seconds}
+            oninput={(event) => (spec.transitions = { ...moves, seconds: Number(event.currentTarget.value) })} /><span class="quiet">{moves.seconds.toFixed(1)} s</span></span>
+          <span class="key">What is new</span>
+          <div class="segments" role="group" aria-label="What is new on a day or a step">
+            {#each [['fade', 'Fades in'], ['draw', 'Is drawn'], ['none', 'At once']] as [value, label] (value)}
+              <button type="button" aria-pressed={moves.appear === value} onclick={() => (spec.transitions = { ...moves, appear: value })}>{label}</button>
+            {/each}
+          </div>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" checked={moves.fade} onchange={(event) => (spec.transitions = { ...moves, fade: event.currentTarget.checked })} /> The page fades into the next</label>
+          <label><input type="checkbox" checked={moves.move} onchange={(event) => (spec.transitions = { ...moves, move: event.currentTarget.checked })} /> A map framed otherwise moves there</label>
+          {#if moves.move}
+            <label class="sub"><input type="checkbox" checked={moves.blur} onchange={(event) => (spec.transitions = { ...moves, blur: event.currentTarget.checked })} /> Blurred as it moves</label>
+          {/if}
+        </div>
+        <p class="note">In the MP4. A step can still cut straight in, from its ⋯.</p>
+      {/if}
+      </PlateSection>
+    {/if}
     <p class="note">Pick an element on the page to set it, Shift to pick several. A drag inside a map moves its ground; its edge moves the frame.</p>
     <p class="note">Texts fill in {TOKENS.join(' ')}.</p>
   {:else if picked.length > 1}
     <h3>{picked.length} picked</h3>
-    <h4>Line up</h4>
+    <PlateSection title="Line up">
     <div class="tools">
       {#each [['left', 'alignLeft', 'Left edges'], ['centre', 'alignCentreH', 'Centres, across'], ['right', 'alignRight', 'Right edges'],
         ['top', 'alignTop', 'Tops'], ['middle', 'alignCentreV', 'Middles, down'], ['bottom', 'alignBottom', 'Bottoms']] as [edge, icon, label] (edge)}
@@ -305,13 +358,15 @@
       <button type="button" class="icon-act" aria-label="Space them evenly down" title="Space evenly down" disabled={picked.length < 3}
         onclick={() => setBoxes(distribute(picked, 'v'))}><Icon name="distributeV" size={15} /></button>
     </div>
-    <h4>Size</h4>
+    </PlateSection>
+    <PlateSection title="Size">
     <div class="tools wide">
       <button type="button" class="btn btn-xs" onclick={() => setBoxes(sameSize(picked, 'width', picked.at(-1)))}>Same width</button>
       <button type="button" class="btn btn-xs" onclick={() => setBoxes(sameSize(picked, 'height', picked.at(-1)))}>Same height</button>
     </div>
     <p class="note">They take the size of the one picked last.</p>
-    <h4>Together</h4>
+    </PlateSection>
+    <PlateSection title="Together">
     <div class="tools wide">
       <button type="button" class="btn btn-xs" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
       <button type="button" class="btn btn-xs" onclick={() => ongroup?.(false)}>Ungroup</button>
@@ -320,11 +375,14 @@
       <button type="button" class="btn btn-xs danger" onclick={() => { for (const item of [...picked]) onremove(item); }}><Icon name="trash" size={12} /> Remove</button>
     </div>
     <p class="note">A group is picked and moved as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
+    </PlateSection>
   {:else}
     <header>
-      <h3>{KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of} (detail){/if}</h3>
-      <button type="button" class="icon-act" aria-label="Bring forward" title="Bring forward" onclick={() => onorder(element, 1)}><Icon name="chevronUp" size={13} /></button>
-      <button type="button" class="icon-act" aria-label="Send back" title="Send back" onclick={() => onorder(element, -1)}><Icon name="chevronDown" size={13} /></button>
+      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of} (detail){/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0} in 3D{/if}</h3>
+      <button type="button" class="icon-act" aria-label="Bring forward" title="Bring forward"
+        disabled={!canorder(element, 1)} onclick={() => onorder(element, 1)}><Icon name="chevronUp" size={13} /></button>
+      <button type="button" class="icon-act" aria-label="Send back" title="Send back"
+        disabled={!canorder(element, -1)} onclick={() => onorder(element, -1)}><Icon name="chevronDown" size={13} /></button>
       {#if element.kind !== 'credits'}
         <button type="button" class="icon-act" aria-label="Duplicate" title="Duplicate (Ctrl+D)" onclick={() => onduplicate(element)}><Icon name="copy" size={13} /></button>
       {/if}
@@ -354,7 +412,7 @@
         onclick={() => Object.assign(element, { step: step.id, carry: false, onward: null, until: null })}>Only on {step.name}</button></p>
     {/if}
 
-    {#if !element.step && playable && ['label', 'arrow', 'ring', 'cone', 'zone', 'measure', 'shape', 'text', 'image'].includes(element.kind)}
+    {#if !element.step && playable && ['label', 'symbol', 'arrow', 'ring', 'cone', 'zone', 'measure', 'line', 'shape', 'text', 'image'].includes(element.kind)}
       <div class="days" class:off={!shownToday}>
         <span class="key">Shown from</span>
         <button type="button" class="end" class:open={ending === 'onward'} aria-expanded={ending === 'onward'} aria-label="First day shown"
@@ -386,7 +444,14 @@
     {/if}
 
     {#if element.kind === 'map'}
-      <button type="button" class="btn btn-sm frame" class:on={framing === element.id} onclick={() => onframe(element)}>
+      {@const framed = framingFor(element)}
+      {@const held = !framed.own && !framed.first}
+      {#if !framed.first}
+        <label class="check keep"><input type="checkbox" checked={held} onchange={(event) => onkeep?.(element, event.currentTarget.checked)} />
+          Keep the previous framing</label>
+        <p class="note">{held ? 'This day or step shows the map as the one before it does.' : 'Framed here on its own; the steps after it follow, unless they frame it too.'}</p>
+      {/if}
+      <button type="button" class="btn btn-sm frame" class:on={framing === element.id} disabled={held} onclick={() => onframe(element)}>
         <Icon name="move" size={12} /> {framing === element.id ? 'Done framing' : 'Frame the map'}</button>
       <div class="rows">
         {#if element.of}
@@ -406,19 +471,39 @@
           </select>
         {/if}
         <span class="key">Zoom</span>
-        <input type="number" aria-label="Zoom" step="0.1" min="0" max="22" value={element.view.zoom.toFixed(2)}
-          onchange={(event) => (element.view = { ...element.view, zoom: Math.min(22, Math.max(0, number(event.currentTarget.value, element.view.zoom))) })} />
+        <input type="number" aria-label="Zoom" step="0.1" min="0" max="22" value={framed.view.zoom.toFixed(2)} disabled={held}
+          onchange={(event) => onmapview(element, { ...framed.view, zoom: Math.min(22, Math.max(0, number(event.currentTarget.value, framed.view.zoom))) })} />
         <span class="key">Turned</span>
-        <input type="number" aria-label="Bearing" step="1" min="-180" max="180" value={Math.round(element.view.bearing ?? 0)}
-          onchange={(event) => (element.view = { ...element.view, bearing: number(event.currentTarget.value, 0) % 360 })} />
+        <input type="number" aria-label="Bearing" step="1" min="-180" max="180" value={Math.round(framed.view.bearing ?? 0)} disabled={held}
+          onchange={(event) => onmapview(element, { ...framed.view, bearing: number(event.currentTarget.value, 0) % 360 })} />
         <span class="key">Frame</span>
         <span class="pair"><input type="checkbox" aria-label="Map frame" checked={element.border !== false} onchange={(event) => (element.border = event.currentTarget.checked)} />
           <input type="range" aria-label="Frame weight" min="0.5" max="4" step="0.25" value={element.width ?? 1} oninput={(event) => (element.width = Number(event.currentTarget.value))} /></span>
       </div>
 
-      <h4>Grid</h4>
+      <PlateSection title="3D" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
+      <label class="check"><input type="checkbox" checked={(element.terrain ?? 0) > 0}
+        onchange={(event) => { const on = event.currentTarget.checked; element.terrain = on ? 1.5 : 0;
+          onmapview(element, { ...framed.view, pitch: on ? Math.max(framed.view.pitch ?? 0, 55) : 0 }); if (!on) element.ridges = false; }} />
+        Stand the map on its heights</label>
+      {#if (element.terrain ?? 0) > 0}
+        <div class="rows">
+          <span class="key">Tilt</span>
+          <input type="range" aria-label="Map tilt" min="0" max="85" step="1" value={framed.view.pitch ?? 0} disabled={held}
+            oninput={(event) => onmapview(element, { ...framed.view, pitch: Number(event.currentTarget.value) })} />
+          <span class="key">Heights</span>
+          <span class="pair"><input type="range" aria-label="Height exaggeration" min="1" max="3" step="0.25" bind:value={element.terrain} />
+            <span class="quiet">{element.terrain}×</span></span>
+        </div>
+        <label class="check"><input type="checkbox" bind:checked={element.ridges} /> Ridge lines</label>
+        <p class="note">{element.terrain > 1 ? `The heights are drawn ${element.terrain} times as tall as they are, to read the slopes.` : 'The heights as they are.'}</p>
+        <p class="note">A tilted map has no scale bar and no grid.</p>
+      {/if}
+      </PlateSection>
+
+      <PlateSection title="Grid" summary={GRIDS.find(([value]) => value === (element.grid ?? 'none'))?.[1] ?? ''}>
       <div class="segments" role="group" aria-label="Grid">
-        {#each [['none', 'None'], ['latlon', 'Lat · lon'], ['utm', 'UTM'], ['mgrs', 'MGRS']] as [value, label] (value)}
+        {#each GRIDS as [value, label] (value)}
           <button type="button" aria-pressed={(element.grid ?? 'none') === value} onclick={() => (element.grid = value)}>{label}</button>
         {/each}
       </div>
@@ -453,20 +538,27 @@
           <label><input type="checkbox" checked={!!style.ticks} onchange={(event) => (element.grid_style = { ...style, ticks: event.currentTarget.checked })} /> Ticks on the frame only</label>
         </div>
       {/if}
+      </PlateSection>
 
+      <PlateSection title={element.basemap?.startsWith('plain') ? 'The plain ground' : 'The imagery'}>
       {#if element.basemap?.startsWith('plain')}
         {@const plain = element.plain ?? {}}
-        <h4>The plain ground</h4>
         <div class="swatches">
           {#each PLAIN_COLOURS as [key, label] (key)}
             <label class="swatch" title={label}><input type="color" aria-label={`${label} colour`}
-              value={plain.colours?.[key] ?? PALETTES[element.basemap === 'plain-dark' ? 'dark' : 'light'][key]}
+              value={plain.colours?.[key] ?? PALETTES[groundPalette(element.basemap)][key]}
               onchange={(event) => (element.plain = { ...plain, colours: { ...(plain.colours ?? {}), [key]: event.currentTarget.value } })} /><span>{label}</span></label>
           {/each}
           {#if Object.keys(plain.colours ?? {}).length}<button type="button" class="text-act" onclick={() => (element.plain = { ...plain, colours: {} })}>Reset</button>{/if}
         </div>
         <div class="checks">
+          {#if topographic(element.basemap)}
+            <label><input type="checkbox" checked={plain.tints !== false} onchange={(event) => (element.plain = { ...plain, tints: event.currentTarget.checked })} /> Heights in colour</label>
+            <label><input type="checkbox" checked={plain.contours !== false} onchange={(event) => (element.plain = { ...plain, contours: event.currentTarget.checked })} /> Contour lines</label>
+            <label><input type="checkbox" checked={plain.peaks !== false} onchange={(event) => (element.plain = { ...plain, peaks: event.currentTarget.checked })} /> Summits and their heights</label>
+          {/if}
           <label><input type="checkbox" checked={plain.roads !== false} onchange={(event) => (element.plain = { ...plain, roads: event.currentTarget.checked })} /> Roads</label>
+          <label><input type="checkbox" checked={plain.rails !== false} onchange={(event) => (element.plain = { ...plain, rails: event.currentTarget.checked })} /> Railways</label>
           <label><input type="checkbox" checked={plain.buildings !== false} onchange={(event) => (element.plain = { ...plain, buildings: event.currentTarget.checked })} /> Buildings</label>
           <label><input type="checkbox" checked={plain.names !== false} onchange={(event) => (element.plain = { ...plain, names: event.currentTarget.checked })} /> Place names</label>
         </div>
@@ -481,14 +573,13 @@
               <button type="button" aria-pressed={(plain.density ?? 'normal') === value} onclick={() => (element.plain = { ...plain, density: value })}>{label}</button>
             {/each}
           </div>
-          {#if (element.overlays ?? []).includes('relief')}
+          {#if (element.overlays ?? []).includes('relief') || topographic(element.basemap)}
             <span class="key">Relief</span>
             <input type="range" aria-label="Relief strength" min="0.25" max="2" step="0.25" value={element.relief ?? 1} oninput={(event) => (element.relief = Number(event.currentTarget.value))} />
           {/if}
         </div>
       {:else}
         {@const tone = element.tone ?? {}}
-        <h4>The imagery</h4>
         <div class="tools wide">
           {#each Object.entries(TONES) as [id, [label, values]] (id)}<button type="button" class="btn btn-xs" onclick={() => (element.tone = { ...values })}>{label}</button>{/each}
         </div>
@@ -501,14 +592,15 @@
         </div>
       {/if}
       <div class="checks">
-        {#each OVERLAYS as [id, label] (id)}
+        {#each PLATE_OVERLAYS as [id, label] (id)}
           {#if id !== 'relief' || element.basemap?.startsWith('plain')}
             <label><input type="checkbox" checked={(element.overlays ?? []).includes(id)} onchange={() => toggleOverlay(id)} /> {label}</label>
           {/if}
         {/each}
       </div>
+      </PlateSection>
 
-      <h4>Layers</h4>
+      <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
       {#if !rows.length}<p class="note">The case has no map layers yet. Add some in the Map.</p>{/if}
       <ul class="layers">
         {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
@@ -544,6 +636,7 @@
           </li>
         {/each}
       </ul>
+      </PlateSection>
     {:else if element.kind === 'inset'}
       <div class="rows">
         <span class="key">Ground</span>
@@ -563,15 +656,12 @@
         <span class="key">Title</span><input aria-label="Legend title" bind:value={element.text} placeholder="Legend" maxlength="120" />
         <span class="key">Of</span>
         <select aria-label="Legend of" bind:value={element.of}>{#each maps as map (map.id)}<option value={map.id}>{name(map)}</option>{/each}</select>
-        <span class="key">Size</span><input type="number" aria-label="Text size" min="5" max="24" step="0.5" bind:value={element.size} />
         <span class="key">Columns</span><input type="number" aria-label="Columns" min="1" max="4" step="1" bind:value={element.columns} />
         <span class="key">Frame</span><input type="checkbox" aria-label="Legend frame" bind:checked={element.border} />
-        <span class="key">Fill</span>
-        <span class="colour"><input type="color" aria-label="Legend fill" value={element.fill ?? '#ffffff'} oninput={(event) => (element.fill = event.currentTarget.value)} />
-          {#if element.fill}<button type="button" class="text-act" onclick={() => (element.fill = null)}>None</button>{/if}</span>
       </div>
+      <PlateWords {element} theme={spec.theme} />
       <label class="check"><input type="checkbox" bind:checked={element.offmap} /> List what the layers hold off the map too</label>
-      <h4>Rows</h4>
+      <PlateSection title="Rows" summary={`${rowsOf.filter((entry) => !entry.off).length}`}>
       {#each rowsOf.filter((entry) => !entry.off) as entry (entry.key)}
         <div class="legend-row">
           <span class="dot" style:background={entry.colour}></span>
@@ -606,6 +696,7 @@
           <input type="color" aria-label="Row colour" bind:value={extra.colour} />
         </div>
       {/each}
+      </PlateSection>
     {:else if ['text', 'label', 'credits', 'key', 'table', 'qr', 'timeline'].includes(element.kind)}
       {#if element.kind === 'qr'}
         <div class="rows"><span class="key">Address</span><input aria-label="QR address" placeholder="https://…" maxlength="400" bind:value={element.text} /></div>
@@ -639,29 +730,18 @@
       {:else}
         <p class="note">The map's sources, written for you. A plate always carries them, and they shrink rather than lose one.</p>
       {/if}
+      {#if element.kind === 'qr'}
+        <div class="rows">
+          <span class="key">Colour</span>
+          <PlateColour label="QR colour" value={element.colour ?? '#000000'} theme={spec.theme} onpick={(hex) => (element.colour = hex)} />
+          <span class="key">Fill</span>
+          <PlateColour label="QR fill" value={element.fill ?? '#ffffff'} theme={spec.theme} onpick={(hex) => (element.fill = hex)} />
+        </div>
+      {:else}
+        <PlateWords {element} theme={spec.theme} onchange={() => { if (element.kind === 'label') element.box = labelBox(element, measure); }} />
+      {/if}
       <div class="rows">
-        {#if element.kind !== 'qr'}
-          <span class="key">Size</span><input type="number" aria-label="Text size" min="4" max="200" step="0.5" bind:value={element.size}
-            oninput={() => { if (element.kind === 'label') element.box = labelBox(element, measure); }} />
-          <span class="key">Font</span>
-          <select aria-label="Element font" value={element.font ?? ''} onchange={(event) => { element.font = event.currentTarget.value || null; if (element.kind === 'label') element.box = labelBox(element, measure); }}>
-            <option value="">The page's</option>
-            {#each Object.entries(FONTS) as [id, font] (id)}<option value={id}>{font.label}</option>{/each}
-          </select>
-        {/if}
         {#if ['text', 'label'].includes(element.kind)}
-          <span class="key">Weight</span>
-          <div class="segments" role="group" aria-label="Weight">
-            {#each [[400, 'Regular'], [600, 'Semi'], [700, 'Bold']] as [value, label] (value)}
-              <button type="button" aria-pressed={(element.weight ?? (element.kind === 'label' ? 600 : 400)) === value} onclick={() => (element.weight = value)}>{label}</button>
-            {/each}
-          </div>
-          <span class="key">Style</span>
-          <div class="segments" role="group" aria-label="Text style">
-            <button type="button" aria-pressed={!!element.italic} onclick={() => (element.italic = !element.italic)}><i>Italic</i></button>
-            <button type="button" aria-pressed={!!element.upper} onclick={() => (element.upper = !element.upper)}>CAPS</button>
-            <button type="button" aria-pressed={!!element.halo} onclick={() => (element.halo = !element.halo)} title="A halo round the letters, for a text over a map">Halo</button>
-          </div>
           <span class="key">Spacing</span>
           <input type="range" aria-label="Letter spacing" min="-5" max="40" step="1" value={element.tracking ?? 0} oninput={(event) => (element.tracking = Number(event.currentTarget.value))} />
           <span class="key">Lines</span>
@@ -690,41 +770,62 @@
               <button type="button" aria-pressed={(element.style ?? 'plain') === value} onclick={() => { element.style = value; element.box = labelBox(element, measure); }}>{label}</button>
             {/each}
           </div>
+          {#if element.style && element.style !== 'plain'}
+            <span class="key">Fill</span>
+            <PlateColour label="Fill colour" value={element.fill ?? (element.style === 'number' ? spec.theme.accent : spec.theme.paper)} theme={spec.theme}
+              onpick={(hex) => (element.fill = hex)} />
+          {/if}
           <span class="key">Leader</span>
           <select aria-label="Leader" bind:value={element.leader}>
             <option value="straight">Straight</option><option value="elbow">Elbowed</option><option value="curve">Curved</option><option value="none">None</option>
           </select>
-          <span class="key">Its end</span>
-          <select aria-label="Leader end" bind:value={element.end}>
-            <option value="dot">A dot</option><option value="arrow">An arrow</option><option value="none">Nothing</option>
-          </select>
+          {#if element.leader !== 'none'}
+            <span class="key">Its end</span>
+            <select aria-label="Leader end" bind:value={element.end}>
+              <option value="dot">A dot</option><option value="arrow">An arrow</option><option value="none">Nothing</option>
+            </select>
+          {/if}
         {/if}
-        <span class="key">Colour</span>
-        <PlateColour label="Text colour" value={element.colour ?? spec.theme.ink} theme={spec.theme} onpick={(hex) => (element.colour = hex)} />
-        <span class="key">Fill</span>
-        <PlateColour label="Fill colour" value={element.fill ?? '#ffffff'} theme={spec.theme} none onpick={(hex) => (element.fill = hex)} />
-        {#if ['text', 'key', 'table'].includes(element.kind)}<span class="key">Frame</span><input type="checkbox" aria-label="Text frame" bind:checked={element.border} />{/if}
+        {#if ['text', 'key', 'table', 'legend'].includes(element.kind)}<span class="key">Frame</span><input type="checkbox" aria-label="Text frame" bind:checked={element.border} />{/if}
       </div>
       {#if element.ref}
         <p class="note">Shown when its feature is on the map. <button type="button" class="text-act" onclick={() => (element.ref = null)}>Always show it</button></p>
       {/if}
+    {:else if element.kind === 'symbol'}
+      <!-- one of the markers the case's layers draw, picked from the same palette -->
+      <div class="rows">
+        <span class="key" title="One of the markers the layers draw, in the colour picked">Symbol</span>
+        <LayerStyleButton label="Symbol and colour" title="Symbol" symbol={element.symbol ?? 'pin'} colour={element.colour ?? spec.theme.accent} {caseId} size={24}
+          onpick={(style) => { Object.assign(element, style); onsymbol?.({ ...style, size: element.box[2] }); }} />
+        <span class="key" title="Its size on the page">Size</span>
+        <span class="pair"><input type="range" aria-label="Symbol size" min="3" max="30" step="0.5" value={element.box[2]}
+          oninput={(event) => { const side = Number(event.currentTarget.value); element.box = [element.box[0], element.box[1], side, side]; onsymbol?.({ size: side }); }} />
+          <span class="quiet">{element.box[2]} mm</span></span>
+        <!-- the same three states, worded as a layer's marker says them -->
+        <span class="key" title={LAYER_HELP.status}>State</span>
+        <div class="segments" role="group" aria-label="Symbol state" title={LAYER_HELP.status}>
+          {#each STATUS_CHOICES as [value, label, said] (value)}
+            <button type="button" class:short={!value} aria-pressed={(element.status ?? '') === value} aria-label={value ? label : said} title={said}
+              onclick={() => (element.status = value)}>{label}</button>
+          {/each}
+        </div>
+      </div>
+      <p class="note">It stands over its point of the ground, the map framed however it is.</p>
     {:else if element.kind === 'signature'}
       <textarea aria-label="Signature words" rows="2" bind:value={element.text} maxlength="400"></textarea>
       <p class="note">{signatureNote}</p>
       <div class="rows">
-        <span class="key">Size</span><input type="number" aria-label="Text size" min="4" max="40" step="0.5" bind:value={element.size} />
         <span class="key">Picture</span>
         <div class="segments" role="group" aria-label="Signature side">
           {#each [['left', 'On the left'], ['right', 'On the right']] as [value, label] (value)}
             <button type="button" aria-pressed={(element.align ?? 'left') === value} onclick={() => (element.align = value)}>{label}</button>
           {/each}
         </div>
-        <span class="key">Colour</span><PlateColour label="Signature colour" value={element.colour ?? spec.theme.ink} theme={spec.theme} onpick={(hex) => (element.colour = hex)} />
       </div>
+      <PlateWords {element} theme={spec.theme} />
     {:else if element.kind === 'brand'}
       <div class="rows">
         <span class="key">Before it</span><input aria-label="Words before the mark" maxlength="40" placeholder="Nothing" bind:value={element.text} />
-        <span class="key">Colour</span><PlateColour label="Mark colour" value={element.colour ?? spec.theme.ink} theme={spec.theme} onpick={(hex) => (element.colour = hex)} />
         <span class="key">Align</span>
         <div class="segments" role="group" aria-label="Mark alignment">
           {#each [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']] as [value, label] (value)}
@@ -732,6 +833,7 @@
           {/each}
         </div>
       </div>
+      <PlateWords {element} theme={spec.theme} />
       <p class="note">The mark grows with its box; its amber flank stays amber.</p>
     {:else if element.kind === 'scale'}
       <div class="rows">
@@ -746,12 +848,9 @@
             <button type="button" aria-pressed={(element.variant ?? 'bar') === value} onclick={() => (element.variant = value)}>{label}</button>
           {/each}
         </div>
-        <span class="key">Size</span><input type="number" aria-label="Scale text size" min="4" max="30" step="0.5" value={element.size === 10 || !element.size ? 7 : element.size}
-          onchange={(event) => (element.size = number(event.currentTarget.value, 7))} />
-        <span class="key">Backing</span><input type="checkbox" aria-label="Scale backing" checked={!!element.fill}
-          onchange={(event) => (element.fill = event.currentTarget.checked ? spec.theme.paper : null)} />
       </div>
-      <p class="note">Measured at the map's centre.</p>
+      <PlateWords {element} theme={spec.theme} />
+      <p class="note">Measured at the map's centre. A tilted map has none.</p>
     {:else if element.kind === 'north'}
       <div class="rows">
         <span class="key">Look</span>
@@ -821,9 +920,9 @@
           {#if element.caption}
             <span class="key">Line</span>
             <input aria-label="Source line" maxlength="200" placeholder="Who posted it, where, when" bind:value={element.text} />
-            <span class="key">Size</span><input type="range" aria-label="Source line size" min="5" max="14" step="0.5" bind:value={element.size} />
           {/if}
         </div>
+        {#if element.caption}<PlateWords {element} theme={spec.theme} />{/if}
         {#if element.caption}<button type="button" class="text-act" onclick={readCaption}>Read the line from the file again</button>{/if}
       {/if}
       <div class="rows">
@@ -864,7 +963,7 @@
           <PlateColour label="Shape fill" value={element.fill ?? '#ffffff'} theme={spec.theme} none onpick={(hex) => (element.fill = hex)} />
         {/if}
       </div>
-    {:else if ['arrow', 'measure', 'ring', 'cone', 'zone'].includes(element.kind)}
+    {:else if ['arrow', 'measure', 'ring', 'cone', 'zone', 'line'].includes(element.kind)}
       <div class="rows">
         <span class="key">Colour</span><PlateColour label="Colour" value={element.colour ?? spec.theme.accent} theme={spec.theme} onpick={(hex) => (element.colour = hex)} />
         <span class="key">Weight</span><input type="range" aria-label="Weight" min="0.3" max="6" step="0.1" bind:value={element.width} />
@@ -873,6 +972,21 @@
           <select aria-label="Dash" value={element.line ?? (element.kind === 'measure' ? 'dashed' : 'solid')} onchange={(event) => (element.line = event.currentTarget.value)}>
             <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
           </select>
+        {/if}
+        {#if element.kind === 'line'}
+          <span class="key">Path</span>
+          <div class="segments" role="group" aria-label="Line path">
+            {#each [['line', 'Straight'], ['curve', 'Curved']] as [value, label] (value)}
+              <button type="button" aria-pressed={(element.shape === 'curve' ? 'curve' : 'line') === value} onclick={() => (element.shape = value)}>{label}</button>
+            {/each}
+          </div>
+          <span class="key">Heads</span>
+          <select aria-label="Line heads" value={element.heads ?? 'none'} onchange={(event) => (element.heads = event.currentTarget.value)}>
+            <option value="none">None</option><option value="end">At its end</option><option value="both">At both ends</option>
+          </select>
+          {#if (element.heads ?? 'none') !== 'none'}
+            <span class="key">Head</span><input type="range" aria-label="Head size" min="0.4" max="3" step="0.1" bind:value={element.head} />
+          {/if}
         {/if}
         {#if element.kind === 'arrow'}
           <span class="key">Kind</span>
@@ -903,11 +1017,10 @@
           <span class="key">Look</span>
           <select aria-label="Look" bind:value={element.look}><option value="fill">Filled</option><option value="hatch">Hatched</option><option value="glow">Glowing</option><option value="outline">Outlined</option></select>
         {/if}
-        {#if ['arrow', 'measure', 'zone'].includes(element.kind)}
-          <span class="key">{element.kind === 'measure' ? 'Says' : 'Words'}</span>
-          <input aria-label="Words" maxlength="200" placeholder={element.kind === 'measure' ? 'Its length, worked out' : 'None'} bind:value={element.text} />
-        {/if}
+        <span class="key">{element.kind === 'measure' ? 'Says' : 'Words'}</span>
+        <input aria-label="Words" maxlength="200" placeholder={element.kind === 'measure' ? 'Its length, worked out' : 'None'} bind:value={element.text} />
       </div>
+      <PlateWords {element} theme={spec.theme} />
       {#if element.kind === 'zone'}
         <label class="check"><input type="checkbox" checked={!!element.mask?.on} onchange={(event) => (element.mask = { ...(element.mask ?? {}), on: event.currentTarget.checked })} />
           Dim the ground round it</label>
@@ -919,7 +1032,7 @@
       <p class="note">Drag its points on the map, or the whole of it.</p>
     {/if}
 
-    {#if !['map', 'inset', 'arrow', 'zone', 'ring', 'cone', 'measure', 'video'].includes(element.kind)}
+    {#if !['map', 'inset', 'arrow', 'zone', 'ring', 'cone', 'measure', 'line', 'video'].includes(element.kind)}
       <div class="rows">
         <span class="key">Strength</span><input type="range" aria-label="Opacity" min="0.05" max="1" step="0.05" value={element.opacity ?? 1}
           oninput={(event) => (element.opacity = Number(event.currentTarget.value))} />
@@ -928,6 +1041,7 @@
       </div>
     {/if}
   {/if}
+  </div>
 </aside>
 
 {#if picking}
@@ -983,11 +1097,17 @@
 {/if}
 
 <style>
-  .inspector { width: 284px; flex: none; overflow-y: auto; padding: 10px 12px 16px; border-left: 1px solid var(--border); background: var(--bg-1); font-size: var(--fs-xs); }
+  .inspector { width: 100%; height: 100%; overflow-y: auto; padding: 10px 12px 16px; background: var(--bg-1); font-size: var(--fs-xs);
+    container-type: inline-size; scrollbar-width: thin; }
   header { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
   h3 { flex: 1; margin: 0 0 8px; font-size: var(--fs-sm); }
   header h3 { margin: 0; }
-  h4 { margin: 14px 0 6px; color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+  /* a wide inspector sets its sections side by side, the element's name and its first fields across the top */
+  @container (min-width: 540px) {
+    .flow { columns: 2; column-gap: 22px; }
+    .flow > h3, .flow > header, .flow > .element-name, .flow > .warn { column-span: all; }
+    .rows, .checks, .days, .themes, .layers li, .legend-row { break-inside: avoid; }
+  }
   .rows { display: grid; grid-template-columns: 74px minmax(0, 1fr); align-items: center; gap: 7px 8px; margin: 8px 0; }
   .key { color: var(--text-3); font-size: 11px; }
   select, input[type='number'], input:not([type]), .rename, textarea, .element-name { width: 100%; min-width: 0; height: 26px; padding: 3px 6px; font-size: var(--fs-xs); border-radius: var(--r-sm); }
@@ -997,10 +1117,13 @@
   input[type='range'] { width: 100%; min-width: 0; }
   .colour, .pair { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .pair input[type='number'] { width: 70px; }
+  .pair input[type='range'] { flex: 1; min-width: 0; }
+  .pair .quiet { flex: none; white-space: nowrap; }
   .rename { flex: 1; }
   .segments { display: flex; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; background: var(--bg-1); }
   .segments button { flex: 1; min-width: 0; padding: 4px 3px; color: var(--text-2); font-size: 11px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .segments.thin button { padding: 2px; font-size: 10px; }
+  .segments button.short { flex: 0 0 26px; }
   .segments button + button { border-left: 1px solid var(--border); }
   .segments button[aria-pressed='true'] { background: var(--accent-soft); color: var(--text-1); font-weight: 600; }
   .checks { display: grid; gap: 4px; margin: 6px 0; }
@@ -1018,6 +1141,8 @@
   .quiet { color: var(--text-3); }
   .frame { width: 100%; justify-content: center; margin-bottom: 4px; }
   .frame.on { border-color: var(--accent); color: var(--accent); }
+  .keep { margin: 2px 0 0; font-weight: 600; color: var(--text-1); }
+  .checks .sub { padding-left: 20px; }
   .note { margin: 6px 0; color: var(--text-3); font-size: 10.5px; line-height: 1.45; }
   .warn { margin: 6px 0; padding: 5px 7px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warning, #f59e0b) 18%, transparent); color: var(--text-1); font-size: 10.5px; }
   .icon-act { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }

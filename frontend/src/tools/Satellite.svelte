@@ -1563,7 +1563,7 @@
       sheetPoints = null;
       mediaView = null;
       footprint.cancel();
-      if (myLayers.editor && myLayers.editor.caseId !== id) { myLayers.close(); myLayers.cancelNew(); }
+      if (myLayers.editor && myLayers.editor.caseId !== id) { myLayers.leave(); myLayers.cancelNew(); }
       if (myLayers.exporting?.caseId !== id) myLayers.cancelDownload();
     }
     const stopSaved = savedWork.load(id);
@@ -2470,7 +2470,7 @@
 
       <!-- The search floats over the map as Detect's does, above the rail: the
            tab strip already says which tool this is. -->
-      <div class="map-bar" bind:clientHeight={searchHeight} bind:clientWidth={searchWidth}>
+      <div class="map-bar" bind:clientHeight={searchHeight} bind:clientWidth={searchWidth} data-bar-obstacle>
         <!-- Two identical windows on a second screen are otherwise impossible to
              tell apart; the first one needs no number and says nothing. -->
         {#if windowNumber}<span class="window-no mono" title="This map's window">Map {windowNumber}</span>{/if}
@@ -2949,8 +2949,8 @@
     source={myLayers.dialog.source}
     busy={addedLayers.saving}
     onclose={() => myLayers.cancelNew()}
-    oncreate={async (title, file, description) => {
-      await myLayers.create(title, file, description);
+    oncreate={async (title, file, description, track) => {
+      await myLayers.create(title, file, description, track);
       if (myLayers.editor) await editMyLayer(myLayers.editor);
     }}
   />

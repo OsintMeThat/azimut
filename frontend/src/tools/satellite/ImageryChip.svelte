@@ -98,7 +98,7 @@
   });
 </script>
 
-<div class="chip-row">
+<div class="chip-row" data-bar-obstacle>
   {#if usagePill}
     <span class="pill mono" title="Requests to this billed provider this month">{usagePill}</span>
   {/if}

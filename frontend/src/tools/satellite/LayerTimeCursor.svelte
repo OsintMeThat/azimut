@@ -12,6 +12,9 @@
    *
    * Every map reads the same cursor (`addedLayers.setTime`), so moving it in the
    * Map moves the layer in Compare and Detect too.
+   *
+   * Today is now: a change dated today, to the day, is read as now, so the same day is
+   * never offered under two names. Now says its date.
    */
   import Icon from '../../components/Icon.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
@@ -35,6 +38,11 @@
   const at = $derived(time?.at ?? null);
   const days = $derived(moments.map((item) => dayNumber(item.slice(0, 10))).filter((day) => day !== null));
   const today = Math.floor(Date.now() / 86_400_000);
+  /** A moment that is today, to the day: now under another name. */
+  const isToday = (value) => value === isoDay(today);
+  /** The changes the cursor steps through, today's being now. */
+  const changes = $derived(moments.filter((item) => !isToday(item)));
+  const nowSaid = `Now · ${momentLabel(isoDay(today))}`;
   // the axis runs from the first change to the last, or to today when that is later
   const first = $derived((days.length ? Math.min(...days) : today) - 1);
   const last = $derived(Math.max(days.length ? Math.max(...days) : today, at ? dayNumber(at.slice(0, 10)) ?? first : first) + 1);
@@ -54,7 +62,7 @@
   /** What the past button says is drawn now, in a few words. */
   const pastSaid = $derived([time?.trail !== false ? 'Before' : '', time?.since ? `± ${time.since === 'previous' ? 'last' : momentLabel(time.since).replace(/ \d{4}/, '')}` : '']
     .filter(Boolean).join(' · ') || 'The past');
-  const go = (value) => set({ at: value });
+  const go = (value) => set({ at: isToday(value) ? null : value });
 
   function dayAt(clientX) {
     const box = track.getBoundingClientRect();
@@ -90,11 +98,11 @@
 
   function key(event) {
     const step = { ArrowLeft: -1, ArrowRight: 1, PageDown: -7, PageUp: 7 }[event.key];
-    if (event.key === 'Home') { event.preventDefault(); go(moments[0] ?? null); return; }
+    if (event.key === 'Home') { event.preventDefault(); go(changes[0] ?? null); return; }
     if (event.key === 'End') { event.preventDefault(); go(null); return; }
     if (step === undefined) return;
     event.preventDefault();
-    const from = cursorDay ?? last - 1;
+    const from = cursorDay ?? today;
     go(isoDay(from + step));
   }
 
@@ -121,21 +129,22 @@
       {@const day = dayNumber(item.slice(0, 10))}
       {#if day !== null}<span class="tick" class:on={item === at} style:left="{place(day)}%" title={momentLabel(item)}></span>{/if}
     {/each}
-    <span class="handle" style:left="{place(cursorDay ?? last)}%" role="slider" tabindex="0" aria-label={label}
-      aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay ?? last}
-      aria-valuetext={at ? momentLabel(at) : 'Now'} onkeydown={key}></span>
+    <!-- now stands on today, on today's change when there is one -->
+    <span class="handle" style:left="{place(cursorDay ?? today)}%" role="slider" tabindex="0" aria-label={label}
+      aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay ?? today}
+      aria-valuetext={at ? momentLabel(at) : nowSaid} onkeydown={key}></span>
   </div>
   {#if moments.length > 1}
-    <div class="ends" aria-hidden="true"><span>{momentLabel(moments[0]).replace(/ \d{4}$/, '')}</span><span>{momentLabel(moments.at(-1)).replace(/ \d{4}$/, '')}</span></div>
+    <div class="ends" aria-hidden="true"><span>{momentLabel(moments[0]).replace(/ \d{4}$/, '')}</span><span>{isToday(moments.at(-1)) ? 'Now' : momentLabel(moments.at(-1)).replace(/ \d{4}$/, '')}</span></div>
   {/if}
 
   <div class="line">
     <button type="button" class="icon-act" aria-label="Previous change" title="Previous change"
-      disabled={!stepMoment(moments, at, -1)} onclick={() => go(stepMoment(moments, at, -1))}><Icon name="chevronLeft" size={12} /></button>
+      disabled={!stepMoment(changes, at, -1)} onclick={() => go(stepMoment(changes, at, -1))}><Icon name="chevronLeft" size={12} /></button>
     <button type="button" class="moment" class:open={picking} aria-expanded={picking} title="Pick the day the layer is read at"
-      onclick={() => (picking = !picking)}>{at ? momentLabel(at) : 'Now'}</button>
+      onclick={() => (picking = !picking)}>{at ? momentLabel(at) : nowSaid}</button>
     <button type="button" class="icon-act" aria-label="Next change" title="Next change"
-      disabled={at === null} onclick={() => go(stepMoment(moments, at, 1))}><Icon name="chevronRight" size={12} /></button>
+      disabled={at === null} onclick={() => go(stepMoment(changes, at, 1))}><Icon name="chevronRight" size={12} /></button>
     {#if at !== null}
       <button type="button" class="text-act" title="Read the layer as it is now" onclick={() => go(null)}>Now</button>
     {/if}

@@ -46,7 +46,11 @@ export function barBox(frame, size, place, obstacles = []) {
   return stepAside({ left, top, width, height }, frame, obstacles, place.edge);
 }
 
-/** The box moved off whatever it covers, along its edge when it can stay on it. */
+/**
+ * The box moved off whatever it covers, along its edge when it can stay on it.
+ * A move that lands on another obstacle comes last, so a bar too wide to pass
+ * the zoom buttons goes under them rather than up under the place search.
+ */
 export function stepAside(box, frame, obstacles, edge = null) {
   let current = box;
   for (let pass = 0; pass < obstacles.length + 1; pass += 1) {
@@ -57,12 +61,27 @@ export function stepAside(box, frame, obstacles, edge = null) {
       .filter((move) => inside(move, frame) && !(move.left === current.left && move.top === current.top));
     const onEdge = moves.filter((move) => (upright({ edge }) ? move.left === current.left
       : edge ? move.top === current.top : true));
-    const pool = onEdge.length ? onEdge : moves;
+    const clear = (list) => list.filter((move) => !obstacles.some((other) => overlaps(move, other)));
+    const pool = [clear(onEdge), clear(moves), onEdge, moves].find((list) => list.length) ?? [];
     if (!pool.length) return current;
     const cost = (move) => Math.hypot(move.left - box.left, move.top - box.top);
     current = pool.reduce((best, move) => (cost(move) < cost(best) ? move : best));
   }
   return current;
+}
+
+/**
+ * How wide a bar docked on the top or the bottom edge can be in its row: the
+ * width between what sits left of the row (the zoom buttons) and right of it
+ * (the map's own controls), `row` tall. A bar placed anywhere else has the map.
+ */
+export function rowRoom(frame, place, obstacles, row) {
+  const band = place.edge === 'top' ? [TOP_INSET, TOP_INSET + row]
+    : place.edge === 'bottom' ? [frame.height - INSET - row, frame.height - INSET] : null;
+  const across = band ? obstacles.filter((other) => other.top < band[1] && other.bottom > band[0]) : [];
+  const left = across.filter((other) => other.left < frame.width / 2).reduce((most, other) => Math.max(most, other.right + GAP), INSET);
+  const right = across.filter((other) => other.left >= frame.width / 2).reduce((least, other) => Math.min(least, other.left - GAP), frame.width - INSET);
+  return Math.max(0, right - left);
 }
 
 /** The placement a bar dropped at `box` takes: the nearest edge within reach, else where it is. */

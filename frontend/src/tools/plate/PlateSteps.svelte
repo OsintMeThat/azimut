@@ -1,10 +1,10 @@
 <script>
   /**
-   * The steps of the plate's day, over its date bar: the day itself first, then
-   * each step in the order it is played. A press shows one; what is added then
+   * The steps of the plate's day, in its play bar beside the days: the day itself
+   * first, then each step in the order it is played. A press shows one; what is added then
    * belongs to it. **+** adds a step after the one shown. A step is dragged to
-   * another place, and its ⋯ names it, sets how long it holds, or removes it with
-   * what stands on it.
+   * another place, and its ⋯ names it, sets how long it holds, cuts straight into it
+   * when the video's transitions are on, or removes it with what stands on it.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -25,13 +25,22 @@
     onremove,
     /** `(id, index)`: the step moved to that place. */
     onmove,
-    /** `(id, patch)`: the step renamed or held longer. */
+    /** `(id, patch)`: the step renamed, held longer, or cut straight into. */
     onchange,
+    /** The video's transitions are on, so a step can do without its own. */
+    transitions = false,
   } = $props();
 
   let menu = $state(null);
   let dragged = $state('');
   let target = $state(-1);
+  let strip = $state(null);
+
+  // the step shown stays in sight when the strip runs longer than the bar
+  $effect(() => {
+    void current; void steps.length;
+    strip?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  });
 
   const name = (step, index) => step.name || `Step ${index + 1}`;
   const firstClip = (step) => clipsOf(elements, step)[0] ?? null;
@@ -51,7 +60,7 @@
   }
 </script>
 
-<div class="steps" role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
+<div class="steps" bind:this={strip} role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
   <button type="button" class="tile day" class:on={!current} role="option" aria-selected={!current} title="The day itself, under its steps"
     onclick={() => onpick?.(null)}>
     <span class="thumb"><Icon name="plate" size={14} /></span>
@@ -94,6 +103,10 @@
         <label>Seconds<input class="input" type="number" min="0.5" max="120" step="0.5" value={menu?.step.duration ?? 3}
           onchange={(event) => onchange?.(menu.step.id, { duration: Math.max(0.5, Math.min(120, Number(event.currentTarget.value) || 3)) })} /></label>
       {/if}
+      {#if transitions && menu}
+        <label class="cut"><input type="checkbox" checked={menu.step.transition === 'none'}
+          onchange={(event) => onchange?.(menu.step.id, { transition: event.currentTarget.checked ? 'none' : '' })} /> Cut straight in, no transition</label>
+      {/if}
     </div>
     <div class="fm-sep"></div>
     <button type="button" class="fm-item" disabled={menu?.index === 0} onclick={() => { const { step, index } = menu; menu = null; onmove?.(step.id, index - 1); }}>
@@ -107,16 +120,16 @@
 {/if}
 
 <style>
-  .steps { display: flex; align-items: stretch; gap: 6px; padding: 6px 14px 0; overflow-x: auto; background: var(--bg-1); border-top: 1px solid var(--border); }
+  .steps { display: flex; align-items: stretch; gap: 5px; min-width: 0; padding: 2px 0; overflow-x: auto; scrollbar-width: thin; }
   .slot { position: relative; display: flex; border-radius: var(--r-sm); }
   .slot.drop-before { box-shadow: -3px 0 var(--accent); }
   .slot.drop-after { box-shadow: 3px 0 var(--accent); }
-  .tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 0 6px; width: 132px; flex: none;
+  .tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 0 6px; width: 124px; flex: none;
     padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2);
     font-size: 11px; text-align: left; cursor: pointer; }
   .tile:hover { border-color: var(--accent); color: var(--text-1); }
   .tile.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
-  .thumb { position: relative; grid-row: span 2; display: grid; place-items: center; width: 44px; height: 28px; border-radius: 3px; overflow: hidden;
+  .thumb { position: relative; grid-row: span 2; display: grid; place-items: center; width: 40px; height: 26px; border-radius: 3px; overflow: hidden;
     background: var(--bg-3); color: var(--text-3); }
   .thumb video { width: 100%; height: 100%; object-fit: cover; }
   .play { position: absolute; right: 2px; bottom: 2px; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%;
@@ -133,4 +146,5 @@
   .fields { display: grid; gap: 6px; padding: 6px; }
   .fields label { display: grid; gap: 3px; color: var(--text-3); font-size: 11px; }
   .fields .input { height: 26px; font-size: var(--fs-xs); }
+  .fields .cut { display: flex; align-items: center; gap: 6px; color: var(--text-2); cursor: pointer; }
 </style>

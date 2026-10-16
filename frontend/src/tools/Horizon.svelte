@@ -120,6 +120,7 @@
   import CaptureMenu from './horizon/CaptureMenu.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import ViewSwitch from '../components/ViewSwitch.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
   import Find from './horizon/Find.svelte';
@@ -1482,15 +1483,7 @@
           {#if views.current && unsaved}
             <span class="hz-unsaved" role="img" aria-label="Unsaved changes" title="Changes not saved yet"></span>
           {/if}
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm hz-close"
-            onclick={closeView}
-            title="Close this view and pick another viewpoint"
-            aria-label="Close the view"
-          >
-            <Icon name="x" size={13} />
-          </button>
+          <BackButton label="Close" icon="x" title="Close this view and pick another viewpoint" onclick={closeView} />
         </div>
       {:else}
         <div class="hz-ask">
@@ -1986,13 +1979,6 @@
   }
   .hz-name:focus::placeholder {
     color: var(--text-3);
-  }
-  .hz-close {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    padding: 0;
   }
   /* the open view has changes Save would keep */
   .hz-unsaved {

@@ -124,6 +124,8 @@
    * second screen showing one map is already somewhere.
    */
   const solo = readSolo(splitHash(location.hash).params);
+  /** The app's bars put away: in a tab of its own, or while a tool's focus gives its page the whole window. */
+  const bare = $derived(solo || uiState.focusMode);
   // Map windows are numbered per window, and the one that opened the app is the
   // first: a window that was detached carries its own number in the address and
   // leaves the count alone (tools/Satellite.svelte).
@@ -303,7 +305,7 @@
 </script>
 
 <div class="shell">
-  {#if !solo}
+  {#if !bare}
   <header class="topbar">
     <!-- The mark is the way home. It costs no rail seat and needs no label, which is
          the whole reason home lives here: the rail reads as a sequence of stages and
@@ -378,7 +380,7 @@
   {/if}
 
   <div class="main">
-    {#if !solo}
+    {#if !bare}
     <nav class="rail">
       {#each WORKSPACES as ws (ws.id)}
         <button
@@ -416,7 +418,7 @@
     {/if}
 
     <main class="canvas">
-      {#if !solo && activeWs && activeWs.tools.length > 1}
+      {#if !bare && activeWs && activeWs.tools.length > 1}
         <div class="tabstrip">
           {#each activeWs.tools as toolId (toolId)}
             <button
@@ -451,7 +453,7 @@
       </div>
     </main>
 
-    {#if uiState.sidebarOpen && !solo}
+    {#if uiState.sidebarOpen && !bare}
       <CaseSidebar />
     {/if}
   </div>

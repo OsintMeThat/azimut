@@ -16,7 +16,7 @@
     untrack(() => {
       if (personalLayers.exporting?.caseId && personalLayers.exporting.caseId !== owner) personalLayers.cancelDownload();
       if (personalLayers.editor && personalLayers.editor.caseId !== owner) {
-        personalLayers.close(); personalLayers.cancelNew(); personalPlaceDeletion.cancel();
+        personalLayers.leave(); personalLayers.cancelNew(); personalPlaceDeletion.cancel();
       }
     });
   });
@@ -48,7 +48,7 @@
   {/if}
   {#if personalLayers.dialog}
     <NewLayerDialog source={personalLayers.dialog.source} busy={addedLayers.saving}
-      onclose={() => personalLayers.cancelNew()} oncreate={(title, file, description) => personalLayers.create(title, file, description)} />
+      onclose={() => personalLayers.cancelNew()} oncreate={(title, file, description, track) => personalLayers.create(title, file, description, track)} />
   {/if}
   <PlaceDeleteDialog controller={personalPlaceDeletion} />
   {#if personalLayers.exporting}<LayerExportDialog target={personalLayers.exporting} onclose={() => personalLayers.cancelDownload()} />{/if}

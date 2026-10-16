@@ -25,6 +25,7 @@
     chevronDown: 'm6 9 6 6 6-6',
     chevronUp: 'm6 15 6-6 6 6',
     panelRight: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm11 0v16',
+    panelLeft: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm5 0v16',
     search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35',
     trash: 'M4 7h16m-2 0-1 13H7L6 7m3 0V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-6 4v6m4-6v6',
     download: 'M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
@@ -131,6 +132,8 @@
     // a month with its head rule: what a field opens when a date is built rather
     // than typed
     calendar: 'M4 6.5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13Zm4-3v4m8-4v4M4 10h16',
+    // what has no date: there on every day
+    always: 'M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z',
     play: 'm8 5 11 7-11 7V5Z',
     pause: 'M8 5v14m8-14v14',
     volume: 'M5 10v4h3l4 4V6L8 10H5Zm11-2a6 6 0 0 1 0 8m2.5-10.5a9 9 0 0 1 0 13',

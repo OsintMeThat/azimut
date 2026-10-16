@@ -16,6 +16,7 @@
   import { foldTerms, foldText } from '../lib/textFold.js';
   import { timeAgo } from '../lib/analysisViews.js';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -709,6 +710,7 @@
 <div class="tool">
   {#if doc.open}
     <div class="tool-header">
+      <BackButton label="Collages" title="Save and go back to the list" onclick={closeCollage} />
       <input
         class="input title-input"
         bind:value={titleField}
@@ -733,13 +735,10 @@
         <Icon name="redo" size={15} />
       </button>
       <button class="btn btn-sm" onclick={() => { query = ''; refreshList(); listOpen = true; }} title="Open another collage">
-        <Icon name="folderOpen" size={14} /> Collages
+        <Icon name="folderOpen" size={14} /> Open
       </button>
       <button class="btn btn-sm" onclick={newCollage} title="Start an empty canvas">
         <Icon name="plus" size={14} /> New
-      </button>
-      <button class="btn btn-ghost btn-sm" onclick={closeCollage} title="Save and go back to the list">
-        <Icon name="x" size={14} /> Close
       </button>
     </div>
   {/if}

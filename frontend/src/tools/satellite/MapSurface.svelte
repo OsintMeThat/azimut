@@ -466,6 +466,7 @@
          the pill says that rather than naming the newest pass. -->
     <span
       class="date-pill mono"
+      data-bar-obstacle
       class:exact={!!renderedDay}
       class:undated={!renderedDay && s2.undated}
       title={renderedDay
@@ -494,7 +495,7 @@
     <!-- The pass is the picker's own chip; this says what it means. Without one
          the tiles blend every pass over the point, which for radar mixes looks
          from opposite sides of the track, so the pill says so. -->
-    <span class="date-pill mono" class:exact={!!radarPass} class:undated={!radarPass && s1.undated}
+    <span class="date-pill mono" data-bar-obstacle class:exact={!!radarPass} class:undated={!radarPass && s1.undated}
       title={radarPass ? `Sentinel-1 pass flying ${radarPass.orbit === 'descending' ? 'south' : 'north'}`
         : s1.undated
           ? 'No pass could be dated here, so these tiles blend several passes'
@@ -509,6 +510,7 @@
   {:else if imageryDate?.supported}
     <span
       class="date-pill mono"
+      data-bar-obstacle
       title={imageryDate.source
         ? `Imagery acquired around this date (source: ${imageryDate.source})`
         : 'Approximate acquisition date of the imagery here'}
@@ -527,6 +529,7 @@
         <!-- lib/map/quotaGuard.js: past a flat view's reach the ground is Esri's -->
         <span
           class="date-pill"
+          data-bar-obstacle
           title="A tilted view would spend billed tiles all the way to the horizon, so past what a flat view shows the ground is Esri's, which is free"
         >
           Far ground: Esri

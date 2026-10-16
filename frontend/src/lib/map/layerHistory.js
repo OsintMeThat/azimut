@@ -115,14 +115,6 @@ export function previousState(feature, at) {
   return before.at(-1) ?? null;
 }
 
-/** The moment an edit at the cursor is written at: a new state there, or the one it corrects. */
-export function editMoment(feature, cursor, mode = 'new') {
-  if (cursor === null || cursor === undefined) return null;
-  if (mode === 'new') return cursor;
-  if (!hasHistory(feature)) return null;
-  return inForce(feature.properties.states, cursor)?.at ?? cursor;
-}
-
 /**
  * Every moment the layer changes at, sorted: each state of a tracked feature,
  * and the first and last day of the plain ones. What the cursor steps through.
@@ -190,12 +182,75 @@ export function changes(feature, before, after) {
  * `since` adds what each area took and gave since then: `'previous'` for its
  * own state before, or a moment. Null `at` is the layer as it is now, where the
  * trail and the changes still read back from the latest state.
+ *
+ * A moment where every feature stands as at one read lately hands back that same
+ * reading, so a map can tell nothing moved; a reading is never changed in place.
  */
 export function asOf(collection, at, { trail = false, since = null, window = EVENT_DAYS } = {}) {
-  const features = collection?.features ?? [];
   const cursor = at ?? '￿';
   // the day events are read against: the moment's, or the layer's last change
   const today = dayNumber((at ?? moments(collection).at(-1) ?? '').slice(0, 10));
+  if (!collection || typeof collection !== 'object') return read(collection, at, cursor, today, trail, since, window);
+  // two moments where every feature stands as it stood are one reading, handed back as it was
+  const phase = `${trail}|${since}|${window}|${phaseOf(collection.features ?? [], at, cursor, today, window)}`;
+  let kept = readings.get(collection);
+  if (!kept) readings.set(collection, (kept = new Map()));
+  const known = kept.get(phase);
+  if (known) {
+    kept.delete(phase);
+    kept.set(phase, known);
+    return known;
+  }
+  const out = read(collection, at, cursor, today, trail, since, window);
+  kept.set(phase, out);
+  if (kept.size > KEPT_READINGS) kept.delete(kept.keys().next().value);
+  return out;
+}
+
+/** The last few readings of each layer, by phase: a played or dragged day reads each phase once. */
+const readings = new WeakMap();
+const KEPT_READINGS = 4;
+
+/**
+ * Where each feature stands at the moment, as one key: its state in force (or, with
+ * no history, whether it is there), and whether the day marks it new, fades it or
+ * lets it go. Everything `asOf` draws follows from that, so an equal key is an
+ * equal reading.
+ */
+function phaseOf(features, at, cursor, today, window) {
+  const out = [];
+  for (const feature of features) {
+    const properties = feature?.properties ?? {};
+    let standing;
+    let began;
+    if (hasHistory(feature)) {
+      standing = -1;
+      for (const [index, state] of properties.states.entries()) {
+        if (state.at > cursor) break;
+        standing = index;
+      }
+      began = standing >= 0 ? properties.states[standing].at : undefined;
+    } else {
+      standing = stateAt(feature, cursor) ? 1 : 0;
+      began = properties.date;
+    }
+    let marks = 0;
+    if (today !== null) {
+      const day = dayNumber(String(began ?? '').slice(0, 10));
+      if (at !== null && at !== undefined && day !== null && day === today) marks |= 1;
+      if (properties.event) {
+        const first = dayNumber(String(properties.date ?? '').slice(0, 10));
+        if (first !== null && today - first > window) marks |= 2;
+        if (first !== null && today > first) marks |= 4;
+      }
+    }
+    out.push(standing * 8 + marks);
+  }
+  return out.join(',');
+}
+
+function read(collection, at, cursor, today, trail, since, window) {
+  const features = collection?.features ?? [];
   const out = [];
   const extras = [];
   for (const feature of features) {
@@ -239,17 +294,129 @@ function marked(feature, standing, at, today, window) {
   return Object.keys(extra).length ? { ...standing, properties: { ...standing.properties, ...extra } } : standing;
 }
 
-/** One feature's history, as the sheet lists it: each state, its moment, and whether it is the one at the cursor. */
+/** What a change of status brought; back to none is said as such, not as a state seen. */
+const STATUS_SAID = { '': 'No damage', damaged: 'Damaged', destroyed: 'Destroyed' };
+
+/** What one state brought, said against the live state before it. */
+function brought(state, before, point, first) {
+  if (state.gone) return 'Gone';
+  if (first) return [state.at ? 'Appears' : 'Shown', state.status ? STATUS_SAID[state.status] : ''].filter(Boolean).join(' · ');
+  if (!before) return 'Back';
+  const said = [];
+  if (JSON.stringify(state.geometry) !== JSON.stringify(before.geometry)) said.push(point ? 'Moved' : 'Reshaped');
+  if ((state.status ?? '') !== (before.status ?? '')) said.push(STATUS_SAID[state.status ?? ''] ?? state.status);
+  return said.join(' · ') || 'No change';
+}
+
+/**
+ * One feature's history, as the sheet lists it: each state, its moment, what it
+ * brought (`Appears`, `Moved`, `Damaged`, `Gone`…), and whether it is the one at
+ * the cursor.
+ */
 export function lifeline(feature, cursor) {
   if (!hasHistory(feature)) return [];
   const now = cursor === null || cursor === undefined ? null : inForce(feature.properties.states, cursor);
   const live = feature.properties.states.filter((state) => !state.gone);
-  return feature.properties.states.map((state) => ({
-    at: state.at,
-    gone: Boolean(state.gone),
-    status: state.status ?? '',
-    current: now ? state === now : state === live.at(-1),
-  }));
+  const point = String(feature.geometry?.type ?? '').includes('Point');
+  let before = null;
+  return feature.properties.states.map((state, index) => {
+    const row = {
+      at: state.at,
+      gone: Boolean(state.gone),
+      status: state.status ?? '',
+      what: brought(state, before, point, index === 0),
+      current: now ? state === now : state === live.at(-1),
+    };
+    before = state.gone ? null : state;
+    return row;
+  });
+}
+
+/**
+ * The history the sheet draws for one feature, with where a dated edit goes:
+ * `editing` on the state it rewrites, or a `ghost` row at the cursor when it
+ * starts a new one there. A plain feature reads as its one implied state, so a
+ * change about to give it a history shows before it is made. `mode` is the
+ * editor's: 'new' dates an edit at the cursor; 'fix' carries no date, and an
+ * edit with none changes every day alike, so no row is marked, as at now.
+ */
+export function lifeRows(feature, cursor, mode = 'new') {
+  const dated = hasHistory(feature);
+  const rows = dated ? lifeline(feature, cursor)
+    : [{ at: String(feature?.properties?.date ?? ''), gone: false, status: feature?.properties?.status ?? '',
+      what: feature?.properties?.date ? 'Appears' : 'Shown', current: true }];
+  const at = cursor ?? null;
+  if (at === null || mode === 'fix' || !stateAt(feature, at)) return rows.map((row) => ({ editing: false, ghost: false, ...row }));
+  const same = rows.find((row) => row.at === at);
+  if (same) {
+    same.editing = true;
+  } else {
+    rows.push({ at, gone: false, status: '', what: 'Next edit', current: false, ghost: true });
+    rows.sort((first, second) => (first.at < second.at ? -1 : first.at > second.at ? 1 : 0));
+  }
+  return rows.map((row) => ({ editing: false, ghost: false, ...row }));
+}
+
+/**
+ * When a feature shows, as its sheet and its row in the list say it: `start`
+ * ('' for always), `end` ('' while it is still there), `ends` saying whether the
+ * end is the moment it is gone ('gone') or a plain feature's last day ('last'),
+ * and how many changes it has between.
+ */
+export function spanOf(feature) {
+  const properties = feature?.properties ?? {};
+  if (!hasHistory(feature)) {
+    return { start: String(properties.date ?? ''), end: String(properties.date_end ?? ''), ends: 'last', changes: 0 };
+  }
+  const states = properties.states;
+  const last = states.at(-1);
+  return { start: states[0].at, end: last.gone ? last.at : '', ends: 'gone',
+    changes: states.slice(1).filter((state) => !state.gone).length };
+}
+
+/** `12 Oct`, with the year when it is not `year`, and the time on a moment that has one. */
+export function shortMoment(at, year = new Date().getFullYear()) {
+  const match = MOMENT.exec(String(at ?? ''));
+  if (!match) return '';
+  const day = `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]}${Number(match[1]) === year ? '' : ` ${match[1]}`}`;
+  return match[4] === undefined ? day : `${day} ${match[4]}:${match[5]}`;
+}
+
+/**
+ * A feature's days in a few words, as its row in the list says them: `Always`,
+ * `From 12 Oct`, `Until 20 Oct`, `12 Oct → 20 Oct`, or the day alone for an
+ * event, which fades after it.
+ */
+export function spanLabel(span, { event = false, year } = {}) {
+  const from = shortMoment(span.start, year);
+  const to = shortMoment(span.end, year);
+  if (event) return from || 'No day';
+  if (from && to) return `${from} → ${to}`;
+  if (from) return `From ${from}`;
+  if (to) return `Until ${to}`;
+  return 'Always';
+}
+
+/**
+ * What a feature changed by date: the moment its shape first differs from the
+ * one it first had, and the moment its status does, each '' when never. An edit
+ * with no date changes every day alike, so it can only touch what never changed.
+ */
+export function changedBy(feature) {
+  if (!hasHistory(feature)) return { shape: '', status: '' };
+  const live = feature.properties.states.filter((state) => !state.gone);
+  const [first, ...later] = live;
+  const shape = later.find((state) => JSON.stringify(state.geometry) !== JSON.stringify(first.geometry))?.at ?? '';
+  const status = later.find((state) => (state.status ?? '') !== (first.status ?? ''))?.at ?? '';
+  return { shape, status };
+}
+
+/** Whether a feature appears, changes or leaves on the day of `at`. */
+export function changesOn(feature, at) {
+  if (at === null || at === undefined) return false;
+  const day = at.slice(0, 10);
+  return statesOf(feature).some((state) => state.at && state.at.slice(0, 10) === day)
+    || (!hasHistory(feature) && String(feature?.properties?.date_end ?? '') === day);
 }
 
 /**

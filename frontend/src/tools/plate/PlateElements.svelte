@@ -1,11 +1,12 @@
 <script>
   /**
-   * The left of the plate editor: what can be added, grouped by where it goes, and
-   * what the page holds, top first.
+   * The left of the plate editor: what the page holds, top first. What can be added
+   * is in Add, over the page (`PlateAdd.svelte`).
    *
-   * - A row picks its element (Shift adds it), and is dragged to restack it; maps
-   *   stay under the writing whatever the order. A double click names it. Its eye
-   *   hides it from the page and the export, its lock keeps it where it is.
+   * - A row picks its element (Shift adds it), and is dragged to restack it. Maps
+   *   stay under the writing, so the drag only offers the places a row can take: the
+   *   writing among the writing, a map among the maps. A double click names it. Its
+   *   eye hides it from the page and the export, its lock keeps it where it is.
    * - On a plate played through its days, **Other days** lists the annotations that
    *   belong to other days than the one shown, each stretched to reach this day or
    *   carried from this day on: what was drawn yesterday is there to reuse, never
@@ -14,8 +15,9 @@
    *   step's marked; another step's elements wait on their own step.
    */
   import Icon from '../../components/Icon.svelte';
-  import { KIND_LABELS, MAP_KINDS, bringTo, carryOn, dated, fillTokens, periodSaid, shownOn } from '../../lib/plate/page.js';
+  import { KIND_LABELS, MAP_KINDS, bringTo, carryOn, dated, fillTokens, landingIn, listedOf, periodSaid, shownOn } from '../../lib/plate/page.js';
   import { momentLabel } from '../../lib/map/layerHistory.js';
+  import symbols from '../../lib/map/layerSymbols.json';
 
   let {
     spec,
@@ -27,39 +29,32 @@
     /** The plate draws a layer followed over time, so its annotations belong to days. */
     playable = false,
     ghosts = $bindable(false),
-    placing = null,
     tokens = {},
-    onadd,
-    /** `(id, index)`: the element moved to that place in the list, top first. */
+    /** `(id, index)`: the element let go above the row at that place in the list, top first (`page.restacked`). */
     onrestack,
+    /** The list put away, from its own header. */
+    onhide = null,
   } = $props();
 
-  /** What can be added, by where it goes on the page. */
-  const SECTIONS = [
-    { title: 'Maps', items: [['map', 'Map', 'satellite'], ['detail', 'Detail', 'zoomInset'], ['inset', 'Inset map', 'mapArea']] },
-    { title: 'On the map', note: 'Press the map to place it', items: [['label', 'Label', 'pin'], ['number', 'Number', 'hash'],
-      ['arrow', 'Arrow', 'arrowRight'], ['measure', 'Distance', 'line'], ['ring', 'Rings', 'rings'], ['cone', 'View cone', 'viewCone'],
-      ['zone', 'Zone', 'polygon'], ['spotlight', 'Spotlight', 'crosshair']] },
-    { title: 'Round the map', items: [['legend', 'Legend', 'list'], ['scale', 'Scale bar', 'ruler'], ['north', 'North arrow', 'compass'],
-      ['credits', 'Credits', 'info'], ['timeline', 'Date strip', 'clock']] },
-    { title: 'Writing', items: [['text', 'Text', 'text'], ['banner', 'Banner', 'columns'], ['stamp', 'Stamp', 'tag'], ['key', 'Numbered list', 'numbered'],
-      ['table', 'Table', 'table'], ['qr', 'QR code', 'qr']] },
-    { title: 'Signing', items: [['signature', 'Signature', 'edit'], ['brand', 'Made with Azimut', 'brand']] },
-    { title: 'Pictures and shapes', items: [['image', 'Picture', 'image'], ['video', 'Video', 'video'], ['logo', 'Logo', 'shield'], ['rect', 'Box', 'square'],
-      ['ellipse', 'Ellipse', 'circle'], ['rule', 'Rule', 'lineSolid']] },
-  ];
   const ICONS = { map: 'satellite', inset: 'mapArea', legend: 'list', text: 'text', label: 'pin', arrow: 'arrowRight', scale: 'ruler',
-    north: 'compass', image: 'image', credits: 'info', shape: 'square', ring: 'rings', cone: 'viewCone', zone: 'polygon', measure: 'line',
-    key: 'numbered', table: 'table', qr: 'qr', timeline: 'clock', signature: 'edit', brand: 'brand', video: 'video' };
+    north: 'compass', image: 'image', credits: 'info', shape: 'square', ring: 'rings', cone: 'viewCone', zone: 'polygon', measure: 'line', line: 'curve',
+    key: 'numbered', table: 'table', qr: 'qr', timeline: 'clock', signature: 'edit', brand: 'brand', video: 'video', symbol: 'star' };
 
-  let folded = $state(new Set());
   let naming = $state('');
   let nameField = $state('');
+  /** A press on a row, which becomes a drag a few pixels on, so a click still picks. */
+  let armed = null;
   let dragged = $state('');
+  /** Where the dragged row would land, in the list, top first. */
   let target = $state(-1);
+  let listEl = $state();
+  let asideEl = $state();
+  /** The pointer's height while a row is dragged, which the list scrolls toward near its edges. */
+  let pointerY = 0;
+  let scrolling = 0;
 
   /** The page's elements, top first: the day's, and the shown step's; another step's wait on it. */
-  const list = $derived([...spec.elements].reverse().filter((element) => !element.step || shownOn(element, at, place)));
+  const list = $derived(listedOf(spec, at, place));
   const otherDays = $derived(playable ? spec.elements.filter((element) => dated(element) && !shownOn(element, at)) : []);
 
   function describe(element) {
@@ -70,6 +65,7 @@
       return index ? `Map ${index + 1}` : 'Map';
     }
     if (element.kind === 'video' && element.src) return element.src.split('/').pop();
+    if (element.kind === 'symbol') return symbols.find((choice) => choice.id === element.symbol)?.label ?? KIND_LABELS.symbol;
     if (['text', 'label', 'arrow', 'zone'].includes(element.kind) && element.text) {
       return (fillTokens(element.text, tokens) || KIND_LABELS[element.kind]).split('\n')[0];
     }
@@ -89,51 +85,70 @@
     naming = '';
   }
 
-  function toggle(title) {
-    const next = new Set(folded);
-    if (next.has(title)) next.delete(title); else next.add(title);
-    folded = next;
+  /** The place under the pointer a row may take: the writing stays above the maps, a map among them. */
+  function landing(id, clientY) {
+    const rows = [...(listEl?.children ?? [])];
+    const index = rows.findIndex((row) => { const rect = row.getBoundingClientRect(); return clientY < rect.top + rect.height / 2; });
+    return landingIn(list, id, index < 0 ? rows.length : index);
   }
 
-  function dragOver(event, index) {
-    if (!dragged) return;
-    event.preventDefault();
-    const rect = event.currentTarget.getBoundingClientRect();
-    target = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
+  function press(event, element) {
+    if (event.button !== 0 || naming === element.id || event.target.closest('input, .mini')) return;
+    armed = { id: element.id, x: event.clientX, y: event.clientY, pointer: event.pointerId, row: event.currentTarget };
   }
-  function drop(event) {
-    if (!dragged) return;
-    event.preventDefault();
-    // the list may leave out another step's elements: the place is read in the page's whole order
-    if (target >= 0) {
-      const whole = [...spec.elements].reverse();
-      onrestack?.(dragged, list[target] ? whole.indexOf(list[target]) : whole.length);
+  function follow(event) {
+    if (!armed) return;
+    if (!dragged) {
+      if (Math.hypot(event.clientX - armed.x, event.clientY - armed.y) < 4) return;
+      dragged = armed.id;
+      armed.row.setPointerCapture?.(armed.pointer);
+      scrolling = requestAnimationFrame(scrollNearEdge);
     }
-    dragged = ''; target = -1;
+    pointerY = event.clientY;
+    target = landing(dragged, event.clientY);
   }
+  /** A long list scrolls while the dragged row is held near its top or its bottom. */
+  function scrollNearEdge() {
+    if (!dragged || !asideEl) return;
+    const box = asideEl.getBoundingClientRect();
+    const by = pointerY < box.top + 28 ? -8 : pointerY > box.bottom - 28 ? 8 : 0;
+    if (by) {
+      asideEl.scrollTop += by;
+      target = landing(dragged, pointerY);
+    }
+    scrolling = requestAnimationFrame(scrollNearEdge);
+  }
+  function release() {
+    if (dragged && target >= 0) onrestack?.(dragged, target);
+    cancelAnimationFrame(scrolling);
+    armed = null;
+    dragged = '';
+    target = -1;
+  }
+  // the release can land anywhere, outside the list or the window
+  $effect(() => {
+    window.addEventListener('pointermove', follow);
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    return () => {
+      window.removeEventListener('pointermove', follow);
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', release, true);
+    };
+  });
 </script>
 
-<aside class="elements" aria-label="Elements">
-  {#each SECTIONS as section (section.title)}
-    <button type="button" class="section" aria-expanded={!folded.has(section.title)} onclick={() => toggle(section.title)}>
-      <Icon name={folded.has(section.title) ? 'chevronRight' : 'chevronDown'} size={11} />{section.title}</button>
-    {#if !folded.has(section.title)}
-      <div class="adds">
-        {#each section.items as [kind, label, icon] (kind)}
-          <button type="button" class="add" class:on={placing?.kind === kind || placing?.preset === kind} onclick={() => onadd?.(kind)}
-            title={section.note ? `${label}: ${section.note.toLowerCase()}` : `Add ${label.toLowerCase()}`}>
-            <Icon name={icon} size={14} /><span>{label}</span></button>
-        {/each}
-      </div>
+<aside class="elements" aria-label="Elements" bind:this={asideEl}>
+  <div class="head">
+    <h4>On the page <span class="count">{list.length}</span></h4>
+    {#if onhide}
+      <button type="button" class="mini shown" aria-label="Hide the list" title="Hide the list" onclick={onhide}><Icon name="chevronLeft" size={13} /></button>
     {/if}
-  {/each}
-
-  <h4>On the page</h4>
-  <ul class="list" ondragover={(event) => event.preventDefault()} ondrop={drop}>
+  </div>
+  <ul class="list" class:sorting={!!dragged} bind:this={listEl}>
     {#each list as element, index (element.id)}
       <li class:drop-before={target === index} class:drop-after={target === list.length && index === list.length - 1}
-        draggable={naming !== element.id} ondragstart={(event) => { dragged = element.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', element.id); }}
-        ondragend={() => { dragged = ''; target = -1; }} ondragover={(event) => dragOver(event, index)}>
+        class:dragging={dragged === element.id} onpointerdown={(event) => press(event, element)}>
         {#if naming === element.id}
           <!-- svelte-ignore a11y_autofocus -->
           <input class="name-field" aria-label="Element name" bind:value={nameField} maxlength="80" autofocus
@@ -173,19 +188,17 @@
 </aside>
 
 <style>
-  .elements { width: 196px; flex: none; overflow-y: auto; padding: 8px 10px 14px; border-right: 1px solid var(--border); background: var(--bg-1); }
-  .section { display: flex; align-items: center; gap: 4px; width: 100%; margin: 6px 0 4px; padding: 2px 0; color: var(--text-3); font-size: 10px;
-    font-weight: 700; text-transform: uppercase; letter-spacing: .06em; cursor: pointer; text-align: left; }
-  .section:hover { color: var(--text-1); }
+  .elements { width: 100%; height: 100%; overflow-y: auto; padding: 6px 10px 14px; background: var(--bg-1); }
+  .head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .head h4 { flex: 1; margin: 6px 0; }
   h4 { margin: 12px 0 6px; color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-  .adds { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px; margin-bottom: 6px; }
-  .add { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 1px; border: 1px solid var(--border); border-radius: var(--r-sm);
-    color: var(--text-2); font-size: 9.5px; line-height: 1.15; cursor: pointer; text-align: center; }
-  .add:hover, .add.on { border-color: var(--accent); color: var(--text-1); background: var(--accent-soft); }
+  .count { margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--bg-3); color: var(--text-2); font-weight: 600; letter-spacing: normal; }
   .list { list-style: none; margin: 0; padding: 0; }
   .list li { display: flex; align-items: center; gap: 1px; border-radius: var(--r-sm); }
   .list li.drop-before { box-shadow: inset 0 2px var(--accent); }
   .list li.drop-after { box-shadow: inset 0 -2px var(--accent); }
+  .list li.dragging { opacity: .45; }
+  .list.sorting, .list.sorting .row { cursor: grabbing; user-select: none; }
   .row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 24px; padding: 3px 6px; border-radius: var(--r-sm);
     color: var(--text-2); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
   .row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: normal; }
@@ -195,7 +208,7 @@
   .tag { padding: 0 3px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-3); font-size: 9px; }
   .tag.step { border-color: var(--accent); color: var(--accent); }
   .mini { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: var(--r-sm); color: var(--text-3); opacity: 0; cursor: pointer; }
-  .list li:hover .mini, .mini.on, .mini:focus-visible { opacity: 1; }
+  .list li:hover .mini, .mini.on, .mini.shown, .mini:focus-visible { opacity: 1; }
   .mini.on { color: var(--accent); }
   .mini:hover { background: var(--bg-3); color: var(--text-1); }
   .name-field { width: 100%; height: 24px; padding: 2px 6px; font-size: var(--fs-xs); }
