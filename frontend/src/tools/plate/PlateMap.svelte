@@ -19,6 +19,10 @@
    * A map drawn in 3D stands on those heights, tilted, and can trace its ridges'
    * crests (`ridges.js`). It reports how it places a point of the ground, the heights
    * included, so what the plate writes over it lands where the ground is.
+   *
+   * A browser draws only so many maps at once, and takes the oldest one's drawing
+   * back when another asks: a plate's map that loses it is built again where it
+   * stood, once the plate is in sight, and says so when it keeps losing it.
    */
   import { onMount, untrack } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
@@ -36,6 +40,7 @@
   import { SKY } from '../../lib/map/relief.js';
   import { WAYBACK_ID, waybackId } from '../../lib/wayback.js';
   import { layerCell } from '../../lib/usage.js';
+  import { uiState } from '../../lib/state.svelte.js';
 
   let {
     element,
@@ -58,7 +63,7 @@
     glide = 0,
     /** `(view, frame)` as the map moves, and once it is up. */
     onview = null,
-    /** `(handle)` once the map is drawn: `{ snapshot(ratio), sitting(ratio) }`. */
+    /** `(handle)` once the map is drawn: `{ snapshot(ratio), sitting(ratio) }`; a snapshot is `{ canvas, complete }`. */
     onready = null,
   } = $props();
 
@@ -103,12 +108,46 @@
     };
   }
 
+  let gone = false;
+  let teardown = null;
   onMount(() => {
-    let gone = false;
-    let teardown = null;
-    build().then((cleanup) => { if (gone) cleanup?.(); else teardown = cleanup; });
-    return () => { gone = true; teardown?.(); };
+    start();
+    return () => { gone = true; clearTimeout(redrawTimer); teardown?.(); teardown = null; };
   });
+  function start() {
+    build().then((cleanup) => { if (gone) cleanup?.(); else teardown = cleanup; });
+  }
+
+  // -- the drawing taken back ----------------------------------------------------------
+
+  /** The browser took this map's drawing back to give it to another map. */
+  let lost = $state(false);
+  /** It lost it again just after being drawn again: the browser has too many maps up, and this says so. */
+  let crowded = $state(false);
+  let redrawnAt = 0;
+  let redrawTimer = null;
+  function onLost() { lost = true; }
+  // drawn again where it stood, once the plate is in sight; not in a loop when the browser keeps taking it
+  $effect(() => {
+    if (!lost || uiState.tool !== 'plate') return;
+    untrack(() => {
+      clearTimeout(redrawTimer);
+      if (Date.now() - redrawnAt < 5000) { crowded = true; return; }
+      redrawTimer = setTimeout(redraw, 300);
+    });
+  });
+  function redraw() {
+    if (gone) return;
+    redrawnAt = Date.now();
+    teardown?.();
+    teardown = null;
+    lost = false;
+    crowded = false;
+    lastPlain = '';
+    laid = new Set();
+    traced = '';
+    start();
+  }
 
   /** The ground's own settings, as one key: a change rebuilds the plain ground, never the map. */
   const plainKey = $derived(JSON.stringify([element.basemap, element.plain ?? {}, element.relief ?? 1, (element.overlays ?? []).includes('relief'), font]));
@@ -142,6 +181,8 @@
       return null;
     }
     const map = engine.impl;
+    map.on('webglcontextlost', onLost);
+    map.on('webglcontextrestored', () => { lost = false; });
     // a plate's map may lean, which the app's other maps only do over their relief
     map.setMaxPitch?.(85);
     map.jumpTo({ center: [start.lon, start.lat], zoom: start.zoom, bearing: start.bearing ?? 0, pitch: start.pitch ?? 0 });
@@ -149,7 +190,6 @@
     map.on('moveend', traceSoon);
     basemaps = createBasemaps(engine);
     showGround(map);
-    for (const id of untrack(() => element.overlays) ?? []) if (id !== 'relief') basemaps.setOverlay(id, true);
     applyGestures(untrack(() => interactive));
     report();
     ready = true;
@@ -175,6 +215,19 @@
     if (key === lastPlain) return;
     lastPlain = key;
     if (String(untrack(() => element.basemap)).startsWith('plain')) untrack(() => showGround(engine.impl));
+  });
+
+  // The key-less layers laid over the ground, switched one by one: the map is never built again for one,
+  // which would flash and ask the browser for one more drawing context.
+  let laid = new Set();
+  $effect(() => {
+    const wanted = new Set((element.overlays ?? []).filter((id) => id !== 'relief'));
+    if (!ready || !basemaps) return;
+    untrack(() => {
+      for (const id of laid) if (!wanted.has(id)) basemaps.setOverlay(id, false);
+      for (const id of wanted) if (!laid.has(id)) basemaps.setOverlay(id, true);
+      laid = wanted;
+    });
   });
 
   // The imagery's tone: faded, greyed, lit, contrasted, tinted, set on the ground's own layer.
@@ -414,7 +467,8 @@
 
   /**
    * The map drawn again at `ratio` times its CSS size, once every tile is in, and
-   * put back. The canvas keeps its size on the page; only its resolution moves.
+   * put back: `{ canvas, complete }`, `complete` false when the wait gave up with
+   * tiles still loading. The canvas keeps its size on the page; only its resolution moves.
    */
   async function snapshot(ratio = 1) {
     const map = engine?.impl;
@@ -428,8 +482,7 @@
     map.setPixelRatio(ratio);
     try {
       map.resize();
-      const { canvas } = await engine.snapshot({ timeout: 20000 });
-      return canvas;
+      return await engine.snapshot({ timeout: 20000 });
     } finally {
       map.setPixelRatio(before);
       map.resize();
@@ -477,7 +530,8 @@
   style:left="{element.box[0] * PX_PER_MM}px" style:top="{element.box[1] * PX_PER_MM}px"
   style:width="{width}px" style:height="{height}px" style:opacity={element.hidden ? 0.15 : element.opacity ?? 1}
   style:visibility={away ? 'hidden' : null}>
-  {#if failed}<p class="refused">This browser cannot draw the map.</p>{/if}
+  {#if failed}<p class="refused">This browser cannot draw the map.</p>
+  {:else if crowded}<p class="refused">The browser has too many maps open to draw this one. Close another tab or tool with a map, then come back to the plate.</p>{/if}
 </div>
 
 <style>

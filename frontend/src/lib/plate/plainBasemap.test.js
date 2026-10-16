@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PALETTES, TINTS, groundPalette, plainLayers, setContours, showPlain, topographic } from './plainBasemap.js';
+import { PALETTES, TINTS, fontStack, groundPalette, plainLayers, setContours, showPlain, topographic } from './plainBasemap.js';
+import { FONTS } from './page.js';
 
 /** A map that keeps its sources and layers, in order. */
 function fakeMap() {
@@ -64,5 +65,20 @@ describe('the topographic grounds', () => {
     expect(ids({ roads: false })).not.toContain('plate-plain-road');
     expect(ids({ rails: false })).toContain('plate-plain-road');
     expect(ids({ rails: false })).not.toContain('plate-plain-rail');
+  });
+});
+
+describe('the font stack the engine writes names in', () => {
+  it('keeps the quotes a family name needs, so the canvas reads it as a font', () => {
+    expect(fontStack('"Source Serif 4", "Noto Sans Arabic"')).toEqual(['"Source Serif 4"', 'Noto Sans Arabic', 'sans-serif']);
+    expect(fontStack('Inter, "Noto Sans Arabic"')).toEqual(['Inter', 'Noto Sans Arabic', 'sans-serif']);
+  });
+
+  it('gives every face a plate offers a stack a canvas font takes whole', () => {
+    // a name the canvas cannot read leaves its font at the 10px default, every place name with it
+    const readable = /^"[^"]+"$|^-?[A-Za-z_][\w-]*(\s+-?[A-Za-z_][\w-]*)*$/;
+    for (const { family } of Object.values(FONTS)) {
+      for (const name of fontStack(family)) expect(name).toMatch(readable);
+    }
   });
 });

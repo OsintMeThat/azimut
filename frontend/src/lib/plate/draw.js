@@ -427,7 +427,7 @@ function drawLegend(ctx, element, context) {
     ctx.fillText('What the map draws is listed here', box.x + pad, box.y + pad + line * 1.75);
   }
   ctx.restore();
-  return pad * 2 + line * (perColumn + 1.25) > box.h + 0.5;
+  return pad * 2 + line * (perColumn + 1.25);
 }
 
 function drawBar(ctx, context, x, top, length, height, segments, label, style, theme, ink = theme.ink) {
@@ -1096,7 +1096,7 @@ function drawKey(ctx, element, context) {
     y += line * Math.max(1, lines.length * 0.8 + 0.2);
   }
   ctx.restore();
-  return y > box.y + box.h + 0.5;
+  return y + pad - box.y;
 }
 
 function drawTable(ctx, element, context) {
@@ -1131,7 +1131,7 @@ function drawTable(ctx, element, context) {
   }
   if (!rows.length && context.editing) { ctx.globalAlpha = 0.5; ctx.fillText('Nothing dated on this map yet', box.x + pad, y + line / 2); }
   ctx.restore();
-  return y > box.y + box.h + 0.5;
+  return y + pad - box.y;
 }
 
 function drawQr(ctx, element, context) {
@@ -1297,12 +1297,13 @@ function drawPageFrame(ctx, spec, context) {
  *   what only the editor shows; `ghosts` draws other days' annotations faintly.
  *   `reveal` (`{ ids, t, mode }`) draws the elements of `ids` as far as a transition
  *   has brought them in, `t` from 0 to 1: faded in, or drawn along (`mode` "draw").
- * @returns {Set<string>} the elements whose words run past their box
+ * @returns {Map<string, number|null>} the elements whose words run past their box, each with the
+ *   height in millimetres it needs when its drawer can say (a legend, a table, the numbered list)
  */
 export function drawPage(ctx, spec, context) {
   const full = { ...context, spec };
   const { scale } = context;
-  const overflow = new Set();
+  const overflow = new Map();
   if (context.paper) drawBackground(ctx, spec, context);
   for (const element of spec.elements) {
     if (context.maps && MAP_KINDS.includes(element.kind) && context.maps[element.id] && !element.hidden && shownOn(element, context.at ?? null, context.place)) {
@@ -1358,7 +1359,9 @@ export function drawPage(ctx, spec, context) {
       case 'brand': drawBrand(ctx, element, full); break;
       default: break;
     }
-    if (ran) overflow.add(element.id);
+    // a drawer that lists rows says the height it needs; the others say whether they ran past
+    if (typeof ran === 'number') { if (ran > boxPx(element, scale).h + 0.5) overflow.set(element.id, Math.ceil((ran / scale) * 10) / 10); }
+    else if (ran) overflow.set(element.id, null);
     ctx.restore();
   }
   drawPageFrame(ctx, spec, full);

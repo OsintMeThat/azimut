@@ -40,6 +40,16 @@ export const FONTS = {
 /** The family a font id names, for a canvas or an engine's text. */
 export const fontFamily = (id) => (FONTS[id] ?? FONTS.inter).family;
 
+/**
+ * The faces a plate writes in, as `document.fonts.load` takes them: its own face and
+ * every element's, in each weight, and upright and italic. A canvas never asks for a
+ * face it lacks, so the page is drawn once they are in, not in the browser's default.
+ */
+export function facesOf(spec) {
+  const ids = new Set([spec?.theme?.font ?? 'inter', ...(spec?.elements ?? []).map((element) => element.font).filter(Boolean)]);
+  return [...ids].flatMap((id) => ['400', '600', '700', 'italic 400'].map((weight) => `${weight} 16px ${fontFamily(id)}`));
+}
+
 export const DEFAULT_THEME = { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' };
 
 /**
@@ -110,6 +120,12 @@ export const ON_THE_GROUND = ['label', 'arrow', 'ring', 'cone', 'zone', 'measure
 export const BOXED_ON_THE_GROUND = ['label', 'symbol'];
 /** The kinds a plate draws as maps, under everything else. */
 export const MAP_KINDS = ['map', 'inset'];
+/** At most this many maps and insets on a plate: each is a live map, and a browser draws only so many at once (`engine/mapplates.MAX_MAPS`). */
+export const MAX_MAPS = 8;
+/** The words that say so, wherever a map would be one too many. */
+export const TOO_MANY_MAPS = `A plate holds ${MAX_MAPS} maps and insets at most: the browser draws only so many at once`;
+/** How many maps and insets `elements` hold. */
+export const mapCount = (elements) => elements.filter((element) => MAP_KINDS.includes(element.kind)).length;
 
 /** The view an inset is drawn at over its map's view `of`: the same centre, its own zoom or four and a half levels out, north up. */
 export const insetView = (inset, of) => ({ lat: of.lat, lon: of.lon, zoom: inset.zoom ?? Math.max(0, of.zoom - 4.5), bearing: 0 });
@@ -390,7 +406,8 @@ export function templateOf(spec) {
   return {
     page: { ...spec.page },
     theme: { ...spec.theme },
-    time: {},
+    // how long a day holds in the video is the layout's; no day of its own is
+    time: spec.time?.hold ? { hold: spec.time.hold } : {},
     ...(spec.transitions ? { transitions: { ...spec.transitions } } : {}),
     elements: spec.elements
       .filter((element) => !ON_THE_GROUND.includes(element.kind) && element.kind !== 'video' && !element.step)
@@ -414,12 +431,12 @@ export function fromTemplate(data, { view, layers = [] } = {}) {
   return {
     page: { ...data.page },
     theme: { ...DEFAULT_THEME, ...data.theme },
-    time: { at: null, trail: true, since: null, window: 7 },
+    time: { at: null, trail: true, since: null, window: 7, ...(data.time?.hold ? { hold: data.time.hold } : {}) },
     ...(data.transitions ? { transitions: { ...data.transitions } } : {}),
     elements: mapsFirst(data.elements
       .filter((element) => !element.of || maps.has(element.of))
       .map((element) => element.kind === 'map'
-        ? { ...element, view: { ...(view ?? { lat: 48.85, lon: 2.35, zoom: 9, bearing: 0 }) },
+        ? { ...element, view: { ...(view ?? { lat: 20, lon: 0, zoom: 1, bearing: 0 }) },
           layers: layers.map((name) => ({ name, hidden: [], stroke: 1, icons: 1 })) }
         : { ...element })),
   };

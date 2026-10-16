@@ -19,9 +19,9 @@ describe('the words of a picked element', () => {
   it('sets the words on the ground as a text\'s: their weight, their case, a box behind them', () => {
     const zone = show({ kind: 'zone', text: 'Depot', colour: '#00aa00' });
     // bold on a halo, as they were always drawn
-    expect(pressed('Weight').find((button) => button.getAttribute('aria-pressed') === 'true').textContent).toBe('Bold');
+    expect(pressed('Text weight').find((button) => button.getAttribute('aria-pressed') === 'true').textContent).toBe('Bold');
     expect(pressed('What stands behind the words').find((button) => button.getAttribute('aria-pressed') === 'true').textContent).toBe('Halo');
-    pressed('Weight').find((button) => button.textContent === 'Regular').click();
+    pressed('Text weight').find((button) => button.textContent === 'Regular').click();
     pressed('Text style').find((button) => button.textContent === 'CAPS').click();
     pressed('What stands behind the words').find((button) => button.textContent === 'Box').click();
     flushSync();

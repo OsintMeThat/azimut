@@ -22,6 +22,9 @@ shown on that step only (or carried to the steps after it), over what the day
 shows. A video only stands on a step: it names a file of the case and the part
 of it the clip runs, and the step lasts as long as its longest clip.
 
+**Every day and step holds its own seconds in the video**: a day its own (`holds`)
+or the plate's (`time.hold`), a step its own, never shorter than its longest clip.
+
 **A day or a step can frame a map its own way** (`framing`, by the day or the
 step's id, then the map's id). One that does not keeps the framing of the one
 played before it, and the first keeps the map's own view.
@@ -40,8 +43,8 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
 import subprocess
-import tempfile
 import warnings
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -244,6 +247,8 @@ class Time(Strict):
     since: Literal["previous"] | Moment | None = None
     #: How many days an event stays on the map after its own, fading.
     window: int = Field(default=7, ge=0, le=365)
+    #: How long a day holds in the video, in seconds, unless it holds its own (`PlateSpec.holds`).
+    hold: FiniteFloat = Field(default=1.0, ge=0.2, le=120)
 
 
 LegendKey = Annotated[str, Field(max_length=330)]
@@ -254,7 +259,7 @@ class Step(Strict):
 
     id: Ident
     name: Annotated[str, Field(max_length=80)] = ""
-    duration: FiniteFloat = Field(default=3, ge=0.5, le=120)
+    duration: FiniteFloat = Field(default=3, ge=0.2, le=120)
     #: How the video comes to it: as the plate's transitions say, or cut straight in.
     transition: Literal["", "none"] = ""
 
@@ -428,6 +433,10 @@ BeatKey = Annotated[str, Field(pattern=r"^(now|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?|
 #: At most this many days and steps frame their maps their own way, each at most this many maps.
 MAX_FRAMED_BEATS = 400
 MAX_FRAMED_MAPS = 20
+#: A beat's own seconds in the video.
+Seconds = Annotated[FiniteFloat, Field(ge=0.2, le=120)]
+#: At most this many maps and insets on one plate: each is a live map the browser draws, and it draws only so many at once.
+MAX_MAPS = 8
 
 
 class PlateSpec(Strict):
@@ -440,6 +449,8 @@ class PlateSpec(Strict):
     framing: dict[BeatKey, Annotated[dict[Ident, View], Field(max_length=MAX_FRAMED_MAPS)]] = Field(
         default_factory=dict, max_length=MAX_FRAMED_BEATS)
     transitions: Transitions = Field(default_factory=Transitions)
+    #: The days that hold their own seconds in the video, by the day ("now" or a moment).
+    holds: dict[Day, Seconds] = Field(default_factory=dict, max_length=MAX_FRAMED_BEATS)
     elements: list[Element] = Field(default_factory=list, max_length=MAX_ELEMENTS)
 
     @model_validator(mode="after")
@@ -454,6 +465,8 @@ class PlateSpec(Strict):
             if element.step and element.step not in steps:
                 raise ValueError(f"the {element.kind} belongs to a step the plate does not hold")
         maps = {element.id for element in self.elements if element.kind == "map"}
+        if sum(1 for element in self.elements if element.kind in ("map", "inset")) > MAX_MAPS:
+            raise ValueError(f"a plate draws at most {MAX_MAPS} maps and insets")
         for element in self.elements:
             if element.of and element.of not in maps:
                 raise ValueError(f"the {element.kind} reads a map the plate does not hold")
@@ -483,6 +496,8 @@ class TemplateData(PlateSpec):
             raise ValueError("a template keeps no steps")
         if self.framing:
             raise ValueError("a template keeps no framing of a day")
+        if self.holds:
+            raise ValueError("a template keeps no day's own time")
         return self
 
 
@@ -537,7 +552,9 @@ def template_of(spec: dict[str, Any]) -> dict[str, Any]:
         if kept.get("src") and kept["src"] != SIGNATURE:
             kept.pop("src")
         elements.append(kept)
-    return {"page": spec.get("page", {}), "theme": spec.get("theme", {}), "time": {}, "elements": elements,
+    # how long a day holds in the video is the layout's; no day of its own is
+    hold = (spec.get("time") or {}).get("hold")
+    return {"page": spec.get("page", {}), "theme": spec.get("theme", {}), "time": {"hold": hold} if hold else {}, "elements": elements,
             **({"transitions": spec["transitions"]} if spec.get("transitions") else {})}
 
 
@@ -614,11 +631,31 @@ def _dpi(image: Image.Image, width_mm: float) -> tuple[int, int]:
     return (dpi, dpi)
 
 
+def even(size: tuple[int, int]) -> tuple[int, int]:
+    """A frame's sides made even, which H.264 in yuv420p needs."""
+    return (size[0] - size[0] % 2, size[1] - size[1] % 2)
+
+
+def keep_frame(image: Image.Image, size: tuple[int, int], path: Path) -> None:
+    """A picture written as a video frame, at the sequence's size and its sides even, so it is let go at once.
+
+    A long video is made of hundreds of these; held in memory together they would take
+    gigabytes, written to disk as they arrive they take one picture's worth.
+    """
+    shown = image if image.size == size else image.resize(size, Image.Resampling.LANCZOS)
+    shown.crop((0, 0, *even(size))).save(path, compress_level=1)
+
+
+def gif_frame(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """A picture as a GIF keeps it: at the sequence's size, in 255 colours, a third of its weight in memory."""
+    shown = image if image.size == size else image.resize(size, Image.Resampling.LANCZOS)
+    return shown.convert("P", palette=Image.Palette.ADAPTIVE, colors=255)
+
+
 def gif_bytes(frames: list[Image.Image], interval: int, durations: list[int] | None = None) -> bytes:
     """A looping GIF, each frame shown `interval` ms (or its own of `durations`), the last held three times as long."""
     size = frames[0].size
-    shown = [(frame if frame.size == size else frame.resize(size, Image.Resampling.LANCZOS))
-             .convert("P", palette=Image.Palette.ADAPTIVE, colors=255) for frame in frames]
+    shown = [frame if frame.mode == "P" and frame.size == size else gif_frame(frame, size) for frame in frames]
     held = list(durations) if durations else [interval] * len(shown)
     held[-1] *= 3
     buf = io.BytesIO()
@@ -626,30 +663,27 @@ def gif_bytes(frames: list[Image.Image], interval: int, durations: list[int] | N
     return buf.getvalue()
 
 
-def mp4_bytes(frames: list[Image.Image], interval: int) -> bytes:
-    """An H.264 video a phone and a slide deck both play, each frame shown `interval` ms."""
+def _ffmpeg() -> str:
     exe = ffmpeg.ffmpeg_path()
     if not exe:
         raise ExportError("making a video needs ffmpeg; the release binaries bring it, a pip install needs it on PATH")
-    size = frames[0].size
-    # Even sides, which H.264 in yuv420p needs.
-    width, height = size[0] - size[0] % 2, size[1] - size[1] % 2
-    with tempfile.TemporaryDirectory(prefix="azimut-plate-") as folder:
-        root = Path(folder)
-        for index, frame in enumerate(frames + [frames[-1]] * 2):
-            shown = frame if frame.size == size else frame.resize(size, Image.Resampling.LANCZOS)
-            shown.crop((0, 0, width, height)).save(root / f"f{index:04d}.png")
-        target = root / "plate.mp4"
-        command = [exe, "-hide_banner", "-loglevel", "error", "-y", "-framerate", f"1000/{interval}",
-                   "-i", str(root / "f%04d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                   "-r", "30", "-movflags", "+faststart", str(target)]
-        try:
-            subprocess.run(command, check=True, capture_output=True, timeout=VIDEO_TIMEOUT)
-        except subprocess.TimeoutExpired as exc:
-            raise ExportError("the video took too long to make") from exc
-        except (OSError, subprocess.CalledProcessError) as exc:
-            raise ExportError("ffmpeg could not make the video") from exc
-        return target.read_bytes()
+    return exe
+
+
+def mp4_bytes(root: Path, count: int, interval: int) -> bytes:
+    """An H.264 video a phone and a slide deck both play, each of the `count` frames kept in `root` shown `interval` ms.
+
+    The frames are `f0000.png` onward, written by `keep_frame`; the last is held three times as long.
+    """
+    exe = _ffmpeg()
+    for extra in (count, count + 1):
+        shutil.copyfile(root / f"f{count - 1:04d}.png", root / f"f{extra:04d}.png")
+    target = root / "plate.mp4"
+    command = [exe, "-hide_banner", "-loglevel", "error", "-y", "-framerate", f"1000/{interval}",
+               "-i", str(root / "f%04d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-r", "30", "-movflags", "+faststart", str(target)]
+    _run(command, "the video took too long to make", "ffmpeg could not make the video")
+    return target.read_bytes()
 
 
 # -- a sequence: the days and steps of a plate, with their clips ---------------------------
@@ -775,52 +809,40 @@ def tween_command(exe: str, pattern: Path, start: int, count: int, target: Path)
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", str(target)]
 
 
-def sequence_mp4(frames: list[Image.Image], beats: list[Beat], overs: list[Image.Image], files: dict[str, Path],
-                 tweens: list[Image.Image] | None = None) -> bytes:
+def sequence_mp4(root: Path, beats: list[Beat], files: dict[str, Path]) -> bytes:
     """A video of a plate's days and steps: each beat its frame held, its clips running in their boxes.
 
-    `files` are the case's videos the clips name, already found inside the case. Each beat is
-    made on its own, after the transition it opens on when it has one (`tweens`), then the
-    beats are joined as they are.
+    The pictures are already kept in `root` by `keep_frame`: a frame per beat (`f0000.png`
+    onward), what stands over the clips (`o…`) and the transitions' frames (`t…`). `files`
+    are the case's videos the clips name, already found inside the case. Each beat is
+    made on its own, after the transition it opens on when it has one, then the beats are
+    joined as they are.
     """
-    exe = ffmpeg.ffmpeg_path()
-    if not exe:
-        raise ExportError("making a video needs ffmpeg; the release binaries bring it, a pip install needs it on PATH")
-    size = frames[0].size
-    width, height = size[0] - size[0] % 2, size[1] - size[1] % 2
+    exe = _ffmpeg()
     sounds: dict[str, bool] = {}
-    with tempfile.TemporaryDirectory(prefix="azimut-plate-") as folder:
-        root = Path(folder)
-        for index, layer in enumerate(overs):
-            shown = layer if layer.size == size else layer.resize(size, Image.Resampling.LANCZOS)
-            shown.crop((0, 0, width, height)).save(root / f"o{index:04d}.png")
-        for index, picture in enumerate(tweens or []):
-            shown = picture if picture.size == size else picture.resize(size, Image.Resampling.LANCZOS)
-            shown.crop((0, 0, width, height)).save(root / f"t{index:04d}.png")
-        listing = []
-        for index, (frame, beat) in enumerate(zip(frames, beats, strict=True)):
-            if beat.tween is not None and tweens:
-                lead = root / f"w{index:04d}.mp4"
-                _run(tween_command(exe, root / "t%04d.png", beat.tween[0], beat.tween[1], lead),
-                     "the video took too long to make", "ffmpeg could not make the video")
-                listing.append(f"file '{lead.name}'")
-            still = root / f"f{index:04d}.png"
-            (frame if frame.size == size else frame.resize(size, Image.Resampling.LANCZOS)).crop((0, 0, width, height)).save(still)
-            clips = []
-            for clip in beat.clips:
-                file = files[clip.src]
-                if clip.sound and clip.src not in sounds:
-                    sounds[clip.src] = has_sound(file)
-                clips.append((clip, file, clip.sound and sounds.get(clip.src, False)))
-            target = root / f"b{index:04d}.mp4"
-            over = root / f"o{beat.over:04d}.png" if beat.over is not None and beat.clips else None
-            _run(beat_command(exe, still, beat.seconds, clips, over, target), "the video took too long to make", "ffmpeg could not make the video")
-            listing.append(f"file '{target.name}'")
-        (root / "beats.txt").write_text("\n".join(listing) + "\n", encoding="utf-8")
-        result = root / "plate.mp4"
-        _run([exe, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(root / "beats.txt"),
-              "-c", "copy", "-movflags", "+faststart", str(result)], "the video took too long to join", "ffmpeg could not join the video")
-        return result.read_bytes()
+    listing = []
+    for index, beat in enumerate(beats):
+        if beat.tween is not None:
+            lead = root / f"w{index:04d}.mp4"
+            _run(tween_command(exe, root / "t%04d.png", beat.tween[0], beat.tween[1], lead),
+                 "the video took too long to make", "ffmpeg could not make the video")
+            listing.append(f"file '{lead.name}'")
+        still = root / f"f{index:04d}.png"
+        clips = []
+        for clip in beat.clips:
+            file = files[clip.src]
+            if clip.sound and clip.src not in sounds:
+                sounds[clip.src] = has_sound(file)
+            clips.append((clip, file, clip.sound and sounds.get(clip.src, False)))
+        target = root / f"b{index:04d}.mp4"
+        over = root / f"o{beat.over:04d}.png" if beat.over is not None and beat.clips else None
+        _run(beat_command(exe, still, beat.seconds, clips, over, target), "the video took too long to make", "ffmpeg could not make the video")
+        listing.append(f"file '{target.name}'")
+    (root / "beats.txt").write_text("\n".join(listing) + "\n", encoding="utf-8")
+    result = root / "plate.mp4"
+    _run([exe, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(root / "beats.txt"),
+          "-c", "copy", "-movflags", "+faststart", str(result)], "the video took too long to join", "ffmpeg could not join the video")
+    return result.read_bytes()
 
 
 def _run(command: list[str], slow: str, failed: str) -> None:

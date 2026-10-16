@@ -43,7 +43,7 @@
     {/if}
     {#if controls.includes('weight')}
       <span class="key">Weight</span>
-      <div class="segments" role="group" aria-label="Weight">
+      <div class="segments" role="group" aria-label="Text weight">
         {#each [[400, 'Regular'], [600, 'Semi'], [700, 'Bold']] as [value, label] (value)}
           <button type="button" aria-pressed={words.weight === value} onclick={() => set('weight', value)}>{label}</button>
         {/each}

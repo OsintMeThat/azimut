@@ -21,10 +21,12 @@ export function mapCredits(element, { providers = [], rows = [], relief = null, 
     parts.push(PLAIN_ATTRIBUTION);
     if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
   } else {
-    parts.push(providers.find((entry) => entry.id === ground)?.attribution ?? '');
-    // a Wayback map names the release it shows, the date a reader can check
+    const said = providers.find((entry) => entry.id === ground)?.attribution ?? '';
+    // a Wayback map names the release it shows, the date a reader can check, in place of the bare name
     const release = releases.find((entry) => entry.release === element.release) ?? (ground === 'esri-wayback' ? releases[0] : null);
-    if (ground === 'esri-wayback' && release?.date) parts.push(`World Imagery Wayback, release of ${release.date}`);
+    const dated = ground === 'esri-wayback' && release?.date ? `World Imagery Wayback, release of ${release.date}` : '';
+    parts.push(dated ? strip(said).split(' · ').filter((part) => part !== 'World Imagery Wayback').join(' · ') : said);
+    if (dated) parts.push(dated);
     if (heights) parts.push(relief.sources?.[0]?.attribution ?? '');
   }
   for (const id of element.overlays ?? []) if (id !== 'relief') parts.push(overlayAttribution(id));

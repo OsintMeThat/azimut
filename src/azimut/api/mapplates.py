@@ -15,6 +15,7 @@ case's videos that run over it, which are read here from the case itself.
 from __future__ import annotations
 
 import json
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -86,6 +87,7 @@ def list_plates(case_id: str) -> list[dict[str, Any]]:
             "title": saved.get("title", path.stem),
             "updated_at": saved.get("updated_at"),
             "paper": (spec.get("page") or {}).get("paper"),
+            "orientation": (spec.get("page") or {}).get("orientation"),
             "maps": sum(1 for element in spec.get("elements", []) if element.get("kind") == "map"),
             "thumb": _thumb_of(case, path.stem),
         })
@@ -191,6 +193,27 @@ async def save_plate_thumb(case_id: str, name: str, file: UploadFile = File()) -
     return {"thumb": thumb}
 
 
+@router.post("/cases/{case_id}/map-plates/{name}/duplicate")
+def duplicate_plate(case_id: str, name: str) -> dict[str, Any]:
+    """A copy of a plate under the next free name, its preview copied with it so the list shows it at once."""
+    case = get_case(case_id)
+    stem = slugify(name, mapplates.FALLBACK)
+    with case.lock:
+        saved = _read(case, stem)
+        if saved is None:
+            raise HTTPException(status_code=404, detail="plate not found")
+        answer = _save(case, f"{saved.get('title') or stem} copy", None, saved["spec"])
+        source = case.resolve_inside(layout.map_plate_thumb_rel(stem))
+        if source.is_file():
+            thumb = layout.map_plate_thumb_rel(answer["name"])
+            replace_atomic(case.resolve_inside(thumb), source.read_bytes())
+            entity = case.find_entity(attr="spec", value=answer["spec_path"])
+            if entity:
+                case.update_entity(entity["id"], {"attrs": {"thumb": thumb}})
+            answer["thumb"] = thumb
+    return answer
+
+
 def clip_files(case: Case, sequence: list[mapplates.Beat]) -> dict[str, Path]:
     """The case's videos a sequence's clips name, each found inside the case; `ExportError` for any that is not."""
     files: dict[str, Path] = {}
@@ -207,6 +230,47 @@ def clip_files(case: Case, sequence: list[mapplates.Beat]) -> dict[str, Path]:
             raise mapplates.ExportError(f"{PurePosixPath(clip.src).name} is not a video")
         files[clip.src] = path
     return files
+
+
+async def _played(case: Case, root: Path, format: str, frames: list[UploadFile], interval: int, beats: str,
+                  overs: list[UploadFile], tweens: list[UploadFile]) -> bytes:
+    """A GIF or an MP4 of a played plate, each picture checked and kept as it is read.
+
+    An MP4's pictures are written into `root` one by one (`mapplates.keep_frame`), so a
+    long video with its transitions never holds more than one of them in memory; a GIF
+    keeps its frames in 255 colours. The first frame sets the size of all the others.
+    """
+    size: tuple[int, int] | None = None
+    kept: list[Any] = []
+
+    async def take(upload: UploadFile, path: Path, *, max_bytes: int, alpha: bool = False) -> None:
+        nonlocal size
+        image = mapplates.picture(await upload.read(max_bytes + 1), max_bytes=max_bytes, max_pixels=mapplates.MAX_FRAME_PIXELS, alpha=alpha)
+        if size is None:
+            if max(image.size) > mapplates.MAX_VIDEO_EDGE:
+                raise mapplates.ExportError("a played plate is at most 3840 pixels across")
+            size = image.size
+        if format == "gif":
+            kept.append(mapplates.gif_frame(image, size))
+        else:
+            await run_in_threadpool(mapplates.keep_frame, image, size, path)
+        image.close()
+        await upload.close()
+
+    for index, frame in enumerate(frames):
+        await take(frame, root / f"f{index:04d}.png", max_bytes=mapplates.MAX_FRAME_BYTES)
+    sequence = mapplates.read_beats(beats, len(frames), len(overs), len(tweens)) if beats else None
+    if format == "gif":
+        durations = [round(beat.seconds * 1000) for beat in sequence] if sequence else None
+        return await run_in_threadpool(mapplates.gif_bytes, kept, interval, durations)
+    if sequence is None:
+        return await run_in_threadpool(mapplates.mp4_bytes, root, len(frames), interval)
+    files = clip_files(case, sequence)
+    for index, over in enumerate(overs):
+        await take(over, root / f"o{index:04d}.png", max_bytes=mapplates.MAX_FRAME_BYTES, alpha=True)
+    for index, tween in enumerate(tweens):
+        await take(tween, root / f"t{index:04d}.png", max_bytes=mapplates.MAX_TWEEN_BYTES)
+    return await run_in_threadpool(mapplates.sequence_mp4, root, sequence, files)
 
 
 @router.delete("/cases/{case_id}/map-plates/{name}")
@@ -260,29 +324,17 @@ async def export_plate(
         raise HTTPException(status_code=422, detail="too many transition frames for one video")
     try:
         if played:
-            pictures = [mapplates.picture(await frame.read(mapplates.MAX_FRAME_BYTES + 1),
-                                          max_bytes=mapplates.MAX_FRAME_BYTES, max_pixels=mapplates.MAX_FRAME_PIXELS)
-                        for frame in frames]
-            if max(pictures[0].size) > mapplates.MAX_VIDEO_EDGE:
-                raise mapplates.ExportError("a played plate is at most 3840 pixels across")
-            sequence = mapplates.read_beats(beats, len(pictures), len(overs), len(tweens)) if beats else None
-            if sequence is None:
-                data = await run_in_threadpool(mapplates.gif_bytes if format == "gif" else mapplates.mp4_bytes, pictures, interval)
-            elif format == "gif":
-                data = await run_in_threadpool(mapplates.gif_bytes, pictures, interval, [round(beat.seconds * 1000) for beat in sequence])
-            else:
-                files = clip_files(case, sequence)
-                above = [mapplates.picture(await over.read(mapplates.MAX_FRAME_BYTES + 1), max_bytes=mapplates.MAX_FRAME_BYTES,
-                                           max_pixels=mapplates.MAX_FRAME_PIXELS, alpha=True) for over in overs]
-                between = [mapplates.picture(await tween.read(mapplates.MAX_TWEEN_BYTES + 1), max_bytes=mapplates.MAX_TWEEN_BYTES,
-                                             max_pixels=mapplates.MAX_FRAME_PIXELS) for tween in tweens]
-                data = await run_in_threadpool(mapplates.sequence_mp4, pictures, sequence, above, files, between)
+            with tempfile.TemporaryDirectory(prefix="azimut-plate-") as folder:
+                data = await _played(case, Path(folder), format, frames, interval, beats, overs, tweens)
         else:
             raw = await frames[0].read(mapplates.MAX_PAGE_BYTES + 1)
             page = mapplates.picture(raw, max_bytes=mapplates.MAX_PAGE_BYTES, max_pixels=mapplates.MAX_PAGE_PIXELS,
                                      alpha=transparent and format == "png")
-            data = (mapplates.pdf_bytes(page, width_mm, height_mm, filename) if format == "pdf"
-                    else mapplates.png_bytes(page))
+            # a print page is tens of millions of pixels: encoded off the loop, so the app keeps answering
+            if format == "pdf":
+                data = await run_in_threadpool(mapplates.pdf_bytes, page, width_mm, height_mm, filename)
+            else:
+                data = await run_in_threadpool(mapplates.png_bytes, page)
     except mapplates.ExportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     name = f"{layout.slugify(filename, mapplates.FALLBACK)}.{format}"

@@ -108,3 +108,89 @@ describe('what belongs to a step', () => {
     expect(document.body.querySelector('input[aria-label="Rotation"]')).toBeNull();
   });
 });
+
+describe('a symbol on the map', () => {
+  it('offers the states a layer\'s marker offers, worded alike, nothing said first', () => {
+    const symbol = show({ kind: 'symbol', element: { symbol: 'pin', status: '' } });
+    const states = [...document.body.querySelectorAll('[aria-label="Symbol state"] button')];
+    expect(states.map((button) => [button.textContent, button.title])).toEqual([
+      ['–', 'No damage said, drawn plain'], ['Damaged', 'Drawn with a stroke across it'], ['Destroyed', 'Drawn with a cross over it']]);
+    expect(states[0].getAttribute('aria-pressed')).toBe('true');
+    press(states[2]);
+    expect(symbol.status).toBe('destroyed');
+    expect([...document.body.querySelectorAll('.rows .key')].filter((key) => ['Symbol', 'Size', 'State'].includes(key.textContent))
+      .every((key) => key.title)).toBe(true);
+  });
+});
+
+describe('hover help on every setting', () => {
+  // what the pointer can rest on: every field, every chooser, every row's key and every button
+  const settings = () => [...document.body.querySelectorAll('.inspector :is(select, input:not([type="file"]), textarea, [role="group"], .key, button.btn)')];
+  const bare = () => settings().filter((node) => !node.closest('[title]')?.getAttribute('title'))
+    .map((node) => node.getAttribute('aria-label') || node.textContent.trim() || node.outerHTML.slice(0, 60));
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await Promise.resolve(); flushSync(); };
+
+  it.each([
+    'text', 'label', 'credits', 'key', 'table', 'qr', 'timeline', 'legend', 'scale', 'north', 'signature', 'brand', 'image', 'shape',
+  ])('says what each setting of a %s does', async (kind) => {
+    const of = kind === 'legend' || kind === 'scale' || kind === 'north' || kind === 'credits' ? { of: 'map' } : {};
+    show({ kind, element: { ...of, border: true, style: 'bubble', at: kind === 'label' ? [2.3, 48.8] : undefined, ...(kind === 'label' ? { of: 'map' } : {}) } });
+    await settle();
+    expect(settings().length).toBeGreaterThan(3);
+    expect(bare()).toEqual([]);
+  });
+
+  it('says what each setting of a video does', async () => {
+    show({ kind: 'video', element: { step: 's1', src: 'media/strike.mp4', clip: [0, 8], sound: true, caption: true } });
+    await settle();
+    expect(settings().length).toBeGreaterThan(8);
+    expect(bare()).toEqual([]);
+  });
+
+  it('finds a setting left without its words', async () => {
+    show({ kind: 'text' });
+    await settle();
+    const stray = document.createElement('select');
+    document.body.querySelector('.inspector .flow').append(stray);
+    await settle();
+    expect(bare()).toHaveLength(1);
+  });
+
+  it.each(['arrow', 'measure', 'ring', 'cone', 'zone', 'line', 'symbol'])('says what each setting of a %s on the map does', async (kind) => {
+    show({ kind, element: { of: 'map', at: [2.3, 48.8], to: [2.4, 48.9], points: [[2.3, 48.8], [2.4, 48.9], [2.35, 48.95]], heads: 'end', mask: { on: true } } });
+    await settle();
+    expect(bare()).toEqual([]);
+  });
+
+  it('says what each setting of a map, its ground, imagery and layers does, and of the page', async () => {
+    const spec = $state(houseLayout());
+    const map = spec.elements.find((element) => element.kind === 'map');
+    map.grid = 'latlon';
+    map.terrain = 1.5;
+    const rows = [{ name: 'front', title: 'Front', categories: [{ name: 'Lines' }] }];
+    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1 }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, grounds: [['plain', 'Plain'], ['esri-world-imagery', 'Imagery']] } });
+    flushSync(); await settle();
+    expect(bare()).toEqual([]);
+    map.basemap = 'esri-world-imagery'; flushSync(); await settle();
+    expect(bare()).toEqual([]);
+    unmount(held); held = null; document.body.innerHTML = '';
+    spec.transitions = { on: true };
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [], plays: true } });
+    flushSync(); await settle();
+    expect(bare()).toEqual([]);
+    unmount(held); held = null; document.body.innerHTML = '';
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: spec.elements.slice(-3).map((element) => element.id) } });
+    flushSync(); await settle();
+    expect(bare()).toEqual([]);
+  });
+
+  it('says it in the words kept for it, and follows a setting whose name changes', async () => {
+    show({ kind: 'text' });
+    await settle();
+    expect(document.body.querySelector('[aria-label="Letter spacing"]').getAttribute('title')).toBe('Space between the letters');
+    // a key says what the control beside it does
+    const key = [...document.body.querySelectorAll('.key')].find((node) => node.textContent === 'Spacing');
+    expect(key.getAttribute('title')).toBe('Space between the letters');
+  });
+});

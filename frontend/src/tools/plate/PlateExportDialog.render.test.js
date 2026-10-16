@@ -4,7 +4,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import PlateExportDialog from './PlateExportDialog.svelte';
 
 let held = null;
-afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; });
+afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; try { localStorage.clear(); } catch { /* none here */ } });
 const settle = async () => { for (let i = 0; i < 5; i += 1) await Promise.resolve(); flushSync(); };
 function show(props) {
   const onexport = vi.fn(async () => {});
@@ -22,7 +22,7 @@ describe('exporting a plate', () => {
     expect(radio('mp4').disabled).toBe(true);
     expect(radio('sheet').disabled).toBe(true);
     go().click(); await settle();
-    expect(onexport).toHaveBeenCalledWith({ format: 'png', quality: 'print', width: 1920, days: null, interval: 900,
+    expect(onexport).toHaveBeenCalledWith({ format: 'png', quality: 'print', side: 1920, days: null,
       filename: 'Map plate', pixels: 0, transparent: false });
     expect(onclose).toHaveBeenCalledOnce();
   });
@@ -36,21 +36,56 @@ describe('exporting a plate', () => {
     expect(document.body.querySelector('select[aria-label="First day"]')).toBeNull();
     expect(document.body.textContent).toContain('Runs 1:23');
     // an MP4 counts its transitions, a GIF has none
-    expect(runtime).toHaveBeenLastCalledWith([], 900, 'mp4');
+    expect(runtime).toHaveBeenLastCalledWith([], 'mp4');
     go().click(); await settle();
     expect(onexport).toHaveBeenCalledWith(expect.objectContaining({ format: 'mp4', days: [] }));
   });
 
-  it('plays the days between the two picked, at the width and pace asked', async () => {
-    const { onexport } = show({ moments: ['2026-09-01', '2026-09-15', '2026-10-01', '2026-10-12'] });
+  it('plays the days between the two picked, at the size asked, each day held the plate\'s seconds', async () => {
+    const onhold = vi.fn();
+    const { onexport } = show({ moments: ['2026-09-01', '2026-09-15', '2026-10-01', '2026-10-12'], hold: 2.5, onhold,
+      page: { paper: 'a4', orientation: 'landscape' } });
     radio('mp4').click(); flushSync();
     const [first] = document.body.querySelectorAll('select');
     first.value = '2026-09-15'; first.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
     expect(document.body.textContent).toContain('3 changes, one picture each');
-    [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim() === '1280 px').click(); flushSync();
+    // the frame takes the page's shape, both sides even
+    const sizes = [...document.body.querySelectorAll('[aria-label="Video size"] button')].map((node) => node.textContent.trim());
+    expect(sizes).toEqual(['1280 × 906', '1920 × 1358']);
+    [...document.body.querySelectorAll('[aria-label="Video size"] button')][0].click(); flushSync();
+    const seconds = document.body.querySelector('input[aria-label="Seconds each day holds"]');
+    expect(seconds.value).toBe('2.5');
+    seconds.value = '4'; seconds.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(onhold).toHaveBeenCalledWith('4');
     go().click(); await settle();
-    expect(onexport).toHaveBeenCalledWith({ format: 'mp4', quality: 'print', width: 1280,
-      days: ['2026-09-15', '2026-10-01', '2026-10-12'], interval: 900, filename: 'Map plate', pixels: 0, transparent: false });
+    expect(onexport).toHaveBeenCalledWith({ format: 'mp4', quality: 'print', side: 1280,
+      days: ['2026-09-15', '2026-10-01', '2026-10-12'], filename: 'Map plate', pixels: 0, transparent: false });
+  });
+
+  it('sizes an upright story video 1080 by 1920, and keeps the format picked for the next export', async () => {
+    show({ moments: ['2026-09-01', '2026-09-15'], page: { paper: 'screen', orientation: 'portrait' } });
+    radio('mp4').click(); flushSync();
+    const sizes = [...document.body.querySelectorAll('[aria-label="Video size"] button')].map((node) => node.textContent.trim());
+    expect(sizes).toEqual(['720 × 1280', '1080 × 1920']);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ moments: ['2026-09-01', '2026-09-15'] });
+    expect(radio('mp4').checked).toBe(true);
+  });
+
+  it('says what runs past its box, and stops an export under way rather than closing', async () => {
+    let finish;
+    const onexport = vi.fn(() => new Promise((resolve, reject) => { finish = reject; }));
+    const oncancel = vi.fn(() => finish(new Error('stopped')));
+    const onclose = vi.fn();
+    held = mount(PlateExportDialog, { target: document.body, props: { moments: [], onexport, oncancel, onclose, past: ['Legend'] } });
+    flushSync();
+    expect(document.body.querySelector('.warn').textContent).toContain('Runs past its box: Legend');
+    go().click(); flushSync();
+    const stop = [...document.body.querySelectorAll('.acts .btn')].find((node) => node.textContent.trim() === 'Stop');
+    stop.click(); await settle();
+    expect(oncancel).toHaveBeenCalledOnce();
+    expect(onclose).not.toHaveBeenCalled();
+    expect([...document.body.querySelectorAll('.acts .btn')].some((node) => node.textContent.trim() === 'Cancel')).toBe(true);
   });
 
   it('names the file, sizes a PNG for a post, keeps its paper see-through and copies the page', async () => {

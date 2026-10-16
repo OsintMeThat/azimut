@@ -1,12 +1,19 @@
 /**
  * The videos a plate plays, and the order it plays its days and steps in.
  *
- * A step holds still for its own seconds, or as long as its longest clip runs; a
- * video only stands on a step. Played, a plate goes through each day, then each
- * step of that day, then the next day: the MP4 is made of those beats, each the page
- * as it stands then, with the step's clips running in their boxes.
+ * Every beat holds its own seconds: a day its own or the plate's, a step its own,
+ * never shorter than its longest clip (a step held longer keeps the clip's last
+ * frame). A video only stands on a step. Played, a plate goes through each day,
+ * then each step of that day, then the next day: the MP4 is made of those beats,
+ * each the page as it stands then, with the step's clips running in their boxes.
  */
-import { STEP_SECONDS, longDay, shownOn, stepsOf } from './page.js';
+import { STEP_SECONDS, dayOf, longDay, shownOn, stepsOf } from './page.js';
+
+/** How long a day holds when neither it nor the plate says, in seconds. */
+export const DAY_SECONDS = 1;
+/** The bounds a beat's own seconds are held in. */
+export const LEAST_SECONDS = 0.2;
+export const MOST_SECONDS = 120;
 
 /** A clip runs at most this long, in seconds. */
 export const MAX_CLIP_SECONDS = 600;
@@ -32,22 +39,38 @@ export const clipSeconds = (element) => {
 /** The videos a step plays: its own, shown and set on a file. */
 export const clipsOf = (elements, step) => elements.filter((element) => element.kind === 'video' && element.step === step.id && element.src && !element.hidden);
 
-/** How long a step holds: its longest clip, else its own seconds. */
+/** The longest clip a step runs: the least it can hold, 0 without one. */
+export const leastSeconds = (step, elements) => Math.max(0, ...clipsOf(elements, step).map(clipSeconds));
+
+/** How long a step holds: its own seconds, never shorter than its longest clip. */
 export function stepSeconds(step, elements) {
-  const clips = clipsOf(elements, step);
-  if (clips.length) return Math.max(...clips.map(clipSeconds));
-  return Number(step.duration) > 0 ? Number(step.duration) : STEP_SECONDS;
+  const own = Number(step.duration) > 0 ? Number(step.duration) : STEP_SECONDS;
+  return Math.max(own, leastSeconds(step, elements));
+}
+
+/** How long every day holds that says nothing of its own: the plate's seconds. */
+export const plateSeconds = (spec) => (Number(spec?.time?.hold) > 0 ? Number(spec.time.hold) : DAY_SECONDS);
+/** How long a day holds (a moment, or null for the plate as it stands): its own seconds, else the plate's. */
+export function daySeconds(spec, day) {
+  const own = Number(spec?.holds?.[dayOf(day)]);
+  return own > 0 ? own : plateSeconds(spec);
+}
+/** A beat's seconds as typed, held in bounds and to the tenth; null when it is not a number. */
+export function boundSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return round(Math.min(MOST_SECONDS, Math.max(LEAST_SECONDS, seconds)));
 }
 
 /**
  * The beats a played plate goes through: each of `days` (a moment, or null for the
  * plate as it stands), then each of its steps, `{ day, step, seconds }` with `step`
- * null for the day itself, held `dayMs` milliseconds.
+ * null for the day itself, each held its own seconds.
  */
-export function beats(spec, days, dayMs) {
+export function beats(spec, days) {
   const out = [];
   for (const day of days) {
-    out.push({ day, step: null, seconds: dayMs / 1000 });
+    out.push({ day, step: null, seconds: daySeconds(spec, day) });
     for (const step of stepsOf(spec, day)) out.push({ day, step: step.id, seconds: stepSeconds(step, spec.elements) });
   }
   return out;

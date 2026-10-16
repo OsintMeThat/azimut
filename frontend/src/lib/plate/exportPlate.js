@@ -15,8 +15,15 @@ export const QUALITIES = {
   screen: { label: 'Screen', dpi: 150 },
   print: { label: 'Print', dpi: 300 },
 };
-/** How wide a played plate is, in pixels. */
-export const WIDTHS = [1280, 1920];
+/** How large a played plate is, by its long side in pixels: 720p and 1080p, a story upright. */
+export const VIDEO_SIDES = [1280, 1920];
+
+/** A played plate's frame at `side` pixels along its long edge, both sides even as H.264 wants. */
+export function videoSize(spec, side) {
+  const { width, height } = pageSize(spec.page);
+  const even = (value) => Math.max(2, Math.round(value / 2) * 2);
+  return width >= height ? { width: even(side), height: even((side * height) / width) } : { width: even((side * width) / height), height: even(side) };
+}
 /** The largest canvas side a browser draws reliably. */
 const MAX_EDGE = 16_000;
 
@@ -86,8 +93,8 @@ export function canvasBlob(canvas, type = 'image/png', quality = 0.92) {
  * holds, the clips running over it, the transition it opens on), `overs`, what stands
  * over those clips, and `tweens`, the frames of its transitions.
  */
-export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, overs = [], tweens = [] },
-  post = api.post) {
+export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, overs = [], tweens = [],
+  signal = undefined }, post = api.post) {
   const body = new FormData();
   frames.forEach((blob, index) => body.append('frames', blob, `${index}.${blob.type === 'image/jpeg' ? 'jpg' : 'png'}`));
   if (beats) {
@@ -101,5 +108,5 @@ export function postExport(caseId, { format, frames, filename, widthMm, heightMm
   body.append('height_mm', String(heightMm));
   body.append('interval', String(interval));
   if (transparent) body.append('transparent', 'true');
-  return post(`/api/cases/${caseId}/map-plates/export`, body);
+  return post(`/api/cases/${caseId}/map-plates/export`, body, signal ? { signal } : undefined);
 }

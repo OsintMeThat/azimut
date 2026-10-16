@@ -97,6 +97,19 @@ describe('drawing a plate page', () => {
     for (const word of ['Esri,', 'Maxar,', 'OpenFreeMap', 'OpenMapTiles']) expect(written).toContain(word);
   });
 
+  it('says the height a legend needs when its rows run past its box, so the box can be fitted to them', () => {
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    const legend = spec.elements.find((element) => element.kind === 'legend');
+    legend.box = [legend.box[0], legend.box[1], legend.box[2], 20];
+    const rows = Array.from({ length: 12 }, (_, index) => ({ key: `l/${index}`, label: `Row ${index}`, kind: 'point', colour: '#c8102e', symbol: 'pin' }));
+    const ran = drawPage(recorder(), spec, { scale: 3, views: {}, legend: { [legend.id]: rows }, credits: {} });
+    const needs = ran.get(legend.id);
+    expect(needs).toBeGreaterThan(20);
+    // fitted to that height, it fits
+    legend.box = [legend.box[0], legend.box[1], legend.box[2], needs];
+    expect(drawPage(recorder(), spec, { scale: 3, views: {}, legend: { [legend.id]: rows }, credits: {} }).has(legend.id)).toBe(false);
+  });
+
   it('sets the credits over a map on a plain band rather than a halo, which blurs letters this small', () => {
     const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
     const map = spec.elements.find((element) => element.kind === 'map');

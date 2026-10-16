@@ -32,6 +32,7 @@
   import PlateWords from './PlateWords.svelte';
   import LayerStyleButton from '../satellite/LayerStyleButton.svelte';
   import { LAYER_HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
+  import { PLATE_HELP, hoverHelp } from '../../lib/plate/plateHelp.js';
 
   let {
     spec,
@@ -51,7 +52,7 @@
     place = null,
     step = null,
     /** The elements whose words run past their box. */
-    overflow = new Set(),
+    overflow = new Map(),
     framing = '',
     onpaper,
     ontheme,
@@ -138,10 +139,12 @@
   function setBoxes(boxes) {
     for (const item of picked) if (boxes[item.id]) item.box = boxes[item.id];
   }
+  /** The box grown to what it writes: a text or a label by its words, a list by the height its rows need. */
   function fitBox() {
-    const height = fittedHeight(element, measure);
+    const height = overflow.get(element.id) ?? fittedHeight(element, measure);
     element.box = [element.box[0], element.box[1], element.box[2], Math.max(4, height)];
   }
+  const fits = (item) => item.kind === 'text' || item.kind === 'label' || overflow.get(item.id) != null;
   function theme(id) {
     ontheme?.(id);
   }
@@ -236,7 +239,8 @@
     : 'Set your handle and your picture in Settings → Publishing → Signature; {handle} and {today} are filled in.');
 </script>
 
-<aside class="inspector" aria-label="Plate inspector">
+<!-- every setting says what it does under the pointer (`lib/plate/plateHelp.js`) -->
+<aside class="inspector" aria-label="Plate inspector" use:hoverHelp>
   <div class="flow">
   {#if alertText}<p class="warn" role="alert">{alertText} <button type="button" class="text-act" onclick={() => (alertText = '')}>OK</button></p>{/if}
   {#if !picked.length}
@@ -258,7 +262,7 @@
         {#each Object.entries(PAPERS) as [id, paper] (id)}<option value={id}>{paper.label}</option>{/each}
       </select>
       {#if spec.page.paper === 'custom'}
-        <span class="key">Size, mm</span>
+        <span class="key" title={PLATE_HELP['key:Size, mm']}>Size, mm</span>
         <span class="pair">
           <input type="number" aria-label="Page width" min="30" max="1200" step="1" value={spec.page.size?.[0] ?? 297}
             onchange={(event) => onpaper({ ...spec.page, size: [Math.max(30, Math.min(1200, number(event.currentTarget.value, 297))), spec.page.size?.[1] ?? 210] })} />
@@ -289,7 +293,7 @@
           <input type="range" aria-label="Gradient direction" min="0" max="360" step="15" bind:value={spec.page.background.angle} /></span>
       {:else if spec.page.background?.kind === 'image'}
         <span class="key">Picture</span>
-        <span class="pair"><button type="button" class="btn btn-xs" onclick={() => backgroundInput?.click()}>{spec.page.background.data ? 'Another' : 'Choose…'}</button>
+        <span class="pair"><button type="button" class="btn btn-xs" title="A picture from this computer, kept inside the plate" onclick={() => backgroundInput?.click()}>{spec.page.background.data ? 'Another' : 'Choose…'}</button>
           {#if spec.page.background.data}<button type="button" class="text-act" onclick={() => (spec.page.background.data = null)}>Remove</button>{/if}</span>
         <input type="file" accept="image/png,image/jpeg,image/webp" hidden bind:this={backgroundInput}
           onchange={(event) => readPicture(event.currentTarget.files?.[0], (data) => (spec.page.background.data = data))} />
@@ -307,7 +311,7 @@
       <select aria-label="Font" bind:value={spec.theme.font}>
         {#each Object.entries(FONTS) as [id, font] (id)}<option value={id}>{font.label}</option>{/each}
       </select>
-      <span class="key">Colours</span>
+      <span class="key" title={PLATE_HELP['key:Colours']}>Colours</span>
       <div class="swatches">
         <label class="swatch"><input type="color" aria-label="Paper colour" bind:value={spec.theme.paper} /><span>Paper</span></label>
         <label class="swatch"><input type="color" aria-label="Ink colour" bind:value={spec.theme.ink} /><span>Ink</span></label>
@@ -361,24 +365,24 @@
     </PlateSection>
     <PlateSection title="Size">
     <div class="tools wide">
-      <button type="button" class="btn btn-xs" onclick={() => setBoxes(sameSize(picked, 'width', picked.at(-1)))}>Same width</button>
-      <button type="button" class="btn btn-xs" onclick={() => setBoxes(sameSize(picked, 'height', picked.at(-1)))}>Same height</button>
+      <button type="button" class="btn btn-xs" title="Each as wide as the one picked last" onclick={() => setBoxes(sameSize(picked, 'width', picked.at(-1)))}>Same width</button>
+      <button type="button" class="btn btn-xs" title="Each as tall as the one picked last" onclick={() => setBoxes(sameSize(picked, 'height', picked.at(-1)))}>Same height</button>
     </div>
     <p class="note">They take the size of the one picked last.</p>
     </PlateSection>
     <PlateSection title="Together">
     <div class="tools wide">
-      <button type="button" class="btn btn-xs" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
-      <button type="button" class="btn btn-xs" onclick={() => ongroup?.(false)}>Ungroup</button>
-      <button type="button" class="btn btn-xs" onclick={() => { const lock = !picked.every((item) => item.locked); for (const item of picked) item.locked = lock; }}>
+      <button type="button" class="btn btn-xs" title="Picked and moved as one from now on (Ctrl+G)" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
+      <button type="button" class="btn btn-xs" title="Each picked on its own again (Ctrl+Shift+G)" onclick={() => ongroup?.(false)}>Ungroup</button>
+      <button type="button" class="btn btn-xs" title="Kept where they are, or free to move again" onclick={() => { const lock = !picked.every((item) => item.locked); for (const item of picked) item.locked = lock; }}>
         <Icon name="lock" size={12} /> {picked.every((item) => item.locked) ? 'Unlock' : 'Lock'}</button>
-      <button type="button" class="btn btn-xs danger" onclick={() => { for (const item of [...picked]) onremove(item); }}><Icon name="trash" size={12} /> Remove</button>
+      <button type="button" class="btn btn-xs danger" title="Take them all off the page" onclick={() => { for (const item of [...picked]) onremove(item); }}><Icon name="trash" size={12} /> Remove</button>
     </div>
     <p class="note">A group is picked and moved as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
     </PlateSection>
   {:else}
     <header>
-      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of} (detail){/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0} in 3D{/if}</h3>
+      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of}{' (detail)'}{/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0}{' in 3D'}{/if}</h3>
       <button type="button" class="icon-act" aria-label="Bring forward" title="Bring forward"
         disabled={!canorder(element, 1)} onclick={() => onorder(element, 1)}><Icon name="chevronUp" size={13} /></button>
       <button type="button" class="icon-act" aria-label="Send back" title="Send back"
@@ -423,11 +427,11 @@
         {#if ending}
           <div class="pick">
             <div class="tools wide">
-              {#if ending === 'onward'}<button type="button" class="btn btn-xs" onclick={() => setEnd('')}>The start</button>{/if}
+              {#if ending === 'onward'}<button type="button" class="btn btn-xs" title="Shown from the plate's first day" onclick={() => setEnd('')}>The start</button>{/if}
               {#if at || ending === 'onward'}
                 <button type="button" class="btn btn-xs" title={at ? `${momentLabel(at)}, the plate's day` : 'The plate is on now'} onclick={() => setEnd(dayOf(at))}>{at ? 'This day' : 'Now'}</button>
               {/if}
-              {#if ending === 'until'}<button type="button" class="btn btn-xs" onclick={() => setEnd('')}>Now</button>{/if}
+              {#if ending === 'until'}<button type="button" class="btn btn-xs" title="Shown up to now" onclick={() => setEnd('')}>Now</button>{/if}
             </div>
             <MonthGrid value={endDay} max={calendarToday()} label={ending === 'onward' ? 'First day shown' : 'Last day shown'} onpick={setEnd} />
           </div>
@@ -439,8 +443,8 @@
     {/if}
 
     {#if overflow.has(element.id)}
-      <p class="warn">The words run past the box.
-        {#if element.kind === 'text' || element.kind === 'label'}<button type="button" class="text-act" onclick={fitBox}>Fit the box</button>{/if}</p>
+      <p class="warn">{['legend', 'table', 'key'].includes(element.kind) ? 'The rows run past the box.' : 'The words run past the box.'}
+        {#if fits(element)}<button type="button" class="text-act" onclick={fitBox}>Fit the box</button>{/if}</p>
     {/if}
 
     {#if element.kind === 'map'}
@@ -451,7 +455,8 @@
           Keep the previous framing</label>
         <p class="note">{held ? 'This day or step shows the map as the one before it does.' : 'Framed here on its own; the steps after it follow, unless they frame it too.'}</p>
       {/if}
-      <button type="button" class="btn btn-sm frame" class:on={framing === element.id} disabled={held} onclick={() => onframe(element)}>
+      <button type="button" class="btn btn-sm frame" class:on={framing === element.id} disabled={held}
+        title={framing === element.id ? 'Stop framing the map' : 'Pan, zoom and turn the map by the hand'} onclick={() => onframe(element)}>
         <Icon name="move" size={12} /> {framing === element.id ? 'Done framing' : 'Frame the map'}</button>
       <div class="rows">
         {#if element.of}
@@ -581,7 +586,8 @@
       {:else}
         {@const tone = element.tone ?? {}}
         <div class="tools wide">
-          {#each Object.entries(TONES) as [id, [label, values]] (id)}<button type="button" class="btn btn-xs" onclick={() => (element.tone = { ...values })}>{label}</button>{/each}
+          {#each Object.entries(TONES) as [id, [label, values]] (id)}<button type="button" class="btn btn-xs" title={id === 'none' ? 'The imagery as it comes' : `The imagery ${label.toLowerCase()}, at one press`}
+            onclick={() => (element.tone = { ...values })}>{label}</button>{/each}
         </div>
         <div class="rows">
           {#each [['opacity', 'Strength', 0, 1, 0.05], ['saturation', 'Colour', -1, 1, 0.05], ['brightness', 'Light', 0.2, 1, 0.05], ['contrast', 'Contrast', -1, 1, 0.05], ['hue', 'Tint', 0, 360, 5]] as [key, label, min, max, step] (key)}
@@ -606,7 +612,7 @@
         {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
           {@const entry = (element.layers ?? []).find((item) => item.name === row.name)}
           <li>
-            <div class="layer"><label><input type="checkbox" checked={!!entry} onchange={() => toggleLayer(row)} />
+            <div class="layer"><label title={PLATE_HELP['Draw the layer']}><input type="checkbox" checked={!!entry} onchange={() => toggleLayer(row)} />
               <span class="name">{row.title}</span>{#if isTracked(row)}<Icon name="clock" size={11} />{/if}</label>
               {#if entry}
                 <button type="button" class="icon-act small" aria-label={`Draw ${row.title} higher`} title="Draw it over the others" onclick={() => moveLayer(entry, -1)}><Icon name="chevronUp" size={11} /></button>
@@ -621,8 +627,8 @@
                       onclick={() => toggleGroup(entry, group.name)}>{group.name}</button>
                   {/each}
                 </div>
-                <label class="weight">Lines <input type="range" min="0.5" max="3" step="0.25" bind:value={entry.stroke} /> <span>{entry.stroke}×</span></label>
-                <label class="weight">Marks <input type="range" min="0.5" max="3" step="0.25" value={entry.icons ?? 1} oninput={(event) => (entry.icons = Number(event.currentTarget.value))} /> <span>{entry.icons ?? 1}×</span></label>
+                <label class="weight" title={PLATE_HELP['Lines on this plate']}>Lines <input type="range" min="0.5" max="3" step="0.25" bind:value={entry.stroke} /> <span>{entry.stroke}×</span></label>
+                <label class="weight" title={PLATE_HELP['Marks on this plate']}>Marks <input type="range" min="0.5" max="3" step="0.25" value={entry.icons ?? 1} oninput={(event) => (entry.icons = Number(event.currentTarget.value))} /> <span>{entry.icons ?? 1}×</span></label>
                 <div class="weight">Here in {#if !entry.colour}<span class="quiet">its own colours</span>{/if}</div>
                 <PlateColour label={`${row.title} colour on this plate`} value={entry.colour ?? '#c8102e'} theme={spec.theme} none onpick={(hex) => (entry.colour = hex)} />
                 <div class="segments thin" role="group" aria-label={`${row.title} lines on this plate`}>
@@ -630,7 +636,7 @@
                     <button type="button" aria-pressed={(entry.dash ?? '') === value} onclick={() => (entry.dash = value)}>{label}</button>
                   {/each}
                 </div>
-                <button type="button" class="text-act" onclick={() => onlabels(element, row)}>Label its named features</button>
+                <button type="button" class="text-act" title="A label beside each named feature in the frame, none covering another" onclick={() => onlabels(element, row)}>Label its named features</button>
               </div>
             {/if}
           </li>
@@ -863,8 +869,8 @@
       <p class="note">Turns with its map.</p>
     {:else if element.kind === 'image'}
       <div class="tools wide">
-        <button type="button" class="btn btn-xs" onclick={openPictures}><Icon name="image" size={12} /> From the case</button>
-        <button type="button" class="btn btn-xs" onclick={() => fileInput?.click()}><Icon name="upload" size={12} /> From this computer</button>
+        <button type="button" class="btn btn-xs" title="A picture of the case, or a proof on the map pointing at its place" onclick={openPictures}><Icon name="image" size={12} /> From the case</button>
+        <button type="button" class="btn btn-xs" title="A picture kept inside the plate, so a template keeps it too" onclick={() => fileInput?.click()}><Icon name="upload" size={12} /> From this computer</button>
         <button type="button" class="btn btn-xs" title="The badge set in Settings → Signature" onclick={() => { element.src = SIGNATURE; element.data = null; }}>Signature</button>
       </div>
       <input type="file" accept="image/png,image/jpeg,image/webp" hidden bind:this={fileInput}
@@ -884,13 +890,13 @@
             <select aria-label="Leader" bind:value={element.leader}><option value="straight">Straight</option><option value="elbow">Elbowed</option><option value="curve">Curved</option></select>
             <button type="button" class="text-act" onclick={() => { element.at = null; element.of = null; }}>Nothing</button>
           {:else}
-            <button type="button" class="btn btn-xs" onclick={() => onpoint?.(element)}>A point of the map…</button>
+            <button type="button" class="btn btn-xs" title="Press the map where it points" onclick={() => onpoint?.(element)}>A point of the map…</button>
           {/if}
         </span>
       </div>
     {:else if element.kind === 'video'}
       <div class="tools wide">
-        <button type="button" class="btn btn-xs" onclick={openVideos}><Icon name="video" size={12} /> {element.src ? 'Another video' : 'Choose a video'}</button>
+        <button type="button" class="btn btn-xs" title="The footage placed on the map first, then every video of the case" onclick={openVideos}><Icon name="video" size={12} /> {element.src ? 'Another video' : 'Choose a video'}</button>
       </div>
       {#if element.src}
         <p class="note file" title={element.src}>{fileName(element.src)}</p>
@@ -900,7 +906,7 @@
         <div class="tools wide">
           <button type="button" class="btn btn-xs" title="The clip starts where the player stands" onclick={() => setClip(trimVideo?.currentTime ?? 0, range[1])}>Start here</button>
           <button type="button" class="btn btn-xs" title="The clip ends where the player stands" onclick={() => setClip(range[0], trimVideo?.currentTime ?? range[1])}>End here</button>
-          <button type="button" class="btn btn-xs" onclick={playClip}><Icon name="play" size={11} /> The clip</button>
+          <button type="button" class="btn btn-xs" title="Plays the clip alone, from its start to its end" onclick={playClip}><Icon name="play" size={11} /> The clip</button>
         </div>
         <div class="rows">
           <span class="key">Start</span>
@@ -939,7 +945,7 @@
             <select aria-label="Leader" bind:value={element.leader}><option value="straight">Straight</option><option value="elbow">Elbowed</option><option value="curve">Curved</option></select>
             <button type="button" class="text-act" onclick={() => { element.at = null; element.of = null; }}>Nothing</button>
           {:else}
-            <button type="button" class="btn btn-xs" onclick={() => onpoint?.(element)}>A point of the map…</button>
+            <button type="button" class="btn btn-xs" title="Press the map where it points" onclick={() => onpoint?.(element)}>A point of the map…</button>
           {/if}
         </span>
       </div>
@@ -1025,7 +1031,7 @@
         <label class="check"><input type="checkbox" checked={!!element.mask?.on} onchange={(event) => (element.mask = { ...(element.mask ?? {}), on: event.currentTarget.checked })} />
           Dim the ground round it</label>
         {#if element.mask?.on}
-          <label class="weight">Dim <input type="range" min="0.1" max="0.9" step="0.05" value={element.mask.darkness ?? 0.55}
+          <label class="weight" title={PLATE_HELP['Dim strength']}>Dim <input type="range" min="0.1" max="0.9" step="0.05" value={element.mask.darkness ?? 0.55}
             oninput={(event) => (element.mask = { ...element.mask, darkness: Number(event.currentTarget.value) })} /></label>
         {/if}
       {/if}

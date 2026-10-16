@@ -15,6 +15,8 @@
    *   boxes (Alt lets go of them). A locked element stays where it is.
    * - **A drag inside a map moves the ground under it**; its frame is moved by its
    *   edge. A double click (or the bar's button) frames it fully: pan, zoom, turn.
+   * - A detail's square on the map it is drawn from is dragged there too: it moves
+   *   what the detail shows, as a drag inside the detail does.
    * - What stands on the ground (a label's point, an arrow, a zone, a line, rings, a
    *   cone, a distance) is dragged there, by its handles or by its body. A text on the
    *   map, a label without a leader, takes its point along when it is moved.
@@ -28,8 +30,8 @@
   import PlateVideo from './PlateVideo.svelte';
   import { drawPage } from '../../lib/plate/draw.js';
   import Icon from '../../components/Icon.svelte';
-  import { BOXED_ON_THE_GROUND, ON_THE_GROUND, decorDensity, fitPage, insetView, PX_PER_MM, pageSize, shownOn, standsOver, zoomPageAt } from '../../lib/plate/page.js';
-  import { bearingTo, circle, distance, project as flatProject, sameView, sector, travel, unproject as flatUnproject } from '../../lib/plate/geo.js';
+  import { BOXED_ON_THE_GROUND, ON_THE_GROUND, decorDensity, facesOf, fitPage, insetView, PX_PER_MM, pageSize, shownOn, standsOver, zoomPageAt } from '../../lib/plate/page.js';
+  import { bearingTo, circle, corners, distance, project as flatProject, sameView, sector, travel, unproject as flatUnproject } from '../../lib/plate/geo.js';
 
   let {
     spec,
@@ -55,7 +57,7 @@
     /** What the page's drawing reads beside the plate (`drawPage`'s context). */
     decor = {},
     /** The elements whose words run past their box, as the last drawing found. */
-    overflow = $bindable(new Set()),
+    overflow = $bindable(new Map()),
     /** `(id, handle)` as each map comes up, for the export. */
     onmap = null,
     /** `[id, label]` of the grounds a plate's maps can be drawn on. */
@@ -152,11 +154,22 @@
   }
   const round = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits;
 
-  // The faces the page writes in, in the weights it uses, before the canvas draws with them.
+  // The faces the page writes in, asked for by name, since a canvas never asks: the page
+  // is drawn again once they are in, and again when any face arrives later (an Arabic name).
+  const faces = $derived(facesOf(spec).join('|'));
   $effect(() => {
-    void spec.theme.font;
-    if (!document.fonts?.ready) return;
-    document.fonts.ready.then(() => { fontsReady += 1; }, () => {});
+    if (!document.fonts?.load) return;
+    let gone = false;
+    Promise.all(faces.split('|').map((face) => document.fonts.load(face).catch(() => [])))
+      .then(() => { if (!gone) fontsReady += 1; });
+    return () => { gone = true; };
+  });
+  $effect(() => {
+    const set = document.fonts;
+    if (!set?.addEventListener) return;
+    const redraw = () => { fontsReady += 1; };
+    set.addEventListener('loadingdone', redraw);
+    return () => set.removeEventListener('loadingdone', redraw);
   });
 
   // Everything that is not a map, drawn again whenever anything it reads moves.
@@ -457,6 +470,54 @@
     window.addEventListener('pointercancel', up);
   }
 
+  /**
+   * The ground each detail shows, outlined on the map it is drawn from, as page points:
+   * what a press there picks, and a drag moves.
+   */
+  const footprints = $derived(spec.elements.filter((item) => item.kind === 'map' && item.of && visible(item) && views[item.id]).flatMap((detail) => {
+    const parent = mapOf(detail);
+    const live = views[detail.id];
+    if (!parent || !visible(parent) || framing === parent.id) return [];
+    const ring = corners(live.view, live.frame).map((point) => onMap(parent, point));
+    return ring.every(Boolean) ? [{ detail, parent, ring }] : [];
+  }));
+
+  /**
+   * A drag on a detail's square moves what the detail shows: its middle follows the
+   * pointer over the map it is drawn from. A press without a drag picks the detail.
+   */
+  function grabFootprint(event, detail, parent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    pick(detail, event.shiftKey);
+    if (detail.locked || event.shiftKey) return;
+    const screen = [event.clientX, event.clientY];
+    const start = toMm(event);
+    const from = { ...framingFor(detail).view };
+    const middle = onMap(parent, [from.lon, from.lat]);
+    if (!middle) return;
+    let started = false;
+    const move = (next) => {
+      if (!started && Math.hypot(next.clientX - screen[0], next.clientY - screen[1]) < DRAG_PIXELS) return;
+      if (!started && lockedMap(detail)) { sayHeld(); up(); return; }
+      started = true;
+      panning = true;
+      const [mx, my] = toMm(next);
+      const ground = groundAt(parent, [middle[0] + mx - start[0], middle[1] + my - start[1]]);
+      if (ground) onmapview(detail, { ...from, lat: Math.max(-85, Math.min(85, round(ground[1], 6))), lon: round(ground[0], 6) });
+    };
+    const up = () => {
+      panning = false;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
   let draft = $state(null);
   /** A zone being drawn: its corners on the ground, on its map. */
   /** A zone or a line being drawn, point by point: its kind, its map, its points on the ground. */
@@ -629,7 +690,8 @@
   <div class="page" bind:this={pageEl} style:width="{width}px" style:height="{height}px"
     style:transform="translate({shown.x}px, {shown.y}px) scale({scale})"
     style:background={paperStyle} role="presentation">
-    {#each maps as element (`${element.id}:${element.basemap}:${element.release ?? ''}:${(element.overlays ?? []).join(',')}`)}
+    <!-- a new ground builds the map again; an overlay switched on or off does not -->
+    {#each maps as element (`${element.id}:${element.basemap}:${element.release ?? ''}`)}
       <PlateMap {element} view={viewOf(element)} {time} {caseId} {rows} {providers} {relief} font={spec.theme.font}
         interactive={framing === element.id} away={!shownOn(element, at, stepPlace)} glide={playing ? glide : 0}
         onview={(view, frame, placer) => reported(element, view, frame, placer)}
@@ -657,6 +719,13 @@
 
       <!-- what stands on the ground is picked by its own drawing, never by a box round it -->
       <svg class="ground-hits" viewBox="0 0 {size.width} {size.height}" preserveAspectRatio="none">
+        <!-- a detail's square, under what stands on the ground: dragged, it moves what the detail shows -->
+        {#each footprints as { detail, parent, ring } (detail.id)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <polygon class="hit-area footprint" class:selected={selection.includes(detail.id)} class:locked={detail.locked} data-footprint={detail.id}
+            points={polygon(ring)} stroke-width={Math.max(1.5, 8 / scale / PX_PER_MM)}
+            onpointerdown={(event) => grabFootprint(event, detail, parent)}><title>{detail.locked ? `${detail.name || 'Detail'} is locked` : `Drag to move what ${detail.name || 'the detail'} shows`}</title></polygon>
+        {/each}
         <!-- a map being framed takes every press on it, its zones' and arrows' included -->
         {#each spec.elements.filter((item) => ON_THE_GROUND.includes(item.kind) && !BOXED_ON_THE_GROUND.includes(item.kind) && visible(item) && framing !== item.of) as element (element.id)}
           {@const drawn = shape(element)}
@@ -736,6 +805,14 @@
         </div>
       {/each}
 
+      <!-- what runs past its box says so where it is, not only in the inspector -->
+      {#each spec.elements.filter((item) => overflow.has(item.id) && visible(item) && !ON_THE_GROUND.includes(item.kind)) as element (element.id)}
+        <button type="button" class="past" style:left={px(element.box[0] + element.box[2])} style:top={px(element.box[1])}
+          style:transform="translate(-100%, 0) scale({1 / scale})" style:transform-origin="100% 0"
+          title={['legend', 'table', 'key'].includes(element.kind) ? 'Its rows run past the box. Pick it to fit the box' : 'Its words run past the box. Pick it to fit the box'}
+          aria-label="Runs past its box" onpointerdown={(event) => { event.stopPropagation(); pick(element, false); }}>!</button>
+      {/each}
+
       {#each guides as guide, index (index)}
         <div class="guide {guide.axis}" style:left={guide.axis === 'x' ? px(guide.at) : 0} style:top={guide.axis === 'y' ? px(guide.at) : 0}></div>
       {/each}
@@ -776,6 +853,8 @@
   .hit-area { fill: transparent; stroke: transparent; pointer-events: visiblePainted; cursor: move; }
   .hit-area.outline { fill: none; pointer-events: stroke; }
   .hit-area.selected { stroke: rgba(59, 130, 246, .6); stroke-dasharray: 2 1; }
+  .hit-area.footprint:hover { fill: rgba(59, 130, 246, .08); stroke: rgba(59, 130, 246, .7); }
+  .hit-area.footprint.locked { cursor: default; }
   .draft { fill: rgba(245, 158, 11, .12); stroke: #f59e0b; stroke-width: .6; stroke-dasharray: 2 1.2; }
   line.draft, polyline.draft { fill: none; }
   .draft-dot { fill: #f59e0b; }
@@ -790,6 +869,8 @@
   .ground.corner { width: 10px; height: 10px; background: #3b82f6; }
   .bar { position: absolute; z-index: 5; transform-origin: 0 0; pointer-events: auto; }
   .guide { position: absolute; background: #ec4899; pointer-events: none; }
+  .past { position: absolute; z-index: 4; display: grid; place-items: center; width: 16px; height: 16px; margin: 0; padding: 0; border: 0;
+    border-radius: 0 0 0 4px; background: #d97706; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; pointer-events: auto; cursor: pointer; }
   .guide.x { top: 0; bottom: 0; width: 1px; }
   .guide.y { left: 0; right: 0; height: 1px; }
   .zoom { position: absolute; right: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 2px;

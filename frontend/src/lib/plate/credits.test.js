@@ -24,4 +24,13 @@ describe('a plate\'s credits', () => {
     expect(mapCredits({ kind: 'map', basemap: 'esri-world-imagery', overlays: [], terrain: 1.5 }, { providers, relief })).toEqual(['Esri', '© Mapterhorn']);
     expect(mapCredits({ kind: 'map', basemap: 'plain', overlays: [] }, { relief })).not.toContain('© Mapterhorn');
   });
+
+  it('names a Wayback map by its dated release, once', () => {
+    const providers = [{ id: 'esri-wayback', attribution: 'Esri, Maxar · World Imagery Wayback' }];
+    const releases = [{ release: 7, date: '2026-09-24' }];
+    const said = plateCredits({ elements: [{ id: 'map', kind: 'map', basemap: 'esri-wayback', release: 7, overlays: [] }] }, { providers, releases });
+    expect(said).toBe('Esri, Maxar · World Imagery Wayback, release of 2026-09-24');
+    // a release whose date is not known yet keeps the provider's own words
+    expect(mapCredits({ kind: 'map', basemap: 'esri-wayback', overlays: [] }, { providers })).toEqual(['Esri, Maxar · World Imagery Wayback']);
+  });
 });

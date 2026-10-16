@@ -45,7 +45,7 @@ def test_a_plate_is_kept_as_its_layout_and_listed(client, owner):
     assert loaded["spec"]["elements"][0]["view"]["zoom"] == 12.4
     page = loaded["spec"]["page"]
     assert (page["paper"], page["orientation"], page["transparent"], page["background"]["kind"]) == ("a4", "landscape", False, "solid")
-    assert loaded["spec"]["time"] == {"at": None, "step": None, "trail": True, "since": None, "window": 7}
+    assert loaded["spec"]["time"] == {"at": None, "step": None, "trail": True, "since": None, "window": 7, "hold": 1.0}
     listed = client.get(f"/api/cases/{owner}/map-plates").json()
     assert [(row["name"], row["maps"], row["thumb"]) for row in listed] == [("Situation", 1, None)]
     entity = Case.open(owner).find_entity(attr="spec", value=".mapplates/Situation.json")
@@ -70,6 +70,24 @@ def test_a_rename_carries_the_preview_and_the_entity(client, owner):
     assert renamed.json()["thumb"] == layout.map_plate_thumb_rel(name)
     assert client.get(f"/api/cases/{owner}/map-plates/Situation").status_code == 404
     assert [row["name"] for row in client.get(f"/api/cases/{owner}/map-plates").json()] == [name]
+
+
+def test_a_duplicate_takes_the_next_free_name_and_its_preview_along(client, owner):
+    save(client, owner)
+    client.put(f"/api/cases/{owner}/map-plates/Situation/thumb", files={"file": ("preview.png", io.BytesIO(png((160, 110))), "image/png")})
+    copied = client.post(f"/api/cases/{owner}/map-plates/Situation/duplicate")
+    assert copied.status_code == 200, copied.text
+    assert copied.json()["name"] == "Situation copy"
+    assert copied.json()["thumb"] == ".mapplates/Situation copy.webp"
+    again = client.post(f"/api/cases/{owner}/map-plates/Situation/duplicate").json()
+    assert again["name"] != "Situation copy"
+    listed = {row["name"]: row["thumb"] for row in client.get(f"/api/cases/{owner}/map-plates").json()}
+    assert listed["Situation copy"] == ".mapplates/Situation copy.webp"
+    loaded = client.get(f"/api/cases/{owner}/map-plates/Situation copy").json()
+    assert loaded["spec"]["elements"][0]["view"]["zoom"] == 12.4
+    entity = Case.open(owner).find_entity(attr="spec", value=".mapplates/Situation copy.json")
+    assert entity["attrs"]["thumb"] == ".mapplates/Situation copy.webp"
+    assert client.post(f"/api/cases/{owner}/map-plates/Nowhere/duplicate").status_code == 404
 
 
 def test_a_rename_onto_another_plate_is_refused(client, owner):
@@ -553,3 +571,35 @@ def test_a_played_plate_opens_its_beats_on_their_transitions(client, owner):
                            check=True, capture_output=True, text=True, timeout=60)
     # half a second, half a second of transition at 30 frames a second, then one second held
     assert 1.9 <= float(json.loads(probe.stdout)["format"]["duration"]) <= 2.15
+
+
+def test_each_day_holds_its_own_seconds_or_the_plate_s(client, owner):
+    spec = plate_spec(time={"hold": 2.5}, holds={"2026-10-14": 6, "now": 0.5})
+    saved = save(client, owner, spec=spec)
+    assert saved.status_code == 200, saved.text
+    loaded = client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]
+    assert loaded["time"]["hold"] == 2.5
+    assert loaded["holds"] == {"2026-10-14": 6, "now": 0.5}
+    for holds in ({"yesterday": 2}, {"2026-10-14": 0.1}, {"2026-10-14": 500}):
+        assert save(client, owner, spec=plate_spec(holds=holds)).status_code == 422
+    # a template keeps the plate's time, never a day's own
+    data = mapplates.template_of(spec)
+    assert "holds" not in data and data["time"] == {"hold": 2.5}
+    assert client.post("/api/templates/map", json={"name": "Held", "data": data}).status_code == 200
+    assert client.post("/api/templates/map", json={"name": "Held", "data": {**data, "holds": {"now": 3}}}).status_code == 422
+
+
+def test_a_plate_draws_a_bounded_number_of_maps(client, owner):
+    maps = [{"id": f"m{index}", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 3}} for index in range(mapplates.MAX_MAPS)]
+    assert save(client, owner, spec={"elements": maps}).status_code == 200
+    one_more = {"id": "inset", "kind": "inset", "box": [0, 0, 10, 10], "of": "m0"}
+    assert save(client, owner, spec={"elements": [*maps, one_more]}).status_code == 422
+
+
+def test_a_video_frame_is_kept_on_disk_at_the_sequence_s_size_its_sides_even(tmp_path):
+    big = Image.new("RGB", (803, 601), (10, 20, 30))
+    mapplates.keep_frame(big, (401, 301), tmp_path / "f0000.png")
+    with Image.open(tmp_path / "f0000.png") as kept:
+        assert kept.size == (400, 300)
+    frame = mapplates.gif_frame(big, (401, 301))
+    assert (frame.mode, frame.size) == ("P", (401, 301))

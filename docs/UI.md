@@ -4635,15 +4635,21 @@ says what it is checking.
 **Map plate**, in Compose, lays a page out round the case's maps, for a report,
 a print or a post. **New plate**, or **Map plate…** in the Map's capture menu, opens
 on the house layout over the ground the Map is looking at, with the layers switched
-on there (the analyst's own layers when none is): a title naming the case by its
+on there (the analyst's own layers when none is; before the Map has looked anywhere,
+the ground the case's layers cover, else the whole world): a title naming the case by its
 `{case}` token, a subtitle, the map, a legend, an inset, a cartouche, the scale, the
 north and the credits, the column beside the map on a wide page and a band under it
 on an upright one. The plate saves itself into the case it was opened in; its name
 is its file, renaming it in the header moves it, and a name another plate holds is
 refused with the reason, the plate keeping the name it had. The case's own column
-folds while a plate is open, and **Plates**, first in the header, goes back to the list. The list of plates offers **Open**, **Duplicate**,
-**Rename** and the Trash; templates are drawn as their page, with **New plate from
-it**, **Edit**, **Rename** and **Delete**.
+folds while a plate is open, and **Plates**, first in the header, goes back to the list,
+the plate's preview drawn first when one is owed. The list shows each plate whole,
+whatever its paper, with its paper and the day it last changed, and offers **Open**,
+**Duplicate** (its preview copied with it), **Rename** and the Trash; templates are
+drawn as their page, with **New plate from it**, **Edit**, **Rename** and **Delete**.
+A plate holds eight maps and insets at most, since a browser draws only so many
+maps at once; a map whose drawing the browser takes back for another is drawn again
+once the plate is in sight, and says so when it keeps losing it.
 
 The page is laid out in millimetres and shown at its true size, scaled to the
 window, so a line weighs on the screen what it weighs on the paper. The wheel
@@ -4684,7 +4690,9 @@ frame is moved by its edge.** A double click frames it fully (scroll to zoom, a
 right-drag or a Ctrl-drag to turn, Esc when done). The arrow keys move, Delete
 removes, Ctrl+C and Ctrl+V copy to this plate or another, Ctrl+D duplicates and
 Ctrl+Z undoes, after a press on the page: a key pressed on a button of the
-inspector never deletes. Escape lets the picked elements go. Maps stay under the
+inspector never deletes. Escape lets the picked elements go. A **Detail**'s square
+on the map it is drawn from is picked by a press and dragged there to move what the
+detail shows, as a drag inside the detail does; a locked detail only picks. Maps stay under the
 page's writing, at the foot of the list. The list, top first, restacks by a drag
 that offers only the places a row can take, and the inspector's arrows step an
 element among the rows listed. A double click names an element, and its row hides
@@ -4756,8 +4764,11 @@ of a zone, an arrow, a line, rings, a cone or a distance, the legend, the table,
 credits, the scale, a video's source line: their size, face, weight, italic or
 capitals, colour, and what stands behind them (nothing, a halo, or a box of a colour).
 Words on the ground are bold on a halo until set otherwise. Texts are also set in their
-spacing and line height, aligned across and down, turned, and faded; a box the words
-run past says so, and **Fit the box** grows it. They fill in `{date}` (the plate's day, else the day its layers
+spacing and line height, aligned across and down, turned, and faded. A box its words
+or rows run past (a text, a label, the legend, the table, the numbered list, the
+credits) carries a **!** at its corner on the page and says so in the inspector,
+whose **Fit the box** grows it to what it holds; the export names it before the file
+goes out. Every setting of the inspector says what it does when the pointer rests on it. They fill in `{date}` (the plate's day, else the day its layers
 last changed), `{today}`, `{updated}`, `{case}`, `{title}`, `{scale}`, `{imagery}` and
 `{handle}`. The credits are what the sources are owed, a copied feature's credit
 among them: they stay on the page, shrink rather than lose a source, and stand on a
@@ -4790,8 +4801,11 @@ asked. So a video shows each day's annotations, and only those.
 
 **A day can hold steps**, played after it one by one. **Step**, in Add or at the end
 of the bar under the page, adds the first; from then on the bar shows the day itself
-and each step with how long it lasts, beside the plate's days, and its **+** adds a
-step after the one shown. A plate with no layer followed over time takes steps too,
+and each step, beside the plate's days, and its **+** adds a step after the one shown.
+**Every tile says how long it holds in the video, and a press on that time sets
+it**: the day its own seconds or, left alone, every day's (one second until set in
+the export), a step its own, never shorter than its longest clip, the clip staying on
+its last frame when the step holds longer. Play holds each one as the video does. A plate with no layer followed over time takes steps too,
 on its one day, and has no bar under the page until it does.
 While a step is shown, a pill over the page says so and **what is added belongs to
 that step**, over what the day shows: the element list holds the day's elements and
@@ -4814,17 +4828,19 @@ the clip's start and end from the player (**Start here**, **End here**) or typed
 minutes and seconds, and plays the clip alone; a new clip takes the first ten seconds.
 **Sound** keeps the video's own sound, at a volume, and is off until asked. **Source**
 writes a line over the bottom of the video, read from the file's record (who posted
-it, where, when) and rewritten at will. The step lasts as long as its longest clip.
+it, where, when) and rewritten at will. The step holds at least as long as its longest clip.
 On the page the video holds on the clip's first frame, under the writing, and runs
 when the plate plays that step. Play goes through each day, then its steps, the
 clips running in their boxes.
 
-**Export** shows the page and its file name first. It writes a PNG at screen or
+**Export** shows the page and its file name first, and keeps the format and sizes
+picked last on this computer. It writes a PNG at screen or
 print resolution or a width in pixels for a post, its paper see-through when asked,
 copies the page to the clipboard, or writes a PDF of the paper size; for a played
 plate, its days as an MP4, a GIF or an evolution sheet, the legend listing what any
-of them draws so it stays still. A plate with steps plays each day and then its
-steps, and says how long the video runs: in an MP4 each step's clips run in their
+of them draws so it stays still. A video is 1280 or 1920 pixels along its long side,
+in the page's shape and both sides even (an upright story is 1080 × 1920). A plate
+with steps plays each day and then its steps, and the dialog says how long the video runs: in an MP4 each step's clips run in their
 boxes, with their sound when it is kept, the frame and the source line over them; a
 GIF shows a clip by its first frame, and the evolution sheet keeps to the days.
 With **Video transitions** on (the page's inspector, once the plate plays), the MP4
@@ -4835,13 +4851,17 @@ and what is written over it placed through its camera as it leans,
 and what is new fades in or is drawn along its lines, or comes at once. The frames play
 at the video's own 30 a second. A step's ⋯ can cut straight into it.
 Play shows the maps moving too. Everything goes into the folder saved for views.
+**Stop** ends an export under way and nothing is written; a map whose tiles had not
+all come in is drawn as it stood and the export says so. A long video is written to
+disk picture by picture as it comes, never held whole in memory.
 The PDF holds the page as one picture at print resolution.
 
 **Keep as template** keeps the layout, its paper and colours, and the pictures kept
 inside it (a logo from this computer, the signature), without the ground, the
-layers or what stands on them. A new plate can start from one. Settings →
-Templates lists them: **Edit** opens one here over the Map's ground, and one goes
-out and comes back as a file.
+layers or what stands on them, but with how long a day holds. A new plate can start
+from one. Settings → Templates lists them: **Edit** opens one here over the Map's
+ground, **Done** goes back where it was opened from, and one goes out and comes back
+as a file.
 
 ## Notebook
 

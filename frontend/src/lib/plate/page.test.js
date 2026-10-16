@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
+import { facesOf, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
   labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE_ZOOM, pageSize, periodSaid, placeOf, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
   turnable, withoutStep, zoomPageAt } from './page.js';
 
@@ -77,6 +77,10 @@ describe('a plate page', () => {
     expect(mainMap(again).view).toEqual({ lat: 1, lon: 2, zoom: 3, bearing: 0 });
     expect(mainMap(again).layers.map((layer) => layer.name)).toEqual(['a', 'b']);
     expect(again.time).toEqual({ at: null, trail: true, since: null, window: 7 });
+    // how long a day holds goes with the layout, never a day's own time
+    const held = templateOf({ ...spec, time: { at: '2026-10-01', hold: 2.5 }, holds: { now: 4 } });
+    expect([held.time, held.holds]).toEqual([{ hold: 2.5 }, undefined]);
+    expect(fromTemplate(held, {}).time.hold).toBe(2.5);
   });
 
   it('keeps a logo inside a template, and the signature, but no picture of a case nor what stands on the ground', () => {
@@ -441,5 +445,14 @@ describe('a text on the map', () => {
     const spec = houseLayout({});
     expect(inLook(spec, 'survey').elements.find((element) => element.id === 'map').basemap).toBe('plain-topo');
     expect(inLook(spec, 'staff').elements.find((element) => element.id === 'map').basemap).toBe('plain-staff');
+  });
+});
+
+describe('the faces a plate writes in', () => {
+  it('names its own face and each element\'s, in every weight and in italic, for the browser to load', () => {
+    const faces = facesOf({ theme: { font: 'serif' }, elements: [{ id: 'a', kind: 'text', font: 'plexmono' }, { id: 'b', kind: 'text' }] });
+    expect(faces).toContain('700 16px "Source Serif 4", "Noto Sans Arabic"');
+    expect(faces).toContain('italic 400 16px "IBM Plex Mono", "Noto Sans Arabic"');
+    expect(faces).toHaveLength(8);
   });
 });

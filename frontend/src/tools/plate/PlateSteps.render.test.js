@@ -23,8 +23,8 @@ describe('the steps of a day', () => {
   it('lists the day, then each step with its length, the one shown marked', () => {
     show();
     expect(tiles().map((tile) => tile.querySelector('.tile-name').textContent)).toEqual(['15 Oct 2026', 'Strike', 'Step 2']);
-    // a step with a clip runs as long as it, one without holds its own seconds
-    expect(tiles().slice(1).map((tile) => tile.querySelector('.time').textContent)).toEqual(['0:08.5', '0:04.5']);
+    // every tile says how long it holds: the day the plate's seconds, a step with a clip at least the clip
+    expect([...document.body.querySelectorAll('.time')].map((time) => time.textContent)).toEqual(['0:01', '0:08.5', '0:04.5']);
     expect(tiles()[1].getAttribute('aria-selected')).toBe('true');
     expect(tiles()[1].querySelector('video').getAttribute('src')).toBe('/files/c1/media/strike.mp4#t=12');
   });
@@ -43,8 +43,14 @@ describe('the steps of a day', () => {
     const field = document.body.querySelector('.fields input');
     field.value = ' Dawn strike '; field.dispatchEvent(new Event('change', { bubbles: true }));
     expect(calls.onchange).toHaveBeenCalledWith('s1', { name: 'Dawn strike' });
-    // a step with a clip holds as long as it, so its seconds are not asked
-    expect(document.body.querySelector('.fields input[type="number"]')).toBeNull();
+    // a step with a clip holds at least as long as it: shorter is taken up to the clip, longer is kept
+    const seconds = document.body.querySelector('.fields input[type="number"]');
+    expect(seconds.value).toBe('8.5');
+    expect(document.body.querySelector('.fm-note').textContent).toContain('At least 0:08.5');
+    seconds.value = '2'; seconds.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(calls.onchange).toHaveBeenLastCalledWith('s1', { duration: 8.5 });
+    seconds.value = '12'; seconds.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(calls.onchange).toHaveBeenLastCalledWith('s1', { duration: 12 });
     const remove = [...document.body.querySelectorAll('.fm-item')].find((item) => item.textContent.includes('Remove'));
     expect(remove.textContent).toContain('Remove it and its 2 elements');
     [...document.body.querySelectorAll('.fm-item')].find((item) => item.textContent.includes('later')).click(); flushSync();
@@ -61,5 +67,19 @@ describe('the steps of a day', () => {
     show({ transitions: false });
     document.body.querySelector('button[aria-label="Set Strike"]').click(); flushSync();
     expect(document.body.querySelector('.cut')).toBeNull();
+  });
+
+  it('holds the day its own seconds from its time, or as every day again', async () => {
+    const ondayhold = vi.fn();
+    show({ daySeconds: 4, dayOwn: true, plateSeconds: 1.5, ondayhold });
+    const time = document.body.querySelector('button[aria-label="How long 15 Oct 2026 holds"]');
+    expect(time.textContent).toBe('0:04');
+    expect(time.classList.contains('own')).toBe(true);
+    time.click(); flushSync();
+    const field = document.body.querySelector('.fields input[type="number"]');
+    field.value = '6'; field.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(ondayhold).toHaveBeenLastCalledWith('6');
+    [...document.body.querySelectorAll('.fields button')].find((node) => node.textContent.includes('As every day')).click();
+    expect(ondayhold).toHaveBeenLastCalledWith(null);
   });
 });

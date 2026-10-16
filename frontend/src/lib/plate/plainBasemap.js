@@ -66,11 +66,20 @@ export function nameField(lang = 'latin') {
   return ['coalesce', ['get', `name:${lang}`], ['get', 'name:latin'], ['get', 'name']];
 }
 
-/** A CSS family list (`Inter, "Noto Sans Arabic"`) as the engine's font stack. */
+/**
+ * A CSS family list (`Inter, "Noto Sans Arabic"`) as the engine's font stack.
+ *
+ * The engine writes the names into a canvas font as they are, so a name that is not
+ * plain words keeps its quotes: `Source Serif 4` unquoted is no font at all, and the
+ * canvas would draw every place name in its own 10-pixel default.
+ */
 export function fontStack(family) {
   if (!family) return FONT;
-  return [...String(family).split(',').map((name) => name.trim().replace(/^"|"$/g, '')).filter(Boolean), 'sans-serif'];
+  const names = String(family).split(',').map((name) => name.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  return [...names.map((name) => (PLAIN_NAME.test(name) ? name : `"${name.replaceAll('"', '')}"`)), 'sans-serif'];
 }
+/** A family name a canvas font reads without quotes: words that each start with a letter. */
+const PLAIN_NAME = /^-?[A-Za-z_][\w-]*(\s+-?[A-Za-z_][\w-]*)*$/;
 
 /** Which places are named at each density: fewer, as usual, or more. */
 const PLACES = { low: ['city', 'town'], normal: ['city', 'town', 'village'], high: ['city', 'town', 'village', 'suburb', 'hamlet'] };
