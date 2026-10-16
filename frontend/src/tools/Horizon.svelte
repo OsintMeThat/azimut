@@ -58,12 +58,22 @@
   import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
   import { sameCuts, skySamples } from '../lib/horizon/traceMarks.js';
+  import { pieceVariants, searchedPair } from '../lib/horizon/cutView.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
   import { MODES, modeOf, modeOfView, modeParams } from '../lib/horizon/modes.js';
   import { photoKept } from '../lib/horizon/savedView.js';
   import { AUTO_REACH, searchHints } from '../lib/horizon/hints.js';
-  import { blinkColours, composePair, composeView, photoTag, standingText, viewFilename } from '../lib/horizon/viewExport.js';
+  import {
+    blinkColours,
+    composePair,
+    composeView,
+    photoTag,
+    SEARCHED_TERRAIN_TAG,
+    standingText,
+    TERRAIN_TAG,
+    viewFilename,
+  } from '../lib/horizon/viewExport.js';
   import { canvasBlob, blobBase64 } from '../lib/map/compareExport.js';
   import { destinationLabel } from '../lib/exportDest.js';
   import { earthCameraLink } from '../lib/maplinks.js';
@@ -432,22 +442,26 @@
    * under the saved view. The pair kinds and the blink draw the photo and the
    * terrain through the same frame. `trace` draws the skyline traced on the
    * photo over it, and `signed` closes the credits with the Azimut lockup.
+   * With `cut`, a pair's terrain is laid piece by piece as the search read a
+   * cut collage (`drawPair`), as Side by side shows it.
    */
-  async function exportView(kind, { keep = false, trace = false, signed = true } = {}) {
+  async function exportView(kind, { keep = false, trace = false, signed = true, cut = false } = {}) {
     if (exportBusy || !viewPane || !view.observer) return;
     const pair = kind === 'row' || kind === 'column' || kind === 'blink';
     if (pair && !(photoOn && overlay.source)) return;
     exportBusy = kind;
     try {
       const owner = await ensureCase();
-      const drawn = await viewPane.exportPicture({
-        kind: kind === 'turn' ? 'turn' : 'view',
-        variants: pair ? [{ photo: 1 }, { photo: 0 }] : [{}],
-      });
+      const drawn = pair
+        ? await drawPair({ cut })
+        : await viewPane.exportPicture({ kind: kind === 'turn' ? 'turn' : 'view', variants: [{}] });
       if (!drawn) throw new Error('the view has not finished landing');
+      const searched = drawn.searched ?? null;
+      const terrainFrame = searched?.frame ?? drawn.frames[1];
+      const terrainTag = searched ? SEARCHED_TERRAIN_TAG : TERRAIN_TAG;
       const title = viewTitle.trim() || views.suggested;
       const common = {
-        layers: drawn.layers,
+        layers: searched?.layers ?? drawn.layers,
         scale: drawn.scale,
         title,
         standing: standingText({ observer: view.observer, camera: drawn.camera, sky: { on: view.skyOn, date: view.skyDate, time: view.skyTime }, kind }),
@@ -459,10 +473,10 @@
       const filename = viewFilename(title, kind);
       let result;
       if (kind === 'blink') {
-        const [photoFrame, terrainFrame] = drawn.frames;
+        const [photoFrame] = drawn.frames;
         const form = new FormData();
         form.append('image_a', await canvasBlob(composeView({ ...common, picture: photoFrame, tag: photoTag(overlay.warped) })), 'photo.png');
-        form.append('image_b', await canvasBlob(composeView({ ...common, picture: terrainFrame, tag: 'Terrain, simulated' })), 'terrain.png');
+        form.append('image_b', await canvasBlob(composeView({ ...common, picture: terrainFrame, tag: terrainTag })), 'terrain.png');
         form.append('animation', 'blink');
         form.append('interval', '800');
         form.append('keep', blinkColours());
@@ -470,7 +484,15 @@
         result = await api.post(`/api/cases/${owner.id}/compare/gif`, form);
       } else {
         const picture = pair
-          ? composePair({ ...common, photo: drawn.frames[0], terrain: drawn.frames[1], layout: kind, reshaped: overlay.warped })
+          ? composePair({
+              ...common,
+              photo: drawn.frames[0],
+              terrain: terrainFrame,
+              layout: kind,
+              reshaped: overlay.warped,
+              terrainTag,
+              seams: searched?.seams ?? [],
+            })
           : composeView({ ...common, picture: drawn.frames[0], tag: reshapedShown() ? photoTag(true) : '' });
         const blob = await canvasBlob(picture);
         result = await api.post(`/api/cases/${owner.id}/plates`, { filename, format: 'png', png: await blobBase64(blob), overwrite: false });
@@ -1074,11 +1096,29 @@
    */
   let side = $state.raw(null);
   let siding = $state(false);
+
+  /**
+   * The photo and the terrain through the same frame (HorizonView
+   * `exportPicture`). With `cut`, a collage whose pieces the search eased is
+   * also drawn as the search read it (lib/horizon/cutView.js): each piece of
+   * the terrain through its own camera, laid between the seams, with the names
+   * and ticks each piece's camera placed, answered as `searched`.
+   */
+  async function drawPair({ cut = false, note = '' } = {}) {
+    const count = overlay.marks.cuts.length + 1;
+    const eased = cut && pieces?.length && count > 1 ? pieces : null;
+    const variants = [{ photo: 1 }, { photo: 0 }, ...(eased ? pieceVariants(count, eased) : [])];
+    const drawn = await viewPane.exportPicture({ kind: 'view', variants, note });
+    if (!drawn || !eased) return drawn;
+    return searchedPair(drawn, { count, pieces: eased, pieceAt: overlay.pieceAt });
+  }
+
   async function showSide() {
     if (siding || !viewPane || !photoOn || !overlay.source) return;
     siding = true;
     try {
-      const drawn = await viewPane.exportPicture({ kind: 'view', variants: [{ photo: 1 }, { photo: 0 }], note: 'Drawing the photo and the terrain…' });
+      const note = pieces?.length ? 'Drawing the photo and the terrain, piece by piece…' : 'Drawing the photo and the terrain…';
+      const drawn = await drawPair({ cut: true, note });
       if (!drawn) throw new Error('the view has not finished landing');
       const strokes = overlay.traceShown && !overlay.traceHidden ? overlay.strokesSeen : [];
       const { lines, inner } = overlay.marks;
@@ -1632,10 +1672,12 @@
               trace={side.trace}
               traceOnTerrain={side.traceOnTerrain}
               ridges={side.ridges}
+              searched={side.searched ?? null}
+              pieceAt={overlay.pieceAt}
               what={overlay.source?.kind === 'video' ? 'Video' : 'Photo'}
               reshaped={overlay.warped}
               saving={exportBusy === 'column'}
-              onsave={() => exportView('column', { trace: true })}
+              onsave={({ cut = false } = {}) => exportView('column', { trace: true, cut })}
               onclose={() => (side = null)}
             />
           {/if}

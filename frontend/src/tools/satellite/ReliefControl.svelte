@@ -5,32 +5,34 @@
    * Sits under the compass because it is the same kind of reading: which way
    * the map looks. Off, the map is the flat picture every capture has always
    * been. On, the relief rises under the imagery, and the middle-drag that
-   * turns the map tilts it too, as in Google Earth. An exaggerated relief says
+   * turns the map tilts it too, as in Google Earth. Switched on, the view leans
+   * to a reading angle at once: relief seen straight down looks like the flat
+   * map, and the switch would seem to do nothing. An exaggerated relief says
    * so in the control itself, since a slope drawn twice its height is a reading
    * aid and not how the ground looks.
    */
-  import { EXAGGERATIONS } from '../../lib/map/relief.js';
+  import { EXAGGERATIONS, READING_TILT } from '../../lib/map/relief.js';
 
   let {
     on = $bindable(false),
     exaggeration = $bindable(1),
     /** The camera's tilt now, in degrees from straight down. */
     pitch = 0,
-    /** Tilt the camera to this many degrees. */
+    /** Tilt the camera to this many degrees, as soon as the relief is in to lean over. */
     ontilt = () => {},
     /** Say something once, the first time relief is switched on. */
     onhint = () => {},
   } = $props();
 
   /** A tilted view goes back flat; a flat one leans to a reading angle. */
-  const READING_TILT = 60;
   const tilted = $derived(pitch > 0);
   const HINTED = 'azimut.relief.hinted';
 
-  /** On, and the first time ever, a word on how the view tilts: nothing on screen shows it. */
+  /** On, the view leans; and the first time ever, a word on how to tilt it by hand. */
   function toggle() {
     on = !on;
     if (!on) return;
+    ontilt(READING_TILT);
     try {
       if (localStorage.getItem(HINTED)) return;
       localStorage.setItem(HINTED, '1');

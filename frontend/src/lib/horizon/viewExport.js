@@ -283,12 +283,29 @@ function drawFooter(ctx, credits, width, height, s, signed) {
   ctx.fillText(credits || '', 16 * s, height - 9 * s, Math.max(0, width - 32 * s - signature));
 }
 
+/** Where a cut collage's pieces meet, white dashes on a dark edge, as the view draws its cuts. */
+function drawSeams(ctx, seams, x0, y0, s) {
+  for (const [width, colour, dash] of [[3.5, 'rgba(0,0,0,.5)', []], [1.5, '#fff', [7, 5]]]) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width * s;
+    ctx.setLineDash(dash.map((step) => step * s));
+    for (const seam of seams) {
+      if (seam.length < 2) continue;
+      ctx.beginPath();
+      seam.forEach((p, i) => (i ? ctx.lineTo(x0 + p.x * s, y0 + p.y * s) : ctx.moveTo(x0 + p.x * s, y0 + p.y * s)));
+      ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+}
+
 /**
  * One panel: the picture, what is written over it, its tag, and its ruler.
  * `picture` is a drawn canvas; `layers` what HorizonView placed for its camera.
  */
-function drawPanel(ctx, picture, layers, x0, y0, s, { tag = '', daylight = true, trace = false } = {}) {
+function drawPanel(ctx, picture, layers, x0, y0, s, { tag = '', daylight = true, trace = false, seams = [] } = {}) {
   ctx.drawImage(picture, x0, y0);
+  if (seams.length) drawSeams(ctx, seams, x0, y0, s);
   drawNames(ctx, layers.labels ?? [], x0, y0, s, daylight);
   if (trace) drawTrace(ctx, layers.trace ?? [], x0, y0, s);
   drawTarget(ctx, layers.target, x0, y0, s);
@@ -316,14 +333,19 @@ export function composeView({ picture, layers = {}, scale, title = '', standing 
 
 /** The tag a photo's panel carries: it says so when the photo was reshaped by hand. */
 export const photoTag = (reshaped) => (reshaped ? 'Photo, reshaped' : 'Photo');
+/** The tag the terrain's panel carries, drawn through one camera or, cut as the search read a collage, piece by piece. */
+export const TERRAIN_TAG = 'Terrain, simulated';
+export const SEARCHED_TERRAIN_TAG = 'Terrain, simulated piece by piece';
 
 /**
  * The photo and the terrain it was matched on, the same frame through the
  * same lens, side by side (`row`) or one over the other (`column`), the ridge
  * lines and the trace on both. A photo pulled by its corners or edges is
- * tagged so (`reshaped`).
+ * tagged so (`reshaped`). A terrain laid piece by piece as the search read a
+ * cut collage (lib/horizon/cutView.js) carries its `terrainTag`, and its
+ * `seams` are drawn on both panels.
  */
-export function composePair({ photo, terrain, layers = {}, scale, layout = 'row', title = '', standing = '', credits = '', daylight = true, trace = false, signed = true, reshaped = false, makeCanvas }) {
+export function composePair({ photo, terrain, layers = {}, scale, layout = 'row', title = '', standing = '', credits = '', daylight = true, trace = false, signed = true, reshaped = false, terrainTag = TERRAIN_TAG, seams = [], makeCanvas }) {
   if (!photo?.width || !terrain?.width) throw new Error('the view must be drawn before it can be exported');
   const s = scale;
   const gap = Math.round(6 * s);
@@ -338,9 +360,9 @@ export function composePair({ photo, terrain, layers = {}, scale, layout = 'row'
   ctx.fillRect(0, 0, output.width, output.height);
   drawHeader(ctx, { title, standing }, width, s);
   const top = HEADER * s;
-  drawPanel(ctx, photo, layers, 0, top, s, { tag: photoTag(reshaped), daylight, trace });
-  if (row) drawPanel(ctx, terrain, layers, photo.width + gap, top, s, { tag: 'Terrain, simulated', daylight, trace });
-  else drawPanel(ctx, terrain, layers, 0, top + panelHeight + gap, s, { tag: 'Terrain, simulated', daylight, trace });
+  drawPanel(ctx, photo, layers, 0, top, s, { tag: photoTag(reshaped), daylight, trace, seams });
+  if (row) drawPanel(ctx, terrain, layers, photo.width + gap, top, s, { tag: terrainTag, daylight, trace, seams });
+  else drawPanel(ctx, terrain, layers, 0, top + panelHeight + gap, s, { tag: terrainTag, daylight, trace, seams });
   drawFooter(ctx, credits, output.width, output.height, s, signed);
   return output;
 }

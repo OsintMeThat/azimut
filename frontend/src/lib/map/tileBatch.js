@@ -114,9 +114,16 @@ function tileError(status, body, statusText = '') {
 }
 
 /**
+ * The status of a relief tile the fallback source drew (api/terrain.py): a
+ * payload transformed on its way, four of AWS's tiles stitched into one.
+ */
+export const FALLBACK_STATUS = 203;
+
+/**
  * One tile through the app, as the engine wants it back (`{ data }`, or an
  * error carrying the status and the reason): in a batch when `batched`, at the
  * address it always had otherwise, or when the app refused the batch whole.
+ * `fallback` says the fallback relief drew it, for a capture that credits it.
  *
  * @param {{ kind: string, providerId: string|null, z: number, x: number, y: number }} asked
  * @param {object} opts
@@ -129,8 +136,10 @@ export async function appTile(asked, { batched, batcher, signal, fetch: fetcher 
   if (batched) {
     try {
       const { status, data } = await batcher.get(batchPath(asked), asked.z, asked.x, asked.y, signal);
-      if (status !== 200) throw tileError(status, new Blob([data], { type: 'text/plain' }));
-      return { data };
+      if (status !== 200 && status !== FALLBACK_STATUS) {
+        throw tileError(status, new Blob([data], { type: 'text/plain' }));
+      }
+      return { data, fallback: status === FALLBACK_STATUS };
     } catch (error) {
       // a request refused whole is no reason to leave a hole: ask this tile alone
       if (!error?.batch) throw error;
@@ -138,7 +147,7 @@ export async function appTile(asked, { batched, batcher, signal, fetch: fetcher 
   }
   const response = await fetcher(singleUrl(asked), { signal });
   if (!response.ok) throw tileError(response.status, await response.blob(), response.statusText);
-  return { data: await response.arrayBuffer() };
+  return { data: await response.arrayBuffer(), fallback: response.status === FALLBACK_STATUS };
 }
 
 /**

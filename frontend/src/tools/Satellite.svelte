@@ -42,9 +42,11 @@
     createReliefWheel,
     startGroundPan,
     startRectDrag,
+    tiltFromKey,
     turnFromKey,
     turnFromPress,
   } from '../lib/map/gestures.js';
+  import { exaggerationOf } from '../lib/map/relief.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
@@ -173,13 +175,16 @@
   let markerLatLng = $state(null); // {lat, lon} of the moved pin
   let bearing = $state(0);
   // The relief under the imagery (lib/map/relief.js): off until asked for, and
-  // only then does the map tilt, by Ctrl+drag or from its control.
+  // only then does the map tilt, by a middle- or Shift+drag, Page Up and Down,
+  // or from its control.
   let reliefOn = $state(false);
   let reliefReady = $state(false);
   let exaggeration = $state(1);
   let pitch = $state(0);
-  // A tilt the address asked for, held until the relief is there to lean over.
-  let pendingTilt = null;
+  // A tilted camera the address or a saved capture asked for, held until the
+  // relief is there to lean over: `{ lat, lon, zoom, bearing, pitch }`, where
+  // what is left out stays as the map has it.
+  let pendingCamera = $state(null);
   // The ground height at the point the readout names, from the relief drawn.
   let groundHeight = $state(null);
   // Middle-drag rotates the map around the grabbed point.
@@ -677,6 +682,9 @@
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
     // Shift and an arrow turn the map, as on every map in the app
     if (!typing && turnFromKey(engine, e)) return;
+    // Page Up and Down tilt it over relief, unless they are scrolling a panel
+    const onMap = e.target === document.body || Boolean(mapEl?.contains(e.target));
+    if (!typing && reliefReady && onMap && tiltFromKey(engine, e)) return;
     // Enter finishes a measured line or area, or a profile line: their points
     // become handles, and a profile reads the ground
     if (!typing && e.key === 'Enter' && (profile.finish() || (measure.mode && measure.finish()))) {
@@ -897,20 +905,49 @@
   $effect(() => {
     if (!mapReady || bearingApplied) return;
     bearingApplied = true;
-    if (openingView?.bearing) setBearing(openingView.bearing);
     // A tilt in the address is a view of the relief, so the relief comes back
-    // with it; the camera leans once the terrain is there to lean over.
+    // with it and the whole camera is set at once over the terrain: turned
+    // first on the flat map, the zoom would settle on a whole level and the
+    // view come back from another height.
     if (openingView?.pitch != null) {
-      reliefOn = true;
-      pendingTilt = openingView.pitch;
+      const { lat, lon, zoom, bearing: turned, pitch: tilt, elevation } = openingView;
+      leanTo({ lat, lon, zoom, bearing: turned, pitch: tilt, elevation });
+      return;
     }
+    if (openingView?.bearing) setBearing(openingView.bearing);
   });
+
+  /** Switch the relief on and set this camera over it once it is there (`pendingCamera`). */
+  function leanTo(camera) {
+    reliefOn = true;
+    pendingCamera = camera;
+  }
+
   $effect(() => {
-    if (!reliefReady || pendingTilt == null || !engine) return;
-    const tilt = pendingTilt;
-    pendingTilt = null;
-    // once the relief under the centre is in, or the centre is seated at sea level
-    engine.idle().then(() => engine?.setPitch(tilt));
+    const wanted = pendingCamera;
+    if (!reliefReady || !wanted || !engine) return;
+    // once the relief under the centre is in, or the centre is seated at sea
+    // level; in one jump, so the camera settles once and where it was asked.
+    // Held until then, so the address never names the view on its way there.
+    engine.idle().then(() => {
+      // a camera asked for meanwhile is the one that lands
+      if (!engine || pendingCamera !== wanted) return;
+      const now = engine.camera();
+      engine.setCamera({
+        lat: wanted.lat ?? now.lat,
+        lon: wanted.lon ?? now.lon,
+        zoom: wanted.zoom ?? engine.exactZoom(),
+        bearing: wanted.bearing ?? now.bearing,
+        pitch: wanted.pitch ?? now.pitch,
+        // with it, the eye stands exactly where it stood (`facade.js` setCamera)
+        elevation: wanted.elevation,
+      });
+      pendingCamera = null;
+    });
+  });
+  // a camera the relief never came up for (switched off, or a widget basemap) is dropped
+  $effect(() => {
+    if (!reliefOn) pendingCamera = null;
   });
 
   /**
@@ -936,19 +973,31 @@
   });
 
   /**
+   * The zoom the view is written down at: over relief with its fraction, which
+   * there is part of the camera (`writtenZoom`), as the centre's height is.
+   * Handed the settled view, so a caller that tracks it re-reads both as the
+   * camera comes to rest.
+   */
+  function zoomNow(settled) {
+    return reliefOn && engine ? engine.exactZoom() : settled.zoom;
+  }
+
+  /**
    * This window's view, kept in its own address.
    *
    * Settled, never navigated to: panning a map is not going somewhere, and a
    * back button holding four hundred camera positions is worse than useless.
+   * Not while a tilted camera waits for its relief: the address still holds it.
    */
   $effect(() => {
-    if (uiState.tool !== 'satellite' || !mapReady) return;
+    if (uiState.tool !== 'satellite' || !mapReady || pendingCamera) return;
     const params = viewParams({
       lat: center.lat,
       lon: center.lon,
-      zoom: center.zoom,
+      zoom: zoomNow(center),
       bearing,
       pitch: reliefOn ? pitch : null,
+      elevation: reliefOn ? engine?.centreElevation() : null,
       provider: providerId,
     });
     if (windowNumber) params.w = String(windowNumber);
@@ -1042,9 +1091,10 @@
     const params = viewParams({
       lat: center.lat,
       lon: center.lon,
-      zoom: center.zoom,
+      zoom: zoomNow(center),
       bearing,
       pitch: reliefOn ? pitch : null,
+      elevation: reliefOn ? engine?.centreElevation() : null,
       provider: providerId,
     });
     params.w = String(nextWindowNumber());
@@ -1497,6 +1547,22 @@
       return;
     }
     if (!engine) return;
+    // A tilted capture opens as it was drawn, leaning over its relief; a flat
+    // one straight down, whatever the map was doing. A place is a point, not a
+    // view, and keeps the camera's tilt.
+    if (row.pitch > 0 && !shown.provider?.widget) {
+      exaggeration = exaggerationOf(row.exaggeration);
+      leanTo({
+        lat: row.lat,
+        lon: row.lon,
+        zoom: Number(row.zoom) || engine.exactZoom(),
+        bearing: row.bearing ?? 0,
+        pitch: row.pitch,
+        elevation: row.elevation ?? undefined,
+      });
+      return;
+    }
+    if (row.kind === 'capture' && pitch > 0) engine.setPitch(0);
     engine.setView(row, Number(row.zoom) || engine.getZoom());
     setBearing(row.bearing);
   }
@@ -1973,9 +2039,13 @@
   // tool*: which other modes it turns off, and the left-drag that draws an area
   // — the same gesture as the capture marquee, sharing its live outline.
 
-  function toggleGridMode() {
-    arm(modes, 'grid');
-  }
+  // A grid is a flat lattice of cells, swept straight down one cell at a time,
+  // which a map leaning over relief cannot lay out: switching the 3D map on
+  // closes it, and its rail seat stays shut while the relief is on.
+  const GRID_FLAT_ONLY = 'Grid Search works on the flat map. Turn 3D off to use it';
+  $effect(() => {
+    if (reliefOn && grid.on) modes.grid.close();
+  });
 
   // rectangle area: drag a box, mirroring the capture marquee and reusing
   // selRect for the live outline. Armed while the rectangle tool is chosen.
@@ -2496,7 +2566,7 @@
           state={{
             measure: { on: modes.measure.isOn() },
             profile: { on: profile.on },
-            grid: { on: grid.on },
+            grid: { on: grid.on, disabled: reliefOn, title: reliefOn ? GRID_FLAT_ONLY : undefined },
             sky: { on: sky.on },
             reference: {
               on: refs.open.length > 0,
@@ -2733,6 +2803,7 @@
           bind:customHeight={capture.customH}
           bind:resolution={capture.resolution}
           bind:scaleNorth={capture.scaleNorth}
+          tilted={reliefOn && pitch > 0}
           openScreenshot={() => (capture.shotOpen = true)}
           openExtensionGate={() => (capture.extGate = true)}
           openFigure={isSentinel ? openFigure : null}

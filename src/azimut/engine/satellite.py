@@ -587,6 +587,10 @@ def _saved_row(
         "thumbnail": thumbnail,
         "zoom": attrs.get("zoom") if attrs.get("zoom") is not None else source.get("zoom"),
         "bearing": attrs.get("bearing") if attrs.get("bearing") is not None else source.get("bearing"),
+        # a tilted capture's camera, which the map leans back to when it is opened
+        "pitch": attrs.get("pitch") if attrs.get("pitch") is not None else source.get("pitch"),
+        "exaggeration": (source.get("relief") or {}).get("exaggeration"),
+        "elevation": source.get("elevation"),
         "provider": source.get("provider_label") or source.get("provider"),
         "site": attrs.get("site") or source.get("site"),
         "source_url": attrs.get("source_url") or source.get("source_url"),

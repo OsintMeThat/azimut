@@ -505,6 +505,8 @@ def apply_style(target: dict[str, Any], changes: dict[str, Any]) -> None:
 
 #: How finely a tracked layer dates its states.
 PRECISIONS = ("day", "time")
+#: The most days an event can be kept on the map after its own; with no window it stays.
+MAX_WINDOW = 365
 #: The states one feature keeps.
 MAX_STATES = 500
 _INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$")
@@ -530,7 +532,9 @@ def zone_of(name: str) -> str:
 
 
 def set_track(spec: dict[str, Any], changes: dict[str, Any]) -> None:
-    """Switch time tracking on or off, or change its precision or clock.
+    """Switch time tracking on or off, or change its precision, its clock, or how
+    many days its events stay on the map after their own ("always" for good, which
+    is also what a layer that never said reads as).
 
     Off hides the history and never deletes it: switched back on, every state is
     where it was.
@@ -544,6 +548,14 @@ def set_track(spec: dict[str, Any], changes: dict[str, Any]) -> None:
         settings["precision"] = changes["precision"]
     if "zone" in changes:
         settings["zone"] = zone_of(changes["zone"])
+    if "window" in changes:
+        window = changes["window"]
+        if window == "always":
+            settings.pop("window", None)
+        elif isinstance(window, int) and not isinstance(window, bool) and 0 <= window <= MAX_WINDOW:
+            settings["window"] = window
+        else:
+            raise maplayers.LayerError(f"keep events for good, or 0 to {MAX_WINDOW} days")
     spec["track"] = settings
 
 
@@ -609,6 +621,8 @@ def _mirror(feature: dict[str, Any]) -> None:
         properties["date"] = states[0]["at"][:10]
     else:
         properties.pop("date", None)
+    if states[-1].get("gone"):
+        properties.pop("end_unknown", None)
     if states[-1].get("gone") and states[-1]["at"][:10] > str(properties.get("date") or ""):
         properties["date_end"] = states[-1]["at"][:10]
     else:
@@ -722,6 +736,7 @@ def set_end(feature: dict[str, Any], at: str) -> None:
     """Say when a feature leaves the map: "" for still there, else a moment after its last change."""
     properties = feature["properties"]
     at = instant(at)
+    properties.pop("end_unknown", None)
     states = properties.get("states") or []
     ended = bool(states) and bool(states[-1].get("gone"))
     if not at:
@@ -736,6 +751,13 @@ def set_end(feature: dict[str, Any], at: str) -> None:
         states.pop()
     properties.pop("date_end", None)
     write_state(feature, at, gone=True)
+
+
+def set_end_unknown(feature: dict[str, Any]) -> None:
+    """Say nobody knows when a feature left the map. It has no end, so it is drawn
+    as one still there, and says its end is unknown rather than claiming it."""
+    set_end(feature, "")
+    feature["properties"]["end_unknown"] = True
 
 
 def as_of(feature: dict[str, Any], at: str) -> dict[str, Any] | None:
@@ -807,7 +829,7 @@ def _undated(feature: dict[str, Any], *, geometry: dict[str, Any] | None = None,
 def _time_fields(feature: dict[str, Any]) -> dict[str, Any]:
     """What an undo puts back of a feature's history."""
     properties = feature["properties"]
-    return {field: copy.deepcopy(properties[field]) for field in ("states", "date", "date_end", "status")
+    return {field: copy.deepcopy(properties[field]) for field in ("states", "date", "date_end", "status", "end_unknown")
             if field in properties}
 
 
@@ -882,7 +904,7 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
     """Change one feature. On a tracked layer `at` dates the change of shape or
     status, and `drop_state` takes the state at `at` out of its history.
     `start` and `end` say when it first shows and when it leaves the map, ""
-    for always and still there.
+    for always and still there; `end_unknown` says nobody knows when it left.
 
     With no `at`, a feature with a history changes on every day it has, which
     only what never changed by date can (`_undated`); on a layer no longer
@@ -897,7 +919,8 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
         properties = stored["properties"]
         changes = dict(changes)
         start, end = changes.pop("start", None), changes.pop("end", None)
-        if (start is not None or end is not None) and not track(spec):
+        unknown = bool(changes.pop("end_unknown", None))
+        if (start is not None or end is not None or unknown) and not track(spec):
             raise maplayers.LayerError("switch “Track over time” on to say when it shows")
         moment = _timed(spec, stored, changes.pop("at", None))
         drop = bool(changes.pop("drop_state", False))
@@ -946,6 +969,8 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
             set_start(stored, start)
         if end is not None:
             set_end(stored, end)
+        if unknown:
+            set_end_unknown(stored)
         # Choosing an app symbol replaces the imported pictogram on this marker.
         if "symbol" in changes or "colour" in changes:
             properties["icon"] = ""
@@ -1115,10 +1140,17 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
 
     A move skips the markers that follow a case item, since their point is that
     item's, and says how many it left where they were. On a tracked layer `at`
-    dates a move or a status, as for one feature (`update_marker`).
+    dates a move or a status, as for one feature (`update_marker`), and `start`
+    and `end` give every feature the same first and last day, or `end_unknown`
+    the same unknown end; one that cannot take it refuses the whole edit.
     """
+    changes = dict(changes)
+    start, end = changes.pop("start", None), changes.pop("end", None)
+    unknown = bool(changes.pop("end_unknown", None))
     with case.lock:
         spec = _spec(case, layer)
+        if (start is not None or end is not None or unknown) and not track(spec):
+            raise maplayers.LayerError("switch “Track over time” on to say when it shows")
         features = spec["document"]["features"]
         chosen = set(keys)
         by_key = {f["properties"]["key"]: f for f in features}
@@ -1185,6 +1217,12 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
                                  and not (props.get("states") and field == "date")})
             if "symbol" in changes or "colour" in changes:
                 props["icon"] = ""
+            if start is not None:
+                set_start(by_key[key], start)
+            if end is not None:
+                set_end(by_key[key], end)
+            if unknown:
+                set_end_unknown(by_key[key])
         _save(case, layer, spec)
         answer = read(case, layer)
         if offset:
@@ -1281,7 +1319,7 @@ def restore_selection(case: Case, layer: str, batch_id: str) -> dict[str, Any]:
                 by_key[entry["key"]]["geometry"] = entry["geometry"]
                 if "time" in entry:
                     properties = by_key[entry["key"]]["properties"]
-                    for field in ("states", "date", "date_end", "status"):
+                    for field in ("states", "date", "date_end", "status", "end_unknown"):
                         properties.pop(field, None)
                     properties.update(copy.deepcopy(entry["time"]))
         groups = _groups(spec)

@@ -436,11 +436,17 @@ describe('editing a layer followed over time', () => {
     api.get.mockResolvedValue({ layer: TRACKED, document: { features: [feature('front'), feature('base')] } });
   });
 
-  it('edits plainly at now, so a feature is corrected rather than given a state', async () => {
-    const editor = store(); await editor.open(TRACKED);
-    expect(editor.cursor).toBeNull();
+  it('dates an edit to today when nobody moved the cursor, so it never slides to the next day', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T21:30:00Z'));
+    const tokyo = { ...TRACKED, track: { ...TRACKED.track, zone: 'Asia/Tokyo' } };
+    api.get.mockResolvedValue({ layer: tokyo, document: { features: [feature('front'), feature('base')] } });
+    const editor = store(); await editor.open(tokyo);
+    // past midnight in Tokyo: the layer's day is the 16th
+    expect(editor.cursor).toBe('2026-10-16');
     await editor.moveFeatures(['front'], [0, 1]);
-    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], offset: [0, 1] });
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['front'], offset: [0, 1], at: '2026-10-16' });
+    vi.useRealTimers();
   });
 
   it('dates a move to the cursor, or sends it with no date when none is chosen', async () => {
@@ -463,7 +469,10 @@ describe('editing a layer followed over time', () => {
       { at: '2026-10-08', geometry: { type: 'Point', coordinates: [2.36, 48.85] } }] });
     api.get.mockResolvedValue({ layer: TRACKED, document: { features: [moved, feature('base')] } });
     const editor = store(); await editor.open(TRACKED);
-    // at now edits carry no date: the shape moved on the 8th is held
+    // dated, as the editor opens, nothing is held
+    expect(editor.dateHolds('front')).toBe('');
+    // with no date chosen edits carry none: the shape moved on the 8th is held
+    editor.timeMode = 'fix';
     expect(editor.dateHolds('front')).toBe('2026-10-08');
     expect(editor.dateHolds('base')).toBe('');
     editor.heldBack(['front']);
@@ -556,6 +565,28 @@ describe('Ctrl+Z in the layer editor', () => {
     await editor.whenSaved(); await editor.whenSaved();
     expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [at('one', [2, 49])], drop: [] });
     expect(editor.features[0].geometry.coordinates).toEqual([2, 49]);
+  });
+
+  it('gives a selection one first or last day in one request, taken back in one step', async () => {
+    const dated = (key, date) => ({ ...feature(key), properties: { ...feature(key).properties, date } });
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [dated('one', '2026-09-28'), dated('two', '2026-09-28')] } });
+    api.post.mockImplementation(async (path, body) => (path.endsWith('/selection')
+      ? { layer: ROW, document: { features: [dated('one', '2026-09-30'), dated('two', '2026-09-30')] } }
+      : { layer: ROW, document: { features: body.put ?? [] } }));
+    const editor = store(); await editor.open(ROW);
+    editor.toggleSelected('one', ['one', 'two']); editor.toggleSelected('two', ['one', 'two'], true);
+    await editor.setSelectionWhen({ start: '2026-09-30' });
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['one', 'two'], changes: { start: '2026-09-30' } });
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved(); await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert',
+      { put: [dated('one', '2026-09-28'), dated('two', '2026-09-28')], drop: [] });
+    expect(editor.canUndo).toBe(false);
+    await editor.setSelectionWhen({ end_unknown: true });
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/selection', { keys: ['one', 'two'], changes: { end_unknown: true } });
+    api.patch.mockResolvedValueOnce({ layer: ROW, marker: dated('one', '2026-09-28') });
+    await editor.setEndUnknown('one');
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/one', { end_unknown: true });
   });
 
   it('brings a removed marker back, and takes back a marker just added', async () => {
@@ -658,14 +689,36 @@ describe('what an edit changed', () => {
     expect(editor.moments).toEqual(['2026-08-24', '2026-09-01', '2026-10-14']);
   });
 
-  it('opens on now, wherever an earlier press left the layer cursor', async () => {
+  it('opens on today, wherever an earlier press left the layer cursor, and holds that moment', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-16T09:15:00Z'));
     let at = '2026-09-01';
     layers.time = () => ({ at });
     layers.setTime = vi.fn((name, patch) => { at = patch.at; });
-    api.get.mockResolvedValueOnce({ layer: { ...ROW, track: { on: true } }, document: { features: [] } });
+    api.get.mockResolvedValueOnce({ layer: { ...ROW, track: { on: true, precision: 'time', zone: 'Europe/Paris' } }, document: { features: [] } });
     const editor = store(); await editor.open(ROW);
     expect(layers.setTime).toHaveBeenCalledWith('working', { at: null });
-    expect(editor.cursor).toBeNull();
+    // on a layer dated to the minute, the edits of one sitting share the minute it opened at
+    expect(editor.cursor).toBe('2026-10-16T11:15');
+    vi.setSystemTime(new Date('2026-10-16T09:47:00Z'));
+    expect(editor.cursor).toBe('2026-10-16T11:15');
+    vi.useRealTimers();
+  });
+
+  it('dates a feature copied in from elsewhere to the day its layer is on, unless it has its own', async () => {
+    const editor = store();
+    const target = { ...ROW, name: 'front', title: 'Front', track: { on: true, precision: 'day', zone: 'UTC' } };
+    layers.time = () => ({ at: '2026-10-12' });
+    api.post.mockResolvedValue({ layer: target });
+    editor.copy({ name: 'other', editable: false, title: 'Other' },
+      { geometry: { type: 'Point', coordinates: [30, 50] }, properties: { name: 'Seen' } });
+    await editor.copyTo(target);
+    expect(api.post.mock.calls.at(-1)[1]).toMatchObject({ lat: 50, lon: 30, at: '2026-10-12' });
+    editor.copy({ name: 'other', editable: false, title: 'Other' },
+      { geometry: { type: 'Point', coordinates: [30, 50] }, properties: { name: 'Dated', date: '2026-10-02' } });
+    await editor.copyTo(target);
+    expect(api.post.mock.calls.at(-1)[1]).toMatchObject({ date: '2026-10-02' });
+    expect(api.post.mock.calls.at(-1)[1].at).toBeUndefined();
   });
 });
 

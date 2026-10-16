@@ -604,7 +604,12 @@ async function personalFixture(page, { imported = false, shared = false, count =
       const shift = (coords) => typeof coords[0] === 'number' ? coords.map((value, index) => value + (body.offset[index] ?? 0)) : coords.map(shift);
       for (const feature of features) if (keys.has(feature.properties.key)) {
         if (body.offset) feature.geometry.coordinates = shift(feature.geometry.coordinates);
-        if (body.changes) Object.assign(feature.properties, body.changes);
+        // a first and a last day land as a feature with no history keeps them
+        const { start, end, ...changes } = body.changes ?? {};
+        Object.assign(feature.properties, changes);
+        if (start !== undefined) feature.properties.date = start;
+        if (end !== undefined) { feature.properties.date_end = end; delete feature.properties.end_unknown; }
+        if (changes.end_unknown) delete feature.properties.date_end;
       }
       changed(); return route.fulfill({ json: { ...answer(), ...(body.offset ? { kept: 0 } : {}) } });
     }
@@ -983,25 +988,70 @@ test('a layer followed over time dates a move to the day its cursor is on', asyn
   await expect.poll(() => fixture.rows[0].track?.on).toBe(true);
   const time = page.getByRole('group', { name: 'Time', exact: true });
   await expect(time).toBeVisible();
-  // at now the bar says edits carry no date
+  // followed, the bar dates the edits from today: no "now" that would slide to tomorrow
   const undated = tools(page).getByRole('button', { name: 'No date', exact: true });
-  await expect(undated).toHaveAttribute('aria-pressed', 'true');
-  // a day back from now: the bar dates the edits from it
-  await time.getByRole('slider').press('ArrowLeft');
   const dated = tools(page).getByRole('button', { name: /^From / });
   await expect(dated).toHaveAttribute('aria-pressed', 'true');
   await expect(undated).toHaveAttribute('aria-pressed', 'false');
   await page.screenshot({ path: test.info().outputPath('layer-dated-edits.png') });
+  const today = new Date().toISOString().slice(0, 10);
   await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
+  await page.mouse.move(pin.x + 30, pin.y - 18, { steps: 8 }); await page.mouse.up();
+  await expect.poll(() => moves.at(-1)?.at ?? null).toBe(today);
+  // a day back: the bar dates the edits from it
+  await time.getByRole('slider').press('ArrowLeft');
+  await expect(dated).toHaveAttribute('aria-pressed', 'true');
+  let count = moves.length;
+  await page.mouse.move(pin.x + 30, pin.y - 18); await page.mouse.down();
   await page.mouse.move(pin.x + 60, pin.y - 18, { steps: 8 }); await page.mouse.up();
-  await expect.poll(() => moves.at(-1)?.at ?? null).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  await expect.poll(() => moves.length).toBeGreaterThan(count);
+  expect(moves.at(-1).at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(moves.at(-1).at < today).toBe(true);
   expect(moves.at(-1).fix).toBeUndefined();
   // with no date, a move carries none: it counts on every day
   await undated.click();
   await expect(undated).toHaveAttribute('aria-pressed', 'true');
-  const count = moves.length;
+  count = moves.length;
   await page.mouse.move(pin.x + 60, pin.y - 18); await page.mouse.down();
   await page.mouse.move(pin.x + 100, pin.y - 18, { steps: 8 }); await page.mouse.up();
   await expect.poll(() => moves.length).toBeGreaterThan(count);
   expect(moves.at(-1).at).toBeUndefined();
+});
+
+test('a selection on a layer followed over time takes one first day for all its features', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  const edits = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/selection')) edits.push(request.postDataJSON());
+  });
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Candidates');
+  const map = await page.locator('.map').boundingBox();
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await page.mouse.click(map.x + map.width * .4, map.y + map.height * .45);
+  await page.mouse.click(map.x + map.width * .6, map.y + map.height * .45);
+  await page.keyboard.press('Escape');
+  await expect(panel.getByText('2 features', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+  await page.getByRole('menu', { name: 'Layer actions', exact: true }).getByRole('menuitemcheckbox', { name: 'Track over time' }).click();
+  await expect.poll(() => fixture.rows[0].track?.on).toBe(true);
+  const rows = panel.locator('.feature-row');
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ['Shift'] });
+  const sheet = panel.getByRole('group', { name: 'Selected features', exact: true });
+  await expect(sheet.getByText('2 selected', { exact: true })).toBeVisible();
+  await sheet.getByRole('button', { name: 'When it first shows', exact: true }).click();
+  const first = `${new Date().toISOString().slice(0, 8)}01`;
+  await page.locator(`.float-menu button.day[title="${first}"]`).click();
+  await expect.poll(() => edits.at(-1)?.changes ?? null).toEqual({ start: first });
+  expect(edits.at(-1).keys).toHaveLength(2);
+  await expect(sheet.getByRole('button', { name: 'When it first shows', exact: true })).toHaveText(/^From /);
+  // an end nobody knows is said only once pressed, beside Today
+  const leaves = sheet.getByRole('button', { name: 'When it leaves the map', exact: true });
+  await expect(leaves).toHaveText('Still there');
+  await leaves.click();
+  await page.locator('.float-menu .acts').getByRole('button', { name: 'Unknown', exact: true }).click();
+  await expect.poll(() => edits.at(-1)?.changes ?? null).toEqual({ end_unknown: true });
+  await expect(leaves).toHaveText('Unknown');
+  await expect(rows.nth(0).locator('.day')).toHaveText(/ → \?$/);
 });

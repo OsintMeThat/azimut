@@ -25,6 +25,7 @@ import './engine.css';
 import { mapFacade, engineZoom } from './facade.js';
 import { GUARD_PROTOCOL, readGuarded, tileSource } from './quotaGuard.js';
 import { appTile, BATCH_PROTOCOL, createTileBatcher, readBatched } from './tileBatch.js';
+import { WHEEL_ZOOM_RATE } from './wheel.js';
 
 setWorkerUrl(workerUrl);
 
@@ -51,9 +52,15 @@ function guardView(map) {
   };
 }
 
+/** The maps some of whose relief the fallback source drew, by id, so a capture credits it. */
+const reliefFallback = new Set();
+
 /** A tile through the app, in a batch while this map stands on relief (`tileBatch.js`). */
-const throughApp = (map, asked, signal) =>
-  appTile(asked, { batcher, signal, batched: asked.kind === 'terrain' || Boolean(map?.getTerrain?.()) });
+async function throughApp(map, asked, signal) {
+  const tile = await appTile(asked, { batcher, signal, batched: asked.kind === 'terrain' || Boolean(map?.getTerrain?.()) });
+  if (tile.fallback && asked.kind === 'terrain') reliefFallback.add(asked.mapId);
+  return tile;
+}
 
 /**
  * A billed tile, from its provider or, past a flat view's reach on a tilted
@@ -89,14 +96,15 @@ addProtocol(BATCH_PROTOCOL, async (params, abort) => {
  */
 const EMPTY_STYLE = { version: 8, sources: {}, layers: [] };
 
-/**
- * One notch of the wheel is one zoom level, as it was on the map this replaced.
+/*
+ * One notch of the wheel is one zoom level, as it was on the map this replaced
+ * (`WHEEL_ZOOM_RATE`, in `wheel.js` so the wheel over relief reads it too).
  *
  * The engine's own rate asymptotes at a level per notch and only reaches about
  * 0.18 of one, which `settleOnLevel` then rounds straight back to where the
  * gesture started: the map twitched and stayed put, and the wheel did nothing
- * at all. At this rate a notch lands within a thousandth of a level, so the
- * settle has nothing left to correct that anyone could see — which matters,
+ * at all. At this rate a notch lands within a few thousandths of a level, so
+ * the settle has nothing left to correct that anyone could see — which matters,
  * because the settle zooms about the centre while the wheel zoomed about the
  * cursor, and a visible correction would slide the ground under it.
  *
@@ -105,7 +113,6 @@ const EMPTY_STYLE = { version: 8, sources: {}, layers: [] };
  * small to make a level snaps back to the one it started on — which is what the
  * old map did with them too.
  */
-const WHEEL_ZOOM_RATE = 1 / 15;
 
 /**
  * The camera comes to rest on a whole zoom level.
@@ -188,7 +195,10 @@ export async function createMapEngine(container, { view, imperial = false, settl
   });
   const mapId = `m${(mapsMade += 1)}`;
   maps.set(mapId, map);
-  map.once('remove', () => maps.delete(mapId));
+  map.once('remove', () => {
+    maps.delete(mapId);
+    reliefFallback.delete(mapId);
+  });
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
   if (controls) map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
@@ -212,7 +222,14 @@ export async function createMapEngine(container, { view, imperial = false, settl
   // as soon as this returns.
   await map.once('load');
   const facade = mapFacade(map, container, mapId);
+  // Whether the fallback relief drew some of this map's ground, for a capture
+  // that credits it: only the tile loader above ever learns it.
+  facade.drewReliefFallback = () => reliefFallback.has(mapId);
   if (settle) settleOnLevel(map, facade.following);
+  // A tilted view has no one scale: the bar reads true along one line of it and
+  // wrong everywhere else, so it steps aside while the camera leans, as a map
+  // plate's tilted map has none (`engine.css`).
+  if (controls) map.on('pitch', () => container.classList.toggle('tilted', map.getPitch() >= 0.5));
   // A stable class for the tool's own cursor rules: a mode armed above the map
   // says so on the surface, whichever engine drew it.
   container.classList.add('map-surface');

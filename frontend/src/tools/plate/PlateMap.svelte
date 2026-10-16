@@ -388,7 +388,7 @@
   }
 
   /** How the layers are read: the day and how much of its past, never the step, which changes none of it. */
-  const reading = $derived(JSON.stringify([time?.at ?? null, time?.trail !== false, time?.since ?? null, time?.window ?? 7]));
+  const reading = $derived(JSON.stringify([time?.at ?? null, time?.trail !== false, time?.since ?? null, time?.window ?? null]));
   /** The layers being handed to the engine, which a snapshot waits for. */
   let layersDrawn = Promise.resolve();
   let catchUp = null;

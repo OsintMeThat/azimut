@@ -30,7 +30,7 @@ describe('the days an annotation is shown on', () => {
     expect(document.body.querySelector('.days').classList.contains('off')).toBe(false);
   });
 
-  it('takes either end from a calendar of any day, or opens it to the start or to now', () => {
+  it('takes either end from a calendar of any day, or opens it to the start or to the end', () => {
     const note = show({ element: { onward: '2026-10-03', until: '2026-10-05' } });
     press(end('Last day shown'));
     press(document.body.querySelector('button[title="2026-10-12"]'));
@@ -41,9 +41,9 @@ describe('the days an annotation is shown on', () => {
     expect(note.onward).toBeNull();
     expect(end('First day shown').textContent).toContain('The start');
     press(end('Last day shown'));
-    press(act('Now'));
+    press(act('The end'));
     expect(note.until).toBeNull();
-    expect(end('Last day shown').textContent).toContain('Now');
+    expect(end('Last day shown').textContent).toContain('The end');
   });
 
   it('pulls the other end along rather than crossing it', () => {

@@ -45,7 +45,7 @@ def test_a_plate_is_kept_as_its_layout_and_listed(client, owner):
     assert loaded["spec"]["elements"][0]["view"]["zoom"] == 12.4
     page = loaded["spec"]["page"]
     assert (page["paper"], page["orientation"], page["transparent"], page["background"]["kind"]) == ("a4", "landscape", False, "solid")
-    assert loaded["spec"]["time"] == {"at": None, "step": None, "trail": True, "since": None, "window": 7, "hold": 1.0}
+    assert loaded["spec"]["time"] == {"at": None, "step": None, "trail": True, "since": None, "window": None, "hold": 1.0}
     listed = client.get(f"/api/cases/{owner}/map-plates").json()
     assert [(row["name"], row["maps"], row["thumb"]) for row in listed] == [("Situation", 1, None)]
     entity = Case.open(owner).find_entity(attr="spec", value=".mapplates/Situation.json")
@@ -168,6 +168,20 @@ def test_a_plate_that_listed_its_days_reads_as_the_period_they_span(client, owne
                        "on": ("2026-10-01", None), "now": ("2026-10-02", None), "all": (None, None)}
     assert not any("days" in element for element in spec["elements"])
     assert save(client, owner, spec=spec, rename_from="Situation").status_code == 200
+
+
+def test_events_stay_on_a_plate_for_good_unless_it_keeps_them_some_days(client, owner):
+    """A plate saved while seven days was the default wrote it out: it reads as for good now."""
+    assert save(client, owner, spec=plate_spec(time={"window": 3})).status_code == 200
+    assert client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["time"]["window"] == 3
+    path = Case.open(owner).resolve_inside(".mapplates/Situation.json")
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    saved["spec"]["time"]["window"] = 7
+    path.write_text(json.dumps(saved), encoding="utf-8")
+    spec = client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]
+    assert spec["time"]["window"] is None
+    assert save(client, owner, spec=spec, rename_from="Situation").status_code == 200
+    assert save(client, owner, spec=plate_spec(time={"window": 400}), title="Too long").status_code == 422
 
 
 def test_a_plate_has_a_bound_on_its_elements(client, owner):

@@ -51,10 +51,15 @@ describe('a tracked layer out of the case', () => {
     mocks.downloadLayer.mockResolvedValue();
     open({ caseId: 'case', row });
     const labels = [...document.querySelectorAll('.which label')].map((label) => label.textContent.trim());
-    expect(labels).toEqual(['The layer now', 'The layer on 12 Oct 2026', 'Every state, dated for a time slider']);
-    document.querySelector('input[value="cursor"]').click(); flushSync();
+    // the day the cursor is on goes out unless the whole history is asked
+    expect(labels).toEqual(['The layer on 12 Oct 2026', 'Every state, dated for a time slider']);
     document.querySelector('.formats button').click(); await settle();
     expect(mocks.downloadLayer).toHaveBeenLastCalledWith('case', row, 'kmz', { at: '2026-10-12', history: false });
+    unmount(held); document.body.innerHTML = '';
+    open({ caseId: 'case', row });
+    document.querySelector('input[value="history"]').click(); flushSync();
+    document.querySelector('.formats button').click(); await settle();
+    expect(mocks.downloadLayer).toHaveBeenLastCalledWith('case', row, 'kmz', { at: null, history: true });
   });
 
   it('sends one day to My Maps, keeps the address and opens it', async () => {

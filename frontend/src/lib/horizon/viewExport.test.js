@@ -11,7 +11,9 @@ import {
   exportScale,
   layersIn,
   photoTag,
+  SEARCHED_TERRAIN_TAG,
   standingText,
+  TERRAIN_TAG,
   turnCamera,
   viewFilename,
 } from './viewExport.js';
@@ -44,6 +46,7 @@ function fakeCanvas() {
     lineTo: record('lineTo'),
     translate: record('translate'),
     scale: record('scale'),
+    setLineDash: record('setLineDash'),
   };
   return { width: 0, height: 0, context, getContext: () => context };
 }
@@ -200,6 +203,22 @@ describe('composing', () => {
     const pulled = composePair({ photo, terrain, layers: LAYERS, scale: 1, reshaped: true, signed: false, makeCanvas: fakeCanvas });
     expect(texts(pulled)).toEqual(expect.arrayContaining(['Photo, reshaped', 'Terrain, simulated']));
     expect(photoTag(false)).toBe('Photo');
+  });
+
+  it('says a terrain laid piece by piece, and draws where its pieces meet on both panels', () => {
+    const photo = picture('photo', 800, 600);
+    const terrain = picture('terrain', 800, 600);
+    const seam = [{ x: 333, y: 0 }, { x: 343, y: 600 }];
+    const pair = composePair({ photo, terrain, layers: LAYERS, scale: 1, layout: 'column', terrainTag: SEARCHED_TERRAIN_TAG, seams: [seam], signed: false, makeCanvas: fakeCanvas });
+    expect(texts(pair)).toEqual(expect.arrayContaining(['Photo', 'Terrain, simulated piece by piece']));
+    const starts = pair.context.calls.filter(([name, x]) => name === 'moveTo' && x === 333).map(([, , y]) => y);
+    // a dark edge then white dashes, on the photo and on the terrain under it
+    expect(starts).toEqual([48, 48, 48 + 624 + 6, 48 + 624 + 6]);
+    expect(pair.context.calls.filter(([name]) => name === 'setLineDash').at(-1)).toEqual(['setLineDash', []]);
+    // one camera: no seams, the plain tag
+    const plain = composePair({ photo, terrain, layers: LAYERS, scale: 1, signed: false, makeCanvas: fakeCanvas });
+    expect(plain.context.calls.some(([name]) => name === 'setLineDash')).toBe(false);
+    expect(texts(plain)).toContain(TERRAIN_TAG);
   });
 
   it('refuses a view not drawn yet', () => {

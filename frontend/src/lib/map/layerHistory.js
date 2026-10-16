@@ -22,9 +22,9 @@
  * - **new** (`$new`): what appeared or changed on the moment's own day, which the
  *   map rings so a played layer shows what each day brought;
  * - **an event** (a group's `event` features: a strike, a clash) is there on its
- *   day, faded (`$fade`) after it, and gone `window` days later. A lasting thing
- *   (a position, a checkpoint) stays as it is. With no moment, "now" is the
- *   layer's last change, so a layer nobody touched for a fortnight keeps its events.
+ *   day and faded (`$fade`) after it, for good unless the layer gives it a window
+ *   of days. A lasting thing (a position, a checkpoint) stays as it is. With no
+ *   moment, events are read against the layer's last change.
  *
  * Nothing is interpolated. Between two states a feature is the first of them,
  * and a front that moved on the 12th did not drift there through the 11th.
@@ -32,7 +32,7 @@
 import polygonClipping from 'polygon-clipping';
 import { dayNumber } from './layerDates.js';
 
-/** How many days an event stays on the map after its own, unless the analyst says. */
+/** The days an event stays when the analyst gives it a window: what the field offers first. */
 export const EVENT_DAYS = 7;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -53,6 +53,31 @@ export function moment(value) {
   if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   if (match[4] !== undefined && (hour > 23 || minute > 59)) return null;
   return text;
+}
+
+const CLOCKS = new Map();
+
+/**
+ * The moment it is on a layer's clock (`track`: `{ precision, zone }`): today, or
+ * today and the minute on a layer dated to the minute. What a cursor nobody moved
+ * reads, and what an edit is dated to there.
+ */
+export function momentNow(track, now = new Date()) {
+  const zone = track?.zone || 'UTC';
+  let clock = CLOCKS.get(zone);
+  if (!clock) {
+    try {
+      clock = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric',
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      // a zone this browser does not know reads on UTC, as the backend refuses it
+      return momentNow({ ...track, zone: 'UTC' }, now);
+    }
+    CLOCKS.set(zone, clock);
+  }
+  const part = Object.fromEntries(clock.formatToParts(now).map(({ type, value }) => [type, value]));
+  const day = `${part.year}-${part.month}-${part.day}`;
+  return track?.precision === 'time' ? `${day}T${part.hour}:${part.minute}` : day;
 }
 
 /** `12 Oct 2026`, or `12 Oct 2026 · 14:00` for a moment with a time. */
@@ -180,13 +205,14 @@ export function changes(feature, before, after) {
  *
  * `trail` adds the previous state of every feature that moved, `$trail`;
  * `since` adds what each area took and gave since then: `'previous'` for its
- * own state before, or a moment. Null `at` is the layer as it is now, where the
+ * own state before, or a moment. `window` is how many days an event stays after
+ * its own, null for good. Null `at` is the layer as last changed, where the
  * trail and the changes still read back from the latest state.
  *
  * A moment where every feature stands as at one read lately hands back that same
  * reading, so a map can tell nothing moved; a reading is never changed in place.
  */
-export function asOf(collection, at, { trail = false, since = null, window = EVENT_DAYS } = {}) {
+export function asOf(collection, at, { trail = false, since = null, window = null } = {}) {
   const cursor = at ?? '￿';
   // the day events are read against: the moment's, or the layer's last change
   const today = dayNumber((at ?? moments(collection).at(-1) ?? '').slice(0, 10));
@@ -240,7 +266,7 @@ function phaseOf(features, at, cursor, today, window) {
       if (at !== null && at !== undefined && day !== null && day === today) marks |= 1;
       if (properties.event) {
         const first = dayNumber(String(properties.date ?? '').slice(0, 10));
-        if (first !== null && today - first > window) marks |= 2;
+        if (first !== null && window !== null && today - first > window) marks |= 2;
         if (first !== null && today > first) marks |= 4;
       }
     }
@@ -288,7 +314,7 @@ function marked(feature, standing, at, today, window) {
   if (at !== null && at !== undefined && day !== null && day === today) extra.$new = true;
   if (properties.event) {
     const first = dayNumber(String(properties.date ?? '').slice(0, 10));
-    if (first !== null && today - first > window) return null;
+    if (first !== null && window !== null && today - first > window) return null;
     if (first !== null && today > first) extra.$fade = true;
   }
   return Object.keys(extra).length ? { ...standing, properties: { ...standing.properties, ...extra } } : standing;
@@ -338,7 +364,7 @@ export function lifeline(feature, cursor) {
  * starts a new one there. A plain feature reads as its one implied state, so a
  * change about to give it a history shows before it is made. `mode` is the
  * editor's: 'new' dates an edit at the cursor; 'fix' carries no date, and an
- * edit with none changes every day alike, so no row is marked, as at now.
+ * edit with none changes every day alike, so no row is marked.
  */
 export function lifeRows(feature, cursor, mode = 'new') {
   const dated = hasHistory(feature);
@@ -366,12 +392,13 @@ export function lifeRows(feature, cursor, mode = 'new') {
 export function spanOf(feature) {
   const properties = feature?.properties ?? {};
   if (!hasHistory(feature)) {
-    return { start: String(properties.date ?? ''), end: String(properties.date_end ?? ''), ends: 'last', changes: 0 };
+    const end = String(properties.date_end ?? '');
+    return { start: String(properties.date ?? ''), end, ends: 'last', changes: 0, unknown: !end && !!properties.end_unknown };
   }
   const states = properties.states;
   const last = states.at(-1);
   return { start: states[0].at, end: last.gone ? last.at : '', ends: 'gone',
-    changes: states.slice(1).filter((state) => !state.gone).length };
+    changes: states.slice(1).filter((state) => !state.gone).length, unknown: !last.gone && !!properties.end_unknown };
 }
 
 /** `12 Oct`, with the year when it is not `year`, and the time on a moment that has one. */
@@ -384,14 +411,15 @@ export function shortMoment(at, year = new Date().getFullYear()) {
 
 /**
  * A feature's days in a few words, as its row in the list says them: `Always`,
- * `From 12 Oct`, `Until 20 Oct`, `12 Oct → 20 Oct`, or the day alone for an
- * event, which fades after it.
+ * `From 12 Oct`, `Until 20 Oct`, `12 Oct → 20 Oct`, `12 Oct → ?` when nobody
+ * knows when it left, or the day alone for an event, which fades after it.
  */
 export function spanLabel(span, { event = false, year } = {}) {
   const from = shortMoment(span.start, year);
   const to = shortMoment(span.end, year);
   if (event) return from || 'No day';
   if (from && to) return `${from} → ${to}`;
+  if (span.unknown) return `${from || 'Always'} → ?`;
   if (from) return `From ${from}`;
   if (to) return `Until ${to}`;
   return 'Always';

@@ -29,12 +29,13 @@ const button = (label) => document.body.querySelector(`[aria-label="${label}"]`)
 const text = (value) => [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim() === value);
 
 describe('the moment a tracked layer is read at', () => {
-  it('reads now by default, a tick per change, and steps back to the last change', () => {
+  it('reads today by default, said as its date, a tick per change, and steps back to the last change', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
     show();
-    // now says its day
-    expect(document.body.querySelector('.moment').textContent).toBe('Now · 25 Oct 2026');
+    // no "now" that would slide to tomorrow: the day itself
+    expect(document.body.querySelector('.moment').textContent).toBe('25 Oct 2026');
+    expect(text('Today')).toBeUndefined();
     expect(document.body.querySelectorAll('.tick')).toHaveLength(3);
     expect(button('Next change').disabled).toBe(true);
     button('Previous change').click();
@@ -42,36 +43,58 @@ describe('the moment a tracked layer is read at', () => {
     vi.useRealTimers();
   });
 
-  it('reads a change dated today as now, never the same day under two names', () => {
+  it("reads today on the layer's clock, not on UTC's", () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 01:30 in Tokyo, still the 19th in UTC
+    vi.setSystemTime(new Date('2026-10-19T16:30:00Z'));
+    show(undefined, { zone: 'Asia/Tokyo' });
+    expect(document.body.querySelector('.moment').textContent).toBe('20 Oct 2026');
+    unmount(held);
+    show(undefined, { zone: 'Asia/Tokyo', precision: 'time' });
+    expect(document.body.querySelector('.moment').textContent).toBe('20 Oct 2026 · 01:30');
+    expect(document.body.querySelector('input[type="time"]').value).toBe('01:30');
+    vi.useRealTimers();
+  });
+
+  it("steps onto today's change like any other", () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
     show();
-    // from now, the change before is the one before today's
+    // today has a change of its own: the one before is the 12th
     button('Previous change').click();
     expect(changes).toEqual([{ at: '2026-10-12' }]);
     unmount(held);
     show({ at: '2026-10-12', trail: true, since: null });
-    // and the change after the 12th, today's, is now
     button('Next change').click();
-    expect(changes).toEqual([{ at: null }]);
+    expect(changes).toEqual([{ at: '2026-10-20' }]);
     vi.useRealTimers();
   });
 
-  it('steps from change to change, and goes back to now', () => {
+  it('steps from change to change, and goes back to today', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
     show({ at: '2026-10-12', trail: true, since: null });
     expect(document.body.querySelector('.moment').textContent).toBe('12 Oct 2026');
     expect(document.body.querySelector('.tick.on').title).toBe('12 Oct 2026');
     button('Previous change').click();
     button('Next change').click();
-    text('Now').click();
-    expect(changes).toEqual([{ at: '2026-10-03' }, { at: '2026-10-20' }, { at: null }]);
+    text('Today').click();
+    expect(changes).toEqual([{ at: '2026-10-03' }, { at: '2026-10-20' }, { at: '2026-10-25' }]);
+    vi.useRealTimers();
   });
 
-  it('moves a day at a time from the keyboard, and Home and End go to the first change and to now', () => {
+  it('moves a day at a time from the keyboard, never past today; Home and End go to the first change and to today', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
     show({ at: '2026-10-12', trail: true, since: null });
     const slider = document.body.querySelector('[role="slider"]');
     for (const key of ['ArrowRight', 'PageDown', 'Home', 'End']) slider.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-    expect(changes).toEqual([{ at: '2026-10-13' }, { at: '2026-10-05' }, { at: '2026-10-03' }, { at: null }]);
+    expect(changes).toEqual([{ at: '2026-10-13' }, { at: '2026-10-05' }, { at: '2026-10-03' }, { at: '2026-10-25' }]);
+    unmount(held);
+    show({ at: '2026-10-24', trail: true, since: null });
+    document.body.querySelector('[role="slider"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    expect(changes).toEqual([{ at: '2026-10-25' }]);
+    vi.useRealTimers();
   });
 
   it('keeps the time of day on a layer dated to the minute, on its clock', () => {
@@ -81,6 +104,22 @@ describe('the moment a tracked layer is read at', () => {
     expect(document.body.querySelector('.zone').textContent).toBe('Kyiv');
     field.value = '09:05'; field.dispatchEvent(new Event('change', { bubbles: true }));
     expect(changes).toEqual([{ at: '2026-10-12T09:05' }]);
+  });
+
+  it('keeps events for good unless a number of days is given', () => {
+    show({ at: '2026-10-12', trail: true, since: null, window: null });
+    button('What the map shows of the past').click(); flushSync();
+    expect(document.body.querySelector('[aria-label="Days an event stays on the map"]')).toBeNull();
+    text('Leave after some days').click();
+    expect(changes).toEqual([{ window: 7 }]);
+    unmount(held);
+    show({ at: '2026-10-12', trail: true, since: null, window: 3 });
+    button('What the map shows of the past').click(); flushSync();
+    const field = document.body.querySelector('[aria-label="Days an event stays on the map"]');
+    expect(field.value).toBe('3');
+    field.value = '10'; field.dispatchEvent(new Event('change', { bubbles: true }));
+    text('Stay, faded').click();
+    expect(changes).toEqual([{ window: 10 }, { window: null }]);
   });
 
   it('switches the trail and the gains and losses from its menu', () => {

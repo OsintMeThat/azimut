@@ -946,3 +946,19 @@ def test_a_refusal_never_quotes_back_what_it_was_sent():
 def test_a_refusal_is_capped_at_a_sentence():
     flood = ("<ows:ExceptionText>" + "no. " * 500 + "</ows:ExceptionText>").encode()
     assert len(tiles.upstream_reason(flood)) == tiles.REASON_MAX
+
+
+def test_a_credit_wider_than_the_image_goes_on_over_more_lines():
+    text = "Esri, Maxar, Earthstar Geographics, and the GIS User Community · Relief © Mapterhorn"
+    narrow = tiles.burn_attribution(Image.new("RGB", (400, 100), (10, 120, 10)), text)
+    # the band grows a line rather than letting the credit run off the edge
+    assert narrow.size == (400, 100 + tiles.ATTRIBUTION_BAND + tiles.ATTRIBUTION_LINE)
+    assert narrow.getpixel((0, 99)) == (10, 120, 10)  # imagery intact
+    wide = tiles.burn_attribution(Image.new("RGB", (900, 100)), text)
+    assert wide.size == (900, 100 + tiles.ATTRIBUTION_BAND)
+    # cut between the credits first, so each one reads whole
+    font = tiles.ImageFont.load_default()
+    assert tiles._attribution_lines(text, font, 400) == [
+        "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        "Relief © Mapterhorn",
+    ]

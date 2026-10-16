@@ -323,6 +323,25 @@
   /** A widget basemap is a page under the map, not a picture the map drapes. */
   const reliefPossible = $derived(reliefOffered && !shown.provider?.widget);
 
+  /**
+   * Lean the camera: at once over relief that is in, else as soon as it is
+   * (the 3D switch leans the view while its relief is still on the way, and a
+   * map without terrain holds any tilt at zero).
+   */
+  let leanWhenReady = $state(null);
+  function lean(deg) {
+    if (reliefReady) engine?.setPitch(deg);
+    else leanWhenReady = deg;
+  }
+  $effect(() => {
+    const deg = leanWhenReady;
+    if (!reliefOn) leanWhenReady = null;
+    if (!reliefReady || deg == null || !engine) return;
+    leanWhenReady = null;
+    // once the relief under the centre is in, or the centre is seated at sea level
+    engine.idle().then(() => engine?.setPitch(deg));
+  });
+
   // Relief asks for its sources and tiles only once it is switched on.
   $effect(() => {
     const on = reliefPossible && reliefOn;
@@ -523,7 +542,7 @@
     <!-- Which way is up. Middle-dragging the map is what turns it. -->
     <Compass {bearing} onbearing={setBearing} />
     {#if reliefPossible}
-      <ReliefControl bind:on={reliefOn} bind:exaggeration {pitch} ontilt={(deg) => engine?.setPitch(deg)}
+      <ReliefControl bind:on={reliefOn} bind:exaggeration {pitch} ontilt={lean}
         onhint={(text) => toast(text, 'info', 6000)} />
       {#if reliefOn && pitch > 0 && shown.provider?.meter}
         <!-- lib/map/quotaGuard.js: past a flat view's reach the ground is Esri's -->

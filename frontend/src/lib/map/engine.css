@@ -119,6 +119,16 @@
     0 0 4px rgba(0, 0, 0, 0.5);
 }
 
+/* The map was given the keyboard by a hand on it, not by Tab (`facade.js` focus). */
+.maplibregl-canvas[data-hand-focus]:focus-visible {
+  outline: none;
+}
+
+/* A tilted view has no one scale (`engine.js` sets the class while it leans). */
+.map-surface.tilted .maplibregl-ctrl-scale {
+  display: none;
+}
+
 /* The card a mark opens, over imagery: one of the app's surfaces, not the
    engine's white bubble. A tool sets `--popup-min-width` for the width its own
    content needs.

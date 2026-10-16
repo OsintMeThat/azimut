@@ -348,7 +348,7 @@ export function houseLayout({ paper = 'a4', orientation = 'landscape', view = nu
   return {
     page,
     theme: { ...DEFAULT_THEME },
-    time: { at: null, trail: true, since: null, window: 7 },
+    time: { at: null, trail: true, since: null, window: null },
     elements: [
       map,
       { id: 'inset', kind: 'inset', box: box('inset'), of: 'map', zoom: null, border: true },
@@ -431,7 +431,7 @@ export function fromTemplate(data, { view, layers = [] } = {}) {
   return {
     page: { ...data.page },
     theme: { ...DEFAULT_THEME, ...data.theme },
-    time: { at: null, trail: true, since: null, window: 7, ...(data.time?.hold ? { hold: data.time.hold } : {}) },
+    time: { at: null, trail: true, since: null, window: null, ...(data.time?.hold ? { hold: data.time.hold } : {}) },
     ...(data.transitions ? { transitions: { ...data.transitions } } : {}),
     elements: mapsFirst(data.elements
       .filter((element) => !element.of || maps.has(element.of))
@@ -461,7 +461,8 @@ export function longDay(moment) {
  * from Settings).
  */
 export function fillTokens(text, { date = null, updated = '', imagery = '', caseName = '', title = '', scale = '', handle = '', today = new Date() } = {}) {
-  const iso = today.toISOString().slice(0, 10);
+  // today on this computer's calendar, not on UTC's, which is still yesterday after midnight east of it
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   return String(text ?? '')
     .replaceAll('{date}', longDay(date) || longDay(updated) || longDay(iso))
     .replaceAll('{today}', longDay(iso))
@@ -478,19 +479,27 @@ export const TOKENS = ['{date}', '{today}', '{updated}', '{case}', '{title}', '{
 
 // -- the days an annotation is shown on ------------------------------------------------
 
-/** The plate's day as an annotation names it: a moment, or "now". */
-export const dayOf = (at) => at ?? 'now';
+/**
+ * What a plate with no day keeps its steps, held seconds and framings under: its page,
+ * the layers as they stand. A plate whose layers change is always on a day of the
+ * calendar instead (`settleOn`). The key is "now", the name it had when a played
+ * plate could stand on a now that slid to the next day.
+ */
+export const PAGE = 'now';
 
-/** Whether `a` comes before `b`, "now" after every moment. */
+/** The plate's day as its steps, its seconds and its framings are kept under: a moment, or the page. */
+export const dayOf = (at) => at ?? PAGE;
+
+/** Whether `a` comes before `b`, the page after every moment. */
 export function dayBefore(a, b) {
   if (a === b) return false;
-  if (a === 'now') return false;
-  if (b === 'now') return true;
+  if (a === PAGE) return false;
+  if (b === PAGE) return true;
   return a < b;
 }
 
 /** Whether the last day `until` is over by `day`: a day without its time lasts until it ends. */
-const over = (until, day) => dayBefore(until, day === 'now' ? day : day.slice(0, until.length));
+const over = (until, day) => dayBefore(until, day === PAGE ? day : day.slice(0, until.length));
 
 /** Whether an element belongs to some days rather than to every day. */
 export const dated = (element) => !!(element.onward || element.until);
@@ -499,12 +508,12 @@ export const dated = (element) => !!(element.onward || element.until);
 export function startOn(element, day) {
   const onward = day || null;
   const pulled = onward && element.until && over(element.until, onward);
-  return { ...element, onward, until: pulled ? (onward === 'now' ? null : onward) : element.until ?? null };
+  return { ...element, onward, until: pulled ? (onward === PAGE ? null : onward) : element.until ?? null };
 }
 
-/** The element shown up to `day`, its start pulled back when it came after. No day, or now: up to now. */
+/** The element shown up to `day`, its start pulled back when it came after. No day, or the page: to the last. */
 export function endOn(element, day) {
-  const until = day && day !== 'now' ? day : null;
+  const until = day && day !== PAGE ? day : null;
   const pulled = until && element.onward && over(until, element.onward);
   return { ...element, onward: pulled ? until : element.onward ?? null, until };
 }
@@ -523,7 +532,7 @@ export const carryOn = (element, at) => endOn(bringTo(element, at), null);
 export function periodSaid(element, label) {
   const { onward, until } = element;
   if (!onward && !until) return 'Every day';
-  if (onward === 'now') return 'Only now';
+  if (onward === PAGE) return 'Only on the page';
   if (onward === until) return `Only on ${label(onward)}`;
   if (!until) return `From ${label(onward)} on`;
   return onward ? `${label(onward)} to ${label(until)}` : `Up to ${label(until)}`;
@@ -531,6 +540,45 @@ export function periodSaid(element, label) {
 
 /** A new annotation on a played plate belongs to the day it is made on. */
 export const bornOn = (at, playable) => (playable ? endOn(startOn({}, dayOf(at)), dayOf(at)) : {});
+
+/** Whether a plate whose layers change still stands on no day, or keeps something under its page. */
+export function unsettled(spec) {
+  if (!spec) return false;
+  if (!spec.time?.at) return true;
+  if ([spec.steps, spec.holds, spec.framing].some((table) => table && PAGE in table)) return true;
+  return (spec.elements ?? []).some((element) => element.onward === PAGE || element.until === PAGE);
+}
+
+/**
+ * A plate whose layers change, put on the day `day` when it stands on none, and with
+ * what it kept under its page moved there: its steps after the day's own, its held
+ * seconds and framings where the day has none, the annotations made on it. What a
+ * plate made before stood on "now" stood on the day it was last saved, which is the
+ * day to give, so it opens where it was left. Answers the fields that change.
+ */
+export function settleOn(spec, day) {
+  const steps = { ...(spec.steps ?? {}) };
+  if (PAGE in steps) {
+    steps[day] = [...(steps[day] ?? []), ...steps[PAGE]].slice(0, MAX_STEPS);
+    delete steps[PAGE];
+  }
+  const held = (table) => {
+    const out = { ...(table ?? {}) };
+    if (PAGE in out) {
+      if (!(day in out)) out[day] = out[PAGE];
+      delete out[PAGE];
+    }
+    return out;
+  };
+  const framing = held(spec.framing);
+  if (spec.framing?.[PAGE] && spec.framing?.[day]) framing[day] = { ...spec.framing[PAGE], ...spec.framing[day] };
+  const kept = new Set(Object.values(steps).flat().map((step) => step.id));
+  // made on the page, an annotation was shown only there: it is the day's alone; up to the page, it runs on
+  const elements = (spec.elements ?? []).filter((element) => !element.step || kept.has(element.step))
+    .map((element) => (element.onward === PAGE ? { ...element, onward: day, until: day }
+      : element.until === PAGE ? { ...element, until: null } : element));
+  return { time: { ...spec.time, at: spec.time?.at ?? day }, steps, holds: held(spec.holds), framing, elements };
+}
 
 // -- the steps of a day ------------------------------------------------------------------
 

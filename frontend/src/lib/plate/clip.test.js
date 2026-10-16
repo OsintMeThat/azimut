@@ -67,12 +67,14 @@ describe('a played plate', () => {
     expect(beatClips(spec, list[2])).toEqual([]);
   });
 
-  it('plays now last, when steps stand on it', () => {
-    expect(playDays(spec, ['2026-10-14'])).toEqual(['2026-10-14']);
-    expect(playDays({ steps: { now: [{ id: 'n' }] } }, ['2026-10-14'], '2026-10-20')).toEqual(['2026-10-14', null]);
-    // today is now: its change is played once, as now, unless steps stand on that day itself
-    expect(playDays({ steps: { now: [{ id: 'n' }] } }, ['2026-10-14', '2026-10-15'], '2026-10-15')).toEqual(['2026-10-14', null]);
-    expect(playDays({ steps: { now: [{ id: 'n' }], '2026-10-15': [{ id: 't' }] } }, ['2026-10-15'], '2026-10-15')).toEqual(['2026-10-15', null]);
-    expect(playDays(spec, ['2026-10-15'], '2026-10-15')).toEqual(['2026-10-15']);
+  it('plays each change, and each day that holds steps, in order, never a now', () => {
+    expect(playDays({}, ['2026-10-14'])).toEqual(['2026-10-14']);
+    // today holds steps without a change of its own: it is played, last
+    expect(playDays({ steps: { '2026-10-20': [{ id: 'n' }] } }, ['2026-10-14'])).toEqual(['2026-10-14', '2026-10-20']);
+    // a change with steps is played once; a day between two changes takes its place
+    expect(playDays({ steps: { '2026-10-15': [{ id: 't' }], '2026-10-12': [{ id: 'u' }] } }, ['2026-10-10', '2026-10-15']))
+      .toEqual(['2026-10-10', '2026-10-12', '2026-10-15']);
+    // the page of a plate with no day, and a day left with no step, play nothing of their own
+    expect(playDays({ steps: { now: [{ id: 'p' }], '2026-10-11': [] } }, ['2026-10-14'])).toEqual(['2026-10-14']);
   });
 });

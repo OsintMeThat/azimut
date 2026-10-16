@@ -9,6 +9,11 @@
  * and the drag handed to the tool, which holds the grabbed ground under the
  * hand (`gestures.js` startGroundPan).
  *
+ * Those rules reach into the engine's own camera (its elevation freeze, the
+ * eye's position, the mouse half of its drag), which no public call offers. So
+ * `package.json` names the engine's exact version, and raising it is a change
+ * of its own, proven by `e2e/satellite-3d.spec.js`.
+ *
  * The heights come through the app (`/api/terrain/tiles`), from Mapterhorn's
  * open terrain with AWS's set as a fallback (engine/terrain.py). Nothing is
  * asked for until relief is switched on, so a map that stays flat reaches no
@@ -29,6 +34,8 @@ export const RELIEF_SOURCE = 'relief-dem';
 export const MAX_TILT = 85;
 /** What the analyst may pick; 1 is the ground as it is. */
 export const EXAGGERATIONS = [1, 1.5, 2, 3];
+/** The tilt the 3D switch and the Tilt button lean a flat view to. */
+export const READING_TILT = 60;
 /**
  * How many tiles a tilted view may load against a flat one. The engine allows
  * three times as many by default, which toward the horizon is a wall of tiles

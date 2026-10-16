@@ -399,6 +399,7 @@ export const GUIDE = [
       {
         where: 'Satellite',
         keys: [
+          { combo: 'Page Up / Down', does: 'tilts the map in 3D toward the horizon and back' },
           { combo: 'C or Space', does: 'clears the grid cell under review and flies to the next' },
           { combo: 'F', does: 'flags the cell under review' },
           { combo: 'S', does: 'skips to the next unchecked cell' },

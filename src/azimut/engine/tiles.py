@@ -1004,7 +1004,42 @@ def esri_capture_date(
     }
 
 
-ATTRIBUTION_BAND = 20  # px footer appended below the imagery
+ATTRIBUTION_BAND = 20  # px footer appended below the imagery, for one line of credit
+ATTRIBUTION_LINE = 13  # px each further line adds to it
+_ATTRIBUTION_MARGIN = 6
+
+
+def _attribution_lines(text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, width: int) -> list[str]:
+    """The credit in as many lines as the image is too narrow for.
+
+    Cut between the credits first (` · `), so each one reads whole, and between
+    words only inside a credit that is wider than the image on its own.
+    """
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    room = max(1, width - 2 * _ATTRIBUTION_MARGIN)
+
+    def fits(candidate: str) -> bool:
+        return draw.textlength(candidate, font=font) <= room
+
+    lines: list[str] = []
+    line = ""
+    for credit in text.split(" · "):
+        joined = f"{line} · {credit}" if line else credit
+        if fits(joined):
+            line = joined
+            continue
+        if line:
+            lines.append(line)
+        line = ""
+        for word in credit.split(" "):
+            candidate = f"{line} {word}" if line else word
+            if line and not fits(candidate):
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+    lines.append(line)
+    return lines
 
 
 def burn_attribution(img: Image.Image, text: str) -> Image.Image:
@@ -1014,12 +1049,22 @@ def burn_attribution(img: Image.Image, text: str) -> Image.Image:
     (Google), the capture must never exist without it — burned in, not optional.
     The band is added *below* the imagery so nothing is covered. Public: the
     screenshot-capture endpoint stamps user screenshots through the same band.
+    A credit wider than the image goes on over more lines, the band growing to
+    hold them, rather than running off its edge.
     """
-    out = Image.new("RGB", (img.width, img.height + ATTRIBUTION_BAND), (16, 18, 24))
+    font = ImageFont.load_default()
+    lines = _attribution_lines(text, font, img.width)
+    band = ATTRIBUTION_BAND + (len(lines) - 1) * ATTRIBUTION_LINE
+    out = Image.new("RGB", (img.width, img.height + band), (16, 18, 24))
     out.paste(img, (0, 0))
     draw = ImageDraw.Draw(out)
-    font = ImageFont.load_default()
-    draw.text((6, img.height + 4), text, fill=(203, 208, 218), font=font)
+    for index, line in enumerate(lines):
+        draw.text(
+            (_ATTRIBUTION_MARGIN, img.height + 4 + index * ATTRIBUTION_LINE),
+            line,
+            fill=(203, 208, 218),
+            font=font,
+        )
     return out
 
 

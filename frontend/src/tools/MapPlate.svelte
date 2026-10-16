@@ -58,14 +58,14 @@
   import { layerPalette } from '../lib/map/layerPalette.svelte.js';
   import { MARKER_PIXELS, drawMarker, isBadge } from '../lib/map/markerGlyphs.js';
   import symbols from '../lib/map/layerSymbols.json';
-  import { asOf, hasHistory, isTracked, momentLabel, stateAt } from '../lib/map/layerHistory.js';
+  import { asOf, hasHistory, isTracked, momentLabel, momentNow, stateAt } from '../lib/map/layerHistory.js';
   import { revealPlates } from '../lib/plateExport.js';
   import '../lib/plateFontFaces.js';
   import { plateCredits } from '../lib/plate/credits.js';
   import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, scaleFor, scaleForWidth, videoSize } from '../lib/plate/exportPlate.js';
   import { KIND_LABELS, PAPERS, longDay, MAP_KINDS, MAX_MAPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
-    fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
-    transitionsOf, withoutStep, restacked, stepOf } from '../lib/plate/page.js';
+    fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
+    transitionsOf, unsettled, withoutStep, restacked, stepOf } from '../lib/plate/page.js';
   import { changes, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
   import { FIRST_SECONDS, beatClips, beats, boundSeconds, clipRange, daySeconds, plateSeconds, playDays, posterKey, posterOf, totalSeconds } from '../lib/plate/clip.js';
@@ -228,7 +228,7 @@
   async function open(name) {
     try {
       const loaded = await api.get(`/api/cases/${caseId}/map-plates/${encodeURIComponent(name)}`);
-      openSpec({ name: loaded.name, title: loaded.title, spec: loaded.spec, pictured: !!loaded.thumb });
+      openSpec({ name: loaded.name, title: loaded.title, spec: loaded.spec, pictured: !!loaded.thumb, savedAt: loaded.updated_at ?? null });
     } catch (error) { toast(error.message, 'danger'); }
   }
 
@@ -552,8 +552,26 @@
     && element.layers?.some((entry) => entry.name === row.name))));
   const moments = $derived([...new Set(tracked.flatMap((row) => addedLayers.moments(row.name)))].sort());
   const playable = $derived(moments.length > 0 && !plate?.template);
-  const time = $derived(exportTime ?? (playBeat ? { ...(spec?.time ?? {}), at: playBeat.day } : spec?.time) ?? { at: null, trail: true, since: null, window: 7 });
+  const time = $derived(exportTime ?? (playBeat ? { ...(spec?.time ?? {}), at: playBeat.day } : spec?.time) ?? { at: null, trail: true, since: null, window: null });
   const at = $derived(time.at ?? null);
+  /** The days a played plate goes through: each change of its layers, and each day that holds steps. */
+  const playedDays = $derived(spec && playable ? playDays(spec, moments) : moments);
+
+  /**
+   * A plate whose layers change stands on a day of the calendar, never on a now that
+   * would slide to the next day. One that stands on none, or keeps something under its
+   * page, is put on the day it was last saved, on its layers' clock (today for a new
+   * one), and opens there. Settling it is not a step to take back.
+   */
+  $effect(() => {
+    if (!plate || !playable || plate.template || !unsettled(plate.spec)) return;
+    untrack(() => {
+      const saved = new Date(plate.savedAt ?? Date.now());
+      const day = momentNow(tracked[0]?.track, Number.isFinite(saved.getTime()) ? saved : new Date());
+      Object.assign(plate.spec, settleOn(plate.spec, day));
+      remember();
+    });
+  });
 
   // -- the steps of the day ------------------------------------------------------------
 
@@ -588,10 +606,10 @@
   /** A step as the strip names it: its own name, else its place in the day. */
   const stepName = (index, day = at) => stepsOf(spec, day)[index]?.name || `Step ${index + 1}`;
   /** The days and steps the play goes through, from the plate's day when it has none followed over time. */
-  const sequence = $derived(spec ? beats(spec, playable ? playDays(spec, moments) : [at]) : []);
+  const sequence = $derived(spec ? beats(spec, playable ? playedDays : [at]) : []);
   /** How long a played export runs over `days`, each beat held its own seconds, an MP4's transitions included. */
   const runtime = (days, format = 'mp4') => {
-    const list = beats(spec, playable ? playDays(spec, days) : [at]);
+    const list = beats(spec, playable ? days : [at]);
     const moves = transitionsOf(spec);
     return totalSeconds(list) + (moves.on && format === 'mp4' ? (list.length - 1) * moves.seconds : 0);
   };
@@ -1002,7 +1020,7 @@
         rows, collection: (name) => addedLayers.collection(name), view: live?.view, frame: live?.frame, place: live?.project,
         days: legendDays ?? [at],
         standing: (row, feature, day) => (isTracked(row) && hasHistory(feature) ? stateAt(feature, day ?? '￿') : feature),
-        past: (row, collection, day) => (isTracked(row) ? asOf(collection, day, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? 7 }).features : []),
+        past: (row, collection, day) => (isTracked(row) ? asOf(collection, day, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? null }).features : []),
         colourName: (hex) => layerPalette.nameOf(hex), symbolName: (id) => symbolNames[id] ?? id, categoryColour, newColour: NEW_COLOUR, ink: spec.theme.ink,
         newLabel: `New on ${momentLabel(at)}`, trailLabel: at ? `Before ${momentLabel(at)}` : 'The state before',
         gainedLabel: `Gained since ${since}`, lostLabel: `Lost since ${since}`,
@@ -1217,19 +1235,19 @@
           filename: name === plate.title ? [name, spec.time.at?.replace('T', ' ').replaceAll(':', 'h'), stepIndex >= 0 ? stepName(stepIndex) : '']
             .filter(Boolean).join(' ') : name, signal: run.signal });
       } else {
-        const picked = playable ? playDays(spec, days.slice(0, 120)) : [at];
+        const picked = playable ? days.slice(0, 120) : [at];
         legendDays = picked;
         if (format === 'sheet') {
           const scale = scaleForWidth(spec, 900);
           const pages = [];
           for (const [index, day] of picked.entries()) {
             check();
-            progress = `Drawing ${momentLabel(day) || 'now'} (${index + 1} of ${picked.length})…`;
+            progress = `Drawing ${momentLabel(day) || 'the page'} (${index + 1} of ${picked.length})…`;
             pages.push(await render(scale, day));
           }
           check();
           progress = 'Writing…';
-          const sheet = evolutionSheet(pages, picked.map((day) => momentLabel(day) || 'Now'), spec.theme);
+          const sheet = evolutionSheet(pages, picked.map((day) => momentLabel(day) || 'The page'), spec.theme);
           answer = await postExport(caseId, { format: 'png', frames: [await canvasBlob(sheet)], widthMm, heightMm, filename: `${name} evolution`, signal: run.signal });
         } else {
           // each day, then each of its steps, each held its own seconds; a step's clips run over its picture in an MP4
@@ -1441,7 +1459,7 @@
                 onchange={(patch) => { if (playing) stop(); if ('at' in patch && patch.at !== plate.spec.time.at) plate.spec.time.step = null; Object.assign(plate.spec.time, patch); }} /></div>
             {/if}
             <!-- the day itself and its steps, each tile saying how long it holds in the video -->
-            <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : playable ? 'Now' : 'The page'} elements={plate.spec.elements}
+            <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : 'The page'} elements={plate.spec.elements}
               transitions={transitionsOf(plate.spec).on} daySeconds={daySeconds(plate.spec, at)} dayOwn={!!plate.spec.holds?.[dayOf(at)]}
               plateSeconds={plateSeconds(plate.spec)} ondayhold={holdDay}
               caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
@@ -1544,7 +1562,7 @@
 {/if}
 
 {#if exporting}
-  <PlateExportDialog {moments} {stepped} {runtime} {progress} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
+  <PlateExportDialog moments={playedDays} {stepped} {runtime} {progress} past={pastBox} name={plate?.title ?? 'Map plate'} preview={exportPreview} transparent={!!spec?.page?.transparent}
     page={spec?.page} hold={spec ? plateSeconds(spec) : 1} onhold={holdPlate}
     onexport={runExport} oncopy={copyImage} oncancel={stopExport} onclose={() => (exporting = false)} />
 {/if}

@@ -57,7 +57,34 @@ def test_the_switch_is_off_by_default_and_its_settings_survive_switching_off(cli
     assert off.json()["layer"]["track"] == {"on": False, "precision": "time", "zone": "Europe/Kyiv"}
 
 
-@pytest.mark.parametrize("track", [{"zone": "Mars/Olympus"}, {"precision": "week"}])
+def test_events_stay_for_good_until_the_layer_keeps_them_some_days(client, owner):
+    row = create(client, owner)
+    # a layer that never said keeps its events on the map, faded
+    assert "window" not in client.get(f"{url_of(owner, row)}/edit").json()["layer"]["track"]
+    kept = client.patch(f"{url_of(owner, row)}/edit", json={"track": {"window": 10}})
+    assert kept.json()["layer"]["track"]["window"] == 10
+    # what the layer keeps is read back in the list every map reads
+    listed = client.get(f"/api/cases/{owner}/map-layers").json()
+    listed = listed["layers"] if isinstance(listed, dict) else listed
+    assert next(item for item in listed if item["name"] == row["name"])["track"]["window"] == 10
+    again = client.patch(f"{url_of(owner, row)}/edit", json={"track": {"window": "always"}})
+    assert "window" not in again.json()["layer"]["track"]
+    # switching tracking off and on leaves it as it was
+    client.patch(f"{url_of(owner, row)}/edit", json={"track": {"window": 0}})
+    client.patch(f"{url_of(owner, row)}/edit", json={"track": {"on": False}})
+    back = client.patch(f"{url_of(owner, row)}/edit", json={"track": {"on": True}})
+    assert back.json()["layer"]["track"]["window"] == 0
+
+
+@pytest.mark.parametrize("window", [-1, 366, "forever", True])
+def test_an_events_window_outside_its_range_is_refused(owner, window):
+    spec: dict = {"track": {"on": True, "precision": "day", "zone": "UTC"}}
+    with pytest.raises(layerediting.maplayers.LayerError):
+        layerediting.set_track(spec, {"window": window})
+    assert "window" not in spec["track"]
+
+
+@pytest.mark.parametrize("track", [{"zone": "Mars/Olympus"}, {"precision": "week"}, {"window": 400}, {"window": "never"}])
 def test_a_clock_or_a_precision_outside_the_list_is_refused(client, owner, track):
     row = create(client, owner, tracked=False)
     assert client.patch(f"{url_of(owner, row)}/edit", json={"track": track}).status_code == 422
@@ -231,6 +258,73 @@ def test_when_it_shows_needs_the_layer_tracked(client, owner):
     for changes in ({"start": ""}, {"end": "2026-10-09"}):
         answer = edit(client, owner, row, key, **changes)
         assert answer.status_code == 422 and "Track over time" in answer.json()["detail"]
+
+
+def test_a_selection_takes_one_start_and_one_end_together(client, owner):
+    row = create(client, owner)
+    keys = [add_line(client, owner, row, date="2026-09-28"), add_line(client, owner, row, MOVED, date="2026-09-28")]
+    started = client.post(f"{url_of(owner, row)}/selection", json={"keys": keys, "changes": {"start": "2026-09-30"}})
+    assert started.status_code == 200, started.text
+    ended = client.post(f"{url_of(owner, row)}/selection", json={"keys": keys, "changes": {"end": "2026-10-05"}})
+    assert ended.status_code == 200, ended.text
+    for key in keys:
+        properties = feature(client, owner, row, key)["properties"]
+        assert properties["date"] == "2026-09-30"
+        assert properties["states"][-1] == {"at": "2026-10-05", "gone": True}
+
+
+def test_a_selection_start_one_feature_cannot_take_changes_none(client, owner):
+    row = create(client, owner)
+    plain = add_line(client, owner, row, date="2026-10-03")
+    moved = add_line(client, owner, row, FURTHER, date="2026-10-03")
+    edit(client, owner, row, moved, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    before = [feature(client, owner, row, key) for key in (plain, moved)]
+    refused = client.post(f"{url_of(owner, row)}/selection", json={"keys": [plain, moved], "changes": {"start": "2026-10-15"}})
+    assert refused.status_code == 422 and refused.json()["detail"] == "start it before 12 Oct 2026"
+    assert [feature(client, owner, row, key) for key in (plain, moved)] == before
+
+
+def test_an_unknown_end_leaves_no_end_and_a_day_or_still_there_takes_it_back(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03")
+    edit(client, owner, row, key, end="2026-10-09")
+    unknown = edit(client, owner, row, key, end_unknown=True).json()["marker"]["properties"]
+    assert unknown["end_unknown"] is True
+    assert "date_end" not in unknown and not any(state.get("gone") for state in unknown.get("states", []))
+    # drawn as one still there: it stands on any day after its first
+    assert layerediting.as_of(feature(client, owner, row, key), "2027-01-01") is not None
+    ended = edit(client, owner, row, key, end="2026-10-12").json()["marker"]["properties"]
+    assert "end_unknown" not in ended
+    edit(client, owner, row, key, end_unknown=True)
+    assert "end_unknown" not in edit(client, owner, row, key, end="").json()["marker"]["properties"]
+
+
+def test_a_selection_takes_an_unknown_end_together(client, owner):
+    row = create(client, owner)
+    keys = [add_line(client, owner, row, date="2026-10-03"), add_line(client, owner, row, MOVED, date="2026-10-03")]
+    client.post(f"{url_of(owner, row)}/selection", json={"keys": keys, "changes": {"end": "2026-10-05"}})
+    answer = client.post(f"{url_of(owner, row)}/selection", json={"keys": keys, "changes": {"end_unknown": True}})
+    assert answer.status_code == 200, answer.text
+    for key in keys:
+        properties = feature(client, owner, row, key)["properties"]
+        assert properties["end_unknown"] is True and "date_end" not in properties
+
+
+def test_an_unknown_end_is_never_set_by_false_or_off_a_tracked_layer(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03")
+    assert edit(client, owner, row, key, end_unknown=False).status_code == 422
+    plain = create(client, owner, tracked=False)
+    other = add_line(client, owner, plain, date="2026-10-03")
+    refused = edit(client, owner, plain, other, end_unknown=True)
+    assert refused.status_code == 422 and "Track over time" in refused.json()["detail"]
+
+
+def test_a_selection_says_when_it_shows_only_on_a_tracked_layer(client, owner):
+    row = create(client, owner, tracked=False)
+    keys = [add_line(client, owner, row, date="2026-10-03")]
+    answer = client.post(f"{url_of(owner, row)}/selection", json={"keys": keys, "changes": {"end": "2026-10-09"}})
+    assert answer.status_code == 422 and "Track over time" in answer.json()["detail"]
 
 
 @pytest.mark.parametrize("changes", [

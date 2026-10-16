@@ -6,6 +6,7 @@ import {
   batchedTerrainTemplate,
   batchPath,
   createTileBatcher,
+  FALLBACK_STATUS,
   readBatched,
   readFrames,
   singleUrl,
@@ -252,5 +253,22 @@ describe('a tile through the app', () => {
   it('hands over a tile that failed alone with its status', async () => {
     const failure = await appTile(asked, { batched: false, batcher: null, fetch: single(502, 'down') }).catch((e) => e);
     expect(failure.status).toBe(502);
+  });
+
+  it('says when the fallback relief drew a tile, batched or alone', async () => {
+    const relief = { kind: 'terrain', providerId: null, z: 5, x: 3, y: 4 };
+    const stitched = new TextEncoder().encode('stitched').buffer;
+    const batched = await appTile(relief, {
+      batched: true,
+      batcher: { get: async () => ({ status: FALLBACK_STATUS, data: stitched }) },
+    });
+    expect([text(batched.data), batched.fallback]).toEqual(['stitched', true]);
+    const fallbackAlone = vi.fn(async () => ({
+      ok: true,
+      status: FALLBACK_STATUS,
+      arrayBuffer: async () => stitched,
+    }));
+    expect((await appTile(relief, { batched: false, batcher: null, fetch: fallbackAlone })).fallback).toBe(true);
+    expect((await appTile(relief, { batched: false, batcher: null, fetch: single(200, 'primary') })).fallback).toBe(false);
   });
 });

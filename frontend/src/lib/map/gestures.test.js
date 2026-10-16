@@ -6,6 +6,8 @@ import {
   flingOf,
   GLIDE_GRACE,
   GLIDE_REACH,
+  KEY_TILT_STEP,
+  keyTilt,
   metresPerPixel,
   ORBIT_TILT_PER_PX,
   ORBIT_TURN_PER_PX,
@@ -13,10 +15,12 @@ import {
   startGroundPan,
   startRectDrag,
   startRotateDrag,
+  tiltFromKey,
   turnFromKey,
   turnFromPress,
   viewReach,
 } from './gestures.js';
+import { wheelLevels } from './wheel.js';
 
 /** The façade, as far as the gestures reach into it. */
 function stubEngine({ bearing = 0 } = {}) {
@@ -267,6 +271,39 @@ describe('turning from the keyboard', () => {
     expect(turnFromKey(engine, keydown('ArrowLeft', { shiftKey: false }))).toBe(false);
     expect(turnFromKey(null, keydown('ArrowLeft'))).toBe(false);
     expect(engine.bearings).toEqual([]);
+  });
+});
+
+describe('tilting from the keyboard', () => {
+  const keydown = (key, init = {}) => new window.KeyboardEvent('keydown', { key, cancelable: true, ...init });
+  const tilted = (pitch) => ({ ...stubEngine(), camera: () => ({ pitch }), pitches: [], setPitch(deg) { this.pitches.push(deg); } });
+
+  it('leans toward the horizon with Page Up and back down with Page Down, never under flat', () => {
+    const engine = tilted(40);
+    const up = keydown('PageUp');
+    expect(tiltFromKey(engine, up)).toBe(true);
+    expect(up.defaultPrevented).toBe(true);
+    expect(tiltFromKey(engine, keydown('PageDown'))).toBe(true);
+    expect(engine.pitches).toEqual([40 + KEY_TILT_STEP, 40 - KEY_TILT_STEP]);
+    expect(keyTilt(keydown('PageDown'), 4)).toBe(0);
+  });
+
+  it('leaves other keys, chords, a key already taken and one typed into a field', () => {
+    const engine = tilted(30);
+    expect(tiltFromKey(engine, keydown('ArrowUp'))).toBe(false);
+    expect(tiltFromKey(engine, keydown('PageUp', { ctrlKey: true }))).toBe(false);
+    expect(tiltFromKey(engine, keydown('PageUp', { shiftKey: true }))).toBe(false);
+    const taken = keydown('PageUp');
+    taken.preventDefault();
+    expect(tiltFromKey(engine, taken)).toBe(false);
+    const select = document.createElement('select');
+    document.body.append(select);
+    const typed = keydown('PageDown');
+    select.dispatchEvent(typed);
+    expect(tiltFromKey(engine, typed)).toBe(false);
+    select.remove();
+    expect(tiltFromKey(null, keydown('PageUp'))).toBe(false);
+    expect(engine.pitches).toEqual([]);
   });
 });
 
@@ -648,6 +685,9 @@ describe('the wheel over the relief', () => {
     const queue = [];
     return {
       next: (run) => queue.push(run),
+      runOne() {
+        queue.splice(0).forEach((run) => run());
+      },
       runAll() {
         for (let i = 0; i < 200 && queue.length; i += 1) queue.splice(0).forEach((run) => run());
       },
@@ -673,7 +713,9 @@ describe('the wheel over the relief', () => {
     wheel.wheel(event);
     expect(event.preventDefault).toHaveBeenCalled();
     frame.runAll();
-    expect(engine.exactZoom()).toBeCloseTo(13, 3);
+    // a notch, as far as the flat map takes one (`wheel.js`)
+    expect(engine.exactZoom()).toBeCloseTo(12 + wheelLevels(100, 'wheel'), 3);
+    expect(engine.exactZoom()).toBeCloseTo(13, 2);
     // the eye moved toward the point, eased in over several frames, not in one jump
     expect(engine.dollies.length).toBeGreaterThan(3);
     expect(engine.zooms).toEqual([]);
@@ -688,7 +730,9 @@ describe('the wheel over the relief', () => {
     const frame = frames();
     const wheel = createReliefWheel(engine, { nextFrame: frame.next });
     wheel.wheel(notch(300, 450));
+    frame.runOne();
     wheel.wheel(notch(300, 450));
+    frame.runOne();
     wheel.wheel(notch(300, 450));
     frame.runAll();
     expect(engine.exactZoom()).toBeCloseTo(13.5, 2);
@@ -714,7 +758,24 @@ describe('the wheel over the relief', () => {
     createReliefWheel(engine, { nextFrame: frame.next }).wheel(notch(300, 450, 100));
     frame.runAll();
     expect(engine.dollies).toEqual([]);
-    expect(engine.exactZoom()).toBeCloseTo(11, 3);
+    expect(engine.exactZoom()).toBeCloseTo(11, 2);
+  });
+
+  it('goes as far for a trackpad as the flat map does, a little a sliver, as one movement', () => {
+    const engine = zoomingEngine();
+    const frame = frames();
+    let clock = 0;
+    const wheel = createReliefWheel(engine, { nextFrame: frame.next, now: () => clock });
+    for (let i = 0; i < 10; i += 1) {
+      clock += 16;
+      wheel.wheel(notch(300, 450, -3));
+      frame.runOne();
+    }
+    frame.runAll();
+    expect(engine.exactZoom()).toBeCloseTo(12 + 10 * wheelLevels(3, 'trackpad'), 3);
+    // ten slivers are a fifth of a level, where a notch is one
+    expect(engine.exactZoom() - 12).toBeLessThan(0.25);
+    expect(engine.holdElevation).toHaveBeenCalledTimes(1);
   });
 
   it('leaves a wheel that does not zoom to the page', () => {

@@ -97,7 +97,7 @@
   function drawn(row, collection) {
     if (!isTracked(row) || !collection) return collection;
     const time = row.time ?? {};
-    return asOf(collection, time.at ?? null, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? 7 });
+    return asOf(collection, time.at ?? null, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? null });
   }
 
   /** What the editor holds off a layer while the analyst drags it; nothing once it is let go. */

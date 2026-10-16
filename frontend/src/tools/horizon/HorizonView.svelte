@@ -354,6 +354,8 @@
   }
 
   const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  /** How long an export's turned camera (`through`) is drawn at most for its ground to sharpen. */
+  const TURNED_WAIT_MS = 4000;
 
   function copyOf(source) {
     const out = document.createElement('canvas');
@@ -405,9 +407,12 @@
    * is sharp (or `wait` ms), then once per entry of `variants` (renderer
    * options over the tab's own: `{ photo: 1 }` the photo alone, `{ photo: 0 }`
    * the terrain alone), each copied before the next is drawn, and the screen
-   * comes back as it was. An `area` of the screen (CSS pixels) is cut out of
-   * each; `note` is what the veil says meanwhile. Answers `{ frames, layers, camera, scale, lens }`, `lens` what the
-   * picture faces and how wide it is (`areaLens`), or null when there is no
+   * comes back as it was. A variant's `through` turns the export's camera into
+   * the one it is drawn with (a piece of a cut collage, lib/horizon/cutView.js),
+   * drawn until its ground is sharp too. An `area` of the screen (CSS pixels) is cut out of
+   * each; `note` is what the veil says meanwhile. Answers `{ frames, layers, camera, scale, lens, turned }`, `lens` what the
+   * picture faces and how wide it is (`areaLens`), `turned` each variant's own
+   * `{ camera, layers }` when it had a `through` (else null), or null when there is no
    * view to draw.
    */
   export async function exportPicture({ kind = 'view', variants = [{}], area = null, wait = kind === 'turn' ? 25000 : 12000, note = '' } = {}) {
@@ -431,10 +436,20 @@
         await nextFrame();
       }
       const cut = area ? areaWithin(area, through) : null;
-      const frames = variants.map((change) => {
-        scene.draw(through, { ...options, ...change });
-        return cut ? cutOf(canvas, cut, scale) : copyOf(canvas);
-      });
+      const frames = [];
+      const turned = [];
+      for (const { through: turn, ...change } of variants) {
+        const at = turn ? turn(through) : through;
+        let now = scene.draw(at, { ...options, ...change });
+        // a turned camera may reach ground the export's own did not sharpen
+        for (const begun = performance.now(); turn && now.phase && performance.now() - begun < TURNED_WAIT_MS; ) {
+          await nextFrame();
+          now = scene.draw(at, { ...options, ...change });
+        }
+        frames.push(cut ? cutOf(canvas, cut, scale) : copyOf(canvas));
+        const own = turn ? layersFor(at, kind) : null;
+        turned.push(own ? { camera: at, layers: cut ? layersIn(own, cut) : own } : null);
+      }
       const whole = { x: 0, y: 0, width: through.width, height: through.height };
       const layers = layersFor(through, kind);
       return {
@@ -443,6 +458,7 @@
         camera: through,
         scale,
         lens: through.projection === 'panorama' ? null : areaLens(through, cut ?? whole),
+        turned,
       };
     } finally {
       canvas.width = before.width;

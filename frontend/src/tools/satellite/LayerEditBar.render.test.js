@@ -180,19 +180,25 @@ describe('what the bar dates an edit to', () => {
     expect(document.querySelector('[aria-label="What your edits are dated to"]')).toBeNull();
   });
 
-  it('carries no date at now, and a day picked dates the edits from it', () => {
-    const controller = tracked({ cursor: null });
+  it('dates from today as it opens, and a day picked dates the edits from it, never after today', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
+    const controller = tracked({ cursor: '2026-10-16' });
     show(LayerEditBar, { controller, ondone: vi.fn() });
-    expect(pressed('No date')).toBe(true);
-    expect(pressed('Date your edits from a day')).toBe(false);
+    // no "now" with no date: today is a day like any other
+    expect(pressed('From 16 Oct 2026')).toBe(true);
+    expect(pressed('No date')).toBe(false);
     // only the mode on says itself in words
-    expect(button('Date your edits from a day').textContent.trim()).toBe('');
-    expect(button('No date').textContent.trim()).toBe('No date');
-    button('Date your edits from a day').click(); flushSync();
-    const day = document.querySelector('.float-menu button.day:not(:disabled):not(.out)');
+    expect(button('From 16 Oct 2026').textContent.trim()).toBe('From 16 Oct');
+    expect(button('No date').textContent.trim()).toBe('');
+    button('From 16 Oct 2026').click(); flushSync();
+    const days = [...document.querySelectorAll('.float-menu button.day:not(.out)')];
+    expect(days.find((day) => day.title === '2026-10-17')?.disabled ?? true).toBe(true);
+    const day = days.find((one) => !one.disabled);
     day.click(); flushSync();
     expect(controller.changeOn).toHaveBeenCalledWith(day.title);
     expect(document.querySelector('.float-menu')).toBeNull();
+    vi.useRealTimers();
   });
 
   it('dates from the day shown until no date is chosen, and back again in one press', () => {

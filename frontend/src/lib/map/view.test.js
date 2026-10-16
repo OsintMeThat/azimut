@@ -100,4 +100,21 @@ describe('a tilted view of the relief', () => {
     expect(readView(new URLSearchParams('ll=46,7&z=12&t=120')).pitch).toBeUndefined();
     expect(readView(new URLSearchParams('ll=46,7&z=12')).pitch).toBeUndefined();
   });
+
+  it('keeps the zoom’s fraction over relief, where it is part of the camera, and only there', () => {
+    expect(viewParams({ lat: 1, lon: 1, zoom: 13.6274, pitch: 60 }).z).toBe('13.63');
+    expect(viewParams({ lat: 1, lon: 1, zoom: 13.6274, pitch: 0 }).z).toBe('13.63');
+    expect(viewParams({ lat: 1, lon: 1, zoom: 13.6274 }).z).toBe('14');
+    expect(readView(new URLSearchParams('ll=46,7&z=13.63&t=60')).zoom).toBe(13.63);
+    expect(readView(new URLSearchParams('ll=46,7&z=13.63')).zoom).toBe(14);
+  });
+
+  it('writes the height the camera holds its centre at, over relief only, and reads it back', () => {
+    expect(viewParams({ lat: 1, lon: 1, zoom: 13, pitch: 85, elevation: 711.9 }).e).toBe('712');
+    expect(viewParams({ lat: 1, lon: 1, zoom: 13, elevation: 711.9 }).e).toBeUndefined();
+    expect(viewParams({ lat: 1, lon: 1, zoom: 13, pitch: 85, elevation: null }).e).toBeUndefined();
+    expect(readView(new URLSearchParams('ll=46,7&z=13.78&t=85&e=712')).elevation).toBe(712);
+    expect(readView(new URLSearchParams('ll=46,7&z=13&e=712')).elevation).toBeUndefined();
+    expect(readView(new URLSearchParams('ll=46,7&z=13&t=85&e=99999')).elevation).toBeUndefined();
+  });
 });

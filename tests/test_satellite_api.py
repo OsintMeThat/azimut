@@ -500,23 +500,51 @@ def test_a_tilted_view_is_filed_with_its_tilt_and_the_relief_it_was_drawn_on(cli
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
     r = client.post(
         f"/api/cases/{cid}/satellite/oblique",
-        files={"image": ("tilted.png", _png_bytes(), "image/png")},
-        data={"lat": "46.5776", "lon": "8.0053", "zoom": "14", "provider": "esri-world-imagery",
-              "bearing": "150", "pitch": "62", "exaggeration": "1",
+        files={"image": ("tilted.png", _png_bytes(w=800), "image/png")},
+        data={"lat": "46.5776", "lon": "8.0053", "zoom": "13.6274", "provider": "esri-world-imagery",
+              "bearing": "150", "pitch": "62", "exaggeration": "1", "elevation": "711.9",
               "imagery_date": "2024-08-13", "imagery_exact": "false"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert (body["method"], body["pitch"], body["bearing"]) == ("render", 62.0, 150.0)
+    # over relief the zoom's fraction is part of the camera, so it is kept
+    assert body["zoom"] == 13.63
     assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0}
     assert "Relief © Mapterhorn" in body["attribution"]
-    assert "taller" not in body["attribution"]
+    assert "AWS" not in body["attribution"]
+    assert "exaggerated" not in body["attribution"]
     # a tilted view has no one scale, so no bar or arrow is drawn on it
     assert body["marks"] is None
     assert body["height"] == 200 + tiles.ATTRIBUTION_BAND
     assert (body["imagery_date"], body["imagery_exact"]) == ("2024-08-13", False)
     listed = client.get(f"/api/cases/{cid}/satellite").json()
     assert listed[0]["pitch"] == 62.0
+    # the saved list carries the camera, so the map can lean back to it
+    row = client.get(f"/api/cases/{cid}/satellite/index").json()[0]
+    assert (row["pitch"], row["exaggeration"], row["zoom"], row["bearing"]) == (62.0, 1.0, 13.63, 150.0)
+    # …and the height its centre was held at, which with the zoom puts the eye back
+    assert (body["elevation"], row["elevation"]) == (712, 712)
+
+
+def test_a_tilted_view_drawn_partly_from_the_fallback_relief_credits_it(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(w=1200), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "13", "provider": "esri-world-imagery",
+              "pitch": "60", "relief_fallback": "true"},
+    ).json()
+    assert "Relief © Mapterhorn and Terrain Tiles, Mapzen and AWS Open Data" in body["attribution"]
+    assert body["relief"] == {"source": "mapterhorn", "exaggeration": 1.0, "fallback": "aws-terrain"}
+
+
+def test_a_flat_saved_row_carries_no_tilt(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place",
+                json={"lat": 46.5, "lon": 8.0, "zoom": 14, "title": "Flat"})
+    row = client.get(f"/api/cases/{cid}/satellite/index").json()[0]
+    assert (row["pitch"], row["exaggeration"], row["elevation"]) == (None, None, None)
 
 
 def test_a_tilted_view_with_free_far_ground_credits_both_providers(client):
@@ -548,7 +576,7 @@ def test_an_exaggerated_relief_says_so_on_the_capture(client):
         data={"lat": "46.5", "lon": "8.0", "zoom": "12", "provider": "esri-world-imagery",
               "pitch": "45", "exaggeration": "2"},
     ).json()
-    assert "heights drawn 2× taller" in body["attribution"]
+    assert "heights exaggerated 2 times" in body["attribution"]
     assert body["relief"]["exaggeration"] == 2.0
 
 

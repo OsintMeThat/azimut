@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { facesOf, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
-  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE_ZOOM, pageSize, periodSaid, placeOf, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
-  turnable, withoutStep, zoomPageAt } from './page.js';
+  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, placeOf, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
+  turnable, unsettled, withoutStep, zoomPageAt } from './page.js';
 
 describe('a plate page', () => {
   it('turns its paper as it is set', () => {
@@ -76,7 +76,7 @@ describe('a plate page', () => {
     const again = fromTemplate(data, { view: { lat: 1, lon: 2, zoom: 3, bearing: 0 }, layers: ['a', 'b'] });
     expect(mainMap(again).view).toEqual({ lat: 1, lon: 2, zoom: 3, bearing: 0 });
     expect(mainMap(again).layers.map((layer) => layer.name)).toEqual(['a', 'b']);
-    expect(again.time).toEqual({ at: null, trail: true, since: null, window: 7 });
+    expect(again.time).toEqual({ at: null, trail: true, since: null, window: null });
     // how long a day holds goes with the layout, never a day's own time
     const held = templateOf({ ...spec, time: { at: '2026-10-01', hold: 2.5 }, holds: { now: 4 } });
     expect([held.time, held.holds]).toEqual([{ hold: 2.5 }, undefined]);
@@ -111,6 +111,8 @@ describe('a plate page', () => {
     // no day of its own: the day its layers last changed, rather than a today that would claim too much
     expect(fillTokens('{date}', { today, updated: '2026-09-30' })).toBe('30 September 2026');
     expect(fillTokens('{scale} {handle}', { today, scale: '1:25,000', handle: '@desk' })).toBe('1:25,000 @desk');
+    // today is this computer's day, even half an hour after its midnight
+    expect(fillTokens('{today}', { today: new Date(2026, 9, 15, 0, 30) })).toBe('15 October 2026');
   });
 });
 
@@ -142,7 +144,7 @@ describe('the days an annotation is shown on', () => {
 
   it('is born on the day it is made on a played plate, every day on another', () => {
     expect(bornOn('2026-10-01', true)).toEqual({ onward: '2026-10-01', until: '2026-10-01' });
-    expect(bornOn(null, true)).toEqual({ onward: 'now', until: null });
+    expect(bornOn(null, true)).toEqual({ onward: PAGE, until: null });
     expect(bornOn('2026-10-01', false)).toEqual({});
   });
 
@@ -177,17 +179,73 @@ describe('the days an annotation is shown on', () => {
   it('says its days in a few words', () => {
     const label = (day) => day.replace('2026-10-', '') + ' Oct';
     expect(periodSaid({}, label)).toBe('Every day');
-    expect(periodSaid({ onward: 'now' }, label)).toBe('Only now');
+    expect(periodSaid({ onward: PAGE }, label)).toBe('Only on the page');
     expect(periodSaid({ onward: '2026-10-03', until: '2026-10-03' }, label)).toBe('Only on 03 Oct');
     expect(periodSaid({ onward: '2026-10-03' }, label)).toBe('From 03 Oct on');
     expect(periodSaid({ until: '2026-10-10' }, label)).toBe('Up to 10 Oct');
     expect(periodSaid({ onward: '2026-10-03', until: '2026-10-10' }, label)).toBe('03 Oct to 10 Oct');
   });
 
-  it('orders now after every day', () => {
+  it('orders the page after every day', () => {
     expect(dayBefore('2026-10-01', 'now')).toBe(true);
     expect(dayBefore('now', '2026-10-01')).toBe(false);
     expect(dayBefore('2026-10-01', '2026-10-01T09:00')).toBe(true);
+  });
+});
+
+describe('a plate put on a day', () => {
+  const old = () => ({
+    time: { at: null, trail: true },
+    steps: { now: [{ id: 'n1' }], '2026-10-15': [{ id: 'd1' }] },
+    holds: { now: 4 },
+    framing: { now: { map: { lat: 1, lon: 2, zoom: 9, bearing: 0 } }, n1: { map: { lat: 3, lon: 4, zoom: 9, bearing: 0 } } },
+    elements: [
+      { id: 'made-now', kind: 'label', onward: 'now', until: null },
+      { id: 'up-to-now', kind: 'label', onward: '2026-10-01', until: 'now' },
+      { id: 'every-day', kind: 'label' },
+      { id: 'of-a-step', kind: 'text', step: 'n1' },
+    ],
+  });
+
+  it('is unsettled while it stands on no day or keeps anything under its page', () => {
+    expect(unsettled(old())).toBe(true);
+    expect(unsettled({ time: { at: '2026-10-15' }, steps: {}, elements: [] })).toBe(false);
+    expect(unsettled({ time: { at: '2026-10-15' }, holds: { now: 2 }, elements: [] })).toBe(true);
+    expect(unsettled({ time: { at: '2026-10-15' }, elements: [{ id: 'a', onward: 'now' }] })).toBe(true);
+  });
+
+  it('takes the day it was last saved, with what stood on now moved there', () => {
+    const spec = old();
+    const settled = { ...spec, ...settleOn(spec, '2026-10-15') };
+    expect(settled.time.at).toBe('2026-10-15');
+    // the page's steps after the day's own, its seconds and framing where the day had none
+    expect(settled.steps).toEqual({ '2026-10-15': [{ id: 'd1' }, { id: 'n1' }] });
+    expect(settled.holds).toEqual({ '2026-10-15': 4 });
+    expect(Object.keys(settled.framing).sort()).toEqual(['2026-10-15', 'n1']);
+    const byId = Object.fromEntries(settled.elements.map((element) => [element.id, element]));
+    // made on now, an annotation is that day's alone; up to now, it runs on
+    expect([byId['made-now'].onward, byId['made-now'].until]).toEqual(['2026-10-15', '2026-10-15']);
+    expect([byId['up-to-now'].onward, byId['up-to-now'].until]).toEqual(['2026-10-01', null]);
+    expect(byId['every-day']).toEqual({ id: 'every-day', kind: 'label' });
+    expect(byId['of-a-step'].step).toBe('n1');
+    expect(unsettled(settled)).toBe(false);
+  });
+
+  it('keeps the day it already stands on, and the day\'s own seconds and framing first', () => {
+    const spec = { ...old(), time: { at: '2026-10-20' }, holds: { now: 4, '2026-10-12': 2 },
+      framing: { now: { map: { lat: 1 }, inset: { lat: 5 } }, '2026-10-12': { map: { lat: 9 } } } };
+    const settled = settleOn(spec, '2026-10-12');
+    expect(settled.time.at).toBe('2026-10-20');
+    expect(settled.holds).toEqual({ '2026-10-12': 2 });
+    expect(settled.framing['2026-10-12']).toEqual({ map: { lat: 9 }, inset: { lat: 5 } });
+  });
+
+  it('drops what belonged to a step cut off by the most a day holds', () => {
+    const many = Array.from({ length: 30 }, (_, index) => ({ id: `d${index}` }));
+    const spec = { time: {}, steps: { now: [{ id: 'late' }], '2026-10-15': many }, elements: [{ id: 'x', kind: 'text', step: 'late' }] };
+    const settled = settleOn(spec, '2026-10-15');
+    expect(settled.steps['2026-10-15']).toHaveLength(30);
+    expect(settled.elements).toEqual([]);
   });
 });
 

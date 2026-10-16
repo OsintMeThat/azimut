@@ -15,10 +15,9 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
-  import { isoDay } from '../../lib/map/layerDates.js';
   import { mergeable, splittable } from '../../lib/map/layerHit.js';
   import { DEFAULT_PLACE, barBox, loadPlace, loadTips, rowRoom, savePlace, saveTips, snapPlace, upright } from '../../lib/map/editBarPlace.js';
-  import { momentLabel } from '../../lib/map/layerHistory.js';
+  import { momentLabel, momentNow } from '../../lib/map/layerHistory.js';
 
   let { controller, vertex = null, ondone } = $props();
   const selection = $derived(controller.selection ?? []);
@@ -42,20 +41,22 @@
   const onePoint = $derived(chosen.length === 1 && chosen[0].geometry.type === 'Point');
   /**
    * A tracked layer: what the next edit is dated to, said and switched on the bar.
-   * From a day, what is drawn appears then and what is changed changes from then;
-   * with no date, what is drawn shows on every day and a change corrects.
+   * From a day, today until another is picked, what is drawn appears then and what
+   * is changed changes from then; with no date, what is drawn shows on every day.
    */
   const tracked = $derived(!!controller.editor?.track?.on);
   const cursor = $derived(controller.cursor);
   const dated = $derived(cursor !== null && controller.timeMode === 'new');
   /** `12 Oct`, or `12 Oct 14:00`: the year is in the panel. */
   const short = $derived(cursor ? momentLabel(cursor).replace(/ \d{4}/, '').replace(' · ', ' ') : '');
+  /** Today on the layer's clock: no change is dated after it. */
+  const today = $derived(momentNow({ zone: controller.editor?.track?.zone }));
   /** The calendar a day is picked from, under the bar's day button. */
   let picking = $state(false);
   let dayButton = $state(null);
   function pickDay() {
     // a press on the day while edits carry no date dates them again; on the day itself it opens the month
-    if (cursor !== null && !dated) controller.timeMode = 'new';
+    if (!dated) controller.timeMode = 'new';
     else picking = !picking;
   }
   const hint = $derived(controller.lassoing ? 'Draw round what to select. Shift adds to the selection.'
@@ -203,10 +204,9 @@
       <!-- the mode on says what it does in words; the other is its icon, named by its tip -->
       <span class="when-mode" role="group" aria-label="What your edits are dated to">
         <button type="button" class="mode" aria-pressed={dated} aria-expanded={picking} bind:this={dayButton}
-          aria-label={cursor === null ? 'Date your edits from a day' : `From ${momentLabel(cursor)}`}
-          title={cursor === null ? 'Pick a day: what you draw appears then, what you change changes from then'
-            : dated ? `What you draw appears on ${momentLabel(cursor)}, what you change changes from then. Press for another day`
-              : `Date your edits from ${momentLabel(cursor)}`}
+          aria-label={`From ${momentLabel(cursor)}`}
+          title={dated ? `What you draw appears on ${momentLabel(cursor)}, what you change changes from then. Press for another day`
+            : `Date your edits from ${momentLabel(cursor)}`}
           onclick={pickDay}><Icon name="calendar" size={12} />{#if !vertical && dated}<span>From {short}</span>{/if}</button>
         <button type="button" class="mode" aria-pressed={!dated} aria-label="No date"
           title="What you draw or change counts on every day; what moved on a day moves from a day"
@@ -290,7 +290,7 @@
   <FloatingMenu anchor={dayButton} width={248} label="Date your edits from" onclose={() => (picking = false)}>
     <p class="fm-head">Date your edits from</p>
     <!-- a change is what was seen, so no day after today -->
-    <MonthGrid value={cursor ? cursor.slice(0, 10) : ''} max={isoDay(Math.floor(Date.now() / 86_400_000))} label="Day your edits start from"
+    <MonthGrid value={cursor ? cursor.slice(0, 10) : ''} max={today} label="Day your edits start from"
       onpick={(iso) => { picking = false; if (iso) controller.changeOn(iso); }} />
     <p class="fm-note">The layer shows that day too.</p>
   </FloatingMenu>

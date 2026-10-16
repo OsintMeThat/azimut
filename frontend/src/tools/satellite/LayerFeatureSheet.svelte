@@ -122,6 +122,8 @@
     .filter(([field]) => (one ? form?.[field] : shared(field, '')) ?? '').map(([, label]) => label));
   /** Its group's features are events, there on their day and fading after it. */
   const inEvents = $derived(!!groups.find((option) => option.id === one?.properties.group)?.events);
+  /** Several picked, all events: their one day is said as an event's. */
+  const allEvents = $derived(chosen.every((feature) => !!groups.find((option) => option.id === feature.properties.group)?.events));
   const blur = (event) => { if (event.key === 'Enter') event.currentTarget.blur(); };
 </script>
 
@@ -151,7 +153,8 @@
         onclick={() => controller.select(null)}><Icon name="x" size={13} /></button>
     </div>
 
-    {#if one && tracked}<LayerFeatureWhen {controller} feature={one} event={inEvents} />{/if}
+    {#if one && tracked}<LayerFeatureWhen {controller} feature={one} event={inEvents} />
+    {:else if tracked && chosen.length > 1}<LayerFeatureWhen {controller} features={chosen} event={allEvents} />{/if}
 
     {#if one?.properties.entity_id}
       {@const said = one.properties}

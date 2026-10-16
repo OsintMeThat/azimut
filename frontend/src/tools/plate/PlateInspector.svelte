@@ -18,7 +18,7 @@
   import { buildMediaQuery } from '../../lib/mediaQuery.js';
   import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
   import { prefs } from '../../lib/state.svelte.js';
-  import { FONTS, KIND_LABELS, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
+  import { FONTS, KIND_LABELS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, bornOn, bringTo, dayOf, endOn, labelBox, mainMap,
     pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
   import { FIRST_SECONDS, captionOf, clipRange, readTimecode, timecode } from '../../lib/plate/clip.js';
   import { GRATICULE_STEPS } from '../../lib/plate/geo.js';
@@ -221,9 +221,11 @@
 
   // -- the days an annotation belongs to --------------------------------------------
   const shownToday = $derived(element ? shownOn(element, at, place) : true);
-  /** The plate's day as a button says it: "on 14 Oct 2026", or "now". */
-  const onDay = $derived(at ? `on ${momentLabel(at)}` : 'now');
-  const dayName = (day) => (day === 'now' ? 'Now' : momentLabel(day));
+  /** The plate's day as a button says it: "on 14 Oct 2026". */
+  const onDay = $derived(at ? `on ${momentLabel(at)}` : 'on the page');
+  const dayName = (day) => (day === PAGE ? 'The page' : momentLabel(day));
+  /** No day after today, nor after the plate's own, which is today on its layers' clock at most. */
+  const lastDay = $derived([calendarToday(), (at ?? '').slice(0, 10)].sort().at(-1));
   /** Which end of the annotation's days has its calendar open: `onward`, `until`, or neither. */
   let ending = $state('');
   $effect(() => { void element?.id; ending = ''; });
@@ -231,8 +233,8 @@
     Object.assign(element, ending === 'onward' ? startOn(element, day) : endOn(element, day));
     ending = '';
   }
-  const endDay = $derived(((ending === 'onward' ? element?.onward : element?.until) || at || '').slice(0, 10).replace(/^now$/, '')
-    || calendarToday());
+  const endDay = $derived(((ending === 'onward' ? element?.onward : element?.until) || at || '').slice(0, 10).replace(PAGE, '')
+    || lastDay);
   /** What the signature is made of, said where it is set, and where to set what is missing. */
   const signatureNote = $derived(prefs.signatureHandle
     ? `{handle} is ${prefs.signatureHandle}; the picture is the one in Settings → Publishing → Signature, when there is one.`
@@ -423,17 +425,17 @@
           onclick={() => (ending = ending === 'onward' ? '' : 'onward')}><Icon name="calendar" size={12} />{element.onward ? dayName(element.onward) : 'The start'}</button>
         <span class="key">to</span>
         <button type="button" class="end" class:open={ending === 'until'} aria-expanded={ending === 'until'} aria-label="Last day shown"
-          onclick={() => (ending = ending === 'until' ? '' : 'until')}><Icon name="calendar" size={12} />{element.until ? dayName(element.until) : 'Now'}</button>
+          onclick={() => (ending = ending === 'until' ? '' : 'until')}><Icon name="calendar" size={12} />{element.until ? dayName(element.until) : 'The end'}</button>
         {#if ending}
           <div class="pick">
             <div class="tools wide">
               {#if ending === 'onward'}<button type="button" class="btn btn-xs" title="Shown from the plate's first day" onclick={() => setEnd('')}>The start</button>{/if}
-              {#if at || ending === 'onward'}
-                <button type="button" class="btn btn-xs" title={at ? `${momentLabel(at)}, the plate's day` : 'The plate is on now'} onclick={() => setEnd(dayOf(at))}>{at ? 'This day' : 'Now'}</button>
+              {#if at}
+                <button type="button" class="btn btn-xs" title={`${momentLabel(at)}, the plate's day`} onclick={() => setEnd(dayOf(at))}>This day</button>
               {/if}
-              {#if ending === 'until'}<button type="button" class="btn btn-xs" title="Shown up to now" onclick={() => setEnd('')}>Now</button>{/if}
+              {#if ending === 'until'}<button type="button" class="btn btn-xs" title="Shown on every day after its first" onclick={() => setEnd('')}>The end</button>{/if}
             </div>
-            <MonthGrid value={endDay} max={calendarToday()} label={ending === 'onward' ? 'First day shown' : 'Last day shown'} onpick={setEnd} />
+            <MonthGrid value={endDay} max={lastDay} label={ending === 'onward' ? 'First day shown' : 'Last day shown'} onpick={setEnd} />
           </div>
         {/if}
         {#if !shownToday}

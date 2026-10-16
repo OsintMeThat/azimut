@@ -272,6 +272,20 @@ def test_an_unreachable_mapterhorn_falls_back_to_four_aws_tiles(tmp_workspace, m
     assert len(asked) == before
 
 
+def test_the_tile_route_says_when_the_fallback_drew_the_tile(client, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "tiles.mapterhorn.com":
+            raise httpx.ConnectError("down", request=request)
+        return httpx.Response(200, content=terrain.encode(np.full((256, 256), 50.0, dtype=np.float32)),
+                              headers={"content-type": "image/png"})
+
+    _network(monkeypatch, handler)
+    response = client.get("/api/terrain/tiles/5/10/20")
+    # 203, a payload transformed on its way: four AWS tiles stitched into one of ours
+    assert response.status_code == 203
+    assert terrain.decode(response.content)[0, 0] == pytest.approx(50.0)
+
+
 def test_both_sources_down_is_unavailable(tmp_workspace, monkeypatch):
     def handler(request):
         raise httpx.ConnectError("offline", request=request)

@@ -523,3 +523,37 @@ test('the page takes the room: panels widened and put away, focus, and a tab of 
   await expect(second.getByRole('heading', { name: 'Map plates' })).toBeVisible();
   await second.close();
 });
+
+test('a plate saved on now reopens on the day it was last saved, with what stood on now', async ({ page }) => {
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 1,
+    categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };
+  const point = (lon) => ({ type: 'Point', coordinates: [lon, 48.86] });
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: point(2.31), properties: { key: 'k', name: 'Post', group: 'g', category: 'Posts',
+      states: [{ at: '2026-10-03', geometry: point(2.30) }, { at: '2026-10-09', geometry: point(2.31) }] } }] } }));
+  // saved on the 12th while a played plate could stand on "now"
+  store.plates.set('Front', { title: 'Front', updated_at: '2026-10-12T21:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: null, step: null, trail: true, since: null, window: 7, hold: 1 },
+    steps: { now: [{ id: 's1', name: 'Strike', duration: 3 }] },
+    holds: { now: 2 },
+    elements: [
+      { id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.3, zoom: 12, bearing: 0 }, basemap: 'plain',
+        overlays: [], layers: [{ name: 'front', hidden: [], stroke: 1, icons: 1 }], grid: 'none' },
+      { id: 'note', kind: 'text', box: [10, 4, 120, 12], text: 'Hit on the post', onward: 'now', until: null },
+    ] } });
+  await page.goto('/#plate');
+  await page.locator('.tile .open', { hasText: 'Front' }).click();
+  // the day it was left on, never a "now" that slid to today
+  await expect(page.locator('.timebar .moment')).toHaveText('12 Oct 2026');
+  await expect.poll(() => lastSave(store)?.spec.time.at ?? null).toBe('2026-10-12');
+  const spec = lastSave(store).spec;
+  expect(spec.steps).toEqual({ '2026-10-12': [{ id: 's1', name: 'Strike', duration: 3 }] });
+  expect(spec.holds).toEqual({ '2026-10-12': 2 });
+  const note = spec.elements.find((element) => element.id === 'note');
+  expect([note.onward, note.until]).toEqual(['2026-10-12', '2026-10-12']);
+  await expect(page.locator('.steps [role="option"]').first()).toContainText('12 Oct 2026');
+});

@@ -189,6 +189,18 @@ describe('the map façade keeps the engine on its own side', () => {
     expect(map.calls.setPitch).toEqual([[0], [30]]);
   });
 
+  it('sets a camera handed with its centre’s height exactly there, as the hand leaves one', () => {
+    const map = stubMap({ getCenterElevation: () => 711.9 });
+    const facade = mapFacade(map);
+    expect(facade.centreElevation()).toBe(711.9);
+    facade.setCamera({ lat: 1, lon: 2, zoom: 13.78, bearing: 0, pitch: 85, elevation: 711.9 });
+    expect(map.calls.jumpTo[0]).toEqual([
+      { center: [2, 1], zoom: 12.78, bearing: -0, pitch: 85, elevation: 711.9 },
+      HAND,
+    ]);
+    expect(mapFacade(stubMap()).centreElevation()).toBe(null);
+  });
+
   it('waits for the map to rest with its tiles in', async () => {
     let idle;
     let moving = true;
@@ -246,6 +258,20 @@ describe('the map façade keeps the engine on its own side', () => {
     expect(facade.onSurface(null)).toBe(false);
     facade.focus();
     expect(canvas.focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('gives the map the keyboard from a gesture without a ring round it, until it loses it', () => {
+    const lost = [];
+    const canvas = {
+      dataset: {},
+      focus: vi.fn(),
+      addEventListener: (name, handler, options) => name === 'blur' && options?.once && lost.push(handler),
+    };
+    mapFacade(stubMap({ getCanvas: () => canvas })).focus();
+    expect(canvas.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect('handFocus' in canvas.dataset).toBe(true);
+    for (const handler of lost) handler();
+    expect('handFocus' in canvas.dataset).toBe(false);
   });
 
   it('holds what it can on an engine with no freeze of its own', () => {

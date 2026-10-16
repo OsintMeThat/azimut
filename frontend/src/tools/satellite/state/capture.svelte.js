@@ -56,6 +56,8 @@ import { clampSize, scaledCapture } from '../../../lib/captureSize.js';
 import { captureTab, extensionVersion } from '../../../lib/extBridge.js';
 import { frameFitsView, isRegistered, sourceRect } from '../../../lib/screenCrop.js';
 import { startRectDrag } from '../../../lib/map/gestures.js';
+import { isGround } from '../../../lib/map/basemap.js';
+import { writtenZoom } from '../../../lib/map/view.js';
 import { applyPrefs, prefs } from '../../../lib/state.svelte.js';
 
 /** Standard output sizes for the centred button, named by what they are for. */
@@ -268,6 +270,11 @@ export function createCaptureState({
    * to stitch, so what is filed is the picture the map drew, cropped to the
    * frame, with the tilt beside the bearing. It reads the map's own canvas,
    * so nothing of our chrome can be in it and no extension is needed.
+   *
+   * Only the imagery on its relief is drawn into it, as the stitched road files
+   * only the imagery: names, borders and the analyst's layers would each need
+   * a credit of their own on the image, and the line would outgrow the frame.
+   * The zoom goes with its fraction, which over relief is part of the camera.
    */
   async function obliqueCapture(framedOn, rect) {
     const box = element().getBoundingClientRect();
@@ -283,7 +290,7 @@ export function createCaptureState({
     busy = true;
     const pixels = provenance();
     try {
-      const { canvas: drawn, complete } = await engine().snapshot();
+      const { canvas: drawn, complete } = await engine().snapshot({ keep: (id) => isGround(id) });
       if (!complete) {
         notify('The map is still loading. Capture again once it has settled', 'warn', 6000);
         return;
@@ -301,13 +308,19 @@ export function createCaptureState({
       form.append('image', blob, 'tilted.png');
       form.append('lat', String(framedOn.lat));
       form.append('lon', String(framedOn.lon));
-      form.append('zoom', String(view().zoom));
+      form.append('zoom', String(writtenZoom(engine().exactZoom?.() ?? view().zoom, true)));
       form.append('bearing', String(bearing()));
       form.append('pitch', String(tilt()));
       form.append('exaggeration', String(reliefScale()));
       form.append('provider', pixels.provider);
       const far = farProvider();
       if (far) form.append('far_provider', far);
+      if (engine().drewReliefFallback?.()) form.append('relief_fallback', 'true');
+      // A frame centred on the view is the camera's own: its centre's height
+      // goes with it, so the view opens again with the eye where it stood.
+      const height = engine().centreElevation?.();
+      const centred = Math.abs(rect.x + rect.w / 2 - box.width / 2) < 1 && Math.abs(rect.y + rect.h / 2 - box.height / 2) < 1;
+      if (centred && Number.isFinite(height)) form.append('elevation', String(Math.round(height)));
       if (pixels.imageryDate) {
         form.append('imagery_date', pixels.imageryDate);
         form.append('imagery_exact', String(pixels.imageryExact ?? true));

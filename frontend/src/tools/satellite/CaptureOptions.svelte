@@ -29,6 +29,9 @@
     openFigure = null,
     /** Lay a map plate out round this view, with the layers on it. */
     openPlate = null,
+    /** The map leans over relief: the capture is the picture it draws, at
+     *  screen size, with no deeper zoom to take and no one scale to mark. */
+    tilted = false,
   } = $props();
 </script>
 
@@ -62,7 +65,7 @@
       class="btn btn-icon capture-arrow"
       class:on={menuOpen}
       onclick={() => (menuOpen = !menuOpen)}
-      title={widgetBase ? 'Capture mode, size & ratio' : 'Capture mode, size, ratio & resolution'}
+      title={widgetBase || tilted ? 'Capture mode, size & ratio' : 'Capture mode, size, ratio & resolution'}
       aria-label="Capture options"
     >
       <Icon name="chevronDown" size={13} />
@@ -168,6 +171,8 @@
               extension (Google's terms allow nothing programmatic out).
             {/if}
           </div>
+        {:else if tilted}
+          <div class="menu-hint">A tilted view is filed as the map draws it on screen, without a scale bar or north arrow.</div>
         {:else}
           <div class="menu-row">
             <span class="menu-label">Resolution</span>
@@ -180,11 +185,13 @@
           <div class="menu-hint">Captures a deeper zoom for a sharper file.</div>
         {/if}
 
-        <label class="menu-check">
-          <input type="checkbox" bind:checked={scaleNorth} />
-          <span>Scale bar & north arrow</span>
-        </label>
-        <div class="menu-hint last">Drawn into the capture, in your units.</div>
+        {#if !tilted}
+          <label class="menu-check">
+            <input type="checkbox" bind:checked={scaleNorth} />
+            <span>Scale bar & north arrow</span>
+          </label>
+          <div class="menu-hint last">Drawn into the capture, in your units.</div>
+        {/if}
       </div>
     {/if}
   </div>

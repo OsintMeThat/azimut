@@ -117,6 +117,20 @@ def test_group_order_survives_download_and_reimport(client, work, fmt):
     assert [group["name"] for group in groups] == ["Upper", "Lower", "Markers"]
 
 
+@pytest.mark.parametrize("fmt", ["geojson", "kml"])
+def test_an_unknown_end_survives_download_and_reimport(client, work, fmt):
+    owner, _, url, _ = work
+    assert client.patch(f"{url}/edit", json={"track": {"on": True}}).status_code == 200
+    key = client.post(f"{url}/markers", json={"lat": 48.8, "lon": 2.3, "name": "Candidate", "date": "2026-10-13"}).json()["marker"]["properties"]["key"]
+    assert client.patch(f"{url}/markers/{key}", json={"end_unknown": True}).status_code == 200
+    exported = client.post(f"{url}/export/{fmt}", json={})
+    imported = client.post(f"/api/cases/{owner}/map-layers/editable/upload", files={"file": (f"unknown.{fmt}", exported.content)})
+    assert imported.status_code == 200, imported.text
+    features = client.get(f"/api/cases/{owner}/map-layers/{imported.json()['name']}/edit").json()["document"]["features"]
+    said = {feature["properties"]["name"]: feature["properties"].get("end_unknown") for feature in features}
+    assert said["Candidate"] is True and said["Area"] is None
+
+
 def test_hidden_group_is_exported_with_its_visibility(client, work):
     _, _, url, _ = work
     client.patch(url, json={"hidden": ["Markers"]})

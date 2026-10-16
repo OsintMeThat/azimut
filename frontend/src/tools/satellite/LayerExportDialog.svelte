@@ -3,8 +3,9 @@
    * A personal layer out of the case: a file in one of three formats, or the
    * file a My Maps is sent.
    *
-   * A tracked layer goes out as it is now, as it stood on the day its cursor is
-   * on, or (KML, KMZ, GeoJSON) with every state dated so a time slider reads it.
+   * A tracked layer goes out as it stood on the day its cursor is on, today until
+   * it is moved, or (KML, KMZ, GeoJSON) with every state dated so a time slider
+   * reads it.
    * My Maps keeps no history and Google offers no way to write to one, so
    * sending is a KMZ of one day, the My Maps opened beside it, and three steps
    * said here.
@@ -22,9 +23,8 @@
   const cursor = $derived(tracked ? addedLayers.time(row.name).at : null);
   // svelte-ignore state_referenced_locally
   let mode = $state(target.mode === 'mymaps' ? 'mymaps' : 'download');
-  /** 'now', 'cursor' or 'history'. */
-  let which = $state('now');
-  $effect(() => { if (which === 'cursor' && cursor === null) which = 'now'; });
+  /** 'cursor' or 'history'. */
+  let which = $state('cursor');
   // svelte-ignore state_referenced_locally
   let address = $state(target.row.mymaps ?? '');
   let busy = $state('');
@@ -66,9 +66,7 @@
   {#if tracked}
     <fieldset class="which">
       <legend>{mode === 'mymaps' ? 'My Maps keeps no history: send one day' : 'What goes in the file'}</legend>
-      <label><input type="radio" bind:group={which} value="now" /> The layer now</label>
-      <label class:off={cursor === null}><input type="radio" bind:group={which} value="cursor" disabled={cursor === null} />
-        {cursor === null ? 'The layer on its day (move its cursor first)' : `The layer on ${momentLabel(cursor)}`}</label>
+      <label><input type="radio" bind:group={which} value="cursor" /> The layer on {momentLabel(cursor)}</label>
       {#if mode === 'download'}
         <label><input type="radio" bind:group={which} value="history" /> Every state, dated for a time slider</label>
       {/if}
@@ -81,7 +79,7 @@
         <button class="btn" disabled={!!busy} onclick={() => download(format)}><strong>{busy === format ? 'Preparing…' : name}</strong><span>{detail}</span></button>
       {/each}
     </div>
-    <button type="button" class="switch" onclick={() => { mode = 'mymaps'; if (which === 'history') which = 'now'; }}>Send to My Maps instead</button>
+    <button type="button" class="switch" onclick={() => { mode = 'mymaps'; if (which === 'history') which = 'cursor'; }}>Send to My Maps instead</button>
   {:else}
     <label class="address">
       <span>Your My Maps</span>
@@ -106,7 +104,6 @@
   .which { margin: 0 0 12px; padding: 0; border: 0; display: grid; gap: 5px; }
   .which legend { margin-bottom: 4px; color: var(--text-3); font-size: 11px; }
   .which label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); cursor: pointer; }
-  .which label.off { color: var(--text-3); }
   .formats { display: grid; gap: 6px; }
   .formats button { display: grid; justify-items: start; gap: 3px; text-align: left; padding: 9px; }
   .formats span { color: var(--text-3); font-size: 11px; }

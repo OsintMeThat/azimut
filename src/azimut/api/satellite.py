@@ -1816,7 +1816,7 @@ async def capture_oblique(
     image: UploadFile,
     lat: float = Form(ge=-90, le=90),
     lon: float = Form(ge=-180, le=180),
-    zoom: int = Form(ge=1, le=22),
+    zoom: float = Form(ge=1, le=22),
     provider: str = Form(),
     bearing: float = Form(default=0.0, ge=0, le=360),
     pitch: float = Form(gt=0, le=85),
@@ -1824,6 +1824,8 @@ async def capture_oblique(
     imagery_date: str | None = Form(default=None),
     imagery_exact: bool = Form(default=True),
     far_provider: str | None = Form(default=None),
+    relief_fallback: bool = Form(default=False),
+    elevation: float | None = Form(default=None, ge=-500, le=9000),
 ) -> dict[str, Any]:
     """File the tilted view the 3D map drew as a capture.
 
@@ -1833,13 +1835,22 @@ async def capture_oblique(
     again. Nothing about it is a single scale, so no scale bar or north arrow is
     drawn. Relief drawn taller than it is says so on the image itself.
 
-    ``lat``/``lon`` are the ground point at the centre of the frame.
+    ``lat``/``lon`` are the ground point at the centre of the frame, and ``zoom``
+    keeps its fraction: over relief it is part of the camera, and a whole level
+    would set the view up again from another height. ``elevation`` is the
+    height the camera held that centre at, sent for a frame centred on the
+    view: the engine seats its centre on the ground in one step, so on a steep
+    slope the eye is only where centre, zoom, tilt and this height put it.
+    ``relief_fallback`` says the map drew some of its ground from the fallback
+    relief, which is then credited beside the primary one.
+
     ``far_provider`` names who drew the far ground when it is not ``provider``:
     a billed basemap stops where a flat view would, and the free one carries on
     to the horizon (frontend lib/map/quotaGuard.js). A picture made of two
     providers credits both and records both.
     """
     case = get_case(case_id)
+    zoom = round(zoom, 2)
     try:
         prov = tiles.get_provider(provider)
         far = tiles.get_provider(far_provider) if far_provider else None
@@ -1862,10 +1873,13 @@ async def capture_oblique(
 
     relief = terrain.MAPTERHORN
     attribution = f"{prov.attribution} · Relief {relief.attribution}"
+    if relief_fallback:
+        attribution += f" and {terrain.AWS_TERRAIN.attribution}"
     if far is not None and far.id != prov.id:
         attribution += f" · Far ground {far.attribution}"
     if exaggeration > 1:
-        attribution += f" · heights drawn {exaggeration:g}× taller"
+        # in words: the band's font has no multiplication sign
+        attribution += f" · heights exaggerated {exaggeration:g} times"
     img = tiles.burn_attribution(img, attribution)
 
     label = satellite_engine.coords_label(lat, lon)
@@ -1881,7 +1895,12 @@ async def capture_oblique(
         "zoom": zoom,
         "bearing": bearing,
         "pitch": pitch,
-        "relief": {"source": relief.id, "exaggeration": exaggeration},
+        "elevation": round(elevation) if elevation is not None else None,
+        "relief": {
+            "source": relief.id,
+            "exaggeration": exaggeration,
+            **({"fallback": terrain.AWS_TERRAIN.id} if relief_fallback else {}),
+        },
         "far_provider": far.id if far is not None and far.id != prov.id else None,
         "attribution": attribution,
         "attribution_burned": True,
@@ -1897,7 +1916,7 @@ async def capture_oblique(
         provenance["imagery_exact"] = False
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    filename = f"sat_{stamp}_z{zoom}_{prov.id}_tilt{round(pitch)}.png"
+    filename = f"sat_{stamp}_z{round(zoom)}_{prov.id}_tilt{round(pitch)}.png"
     result = media_engine.import_image(
         case,
         img,

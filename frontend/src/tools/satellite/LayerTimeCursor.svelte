@@ -4,26 +4,26 @@
    *
    * - **the track**: one tick per moment the layer changes at, and the cursor.
    *   Dragged, it moves a day at a time and catches on a tick it passes near; a
-   *   double click goes back to now;
+   *   double click goes back to today;
    * - **the line under it**: the moment, pressed for a calendar (and the time,
    *   on a layer dated to the minute), the steps to the previous and the next
-   *   change, Now, and what is drawn beside the layer: the state before, dashed,
-   *   and an area's gains and losses, hatched.
+   *   change, Today, and what is drawn beside the layer: the state before, dashed,
+   *   an area's gains and losses, hatched, and how long events stay.
    *
    * Every map reads the same cursor (`addedLayers.setTime`), so moving it in the
    * Map moves the layer in Compare and Detect too.
    *
-   * Today is now: a change dated today, to the day, is read as now, so the same day is
-   * never offered under two names. Now says its date.
+   * The cursor is always on a day of the calendar, today on the layer's clock until
+   * it is moved: an edit made on it is dated that day, and never slides to the next.
    */
   import Icon from '../../components/Icon.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { dayNumber, isoDay } from '../../lib/map/layerDates.js';
-  import { moment, momentLabel, stepMoment } from '../../lib/map/layerHistory.js';
+  import { EVENT_DAYS, moment, momentLabel, momentNow, stepMoment } from '../../lib/map/layerHistory.js';
 
   let {
-    /** `{ at, trail, since }`: null `at` is now. */
+    /** `{ at, trail, since, window }`: null `at` is today, null `window` keeps events for good. */
     time,
     /** The moments the layer changes at, sorted. */
     moments = [],
@@ -35,20 +35,21 @@
     onchange,
   } = $props();
 
-  const at = $derived(time?.at ?? null);
+  /** The moment it is on the layer's clock, asked when it is needed. */
+  const nowOn = () => momentNow({ precision, zone });
+  const todayIso = $derived(momentNow({ zone }));
+  const today = $derived(dayNumber(todayIso));
+  const at = $derived(time?.at ?? nowOn());
+  const onToday = $derived(at.slice(0, 10) === todayIso);
   const days = $derived(moments.map((item) => dayNumber(item.slice(0, 10))).filter((day) => day !== null));
-  const today = Math.floor(Date.now() / 86_400_000);
-  /** A moment that is today, to the day: now under another name. */
-  const isToday = (value) => value === isoDay(today);
-  /** The changes the cursor steps through, today's being now. */
-  const changes = $derived(moments.filter((item) => !isToday(item)));
-  const nowSaid = `Now · ${momentLabel(isoDay(today))}`;
-  // the axis runs from the first change to the last, or to today when that is later
+  const cursorDay = $derived(dayNumber(at.slice(0, 10)) ?? today);
+  // the axis runs from the first change to today, or to the day shown when that is later
   const first = $derived((days.length ? Math.min(...days) : today) - 1);
-  const last = $derived(Math.max(days.length ? Math.max(...days) : today, at ? dayNumber(at.slice(0, 10)) ?? first : first) + 1);
+  const last = $derived(Math.max(days.length ? Math.max(...days) : today, today, cursorDay) + 1);
   const span = $derived(Math.max(1, last - first));
   const place = (day) => ((day - first) / span) * 100;
-  const cursorDay = $derived(at ? dayNumber(at.slice(0, 10)) : null);
+  /** How many days an event stays after its own, null for good. */
+  const stay = $derived(time?.window ?? null);
 
   let track = $state(null);
   let picking = $state(false);
@@ -56,13 +57,16 @@
   let menu = $state(false);
   let menuAnchor = $state(null);
   let sincePicking = $state(false);
-  $effect(() => { clock = at?.includes('T') ? at.slice(11) : ''; });
+  $effect(() => { clock = at.includes('T') ? at.slice(11) : ''; });
 
   const set = (patch) => onchange?.(patch);
   /** What the past button says is drawn now, in a few words. */
   const pastSaid = $derived([time?.trail !== false ? 'Before' : '', time?.since ? `± ${time.since === 'previous' ? 'last' : momentLabel(time.since).replace(/ \d{4}/, '')}` : '']
     .filter(Boolean).join(' · ') || 'The past');
-  const go = (value) => set({ at: isToday(value) ? null : value });
+  const go = (value) => { if (value) set({ at: value }); };
+
+  /** A day of the axis as the cursor holds it: today is the moment it is, never a day ahead. */
+  const dayOn = (day) => (day >= today ? nowOn() : isoDay(day));
 
   function dayAt(clientX) {
     const box = track.getBoundingClientRect();
@@ -77,7 +81,7 @@
       return day !== null && Math.abs(box.left + (place(day) / 100) * box.width - clientX) <= 6;
     });
     if (near) return near;
-    return isoDay(Math.min(last - 1, Math.max(first + 1, dayAt(clientX))));
+    return dayOn(Math.min(last - 1, Math.max(first + 1, dayAt(clientX))));
   }
 
   function grab(event) {
@@ -98,12 +102,11 @@
 
   function key(event) {
     const step = { ArrowLeft: -1, ArrowRight: 1, PageDown: -7, PageUp: 7 }[event.key];
-    if (event.key === 'Home') { event.preventDefault(); go(changes[0] ?? null); return; }
-    if (event.key === 'End') { event.preventDefault(); go(null); return; }
+    if (event.key === 'Home') { event.preventDefault(); go(moments[0]); return; }
+    if (event.key === 'End') { event.preventDefault(); go(nowOn()); return; }
     if (step === undefined) return;
     event.preventDefault();
-    const from = cursorDay ?? today;
-    go(isoDay(from + step));
+    go(dayOn(cursorDay + step));
   }
 
   function pickDay(iso) {
@@ -114,39 +117,38 @@
 
   function pickClock(value) {
     clock = value;
-    const day = (at ?? isoDay(today)).slice(0, 10);
+    const day = at.slice(0, 10);
     const next = moment(value ? `${day}T${value}` : day);
     if (next) go(next);
   }
 </script>
 
-<div class="cursor" class:now={at === null}>
+<div class="cursor">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="track" bind:this={track} onpointerdown={grab} ondblclick={() => go(null)}
-    title="Drag to read the layer at another day. Double-click goes back to now.">
+  <div class="track" bind:this={track} onpointerdown={grab} ondblclick={() => go(nowOn())}
+    title="Drag to read the layer at another day. Double-click goes back to today.">
     <span class="rail"></span>
     {#each moments as item (item)}
       {@const day = dayNumber(item.slice(0, 10))}
       {#if day !== null}<span class="tick" class:on={item === at} style:left="{place(day)}%" title={momentLabel(item)}></span>{/if}
     {/each}
-    <!-- now stands on today, on today's change when there is one -->
-    <span class="handle" style:left="{place(cursorDay ?? today)}%" role="slider" tabindex="0" aria-label={label}
-      aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay ?? today}
-      aria-valuetext={at ? momentLabel(at) : nowSaid} onkeydown={key}></span>
+    <span class="handle" style:left="{place(cursorDay)}%" role="slider" tabindex="0" aria-label={label}
+      aria-valuemin={first} aria-valuemax={last} aria-valuenow={cursorDay}
+      aria-valuetext={momentLabel(at)} onkeydown={key}></span>
   </div>
   {#if moments.length > 1}
-    <div class="ends" aria-hidden="true"><span>{momentLabel(moments[0]).replace(/ \d{4}$/, '')}</span><span>{isToday(moments.at(-1)) ? 'Now' : momentLabel(moments.at(-1)).replace(/ \d{4}$/, '')}</span></div>
+    <div class="ends" aria-hidden="true"><span>{momentLabel(moments[0]).replace(/ \d{4}$/, '')}</span><span>{momentLabel(moments.at(-1)).replace(/ \d{4}$/, '')}</span></div>
   {/if}
 
   <div class="line">
     <button type="button" class="icon-act" aria-label="Previous change" title="Previous change"
-      disabled={!stepMoment(changes, at, -1)} onclick={() => go(stepMoment(changes, at, -1))}><Icon name="chevronLeft" size={12} /></button>
+      disabled={!stepMoment(moments, at, -1)} onclick={() => go(stepMoment(moments, at, -1))}><Icon name="chevronLeft" size={12} /></button>
     <button type="button" class="moment" class:open={picking} aria-expanded={picking} title="Pick the day the layer is read at"
-      onclick={() => (picking = !picking)}>{at ? momentLabel(at) : nowSaid}</button>
+      onclick={() => (picking = !picking)}>{momentLabel(at)}</button>
     <button type="button" class="icon-act" aria-label="Next change" title="Next change"
-      disabled={at === null} onclick={() => go(stepMoment(changes, at, 1))}><Icon name="chevronRight" size={12} /></button>
-    {#if at !== null}
-      <button type="button" class="text-act" title="Read the layer as it is now" onclick={() => go(null)}>Now</button>
+      disabled={!stepMoment(moments, at, 1)} onclick={() => go(stepMoment(moments, at, 1))}><Icon name="chevronRight" size={12} /></button>
+    {#if !onToday}
+      <button type="button" class="text-act" title="Read the layer as it is today" onclick={() => go(nowOn())}>Today</button>
     {/if}
     <span class="grow"></span>
     <!-- what the map draws of the past, said on the button that sets it: a menu nobody finds sets nothing -->
@@ -158,7 +160,7 @@
   {#if precision === 'time'}
     <label class="clock">
       <span>Time</span>
-      <input type="time" aria-label="Time of day" value={clock} disabled={at === null}
+      <input type="time" aria-label="Time of day" value={clock}
         onchange={(event) => pickClock(event.currentTarget.value)} />
       <span class="zone">{zone === 'UTC' ? 'UTC' : zone.split('/').at(-1).replaceAll('_', ' ')}</span>
     </label>
@@ -166,7 +168,7 @@
 
   {#if picking}
     <!-- a state is what was seen, so no day after today is offered -->
-    <MonthGrid value={at ? at.slice(0, 10) : isoDay(today)} max={isoDay(today)} label="Day the layer is read at" onpick={pickDay} />
+    <MonthGrid value={at.slice(0, 10)} max={todayIso} label="Day the layer is read at" onpick={pickDay} />
   {/if}
 </div>
 
@@ -186,16 +188,25 @@
       {#if time?.since && time.since !== 'previous'}<Icon name="check" size={14} />{:else}<span class="tick-room"></span>{/if}
       <span class="fm-grow">{time?.since && time.since !== 'previous' ? `Since ${momentLabel(time.since)}` : 'Since a day…'}</span></button>
     {#if sincePicking}
-      <MonthGrid value={time?.since && time.since !== 'previous' ? time.since.slice(0, 10) : (at ?? isoDay(today)).slice(0, 10)}
+      <MonthGrid value={time?.since && time.since !== 'previous' ? time.since.slice(0, 10) : at.slice(0, 10)}
         label="Count gains and losses from" onpick={(iso) => { sincePicking = false; if (iso) set({ since: iso }); }} />
     {/if}
     <div class="fm-sep"></div>
-    <label class="window" title="How long a group of events stays on the map after each one's day">
-      <span>Events stay</span>
-      <input type="number" min="0" max="365" step="1" aria-label="Days an event stays on the map" value={time?.window ?? 7}
-        onchange={(event) => set({ window: Math.max(0, Math.min(365, Math.round(Number(event.currentTarget.value) || 0))) })} />
-      <span>days</span>
-    </label>
+    <p class="fm-label">Events after their day</p>
+    <button type="button" class="fm-item" role="menuitemradio" aria-checked={stay === null}
+      title="Each event stays on the map, faded, after its day" onclick={() => set({ window: null })}>
+      {#if stay === null}<Icon name="check" size={14} />{:else}<span class="tick-room"></span>{/if}<span class="fm-grow">Stay, faded</span></button>
+    <button type="button" class="fm-item" role="menuitemradio" aria-checked={stay !== null}
+      title="Each event leaves the map some days after its own" onclick={() => { if (stay === null) set({ window: EVENT_DAYS }); }}>
+      {#if stay !== null}<Icon name="check" size={14} />{:else}<span class="tick-room"></span>{/if}<span class="fm-grow">Leave after some days</span></button>
+    {#if stay !== null}
+      <label class="window" title="How many days an event stays on the map after its own">
+        <span>Leave after</span>
+        <input type="number" min="0" max="365" step="1" aria-label="Days an event stays on the map" value={stay}
+          onchange={(event) => set({ window: Math.max(0, Math.min(365, Math.round(Number(event.currentTarget.value) || 0))) })} />
+        <span>days</span>
+      </label>
+    {/if}
   </FloatingMenu>
 {/if}
 
@@ -207,13 +218,11 @@
   .tick.on { background: var(--accent); }
   .handle { position: absolute; top: 1px; bottom: 1px; width: 11px; margin-left: -5px; border-radius: 3px;
     background: var(--accent); box-shadow: 0 0 0 2px var(--bg-1); cursor: ew-resize; }
-  .now .handle { background: var(--text-2); }
   .handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .line { display: flex; align-items: center; gap: 2px; min-height: 24px; }
   .ends { display: flex; justify-content: space-between; margin-top: -2px; color: var(--text-3); font-size: 9.5px; font-variant-numeric: tabular-nums; }
   .moment { padding: 2px 6px; border-radius: var(--r-sm); color: var(--text-1); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
   .moment:hover, .moment.open { background: var(--bg-3); }
-  .now .moment { color: var(--text-2); font-weight: 500; }
   .grow { flex: 1; }
   .past { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 150px; height: 22px; padding: 0 7px; border: 1px solid var(--border);
     border-radius: 999px; background: var(--bg-2); color: var(--text-2); font-size: 10.5px; cursor: pointer; white-space: nowrap; }

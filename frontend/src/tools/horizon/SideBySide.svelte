@@ -8,9 +8,16 @@
    * The trace shows on both: on the terrain, each piece of a cut collage
    * where the search read it (lib/horizon/overlay.js `traceOnTerrain`). A
    * line follows the pointer down both, with the direction it stands at.
+   *
+   * A cut collage the search eased is shown, by default, as the search read
+   * it (`searched`, lib/horizon/cutView.js): the terrain laid piece by piece,
+   * each through its own camera, the seams drawn on both, the names, ticks and
+   * direction read through the piece under them. One camera shows the whole.
    */
   import Icon from '../../components/Icon.svelte';
   import { rayFor } from '../../lib/horizon/camera.js';
+  import { easeText } from '../../lib/horizon/cutView.js';
+  import { SEARCHED_TERRAIN_TAG, TERRAIN_TAG } from '../../lib/horizon/viewExport.js';
 
   let {
     /** The two pictures, the photo then the terrain, as drawn canvases. */
@@ -24,6 +31,13 @@
     trace = [],
     traceOnTerrain = [],
     ridges = [],
+    /**
+     * The terrain as the search read a cut collage, when it eased its pieces:
+     * `{ frame, seams, layers, cameras, eases }` (Horizon `drawPair`), or null.
+     */
+    searched = null,
+    /** Which piece of the collage a point of the frame (`{ u, v }`) lies in. */
+    pieceAt = null,
     /** "Photo" or "Video", what lies over the terrain. */
     what = 'Photo',
     /** Whether the photo was pulled by its corners or edges, which its tag then says. */
@@ -53,12 +67,30 @@
 
   const points = (stroke) => stroke.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const percent = (value, whole) => `${((value / whole) * 100).toFixed(3)}%`;
-  /** The direction under the pointer, in whole tenths of a degree. */
+
+  /** Whether the terrain shows as the search read the cut collage, piece by piece, or through one camera. */
+  let bySearch = $state(true);
+  const cut = $derived(Boolean(searched && bySearch));
+  const terrainFrame = $derived(cut ? searched.frame : frames[1]);
+  const shownLabels = $derived(cut ? searched.layers.labels : labels);
+  const shownTicks = $derived(cut ? searched.layers.ticks : ticks);
+  // each piece drawn through its own camera: the trace lies on it where it was drawn
+  const terrainTrace = $derived(cut ? trace : traceOnTerrain);
+  const seams = $derived(cut ? searched.seams : []);
+  /** The piece under the pointer, while the terrain shows piece by piece. */
+  const piece = $derived(cut && across != null && pieceAt ? pieceAt({ u: across, v: 0.5 }) : null);
+
+  /** The direction under the pointer, in whole tenths of a degree, through its piece's camera when cut. */
   const facing = $derived.by(() => {
-    if (across == null || !camera) return '';
-    const { azimuth } = rayFor(camera, across * camera.width, camera.height / 2);
+    const through = piece != null ? (searched.cameras[piece] ?? camera) : camera;
+    if (across == null || !through) return '';
+    const { azimuth } = rayFor(through, across * through.width, through.height / 2);
     return `${(((azimuth % 360) + 360) % 360).toFixed(1)}°`;
   });
+  /** What the piece under the pointer was eased by. */
+  const pieceSaid = $derived(
+    piece != null ? `piece ${piece + 1} of ${searched.cameras.length}, ${easeText(searched.eases[piece])}` : ''
+  );
 
   function point(event) {
     const box = event.currentTarget.getBoundingClientRect();
@@ -81,12 +113,16 @@
 
 {#snippet over(strokes)}
   <svg class="lines" viewBox="0 0 {camera.width} {camera.height}" preserveAspectRatio="none" aria-hidden="true">
+    {#each seams as seam, index (index)}
+      <polyline class="seam under" points={points(seam)} />
+      <polyline class="seam over" points={points(seam)} />
+    {/each}
     {#each strokes as stroke, index (index)}
       <polyline class="under" points={points(stroke)} />
       <polyline class="over" class:ridge={ridges[index]} points={points(stroke)} />
     {/each}
   </svg>
-  {#each labels as label (label.name + label.x)}
+  {#each shownLabels as label (label.name + label.x)}
     <span class="name" style:left={percent(label.left + label.width / 2, camera.width)} style:top={percent(label.baseline, camera.height)}
       >{label.name}</span
     >
@@ -99,8 +135,34 @@
 <section class="side" aria-label="{what} above the terrain" bind:clientWidth={room.width} bind:clientHeight={room.height}>
   <header>
     <h2>{what} above the terrain</h2>
-    <span class="say">The same frame on both{facing ? ` · ${facing}` : ''}</span>
-    <button type="button" class="act" disabled={saving} aria-busy={saving} onclick={onsave} title="Write the two out as one picture">
+    <span class="say">The same frame on both{facing ? ` · ${facing}` : ''}{pieceSaid ? ` · ${pieceSaid}` : ''}</span>
+    {#if searched}
+      <div class="ways" role="radiogroup" aria-label="How the terrain is drawn">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={!bySearch}
+          class:on={!bySearch}
+          onclick={() => (bySearch = false)}
+          title="The terrain through the view's one camera">One camera</button
+        >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={bySearch}
+          class:on={bySearch}
+          onclick={() => (bySearch = true)}
+          title="Each piece of the collage through the camera the search found for it">Piece by piece</button
+        >
+      </div>
+    {/if}
+    <button
+      type="button"
+      class="act"
+      disabled={saving}
+      aria-busy={saving}
+      onclick={() => onsave({ cut })}
+      title={cut ? 'Write the two out as one picture, the terrain piece by piece' : 'Write the two out as one picture'}>
       <Icon name="download" size={14} /><span>{saving ? 'Saving…' : 'Save as picture'}</span>
     </button>
     <button type="button" class="act icon" onclick={onclose} title="Back to the view (Esc)" aria-label="Close">
@@ -116,7 +178,7 @@
         <figcaption class="tag accent">{reshaped ? `${what}, reshaped` : what}</figcaption>
       </figure>
       <div class="ruler" aria-hidden="true">
-        {#each ticks as tick (tick.azimuth ?? tick.x)}
+        {#each shownTicks as tick (tick.azimuth ?? tick.x)}
           <span class="tick" class:named={tick.named} style:left={percent(tick.x, camera.width)}>{tick.label ?? ''}</span>
         {/each}
         {#if across != null}
@@ -124,9 +186,9 @@
         {/if}
       </div>
       <figure class="picture" style:height="{panel.height}px">
-        <div class="canvas" {@attach canvasIn(frames[1])}></div>
-        {@render over(traceOnTerrain)}
-        <figcaption class="tag">Terrain, simulated</figcaption>
+        <div class="canvas" {@attach canvasIn(terrainFrame)}></div>
+        {@render over(terrainTrace)}
+        <figcaption class="tag">{cut ? SEARCHED_TERRAIN_TAG : TERRAIN_TAG}</figcaption>
       </figure>
     </div>
   {/if}
@@ -229,6 +291,36 @@
   }
   .lines .over.ridge {
     stroke: #4dd6ff;
+  }
+  /* where the pieces of a cut collage meet, as the view draws its cuts */
+  .lines .seam.under {
+    stroke: rgba(0, 0, 0, 0.5);
+    stroke-width: 3.5;
+  }
+  .lines .seam.over {
+    stroke: #fff;
+    stroke-width: 1.5;
+    stroke-dasharray: 7 5;
+  }
+  .ways {
+    display: flex;
+    gap: 4px;
+  }
+  .ways button {
+    height: 26px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .ways button.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .name {
     position: absolute;

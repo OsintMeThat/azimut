@@ -94,6 +94,16 @@ def test_terrain_tiles_come_in_one_answer_the_sea_as_a_flat_tile(client, monkeyp
     assert tiles[2] == (200, terrain.sea_tile())
 
 
+def test_a_relief_tile_the_fallback_drew_says_so_in_its_status(client, monkeypatch):
+    def tile(z, x, y):
+        return (b"stitched", "image/png", "aws-terrain") if x == 1 else (b"relief", "image/webp", "mapterhorn")
+
+    monkeypatch.setattr(terrain, "tile", tile)
+    tiles, _ = _frames(client.get("/api/terrain/batch", params={"t": "6/0/1,6/1/1"}).content)
+    # 203: a payload transformed on its way, which the map credits (lib/map/tileBatch.js)
+    assert tiles == {0: (200, b"relief"), 1: (203, b"stitched")}
+
+
 def test_a_tile_that_breaks_is_a_failed_tile_not_a_failed_answer(client, monkeypatch):
     def serve(provider, z, x, y):
         if x == 1:

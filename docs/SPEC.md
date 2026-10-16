@@ -172,11 +172,11 @@ proof for publication.
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
-| ✅ **Personal map layers** | Edit on the map with a movable bar and a right-click menu (pick, area select, drag, draw with snapping or freehand, circles, boxes, restyle, merge, split), undo and redo every edit, turn a marker by its ring, style groups with pictograms and case-named colours, and mark each feature's status, confidence, look, day, sources and provenance in a sheet that saves as it goes. |
+| ✅ **Personal map layers** | Draws and edits markers, lines and areas on any map from a movable bar, styled with pictograms, every edit undoable, each feature described in a sheet that saves as it goes and explains itself on hover. |
 | ✅ **Points into a layer** | Follows places, proofs and files of the case as they move and as they are saved (a proof and its footage are one marker, named by the proof's description), reads pasted coordinates, map links and posts, and takes a Geo Proof point, a file played on the map or another layer's feature from the same step-by-step menu. |
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
-| ✅ **Layers followed over time** | Keeps a personal layer's features as dated states, by the day or the minute on one clock, reads it on any day with the state before dashed, what is new that day ringed, events fading and an area's gains and losses hatched, says in its editor when each feature shows and what an edit is dated to, and downloads it as it stood or with every state dated. |
+| ✅ **Layers followed over time** | Keeps a layer's features as dated states read on any day, today until the cursor moves, so every edit is dated, with what changed that day ringed and each feature's days said in its editor. |
 | ✅ **Layers kept per case** | Reopens each case on the layers every map had on, fires and night lights excepted, and leaves off with a toast a layer that stopped the last session while drawing. |
 | ✅ **Send to My Maps** | Saves a layer as it stood on one day as a KMZ, opens the analyst's My Maps beside it and says the three steps that replace its layer. |
 | ✅ **Map plates** | Lays a page out round the case's maps (title, legend of what the frame draws, scale, north, inset, detail maps, grids, labels, numbers, arrows, zones, rings, cones, distances, tables, QR codes, pictures and forced credits) on a quiet or a toned ground, and exports it as a PNG, a print PDF, or its days as an MP4, a GIF or an evolution sheet. |
@@ -189,6 +189,7 @@ proof for publication.
 | ✅ **Plate framing & transitions** | Frames a map day by day or step by step, and goes from one to the next in the MP4 by a fade, the map flying there drawn frame by frame (blurred or sharp) and what is new fading in or drawn. |
 | ✅ **Plate workspace** | Widens or puts away the plate's list and inspector, folds the inspector's sections, finds what to add by a word, gives the page the whole screen in focus, and opens a plate in a tab of its own, edited in one tab at a time. |
 | ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
+| ✅ **3D map** | Stands Satellite's imagery on public relief, tilted by hand or key, and files a tilted view as a credited capture that reopens as it was taken. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
@@ -216,7 +217,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **3D map** | Pitch and public DEM terrain on the MapLibre map; an oblique capture records its pitch beside the bearing, so the view can be reproduced. Buildings stand in Horizon round the eye, from open sources merged by a stated rule (national surveys, OpenStreetMap, Overture, 3D-GloBFP, Google's 2.5D heights), each saying where its height comes from; a saved view keeps them. |
+| **Horizon buildings** | Buildings stand in Horizon round the eye, from open sources merged by a stated rule (national surveys, OpenStreetMap, Overture, 3D-GloBFP, Google's 2.5D heights), each saying where its height comes from; a saved view keeps them. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |

@@ -115,6 +115,8 @@ class TrackIn(BaseModel):
     on: bool | None = None
     precision: Literal["day", "time"] | None = None
     zone: str | None = Field(default=None, max_length=64)
+    #: How many days an event stays on the map after its own, or "always".
+    window: Annotated[int, Field(ge=0, le=layerediting.MAX_WINDOW)] | Literal["always"] | None = None
 
 
 class LayerDetailsIn(BaseModel):
@@ -194,6 +196,8 @@ class MarkerUpdateIn(MarkerFields):
     #: When the feature first shows and when it leaves the map, "" for always and still there.
     start: Moment | None = None
     end: Moment | None = None
+    #: Nobody knows when it left: no end, drawn as still there, said as unknown.
+    end_unknown: Literal[True] | None = None
 
     @field_validator("symbol")
     @classmethod

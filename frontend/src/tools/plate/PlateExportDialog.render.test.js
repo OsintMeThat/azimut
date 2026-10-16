@@ -48,7 +48,7 @@ describe('exporting a plate', () => {
     radio('mp4').click(); flushSync();
     const [first] = document.body.querySelectorAll('select');
     first.value = '2026-09-15'; first.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
-    expect(document.body.textContent).toContain('3 changes, one picture each');
+    expect(document.body.textContent).toContain('3 days, one picture each');
     // the frame takes the page's shape, both sides even
     const sizes = [...document.body.querySelectorAll('[aria-label="Video size"] button')].map((node) => node.textContent.trim());
     expect(sizes).toEqual(['1280 × 906', '1920 × 1358']);

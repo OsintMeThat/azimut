@@ -10,42 +10,63 @@
    * made. A row pressed shows the layer that day; "Change" goes to a day picked,
    * where the next move or status is a change from it. While edits carry no date
    * a line says what a date holds: a feature moved on a day moves from a day.
+   *
+   * Given several `features`, the two days are theirs together: a day they share
+   * is said, else "Mixed", and one picked goes to all of them in one edit. The
+   * calendars offer only the days every one of them can take; the history and
+   * the changes from a day stay with one feature.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
   import { dayNumber, isoDay } from '../../lib/map/layerDates.js';
-  import { lifeRows, momentLabel, shortMoment, spanOf } from '../../lib/map/layerHistory.js';
+  import { lifeRows, momentLabel, momentNow, shortMoment, spanOf } from '../../lib/map/layerHistory.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
 
-  let { controller, feature, event = false } = $props();
+  let { controller, feature = null, features = null, event = false } = $props();
 
   const busy = $derived(controller.loading);
   const cursor = $derived(controller.cursor);
-  const span = $derived(spanOf(feature));
-  const rows = $derived(lifeRows(feature, cursor, controller.timeMode));
+  const list = $derived(features?.length ? features : [feature]);
+  const many = $derived(list.length > 1);
+  const spans = $derived(list.map(spanOf));
+  /** The days they share; a bound they differ on is null. */
+  const span = $derived({
+    start: spans.every((one) => one.start === spans[0].start) ? spans[0].start : null,
+    end: spans.every((one) => one.end === spans[0].end && one.ends === spans[0].ends && one.unknown === spans[0].unknown) ? spans[0].end : null,
+    ends: spans[0].ends,
+    unknown: spans.every((one) => one.unknown),
+  });
+  const rows = $derived(many ? [] : lifeRows(feature, cursor, controller.timeMode));
   /** While edits carry no date, what a date holds: a feature moved on a day moves from a day. */
-  const held = $derived(controller.held?.(feature) ?? { shape: '', status: '' });
-  const states = $derived(feature.properties.states ?? []);
-  const key = $derived(feature.properties.key);
-  const today = isoDay(Math.floor(Date.now() / 86_400_000));
+  const held = $derived(many ? { shape: '', status: '' } : controller.held?.(feature) ?? { shape: '', status: '' });
+  const states = $derived(many ? [] : feature.properties.states ?? []);
+  const key = $derived(list.map((one) => one.properties.key).join(' '));
+  /** Today on the layer's clock: no day after it is offered. */
+  const today = $derived(momentNow({ zone: controller.editor?.track?.zone }));
   const dayOf = (at) => dayNumber(String(at ?? '').slice(0, 10));
   const shift = (at, days) => (dayOf(at) === null ? '' : isoDay(dayOf(at) + days));
   const earliest = (...days) => days.filter(Boolean).sort()[0] ?? '';
-  /** The state after the first, which a start must stay before. */
-  const next = $derived(states[1]?.at ?? '');
-  /** The last state it is drawn in, which an end must come after. */
-  const lastLive = $derived(states.length ? states.findLast((state) => !state.gone)?.at ?? '' : span.start);
-  const startMax = $derived(earliest(today, next && shift(next, -1)));
-  const endMin = $derived(lastLive ? shift(lastLive, 1) : '');
+  const latest = (...days) => days.filter(Boolean).sort().at(-1) ?? '';
+  /** Each one's state after the first, which a start must stay before. */
+  const nexts = $derived(list.map((one) => one.properties.states?.[1]?.at ?? '').filter(Boolean));
+  /** Each one's last state it is drawn in, which an end must come after. */
+  const lastLives = $derived(list.map((one, index) => {
+    const own = one.properties.states ?? [];
+    return own.length ? own.findLast((state) => !state.gone)?.at ?? '' : spans[index].start;
+  }));
+  const startMax = $derived(earliest(today, ...nexts.map((next) => shift(next, -1))));
+  const endMin = $derived(latest(...lastLives.map((last) => last && shift(last, 1))));
   const changeMin = $derived(span.start ? shift(span.start, 1) : '');
   const changeMax = $derived(earliest(today, span.end && span.ends === 'gone' && shift(span.end, -1)));
-  /** The day the layer is shown at, offered as a start or an end where it can be one. */
-  const shownStart = $derived(cursor !== null && cursor !== span.start && (!next || cursor < next) && cursor.slice(0, 10) <= today);
-  const shownEnd = $derived(!event && cursor !== null && cursor !== span.end && cursor > lastLive);
+  /** The day the layer is shown at, offered as a start or an end where every one can take it. */
+  const shownStart = $derived(cursor !== null && cursor !== span.start && nexts.every((next) => cursor < next) && cursor.slice(0, 10) <= today);
+  const shownEnd = $derived(!event && cursor !== null && cursor !== span.end && lastLives.every((last) => cursor > last));
 
-  const startSaid = $derived(event ? (span.start ? shortMoment(span.start) : 'No day') : span.start ? `From ${shortMoment(span.start)}` : 'Always');
-  const endSaid = $derived(!span.end ? 'Still there' : span.ends === 'gone' ? `Gone ${shortMoment(span.end)}` : `Until ${shortMoment(span.end)}`);
+  const startSaid = $derived(span.start === null ? 'Mixed' : event ? (span.start ? shortMoment(span.start) : 'No day')
+    : span.start ? `From ${shortMoment(span.start)}` : 'Always');
+  const endSaid = $derived(span.end === null ? 'Mixed' : span.unknown ? 'Unknown' : !span.end ? 'Still there'
+    : span.ends === 'gone' ? `Gone ${shortMoment(span.end)}` : `Until ${shortMoment(span.end)}`);
 
   /** Which calendar is open: 'start', 'end', 'change' or ''. */
   let open = $state('');
@@ -53,26 +74,45 @@
   $effect(() => { void key; open = ''; });
 
   function toggle(which) { open = open === which ? '' : which; }
-  function start(at) { open = ''; if (at !== span.start) controller.setStart(key, at); }
-  function end(at) { open = ''; if (at !== span.end) controller.setEnd(key, at); }
+  function start(at) {
+    open = '';
+    if (at === span.start) return;
+    if (many) controller.setSelectionWhen({ start: at });
+    else controller.setStart(key, at);
+  }
+  function end(at) {
+    open = '';
+    if (at === span.end && !span.unknown) return;
+    if (many) controller.setSelectionWhen({ end: at });
+    else controller.setEnd(key, at);
+  }
+  /** Nobody knows when it left: no end, drawn as still there. Only ever on a press. */
+  function unknown() {
+    open = '';
+    if (span.unknown) return;
+    if (many) controller.setSelectionWhen({ end_unknown: true });
+    else controller.setEndUnknown(key);
+  }
   function change(at) { open = ''; controller.changeOn(at); }
   const view = (at) => addedLayers.setTime(controller.editor.name, { at });
 </script>
 
 <div class="when" role="group" aria-label="When it shows">
   <Icon name="clock" size={12} />
-  <button type="button" class="bound" class:open-ended={!span.start} aria-label="When it first shows" aria-expanded={open === 'start'}
+  <button type="button" class="bound" class:open-ended={span.start === ''} class:mixed={span.start === null} aria-label="When it first shows" aria-expanded={open === 'start'}
     title={event ? 'The day of the event' : 'The day it first shows on the map'} disabled={busy}
     bind:this={anchors.start} onclick={() => toggle('start')}>{startSaid}</button>
   {#if !event}
     <span class="to" aria-hidden="true">→</span>
-    <button type="button" class="bound" class:open-ended={!span.end} aria-label="When it leaves the map" aria-expanded={open === 'end'}
+    <button type="button" class="bound" class:open-ended={span.end === '' && !span.unknown} class:mixed={span.end === null} aria-label="When it leaves the map" aria-expanded={open === 'end'}
       title="The day it leaves the map" disabled={busy} bind:this={anchors.end} onclick={() => toggle('end')}>{endSaid}</button>
   {/if}
   <span class="grow"></span>
+  {#if !many}
   <button type="button" class="add-change" aria-label="Change it from a day" aria-expanded={open === 'change'}
     title="Change it from a day: pick the day, then move it or set its status" disabled={busy}
     bind:this={anchors.change} onclick={() => toggle('change')}><Icon name="plus" size={12} /></button>
+  {/if}
 </div>
 
 {#if rows.length > 1}
@@ -104,29 +144,30 @@
 {#if open === 'start'}
   <FloatingMenu anchor={anchors.start} width={248} label="When it first shows" onclose={() => (open = '')}>
     <p class="fm-head">{event ? 'Day of the event' : 'Shows from'}</p>
-    <button type="button" class="fm-item" role="menuitemradio" aria-checked={!span.start} onclick={() => start('')}>
+    <button type="button" class="fm-item" role="menuitemradio" aria-checked={span.start === ''} onclick={() => start('')}>
       <Icon name="always" size={14} /><span class="fm-grow">{event ? 'No day' : 'Always'}</span>
-      {#if !span.start}<span class="fm-tick"><Icon name="check" size={13} /></span>{/if}</button>
+      {#if span.start === ''}<span class="fm-tick"><Icon name="check" size={13} /></span>{/if}</button>
     {#if shownStart}
       <button type="button" class="fm-item" role="menuitemradio" aria-checked="false" onclick={() => start(cursor)}>
         <Icon name="eye" size={14} /><span class="fm-grow">{momentLabel(cursor)}</span><span class="aside">day shown</span></button>
     {/if}
     <div class="fm-sep"></div>
-    <MonthGrid value={span.start.slice(0, 10)} max={startMax} label="First day" onpick={(iso) => { if (iso) start(iso); }} />
+    <MonthGrid value={(span.start ?? '').slice(0, 10)} max={startMax} label="First day" onpick={(iso) => { if (iso) start(iso); }} />
   </FloatingMenu>
 {:else if open === 'end'}
   <FloatingMenu anchor={anchors.end} width={248} label="When it leaves the map" onclose={() => (open = '')}>
     <p class="fm-head">Leaves the map</p>
-    <button type="button" class="fm-item" role="menuitemradio" aria-checked={!span.end} onclick={() => end('')}>
+    <button type="button" class="fm-item" role="menuitemradio" aria-checked={span.end === '' && !span.unknown} onclick={() => end('')}>
       <Icon name="always" size={14} /><span class="fm-grow">Still there</span>
-      {#if !span.end}<span class="fm-tick"><Icon name="check" size={13} /></span>{/if}</button>
+      {#if span.end === '' && !span.unknown}<span class="fm-tick"><Icon name="check" size={13} /></span>{/if}</button>
     {#if shownEnd}
       <button type="button" class="fm-item" role="menuitemradio" aria-checked="false" onclick={() => end(cursor)}>
         <Icon name="eye" size={14} /><span class="fm-grow">{momentLabel(cursor)}</span><span class="aside">day shown</span></button>
     {/if}
     <div class="fm-sep"></div>
-    <MonthGrid value={span.end.slice(0, 10)} min={endMin} max={today} label="Day it leaves" onpick={(iso) => { if (iso) end(iso); }} />
-    <p class="fm-note">Gone from that day on.</p>
+    <MonthGrid value={(span.end ?? '').slice(0, 10)} min={endMin} max={today} label="Day it leaves" onpick={(iso) => { if (iso) end(iso); }}
+      also={{ label: 'Unknown', title: 'Nobody knows when it left: drawn as still there', pressed: span.unknown, onclick: unknown }} />
+    <p class="fm-note">{many ? `Gone from that day on, for all ${list.length}.` : 'Gone from that day on.'}</p>
   </FloatingMenu>
 {:else if open === 'change'}
   <FloatingMenu anchor={anchors.change} align="end" width={248} label="Change it from a day" onclose={() => (open = '')}>
@@ -144,6 +185,8 @@
     transition: border-color .12s, background-color .12s; }
   /* no date is drawn open: a dashed rim, the words quieter */
   .bound.open-ended { border-style: dashed; color: var(--text-2); }
+  /* days the selection does not share: the words quieter, the rim whole */
+  .bound.mixed { border-style: solid; color: var(--text-3); font-style: italic; }
   .bound:hover:not(:disabled), .bound[aria-expanded='true'] { border-color: var(--accent); border-style: solid; }
   .bound[aria-expanded='true'] { background: var(--accent-soft); }
   .to { flex: none; color: var(--text-3); }

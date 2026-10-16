@@ -1903,6 +1903,8 @@ name and its number.
 local KMZ, KML, GeoJSON or GPX file. An added source layer also offers **Create
 editable copy**. Both routes keep the original file and its bundled pictograms;
 external icons are not fetched, and a followed source is not refreshed for a copy.
+The name offered is one no layer of the case has yet ("My layer 2"), and **Track
+over time** can be switched on there, from the start.
 
 The section and its rows fold like **Added layers**; the pencil opens the editor,
 the trash removes a layer, and the grip changes its stacking order. Keyboard users
@@ -1933,9 +1935,10 @@ drags at once; a line or an area drags once it is picked, so a drag across one
 that is not pans the map. Dragging moves the whole selection with it, the map does
 not pan under the drag, and the toast offers **Undo**. What is let go is drawn where
 it landed at once and saves behind; a move the layer refuses goes back. Ctrl+Z takes back any edit
-of the session, one step at a time (an added marker, a restyle, a reshape, a move, a
-removal, a merge, a split, a group's settings), and Ctrl+Shift+Z or Ctrl+Y makes it
-again; while a shape is drawn Ctrl+Z takes its last point. **Select an area** draws a
+of the session, one step at a time (an added marker, a restyle, a status, a reshape, a
+move, a removal, a merge, a split, a group made, its settings, an **Ungroup**), and
+Ctrl+Shift+Z or Ctrl+Y makes it again. Pressed while an edit still saves, it waits for
+it and takes that one back; while a shape is drawn Ctrl+Z takes its last point. **Select an area** draws a
 free loop round what to pick; Shift adds. Delete removes the selection, with
 **Undo**, after a press on the map only: a Delete after a click on a button of the
 panel removes nothing.
@@ -1985,18 +1988,25 @@ and palettes close on a press outside or Escape. Individual styles survive a
 temporary group override.
 
 A feature's sheet holds its style and name, then what it says: its group;
-for a marker, **Intact**, **Damaged** or **Destroyed**, drawn on the map as a stroke
-or a cross across the marker (a line or an area has no status); **How sure**:
-**Sure**, **Likely** or **Claimed**, a likely line drawn dashed and a claimed one
-dotted, a marker drawn fainter, unless the feature sets its own dash; how it is
-drawn: a marker's **Size**, a line's width, **Dash** (solid, dashed, dotted) and
-**Arrow** at its end or both, an area's **Fill** (filled, hatched, or its outline
-only) and the fill's strength; its **Name** on the map, as its group says, shown
-at a size of its own, or hidden; a **Day**, which the layer's time strip and the
-Timeline read; which way it faces; its sources, each a chip that opens in a tab of
-its own; **Geolocated by** **Me** or **Others**, the second giving the marker a
-dashed rim; the **Credit** a feature copied from somebody else's layer keeps, which
-a plate that draws it prints; and a note. A line states its length and an area its surface. Each row saves
+for a marker, a status, **–** (nothing said, the first choice, since most markers
+are no building), **Damaged** or **Destroyed**, drawn on the map as a stroke or a
+cross across the marker (a line or an area has no status); **How sure**: **Sure**,
+**Likely** or **Claimed**, a likely line drawn dashed and a claimed one dotted, a
+marker drawn fainter, unless the feature sets its own dash; a **Day**, which the
+layer's time strip and the Timeline read; which way it faces; its sources, each a
+chip that opens in a tab of its own; **Geolocated by** **Me** or **Others**, the
+second giving the marker a dashed rim; the **Credit** a feature copied from somebody
+else's layer keeps, which a plate that draws it prints; and a note. A line states
+its length and an area its surface. How it is drawn folds under **Look**, which
+names what the feature sets of its own while folded and stays as it was left from
+one feature to the next: a marker's **Size**, a line's **Width**, **Dash** (solid,
+dashed, dotted) and **Arrow** at its end or both, an area's **Fill** (filled,
+hatched, or its outline only) and the fill's strength, and its **Name** on the map,
+as its group says, shown at a size of its own, or hidden. Each slider says its
+value, quieter while the group sets it, and **Reset** gives it back to the group.
+Every row says what it does when the pointer rests on its name, as a group's
+settings and the layer's menu do; the words live in one module the sheet, the
+right-click menu, the **Add to a layer** steps and a plate's symbol share. Each row saves
 as it is set, a name or a note when its field is left. Its ⋯ holds **Save as case
 place**, **Delete case place** for a followed place, and **Remove from the layer**.
 
@@ -2041,7 +2051,9 @@ description, downloads the layer, and offers **Discard changes…**. **New layer
 also accepts a description. Both fields travel with the layer.
 
 **Done**, in the bar or the panel, saves anything still in a field and any complete
-shape being drawn, then ends the session. **Discard changes…** asks
+shape being drawn, then ends the session. Opening another layer for editing, or
+another case, leaves this one the same way, so a later **Discard changes…** goes back
+no further than the session it is pressed in. **Discard changes…** asks
 first, then restores the layer to its state when editing started. Separately
 saved case places remain in the case. The checkpoint survives a reload, so
 reopening can still discard.
@@ -2054,13 +2066,15 @@ map**. Its day is changed on the layer, not by dragging it on the axis.
 **Track over time**, in the editor's ⋯, follows a layer through its changes
 instead of overwriting them. It is off until asked for, and a layer that stays
 off behaves as above. On, the layer's row and its editor read it at one moment
-on a cursor: a tick per change, steps to the one before and the next, **Now**,
-and a calendar, which offers no day after today: a state is what was seen. Now says
-its date, and a change dated today is read as now, so the same day never shows under
-two names; a played plate plays it once, as now. The axis
+on a cursor: a tick per change, steps to the one before and the next, **Today**,
+and a calendar, which offers no day after today: a state is what was seen. The
+cursor is always on a day of the calendar, today on the layer's clock until it is
+moved, never on a "now" that would slide to the next day. The axis
 writes its first and last change under it. Every map reads the same cursor, which
-is never stored, so a layer opens on now, and opening the editor puts it back on
-now wherever an earlier press left it. The editor's ticks come from the features
+is never stored, so a layer opens on today, and opening the editor puts it back on
+today wherever an earlier press left it and holds that moment while it is open: an
+edit made just before midnight stays on its day, and on a layer dated to the minute
+the edits of one sitting share one moment. The editor's ticks come from the features
 it holds, so they are there whether or not a map drew the layer. The editor's ⋯ sets how states are
 dated, to **the day** or **day and time**, and the one clock they are read on, the
 case's clock until another is picked; set once, they stay out of the panel.
@@ -2074,24 +2088,35 @@ drawn appears that day and a move, a reshape or a status changes from it, and
 day alike. That only works on what never changed by date: a feature that moved on
 a day stays put with no date (a drag says why, Reshape greys out) and moves from
 a day, and so does a status that changed on one. To correct one of its dates,
-press that date in its history. At **Now** edits carry no date, and the calendar
-on the day button picks a day to date them from, which moves the map there too.
+press that date in its history. Edits are dated to today until another day is
+picked: the calendar on the day button picks it, which moves the map there too.
 **No date** holds for the day it was chosen on; at another day, edits are dated
-again.
+again. A feature copied in from another layer appears on the day its layer shows,
+unless it brings a day of its own.
 
 Under its name, a feature's sheet says when it shows: the day it first shows
 (**Always** for none) and the day it leaves the map (**Still there** for none),
 each pressed for a calendar that offers the day shown first. A start stays before
-the next change and an end after the last; an event has its day only. The round
+the next change and an end after the last; an event has its day only. **Unknown**,
+beside Today in the end's calendar, says nobody knows when it left: it is never
+set unless pressed, the feature is drawn as still there, and its row reads
+**13 Oct → ?**. The round
 **+** goes to a day picked to change the feature from. Its history lists each date
 with what it brought (**Appears**, **Moved**, **Destroyed**, **Gone**), pressed to
 show the layer then and × to take it out. A pencil marks the date an edit will
 change, and a dashed **Next edit** row shows where a dated edit would start a new
 one, so a feature with no date shows that a move now gives it a history. With no
-date, a line under it says what a date holds (**Moved on 8 Oct**). Each row
+date, a line under it says what a date holds (**Moved on 8 Oct**). Several
+features selected share the two days: a day they all have is said, else **Mixed**,
+and a day picked goes to all of them in one edit, its calendar offering only the
+days every one can take. Each row
 of the layer's list says the same in a few words (**Always**, **From 12 Oct**,
 **3 Oct → 14 Oct**), with a yellow dot on what changes on the day shown. Merge and
-split work on features with no history yet.
+split work on features with no history yet. A feature not on the map on the day
+shown, greyed in the list, keeps its status and shape there: a status, a move or a
+reshape would quietly move the day it first shows, so its sheet says so and its days
+are changed first. A status is always the day shown's, so a feature picked on one
+day and read on another never writes the first day's status on the second.
 
 What the cursor reads is drawn alone, never between two states: the state before
 dashed under it, and an area's gains and losses since the state before or since a
@@ -2100,15 +2125,15 @@ cursor's line, which says what is drawn (**Before · ± last**, **The past** whe
 nothing is). What is after the
 cursor's day is not drawn, and what appeared or changed on that very day is ringed
 in yellow. A group's menu can say its features are **Events**: a strike or a clash
-shows on its day, fades after it and leaves the map the number of days that button
-sets, seven unless changed, where a lasting thing stays. At **Now**
-events are read against the layer's last change. Off again, the history
+shows on its day and fades after it, where a lasting thing stays. Events stay,
+faded, for good, unless that button says **Leave after** a number of days; the
+layer keeps the choice, so every map and the next visit read it. Off again, the history
 is hidden and kept, and an edit corrects the latest state. On the Timeline a
 tracked feature is a bar per state, the last one marked on the day it went.
 
 The download icon on a personal layer or its editor offers **KMZ**, **KML** and
-**GeoJSON**. A tracked layer goes out as it is now, as it stood on the cursor's
-day, or with every state dated for another viewer's time slider. **Send to My
+**GeoJSON**. A tracked layer goes out as it stood on the cursor's day, or with
+every state dated for another viewer's time slider. **Send to My
 Maps…**, in the editor's ⋯ or from the download dialog, saves the KMZ of one day
 and opens the analyst's My Maps, whose address the layer keeps, beside three
 steps: delete the old layer there, then import the file. Google offers no way to
@@ -2128,7 +2153,7 @@ puts it in one of the analyst's layers as somebody else's point, with its day an
 the addresses its note cites. It opens the same step-by-step menu as a Geo Proof
 point, the layer used last first, the icon step starting on the feature's own
 colour; a line or an area skips the icon. A row at the top of that menu says what
-the item shows, **Intact**, **Damaged** or **Destroyed**, on the marker it adds.
+the item shows, **–** (nothing said), **Damaged** or **Destroyed**, on the marker it adds.
 
 A personal marker belongs to its layer. **Save as case place** explicitly creates
 a place, or reuses a place already at that point, and records the layer's origin.
@@ -2315,6 +2340,27 @@ south, dusk passes north, and the two see a place from opposite sides. The picke
 reads a month of passes at the crosshair when it opens, one request a month, and
 keeps what it read. The picture is the dual-polarisation composite Detect reviews
 radar candidates on: water dark blue, vegetation grey-green, walls and hulls white.
+
+**3D** sits under the compass. Pressed, the imagery rises on the relief
+(Mapterhorn's open heights, AWS's set when Mapterhorn cannot be reached) and the
+view leans to 60°. **Tilt** looks straight down and back, Page Up and Page Down
+lean it ten degrees at a time, and a middle-drag or Shift+drag orbits round the
+ground grabbed. Over relief a plain drag keeps the grabbed ground under the hand,
+and the wheel zooms toward the ground under the pointer, as far for a notch or a
+trackpad swipe as on the flat map. **Real heights** can be raised to ×1.5, ×2 or
+×3 to read a gentle slope, and the control turns amber while they are. On a
+billed basemap a **Far ground: Esri** pill says the ground past a flat view's
+reach is Esri's free imagery. A tilted view has no one scale, so the scale bar
+steps aside while it leans, and Grid Search stays shut until 3D is off. The
+address keeps the tilt, the zoom to two decimals and the height the camera
+holds its centre at, so a reload or a second window opens on the same view.
+
+A tilted capture is the picture the map draws, imagery on relief and nothing laid
+over it, filed with its tilt, bearing, exact zoom and, for a frame centred on
+the view, the height of its centre. Its credit line names the
+relief, the fallback when it drew some of the ground, and raised heights. It
+offers no deeper resolution and no scale bar or north arrow. Opened from Saved, it
+leans back to the view it was taken from; a flat capture opens straight down.
 
 A capture can carry a **scale bar and a north arrow**, ticked in the capture
 menu: the bar bottom-left in the analyst's own units, the needle top-right,
@@ -2756,7 +2802,11 @@ level included. **Details** (D) adds the band the terrain's skyline may be off
 by (wide over a near ridge), the cuts and the pairs' letters, which also show
 while a tool is out. **Side by side** draws the photo above the terrain through
 the same frame, on demand, with a line down both that says the direction under
-the pointer, and saves the pair as a picture.
+the pointer, and saves the pair as a picture. A collage cut for a search shows
+its terrain **Piece by piece**, as the search read it: each piece through the
+camera the search found for it, the seams dashed on both, and the piece under
+the pointer says how far it was turned, tilted and rolled. **One camera** shows
+the terrain whole, and the picture saved is the one shown.
 
 Horizon offers these controls and the place search on its large map and in
 Find, including its three-column view. The small map
@@ -4710,7 +4760,9 @@ along, and on a day or a step framed otherwise it stays over it. A **Symbol** is
 the markers the case's layers draw (a tank, a drone, a checkpoint…), stamped by a press
 on the map, the tool staying in hand for the next; it stands over its point the same
 way, picked from the layers' palette with its colour, sized, turned, and shown damaged
-or destroyed, and the next one takes the last marker set. While something is placed,
+or destroyed from its **State** row, worded as a layer's marker words it (**–**,
+**Damaged**, **Destroyed**, each saying on hover what it draws), and the next one
+takes the last marker set. While something is placed,
 a press goes through what already stands on the map. A **Line** is clicked
 point by point, ended by a double click or Enter (Backspace takes a point back), drawn
 straight from point to point or curved through them, solid, dashed or dotted, with a
@@ -4790,11 +4842,16 @@ ones used, or the browser's picker.
 
 A plate that draws a layer followed over time has a day of its own, on a bar under
 the page that steps through its changes, and plays them at three paces, once or in a
-loop, without writing a day into the plate until it stops. What is added on the map
+loop, without writing a day into the plate until it stops. Its day is always a day of
+the calendar, today on its layers' clock for a new plate, never a "now" that would
+slide to the next day, so a plate reopens on the day it was left on; one saved on
+"now" before this moves to the day it was last saved, with what stood on it. The days
+played are its layers' changes and every day that holds steps. Events stay on its
+maps, faded, unless the plate's cursor says how many days. What is added on the map
 (a label, an arrow, a zone, rings, a cone, a distance, a shape) **belongs to the day
 it is made on**: the next day starts without it. The inspector shows it from a first
 day to a last, each picked on a calendar of any day, or left open to the start or
-to now; both open is every day, and an end moved past the other pulls it along.
+to the end; both open is every day, and an end moved past the other pulls it along.
 **Other days**, under the element list, lists another day's annotations, stretches
 one to reach this day or carries it from this day on, and draws them faintly when
 asked. So a video shows each day's annotations, and only those.

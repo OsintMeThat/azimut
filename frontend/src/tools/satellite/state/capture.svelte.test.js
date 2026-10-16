@@ -416,6 +416,34 @@ describe('a view tilted over the relief', () => {
     // the centred 1200×675 frame, at the canvas's own density
     expect([made.width, made.height]).toEqual([2400, 1350]);
     expect(made.drawn[0].slice(1, 3)).toEqual([400, 225]);
+    expect(form.get('relief_fallback')).toBe(null);
+  });
+
+  it('draws only the imagery on its relief, and keeps the zoom’s fraction', async () => {
+    drawing();
+    let kept = null;
+    engine.snapshot = async ({ keep } = {}) => {
+      kept = keep;
+      return { canvas: { width: 3200, height: 1800 }, complete: true };
+    };
+    engine.exactZoom = () => 13.6274;
+    engine.drewReliefFallback = () => true;
+    engine.centreElevation = () => 711.9;
+    const capture = store({ tilt: () => 60 });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    // the names, the borders and the analyst's layers each owe a credit of their own
+    expect(['basemap-imagery', 'basemap-placenames-labels', 'my-layer-line'].map((id) => kept?.(id))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    const form = api.post.mock.calls[0][1];
+    expect(form.get('zoom')).toBe('13.63');
+    // the fallback relief drew some of this ground, so the capture credits it
+    expect(form.get('relief_fallback')).toBe('true');
+    // the centred frame is the camera's own, its centre's height with it
+    expect(form.get('elevation')).toBe('712');
   });
 
   it('waits for a settled map rather than filing half of it', async () => {

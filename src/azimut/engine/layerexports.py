@@ -78,7 +78,7 @@ def _geometry(parent: ET.Element, geometry: dict[str, Any]) -> None:
 
 #: What a personal feature says beyond its style, carried so a re-import keeps it.
 #: The link to a case item is not: a download never names case entities.
-PERSONAL_FIELDS = ("date", "date_end", "status", "bearing", "links", "provenance")
+PERSONAL_FIELDS = ("date", "date_end", "end_unknown", "status", "bearing", "links", "provenance")
 
 
 def kml_time(at: str, zone: str) -> str:
@@ -215,6 +215,8 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str], *,
         extra = _element(placemark, "ExtendedData")
         for field in ("symbol", "colour", "icon_scale", "stroke_width"):
             _element(_element(extra, "Data", name=f"azimut_{field}"), "value", props.get(field, ""))
+        if props.get("end_unknown"):
+            _element(_element(extra, "Data", name="azimut_end_unknown"), "value", "true")
         for field in ("status", "bearing", "provenance"):
             if field in props:
                 _element(_element(extra, "Data", name=f"azimut_{field}"), "value", props[field])

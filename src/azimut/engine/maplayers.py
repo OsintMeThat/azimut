@@ -659,6 +659,9 @@ def _personal_style(properties: dict[str, Any], source: dict[str, Any]) -> None:
                 apply_fields(properties, {field: source[field]})
             except LayerError:
                 continue
+    # an unknown end is said only of a feature with none
+    if source.get("end_unknown") in (True, "true") and not properties.get("date_end"):
+        properties["end_unknown"] = True
     colour = _hex(source.get("colour"))
     if colour:
         properties["colour"] = colour
@@ -949,7 +952,7 @@ def _kml_days(element: Element) -> tuple[str, str]:
 
 
 #: The fields a personal layer's own download writes as `azimut_*` ExtendedData.
-_AZIMUT_FIELDS = ("symbol", "colour", "icon_scale", "stroke_width", "status", "bearing", "provenance", "links")
+_AZIMUT_FIELDS = ("symbol", "colour", "icon_scale", "stroke_width", "status", "bearing", "provenance", "links", "end_unknown")
 
 
 def _kml_extended_data(element: Element) -> str:
@@ -2265,7 +2268,7 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
         "spec": layout.layer_spec_rel(name),
         "editable": source.get("kind") == "editable",
         "origin": spec.get("origin"),
-        # a personal layer followed over time: `{on, precision, zone}`, kept when off
+        # a personal layer followed over time: `{on, precision, zone, window?}`, kept when off
         "track": spec.get("track") or None,
         # the My Maps a personal layer is sent to, by its editor's address
         "mymaps": spec.get("mymaps") or "",

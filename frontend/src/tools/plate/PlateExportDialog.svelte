@@ -149,7 +149,7 @@
   {:else}
     {#if moments.length >= 2}
       <div class="row">
-        <span title="The changes of the plate's layers the export goes through">Days</span>
+        <span title="The days the export goes through: each change of the plate's layers, and each day with steps">Days</span>
         <span class="days">
           <select aria-label="First day" title="The first day played" value={first} onchange={(event) => (first = event.currentTarget.value)}>
             {#each moments as moment (moment)}<option value={moment}>{momentLabel(moment)}</option>{/each}</select>
@@ -158,7 +158,7 @@
             {#each moments as moment (moment)}<option value={moment}>{momentLabel(moment)}</option>{/each}</select>
         </span>
       </div>
-      <p class="note">{days.length} {days.length === 1 ? 'change' : 'changes'}, one picture each{days.length > 120 ? '; at most 120 go in' : ''}{stepped && format !== 'sheet' ? ', each followed by its steps' : ''}. The legend lists what any of them draws, so it stays still.</p>
+      <p class="note">{days.length} {days.length === 1 ? 'day' : 'days'}, one picture each{days.length > 120 ? '; at most 120 go in' : ''}{stepped && format !== 'sheet' ? ', each followed by its steps' : ''}. The legend lists what any of them draws, so it stays still.</p>
     {:else}
       <p class="note">The page, then each of its steps.</p>
     {/if}

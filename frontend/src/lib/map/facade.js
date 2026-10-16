@@ -384,17 +384,30 @@ export function mapFacade(map, container, mapId = '') {
      * `setView` then `setBearing` would settle once on the old heading first.
      * A camera that names no tilt keeps the one the map has; a flat map holds
      * any tilt it is handed at zero.
+     *
+     * Over relief the centre's height (`centreElevation`) is part of the
+     * camera: the engine seats the centre on the ground in one step, which on a
+     * steep slope at a steep tilt leaves it hundreds of metres off, and the eye
+     * stands where centre, zoom, tilt and height put it. A camera handed with
+     * its height is set exactly there and kept as the hand would leave it
+     * (`groundHold.js`); one without is placed and rides the ground.
      */
-    setCamera: ({ lat, lon, zoom, bearing = 0, pitch }) =>
+    setCamera: ({ lat, lon, zoom, bearing = 0, pitch, elevation }) =>
       map.jumpTo(
         {
           center: [lon, lat],
           zoom: engineZoom(zoom),
           bearing: -normalizeBearing(bearing),
           ...(Number.isFinite(pitch) ? { pitch } : {}),
+          ...(Number.isFinite(elevation) ? { elevation } : {}),
         },
-        PLACED
+        Number.isFinite(elevation) ? HAND : PLACED
       ),
+    /** The height the engine holds the centre of the view at, in metres; null on a map without one. */
+    centreElevation: () => {
+      const height = map.getCenterElevation?.();
+      return Number.isFinite(height) ? height : null;
+    },
     setZoom: (zoom) =>
       heldElevation == null
         ? map.setZoom(engineZoom(zoom))
@@ -554,8 +567,21 @@ export function mapFacade(map, container, mapId = '') {
     /** Whether a press landed on the drawn map itself, not on a marker or a control over it. */
     onSurface: (target) => Boolean(target) && target === map.getCanvas?.(),
 
-    /** Give the map the keyboard, as a press on it would. */
-    focus: () => map.getCanvas?.()?.focus?.({ preventScroll: true }),
+    /**
+     * Give the map the keyboard, as a press on it would, and like a press without
+     * the ring round the whole map: a browser that last saw a key (the Shift of
+     * a turn) would draw one for a focus given from script (`engine.css`). It
+     * comes back once the map has lost the keyboard and Tab brings it back.
+     */
+    focus: () => {
+      const canvas = map.getCanvas?.();
+      if (!canvas?.focus) return;
+      if (canvas.dataset) {
+        canvas.dataset.handFocus = '';
+        canvas.addEventListener?.('blur', () => delete canvas.dataset.handFocus, { once: true });
+      }
+      canvas.focus({ preventScroll: true });
+    },
 
     /**
      * The camera exactly as the engine holds it, fractional zoom included. Only

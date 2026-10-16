@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  asOf, changedBy, changes, changesOn, inForce, isTracked, lifeline, lifeRows, moment, momentLabel, moments,
+  asOf, changedBy, changes, changesOn, inForce, isTracked, lifeline, lifeRows, moment, momentLabel, momentNow, moments,
   previousState, seenAt, shortMoment, spanLabel, spanOf, stateAt, stepMoment,
 } from './layerHistory.js';
 
@@ -20,6 +20,18 @@ describe('moments', () => {
     expect(moment('2026-10-12')).toBe('2026-10-12');
     expect(moment('2026-10-12T14:05')).toBe('2026-10-12T14:05');
     for (const bad of ['2026-02-30', '2026-10-12T24:00', '12/10/2026', '', null]) expect(moment(bad)).toBeNull();
+  });
+
+  it("says the moment it is on a layer's clock, to the day or to the minute", () => {
+    const at = new Date('2026-10-16T22:30:00Z');
+    expect(momentNow({ zone: 'UTC' }, at)).toBe('2026-10-16');
+    // past midnight in Paris while UTC is still on the 16th
+    expect(momentNow({ zone: 'Europe/Paris' }, at)).toBe('2026-10-17');
+    expect(momentNow({ zone: 'Europe/Paris', precision: 'time' }, at)).toBe('2026-10-17T00:30');
+    expect(momentNow({ zone: 'America/New_York', precision: 'time' }, at)).toBe('2026-10-16T18:30');
+    // no clock, or one this browser does not know, reads on UTC
+    expect(momentNow(null, at)).toBe('2026-10-16');
+    expect(momentNow({ zone: 'Nowhere/Atlantis' }, at)).toBe('2026-10-16');
   });
 
   it('labels a day, a time, and always', () => {
@@ -147,7 +159,7 @@ describe('the day the layer is read on', () => {
   const point = (properties) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] }, properties: { key: Math.random(), ...properties } });
   const read = (features, at, options) => asOf({ features }, at, options).features;
 
-  it('rings what appeared or changed that very day, and nothing at now', () => {
+  it('rings what appeared or changed that very day, and nothing with no moment', () => {
     const [moved, born, old] = read([front, point({ date: '2026-10-12' }), point({ date: '2026-10-01' })], '2026-10-12');
     expect(moved.properties.$new).toBe(true);
     expect(born.properties.$new).toBe(true);
@@ -155,17 +167,19 @@ describe('the day the layer is read on', () => {
     expect(read([point({ date: '2026-10-12' })], null)[0].properties.$new).toBeUndefined();
   });
 
-  it('keeps a lasting thing as it is, fades an event after its day and lets it go after its window', () => {
+  it('keeps a lasting thing as it is, and an event faded after its day for good unless given a window', () => {
     const strike = point({ date: '2026-10-05', event: true });
     const post = point({ date: '2026-10-05' });
     expect(read([strike], '2026-10-05')[0].properties.$fade).toBeUndefined();
     expect(read([strike], '2026-10-08')[0].properties.$fade).toBe(true);
-    expect(read([strike, post], '2026-10-20')).toHaveLength(1);
+    // no window: a year on, the strike is still there, faded
+    expect(read([strike], '2027-10-05')[0].properties.$fade).toBe(true);
+    expect(read([strike, post], '2026-10-20', { window: 7 })).toHaveLength(1);
     expect(read([strike], '2026-10-20', { window: 30 })).toHaveLength(1);
     expect(read([post], '2026-10-20')[0].properties.$fade).toBeUndefined();
   });
 
-  it("reads events at now against the layer's last change, not the calendar", () => {
+  it("reads events with no moment against the layer's last change, not the calendar", () => {
     const strike = point({ date: '2025-01-10', event: true });
     const last = point({ date: '2025-01-12' });
     const [kept] = read([strike, last], null);
@@ -195,7 +209,8 @@ describe('a reading kept', () => {
     const faded = asOf(layer, '2026-10-06');
     expect(faded).not.toBe(day);
     expect(asOf(layer, '2026-10-09')).toBe(faded);
-    expect(asOf(layer, '2026-10-20').features).toHaveLength(0);
+    expect(asOf(layer, '2026-10-20').features).toHaveLength(1);
+    expect(asOf(layer, '2026-10-20', { window: 7 }).features).toHaveLength(0);
   });
 
   it('reads every day of a busy layer as a fresh reading would', () => {
@@ -226,11 +241,19 @@ describe('when a feature shows, as the editor says it', () => {
   const plain = (properties = {}) => ({ type: 'Feature', geometry: line(0), properties: { key: 'p', ...properties } });
 
   it('reads a plain feature from its days and a history from its states', () => {
-    expect(spanOf(plain())).toEqual({ start: '', end: '', ends: 'last', changes: 0 });
-    expect(spanOf(plain({ date: '2026-10-03', date_end: '2026-10-09' }))).toEqual({ start: '2026-10-03', end: '2026-10-09', ends: 'last', changes: 0 });
-    expect(spanOf(front)).toEqual({ start: '2026-10-03', end: '2026-10-20', ends: 'gone', changes: 1 });
+    expect(spanOf(plain())).toEqual({ start: '', end: '', ends: 'last', changes: 0, unknown: false });
+    expect(spanOf(plain({ date: '2026-10-03', date_end: '2026-10-09' }))).toEqual({ start: '2026-10-03', end: '2026-10-09', ends: 'last', changes: 0, unknown: false });
+    expect(spanOf(front)).toEqual({ start: '2026-10-03', end: '2026-10-20', ends: 'gone', changes: 1, unknown: false });
     const always = tracked([{ at: '', geometry: line(0) }, { at: '2026-10-12', geometry: line(1) }]);
-    expect(spanOf(always)).toEqual({ start: '', end: '', ends: 'gone', changes: 1 });
+    expect(spanOf(always)).toEqual({ start: '', end: '', ends: 'gone', changes: 1, unknown: false });
+  });
+
+  it('says an end nobody knows only of a feature with no end', () => {
+    expect(spanOf(plain({ date: '2026-10-03', end_unknown: true })).unknown).toBe(true);
+    expect(spanOf(plain({ date: '2026-10-03', date_end: '2026-10-09', end_unknown: true })).unknown).toBe(false);
+    expect(spanOf({ ...front, properties: { ...front.properties, end_unknown: true } }).unknown).toBe(false);
+    expect(spanLabel(spanOf(plain({ date: '2026-10-13', end_unknown: true })), { year: 2026 })).toBe('13 Oct → ?');
+    expect(spanLabel(spanOf(plain({ end_unknown: true })), { year: 2026 })).toBe('Always → ?');
   });
 
   it('says it in a few words, the year only when it is not this one', () => {
@@ -258,7 +281,7 @@ describe('when a feature shows, as the editor says it', () => {
 
   it('marks the state a dated edit rewrites, or where a new one goes', () => {
     const shown = (rows) => rows.map((row) => [row.at, row.editing, row.ghost]);
-    // at now, or with no date, an edit counts on every day alike: no row is its own
+    // with no moment, or with no date, an edit counts on every day alike: no row is its own
     expect(shown(lifeRows(front, null))).toEqual([['2026-10-03', false, false], ['2026-10-12', false, false], ['2026-10-20', false, false]]);
     expect(shown(lifeRows(front, '2026-10-15', 'fix'))).toEqual(shown(lifeRows(front, null)));
     // a day between two states: a new one there

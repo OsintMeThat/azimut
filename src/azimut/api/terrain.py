@@ -30,6 +30,16 @@ def _unavailable(exc: terrain.TerrainUnavailable) -> HTTPException:
     return HTTPException(status_code=502, detail=f"Terrain could not be loaded: {exc}")
 
 
+# A tile the fallback drew answers 203, the status for a payload transformed on
+# its way (four of AWS's tiles stitched into one of ours). The map remembers it,
+# so a capture of the view credits that source too (frontend lib/map/tileBatch.js).
+FALLBACK_STATUS = 203
+
+
+def _status(source: str) -> int:
+    return FALLBACK_STATUS if source == terrain.AWS_TERRAIN.id else 200
+
+
 @router.get("/sources")
 def sources() -> dict[str, Any]:
     """What the map needs to draw relief, and who to credit for it."""
@@ -58,7 +68,10 @@ def terrain_tile(z: int, x: int, y: int) -> Response:
         raise _unavailable(exc) from exc
     content, media_type = (fetched[0], fetched[1]) if fetched else (terrain.sea_tile(), "image/png")
     return Response(
-        content=content, media_type=media_type, headers={"Cache-Control": TILE_CACHE_CONTROL}
+        content=content,
+        media_type=media_type,
+        status_code=_status(fetched[2]) if fetched else 200,
+        headers={"Cache-Control": TILE_CACHE_CONTROL},
     )
 
 
@@ -72,7 +85,7 @@ def terrain_batch(t: str = Query(max_length=tile_batch.QUERY_MAX)) -> StreamingR
             fetched = terrain.tile(z, x, y)
         except terrain.TerrainUnavailable as exc:
             raise _unavailable(exc) from exc
-        return 200, fetched[0] if fetched else terrain.sea_tile()
+        return (_status(fetched[2]), fetched[0]) if fetched else (200, terrain.sea_tile())
 
     return tile_batch.stream(keys, one)
 

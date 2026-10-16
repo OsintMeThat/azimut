@@ -1,4 +1,4 @@
-import { changedBy, momentLabel, moments as momentsOf, seenAt } from '../../../lib/map/layerHistory.js';
+import { changedBy, momentLabel, momentNow, moments as momentsOf, seenAt } from '../../../lib/map/layerHistory.js';
 import { landAt } from '../../../lib/map/landings.js';
 import { attribution } from '../../../lib/map/addedLayers.js';
 
@@ -83,9 +83,9 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   let details = $state(null);
   // The style the next markers are added in, set from the map's edit bar.
   let draft = $state({ colour: '#0072b2', symbol: 'pin' });
-  // On a tracked layer read at a moment: does an edit start a state there
-  // ('new') or carry no date ('fix'), correcting the state in force then? No date
-  // holds for the moment it was chosen at: the next day the cursor goes to dates again.
+  // On a tracked layer, always read at a moment: does an edit start a state there
+  // ('new') or carry no date ('fix'), counting on every day? No date holds for the
+  // moment it was chosen at: the next day the cursor goes to dates again.
   let timeMode = $state('new');
   let fixedAt = $state(null);
   /** The edits that can be taken back, newest last, and the ones taken back, to redo. */
@@ -98,8 +98,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
    * moment, each in the shape and status it had then, its history kept, and the ones
    * not there yet or any more marked `$absent`. Otherwise as the layer holds them.
    */
-  const features = $derived(landAt(seenAt(stored, editor?.track?.on ? layers.time?.(editor.name)?.at ?? null : null),
-    landings.filter((landing) => !landing.saved)));
+  const features = $derived(landAt(seenAt(stored, cursor()), landings.filter((landing) => !landing.saved)));
   /** The moments the layer changes at, read from the features the editor holds rather than
    *  from a map's drawing of it, which a layer switched off never has and each save drops. */
   const stateMoments = $derived(momentsOf({ features: stored }));
@@ -162,13 +161,19 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     [key, !draft || draft[key] === before?.[key] ? value : draft[key]])) : null;
 
   const base = (owner, name) => `/api/cases/${owner}/map-layers/${encodeURIComponent(name)}`;
-  /** The moment the layer is read at while it is tracked, else null: what an edit is dated to. */
-  const cursor = () => editor?.track?.on ? layers.time?.(editor.name)?.at ?? null : null;
+  /**
+   * The moment the layer is read at while it is tracked, today on its clock until
+   * the cursor moves, else null: what an edit is dated to.
+   */
+  function cursor() {
+    return editor?.track?.on ? layers.time?.(editor.name)?.at ?? momentNow(editor.track) : null;
+  }
   /** 'new' or 'fix' at the cursor where it is now. */
   const mode = () => (timeMode === 'fix' && fixedAt === cursor() ? 'fix' : 'new');
   /**
-   * What dates an edit: the cursor, or nothing at now and with no date chosen. A new
-   * feature then shows on every day, and a change counts on every day alike.
+   * What dates an edit: the cursor, or nothing with no date chosen or on a layer not
+   * followed over time. A new feature then shows on every day, and a change counts on
+   * every day alike.
    */
   const undated = () => cursor() === null || mode() === 'fix';
   const stamp = () => (undated() ? {} : { at: cursor() });
@@ -246,8 +251,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     close();
     const owner = caseId();
     if (!owner || !row?.editable) return;
-    // the editor opens on now, wherever a state pressed earlier left the cursor:
-    // an edit dates a change only once the analyst moves it here
+    // the editor opens on today, wherever a state pressed earlier left the cursor
     layers.setTime?.(row.name, { at: null });
     const stamp = generation;
     editor = { ...row, caseId: owner };
@@ -261,6 +265,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       groups = answer.groups ?? [];
       group = groups[0]?.id ?? '';
       checkpoint = answer.checkpoint;
+      holdToday();
       const live = layers.rows.find((item) => item.name === row.name);
       if (live && !live.enabled) await layers.toggle(owner, live);
     } catch (error) {
@@ -283,7 +288,17 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     if (!row || (owner && owner !== caseId())) return;
     dialog = null;
     await open(row);
-    if (track && editor?.name === row.name) await enqueue((path) => api.patch(`${path}/edit`, { track }), null, null, { record: false });
+    if (track && editor?.name === row.name) await enqueue((path) => api.patch(`${path}/edit`, { track }), holdToday, null, { record: false });
+  }
+
+  /**
+   * Put the cursor of a tracked layer being edited on today, on its clock, and hold it
+   * there while the editor is open: an edit is dated to the day it is made on, even
+   * past midnight, and on a layer dated to the minute the edits of one sitting share
+   * one moment rather than one each.
+   */
+  function holdToday() {
+    if (editor?.track?.on) layers.setTime?.(editor.name, { at: momentNow(editor.track) });
   }
 
   function settle(owner, name, stamp, answer) {
@@ -587,7 +602,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     /** 'new' or 'fix': what an edit at the cursor does to a tracked feature. */
     get timeMode() { return mode(); },
     set timeMode(value) { timeMode = value === 'fix' ? 'fix' : 'new'; fixedAt = cursor(); },
-    /** The moment the tracked layer being edited is read at, or null for now. */
+    /** The moment the tracked layer being edited is read at, or null on a layer not tracked. */
     get cursor() { return cursor(); },
     /** What a date holds of a feature while edits carry none: `{ shape, status }`, each a moment or ''. */
     held: heldOf,
@@ -813,6 +828,16 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     setEnd(key, at) {
       return enqueue((path) => api.patch(`${path}/markers/${key}`, { end: at ?? '' }), null, null, { label: 'change' });
     },
+    /** Say nobody knows when a feature left the map: no end, said as unknown. */
+    setEndUnknown(key) {
+      return enqueue((path) => api.patch(`${path}/markers/${key}`, { end_unknown: true }), null, null, { label: 'change' });
+    },
+    /** Give every selected feature the same first day (`start`), last (`end`) or unknown end (`end_unknown`), as one edit. */
+    setSelectionWhen(changes) {
+      const keys = [...selection];
+      if (!keys.length) return Promise.resolve(null);
+      return enqueue((path) => api.post(`${path}/selection`, { keys, changes }), null, null, { label: 'change' });
+    },
     /** Read the layer at `at` with edits dated there: what the next one does is a change from that day. */
     changeOn(at) {
       if (!editor?.track?.on || !at) return;
@@ -825,7 +850,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     },
     /** Switch time tracking on or off, or change its precision or its clock. */
     setTrack(changes) {
-      return enqueue((path) => api.patch(`${path}/edit`, { track: changes }), null, null, { record: false });
+      return enqueue((path) => api.patch(`${path}/edit`, { track: changes }), holdToday, null, { record: false });
     },
     /** Keep (or forget, with '') the My Maps this layer is sent to. */
     setMyMaps(address) {
@@ -906,10 +931,14 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
         ...(groupId ? { group: groupId } : {}), ...(style ?? {}), ...(status ? { status } : {}),
       };
       const point = geometry?.type === 'Point';
+      // on a layer followed over time, a feature with no day of its own appears on the day shown
+      const editing = editor?.name === row.name && editor?.caseId === owner;
+      const day = properties.date || !row.track?.on ? {} : editing ? stamp()
+        : { at: layers.time?.(row.name)?.at ?? momentNow(row.track) };
       const send = (path) => point
-        ? api.post(`${path}/markers`, { lat: geometry.coordinates[1], lon: geometry.coordinates[0], ...fields })
-        : api.post(`${path}/shapes`, { geometry, ...fields });
-      const answer = editor?.name === row.name && editor?.caseId === owner
+        ? api.post(`${path}/markers`, { lat: geometry.coordinates[1], lon: geometry.coordinates[0], ...fields, ...day })
+        : api.post(`${path}/shapes`, { geometry, ...fields, ...day });
+      const answer = editing
         ? await enqueue(send)
         : await send(base(owner, row.name)).then((answer) => { layers.edited(owner, answer.layer); return answer; },
           (error) => { notify(error.message, 'danger', 5000); return null; });

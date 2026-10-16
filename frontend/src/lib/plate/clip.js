@@ -7,7 +7,7 @@
  * then each step of that day, then the next day: the MP4 is made of those beats,
  * each the page as it stands then, with the step's clips running in their boxes.
  */
-import { STEP_SECONDS, dayOf, longDay, shownOn, stepsOf } from './page.js';
+import { PAGE, STEP_SECONDS, dayOf, longDay, shownOn, stepsOf } from './page.js';
 
 /** How long a day holds when neither it nor the plate says, in seconds. */
 export const DAY_SECONDS = 1;
@@ -50,7 +50,7 @@ export function stepSeconds(step, elements) {
 
 /** How long every day holds that says nothing of its own: the plate's seconds. */
 export const plateSeconds = (spec) => (Number(spec?.time?.hold) > 0 ? Number(spec.time.hold) : DAY_SECONDS);
-/** How long a day holds (a moment, or null for the plate as it stands): its own seconds, else the plate's. */
+/** How long a day holds (a moment, or null for the page of a plate with no day): its own seconds, else the plate's. */
 export function daySeconds(spec, day) {
   const own = Number(spec?.holds?.[dayOf(day)]);
   return own > 0 ? own : plateSeconds(spec);
@@ -64,8 +64,8 @@ export function boundSeconds(value) {
 
 /**
  * The beats a played plate goes through: each of `days` (a moment, or null for the
- * plate as it stands), then each of its steps, `{ day, step, seconds }` with `step`
- * null for the day itself, each held its own seconds.
+ * page of a plate with no day), then each of its steps, `{ day, step, seconds }` with
+ * `step` null for the day itself, each held its own seconds.
  */
 export function beats(spec, days) {
   const out = [];
@@ -76,17 +76,13 @@ export function beats(spec, days) {
   return out;
 }
 
-/** Today, as a layer's moment to the day. */
-const todayIso = () => new Date().toISOString().slice(0, 10);
-
 /**
- * The days a played plate goes through: the moments asked, then now when steps stand
- * on it. Today is then now: a change dated today is not played twice under two names,
- * unless steps stand on that day of its own.
+ * The days a played plate goes through, in order: the moments its layers change at,
+ * and every day that holds steps of its own, a change or not, today among them.
  */
-export function playDays(spec, moments, today = todayIso()) {
-  if (!spec?.steps?.now?.length) return moments;
-  return [...moments.filter((day) => day !== today || spec.steps[today]?.length), null];
+export function playDays(spec, moments) {
+  const stepped = Object.entries(spec?.steps ?? {}).filter(([day, list]) => day !== PAGE && list?.length).map(([day]) => day);
+  return [...new Set([...moments, ...stepped])].sort();
 }
 
 /** The whole of a sequence, in seconds. */

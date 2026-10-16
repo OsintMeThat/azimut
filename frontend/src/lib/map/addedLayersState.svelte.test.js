@@ -1098,3 +1098,64 @@ describe('kept between sessions', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe('a layer followed over time', () => {
+  const TRACKED = {
+    ...FILE_LAYER, name: 'Front', title: 'Front', source: { kind: 'editable' }, editable: true,
+    track: { on: true, precision: 'day', zone: 'Asia/Tokyo' },
+  };
+
+  async function opened() {
+    rows = [TRACKED];
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    return layers;
+  }
+
+  it("is read on today, on the layer's clock, until its cursor moves: never on a now that slides", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 01:30 in Tokyo while UTC is still on the 19th
+    vi.setSystemTime(new Date('2026-10-19T16:30:00Z'));
+    const layers = await opened();
+    expect(layers.time('Front').at).toBe('2026-10-20');
+    expect(layers.rows[0].time.at).toBe('2026-10-20');
+    layers.setTime('Front', { at: '2026-10-12' });
+    expect(layers.time('Front').at).toBe('2026-10-12');
+    vi.useRealTimers();
+  });
+
+  it('keeps events for good unless the layer says how many days, and saves what the analyst sets', async () => {
+    const layers = await opened();
+    expect(layers.time('Front').window).toBeNull();
+    api.patch.mockImplementationOnce(async (path, body) => {
+      calls.push(['PATCH', path, body]);
+      return { layer: { ...TRACKED, track: { ...TRACKED.track, window: 3 } } };
+    });
+    calls.length = 0;
+    layers.setTime('Front', { window: 3 });
+    // drawn at once, before the answer
+    expect(layers.time('Front').window).toBe(3);
+    await settle();
+    expect(calls).toEqual([['PATCH', '/api/cases/c1/map-layers/Front/edit', { track: { window: 3 } }]]);
+    expect(layers.rows[0].track.window).toBe(3);
+    calls.length = 0;
+    api.patch.mockImplementationOnce(async (path, body) => {
+      calls.push(['PATCH', path, body]);
+      return { layer: TRACKED };
+    });
+    layers.setTime('Front', { window: null });
+    await settle();
+    expect(calls).toEqual([['PATCH', '/api/cases/c1/map-layers/Front/edit', { track: { window: 'always' } }]]);
+    expect(layers.time('Front').window).toBeNull();
+  });
+
+  it('puts the window back and says why when the layer refuses it', async () => {
+    const layers = await opened();
+    api.patch.mockRejectedValueOnce(new Error('keep events for good, or 0 to 365 days'));
+    layers.setTime('Front', { window: 3 });
+    await settle();
+    expect(layers.time('Front').window).toBeNull();
+    expect(notify).toHaveBeenCalledWith('keep events for good, or 0 to 365 days', 'danger');
+  });
+});

@@ -48,11 +48,20 @@ import {
   toggleCategory,
 } from './addedLayers.js';
 import { active, indexDates, within } from './layerDates.js';
-import { isTracked, moments as momentsOf } from './layerHistory.js';
+import { isTracked, momentNow, moments as momentsOf } from './layerHistory.js';
 import { layerMemory } from './layerMemory.js';
 
-/** How a tracked layer is read when nobody moved its cursor: as it is now, with its trail. */
-export const NOW = Object.freeze({ at: null, trail: true, since: null, window: 7 });
+/** How a tracked layer is read when nobody moved its cursor: today, with its trail. */
+const UNMOVED = Object.freeze({ at: null, trail: true, since: null });
+
+/**
+ * How a tracked layer is read: the moment its cursor is on, or today on the
+ * layer's clock while nobody moved it, so the moment is always a day of the
+ * calendar; and how long its events stay, which the layer itself keeps.
+ */
+function readingOf(row, time) {
+  return { ...UNMOVED, ...time, at: time?.at ?? momentNow(row?.track), window: row?.track?.window ?? null };
+}
 
 /** The Map's switches, where layers are added: what `rows`, `drawn` and `toggle` read. */
 const MAP = 'satellite';
@@ -103,9 +112,10 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
   /** name → `{ collection, index }`: the days of a layer's features, indexed
    *  once per snapshot rather than on every frame of a drag. */
   const indexes = new Map();
-  /** name → how a tracked layer is read: the moment its cursor is on (null for
-   *  now), its trail, and the reference its gains are counted from. The page's
-   *  and never stored, so a layer opens on what it is now, in every map at once. */
+  /** name → how a tracked layer is read: the moment its cursor is on (null until
+   *  it moves, read as today), its trail, and the reference its gains are counted
+   *  from. The page's and never stored, so a layer opens on today, in every map at
+   *  once. How long its events stay is the layer's own (`track.window`). */
   let times = $state({});
   /** name → `{ collection, list }`: the moments a layer changes at, once per snapshot. */
   const momentLists = new Map();
@@ -262,7 +272,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
     return rows.map((row) => {
       const enabled = isOn(scope, row.name);
       // a tracked layer is read at a moment, not filtered by a period
-      if (isTracked(row)) return { ...row, enabled, period: null, time: times[row.name] ?? NOW };
+      if (isTracked(row)) return { ...row, enabled, period: null, time: readingOf(row, times[row.name]) };
       const period = row.name in drafts ? drafts[row.name] : (row.period ?? null);
       const listing = { ...row, enabled, period };
       const index = active(period) ? datesOf(row.name) : null;
@@ -481,6 +491,27 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
     return row;
   }
 
+  /**
+   * How long a tracked layer's events stay after their day, null for good: drawn
+   * at once and kept by the layer, so every map and the next visit read it too.
+   */
+  async function keepWindow(name, window) {
+    const caseId = loadedFor;
+    const row = rows.find((entry) => entry.name === name);
+    if (!caseId || !row) return;
+    const before = row.track;
+    replace({ ...row, track: { ...before, window } });
+    try {
+      const answer = await api.patch(`/api/cases/${caseId}/map-layers/${encodeURIComponent(name)}/edit`,
+        { track: { window: window ?? 'always' } });
+      if (loadedFor === caseId && answer?.layer) replace(answer.layer);
+    } catch (error) {
+      const now = rows.find((entry) => entry.name === name);
+      if (loadedFor === caseId && now) replace({ ...now, track: before });
+      notify?.(error.message, 'danger');
+    }
+  }
+
   /** The eye on a row in one map, kept for the case in this browser only. */
   function toggleIn(scope, caseId, layer) {
     const visible = !isOn(scope, layer.name);
@@ -637,14 +668,19 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
       return held.has(name) ? drawings.get(name) ?? null : null;
     },
 
-    /** How a tracked layer is read right now (`NOW` until its cursor moves). */
+    /** How a tracked layer is read right now: on today until its cursor moves. */
     time(name) {
-      return times[name] ?? NOW;
+      return readingOf(rows.find((row) => row.name === name), times[name]);
     },
 
-    /** Move a tracked layer's cursor, or switch its trail or its gains: every map follows. */
+    /**
+     * Move a tracked layer's cursor, or switch its trail or its gains: every map
+     * follows. How long its events stay is saved with the layer.
+     */
     setTime(name, patch) {
-      times = { ...times, [name]: { ...(times[name] ?? NOW), ...patch } };
+      const { window, ...moved } = patch;
+      if ('window' in patch) keepWindow(name, window ?? null);
+      if (Object.keys(moved).length) times = { ...times, [name]: { ...(times[name] ?? UNMOVED), ...moved } };
     },
 
     /** The moments a tracked layer changes at, once its features are in hand, else []. */

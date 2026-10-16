@@ -17,6 +17,7 @@
  */
 import { haversine } from '../measure.js';
 import { beyondGuide, keyTurn, pivotPanOffset, sweepDelta, turnBearing } from '../turn.js';
+import { createWheelKind, wheelLevels, wheelValue } from './wheel.js';
 
 /** px the pointer may wander and a middle press still be a click. */
 const CLICK_SLOP = 4;
@@ -515,10 +516,6 @@ export function startGroundPan(engine, event, { onEnd, now, nextFrame } = {}) {
   return true;
 }
 
-/** Wheel delta that makes one level, as a notch does on the flat map (`engine.js`). */
-const WHEEL_LEVEL = 100;
-/** Lines a level is, for a wheel that counts in lines. */
-const WHEEL_LEVEL_LINES = 3;
 /** Share of what is left of the wheel's zoom taken at each frame: a notch eases in. */
 const WHEEL_EASE = 0.35;
 /** Levels left that are not worth another frame. */
@@ -541,15 +538,21 @@ const WHEEL_TRIM = 8;
  * ours over relief, and the tool turns the engine's own wheel off while this
  * one is in use (`relief.js`).
  *
+ * How far it goes is the flat map's own reading of the wheel (`wheel.js`): the
+ * events of a frame added up, a mouse notch about a level and a trackpad's
+ * slivers a little each, eased in over a few frames as one movement.
+ *
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
  * @param {(run: () => void) => unknown} [opts.nextFrame]
+ * @param {() => number} [opts.now] the clock, in ms
  * @returns {{ wheel: (event: WheelEvent) => void, stop: () => void }}
  */
-export function createReliefWheel(engine, { nextFrame } = {}) {
+export function createReliefWheel(engine, { nextFrame, now } = {}) {
   const later =
     nextFrame ??
     ((run) => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(run) : setTimeout(run, 16)));
+  const kindOf = createWheelKind(now ?? (() => globalThis.performance?.now?.() ?? Date.now()));
   let burst = null;
 
   function stop() {
@@ -562,6 +565,14 @@ export function createReliefWheel(engine, { nextFrame } = {}) {
 
   function step() {
     if (!burst) return;
+    if (burst.pending) {
+      // this frame's events, as far as the flat map would have zoomed for them;
+      // notches past the ceiling are not kept for the way back out
+      const asked = wheelLevels(burst.pending, burst.kind);
+      burst.pending = 0;
+      const room = engine.maxZoom() - engine.exactZoom() - burst.left;
+      burst.left += Math.min(asked, Math.max(0, room));
+    }
     const levels = Math.abs(burst.left) < WHEEL_DONE ? burst.left : burst.left * WHEEL_EASE;
     burst.left -= levels;
     const before = engine.exactZoom();
@@ -580,14 +591,14 @@ export function createReliefWheel(engine, { nextFrame } = {}) {
   }
 
   function wheel(event) {
-    const levels = -event.deltaY / (event.deltaMode === 1 ? WHEEL_LEVEL_LINES : WHEEL_LEVEL);
-    if (!levels) return;
+    const value = wheelValue(event);
+    if (!value) return;
     event.preventDefault();
     event.stopPropagation();
     const at = containerPoint(engine, event);
     const fresh = !burst;
     if (fresh) {
-      burst = { release: engine.holdElevation?.() ?? (() => {}), left: 0, at: null };
+      burst = { release: engine.holdElevation?.() ?? (() => {}), left: 0, pending: 0, kind: 'wheel', at: null };
       window.addEventListener('mousedown', stop, true);
     }
     // the hand moved between notches: zoom toward what is under it now
@@ -598,13 +609,45 @@ export function createReliefWheel(engine, { nextFrame } = {}) {
       burst.offset = held?.offset ?? { x: 0, y: 0 };
       burst.at = at;
     }
-    // notches past the ceiling are not kept for the way back out
-    const room = engine.maxZoom() - engine.exactZoom() - burst.left;
-    burst.left += Math.min(levels, Math.max(0, room));
+    burst.kind = kindOf(value);
+    burst.pending -= value;
     if (fresh) later(step);
   }
 
   return { wheel, stop };
+}
+
+/** Degrees a press of Page Up or Page Down tilts a map standing on relief. */
+export const KEY_TILT_STEP = 10;
+
+/**
+ * The tilt a key asks of a map over relief, or null when it asks none: Page Up
+ * leans toward the horizon and Page Down back toward the ground, a step at a
+ * time, as they do in Horizon. The engine holds it under its own ceiling.
+ */
+export function keyTilt(event, pitch) {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  if (event.key === 'PageUp') return pitch + KEY_TILT_STEP;
+  if (event.key === 'PageDown') return Math.max(0, pitch - KEY_TILT_STEP);
+  return null;
+}
+
+/**
+ * Tilt the map from the keyboard (`keyTilt`), for a tool whose map stands on
+ * relief. True when the key was a tilt and has been spent; a key a focused
+ * control already took, or one typed into a field, is left alone.
+ *
+ * @param {object} engine the façade from `engine.js`
+ * @param {KeyboardEvent} event
+ */
+export function tiltFromKey(engine, event) {
+  if (!engine || event.defaultPrevented) return false;
+  if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return false;
+  const to = keyTilt(event, engine.camera().pitch ?? 0);
+  if (to == null) return false;
+  event.preventDefault();
+  engine.setPitch(to);
+  return true;
 }
 
 /**

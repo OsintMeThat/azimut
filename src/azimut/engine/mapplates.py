@@ -105,7 +105,8 @@ Name = Annotated[str, Field(min_length=1, max_length=120)]
 Ident = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")]
 #: A moment on a tracked layer's clock (`engine/layerediting.instant`).
 Moment = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$")]
-#: The day an annotation is shown on: a moment, or "now", the layers as they stand today.
+#: The day an annotation is shown on: a moment, or "now", the page of a plate with no day,
+#: whose layers are drawn as they stand. A plate whose layers change is always on a moment.
 Day = Annotated[str, Field(pattern=r"^(now|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?)$")]
 #: A picture kept inside the plate itself (a logo a template carries), small by bound.
 MAX_PICTURE_CHARS = 300_000
@@ -245,8 +246,8 @@ class Time(Strict):
     trail: bool = True
     #: "previous", or a moment: hatch an area's gains and losses since then.
     since: Literal["previous"] | Moment | None = None
-    #: How many days an event stays on the map after its own, fading.
-    window: int = Field(default=7, ge=0, le=365)
+    #: How many days an event stays on the map after its own, faded; none, for good.
+    window: int | None = Field(default=None, ge=0, le=365)
     #: How long a day holds in the video, in seconds, unless it holds its own (`PlateSpec.holds`).
     hold: FiniteFloat = Field(default=1.0, ge=0.2, le=120)
 
@@ -428,7 +429,7 @@ class Element(Strict):
 
 
 DAY = re.compile(r"now|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?")
-#: A day (a moment, or "now") or a step, by its id: what a framing is kept under.
+#: A day (a moment, or "now" for the page) or a step, by its id: what a framing is kept under.
 BeatKey = Annotated[str, Field(pattern=r"^(now|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?|[A-Za-z0-9_-]{1,40})$")]
 #: At most this many days and steps frame their maps their own way, each at most this many maps.
 MAX_FRAMED_BEATS = 400
@@ -449,7 +450,7 @@ class PlateSpec(Strict):
     framing: dict[BeatKey, Annotated[dict[Ident, View], Field(max_length=MAX_FRAMED_MAPS)]] = Field(
         default_factory=dict, max_length=MAX_FRAMED_BEATS)
     transitions: Transitions = Field(default_factory=Transitions)
-    #: The days that hold their own seconds in the video, by the day ("now" or a moment).
+    #: The days that hold their own seconds in the video, by the day ("now" for the page, or a moment).
     holds: dict[Day, Seconds] = Field(default_factory=dict, max_length=MAX_FRAMED_BEATS)
     elements: list[Element] = Field(default_factory=list, max_length=MAX_ELEMENTS)
 
@@ -517,8 +518,13 @@ def as_periods(spec: dict[str, Any]) -> dict[str, Any]:
     and a day from which on; the period runs from the earliest to the latest of them.
     Plates saved before the words on the ground could be set wrote every element's
     weight as regular, which those words never were: the weight is let go, so they
-    stay bold.
+    stay bold. Plates saved while events left the map after seven days by default
+    wrote those seven days out, as every default is written: events now stay for
+    good unless a plate says otherwise, so that seven is let go too.
     """
+    time = spec.get("time")
+    if isinstance(time, dict) and time.get("window") == 7:
+        time["window"] = None
     for element in spec.get("elements", []):
         if isinstance(element, dict) and element.get("kind") in GROUND_WORDS and "back" not in element:
             element.pop("weight", None)

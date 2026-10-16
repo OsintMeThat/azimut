@@ -506,6 +506,76 @@ describe('a feature with a history', () => {
     expect(changeOn).toHaveBeenCalledWith('2026-10-08');
   });
 
+  /** Several features picked on a tracked layer, the sheet shared by all of them. */
+  const several = (features, extra = {}) => ({ editor: TRACKED, features, groups: [], selection: features.map((one) => one.properties.key),
+    selected: null, pending: 0, cursor: null, timeMode: 'new', ...extra });
+  const candidate = (key, properties = {}) => ({ type: 'Feature', geometry: line(2), properties: { key, name: 'Candidate', date: '2026-09-28', date_end: '2026-10-03', ...properties } });
+
+  it('says the days a selection shares and gives a day picked to all of them', () => {
+    const setSelectionWhen = vi.fn();
+    show(MyLayers, { controller: several([candidate('a'), candidate('b')], { setSelectionWhen }) });
+    expect(document.querySelector('[aria-label="When it first shows"]').textContent.trim()).toBe(`From ${shortMoment('2026-09-28')}`);
+    expect(document.querySelector('[aria-label="When it leaves the map"]').textContent.trim()).toBe(`Until ${shortMoment('2026-10-03')}`);
+    // the history and the changes from a day stay with one feature
+    expect(document.querySelector('[aria-label="Feature history"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Change it from a day"]')).toBeNull();
+    document.querySelector('[aria-label="When it first shows"]').click(); flushSync();
+    document.querySelector('.float-menu button.day[title="2026-09-30"]').click(); flushSync();
+    expect(setSelectionWhen).toHaveBeenCalledWith({ start: '2026-09-30' });
+    document.querySelector('[aria-label="When it leaves the map"]').click(); flushSync();
+    menuItem('Still there').click(); flushSync();
+    expect(setSelectionWhen).toHaveBeenLastCalledWith({ end: '' });
+  });
+
+  it('says Mixed where the selection differs and offers only the days all of them can take', () => {
+    const setSelectionWhen = vi.fn();
+    show(MyLayers, { controller: several([candidate('a', { date: '2026-10-01', date_end: '' }), front], { cursor: '2026-10-15', setSelectionWhen }) });
+    const first = document.querySelector('[aria-label="When it first shows"]');
+    expect(first.textContent.trim()).toBe('Mixed');
+    expect(first.classList.contains('mixed')).toBe(true);
+    first.click(); flushSync();
+    expect(menuItem('Always').getAttribute('aria-checked')).toBe('false');
+    // the front line changes on the 12th, so no start reaches it
+    expect(document.querySelector('.float-menu button.day[title="2026-10-11"]').disabled).toBe(false);
+    expect(document.querySelector('.float-menu button.day[title="2026-10-12"]').disabled).toBe(true);
+    document.querySelector('[aria-label="When it leaves the map"]').click(); flushSync();
+    expect(document.querySelector('.float-menu button.day[title="2026-10-12"]').disabled).toBe(true);
+    expect(document.querySelector('.float-menu button.day[title="2026-10-13"]').disabled).toBe(false);
+    [...document.querySelectorAll('.float-menu .fm-item')].find((node) => node.textContent.includes('day shown')).click(); flushSync();
+    expect(setSelectionWhen).toHaveBeenCalledWith({ end: '2026-10-15' });
+  });
+
+  it('says an unknown end only when it is pressed, beside Today, for one feature or a selection', () => {
+    const setEndUnknown = vi.fn(), setSelectionWhen = vi.fn();
+    show(MyLayers, { controller: picked(candidate('a', { date_end: '' }), { editor: TRACKED, cursor: null, timeMode: 'new', setEndUnknown }) });
+    const leaves = () => document.querySelector('[aria-label="When it leaves the map"]');
+    // never by default: a feature with no end is still there
+    expect(leaves().textContent.trim()).toBe('Still there');
+    leaves().click(); flushSync();
+    const unknown = document.querySelector('.float-menu .acts button[aria-pressed]');
+    expect(unknown.textContent.trim()).toBe('Unknown');
+    expect(unknown.nextElementSibling.textContent.trim()).toBe('Today');
+    expect(unknown.getAttribute('aria-pressed')).toBe('false');
+    unknown.click(); flushSync();
+    expect(setEndUnknown).toHaveBeenCalledWith('a');
+    unmount(held);
+    show(MyLayers, { controller: several([candidate('a', { date_end: '', end_unknown: true }), candidate('b', { date_end: '', end_unknown: true })], { setSelectionWhen }) });
+    expect(leaves().textContent.trim()).toBe('Unknown');
+    leaves().click(); flushSync();
+    expect(menuItem('Still there').getAttribute('aria-checked')).toBe('false');
+    expect(document.querySelector('.float-menu .acts button[aria-pressed]').getAttribute('aria-pressed')).toBe('true');
+    menuItem('Still there').click(); flushSync();
+    expect(setSelectionWhen).toHaveBeenCalledWith({ end: '' });
+  });
+
+  it('gives a selection an unknown end in one edit', () => {
+    const setSelectionWhen = vi.fn();
+    show(MyLayers, { controller: several([candidate('a'), candidate('b')], { setSelectionWhen }) });
+    document.querySelector('[aria-label="When it leaves the map"]').click(); flushSync();
+    document.querySelector('.float-menu .acts button[aria-pressed]').click(); flushSync();
+    expect(setSelectionWhen).toHaveBeenCalledWith({ end_unknown: true });
+  });
+
   it('tags each row of the list with when it shows, and dots what changes on the day shown', () => {
     const point = (key, group, properties = {}) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [2, 48] },
       properties: { key, name: key, group, ...properties } });

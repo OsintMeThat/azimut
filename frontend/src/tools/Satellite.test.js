@@ -713,9 +713,10 @@ describe('a map in more than one window', () => {
     expect(source).not.toContain('navigate: true');
   });
 
-  it('writes nothing while another tool is open', () => {
-    const writer = source.slice(source.indexOf("if (uiState.tool !== 'satellite' || !mapReady) return;"));
-    expect(writer.slice(0, 400)).toContain('viewParams({');
+  it('writes nothing while another tool is open, nor while a tilted view waits for its relief', () => {
+    const guard = "if (uiState.tool !== 'satellite' || !mapReady || pendingCamera) return;";
+    expect(source).toContain(guard);
+    expect(source.slice(source.indexOf(guard)).slice(0, 400)).toContain('viewParams({');
   });
 
   it('opens a peer tab on the view it is showing, and says when refused', () => {

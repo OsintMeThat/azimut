@@ -839,3 +839,38 @@ def test_revert_puts_features_back_and_drops_the_ones_an_edit_made(client, owner
     broken = {**before, "geometry": {"type": "Point", "coordinates": [500, 48]}}
     assert client.post(f"{url}/revert", json={"put": [broken], "drop": []}).status_code == 422
     assert client.post(f"{url}/revert", json={"put": [{"geometry": before["geometry"], "properties": {}}], "drop": []}).status_code == 422
+
+
+def test_revert_brings_back_a_group_an_edit_took_out_and_takes_out_one_it_made(client, owner):
+    """Undoing Ungroup puts the group back where it stood, its look kept, before its features return to it."""
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    made = client.post(f"{url}/groups", json={"name": "Strikes"}).json()["group"]
+    assert client.patch(f"{url}/groups/{made['id']}", json={"colour": "#d55e00", "labels": True, "events": True, "line_dash": "dotted"}).status_code == 200
+    client.post(f"{url}/groups", json={"name": "Later"})
+    point = marker(client, owner, row, name="Hit", group=made["id"])
+    before = read(client, owner, row)
+    group = next(one for one in before["groups"] if one["id"] == made["id"])
+    feature = next(one for one in before["document"]["features"] if one["properties"]["key"] == point["properties"]["key"])
+    assert client.delete(f"{url}/groups/{made['id']}").status_code == 200
+    answer = client.post(f"{url}/revert", json={"put": [feature], "drop": [], "groups": [{**group, "at": 1}], "drop_groups": []})
+    assert answer.status_code == 200, answer.text
+    after = read(client, owner, row)
+    assert [one["name"] for one in after["groups"]] == ["Markers", "Strikes", "Later"]
+    back = after["groups"][1]
+    assert (back["id"], back["colour"], back["labels"], back["events"], back["line_dash"]) == (made["id"], "#d55e00", True, True, "dotted")
+    assert after["document"]["features"][0]["properties"]["group"] == made["id"]
+    # its redo takes it out again; a group of the same name meanwhile is refused rather than doubled
+    assert client.post(f"{url}/revert", json={"put": [], "drop": [], "drop_groups": [made["id"]]}).status_code == 200
+    after = read(client, owner, row)
+    assert [one["name"] for one in after["groups"]] == ["Markers", "Later"]
+    assert after["document"]["features"][0]["properties"]["group"] == after["groups"][0]["id"]
+    client.post(f"{url}/groups", json={"name": "Strikes"})
+    refused = client.post(f"{url}/revert", json={"put": [], "drop": [], "groups": [{**group, "at": 1}]})
+    assert refused.status_code == 422 and "Strikes" in refused.text
+    # the last group stays, whatever an undo asks
+    only = read(client, owner, row)["groups"]
+    client.post(f"{url}/revert", json={"put": [], "drop": [], "drop_groups": [one["id"] for one in only]})
+    assert len(read(client, owner, row)["groups"]) == 1
+    # a group put back is checked as an edit would check it
+    assert client.post(f"{url}/revert", json={"put": [], "drop": [], "groups": [{**group, "id": "x", "name": "Other", "colour": "red"}]}).status_code == 422
