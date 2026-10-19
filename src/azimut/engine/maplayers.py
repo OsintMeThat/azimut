@@ -1873,6 +1873,43 @@ def icon(case: "Case", name: str, key: str) -> bytes:
     return buffer.getvalue()
 
 
+def icon_members(case: "Case", name: str) -> dict[str, bytes]:
+    """Every pictogram a layer holds, key → the bytes stored, unread past the bounds.
+
+    The bytes as they sit in the zip: what a palette hashes to tell which are in
+    the analyst's library already, and what a new member is written beside.
+    Serving one still goes through `icon`, which re-encodes it.
+    """
+    path = case.resolve_inside(layout.layer_icons_rel(name))
+    out: dict[str, bytes] = {}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for entry in archive.infolist()[:MAX_ICONS]:
+                key = entry.filename.removesuffix(".png")
+                if (entry.is_dir() or not entry.filename.endswith(".png") or not _ICON_KEY.fullmatch(key)
+                        or entry.file_size > MAX_ICON_BYTES):
+                    continue
+                with archive.open(entry) as handle:
+                    data = handle.read(MAX_ICON_BYTES + 1)
+                if len(data) <= MAX_ICON_BYTES:
+                    out[key] = data
+    except FileNotFoundError:
+        return {}
+    except (OSError, KeyError, EOFError, RuntimeError, NotImplementedError,
+            zipfile.BadZipFile, zlib.error) as exc:
+        raise LayerError("this layer's icons could not be read") from exc
+    return out
+
+
+def add_icons(case: "Case", name: str, images: dict[str, bytes]) -> int:
+    """Write pictograms beside the ones a layer holds; how many it holds then."""
+    held = icon_members(case, name)
+    fresh = {key: png for key, png in images.items() if key not in held}
+    if len(held) + len(fresh) > MAX_ICONS:
+        raise LayerError(f"a layer holds at most {MAX_ICONS} icons")
+    return _write_icons(case, name, {**held, **fresh}) if fresh else len(held)
+
+
 def _write_cache(
     case: "Case", name: str, geojson: dict[str, Any], *, content_sha256: str = ""
 ) -> Path:

@@ -44,7 +44,8 @@
     One style for the whole group</label>
   {#if uniform}
     <div class="field" title={HELP.groupStyle}><span>Style</span>
-      <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} {used} caseId={controller.editor?.caseId ?? null}
+      <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} icon={group.icon ?? ''} {used}
+        caseId={controller.editor?.caseId ?? null} layer={controller.editor?.name ?? null} meta={controller.icons}
         disabled={busy} onpick={(changes) => controller.updateGroup(group.id, changes)} /></div>
   {/if}
   <label class="switch" title={HELP.labels}><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}

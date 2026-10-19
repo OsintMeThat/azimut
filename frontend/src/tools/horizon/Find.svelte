@@ -4,7 +4,8 @@
    * over the tab, its header holding the same mode switch as the tab's.
    *
    * Three columns: the photo with its skyline, the map with the area and the
-   * alignments, the steps. A column is enlarged by its own button and given
+   * alignments, the steps. The header opens a search the case keeps, or
+   * starts a new one from another photo. A column is enlarged by its own button and given
    * back by the same one or Escape; the line between photo and map is dragged
    * to share the width, and the steps fold away. How it was left is kept for
    * next time in this browser.
@@ -14,6 +15,7 @@
   import FindPhoto from './FindPhoto.svelte';
   import FindMap from './FindMap.svelte';
   import FindSteps from './FindSteps.svelte';
+  import SearchesMenu from './SearchesMenu.svelte';
 
   let {
     find,
@@ -34,9 +36,13 @@
     onsearch = () => {},
     /** Asked to look from a place the search found. */
     onplace = () => {},
+    /** Whether a case is open to keep searches in. */
+    caseOpen = false,
     /** Asked to open or delete a search the case keeps, by name. */
     onopensearch = () => {},
     onremovesearch = () => {},
+    /** Asked to start a new search: the photo, its trace and the setup let go. */
+    onnew = () => {},
   } = $props();
 
   /** The place of the results the panel and the map light together, or -1. */
@@ -130,6 +136,17 @@
     <span class="find-gap"></span>
     <button
       type="button"
+      class="btn btn-sm"
+      disabled={!overlay.source && !find.area.length && !find.alignments.length && !find.search}
+      onclick={onnew}
+      title="Start a new search: another photo, a new area"
+      aria-label="New search"
+    >
+      <Icon name="plus" size={13} /><span>New</span>
+    </button>
+    <SearchesMenu searches={find.list} current={find.search?.name ?? null} ready={caseOpen} onopen={onopensearch} onremove={onremovesearch} />
+    <button
+      type="button"
       class="btn btn-ghost btn-sm"
       onclick={() => {
         folded = !folded;
@@ -204,8 +221,6 @@
           {onstand}
           {onsearch}
           {onplace}
-          {onopensearch}
-          {onremovesearch}
           bind:lit
         />
       </aside>

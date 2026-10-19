@@ -1002,3 +1002,51 @@ describe('going to one feature', () => {
     expect(engine.fitBounds).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * One of the analyst's own icons on a personal layer: drawn as the source's
+ * pictograms are when it is a plain picture, composed when it is worn in a disc
+ * or carries a status stroke, and always over the symbol kept as its fallback.
+ */
+describe("the analyst's own icons on a personal layer", () => {
+  const picture = { image: { width: 64, height: 64 }, box: { x: 0, y: 0, w: 64, h: 64 } };
+  const pixels = { width: 64, height: 64, data: new Uint8Array(64 * 64 * 4) };
+  const dressed = (properties) => ({ type: 'FeatureCollection', features: [{ type: 'Feature',
+    geometry: { type: 'Point', coordinates: [2, 48] },
+    properties: { index: 0, category: 'Mine', colour: '#d55e00', symbol: 'badge-tank', icon: 'abcdef0123456789', ...properties } }] });
+  const opts = (extra = {}) => ({ editable: true, iconUrl: (key) => `/icons/${key}`,
+    loadIcon: vi.fn(async () => ({ width: 64, height: 64, data: new Uint8ClampedArray(64 * 64 * 4) })),
+    readPicture: vi.fn(async () => picture), buildOwn: vi.fn(() => pixels), buildBadge: vi.fn(() => pixels), ...extra });
+  const drawn = (engine) => [...engine.map.sources.values()][0].data.features[0].properties;
+
+  it('wears the icon over the symbol it keeps as a fallback, as a plain picture when nothing is added to it', async () => {
+    const engine = stubEngine(), options = opts();
+    await createAddedLayer(engine, options).set(dressed({ icon_mode: 'image' }));
+    expect(options.buildBadge).not.toHaveBeenCalled();
+    expect(options.buildOwn).not.toHaveBeenCalled();
+    expect(drawn(engine).$own).toBe('azimut-source-abcdef0123456789');
+  });
+
+  it('composes it into a disc of the marker colour', async () => {
+    const engine = stubEngine(), options = opts();
+    await createAddedLayer(engine, options).set(dressed({ icon_mode: 'disc' }));
+    expect(options.readPicture).toHaveBeenCalledWith('/icons/abcdef0123456789');
+    expect(options.buildOwn).toHaveBeenCalledWith(picture, '#d55e00', { mode: 'disc', status: '', external: false });
+    expect(drawn(engine).$badge).toBe(true);
+    expect(drawn(engine).$own).toContain('own-abcdef0123456789-disc');
+  });
+
+  it('composes a picture drawn as it is when it carries a status or an external rim', async () => {
+    const engine = stubEngine(), options = opts();
+    await createAddedLayer(engine, options).set(dressed({ icon_mode: 'image', status: 'destroyed', provenance: 'external' }));
+    expect(options.buildOwn).toHaveBeenCalledWith(picture, '#d55e00', { mode: 'image', status: 'destroyed', external: true });
+    expect(drawn(engine).$own).toContain('-destroyed-x');
+  });
+
+  it('falls back to its symbol when the picture cannot be read', async () => {
+    const engine = stubEngine(), options = opts({ loadIcon: vi.fn(async () => null), readPicture: vi.fn(async () => null) });
+    await createAddedLayer(engine, options).set(dressed({ icon_mode: 'disc' }));
+    expect(options.buildOwn).not.toHaveBeenCalled();
+    expect(options.buildBadge).toHaveBeenCalledWith('badge-tank', '#d55e00', { status: '', external: false });
+  });
+});

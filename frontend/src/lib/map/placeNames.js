@@ -37,7 +37,7 @@ export const PLACE_CLASSES = [
 const CLASS = ['get', 'class'];
 
 /** The app's sans-serif stack (`--font-sans`), which the engine hands to the browser. */
-const FONT = ['ui-sans-serif', 'system-ui', 'sans-serif'];
+export const FONT = ['ui-sans-serif', 'system-ui', 'sans-serif'];
 
 export const PLACE_NAMES = {
   sources: { openmaptiles: { url: 'https://tiles.openfreemap.org/planet' } },

@@ -229,6 +229,21 @@ describe('the search', () => {
     find.closeSearch();
   });
 
+  it('says the setup is still the search’s until something in it changes', async () => {
+    const { find, overlay } = laid();
+    expect(find.edited).toBe(true); // no search on show
+    find.setArea(area);
+    await find.start('c1');
+    expect(find.edited).toBe(false);
+    overlay.strokes = [stroke, stroke.slice(0, 10)];
+    expect(find.edited).toBe(true);
+    overlay.strokes = [stroke];
+    expect(find.edited).toBe(false);
+    find.setWho({ mode: 'drone' });
+    expect(find.edited).toBe(true);
+    find.closeSearch();
+  });
+
   it('keeps the curve and the corners the trace is read through with the search', async () => {
     const { find, api, overlay } = laid();
     overlay.bend = -0.12;

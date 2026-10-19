@@ -176,6 +176,7 @@ proof for publication.
 | ✅ **Points into a layer** | Follows places, proofs and files of the case as they move and as they are saved (a proof and its footage are one marker, named by the proof's description), reads pasted coordinates, map links and posts, and takes a Geo Proof point, a file played on the map or another layer's feature from the same step-by-step menu. |
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
+| ✅ **Own icons** | Imports the analyst's icons in Settings (files, folders, zipped packs, SVG) for every layer's palette, in a disc or as they are; a layer keeps its copy and a copied map keeps its own. |
 | ✅ **Layers followed over time** | Keeps a layer's features as dated states read on any day, today until the cursor moves, so every edit is dated, with what changed that day ringed and each feature's days said in its editor. |
 | ✅ **Layers kept per case** | Reopens each case on the layers every map had on, fires and night lights excepted, and leaves off with a toast a layer that stopped the last session while drawing. |
 | ✅ **Send to My Maps** | Saves a layer as it stood on one day as a KMZ, opens the analyst's My Maps beside it and says the three steps that replace its layer. |
@@ -196,6 +197,7 @@ proof for publication.
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
 | ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
+| ✅ **Inspect player & panel** | Captures the very frame on screen, lays frames, marks, shots and sound along the bar, and keeps Capture and Save above Info, Adjust, Moments and Analyze tabs. |
 | ✅ **Proof annotations & publishing** | Adds numbered markers, blur boxes, box tags, callouts, zoom insets, view cones and line styles, puts marks free on the page or tied by their ends across panels, sets the proof in shipped fonts, keeps line widths and sizes the same on every panel, verifies proof points and carries proof dates into previewed post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
 | ✅ **Subjects & case analysis** | Corrects and merges subjects, indexes their events, searches across scripts and reviews proposed account and site connections. |
@@ -231,7 +233,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
 | **Event layers** | The rest of what dates an event from the sky: archived weather and METAR, beside the fire detections that already ship. |
-| **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
 | **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |

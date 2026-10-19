@@ -51,11 +51,24 @@ export function segmentDistance(point, a, b) {
   return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
 }
 
-/** Where a point feature's picture is centred on screen, and how far it reaches. */
-export function markerDisc(feature, project) {
+/**
+ * Where a point feature's picture is centred on screen, and how far it reaches.
+ *
+ * A marker wearing one of the analyst's icons is centred on its point as a badge
+ * is, whatever symbol it keeps underneath. `own(properties)` says, for one drawn
+ * as it is, where its painted part sits and how far it reaches, `{ dx, dy, reach }`
+ * in screen pixels at size 1; null for a disc, or a picture not read yet, which
+ * reach as far as a badge.
+ */
+export function markerDisc(feature, project, own = null) {
   const [lon, lat] = feature.geometry.coordinates;
   const at = project(lon, lat);
   const scale = Number(feature.properties?.icon_scale) || 1;
+  if (feature.properties?.icon) {
+    const look = own?.(feature.properties);
+    return look ? { x: at.x + look.dx * scale, y: at.y + look.dy * scale, r: look.reach * scale, tip: at }
+      : { x: at.x, y: at.y, r: BADGE_REACH * scale, tip: at };
+  }
   return isBadge(feature.properties?.symbol)
     ? { x: at.x, y: at.y, r: BADGE_REACH * scale, tip: at }
     : { x: at.x, y: at.y - PIN_HEAD * scale, r: PIN_REACH * scale, tip: at };
@@ -69,12 +82,12 @@ export function markerDisc(feature, project) {
  * drawing order, and the last one under the pointer is the one the eye sees
  * there. Among strokes, the nearest; among areas, the smallest.
  */
-export function hitFeature(features, project, at) {
+export function hitFeature(features, project, at, own = null) {
   let point = null, line = null, area = null;
   for (const feature of features) {
     const geometry = feature.geometry;
     if (geometry?.type === 'Point') {
-      const disc = markerDisc(feature, project);
+      const disc = markerDisc(feature, project, own);
       const distance = Math.min(Math.hypot(at.x - disc.x, at.y - disc.y),
         Math.hypot(at.x - disc.tip.x, at.y - disc.tip.y) + disc.r / 2);
       if (distance <= disc.r) point = { key: feature.properties.key, distance };

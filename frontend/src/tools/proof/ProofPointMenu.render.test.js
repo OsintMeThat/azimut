@@ -52,7 +52,7 @@ describe('a proof point’s menu', () => {
     const add = [...document.querySelectorAll('.add-row button')][0];
     expect(add.textContent.trim()).toBe('Add to Positions');
     add.click(); flushSync();
-    expect(onadd).toHaveBeenCalledWith({ layer: front, group: front.groups[0], style: { symbol: 'badge-ship', colour: '#d55e00' }, status: '' });
+    expect(onadd).toHaveBeenCalledWith({ layer: front, group: front.groups[0], style: { symbol: 'badge-ship', icon: '', colour: '#d55e00' }, status: '' });
     // back steps up one level at a time
     open(); item('Sites').click(); flushSync();
     expect(back().textContent).toBe('Sites');

@@ -30,6 +30,7 @@ import {
   areaProblem,
   meeting,
   photoOffset,
+  sameAsk,
 } from '../../../lib/horizon/find.js';
 import { searchHints } from '../../../lib/horizon/hints.js';
 import { marksSaid } from '../../../lib/horizon/traceMarks.js';
@@ -421,6 +422,23 @@ export function createFindState({ api, overlay, view }) {
     },
     get searching() {
       return Boolean(search && ACTIVE.includes(search.status));
+    },
+    /**
+     * Whether the setup changed since the search on show was asked; true while
+     * none is on show. Read off what the analyst set, never the trace worked
+     * out from it, so it costs nothing as the view turns.
+     */
+    get edited() {
+      if (!search?.ask) return true;
+      const source = overlay.source;
+      return !sameAsk(search.ask, {
+        area,
+        who,
+        spacing: settings.spacing === 'auto' ? null : settings.spacing,
+        alignments: live.map((one) => ({ near: one.map.near, far: one.map.far, tops: one.tops, heights: one.heights })),
+        photo: source?.path ? { path: source.path, strokes: overlay.strokes, marks: overlay.marks } : null,
+        hints: overlay.hints,
+      });
     },
     get list() {
       return list;

@@ -39,7 +39,13 @@ def test_ops_registry_is_self_describing(client):
     brightness = next(f for f in ops["filters"] if f["id"] == "brightness")
     assert brightness["css"] == "brightness({v})"
     assert brightness["params"][0]["default"] == 1
-    assert {a["id"] for a in ops["analyses"]} >= {"histogram", "exif", "ela"}
+    assert {a["id"] for a in ops["analyses"]} == {"ela"}
+    channel = next(f for f in ops["filters"] if f["id"] == "channel")
+    assert channel["params"][0]["type"] == "choice"
+    assert [o["label"] for o in channel["params"][0]["options"]] == ["All", "Red", "Green", "Blue"]
+    assert channel["css"] is None
+    assert brightness["params"][0]["options"] == []
+    assert {"denoise", "autolevels", "clahe", "channel"} <= ids
 
 
 def test_video_rotation_filterchain_covers_every_orientation_control():
@@ -99,7 +105,7 @@ def test_focus_scan_redirects_stderr_and_terminates_a_stalled_decoder(client, mo
     monkeypatch.setattr(inspect_engine.subprocess, "Popen", FakeProcess)
 
     with pytest.raises(RuntimeError, match="timed out"):
-        inspect_engine.scan_focus(case, "media/clip.mp4")
+        inspect_engine.scan_video(case, "media/clip.mp4")
     assert stopped.is_set()
     assert seen["stderr"] is not subprocess.PIPE
 
@@ -216,27 +222,6 @@ def test_compose_requires_nodes(client):
         json={"width": 100, "height": 100, "nodes": []},
     )
     assert res.status_code == 422
-
-
-def test_analyze_histogram(client):
-    cid = client.post("/api/cases", json={"name": "Hist"}).json()["id"]
-    item = _upload(client, cid, "img.png", _png_bytes(color=(255, 0, 0), size=(20, 20)))
-    res = client.post(
-        f"/api/cases/{cid}/inspect/analyze", json={"path": item["path"], "name": "histogram"}
-    ).json()
-    assert res["kind"] == "histogram"
-    # a pure-red image piles every pixel into R=255
-    assert res["channels"]["r"][255] == 400
-
-
-def test_analyze_exif_keyvalue(client):
-    cid = client.post("/api/cases", json={"name": "Exif"}).json()["id"]
-    item = _upload(client, cid, "img.png")
-    res = client.post(
-        f"/api/cases/{cid}/inspect/analyze", json={"path": item["path"], "name": "exif"}
-    ).json()
-    assert res["kind"] == "keyvalue"
-    assert res["rows"]["Format"] == "PNG"
 
 
 def test_analyze_ela_returns_image(client):
@@ -686,12 +671,10 @@ def test_analyze_accepts_transient_ops_without_filing(client):
 
     res = client.post(
         f"/api/cases/{cid}/inspect/analyze",
-        json={"path": item["path"], "name": "histogram",
+        json={"path": item["path"], "name": "ela",
               "ops": [{"op": "invert", "params": {"on": 1}}]},
     ).json()
-    assert res["kind"] == "histogram"
-    # inverting pure red pushes the red channel to 0
-    assert res["channels"]["r"][0] == 400
+    assert res["kind"] == "image"
     # analysing a transient recipe files nothing
     assert len(client.get(f"/api/cases/{cid}/media").json()) == before
 
@@ -774,6 +757,21 @@ def test_render_preview_applies_ops_without_filing(client):
     assert res.headers["content-type"] == "image/png"
     assert Image.open(io.BytesIO(res.content)).size == (15, 20)  # cropped to half width
     assert len(client.get(f"/api/cases/{cid}/media").json()) == before  # nothing filed
+
+
+def test_render_preview_can_answer_in_jpeg(client):
+    cid = client.post("/api/cases", json={"name": "RenderJpeg"}).json()["id"]
+    item = _upload(client, cid, "img.png", _png_bytes(color=(255, 0, 0), size=(30, 20)))
+    url = f"/api/cases/{cid}/inspect/render-preview"
+
+    res = client.post(url, json={"path": item["path"], "format": "jpeg"})
+    assert res.status_code == 200 and res.headers["content-type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(res.content))
+    assert img.format == "JPEG" and img.size == (30, 20) and img.mode == "RGB"
+
+    plain = client.post(url, json={"path": item["path"]})  # PNG stays the default
+    assert plain.headers["content-type"] == "image/png"
+    assert client.post(url, json={"path": item["path"], "format": "gif"}).status_code == 422
 
 
 @pytest.mark.skipif(not media_engine.ffmpeg_available(), reason="ffmpeg not installed")

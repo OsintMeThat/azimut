@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 import shutil
 import warnings
@@ -54,6 +55,8 @@ COLLAGE_VERSION = 1
 #: these are far above anything a real one reaches and only stop a runaway client.
 MAX_SPEC_BYTES = 2_000_000
 MAX_FRAMES = 500
+MAX_MARKS = 500
+MAX_MARK_LABEL = 200
 MAX_PIECES = 200
 #: The collage list's preview: the browser draws it no wider than this, and a
 #: larger one is shrunk rather than stored.
@@ -70,6 +73,7 @@ PRODUCER = "inspect"
 _FRAME_KEYS = (
     "id", "path", "time", "adjust", "crop", "sourceOps", "rotation", "w", "h", "filed",
 )
+_MARK_KEYS = ("id", "time", "label")
 _PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop")
 _RIGHT_ANGLES = (-180, -90, 0, 90, 180)
 
@@ -178,6 +182,7 @@ def _work_row(rel: str, spec: dict[str, Any]) -> dict[str, Any]:
         "source": source.get("path"),
         "kind": source.get("kind"),
         "frames": len(spec.get("frames") or []),
+        "marks": len(spec.get("marks") or []),
         "updated_at": spec.get("updated_at"),
     }
 
@@ -259,6 +264,30 @@ def _clean_frames(frames: Any, subject: str) -> list[dict[str, Any]]:
     return out
 
 
+def _clean_marks(marks: Any) -> list[dict[str, Any]]:
+    """Timecoded notes on the video: an id, a moment in seconds and a short label."""
+    if marks is None:
+        return []
+    if not isinstance(marks, list):
+        raise CaseError("marks must be a list")
+    if len(marks) > MAX_MARKS:
+        raise CaseError(f"a file holds at most {MAX_MARKS} marks")
+    out = []
+    for mark in marks:
+        if not isinstance(mark, dict) or not isinstance(mark.get("id"), str):
+            raise CaseError("every mark needs an id")
+        moment = mark.get("time")
+        if isinstance(moment, bool) or not isinstance(moment, (int, float)):
+            raise CaseError("a mark needs a time in seconds")
+        if not math.isfinite(moment) or moment < 0:
+            raise CaseError("a mark time must be zero or more")
+        label = mark.get("label", "")
+        if not isinstance(label, str):
+            raise CaseError("a mark label must be text")
+        out.append({"id": mark["id"], "time": moment, "label": label.strip()[:MAX_MARK_LABEL]})
+    return sorted(out, key=lambda m: m["time"])
+
+
 def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Write one file's work, filing its entity the first time.
 
@@ -270,6 +299,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
         raise CaseError("the work must be an object")
     _check_size(spec)
     frames = _clean_frames(spec.get("frames", []), subject)
+    marks = _clean_marks(spec.get("marks"))
     rotation = spec.get("videoRotation", 0)
     if rotation not in _RIGHT_ANGLES:
         raise CaseError("video rotation must be a right angle")
@@ -300,6 +330,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             "videoRotation": rotation,
             "videoFiled": spec.get("videoFiled") if isinstance(spec.get("videoFiled"), dict) else None,
             "frames": frames,
+            "marks": marks,
             "activeFrameId": active if any(f["id"] == active for f in frames) else None,
         }
         if found and previous.get("merged_from"):
@@ -839,6 +870,16 @@ def _merge_subject(
             if isinstance(frame, dict) and frame.get("id") not in seen:
                 frames.append(frame)
                 seen.add(frame.get("id"))
+    marks: list[dict[str, Any]] = []
+    seen_marks: set[Any] = set()
+    for _r, spec in [(rel, base), *others]:
+        for mark in spec.get("marks") or []:
+            if (
+                isinstance(mark, dict) and isinstance(mark.get("id"), str)
+                and isinstance(mark.get("time"), (int, float)) and mark["id"] not in seen_marks
+            ):
+                marks.append(_pick(mark, _MARK_KEYS))
+                seen_marks.add(mark["id"])
     merged_from = list(base.get("merged_from") or [])
     for r, _spec in others:
         if names[r] not in merged_from:
@@ -855,6 +896,7 @@ def _merge_subject(
         "videoRotation": base.get("videoRotation") if base.get("videoRotation") in _RIGHT_ANGLES else 0,
         "videoFiled": base.get("videoFiled"),
         "frames": [_pick(f, _FRAME_KEYS) for f in frames],
+        "marks": sorted(marks, key=lambda m: m.get("time", 0))[:MAX_MARKS],
         "activeFrameId": base.get("activeFrameId"),
     }
     if merged_from:

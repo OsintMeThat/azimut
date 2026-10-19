@@ -7,10 +7,56 @@
  * files, and handle the collage perspective math.
  */
 
-// Order the adjust pipeline is applied in (matches the backend ORDER in bake()).
+// Order the adjust pipeline is applied in: the backend runs ops in the order sent.
+// Grain is smoothed and levels set before the tone sliders, and one channel is
+// picked before the picture loses its colour. A filed frame's signature is its op
+// list, so the filters that came first keep their order among themselves.
 export const ADJUST_ORDER = [
-  'brightness', 'contrast', 'saturation', 'gamma', 'sharpness', 'rotate', 'grayscale', 'invert',
+  'denoise', 'autolevels', 'clahe',
+  'brightness', 'contrast', 'saturation', 'gamma', 'sharpness', 'rotate', 'channel', 'grayscale', 'invert',
 ];
+
+/**
+ * Starting points for the sliders, by the kind of picture. A preset sets its
+ * sliders and puts the others back; every one stays the analyst's to move after.
+ */
+export const ADJUST_PRESETS = [
+  { id: 'dark', label: 'Dark scene', values: { gamma: 1.8, clahe: 2, denoise: 6 } },
+  { id: 'haze', label: 'Haze', values: { autolevels: 1, clahe: 1.5, contrast: 1.15, saturation: 1.15 } },
+  { id: 'text', label: 'Text and plates', values: { grayscale: 1, contrast: 1.5, sharpness: 2.2, clahe: 1.2 } },
+];
+
+/** Slider values for a preset, over the filters this server offers. */
+export function presetValues(filters, preset) {
+  const out = adjustDefaults(filters);
+  for (const [id, value] of Object.entries(preset.values)) if (id in out) out[id] = value;
+  return out;
+}
+
+/** The preset the sliders stand at exactly, if any. */
+export function activePreset(filters, values) {
+  return ADJUST_PRESETS.find((p) => {
+    const wanted = presetValues(filters, p);
+    return filters.every((f) => (values?.[f.id] ?? defaultOf(f)) === wanted[f.id]);
+  })?.id ?? null;
+}
+
+/**
+ * Whether the picture has to come from the server to show as it will save: a
+ * filter with no CSS twin (sharpness, gamma, local contrast…) is set.
+ */
+export function needsRender(filters, values) {
+  return filters.some((f) => !f.css && !f.transform && (values?.[f.id] ?? defaultOf(f)) !== defaultOf(f));
+}
+
+/** The ops the server renders a frame's adjusted preview from: everything but the crop, which the viewer draws. */
+export function previewOps(filters, frame) {
+  return [
+    ...(frame?.sourceOps ?? []),
+    ...rotationOps(frame?.rotation),
+    ...buildOps(filters, frame?.adjust),
+  ];
+}
 
 let _seq = 0;
 export const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${_seq++}`;

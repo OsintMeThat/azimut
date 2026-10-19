@@ -43,6 +43,9 @@
   import MarkerSymbol from './MarkerSymbol.svelte';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { caseState } from '../../lib/state.svelte.js';
+  import { layerIconUrl } from '../../lib/map/ownIcons.js';
+  import { ICON_HELP } from '../../lib/map/layerHelp.js';
+  import LayerIconsToLibrary from './LayerIconsToLibrary.svelte';
   import {
     countLabel,
     followed,
@@ -94,6 +97,8 @@
   $effect(() => { if (rows.some((row) => row.editable)) layerPalette.load(caseState.current?.id); });
 
   const live = $derived(rows.filter((row) => row.enabled).length);
+  /** The layer whose icons are being filed in the library. */
+  let iconsOf = $state(null);
   const anyFollowed = $derived(rows.some(followed));
   const names = $derived(rows.map((row) => row.name));
 
@@ -345,6 +350,11 @@
         <!-- Both numbers, always: what is loaded and what is drawn, never the
              one passing for the other. -->
         <p class="meta counts">{countLabel(row)}</p>
+        {#if row.icons}
+          <!-- the map's own icons, which the analyst may want in every palette; never filed unasked -->
+          <p class="meta icons-line"><span>{row.icons} {row.icons === 1 ? 'icon' : 'icons'}</span>
+            <button type="button" class="to-library" title={ICON_HELP.toLibraryHint} onclick={() => (iconsOf = row)}>{ICON_HELP.toLibrary}</button></p>
+        {/if}
 
         <!-- Only on a layer being drawn, and only once its features are in hand
              and turn out to be dated: a filter over marks nobody can see would
@@ -379,11 +389,12 @@
           </button>
           {#if expanded.has(row.name)}
             {@const query = (queries[row.name] ?? '').trim()}
-            <!-- Only on a layer being drawn: a match is somewhere to go, and a
-                 layer switched off has nowhere. -->
+            <!-- Searches only a layer being drawn: a match is somewhere to go, and
+                 a layer switched off has nowhere. The box stays in sight there,
+                 saying so, or it reads as gone. -->
             {@const found = row.enabled && query ? search?.(row, query) : null}
-            {#if row.enabled}
-              <div class="find">
+            <div class="find">
+              {#if row.enabled}
                 <SearchInput
                   bind:value={
                     () => queries[row.name] ?? '',
@@ -393,8 +404,11 @@
                   width="100%"
                   count={found?.ready ? grouped(found.total) : null}
                 />
-              </div>
-            {/if}
+              {:else}
+                <SearchInput value="" placeholder="Turn the layer on to find a pin" width="100%" disabled
+                  title="Searches the pins of a layer drawn on the map" />
+              {/if}
+            </div>
 
             {#if found}
               {#if !found.ready}
@@ -442,7 +456,8 @@
                       title={entry.on ? 'Hide this group' : 'Show this group'}
                       onclick={() => oncategory?.(row, entry.name)}
                     >
-                      {#if entry.symbol}<MarkerSymbol symbol={entry.symbol} colour={entry.colour} size={14} />
+                      {#if entry.symbol}<MarkerSymbol symbol={entry.symbol} colour={entry.colour} size={14}
+                        icon={entry.icon ? { src: layerIconUrl(caseState.current?.id, row.name, entry.icon), mode: entry.iconMode } : null} />
                       {:else}<span class="swatch" style="--swatch: {entry.colour}"></span>{/if}
                       <span class="cat-name">{entry.name}</span>
                       <span class="cat-count">{entry.count}</span>
@@ -469,7 +484,22 @@
   </button>
 {/if}
 
+{#if iconsOf}
+  <LayerIconsToLibrary caseId={caseState.current?.id} row={iconsOf} onclose={() => (iconsOf = null)} />
+{/if}
+
 <style>
+  .to-library {
+    padding: 0;
+    color: var(--text-2);
+    font-size: 10px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .to-library:hover {
+    color: var(--text-1);
+  }
   .layers {
     --indent: 30px;
     margin: 0;

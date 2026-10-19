@@ -6,6 +6,9 @@
  * features draws them in that style whatever each says, so a pick on them
  * restyles the group: changing a marker that would not visibly change is the
  * one thing the button must not do.
+ *
+ * A style is `{ symbol, colour }`, with `icon` when it wears one of the
+ * analyst's own icons, which wins over the symbol.
  */
 
 const PLAIN = '#0072b2';
@@ -14,8 +17,10 @@ const same = (first, second) => String(first ?? '').toLowerCase() === String(sec
 
 /** How a feature is drawn: its group's style when the group has one style. */
 export function drawnStyle(feature, group) {
-  if (group?.mode === 'uniform') return { symbol: group.symbol || 'pin', colour: group.colour || PLAIN };
-  return { symbol: feature.properties.symbol || 'pin', colour: feature.properties.colour || group?.colour || PLAIN };
+  const icon = (group?.mode === 'uniform' ? group.icon : feature.properties.icon) || '';
+  const style = group?.mode === 'uniform' ? { symbol: group.symbol || 'pin', colour: group.colour || PLAIN }
+    : { symbol: feature.properties.symbol || 'pin', colour: feature.properties.colour || group?.colour || PLAIN };
+  return icon ? { ...style, icon } : style;
 }
 
 /** The styles a layer already shows, at most `limit`, markers' or lines' and areas'. */
@@ -25,7 +30,7 @@ export function usedStyles(features, groups, { point = true, limit = 12 } = {}) 
   for (const feature of features) {
     if (isPoint(feature) !== point) continue;
     const style = drawnStyle(feature, byId.get(feature.properties.group));
-    const key = point ? `${style.symbol}|${style.colour.toLowerCase()}` : style.colour.toLowerCase();
+    const key = point ? `${style.icon || style.symbol}|${style.colour.toLowerCase()}` : style.colour.toLowerCase();
     if (!seen.has(key)) seen.set(key, point ? style : { colour: style.colour });
     if (seen.size >= limit) break;
   }
@@ -43,7 +48,8 @@ export function styleTarget({ chosen = [], groups = [], into = '', draft = { sym
     const group = byId.get(into) ?? groups[0] ?? null;
     const uniform = group?.mode === 'uniform' ? group : null;
     return {
-      ...(uniform ? drawnStyle({ properties: {} }, uniform) : { symbol: draft.symbol || 'pin', colour: draft.colour || PLAIN }),
+      ...(uniform ? drawnStyle({ properties: {} }, uniform)
+        : { symbol: draft.symbol || 'pin', colour: draft.colour || PLAIN, ...(draft.icon ? { icon: draft.icon } : {}) }),
       point: true, mixed: false, group: group?.id ?? '', uniform,
       note: uniform ? `New markers in ${uniform.name} take its one style. A pick here restyles the whole group.` : '',
     };
@@ -55,7 +61,7 @@ export function styleTarget({ chosen = [], groups = [], into = '', draft = { sym
   const point = chosen.some(isPoint);
   const first = styles[chosen.findIndex(isPoint)] ?? styles[0];
   const mixed = styles.some((style, index) => !same(style.colour, first.colour)
-    || (isPoint(chosen[index]) && point && style.symbol !== first.symbol));
+    || (isPoint(chosen[index]) && point && (style.symbol !== first.symbol || (style.icon ?? '') !== (first.icon ?? ''))));
   const someUniform = !uniform && chosen.some((feature) => byId.get(feature.properties.group)?.mode === 'uniform');
   return {
     ...first, point, mixed, group: shared?.id ?? '', uniform,

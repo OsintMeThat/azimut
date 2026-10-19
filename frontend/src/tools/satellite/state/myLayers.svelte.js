@@ -5,7 +5,9 @@ import { attribution } from '../../../lib/map/addedLayers.js';
 /** How many edits the editor can take back, per layer session. */
 export const HISTORY = 100;
 /** The group fields an undo puts back. */
-const GROUP_FIELDS = ['name', 'mode', 'colour', 'symbol', 'size', 'stroke', 'labels', 'events', 'line_dash', 'line_arrow', 'area_fill', 'fill_opacity'];
+const GROUP_FIELDS = ['name', 'mode', 'colour', 'symbol', 'icon', 'size', 'stroke', 'labels', 'events', 'line_dash', 'line_arrow', 'area_fill', 'fill_opacity'];
+/** What a group field is sent as to clear it, where null would leave it as it is. */
+const CLEARED = { icon: '' };
 
 /**
  * What an edit changed, as the two ways back across it: `undo` puts the features
@@ -38,8 +40,8 @@ export function difference(beforeFeatures, afterFeatures, beforeGroups = [], aft
     const forth = {};
     for (const field of GROUP_FIELDS) {
       if (same(old[field] ?? null, group[field] ?? null)) continue;
-      back[field] = old[field] ?? (typeof group[field] === 'boolean' ? false : null);
-      forth[field] = group[field] ?? (typeof old[field] === 'boolean' ? false : null);
+      back[field] = old[field] ?? (typeof group[field] === 'boolean' ? false : CLEARED[field] ?? null);
+      forth[field] = group[field] ?? (typeof old[field] === 'boolean' ? false : CLEARED[field] ?? null);
     }
     if (Object.keys(back).length) groups.push({ id: group.id, back, forth });
   }
@@ -56,6 +58,8 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   /** The features as the layer holds them, their latest shapes and their histories. */
   let stored = $state.raw([]);
   let groups = $state([]);
+  /** How the layer draws and names the own icons it holds, `{key: {mode, name}}`. */
+  let icons = $state({});
   let group = $state('');
   let placing = $state(false);
   // The map's selection tool drawing a free shape round what it should pick.
@@ -221,6 +225,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     details = null;
     stored = [];
     groups = [];
+    icons = {};
     group = '';
     loading = false;
   }
@@ -263,6 +268,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       details = detailsOf(editor);
       stored = answer.document.features;
       groups = answer.groups ?? [];
+      icons = answer.icons ?? {};
       group = groups[0]?.id ?? '';
       checkpoint = answer.checkpoint;
       holdToday();
@@ -311,6 +317,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       groups = answer.groups;
       if (!groups.some((item) => item.id === group)) group = groups[0]?.id ?? '';
     }
+    if (answer.icons) icons = answer.icons;
     if (answer.document) {
       stored = answer.document.features;
       const available = new Set(features.map((feature) => feature.properties.key));
@@ -580,6 +587,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     get editor() { return editor; },
     get features() { return features; },
     get groups() { return groups; },
+    get icons() { return icons; },
     get group() { return group; },
     set group(value) { group = value; },
     get placing() { return placing; },
@@ -873,7 +881,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
      */
     updateGroup(key, changes) {
       const target = groups.find((item) => item.id === key);
-      const many = target?.mode === 'uniform' && ['colour', 'symbol'].some((field) => field in changes)
+      const many = target?.mode === 'uniform' && ['colour', 'symbol', 'icon'].some((field) => field in changes)
         ? features.filter((feature) => feature.properties.group === key).length : 0;
       return enqueue((path) => api.patch(`${path}/groups/${key}`, changes), () => {
         if (many > 1) undoable(`Restyled the ${many} features of ${target.name}`);

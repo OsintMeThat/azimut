@@ -39,7 +39,8 @@ import { Popup } from 'maplibre-gl';
 import { paths } from '../../components/Icon.svelte';
 import { wrapLon } from '../coords.js';
 import { categoryColour } from './addedLayers.js';
-import { drawMarker, isBadge, MARKER_PIXELS } from './markerGlyphs.js';
+import { drawMarker, drawOwnMarker, isBadge, MARKER_PIXELS, ownMarkerSide } from './markerGlyphs.js';
+import { loadPicture } from './ownIcons.js';
 
 /** Geometry defaults and the symbols available to personal layer points. */
 const GLYPHS = { point: 'pin', line: 'line', area: 'polygon', circle: 'circle', star: 'star', flag: 'flag' };
@@ -89,7 +90,7 @@ const PERSONAL_PIN_SCALE = 0.6;
  * where ours is a stroked outline: at equal size the picture reads heavier, and
  * these are somebody else's marks sitting under the case's own.
  */
-const SOURCE_ICON_SCALE = 0.28;
+export const SOURCE_ICON_SCALE = 0.28;
 
 /**
  * The white edge around every mark.
@@ -214,6 +215,19 @@ export function personalMarkerImage(symbol, colour, marks = {}, make = defaultCa
   if (!context) return null;
   drawMarker(context, symbol, colour, marks);
   return context.getImageData(0, 0, MARKER_PIXELS, MARKER_PIXELS);
+}
+
+/**
+ * A marker wearing one of the analyst's icons (`drawOwnMarker`): in its disc, or
+ * as it is with its status stroke or external rim. `picture` is `{ image, box }`
+ * (`ownIcons.loadPicture`).
+ */
+export function ownMarkerImage(picture, colour, look = {}, make = defaultCanvas) {
+  const side = ownMarkerSide(picture?.image, look.mode);
+  const canvas = make(side, side), context = canvas?.getContext('2d');
+  if (!context || !picture?.image) return null;
+  drawOwnMarker(context, picture.image, colour, { ...look, box: picture.box });
+  return context.getImageData(0, 0, side, side);
 }
 
 /** The image a marker is registered under: one per symbol, colour and marks. */
@@ -432,7 +446,8 @@ export function periodFilter(period = null) {
 export function createAddedLayer(
   engine,
   { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null,
-    editable = false, history = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage } = {}
+    editable = false, history = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage,
+    buildOwn = ownMarkerImage, readPicture = loadPicture } = {}
 ) {
   const map = engine.impl;
   const prefix = `added-${++layers}`;
@@ -497,6 +512,8 @@ export function createAddedLayer(
     [NEW_RING]: ['all', NOW, ['has', '$new'], POINT],
   };
   const badgeIcons = new Set();
+  /** The analyst's icons a personal layer wears, `{ image, box }` by key, for its discs and marks. */
+  const pictures = new Map();
   // Features held off the map while the editor drags their copies (`hide`).
   let hiddenKeys = new Set();
   let lastFilter = [[], null];
@@ -813,6 +830,14 @@ export function createAddedLayer(
   async function registerSourceIcons(features) {
     const arrived = new Set();
     if (!iconUrl) return arrived;
+    // a personal layer composes its own icons into discs and marks, so it keeps the pictures too
+    if (editable) {
+      const wanted = new Set(features.map((feature) => feature?.properties?.icon).filter((key) => key && !pictures.has(key)));
+      await Promise.all([...wanted].map(async (key) => {
+        const picture = await readPicture(iconUrl(key));
+        if (picture) pictures.set(key, picture);
+      }));
+    }
     const keys = new Set();
     for (const feature of features) {
       const key = feature?.properties?.icon;
@@ -914,7 +939,21 @@ export function createAddedLayer(
         const own = lookOf(feature, colour);
         if (own) feature = { ...feature, properties: { ...feature.properties, ...own } };
         const native = editable && !isBadge(symbol) && !ready.has(feature.properties?.icon);
-        if (feature.geometry?.type === 'Point' && (isBadge(symbol) || native)) {
+        const wearing = editable && feature.geometry?.type === 'Point' && ready.has(feature.properties?.icon)
+          ? pictures.get(feature.properties.icon) : null;
+        if (wearing) {
+          // one of the analyst's icons: drawn plain when it can be, composed when a disc or a mark is asked for
+          const mode = feature.properties.icon_mode === 'disc' ? 'disc' : 'image';
+          const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
+          if (mode === 'disc' || marks.status || marks.external) {
+            const id = `${prefix}-own-${feature.properties.icon}-${mode}-${markerImageKey('', colour, marks)}`;
+            if (!map.hasImage(id)) {
+              const pixels = buildOwn(wearing, colour, { mode, ...marks });
+              if (pixels) { map.addImage(id, pixels); badgeIcons.add(id); }
+            }
+            if (map.hasImage(id)) badge = id;
+          }
+        } else if (feature.geometry?.type === 'Point' && (isBadge(symbol) || native)) {
           const marks = { status: feature.properties?.status ?? '', external: feature.properties?.provenance === 'external' };
           const id = `${prefix}-${markerImageKey(symbol, colour, marks)}`;
           if (!map.hasImage(id)) {

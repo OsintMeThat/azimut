@@ -50,7 +50,12 @@ test.describe('the band over a photo in Horizon', () => {
   test('keeps its last button in sight at 1280 px with the map and settings open', async ({ page }) => {
     const { band } = await layPhoto(page);
     await expect(page.getByRole('button', { name: 'Hide the map and settings' })).toBeVisible();
-    await expect(band.getByRole('button', { name: 'Take the photo away' })).toBeVisible();
+    await expect(band.getByRole('button', { name: 'Gestures and keys' })).toBeVisible();
+    // what is said about the photo is the inspector's, not the band's
+    await expect(band.getByRole('button', { name: 'Take the photo away' })).toHaveCount(0);
+    const inspector = page.getByRole('complementary', { name: 'Map and settings' });
+    await expect(inspector.getByRole('button', { name: 'Take the photo away' })).toBeVisible();
+    await expect(inspector.getByRole('group', { name: 'What you know about the photo' })).toBeVisible();
     await expectAllInside(band);
     // a trace adds its own buttons, and the band still holds them all
     await band.getByRole('button', { name: 'Trace skyline' }).click();
@@ -61,7 +66,8 @@ test.describe('the band over a photo in Horizon', () => {
     await page.mouse.move(frame.x + frame.width * 0.6, frame.y + frame.height * 0.35, { steps: 6 });
     await page.mouse.up();
     await page.keyboard.up('Alt');
-    await expect(band.getByRole('button', { name: 'Clear the whole trace' })).toBeVisible();
+    await expect(band.getByRole('button', { name: 'Hide the trace' })).toBeVisible();
+    await expect(inspector.getByRole('button', { name: 'Clear the whole trace' })).toBeVisible();
     await expectAllInside(band);
   });
 
@@ -140,5 +146,22 @@ test.describe('the band over a photo in Horizon', () => {
     await expect(ground).toBeVisible();
     await band.getByRole('button', { name: 'Reshape the photo' }).click();
     await expect(ground).toHaveCount(0);
+  });
+});
+
+test.describe('a Horizon setting found from the command palette', () => {
+  test('opens Horizon on its group, the inspector out and the row lit', async ({ page }) => {
+    await layPhoto(page);
+    await page.getByRole('button', { name: 'Hide the map and settings' }).click();
+    await expect(page.getByRole('button', { name: 'Show the map and settings' })).toBeVisible();
+    await page.keyboard.press('Control+k');
+    const palette = page.getByRole('dialog', { name: 'Go to', exact: true });
+    await palette.getByRole('combobox').fill('haze');
+    const row = palette.getByRole('group', { name: 'Horizon settings' }).getByRole('option', { name: /Visibility/ });
+    await expect(row).toContainText('What the view shows');
+    await row.click();
+    await expect(palette).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Hide the map and settings' })).toBeVisible();
+    await expect(page.locator('[data-setting="visibility"]')).toHaveClass(/sought/);
   });
 });

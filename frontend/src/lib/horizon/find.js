@@ -259,5 +259,45 @@ export const VERDICTS = {
   unclear: 'No place stands out: many explain the trace about as well',
 };
 
+const corner = (p) => (Array.isArray(p) ? p : [p?.lat, p?.lon]).map((x) => Math.round(Number(x) * 1e6));
+const marksKey = (m) => (m && (m.inner?.length || m.pairs?.length || m.cuts?.length) ? JSON.stringify([m.inner ?? [], m.pairs ?? [], m.cuts ?? []]) : '');
+
+/**
+ * Whether Find's setup now (`now`, shaped as the search asks it) is still the
+ * one a search was asked with (`ask`, as the case keeps it): the same area,
+ * who, grid, alignments, photo, trace and what is known of it. Anything that
+ * reads differently counts as changed, so work is never taken as kept when it is not.
+ */
+export function sameAsk(ask, now) {
+  if (!ask || !now) return false;
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const ends = (one) => [corner(one.near), corner(one.far), Boolean(one.tops), one.heights ?? null];
+  return (
+    same((ask.area ?? []).map(corner), (now.area ?? []).map(corner)) &&
+    same(ask.who ?? null, now.who ?? null) &&
+    (ask.spacing ?? null) === (now.spacing ?? null) &&
+    same((ask.alignments ?? []).map(ends), (now.alignments ?? []).map(ends)) &&
+    (ask.photo?.path ?? null) === (now.photo?.path ?? null) &&
+    same(ask.photo?.strokes ?? [], now.photo?.strokes ?? []) &&
+    marksKey(ask.photo?.marks) === marksKey(now.photo?.marks) &&
+    same(ask.hints ?? null, now.hints ?? null)
+  );
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** When a search was made, on this computer's clock: "14 Oct 2026, 21:05"; '' when not known. */
+export function searchedWhen(iso) {
+  const at = new Date(iso ?? '');
+  if (!iso || Number.isNaN(at.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}, ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/** An area as a search keeps it (`[lat, lon]` pairs) or as Find draws it (`{ lat, lon }`), drawn the second way. */
+export function areaPoints(area) {
+  return (area ?? []).map((p) => (Array.isArray(p) ? { lat: p[0], lon: p[1] } : { lat: p.lat, lon: p.lon }));
+}
+
 /** What to change when no place stands out, in the panel's words. */
 export const UNCLEAR_HELP = 'Say the zoom, check how far the photo sees, add an alignment or draw a smaller area.';

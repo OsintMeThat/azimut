@@ -13,6 +13,7 @@ test('keeps app settings in focused sections', async ({ page }) => {
     'Publishing',
     'Imagery',
     'Templates',
+    'Icons',
     'Capture extension',
     'Storage',
     'System',

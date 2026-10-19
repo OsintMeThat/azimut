@@ -70,6 +70,7 @@ export function legend(layer) {
     colour: categoryColour(category, index),
     // a personal group drawn in one pictogram, shown as that pictogram
     ...(category.symbol ? { symbol: category.symbol } : {}),
+    ...(category.icon ? { icon: category.icon, iconMode: category.icon_mode ?? 'image' } : {}),
     on: !hidden.has(category.name),
   }));
 }

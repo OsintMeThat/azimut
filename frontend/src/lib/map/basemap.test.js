@@ -734,6 +734,78 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('draws the borders as lines over relief, in their place in the stack, and as Esri’s picture again flat', async () => {
+    // Esri's borders have their names printed in: on relief they would lie on the slopes
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show(ESRI, ESRI.id, 256);
+      basemaps.setOverlay('roads', true);
+      basemaps.setOverlay('boundaries', true);
+      basemaps.setOverlay('placenames', true);
+      const roads = map.getLayer('basemap-roads');
+
+      basemaps.setRelief(true);
+      const ids = map.layers.map((l) => l.id);
+      expect(ids).not.toContain('basemap-boundaries');
+      expect(map.sources.has('basemap-boundaries')).toBe(false);
+      const lines = ids.filter((id) => id.startsWith('basemap-boundaries-relief-'));
+      expect(lines).toContain('basemap-boundaries-relief-country');
+      expect(lines.at(-1)).toBe('basemap-boundaries-relief-names');
+      // over the roads, under the place names, as the picture was
+      expect(ids.slice(0, 2)).toEqual(['basemap-imagery', 'basemap-roads']);
+      expect(ids.slice(2, -1).every((id) => id.startsWith('basemap-boundaries-relief-'))).toBe(true);
+      expect(ids.at(-1)).toBe('basemap-placenames-label');
+      expect(map.sources.get('basemap-boundaries-relief-openmaptiles')).toMatchObject({
+        type: 'vector',
+        url: 'https://tiles.openfreemap.org/planet',
+        attribution: expect.stringContaining('OpenFreeMap'),
+      });
+      // the others are not laid again: a rebuilt raster is every tile refetched
+      expect(map.getLayer('basemap-roads')).toBe(roads);
+
+      // saying so twice changes nothing
+      basemaps.setRelief(true);
+      expect(map.layers.map((l) => l.id)).toEqual(ids);
+
+      basemaps.setRelief(false);
+      expect(map.layers.map((l) => l.id)).toEqual([
+        'basemap-imagery', 'basemap-roads', 'basemap-boundaries', 'basemap-placenames-label',
+      ]);
+      expect(map.sources.has('basemap-boundaries-relief-openmaptiles')).toBe(false);
+    });
+  });
+
+  it('lays the borders switched on over relief as lines, and takes them all off', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setRelief(true);
+      // nothing to lay again while the borders are off
+      expect(map.layers).toEqual([]);
+      basemaps.setOverlay('boundaries', true);
+      expect(map.layers.every((l) => l.id.startsWith('basemap-boundaries-relief-'))).toBe(true);
+      basemaps.setOverlay('boundaries', true);
+      expect(map.getLayer('basemap-boundaries')).toBe(undefined);
+      basemaps.setOverlay('boundaries', false);
+      expect(map.layers).toEqual([]);
+      expect(map.sources.size).toBe(0);
+    });
+  });
+
+  it('traces a failed tile of the borders’ lines back to the borders', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const onOverlayTrouble = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onOverlayTrouble });
+      basemaps.setRelief(true);
+      basemaps.setOverlay('boundaries', true);
+      const onError = map.calls.on.find(([name]) => name === 'error')[1];
+      onError({ sourceId: 'basemap-boundaries-relief-openmaptiles', error: { status: 503 } });
+      expect(onOverlayTrouble).toHaveBeenCalledWith('boundaries');
+    });
+  });
+
   it('slides a vector overlay into the stack as one block', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();

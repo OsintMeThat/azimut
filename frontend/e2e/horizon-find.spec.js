@@ -99,6 +99,26 @@ test.describe('Find where it was taken', () => {
     await expect(page.getByRole('toolbar', { name: 'Photo over the view' })).toBeVisible();
   });
 
+  test('starts a new search beside Open: asks first while the trace is no search’s, then lets the photo go', async ({ page }) => {
+    const { find } = await openFind(page);
+    await trace(page, find);
+    await expect(find.getByText(/1 line traced/)).toBeVisible();
+    await find.getByRole('button', { name: 'New search' }).click();
+    const ask = page.getByRole('alertdialog', { name: 'Start a new search?' });
+    await expect(ask).toBeVisible();
+    await ask.getByRole('button', { name: 'Cancel' }).click();
+    await expect(find.getByText(/1 line traced/)).toBeVisible();
+    await find.getByRole('button', { name: 'New search' }).click();
+    await ask.getByRole('button', { name: 'Start a new one' }).click();
+    // the next photo is asked for, the setup empty under it
+    const pick = page.getByRole('dialog', { name: 'Add a photo or video' });
+    await expect(pick).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(pick).toBeHidden();
+    await expect(find.getByRole('complementary', { name: 'Steps' }).getByText('Add the photo first.').first()).toBeVisible();
+    await expect(find.getByRole('button', { name: 'New search' })).toBeDisabled();
+  });
+
   test('takes the trace on the photo and holds the search until the area is drawn', async ({ page }) => {
     const { find } = await openFind(page);
     await expect(find.getByText('Trace the skyline on the photo, or press Detect.')).toBeVisible();
@@ -121,7 +141,10 @@ test.describe('Find where it was taken', () => {
     await expect(find.getByText(/km²/)).toBeVisible();
     await expect(find.getByText('64 points, about a minute.')).toBeVisible();
 
-    // an alignment: the near thing and the far one on the photo, then on the map
+    // an alignment, under Help the search: the near thing and the far one on the photo, then on the map
+    const help = find.getByRole('region', { name: 'Help the search' });
+    await expect(help.getByRole('button', { name: 'Add an alignment' })).toBeHidden();
+    await help.locator('summary', { hasText: 'Alignments' }).click();
     const before = await find.locator('.fp').boundingBox();
     await find.getByRole('button', { name: 'Add an alignment' }).click();
     const photo = await find.locator('.fp').boundingBox();
@@ -142,6 +165,9 @@ test.describe('Find where it was taken', () => {
 
     await find.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(find.getByText('One place stands out')).toBeVisible({ timeout: 10_000 });
+    // the result has the side to itself, and says what it was asked with
+    await expect(find.getByRole('region', { name: 'The search on show' })).toContainText(/km² · any lens/);
+    await expect(find.locator('.fs-steps')).toHaveCount(0);
     expect(asked).toHaveLength(1);
     expect(asked[0].area).toHaveLength(4);
     expect(asked[0].alignments).toHaveLength(1);
@@ -252,7 +278,7 @@ test.describe('Find where it was taken', () => {
     expect(asked[0].photo.strokes).toEqual(strokes);
   });
 
-  test('the mode is in the address, and a reload brings it back with the photo, its trace and the area', async ({ page }) => {
+  test('the mode is in the address; a reload opens on the map and Resume brings back the photo, its trace and the area', async ({ page }) => {
     const { find, fixture } = await openFind(page);
     await awaitMapReady(page, 2);
     await trace(page, find);
@@ -265,14 +291,24 @@ test.describe('Find where it was taken', () => {
     await expect.poll(() => fixture.workWrites.at(-1)?.find?.area?.length ?? 0, { timeout: 5000 }).toBe(3);
     expect(fixture.workWrites.at(-1).photo.strokes.length).toBe(1);
 
+    expect(fixture.workWrites.at(-1)).toMatchObject({ mode: 'find', saved: false });
+
     await page.reload();
     const again = page.getByRole('region', { name: 'Find where it was taken' });
+    await expect(page.getByRole('heading', { name: 'Pick a viewpoint' })).toBeVisible();
+    await expect(again).toHaveCount(0);
+    await expect(page).not.toHaveURL(/md=find/);
+    const offer = page.getByRole('region', { name: 'Unsaved work' });
+    await expect(offer).toContainText('1 line traced');
+    await expect(offer).toContainText('an area drawn in Find');
+    await offer.getByRole('button', { name: 'Resume' }).click();
     await expect(again).toBeVisible();
+    await expect(offer).toHaveCount(0);
     await expect(again.getByText(/1 line traced/)).toBeVisible();
     await expect(again.getByText(/km²/)).toBeVisible();
-    // and Back leaves Find for the mode before it
+    await expect(page).toHaveURL(/md=find/);
+    // and Back leaves Find
     await page.goBack();
     await expect(again).toHaveCount(0);
-    await expect(page.getByRole('toolbar', { name: 'Photo over the view' })).toBeVisible();
   });
 });

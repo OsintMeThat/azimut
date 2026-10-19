@@ -68,7 +68,7 @@ describe('Backup', () => {
   });
 
   it('says what the file holds, and what it leaves behind', () => {
-    expect(storage).toContain('settings, keys, templates and your signature');
+    expect(storage).toContain('settings, keys, templates, your icons and your signature');
     expect(storage).toContain('export folders and');
     expect(storage).toContain('download logins stay here');
     expect(storage).toContain('keep this backup private');

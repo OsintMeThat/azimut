@@ -7,7 +7,11 @@
   import {
     adjustDefaults, buildFrameOps, previewStyle, uid, videoSeed, VIDEO_ADJUST_IDS,
     hasVideoEdits, normalizeRightAngleRotation, rotationOps, sourceStem, frameSaveNames,
+    needsRender, previewOps, isNeutral,
   } from '../lib/inspect.js';
+  import { captureMoment, frameDuration, preciseClock, seekInto, shownFrameTime } from '../lib/inspectPlayer.js';
+  import { INSPECT_HELP } from '../lib/inspectHelp.js';
+  import { panelWidth } from '../lib/panelWidth.js';
   import {
     workState, workSpec, isPristine, frameSignature, videoSignature, isFiled,
   } from '../lib/inspectWork.svelte.js';
@@ -20,10 +24,15 @@
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import SourcePicker from '../components/SourcePicker.svelte';
+  import PanelEdge from '../components/PanelEdge.svelte';
   import FrameStrip from './inspect/FrameStrip.svelte';
   import FrameViewer from './inspect/FrameViewer.svelte';
-  import FrameMenu from './inspect/FrameMenu.svelte';
-  import VideoMenu from './inspect/VideoMenu.svelte';
+  import FrameAdjust from './inspect/FrameAdjust.svelte';
+  import FrameAnalyze from './inspect/FrameAnalyze.svelte';
+  import InfoPanel from './inspect/InfoPanel.svelte';
+  import MomentsPanel from './inspect/MomentsPanel.svelte';
+  import SaveToCase from './inspect/SaveToCase.svelte';
+  import VideoAdjust from './inspect/VideoAdjust.svelte';
   import VideoPlayer from './inspect/VideoPlayer.svelte';
   import NoCase from '../components/NoCase.svelte';
 
@@ -59,6 +68,7 @@
     videoRotation: 0,
     videoFiled: null,
     frames: [],
+    marks: [],
     activeFrameId: null,
   });
 
@@ -238,14 +248,24 @@
     work.videoRotation = 0;
     work.videoFiled = null;
     work.frames = [];
+    work.marks = [];
     work.activeFrameId = null;
     savedSignature = null;
     probeInfo = null;
     shared.currentTime = 0;
+    shared.frameTime = null;
+    shared.seekTo = null;
     shared.cropMode = false;
     cropEditing = false;
     cropBefore = null;
     frameAspect = null;
+    overview = null;
+    scan = null;
+    scanning = false;
+    analysis = null;
+    dropRendered();
+    holdOriginal = false;
+    focusMarkId = null;
   }
 
   /** A work whose save failed is held open, where the header says so and offers Retry,
@@ -277,6 +297,7 @@
       if (saved) restore(saved, run);
       else seed();
       savedSignature = signature();
+      if (item.kind === 'video') loadOverview(run);
     } catch (e) {
       if (run === openRun) {
         toast(e.message, 'danger');
@@ -357,6 +378,7 @@
     work.videoRotation = normalizeRightAngleRotation(spec.videoRotation);
     work.videoFiled = spec.videoFiled ?? null;
     work.frames = (spec.frames ?? []).map((f) => ({ ...f, adjust: { ...adjustDefaults(filters), ...(f.adjust ?? {}) }, url: null }));
+    work.marks = (spec.marks ?? []).map((m) => ({ id: m.id, time: m.time, label: m.label ?? '' }));
     if (!isVideo && !work.frames.length) {
       seed();
       return;
@@ -425,11 +447,19 @@
   });
 
   // -- rendering ------------------------------------------------------------------
-  async function renderBlob(path, time, ops = []) {
+  async function renderBlob(path, time, ops = [], format = 'png') {
+    return (await renderResponse(path, time, ops, { format })).blob();
+  }
+
+  /**
+   * One render. `snap` asks the server for the frame a player shows at `time`, and
+   * the answer names that frame's own timestamp in `X-Frame-Time`.
+   */
+  async function renderResponse(path, time, ops = [], { format = 'png', snap = false } = {}) {
     const res = await fetch(`/api/cases/${work.caseId}/inspect/render-preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, time: time ?? null, ops }),
+      body: JSON.stringify({ path, time: time ?? null, ops, format, ...(snap ? { snap: true } : {}) }),
     });
     if (!res.ok) {
       let detail = 'render failed';
@@ -440,7 +470,7 @@
       }
       throw new Error(detail);
     }
-    return res.blob();
+    return res;
   }
 
   async function renderUrl(path, time, ops = []) {
@@ -488,23 +518,66 @@
   }
 
   // -- frames -----------------------------------------------------------------------
+  /**
+   * Cut the frame a player shows at `time`. The server names it by its own
+   * timestamp, which is the time the frame keeps (`snap`). It joins the strip at
+   * once and its picture follows, so captures can be taken as fast as the key is
+   * pressed. Taking the frame a second time only points at it.
+   */
   async function capture(time) {
+    const sourceOps = rotationOps(videoRotation);
+    const twinOf = (t, except = null) => work.frames.find((f) => f !== except && f.time != null && Math.abs(f.time - t) < 1e-4 && JSON.stringify(f.sourceOps ?? []) === JSON.stringify(sourceOps));
+    const already = (twin) => toast(`This frame is already in the strip, at ${preciseClock(twin.time)}`, 'info', 2500);
+    const twin = twinOf(time);
+    if (twin) {
+      already(twin);
+      return;
+    }
     // Two round trips, long enough on a slow video to switch file in between. The
     // frame is evidence, so a late one is dropped rather than put in another file.
     const run = openRun;
+    const frame = makeFrame(work.source.path, time);
+    frame.sourceOps = sourceOps;
+    // frames cut from an adjusted clip start from its adjustments
+    frame.adjust = videoSeed(filters, work.videoAdjust);
+    work.frames.push(frame);
+    const placed = work.frames[work.frames.length - 1];
     try {
-      const sourceOps = rotationOps(videoRotation);
-      const url = await renderUrl(work.source.path, time, sourceOps);
+      const res = await renderResponse(work.source.path, time, sourceOps, { snap: true });
+      const named = Number(res.headers.get('X-Frame-Time'));
+      const blob = await res.blob();
+      if (run !== openRun) return;
+      if (Number.isFinite(named) && res.headers.has('X-Frame-Time')) {
+        const twin = twinOf(named, placed);
+        if (twin) {
+          // removed from the strip while it rendered, it is already gone
+          const index = work.frames.indexOf(placed);
+          if (index !== -1) work.frames.splice(index, 1);
+          already(twin);
+          return;
+        }
+        placed.time = named;
+      }
+      const url = URL.createObjectURL(blob);
+      blobs.add(url);
+      placed.url = url;
       const dim = await imageSize(url);
       if (run !== openRun) return;
-      const frame = makeFrame(work.source.path, time);
-      Object.assign(frame, { url, sourceOps, w: dim.w, h: dim.h });
-      // frames cut from an adjusted clip start from its adjustments
-      frame.adjust = videoSeed(filters, work.videoAdjust);
-      work.frames.push(frame);
+      Object.assign(placed, { w: dim.w, h: dim.h });
     } catch (e) {
-      if (run === openRun) toast(e.message, 'danger');
+      if (run !== openRun) return;
+      const index = work.frames.indexOf(placed);
+      if (index !== -1) work.frames.splice(index, 1);
+      toast(e.message, 'danger');
     }
+  }
+
+  /** The frame on screen, by the timestamp of the frame the browser drew. */
+  const shownTime = () => shownFrameTime(shared.currentTime, probeInfo?.fps, shared.frameTime);
+
+  function captureNow() {
+    if (!isVideo) return;
+    capture(captureMoment(shared.currentTime, shared.frameTime));
   }
 
   function select(id) {
@@ -587,46 +660,243 @@
   }
 
   // -- video --------------------------------------------------------------------------
-  // The bridge between the player and its panel: where the clip is, where to seek,
-  // and whether the frame viewer is drawing a crop box.
-  const shared = $state({ currentTime: 0, seekTo: null, cropMode: false });
+  // The bridge between the player and its panel: where the clip is, the timestamp
+  // of the frame on screen, where to seek, and whether the frame viewer is drawing
+  // a crop box.
+  let shared = $state({ currentTime: 0, frameTime: null, seekTo: null, cropMode: false });
   let videoEl = $state();
-  const frameDur = $derived(probeInfo?.fps ? 1 / probeInfo.fps : 1 / 30);
+  let player = $state();
+  let holdOriginal = $state(false);
+  const frameDur = $derived(frameDuration(probeInfo?.fps));
 
-  $effect(() => {
-    if (shared.seekTo != null && videoEl) {
-      videoEl.currentTime = shared.seekTo;
-      shared.seekTo = null;
-    }
-  });
-
-  function stepVideo(delta) {
-    const duration = probeInfo?.duration ?? Infinity;
-    shared.seekTo = Math.min(Math.max((shared.currentTime ?? 0) + delta, 0), duration);
+  /** Show the frame starting at `time`, from the panel or the strip. */
+  function seekFrame(time) {
+    videoEl?.pause();
+    shared.seekTo = seekInto(time, probeInfo?.fps, probeInfo?.duration ?? 0);
   }
 
+  // Keys on the open file. On the video: Space or K plays, ←/→ step one frame
+  // (Shift a second, with mpv's , and . as aliases), J and L slow and speed it, C
+  // captures, M marks. Holding O shows the picture without its adjustments.
   function onWindowKeydown(e) {
-    if (uiState.tool !== 'inspect' || !work.source || pickerOpen) return;
+    if (uiState.tool !== 'inspect' || !work.source || pickerOpen || clearConfirm) return;
     const t = e.target;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
-    if (e.ctrlKey || e.metaKey) return;
-    if (activeFrame && cropEditing) {
-      if (e.key === 'Enter') { e.preventDefault(); commitCrop(); }
-      else if (e.key === 'Escape') { e.preventDefault(); cancelCrop(); }
+    if (t.closest?.('[role="dialog"], [role="alertdialog"]')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (key === 'o') {
+      e.preventDefault();
+      holdOriginal = true;
       return;
     }
-    // On the video: ←/→ step one frame (Shift = 1 s), with mpv's , and . as aliases.
-    if (selected !== 'video') return;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); stepVideo(e.shiftKey ? -1 : -frameDur); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); stepVideo(e.shiftKey ? 1 : frameDur); }
-    else if (e.key === ',') { e.preventDefault(); stepVideo(-frameDur); }
-    else if (e.key === '.') { e.preventDefault(); stepVideo(frameDur); }
-    else if (e.key === ' ' && videoEl) {
-      e.preventDefault();
-      if (videoEl.paused) videoEl.play().catch(() => {});
-      else videoEl.pause();
+    if (activeFrame && cropEditing) {
+      if (key === 'Enter') { e.preventDefault(); commitCrop(); }
+      else if (key === 'Escape') { e.preventDefault(); cancelCrop(); }
+      return;
+    }
+    if (selected !== 'video' || !player) return;
+    const actions = {
+      ArrowLeft: () => player.stepBy(e.shiftKey ? -1 : -frameDur),
+      ArrowRight: () => player.stepBy(e.shiftKey ? 1 : frameDur),
+      ',': () => player.stepBy(-frameDur),
+      '.': () => player.stepBy(frameDur),
+      ' ': () => player.togglePlay(),
+      k: () => player.togglePlay(),
+      j: () => player.slower(),
+      l: () => player.faster(),
+      c: () => !e.repeat && captureNow(),
+      m: () => !e.repeat && addMark(),
+    };
+    const act = actions[key];
+    if (!act) return;
+    e.preventDefault();
+    act();
+  }
+
+  function onWindowKeyup(e) {
+    if (e.key.toLowerCase() === 'o') holdOriginal = false;
+  }
+
+  // -- what the server read off the clip ------------------------------------------------
+  // The hover strip and the waveform come on their own once a video opens: one
+  // keyframe-only decode and one audio decode, kept in the case's thumbnail cache.
+  // The scan reads every frame, so it waits to be asked; what it found comes back
+  // with the overview the next time the clip opens.
+  let overview = $state(null); // { tiles, waveform, stripUrl }
+  let scan = $state(null); // { frames, shots }
+  let scanning = $state(false);
+  let scanProgress = $state(null);
+
+  async function pollJob(jobId, onprogress) {
+    for (;;) {
+      const job = await api.get(`/api/jobs/${jobId}`);
+      if (job.status === 'done') return job.result;
+      if (job.status === 'error') throw new Error(job.error);
+      onprogress?.(job.progress?.percent ?? null);
+      await new Promise((r) => setTimeout(r, 500));
     }
   }
+
+  async function loadOverview(run) {
+    const caseId = work.caseId;
+    const path = work.source.path;
+    try {
+      const res = await api.post(`/api/cases/${caseId}/inspect/overview`, { path });
+      if (run !== openRun) return;
+      if (res?.scan) scan = res.scan;
+      const found = res?.overview ?? (res?.job_id ? await pollJob(res.job_id) : null);
+      if (run !== openRun || !found) return;
+      overview = {
+        tiles: found.tiles ?? null,
+        waveform: found.waveform ?? null,
+        stripUrl: found.tiles
+          ? `/api/cases/${caseId}/inspect/overview/strip?path=${encodeURIComponent(path)}`
+          : null,
+      };
+    } catch {
+      // without ffmpeg, or on a file it cannot read, the bar is simply plainer
+    }
+  }
+
+  async function runScan() {
+    if (!isVideo || scanning) return;
+    const run = openRun;
+    scanning = true;
+    scanProgress = null;
+    try {
+      const { job_id } = await api.post(`/api/cases/${work.caseId}/inspect/suggest`, { path: work.source.path, count: 12 });
+      const result = await pollJob(job_id, (p) => {
+        if (run === openRun) scanProgress = p;
+      });
+      if (run === openRun) scan = { frames: result.frames ?? [], shots: result.shots ?? [] };
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+    } finally {
+      if (run === openRun) scanning = false;
+    }
+  }
+
+  // -- marks --------------------------------------------------------------------------
+  let focusMarkId = $state(null);
+
+  function addMark() {
+    if (!isVideo) return;
+    const mark = { id: uid('mk'), time: shownTime(), label: '' };
+    work.marks.push(mark);
+    focusMarkId = mark.id;
+    tabs.video = 'moments';
+  }
+
+  function removeMark(id) {
+    const index = work.marks.findIndex((m) => m.id === id);
+    if (index === -1) return;
+    const [mark] = work.marks.splice(index, 1);
+    const run = openRun;
+    toast('Mark removed', 'info', 6000, {
+      label: 'Undo',
+      onClick: () => {
+        if (run !== openRun || work.marks.some((m) => m.id === mark.id)) return;
+        work.marks.splice(Math.min(index, work.marks.length), 0, mark);
+      },
+    });
+  }
+
+  // -- a frame's adjusted picture, when CSS cannot show it --------------------------------
+  // Brightness, contrast and the like preview in the browser. Sharpness, gamma, local
+  // contrast and denoise have no CSS twin, so once one is set the server renders the
+  // frame as it will save, a moment after the sliders stop.
+  let rendered = $state(null); // { frameId, key, url }
+  let renderTimer = null;
+  const renderKey = $derived(
+    activeFrame?.url && needsRender(filters, activeFrame.adjust) ? JSON.stringify(previewOps(filters, activeFrame)) : null
+  );
+  const frameSrc = $derived(renderKey && rendered?.frameId === activeFrame?.id ? rendered.url : null);
+  const renderPending = $derived(!!renderKey && rendered?.key !== renderKey);
+
+  function dropRendered() {
+    clearTimeout(renderTimer);
+    if (rendered?.url) URL.revokeObjectURL(rendered.url);
+    rendered = null;
+  }
+
+  $effect(() => {
+    const key = renderKey;
+    const frame = activeFrame;
+    clearTimeout(renderTimer);
+    if (!key || !frame || (rendered?.frameId === frame.id && rendered.key === key)) return;
+    const run = openRun;
+    renderTimer = setTimeout(async () => {
+      try {
+        const blob = await renderBlob(frame.path, frame.time, previewOps(filters, frame), 'jpeg');
+        if (run !== openRun || renderKey !== key) return;
+        const url = URL.createObjectURL(blob);
+        if (rendered?.url) URL.revokeObjectURL(rendered.url);
+        rendered = { frameId: frame.id, key, url };
+      } catch {
+        // the CSS preview stays, and Save to case still renders it in full
+      }
+    }, 250);
+  });
+
+  // -- readings on a frame ------------------------------------------------------------
+  let analysis = $state(null); // { id, frameId, signature, kind, url, rows, text, note, shown, opacity }
+  let analysisRunning = $state(null);
+  const frameAnalysis = $derived(analysis && analysis.frameId === activeFrame?.id ? analysis : null);
+  const analysisCurrent = $derived(!!frameAnalysis && frameAnalysis.signature === frameSignature(filters, activeFrame));
+  const overlay = $derived(
+    analysisCurrent && frameAnalysis.kind === 'image' && frameAnalysis.shown
+      ? { url: frameAnalysis.url, opacity: frameAnalysis.opacity }
+      : null
+  );
+
+  async function runAnalysis(name) {
+    const frame = activeFrame;
+    if (!frame || analysisRunning) return;
+    analysisRunning = name;
+    const run = openRun;
+    try {
+      const res = await api.post(`/api/cases/${work.caseId}/inspect/analyze`, {
+        path: frame.path, name, time: frame.time ?? null, ops: buildFrameOps(filters, frame),
+      });
+      if (run !== openRun) return;
+      analysis = {
+        id: name, frameId: frame.id, signature: frameSignature(filters, frame), kind: res.kind,
+        url: res.data_url ?? null, rows: res.rows ?? null, text: res.text ?? null, note: res.note ?? '',
+        shown: true, opacity: 0.85,
+      };
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      analysisRunning = null;
+    }
+  }
+
+  // -- the panel ----------------------------------------------------------------------
+  // The one press every visit needs stays pinned above the tabs: Capture frame on the
+  // video, Save to case on a frame. The tabs hold the rest, and keep their place for
+  // the session.
+  const tabs = $state({ video: 'info', frame: 'adjust' });
+  const panelHelpers = panelWidth({ key: 'azimut:inspectPanelW', min: 300, max: 560, def: 340, fraction: 0.4 });
+  let panelW = $state(panelHelpers.loadWidth());
+  const unfiledCount = $derived(work.frames.filter((f) => !filedIds.has(f.id) && !savingFrames.has(f.id) && f.url).length);
+  const frameTouched = $derived(
+    !!activeFrame && (!!activeFrame.crop || !!activeFrame.rotation || !isNeutral(filters, activeFrame.adjust))
+  );
+  const panelTabs = $derived(
+    selected === 'video'
+      ? [
+          { id: 'info', label: 'Info', title: INSPECT_HELP.tabInfo },
+          { id: 'adjust', label: 'Adjust', title: INSPECT_HELP.tabAdjust, dot: videoEdited },
+          { id: 'moments', label: 'Moments', title: INSPECT_HELP.tabMoments, count: work.marks.length },
+        ]
+      : [
+          { id: 'info', label: 'Info', title: INSPECT_HELP.tabInfo },
+          { id: 'adjust', label: 'Adjust', title: INSPECT_HELP.tabAdjust, dot: frameTouched },
+          { id: 'analyze', label: 'Analyze', title: INSPECT_HELP.tabAnalyze, dot: !!overlay },
+        ]
+  );
+  const mode = $derived(selected === 'video' ? 'video' : 'frame');
 
   // -- save to case: the one step that files media ------------------------------------
   function dupeNote(results) {
@@ -745,7 +1015,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onWindowKeydown} {onpagehide} />
+<svelte:window onkeydown={onWindowKeydown} onkeyup={onWindowKeyup} onblur={() => (holdOriginal = false)} {onpagehide} />
 
 <div class="tool">
   {#if work.source}
@@ -813,25 +1083,39 @@
             <span class="spinner" aria-label="Opening"></span>
           {:else if selected === 'video'}
             <VideoPlayer
+              bind:this={player}
               bind:video={videoEl}
               src={fileUrl(work.caseId, work.source.path)}
               filter={videoPreview.filter}
               transform={videoTransform}
               quarterTurn={Math.abs(videoRotation) === 90}
               duration={probeInfo?.duration ?? 0}
-              currentTime={shared.currentTime}
-              ontimeupdate={(time) => (shared.currentTime = time)}
+              fps={probeInfo?.fps ?? null}
+              bind:shared
+              frames={work.frames.filter((f) => f.time != null)}
+              marks={work.marks}
+              shots={scan?.shots ?? []}
+              picks={scan?.frames ?? []}
+              tiles={overview?.tiles ?? null}
+              stripUrl={overview?.stripUrl ?? null}
+              waveform={overview?.waveform ?? null}
+              original={holdOriginal}
+              oncapture={captureNow}
             />
           {:else if activeFrame?.url}
             <FrameViewer
               frame={activeFrame}
               preview={framePreview}
+              src={frameSrc}
+              original={holdOriginal}
+              {overlay}
               aspect={frameAspect}
               {cropEditing}
               bind:cropMode={shared.cropMode}
               onbegincrop={beginCrop}
               oncommitcrop={commitCrop}
             />
+            {#if renderPending}<span class="rendering" aria-live="polite"><span class="spinner small"></span> Rendering…</span>{/if}
           {:else if activeFrame?.missing}
             <div class="hint-mid">
               <Icon name="alert" size={30} />
@@ -860,40 +1144,113 @@
         {/if}
       </div>
 
-      <aside class="panel">
+      <aside class="panel" style:width={`${panelW}px`}>
+        <PanelEdge bind:width={panelW} helpers={panelHelpers} side="left" label={INSPECT_HELP.resize} />
         {#if opening}
           <p class="hint">Opening…</p>
-        {:else if selected === 'video'}
-          <VideoMenu
-            {probeInfo} {shared} {videoFilters} {work} {capture}
-            {videoEdited}
-            videoSave={{
-              defaultName: `${stemFor(work.source.path)} (enhanced)`,
-              filedPath: videoFiled ? work.videoFiled.path : null,
-              busy: saving === 'video',
-              onsave: saveVideo,
-            }}
-            bind:folder={saveFolder}
-          />
-        {:else if activeFrame}
-          {#key activeFrame.id}
-            <FrameMenu
-              frame={activeFrame} {filters} {analyses} {shared}
-              bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop}
-              setRotation={setFrameRotation} {rotationBusy}
-              reverse={reverseFrame}
-              horizon={horizonFrame}
-              onduplicate={duplicateFrame}
-              frameSave={{
-                defaultName: frameNames.get(activeFrame.id),
-                filedPath: filedIds.has(activeFrame.id) ? activeFrame.filed.path : null,
-                busy: savingFrames.has(activeFrame.id),
-                blocked: activeFrame.url ? '' : 'The frame is still rendering.',
-                onsave: (opts) => saveFrame(activeFrame, opts),
-              }}
-              bind:folder={saveFolder}
-            />
-          {/key}
+        {:else if selected === 'video' || activeFrame}
+          <div class="pinned">
+            {#if selected === 'video'}
+              <button class="btn btn-primary capture" onclick={captureNow} title={INSPECT_HELP.capture}>
+                <Icon name="camera" size={16} />
+                <span>Capture frame</span>
+                <span class="at mono">{preciseClock(shownFrameTime(shared.currentTime, probeInfo?.fps, shared.frameTime))}</span>
+                <kbd>C</kbd>
+              </button>
+              {#if unfiledCount}
+                <button class="btn btn-sm save-frames" disabled={saving === 'all'} onclick={saveAllFrames} title={INSPECT_HELP.saveAll}>
+                  <Icon name="save" size={13} />
+                  {saving === 'all' ? 'Saving…' : unfiledCount === 1 ? 'Save the frame to the case' : `Save ${unfiledCount} frames to the case`}
+                </button>
+              {/if}
+            {:else}
+              {#key activeFrame.id}
+                <SaveToCase
+                  defaultName={frameNames.get(activeFrame.id)}
+                  filedPath={filedIds.has(activeFrame.id) ? activeFrame.filed.path : null}
+                  busy={savingFrames.has(activeFrame.id)}
+                  blocked={activeFrame.url ? '' : 'The frame is still rendering.'}
+                  bind:folder={saveFolder}
+                  onsave={(opts) => saveFrame(activeFrame, opts)}
+                />
+              {/key}
+            {/if}
+          </div>
+
+          <div class="ptabs" role="tablist" aria-label="Panel">
+            {#each panelTabs as t (t.id)}
+              <button
+                class="ptab"
+                class:on={tabs[mode] === t.id}
+                role="tab"
+                aria-selected={tabs[mode] === t.id}
+                title={t.title}
+                onclick={() => (tabs[mode] = t.id)}
+              >
+                {t.label}
+                {#if t.count}<span class="count">{t.count}</span>{:else if t.dot}<span class="dot"></span>{/if}
+              </button>
+            {/each}
+          </div>
+
+          <div class="tab-body" role="tabpanel">
+            {#if tabs[mode] === 'info'}
+              <InfoPanel caseId={work.caseId} source={work.source} probe={probeInfo} frame={selected === 'video' ? null : activeFrame} />
+            {:else if selected === 'video' && tabs.video === 'adjust'}
+              <VideoAdjust
+                {videoFilters} {work}
+                video={videoEl}
+                filter={holdOriginal ? '' : videoPreview.filter}
+                tick={shared.frameTime ?? shared.currentTime}
+                {videoEdited}
+                onhold={(on) => (holdOriginal = on)}
+                videoSave={{
+                  defaultName: `${stemFor(work.source.path)} (enhanced)`,
+                  filedPath: videoFiled ? work.videoFiled.path : null,
+                  busy: saving === 'video',
+                  onsave: saveVideo,
+                }}
+                bind:folder={saveFolder}
+              />
+            {:else if selected === 'video'}
+              <MomentsPanel
+                bind:marks={work.marks}
+                focusId={focusMarkId}
+                onaddmark={addMark}
+                onremovemark={removeMark}
+                onseek={seekFrame}
+                oncapture={capture}
+                {scan}
+                {scanning}
+                progress={scanProgress}
+                onscan={runScan}
+                tiles={overview?.tiles ?? null}
+                stripUrl={overview?.stripUrl ?? null}
+              />
+            {:else if tabs.frame === 'adjust'}
+              {#key activeFrame.id}
+                <FrameAdjust
+                  frame={activeFrame} {filters} {shared}
+                  shown={{ url: frameSrc ?? activeFrame.url, filter: frameSrc ? '' : framePreview.filter }}
+                  bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop}
+                  setRotation={setFrameRotation} {rotationBusy}
+                  onduplicate={duplicateFrame}
+                  onhold={(on) => (holdOriginal = on)}
+                />
+              {/key}
+            {:else}
+              <FrameAnalyze
+                frame={activeFrame}
+                {analyses}
+                analysis={frameAnalysis}
+                current={analysisCurrent}
+                running={analysisRunning}
+                onrun={runAnalysis}
+                reverse={reverseFrame}
+                horizon={horizonFrame}
+              />
+            {/if}
+          </div>
         {/if}
       </aside>
     </div>
@@ -1024,6 +1381,7 @@
     flex-direction: column;
   }
   .viewer {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: flex;
@@ -1035,13 +1393,108 @@
   .viewer.pad {
     padding: 18px;
   }
+  .rendering {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: var(--r-sm);
+    background: rgba(22, 22, 22, 0.85);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .spinner.small {
+    width: 11px;
+    height: 11px;
+    border-width: 2px;
+  }
   .panel {
-    width: 320px;
+    position: relative;
     flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: var(--bg-1);
     display: flex;
     flex-direction: column;
+    min-height: 0;
+  }
+  .panel > .hint {
+    padding: 14px;
+  }
+  /* The press every visit needs, above the tabs, never scrolled away. */
+  .pinned {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .capture {
+    width: 100%;
+    justify-content: center;
+    gap: 8px;
+    min-height: 36px;
+  }
+  .capture .at {
+    font-size: var(--fs-xs);
+    opacity: 0.75;
+  }
+  .capture kbd {
+    padding: 0 5px;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    opacity: 0.7;
+  }
+  .save-frames {
+    width: 100%;
+    justify-content: center;
+  }
+  .ptabs {
+    flex-shrink: 0;
+    display: flex;
+    gap: 2px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ptab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 9px 10px 8px;
+    border-bottom: 2px solid transparent;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    background: none;
+  }
+  .ptab:hover {
+    color: var(--text-1);
+  }
+  .ptab.on {
+    color: var(--text-1);
+    border-bottom-color: var(--accent);
+  }
+  .ptab .count {
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--bg-2);
+    color: var(--text-2);
+    font-size: 10px;
+  }
+  .ptab .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .tab-body {
+    flex: 1;
     min-height: 0;
     overflow: auto;
     padding: 14px;

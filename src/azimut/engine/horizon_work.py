@@ -2,10 +2,10 @@
 
 What the tab holds and nothing has saved yet: where the eye stands and how the
 view is drawn, the photo laid over it with its trace and what is known about it,
-Find's area, alignments and settings, and which saved view or search is open.
-The browser writes it a moment after each change and reads it back when the tab
-opens on a case, so a reload, or a case opened again, finds the work as it was
-left.
+Find's area, alignments and settings, the mode, and which saved view or search
+is open. The browser writes it a moment after each change and reads it back when
+the tab opens on a case: the tab opens on the map, and work no save keeps is
+offered back with Resume.
 
 It is one file per case, `.horizon/.work.json`, and not a document: no list
 shows it, it is overwritten as the analyst works, and it is cleared when the

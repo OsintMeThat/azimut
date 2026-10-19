@@ -1158,8 +1158,9 @@ describe('Compare', () => {
     expect(menu.textContent).toContain('Measure from here');
     expect(menu.textContent).not.toContain('Sun and moon from here');
     expect(menu.textContent).not.toContain('Imagery history here');
-    // It belongs to the surface it opened on, and travels with it.
-    expect(target.querySelector('.surface-shell.primary [role="menu"]')).not.toBeNull();
+    // Over the whole stage, outside both maps, so B can never cover it.
+    expect(menu.closest('.surface-shell')).toBeNull();
+    expect(menu.closest('.point-menu').parentElement).toBe(target.querySelector('.compare-stage'));
 
     button('Measure from here', menu).click();
     await settle();
@@ -1175,6 +1176,34 @@ describe('Compare', () => {
     const drawn = [...target.querySelectorAll('.surface-shell.primary .mark path')];
     expect(drawn.some((path) => path.getAttribute('stroke-dasharray') === '8 6')).toBe(true);
   });
+
+  it.each(['Swipe', 'Fade', 'Blink'])(
+    'keeps the right-click menu over both maps in %s, whichever it opened on',
+    async (label) => {
+      vi.useFakeTimers();
+      try {
+        await open();
+        await add('A');
+        await add('B');
+        button(label, target).click();
+        flushSync();
+        await settle();
+        for (const engine of engines) {
+          engine.handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 120, y: 90 });
+          flushSync();
+          // Inside a map, it was cut at the divider, laid under B, or blinked with B.
+          const menu = target.querySelector('[role="menu"]');
+          expect(menu.closest('.surface-shell')).toBeNull();
+          expect(menu.closest('.point-menu').parentElement).toBe(target.querySelector('.compare-stage'));
+          vi.advanceTimersByTime(800);
+          flushSync();
+          expect(target.querySelector('[role="menu"]')).toBe(menu);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('opens the right-clicked point in Satellite or Detect, at the zoom it was read at', async () => {
     await open();
@@ -1263,9 +1292,14 @@ describe('Compare', () => {
     await open();
     await add('A');
     await add('B');
+    // Side by side, the menu is placed in B's own box, wherever B sits in the stage.
+    target.querySelector('.compare-stage').getBoundingClientRect = () => ({ left: 100, top: 50, width: 1001, height: 600 });
+    target.querySelector('.surface-shell.secondary .map').getBoundingClientRect =
+      () => ({ left: 601, top: 51, width: 499, height: 598 });
     engines[1].handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 40, y: 40 });
     flushSync();
-    expect(target.querySelector('.surface-shell.secondary [role="menu"]')).not.toBeNull();
+    const box = target.querySelector('.point-menu');
+    expect([box.style.left, box.style.top]).toEqual(['501px', '1px']);
 
     button('Save place here…', target.querySelector('[role="menu"]')).click();
     await settle();

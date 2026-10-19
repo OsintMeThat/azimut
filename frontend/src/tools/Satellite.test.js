@@ -375,6 +375,12 @@ describe('what is laid over the imagery', () => {
     );
   });
 
+  it('tells the layers when the map stands on its relief, so the borders lie as lines', () => {
+    // read before the guard, or the effect would never hear the relief come in
+    expect(surface).toContain('const over = reliefReady;');
+    expect(surface).toContain('if (ready && basemaps && reliefOffered) basemaps.setRelief(over);');
+  });
+
   it('offers the railways over any basemap and the roads only over imagery', () => {
     // OSM's own street map already draws its roads; it draws a railway as one
     // more line, which is the thing OpenRailwayMap is for

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { featuresInLoop, hitFeature, mergeable, splittable } from './layerHit.js';
+import { featuresInLoop, hitFeature, markerDisc, mergeable, splittable } from './layerHit.js';
 
 const project = (lon, lat) => ({ x: lon * 10, y: lat * 10 });
 const point = (key, lon, lat, symbol = 'badge-tank') => ({ geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { key, symbol } });
@@ -40,5 +40,28 @@ describe('what sits under the pointer', () => {
     expect(mergeable([point('a', 0, 0), point('b', 0, 0)])).toBe(false);
     expect(splittable({ geometry: { type: 'MultiLineString', coordinates: [[], []] } })).toBe(true);
     expect(splittable({ geometry: { type: 'MultiLineString', coordinates: [[]] } })).toBe(false);
+  });
+});
+
+describe("a marker wearing one of the analyst's icons", () => {
+  const project = (lon, lat) => ({ x: lon * 100, y: -lat * 100 });
+  const marker = (properties) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [1, 1] },
+    properties: { key: 'k', symbol: 'pin', ...properties } });
+
+  it('is ringed on its point, not where the pin it keeps underneath has its head', () => {
+    expect(markerDisc(marker({}), project)).toMatchObject({ x: 100, y: -120 });
+    expect(markerDisc(marker({ icon: 'abcdef0123456789' }), project)).toMatchObject({ x: 100, y: -100, r: 14 });
+  });
+
+  it('is ringed round the painted part of a picture drawn as it is, at its size', () => {
+    const own = () => ({ dx: 0, dy: -8, reach: 10 });
+    expect(markerDisc(marker({ icon: 'abcdef0123456789', icon_scale: 2 }), project, own)).toMatchObject({ x: 100, y: -116, r: 20 });
+  });
+
+  it('is picked by a press on its picture', () => {
+    const features = [marker({ icon: 'abcdef0123456789' })];
+    expect(hitFeature(features, project, { x: 100, y: -100 })).toBe('k');
+    // where the pin's head would be, well above a centred icon, is not it
+    expect(hitFeature(features, project, { x: 100, y: -122 })).toBeNull();
   });
 });

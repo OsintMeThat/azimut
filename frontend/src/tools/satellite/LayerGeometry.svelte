@@ -13,8 +13,11 @@
   import LayerEditBar from './LayerEditBar.svelte';
   import LayerFeatureMenu from './LayerFeatureMenu.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
   import { featuresInLoop, hitFeature, linesOf, markerDisc } from '../../lib/map/layerHit.js';
   import { isBadge } from '../../lib/map/markerGlyphs.js';
+  import { SOURCE_ICON_SCALE } from '../../lib/map/addedLayer.js';
+  import { layerIconUrl, readyPicture } from '../../lib/map/ownIcons.js';
   import { bearingToward, facingLabel, knobAt, screenNorth } from '../../lib/map/turnRing.js';
 
   /** `bar`: whether this map carries the tool bar, false on the second of two side-by-side maps. */
@@ -86,6 +89,23 @@
     }));
   });
 
+  /**
+   * Where the painted part of an icon drawn as it is sits from its point, and how far
+   * it reaches, in screen pixels at size 1 (`markerDisc`): what a halo, the turn ring
+   * and a click go round. Read off the picture the map drew it from, so a padded pin
+   * is ringed where its ink is. Null for a disc, which is a badge's size.
+   */
+  function ownReach(properties) {
+    const caseId = controller.editor?.caseId, layer = controller.editor?.name;
+    if (!caseId || !layer || controller.icons?.[properties.icon]?.mode === 'disc') return null;
+    const picture = readyPicture(layerIconUrl(caseId, layer, properties.icon));
+    if (!picture) return null;
+    const { image, box } = picture;
+    return { dx: (box.x + box.w / 2 - image.width / 2) * SOURCE_ICON_SCALE,
+      dy: (box.y + box.h / 2 - image.height / 2) * SOURCE_ICON_SCALE,
+      reach: (Math.max(box.w, box.h) / 2) * SOURCE_ICON_SCALE + 3 };
+  }
+
   /** Outlines round what is selected, re-projected as the map moves. */
   const halos = $derived.by(() => {
     frame;
@@ -94,7 +114,7 @@
     const discs = [], paths = [];
     for (const feature of shown) {
       if (!keys.has(feature.properties.key)) continue;
-      if (feature.geometry.type === 'Point') discs.push(markerDisc(feature, project));
+      if (feature.geometry.type === 'Point') discs.push(markerDisc(feature, project, ownReach));
       else for (const ring of linesOf(feature.geometry)) {
         paths.push(`M${ring.map(([lon, lat]) => { const p = project(lon, lat); return `${p.x},${p.y}`; }).join(' L')}`);
       }
@@ -117,7 +137,9 @@
         const at = project(geometry.coordinates[0] + dx, geometry.coordinates[1] + dy);
         const scale = feature.properties.icon_scale ?? 1;
         const badge = isBadge(feature.properties.symbol);
-        marks.push({ key: feature.properties.key, x: at.x, y: at.y, badge, size: (badge ? 25.6 : 38.4) * scale,
+        const icon = feature.properties.icon ? iconLibrary.look(feature.properties.icon,
+          { caseId: controller.editor?.caseId, layer: controller.editor?.name, meta: controller.icons }) : null;
+        marks.push({ key: feature.properties.key, x: at.x, y: at.y, badge: badge || !!icon, size: (badge || icon ? 25.6 : 38.4) * scale, icon,
           symbol: feature.properties.symbol || 'pin', colour: feature.properties.colour || '#0072b2',
           status: feature.properties.status ?? '', external: feature.properties.provenance === 'external' });
       } else for (const ring of linesOf(geometry)) {
@@ -138,8 +160,10 @@
     const feature = shown.find((one) => one.properties.key === keys[0]);
     if (feature?.geometry.type !== 'Point') return null;
     const [lon, lat] = feature.geometry.coordinates;
-    const centre = project(lon, lat);
-    const radius = (isBadge(feature.properties.symbol) ? 14 : 22) * (Number(feature.properties.icon_scale) || 1) + 16;
+    // round the icon a marker wears, as its halo is; round the point for the app's own
+    const disc = feature.properties.icon ? markerDisc(feature, project, ownReach) : null;
+    const centre = disc ? { x: disc.x, y: disc.y } : project(lon, lat);
+    const radius = disc ? disc.r + 16 : (isBadge(feature.properties.symbol) ? 14 : 22) * (Number(feature.properties.icon_scale) || 1) + 16;
     const north = screenNorth(project, lon, lat);
     const held = turning?.key === feature.properties.key ? turning.bearing : feature.properties.bearing;
     const bearing = held === undefined || held === null || held === '' ? null : Number(held);
@@ -258,7 +282,7 @@
         return;
       }
       // A right press on a feature opens its menu; the map must not start turning under it.
-      if (event.button === 2 && !ours(event) && !controller.armed && hitFeature(shown, project, local(event))) {
+      if (event.button === 2 && !ours(event) && !controller.armed && hitFeature(shown, project, local(event), ownReach)) {
         swallow = true; event.preventDefault(); event.stopPropagation();
         return;
       }
@@ -269,7 +293,7 @@
         drawLoop(event, at, local);
         return;
       }
-      const key = hitFeature(shown, project, at);
+      const key = hitFeature(shown, project, at, ownReach);
       if (!key) return;
       const feature = shown.find((one) => one.properties.key === key);
       const add = event.shiftKey || event.ctrlKey || event.metaKey;
@@ -303,7 +327,7 @@
         return;
       }
       if (ours(event) || controller.armed) return;
-      const key = hitFeature(shown, project, local(event));
+      const key = hitFeature(shown, project, local(event), ownReach);
       const feature = key && controller.features.find((one) => one.properties.key === key);
       if (!feature || feature.geometry.type === 'Point') return;
       event.stopPropagation(); event.preventDefault();
@@ -313,7 +337,7 @@
     /** A right-click on a feature: its menu, over the map's own. */
     function menu(event) {
       if (ours(event) || controller.armed) return;
-      const key = hitFeature(shown, project, local(event));
+      const key = hitFeature(shown, project, local(event), ownReach);
       if (!key) return;
       event.preventDefault(); event.stopPropagation();
       if (!(controller.selection ?? []).includes(key)) controller.chooseKeys([key]);
@@ -531,7 +555,7 @@
     {/if}
     {#each ghosts.marks as mark (mark.key)}
       <span class="ghost-mark" class:badge={mark.badge} style:left={`${mark.x}px`} style:top={`${mark.y}px`}>
-        <MarkerSymbol symbol={mark.symbol} colour={mark.colour} status={mark.status} external={mark.external} size={mark.size} />
+        <MarkerSymbol symbol={mark.symbol} colour={mark.colour} status={mark.status} external={mark.external} icon={mark.icon} size={mark.size} />
       </span>
     {/each}
   </div>

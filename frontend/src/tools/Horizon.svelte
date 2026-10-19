@@ -45,7 +45,7 @@
   import { api } from '../lib/api.js';
   import { caseState, ensureCase, fmtCoords, prefs, prefsReady, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { assignFolder } from '../lib/filing.js';
-  import { splitHash } from '../lib/hash.js';
+  import { reloadedInto, splitHash } from '../lib/hash.js';
   import { copyText } from '../lib/clipboard.js';
   import { holdsUnsaved, onBackForward, settlePlace } from '../lib/backButton.js';
   import { openMapAt } from '../lib/navigate.js';
@@ -102,7 +102,7 @@
   import { createFindState } from './horizon/state/find.svelte.js';
   import { facingFrom } from '../lib/horizon/find.js';
   import { createViewsState } from './horizon/state/views.svelte.js';
-  import { createWorkState } from './horizon/state/work.svelte.js';
+  import { benchSummary, createWorkState } from './horizon/state/work.svelte.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import SideBySide from './horizon/SideBySide.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
@@ -206,29 +206,53 @@
 
   // -- opening ------------------------------------------------------------------
 
+  // a link stands where it says; a reload opens on the map, the work left there offered back
   const opening = splitHash(location.hash);
-  if (opening.route === 'horizon') view.restore(readHorizonView(opening.params));
+  const linked = opening.route === 'horizon' && !reloadedInto('horizon');
+  if (linked) view.restore(readHorizonView(opening.params));
 
   // -- the three modes (lib/horizon/modes.js) ------------------------------------------
 
-  let mode = $state(opening.route === 'horizon' ? modeOf(opening.params) : 'view');
+  let mode = $state(linked ? modeOf(opening.params) : 'view');
   /** Whether the photo lies over the view: in Overlay only. */
   const photoOn = $derived(mode === 'overlay');
 
   // -- the bench, kept in the case (state/work.svelte.js) ----------------------------------
 
-  /** The work no save has kept yet: a reload, or the case opened again, brings it back. */
-  const work = createWorkState({ api, caseId: () => caseState.current?.id ?? null, view, overlay, finder, views, buildings });
-  /** Where the address stood the eye when the tab opened: the bench never moves it from there. */
-  const addressEye = untrack(() => (view.observer ? { lat: view.observer.lat, lon: view.observer.lon } : null));
+  /** The work no save has kept yet: offered back with Resume when the tab opens on its case. */
+  const work = createWorkState({ api, caseId: () => caseState.current?.id ?? null, view, overlay, finder, views, buildings, mode: () => mode });
 
+  /** The case the bench was last read for: another one opening sends the tab back to the map. */
+  let benchCase;
   $effect(() => {
-    void caseState.current?.id;
+    const id = caseState.current?.id ?? null;
     untrack(async () => {
-      const back = await work.restore({ address: addressEye });
-      if (back?.photoGone) toast('The photo left on the bench is no longer in the case', 'warn', 6500);
+      const from = benchCase;
+      benchCase = id;
+      if (from && id !== from) {
+        // the case left keeps its work on its own bench, offered when it opens again
+        work.flush();
+        leaveView();
+        mode = 'view';
+        await finder.restore(null, id);
+      }
+      // work already on the tab (a link, a case just made for it) stays: nothing is offered over it
+      await work.restore({ quiet: Boolean(work.current) });
     });
   });
+
+  /** The work offered back, on the map before any eye stands. */
+  const offered = $derived(layout === 'picking' && mode !== 'find' ? work.offer : null);
+  const offeredText = $derived(offered ? benchSummary(offered.work, { views: views.list, searches: finder.list }) : '');
+
+  async function resumeWork() {
+    const back = await work.resume();
+    if (!back) return;
+    mode = back.mode;
+    if (back.mode === 'find' && caseState.current) finder.refreshList(caseState.current.id);
+    if (back.photoGone) toast('The photo left on the bench is no longer in the case', 'warn', 6500);
+    if (view.observer) flyToEye();
+  }
 
   const bench = $derived(work.current);
   $effect(() => {
@@ -298,6 +322,16 @@
       work.interrupt();
       if (mode === 'view') mode = 'overlay';
       overlay.openCase(caseId, asked, { time: asked.time ?? 0 });
+    });
+  });
+
+  /** A setting asked for from the command palette: the inspector shows, over the view, and lights it. */
+  $effect(() => {
+    if (uiState.tool !== 'horizon' || !uiState.horizonSetting) return;
+    untrack(() => {
+      folded = false;
+      mapLarge = false;
+      if (mode === 'find') mode = 'view';
     });
   });
 
@@ -1318,6 +1352,26 @@
     }
   }
 
+  /** Asking before a new search lets go of a setup no search keeps. */
+  let newing = $state(false);
+
+  /** A new search in Find: the photo, its trace and the setup let go, then the next photo asked for. */
+  function newSearch() {
+    const held = Boolean(overlay.source || finder.area.length || finder.alignments.length);
+    if (held && finder.edited) {
+      newing = true;
+      return;
+    }
+    startNewSearch();
+  }
+
+  async function startNewSearch() {
+    newing = false;
+    overlay.remove();
+    await finder.restore(null, caseState.current?.id ?? null);
+    photoDialog = true;
+  }
+
   async function removeSearch(name) {
     const caseId = caseState.current?.id;
     if (!caseId) return;
@@ -1616,20 +1670,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="view-area" ondragover={onDragOver} ondragleave={() => (dropping = false)} ondrop={onDrop}>
         {#if photoOn && overlay.source && layout === 'looking' && !swapped}
-          <OverlayBar
-            {overlay}
-            {gap}
-            {view}
-            onchange={() => (photoDialog = true)}
-            onfit={fit}
-            {fitting}
-            heading={view.camera.heading}
-            places={searched && searched.verdict !== 'match' ? searched.places : []}
-            onplace={takePlace}
-            ondetect={detect}
-            onside={showSide}
-            {siding}
-          />
+          <OverlayBar {overlay} {gap} onfit={fit} {fitting} ondetect={detect} onside={showSide} {siding} />
         {/if}
         <div class="frame-slot" bind:clientWidth={slot.width} bind:clientHeight={slot.height}>
           <div
@@ -1743,6 +1784,11 @@
       <HorizonPanel
         {view}
         overlay={photoOn ? overlay : null}
+        onphoto={() => (photoDialog = true)}
+        places={photoOn && searched && searched.verdict !== 'match' ? searched.places : []}
+        onplace={takePlace}
+        seek={uiState.tool === 'horizon' ? uiState.horizonSetting : null}
+        onsought={() => (uiState.horizonSetting = null)}
         {buildings}
         units={prefs.units}
         {aspect}
@@ -1888,6 +1934,16 @@
           />
         </div>
       {/if}
+      {#if offered}
+        <div class="hz-resume" role="region" aria-label="Unsaved work">
+          <p>
+            <strong>Left unsaved last time</strong>
+            <span title={offeredText}>{offeredText}</span>
+          </p>
+          <button type="button" class="btn btn-sm btn-primary" onclick={resumeWork}>Resume</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick={() => work.discard()} title="Let this work go">Discard</button>
+        </div>
+      {/if}
     {/if}
     <PersonalLayerPanel tool="horizon" scope={myLayers} {engine} />
   </div>
@@ -1905,8 +1961,10 @@
       onstand={standFromFind}
       onsearch={searchFromFind}
       onplace={lookFromPlace}
+      caseOpen={Boolean(caseState.current)}
       onopensearch={openSearch}
       onremovesearch={removeSearch}
+      onnew={newSearch}
     />
   {/if}
 </div>
@@ -1918,6 +1976,17 @@
     onpick={layCase}
     onfile={layFile}
     onclose={() => (photoDialog = false)}
+  />
+{/if}
+
+{#if newing}
+  <ConfirmDialog
+    title="Start a new search?"
+    message="The photo, its trace and the area on screen are not kept by any search."
+    confirmLabel="Start a new one"
+    icon="search"
+    onconfirm={startNewSearch}
+    oncancel={() => (newing = false)}
   />
 {/if}
 
@@ -2335,6 +2404,44 @@
   .hz-away span {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* the work left unsaved, offered at the foot of the starting map */
+  .hz-resume {
+    position: absolute;
+    left: 50%;
+    bottom: 24px;
+    z-index: 702;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: max-content;
+    max-width: min(640px, calc(100% - 32px));
+    padding: 10px 12px 10px 14px;
+    border-radius: var(--r-md);
+    background: var(--bg-1);
+    box-shadow:
+      0 0 0 1px var(--border),
+      0 6px 24px rgb(0 0 0 / 0.3);
+    transform: translateX(-50%);
+  }
+  .hz-resume p {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    margin: 0 6px 0 0;
+    font-size: var(--fs-sm);
+  }
+  .hz-resume strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .hz-resume span {
+    overflow: hidden;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .hz-away strong {
     color: var(--accent);

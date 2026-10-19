@@ -366,6 +366,12 @@ export const uiState = $state({
    * Inspect: `{ path, kind, title?, time? }`. Consumed once, session-only.
    */
   horizonPhoto: null,
+  /**
+   * A Horizon setting asked for from the command palette, by its id
+   * (lib/horizon/panelIndex.js): the inspector opens its group and lights it.
+   * Consumed once, session-only.
+   */
+  horizonSetting: null,
   focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured

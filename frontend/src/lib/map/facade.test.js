@@ -201,24 +201,60 @@ describe('the map façade keeps the engine on its own side', () => {
     expect(mapFacade(stubMap()).centreElevation()).toBe(null);
   });
 
-  it('waits for the map to rest with its tiles in', async () => {
-    let idle;
+  it('waits for the map to rest with its tiles in, read off a frame the engine drew', async () => {
     let moving = true;
+    let loaded = false;
+    const frames = new Set();
+    let repaints = 0;
     const map = stubMap({
       isMoving: () => moving,
-      areTilesLoaded: () => false,
-      once: (name, handler) => name === 'idle' && (idle = handler),
+      areTilesLoaded: () => loaded,
+      on: (name, handler) => name === 'render' && frames.add(handler),
+      off: (name, handler) => name === 'render' && frames.delete(handler),
+      triggerRepaint: () => (repaints += 1),
+    });
+    const draw = () => [...frames].forEach((frame) => frame());
+    let done = false;
+    mapFacade(map).idle().then(() => (done = true));
+    // a frame is asked for, so a map with nothing else to draw still answers
+    expect(repaints).toBe(1);
+    draw();
+    await Promise.resolve();
+    expect(done).toBe(false);
+    moving = false;
+    loaded = true;
+    draw();
+    await Promise.resolve();
+    expect(done).toBe(true);
+    expect(frames.size).toBe(0);
+  });
+
+  it('never reads a map as idle before it drew the relief just laid', async () => {
+    // Right after the terrain is set the engine has asked for none of its
+    // tiles, so "every tile is in" holds until the next frame asks for them.
+    // Read at once, the view leaned over sea level and jumped when they landed.
+    let loaded = true;
+    const frames = new Set();
+    const map = stubMap({
+      isMoving: () => false,
+      areTilesLoaded: () => loaded,
+      on: (name, handler) => name === 'render' && frames.add(handler),
+      off: (name, handler) => name === 'render' && frames.delete(handler),
+      triggerRepaint: () => {},
     });
     let done = false;
     mapFacade(map).idle().then(() => (done = true));
     await Promise.resolve();
     expect(done).toBe(false);
-    moving = false;
-    idle();
+    // the frame asks for the relief tiles: still on their way
+    loaded = false;
+    [...frames].forEach((frame) => frame());
+    await Promise.resolve();
+    expect(done).toBe(false);
+    loaded = true;
+    [...frames].forEach((frame) => frame());
     await Promise.resolve();
     expect(done).toBe(true);
-    const ready = stubMap({ isMoving: () => false, areTilesLoaded: () => true });
-    await expect(mapFacade(ready).idle()).resolves.toBeUndefined();
   });
 
   it('holds the centre’s height through a gesture, and re-seats it after with the camera kept', () => {

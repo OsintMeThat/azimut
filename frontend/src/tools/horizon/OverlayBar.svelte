@@ -1,13 +1,12 @@
 <script>
   /**
-   * The band over the view while a photo or a video lies on it, read left to
-   * right as the work goes: which file; how much of it shows against the
-   * terrain, or a blink between the two; the skyline traced or found on it,
-   * and the photo's corners to pull; how far the terrain's skyline lies from
-   * the trace, with the fit that closes it as the one lit act, what the
-   * analyst knows about the photo to narrow it, the places it found when one
-   * alone did not stand out; then every gesture and key, and a way to take the
-   * photo away.
+   * The band over the view while a photo or a video lies on it holds what is
+   * done on the picture, read left to right as the work goes: how much of it
+   * shows against the terrain, or a blink between the two; the skyline traced
+   * or found on it, and the photo's corners to pull; how far the terrain's
+   * skyline lies from the trace, with the fit that closes it as the one lit
+   * act; then every gesture and key. What is said about the photo (its file,
+   * what is known of it, the places Fit found) is the inspector's Photo group.
    *
    * The photo and the terrain are named once, at the two ends of the slider,
    * and what is done to one sits by its name: a press on the name shows it
@@ -17,11 +16,8 @@
    */
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
-  import PhotoHints from './PhotoHints.svelte';
-  import { hintsSummary } from '../../lib/horizon/hints.js';
   import { clockTime } from '../../lib/inspect.js';
-  import { gapDegrees, gapSpan, isAtPlace } from '../../lib/horizon/overlay.js';
-  import { headingText } from '../../lib/horizon/geometry.js';
+  import { gapDegrees, gapSpan } from '../../lib/horizon/overlay.js';
   import { detailsTitle, editing, magnetTitle, pressTool, TRACE_TOOLS, toolBlocked, toolOn } from '../../lib/horizon/traceTools.js';
 
   let {
@@ -29,30 +25,17 @@
     overlay,
     /** How far the trace lies from the terrain's skyline (`traceGap`), or null. */
     gap = null,
-    /** Asked to lay another file. */
-    onchange = () => {},
     /** Asked to turn the view onto the trace. */
     onfit = () => {},
     /** Whether the fit is searching the turn. */
     fitting = false,
-    /** The places the search found, best first, when one alone did not stand out (`searchedPlaces`). */
-    places = [],
-    /** Asked to turn to one of them, by its index. */
-    onplace = () => {},
     /** Asked to find the skyline in the photo. */
     ondetect = () => {},
     /** Asked to show the photo above the terrain, the same frame on both. */
     onside = () => {},
     /** Whether that is being drawn. */
     siding = false,
-    /** The tab's view state, to tell which of the places found the view stands at. */
-    view = null,
-    /** Where the view looks now, which "roughly this way" takes. */
-    heading = 0,
   } = $props();
-
-  /** What is known about the photo, in the band's words; '' while nothing is. */
-  const told = $derived(hintsSummary(overlay.hints, overlay.reach));
 
   const terrainShare = $derived(Math.round((1 - overlay.mix) * 100));
   const what = $derived(overlay.source?.kind === 'video' ? 'Video' : 'Photo');
@@ -128,18 +111,7 @@
   let keysOpen = $state(false);
   let keysButton = $state();
   let keysBox = $state();
-  let hintsOpen = $state(false);
-  let hintsButton = $state();
-  let hintsBox = $state();
-  // the places a search found are listed for that search alone: a new one starts folded
-  let placesFor = $state.raw(null);
-  const placesOpen = $derived(places.length > 1 && placesFor === places);
-  let placesButton = $state();
-  let placesBox = $state();
   let bar = $state();
-  // a list folds down under its own button, wherever the band's narrowing left it
-  let hintsRight = $state(8);
-  let placesRight = $state(8);
 
   /**
    * How far the band has given up its words, 0 to `TIGHTEST`. Read off what
@@ -159,11 +131,11 @@
       if (mine !== narrowed || !bar || bar.scrollWidth <= bar.clientWidth) return;
     }
   }
-  // what the band holds changes its width: a file, a trace, the gap and what is known, the places found
+  // what the band holds changes its width: a trace, its tools, the gap
   $effect(() => {
-    void [overlay.source?.name, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
+    void [overlay.source?.kind, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
     void [overlay.linking, overlay.cutting, overlay.pen, overlay.front];
-    void [gap, told, places.length, fitting, away];
+    void [gap, fitting, away];
     narrow();
   });
   $effect(() => {
@@ -178,24 +150,14 @@
     return () => watch.disconnect();
   });
 
-  /** How far from the band's right edge a button ends, for the list it opens to line up under it. */
-  function rightOf(button) {
-    if (!bar || !button) return 8;
-    return Math.max(8, Math.round(bar.getBoundingClientRect().right - button.getBoundingClientRect().right));
-  }
-
-  /** A press anywhere else, or Escape, folds a list away. */
+  /** A press anywhere else, or Escape, folds the list of keys away. */
   function onWindowPointer(event) {
     if (keysOpen && !keysBox?.contains(event.target) && !keysButton?.contains(event.target)) keysOpen = false;
-    if (hintsOpen && !hintsBox?.contains(event.target) && !hintsButton?.contains(event.target)) hintsOpen = false;
-    if (placesOpen && !placesBox?.contains(event.target) && !placesButton?.contains(event.target)) placesFor = null;
   }
   function onWindowKey(event) {
-    if ((keysOpen || hintsOpen || placesOpen) && event.key === 'Escape') {
+    if (keysOpen && event.key === 'Escape') {
       event.stopPropagation();
       keysOpen = false;
-      hintsOpen = false;
-      placesFor = null;
     }
   }
 </script>
@@ -230,14 +192,6 @@
   role="toolbar"
   aria-label="Photo over the view"
 >
-  <button type="button" class="file" onclick={onchange} title="Lay another photo or video">
-    <Icon name={overlay.source?.kind === 'video' ? 'video' : 'image'} size={14} />
-    <span class="name">{overlay.source?.name ?? ''}</span>
-    <span class="chev"><Icon name="chevronDown" size={12} /></span>
-  </button>
-
-  <span class="divider" aria-hidden="true"></span>
-
   {@render handButton('photo')}
   <div class="zone fade" class:dim={overlay.blink}>
     <!-- the two ends say which way the slider goes, and a press goes all the way there -->
@@ -365,16 +319,6 @@
         >
           <Icon name="info" size={14} />
         </button>
-        <button
-          type="button"
-          class="act icon"
-          onclick={() => overlay.clearTrace()}
-          disabled={!overlay.strokes.length}
-          title="Clear the whole trace (Ctrl+Z brings it back)"
-          aria-label="Clear the whole trace"
-        >
-          <Icon name="trash" size={14} />
-        </button>
       </span>
     {/if}
     {#if isPhoto}
@@ -418,25 +362,6 @@
         <strong class="mono">Gap {gapDegrees(gap)}°</strong><span class="span">over {gapSpan(gap)}° of skyline</span>
       </span>
       <button
-        bind:this={hintsButton}
-        type="button"
-        class="act"
-        class:on={hintsOpen}
-        class:said={Boolean(told)}
-        aria-expanded={hintsOpen}
-        aria-controls="hz-photo-hints"
-        onclick={() => {
-          hintsRight = rightOf(hintsButton);
-          hintsOpen = !hintsOpen;
-        }}
-        title="Tell Fit what you know about the photo"
-        aria-label={told ? `What you know: ${told}` : 'What you know'}
-      >
-        <Icon name="sliders" size={14} /><span class="word" class:told={Boolean(told)}>{told || 'What you know'}</span><span
-          class="chev"><Icon name="chevronDown" size={12} /></span
-        >
-      </button>
-      <button
         type="button"
         class="act primary"
         disabled={overlay.locked || fitting}
@@ -449,24 +374,6 @@
           class="word long">{fitting ? 'Fitting…' : 'Fit to trace'}</span
         ><span class="word short">Fit</span>
       </button>
-      {#if places.length > 1}
-        <button
-          bind:this={placesButton}
-          type="button"
-          class="act"
-          class:on={placesOpen}
-          aria-expanded={placesOpen}
-          aria-controls="hz-photo-places"
-          onclick={() => {
-            placesRight = rightOf(placesButton);
-            placesFor = placesOpen ? null : places;
-          }}
-          title="The places on the turn that fit the trace"
-          aria-label="Places that fit"
-        >
-          <Icon name="compass" size={14} /><span class="mono">{places.length}</span><span class="chev"><Icon name="chevronDown" size={12} /></span>
-        </button>
-      {/if}
     {:else if overlay.tracing}
       <span class="say">{overlay.pen === 'ridge' ? 'Draw along a ridge seen against farther land.' : `Draw along the skyline in the ${what.toLowerCase()}.`}</span>
     {:else if overlay.linking}
@@ -493,50 +400,6 @@
   >
     <Icon name="keyboard" size={14} />
   </button>
-
-  <button
-    type="button"
-    class="act icon close"
-    onclick={() => overlay.remove()}
-    title="Take the {what.toLowerCase()} away"
-    aria-label="Take the {what.toLowerCase()} away"
-  >
-    <Icon name="x" size={14} />
-  </button>
-
-  {#if hintsOpen}
-    <div
-      bind:this={hintsBox}
-      class="pop"
-      id="hz-photo-hints"
-      role="dialog"
-      aria-label="What you know about the photo"
-      style:right="{hintsRight}px"
-    >
-      <h3>What you know about the photo</h3>
-      <PhotoHints {overlay} {heading} />
-    </div>
-  {/if}
-
-  {#if placesOpen}
-    <div
-      bind:this={placesBox}
-      class="pop places"
-      id="hz-photo-places"
-      role="dialog"
-      aria-label="Places that fit"
-      style:right="{placesRight}px"
-    >
-      <h3>Places that fit</h3>
-      {#each places as place, index (index)}
-        {@const at = view ? isAtPlace(view.camera, place) : false}
-        <button type="button" class="place" class:on={at} aria-pressed={at} disabled={overlay.locked} onclick={() => onplace(index)}>
-          <strong class="mono">{headingText(place.camera.heading, place.camera.fov)}</strong>
-          <span>explains {Math.round(Math.max(0, place.explained) * 100)}% of the trace</span>
-        </button>
-      {/each}
-    </div>
-  {/if}
 
   {#if keysOpen}
     <div bind:this={keysBox} class="pop keys" id="hz-photo-keys" role="dialog" aria-label="Gestures and keys">
@@ -571,7 +434,6 @@
     color: var(--text-2);
   }
   /* one kind of button all along the band: no box at rest, a soft ground on hover, amber when on */
-  .file,
   .act,
   .end {
     display: inline-flex;
@@ -590,17 +452,6 @@
   .act.icon {
     padding: 0 7px;
   }
-  .file {
-    max-width: 230px;
-    min-width: 56px;
-    color: var(--text-1);
-    font-weight: 600;
-  }
-  .file .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .file:hover,
   .act:hover,
   .end:hover {
     color: var(--text-1);
@@ -631,7 +482,6 @@
     background: var(--accent-hover, var(--accent));
     color: var(--accent-text);
   }
-  .file:focus-visible,
   .act:focus-visible,
   .end:focus-visible,
   input:focus-visible {
@@ -743,52 +593,6 @@
   .keys {
     width: 340px;
   }
-  .told {
-    color: var(--text-1);
-  }
-  /* something is said: the icon stays amber when the band is too narrow for the words */
-  .act.said :global(svg:first-child) {
-    color: var(--accent);
-  }
-  .places {
-    gap: 2px;
-    min-width: 240px;
-  }
-  .place {
-    display: grid;
-    grid-template-columns: 74px 1fr;
-    align-items: baseline;
-    gap: 10px;
-    padding: 6px 8px;
-    border: none;
-    border-radius: var(--r-md);
-    background: transparent;
-    color: var(--text-2);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .place strong {
-    color: var(--text-1);
-    font-weight: 600;
-  }
-  .place:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--text-1) 7%, transparent);
-  }
-  .place.on {
-    background: var(--accent-soft);
-  }
-  .place.on strong {
-    color: var(--accent);
-  }
-  .place:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 2px var(--accent);
-  }
-  .place:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
   .pop h3 {
     margin: 0 0 4px;
     color: var(--text-2);
@@ -841,9 +645,8 @@
     }
   }
   /* as the band narrows (`tight`), the gap's number and every button stay; their words go, the least needed
-     first, then the file's name (the Photo group says it) and the menus' arrows as the slider shortens, then the
-     slider leaves its two ends, which still set the photo or the terrain alone; past that the band takes a second
-     row */
+     first, as the slider shortens, then the slider leaves its two ends, which still set the photo or the terrain
+     alone; past that the band takes a second row */
   .short {
     display: none;
   }
@@ -858,27 +661,10 @@
   .t2 .minor {
     display: none;
   }
-  .t2 .file {
-    max-width: 160px;
-  }
   .t2 .fade input {
     width: 90px;
   }
   .t3 .word:not(.short) {
-    display: none;
-  }
-  .t3 .file {
-    max-width: 130px;
-  }
-  .chev {
-    display: inline-flex;
-  }
-  .t4 .file {
-    flex: none;
-    min-width: 0;
-  }
-  .t4 .file .name,
-  .t4 .chev {
     display: none;
   }
   .t4 .fade input {

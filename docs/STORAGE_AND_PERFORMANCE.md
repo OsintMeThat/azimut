@@ -222,6 +222,7 @@ carry enough information to detect staleness.
 | Trash journal | `case.db` (`trash`) | One row per delete action; payload loaded only for restore |
 | Deleted artifact bytes | `.trash/<group>/` | Numbered slots paired to their origin by the journal, retained until purge |
 | Thumbnails | `media/.thumbs/` | Cache; safe to remove at any time |
+| Video overviews | `media/.thumbs/` | Inspect's hover strip, waveform and last scan; cache, safe to remove |
 | Note bodies | `notes.md`, `notes/<folder>/<title>.md` | Graph keeps only id, title, folder, path; uniqueness is per folder |
 
 ## Packaging and frozen-binary constraints
@@ -661,6 +662,15 @@ the superseded ones become orphans that `repair` sweeps. Pixels are rendered to 
 unique temp file, validated, then renamed into `.thumbs/`. Readers never see a
 half-written thumbnail, and the Windows rename rules hold. Images decode through
 the process-wide Pillow pixel clamp.
+
+Inspect keeps a video's overview in the same directory under the same identity
+(`VIDEO_CACHE_GEN`): `<sha[:24]>-strip-g<gen>.jpg` holds the hover pictures, one
+per second up to 120, `-overview-g<gen>.json` their layout and the waveform, and
+`-scan-g<gen>.json` the last shot and sharpness scan. The overview is made when
+the analyst opens the video in Inspect, from one keyframe-only decode and one
+8 kHz mono audio decode reduced as it streams; the scan only when Scan is pressed.
+`repair` counts all three as referenced while the video is in the case, and the
+budget prunes them with the thumbnails.
 
 ### Inline for cheap, queued for heavy
 

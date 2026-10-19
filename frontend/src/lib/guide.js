@@ -184,6 +184,10 @@ export const GUIDE = [
         text: 'A video leads the strip and the frames cut from it follow. Click one to adjust, crop or analyse it.',
       },
       {
+        label: 'Capture and Save stay on top',
+        text: 'The panel keeps Capture frame over the video and Save to case over a frame, whichever tab is open.',
+      },
+      {
         label: 'Save to case is the one step that files media',
         text: 'A frame, an adjusted video or a collage becomes media marked as made here, so the graph can say what it came out of. The original is never overwritten.',
       },
@@ -530,9 +534,13 @@ export const GUIDE = [
         keys: [
           { combo: '← / →', does: 'steps one video frame, Shift for a second' },
           { combo: ', / .', does: 'the same step, on the keys mpv uses' },
-          { combo: 'Space', does: 'plays and pauses' },
+          { combo: 'Space or K', does: 'plays and pauses' },
+          { combo: 'J / L', does: 'slows the video down or speeds it up' },
+          { combo: 'C', does: 'captures the frame on screen' },
+          { combo: 'M', does: 'marks the moment in Moments' },
+          { combo: 'O, held', does: 'shows the picture without its adjustments' },
           { combo: 'Enter / Escape', does: 'applies the crop, or leaves it' },
-          { combo: 'Middle-drag', does: 'turns the frame, Ctrl for 15° steps' },
+          { combo: 'Middle-drag', does: 'turns the frame or the video, Ctrl for 15° steps' },
           { combo: 'Middle-click', does: 'stands it upright again' },
         ],
       },

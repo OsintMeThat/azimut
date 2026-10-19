@@ -14,10 +14,13 @@
   import LayerStylePalette from './LayerStylePalette.svelte';
   import choices from '../../lib/map/layerSymbols.json';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
 
   let {
     label, symbol = 'pin', colour = '#0072b2', point = true, mixed = false,
-    /** Styles already in the layer, `{ symbol, colour }`, offered first. */
+    /** The own icon worn, '' for none; the layer it is in, and that layer's `{key: {mode, name}}`. */
+    icon = '', layer = null, meta = null, own = true,
+    /** Styles already in the layer, `{ symbol, colour, icon? }`, offered first. */
     used = [],
     /** The groups a feature can be moved into, with the one it is in ('' for several). */
     groups = [], group = '', groupLabel = 'Group', ongroup = null,
@@ -31,13 +34,15 @@
   $effect(() => { onopen?.(open); });
   let trigger = $state(null);
   const picked = $derived(choices.find((choice) => choice.id === symbol) ?? choices[0]);
+  const worn = $derived(icon ? iconLibrary.look(icon, { caseId, layer, meta }) : null);
+  const wornName = $derived(worn ? worn.name || 'own icon' : picked.label);
   const colourName = $derived(layerPalette.nameOf(colour));
 </script>
 
 <button type="button" class="style-button" bind:this={trigger} aria-label={label} aria-expanded={open} {disabled}
-  title={mixed ? `${title}: several` : point ? `${title}: ${picked.label}${colourName ? `, ${colourName}` : ''}` : title}
+  title={mixed ? `${title}: several` : point ? `${title}: ${wornName}${colourName ? `, ${colourName}` : ''}` : title}
   onclick={() => (open = !open)}>
-  {#if point}<MarkerSymbol symbol={picked.id} {colour} {size} />
+  {#if point}<MarkerSymbol symbol={picked.id} {colour} icon={worn} {size} />
   {:else}<span class="dot" style={`--swatch:${colour}`}></span>{/if}
   {#if mixed}<span class="mixed">+</span>{/if}
   <Icon name="chevronDown" size={10} />
@@ -54,7 +59,7 @@
         </select>
       </label>
     {/if}
-    <LayerStylePalette {label} {symbol} {colour} {point} {mixed} {used} {caseId} {onpick} />
+    <LayerStylePalette {label} {symbol} {colour} {icon} {layer} {meta} {own} {point} {mixed} {used} {caseId} {onpick} />
   </FloatingMenu>
 {/if}
 

@@ -27,7 +27,8 @@
 </script>
 
 <LayerStyleButton {label} {size} {used} {groups} {disabled}
-  symbol={target.symbol} colour={target.colour} point={target.point} mixed={target.mixed} note={target.note}
+  symbol={target.symbol} colour={target.colour} icon={target.icon ?? ''} point={target.point} mixed={target.mixed} note={target.note}
+  layer={controller.editor?.name ?? null} meta={controller.icons}
   group={target.group} groupLabel={chosen.length ? 'Group' : 'Add to'} ongroup={regroup ? move : null}
   title={chosen.length ? 'Style' : 'Style of the next markers'}
   caseId={controller.editor?.caseId ?? null} onpick={pick} {onopen} />

@@ -68,7 +68,7 @@ describe('the layer edit bar', () => {
     show(LayerEditBar, { controller, ondone: vi.fn() });
     button('Style').click(); flushSync();
     button('Style Vessel icon').click();
-    expect(controller.updateSelection).toHaveBeenCalledWith({ symbol: 'badge-ship' });
+    expect(controller.updateSelection).toHaveBeenCalledWith({ symbol: 'badge-ship', icon: '' });
     unmount(held); document.body.innerHTML = '';
     const grouped = editor({ features: [point('b', { group: 'one' })], selection: ['b'] });
     show(LayerEditBar, { controller: grouped, ondone: vi.fn() });

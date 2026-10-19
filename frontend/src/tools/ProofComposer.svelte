@@ -6375,6 +6375,7 @@
             <LayerPlaces
               places={pointPlaces.get(i) ?? []}
               busy={pointLayers.busy}
+              caseId={caseState.current?.id ?? null}
               onopen={openPointInLayer}
               onremove={(place) => pointLayers.remove(caseState.current?.id, savedName, place)}
             />

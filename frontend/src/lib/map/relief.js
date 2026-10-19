@@ -34,8 +34,12 @@ export const RELIEF_SOURCE = 'relief-dem';
 export const MAX_TILT = 85;
 /** What the analyst may pick; 1 is the ground as it is. */
 export const EXAGGERATIONS = [1, 1.5, 2, 3];
-/** The tilt the 3D switch and the Tilt button lean a flat view to. */
-export const READING_TILT = 60;
+/**
+ * The tilt the 3D switch and the Tilt button lean a flat view to: enough for the
+ * relief to show, little enough that the view stays on one or two imagery
+ * levels. At 60° a view mixed four or five, each its own Esri picture.
+ */
+export const READING_TILT = 20;
 /**
  * How many tiles a tilted view may load against a flat one. The engine allows
  * three times as many by default, which toward the horizon is a wall of tiles

@@ -25,6 +25,7 @@ from ..engine import (
     ffmpeg,
     firms,
     google_tiles,
+    iconlibrary,
     reveal,
     scrapers,
     sentinel,
@@ -544,8 +545,8 @@ def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
     set up identically (POST /settings/import).
 
-    Three files in one: portable settings, templates.json, and the signature
-    logo base64-encoded. It carries the user's own API keys by design — it's a
+    Four things in one: portable settings, templates.json, the signature logo
+    base64-encoded, and the icon library, each icon's PNG base64-encoded. It carries the user's own API keys by design — it's a
     local download of secrets that already live in their workspace.
 
     Deliberately absent: export destinations (absolute paths chosen on this
@@ -570,6 +571,7 @@ def export_settings() -> Response:
         "settings": portable_settings,
         "templates": config.load_templates(),
         "signature_png": _signature_b64(),
+        "icons": iconlibrary.backup(),
     }
     payload = json.dumps(bundle, indent=2, ensure_ascii=False)
     return Response(
@@ -791,6 +793,18 @@ class ImportedSettings(BaseModel):
         return value if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) else DEFAULT_POST_TEMPLATE
 
 
+class ImportedIcon(BaseModel):
+    """One icon of a backed-up library; the picture faces the import's own checks."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(default="Icon", max_length=iconlibrary.MAX_NAME * 2)
+    group: str = Field(default="", max_length=iconlibrary.MAX_GROUP * 2)
+    mode: Literal["disc", "image"] = "image"
+    aliases: list[Annotated[str, Field(pattern=r"^[0-9a-f]{16}$")]] = Field(default_factory=list, max_length=iconlibrary.MAX_ALIASES)
+    png_base64: str = Field(max_length=iconlibrary.MAX_BACKUP_B64)
+
+
 class ImportIn(BaseModel):
     """A previously exported backup. Only keys Azimut recognises are applied —
     anything else in the file is ignored, so a hand-edited or foreign JSON can't
@@ -806,6 +820,8 @@ class ImportIn(BaseModel):
     # megabytes-long field only to reject it is work an untrusted body shouldn't
     # get. The decoded bytes then face config.valid_signature().
     signature_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
+    #: The icon library, each picture re-encoded as an import would be (`iconlibrary.restore`).
+    icons: list[ImportedIcon] = Field(default_factory=list, max_length=iconlibrary.MAX_ICONS)
 
 
 @router.post("/settings/import")
@@ -845,7 +861,8 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             signature = True
-    return {"imported": applied, "templates": templates, "signature": signature}
+    icons = iconlibrary.restore([icon.model_dump() for icon in body.icons]) if body.icons else 0
+    return {"imported": applied, "templates": templates, "signature": signature, "icons": icons}
 
 
 @router.post("/settings/keys/{provider}/status")

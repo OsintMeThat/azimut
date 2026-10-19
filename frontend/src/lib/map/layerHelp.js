@@ -67,3 +67,26 @@ export const ORIGIN_CHOICES = [
   ['', 'Me', 'Geolocated by me'],
   ['external', 'Others', 'Geolocated by someone else, drawn with a dashed rim'],
 ];
+
+/**
+ * The analyst's own icons, as the palette, the copy steps, a layer's menu and
+ * Settings › Icons word them.
+ */
+export const ICON_HELP = {
+  keepsColours: 'This icon keeps its own colours.',
+  layerIcons: "This layer's icons",
+  layerIconsHint: 'Icons this layer holds that are not in your library',
+  layerIcon: 'Icon from this layer',
+  noLibrary: 'Your own icons go here.',
+  openSettings: 'Settings › Icons takes PNG, JPEG, WebP, SVG or a zipped pack',
+  itsOwn: 'Its own icon',
+  itsOwnHint: 'The icon it wears on its map, copied with it',
+  toLibrary: 'Add these icons to my library',
+  toLibraryHint: "Files this layer's icons in Settings › Icons, for any layer of any case",
+};
+
+/** How an own icon is drawn, as Settings › Icons offers it: `[value, label, hover]`. */
+export const ICON_MODES = [
+  ['disc', 'In a disc', "Its shape inked on a disc of the marker's colour, as the app's icons are"],
+  ['image', 'As it is', 'Drawn in its own colours'],
+];

@@ -803,7 +803,7 @@
       <!-- one of the markers the case's layers draw, picked from the same palette -->
       <div class="rows">
         <span class="key" title="One of the markers the layers draw, in the colour picked">Symbol</span>
-        <LayerStyleButton label="Symbol and colour" title="Symbol" symbol={element.symbol ?? 'pin'} colour={element.colour ?? spec.theme.accent} {caseId} size={24}
+        <LayerStyleButton label="Symbol and colour" title="Symbol" symbol={element.symbol ?? 'pin'} colour={element.colour ?? spec.theme.accent} {caseId} size={24} own={false}
           onpick={(style) => { Object.assign(element, style); onsymbol?.({ ...style, size: element.box[2] }); }} />
         <span class="key" title="Its size on the page">Size</span>
         <span class="pair"><input type="range" aria-label="Symbol size" min="3" max="30" step="0.5" value={element.box[2]}

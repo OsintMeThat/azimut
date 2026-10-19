@@ -26,7 +26,7 @@
 
 <section class="bpanel" aria-label="Buildings settings">
   <header class="head">
-    <h3>Buildings</h3>
+    <h3>Buildings <span class="badge info beta" title="Still being refined: heights can be off">Beta</span></h3>
     <button class="close" aria-label="Close" title="Close" onclick={onclose}>
       <Icon name="x" size={13} />
     </button>
@@ -238,6 +238,13 @@
     flex: 1;
     font-size: var(--fs-sm, 12px);
     font-weight: 600;
+  }
+  .beta {
+    margin-left: 4px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    line-height: 16px;
+    vertical-align: 1px;
   }
   h4 {
     margin: 0 0 5px;

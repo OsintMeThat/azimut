@@ -108,8 +108,8 @@ test('the 3D switch stands the map on its relief and leans it to read it', async
   await page.getByRole('button', { name: '3D', exact: true }).click();
 
   // relief seen straight down looks like the flat map, so the switch leans it
-  await expect(tilt(page)).toHaveText(/Tilt 60°/, LEANS);
-  await expect.poll(() => address(page).get('t')).toBe('60');
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect.poll(() => address(page).get('t')).toBe('20');
   // a tilted view has no one scale, and a grid has no straight-down cells to sweep
   await expect(page.locator('.map')).toHaveClass(/\btilted\b/);
   await expect(gridSeat(page)).toBeDisabled();
@@ -117,16 +117,53 @@ test('the 3D switch stands the map on its relief and leans it to read it', async
   // Page Up and Down lean it further and back, as in Horizon
   await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('PageUp');
-  await expect(tilt(page)).toHaveText(/Tilt 70°/);
+  await expect(tilt(page)).toHaveText(/Tilt 30°/);
   await page.keyboard.press('PageDown');
   await page.keyboard.press('PageDown');
-  await expect(tilt(page)).toHaveText(/Tilt 50°/);
+  await expect(tilt(page)).toHaveText(/Tilt 10°/);
 
   // and off again: the flat map, its scale bar and its grid
   await page.getByRole('button', { name: '3D', exact: true }).click();
   await expect(page.locator('.map')).not.toHaveClass(/\btilted\b/);
   await expect(gridSeat(page)).toBeEnabled();
   await expect.poll(() => address(page).has('t')).toBe(false);
+});
+
+test('the 3D switch leans only once the relief under the view is in', async ({ page }) => {
+  await openMap(page);
+  // the relief held back: leaning now would tilt over sea level, and the whole
+  // view would jump by the height of the ground when it landed
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  await page.route('**/api/terrain/batch**', async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 0°/);
+  await page.waitForTimeout(1000);
+  await expect(tilt(page)).toHaveText(/Tilt 0°/);
+  release();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+});
+
+test('over relief the borders are lines, not Esri’s picture with its printed names', async ({ page }) => {
+  const { referenceTiles, placeNameTiles } = await openMap(page);
+  await expect.poll(() => referenceTiles.length).toBeGreaterThan(0);
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+
+  // new ground asks OpenFreeMap for its lines and Esri for nothing
+  const pictures = referenceTiles.length;
+  const lines = placeNameTiles.length;
+  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await expect.poll(() => placeNameTiles.length).toBeGreaterThan(lines);
+  expect(referenceTiles.length).toBe(pictures);
+
+  // flat again, Esri's picture is back
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect.poll(() => referenceTiles.length).toBeGreaterThan(pictures);
 });
 
 test('an address with a tilt opens that view, its zoom to the hundredth and its centre’s height', async ({ page }) => {

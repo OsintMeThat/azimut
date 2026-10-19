@@ -17,6 +17,7 @@
  * throwaway intermediate zoom levels mid-gesture, which a billed provider paid
  * for. MapLibre overzooms what it already holds instead.
  */
+import { BORDER_LINES } from './borders.js';
 import { FIRE_MARKS } from './firePoints.js';
 import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
 import { INFRASTRUCTURE } from './infrastructure.js';
@@ -61,6 +62,10 @@ const TROUBLE_SPEAKS_UP = 4;
  * may be a function too, for the same reason as `url`. A source is a tile
  * template, or `{ url }` naming a TileJSON for a provider whose tile paths
  * change with each build.
+ *
+ * `relief` is the form an overlay takes on a map standing on its relief
+ * (`setRelief`): its own `layer`, `vector` and `attribution`, in its place in
+ * the stack. A picture with names printed into it would lay them on the slopes.
  */
 const OVERLAYS = [
   {
@@ -127,6 +132,11 @@ const OVERLAYS = [
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community',
     maxZoom: 19,
+    relief: {
+      layer: 'basemap-boundaries-relief',
+      vector: BORDER_LINES,
+      attribution: 'OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors',
+    },
   },
   {
     // The towns, villages and hamlets the borders leave out (placeNames.js),
@@ -173,6 +183,14 @@ export function isGround(layerId, overlays = []) {
   return OVERLAYS.some(
     (overlay) => overlays.includes(overlay.id) && (layerId === overlay.layer || layerId.startsWith(`${overlay.layer}-`))
   );
+}
+
+/**
+ * The forms one overlay may be drawn in: its own, then the one it takes over
+ * relief, which stands in its place with its own layers and sources.
+ */
+function formsOf(overlay) {
+  return overlay.relief ? [overlay, { id: overlay.id, ...overlay.relief }] : [overlay];
 }
 
 /**
@@ -230,7 +248,7 @@ export function overlaySources(overlay, params) {
 }
 
 /** Ours, so the first layer that is not is where the basemap stops. */
-const OWNED = new Set([IMAGERY, ALTERNATE, ...OVERLAYS.flatMap(overlayLayers)]);
+const OWNED = new Set([IMAGERY, ALTERNATE, ...OVERLAYS.flatMap(formsOf).flatMap(overlayLayers)]);
 
 /**
  * Where a provider's tiles are fetched from.
@@ -377,6 +395,7 @@ export function createBasemaps(engine, hooks = {}) {
   let alternate = null; // `${providerId}@${cell}` of the second picture, when there is one
   let alternateMetered = null;
   let alternateOn = false;
+  let overRelief = false; // the map stands on its relief, so overlays take their `relief` form
 
   // Drawn shapes are appended by `surface.js`, so the first layer this module
   // does not own is where the basemap stops and a tool's own marks begin.
@@ -384,15 +403,27 @@ export function createBasemaps(engine, hooks = {}) {
     return map.getLayersOrder().find((id) => !OWNED.has(id));
   }
 
+  /** The form an overlay is drawn in on this map now. */
+  function formNow(overlay) {
+    const forms = formsOf(overlay);
+    return overRelief ? forms.at(-1) : forms[0];
+  }
+
+  /** An overlay's lowest layer on the map, in whichever form it is up, else null. */
+  function bottomOf(overlay) {
+    const up = formsOf(overlay).find((form) => map.getLayer(overlayLayers(form)[0]));
+    return up ? overlayLayers(up)[0] : null;
+  }
+
   /** Whether an overlay is on the map, read off its lowest layer. */
   function isUp(overlay) {
-    return Boolean(map.getLayer(overlayLayers(overlay)[0]));
+    return bottomOf(overlay) !== null;
   }
 
   /** The lowest overlay that is up, which is what the imagery goes under. */
   function lowestOverlay() {
     const up = OVERLAYS.find(isUp);
-    return up ? overlayLayers(up)[0] : ceiling();
+    return up ? bottomOf(up) : ceiling();
   }
 
   /**
@@ -401,7 +432,7 @@ export function createBasemaps(engine, hooks = {}) {
    */
   function under(overlay) {
     const above = OVERLAYS.slice(OVERLAYS.indexOf(overlay) + 1).find(isUp);
-    return above ? overlayLayers(above)[0] : ceiling();
+    return above ? bottomOf(above) : ceiling();
   }
 
   // Tiles that failed since the imagery source last settled, by source id.
@@ -455,7 +486,7 @@ export function createBasemaps(engine, hooks = {}) {
       // trouble is the picture, not a gap in it: say so without waiting.
       if (trouble.failed + 1 >= TROUBLE_SPEAKS_UP) report(source, key);
     }
-    const overlay = source && OVERLAYS.find((entry) => overlaySourceIds(entry).includes(source));
+    const overlay = source && OVERLAYS.find((entry) => formsOf(entry).some((form) => overlaySourceIds(form).includes(source)));
     if (overlay) onOverlayTrouble(overlay.id);
   }
   map.on('error', onError);
@@ -525,8 +556,9 @@ export function createBasemaps(engine, hooks = {}) {
 
   function addOverlay(overlay, params) {
     if (isUp(overlay)) return;
-    for (const [id, spec] of overlaySources(overlay, params)) map.addSource(id, spec);
     const before = under(overlay);
+    overlay = formNow(overlay);
+    for (const [id, spec] of overlaySources(overlay, params)) map.addSource(id, spec);
     if (overlay.vector) {
       for (const [name, image, options] of overlay.vector.images ?? []) {
         if (!map.hasImage(name)) map.addImage(name, image(), options);
@@ -561,8 +593,10 @@ export function createBasemaps(engine, hooks = {}) {
   }
 
   function dropOverlay(overlay) {
-    for (const id of overlayLayers(overlay)) if (map.getLayer(id)) map.removeLayer(id);
-    for (const id of overlaySourceIds(overlay)) if (map.getSource(id)) map.removeSource(id);
+    for (const form of formsOf(overlay)) {
+      for (const id of overlayLayers(form)) if (map.getLayer(id)) map.removeLayer(id);
+      for (const id of overlaySourceIds(form)) if (map.getSource(id)) map.removeSource(id);
+    }
   }
 
   return {
@@ -619,6 +653,21 @@ export function createBasemaps(engine, hooks = {}) {
       if (on) {
         shown.set(id, asked);
         addOverlay(overlay, params);
+      }
+    },
+
+    /**
+     * Say whether the map stands on its relief. The overlays drawn in another
+     * form over relief (`relief` in `OVERLAYS`) are laid again in it, in their
+     * place in the stack; the others are left alone.
+     */
+    setRelief(on) {
+      if (Boolean(on) === overRelief) return;
+      overRelief = Boolean(on);
+      for (const overlay of OVERLAYS) {
+        if (!overlay.relief || !shown.has(overlay.id)) continue;
+        dropOverlay(overlay);
+        addOverlay(overlay, JSON.parse(shown.get(overlay.id)));
       }
     },
 

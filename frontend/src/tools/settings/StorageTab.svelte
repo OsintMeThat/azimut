@@ -46,8 +46,8 @@
 <section class="group">
   <h3>Settings backup</h3>
   <p class="note">
-    Carries settings, keys, templates and your signature; export folders and
-    download logins stay here, so keep this backup private.
+    Carries settings, keys, templates, your icons and your signature;
+    export folders and download logins stay here, so keep this backup private.
   </p>
   <div class="links">
     <a class="btn btn-sm" href="/api/settings/export" download>

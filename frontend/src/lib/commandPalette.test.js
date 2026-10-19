@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPaletteKey, matchRuns, paletteTools } from './commandPalette.js';
+import { isPaletteKey, matchRuns, paletteSettings, paletteTools } from './commandPalette.js';
 
 describe('the palette shortcut', () => {
   it('opens with Control or Command, including from a text field', () => {
@@ -57,3 +57,14 @@ describe('tool search', () => {
     expect(paletteTools([{ id: 'proof', label: 'Geo Proof' }, { id: 'notebook', label: 'Compose notes' }], 'compose')[0].id).toBe('notebook');
   });
 });
+
+describe('Horizon settings search', () => {
+  it('finds a setting by its name or the words it goes by, only once something is typed', () => {
+    expect(paletteSettings('')).toEqual([]);
+    expect(paletteSettings('buildings')).toEqual([{ kind: 'setting', id: 'buildings', label: 'Buildings', detail: 'What the view shows', icon: 'horizon' }]);
+    expect(paletteSettings('haze').map((row) => row.id)).toEqual(['visibility']);
+    expect(paletteSettings('FOCAL').map((row) => row.label)).toEqual(['Field of view']);
+    expect(paletteSettings('nothing like this')).toEqual([]);
+  });
+});
+

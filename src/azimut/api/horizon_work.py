@@ -1,8 +1,9 @@
-"""The work on Horizon's bench, kept in the case so a reload brings it back (engine/horizon_work.py).
+"""The work on Horizon's bench, kept in the case so it can be resumed (engine/horizon_work.py).
 
 The browser writes the bench a moment after each change and reads it when the
-tab opens on a case. It is checked here as a saved view and a search are: the
-view's own models, Find's, and a photo that must be a file of this case.
+tab opens on a case, offering it back unless a save keeps all of it. It is
+checked here as a saved view and a search are: the view's own models, Find's,
+and a photo that must be a file of this case.
 """
 
 from __future__ import annotations
@@ -65,12 +66,15 @@ class FindWork(BaseModel):
 
 
 class WorkIn(BaseModel):
-    """The bench: the saved view it came from, the view as it stands, the photo laid, Find's setup."""
+    """The bench: the saved view it came from, the view as it stands, the photo laid, Find's setup, the mode."""
 
     view: str | None = Field(default=None, max_length=200)
     spec: ViewSpec | None = None
     photo: Photo | None = None
     find: FindWork | None = None
+    mode: Literal["view", "overlay", "find"] = "view"
+    #: A save keeps all of it (the saved view unchanged, the search's own setup): nothing to offer back.
+    saved: bool = False
 
 
 @router.get("/cases/{case_id}/horizon/work")

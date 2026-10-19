@@ -6,7 +6,7 @@
   import { entityLabel, entityTypes } from '../lib/entityTypes.svelte.js';
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
   import { openEntity } from '../lib/navigate.js';
-  import { matchRuns, paletteTools } from '../lib/commandPalette.js';
+  import { matchRuns, paletteSettings, paletteTools } from '../lib/commandPalette.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
 
@@ -29,6 +29,7 @@
     .filter((entry) => ['document', 'collected'].includes(entry.family))
     .map((entry) => entry.type));
   const toolRows = $derived(paletteTools(tools, loadedQuery));
+  const settingRows = $derived(paletteSettings(loadedQuery));
   const documentRows = $derived(documents.map((entity) => ({
     kind: 'document', id: entity.id, label: entity.label, caseId: documentCase,
     detail: [entityKindLabel(entity, entityLabel(entity.type)), entity.attrs?.folder].filter(Boolean).join(' · '),
@@ -39,7 +40,7 @@
     detail: [item.scratch ? 'Scratch' : 'Case', item.id === caseState.current?.id ? 'Current' : ''].filter(Boolean).join(' · '), icon: 'folder',
   })));
   const groups = $derived(loadedQuery
-    ? [{ label: 'Tools', rows: toolRows }, { label: 'Documents', rows: documentRows }, { label: 'Cases', rows: caseRows }]
+    ? [{ label: 'Tools', rows: toolRows }, { label: 'Horizon settings', rows: settingRows }, { label: 'Documents', rows: documentRows }, { label: 'Cases', rows: caseRows }]
     : [{ label: 'Recently added', rows: documentRows }, { label: 'Tools', rows: toolRows }, { label: 'Cases', rows: caseRows }]);
   const rows = $derived(groups.flatMap((group) => group.rows));
 
@@ -121,6 +122,7 @@
     if (row.kind === 'document' && row.caseId !== caseState.current?.id) return;
     try {
       if (row.kind === 'tool') { close(); uiState.tool = row.id; }
+      else if (row.kind === 'setting') { close(); uiState.horizonSetting = row.id; uiState.tool = 'horizon'; }
       else if (row.kind === 'document') { close(); await openEntity(row.entity); }
       else {
         if (row.id !== caseState.current?.id) await openCase(row.id);
@@ -160,7 +162,7 @@
       <Icon name="search" size={18} />
       <input
         use:focus bind:value={query} onkeydown={onKeydown}
-        placeholder="Search tools, cases and documents…" aria-label="Search tools, cases and documents"
+        placeholder="Search tools, settings, cases and documents…" aria-label="Search tools, settings, cases and documents"
         role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="go-to-results"
         aria-activedescendant={rows[selected] ? `go-to-result-${selected}` : undefined}
         autocomplete="off" spellcheck="false"

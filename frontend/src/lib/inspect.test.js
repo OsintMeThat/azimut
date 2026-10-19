@@ -7,7 +7,8 @@ import {
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   exportFrame, COLLAGE_MAX_EXPORT_PIXELS, clockTime,
-  COLLAGE_DEFAULT_SIZE,
+  COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
+  presetValues, previewOps,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -536,5 +537,50 @@ describe('clockTime', () => {
     expect(clockTime(64.5)).toBe('1:04.5');
     expect(clockTime(0)).toBe('0:00.0');
     expect(clockTime(-3)).toBe('0:00.0');
+  });
+});
+
+describe('adjusting a frame', () => {
+  const FILTERS = [
+    { id: 'brightness', params: [{ name: 'amount', default: 1 }], css: 'brightness({v})' },
+    { id: 'contrast', params: [{ name: 'amount', default: 1 }], css: 'contrast({v})' },
+    { id: 'sharpness', params: [{ name: 'amount', default: 1 }] },
+    { id: 'clahe', params: [{ name: 'amount', default: 0 }] },
+    { id: 'grayscale', params: [{ name: 'on', type: 'toggle', default: 0 }], css: 'grayscale({v})' },
+    { id: 'channel', params: [{ name: 'pick', type: 'choice', default: 0, options: [] }] },
+  ];
+  const neutral = { brightness: 1, contrast: 1, sharpness: 1, clahe: 0, grayscale: 0, channel: 0 };
+
+  it('keeps the filters that came first in their order, so a filed frame stays filed', () => {
+    const before = ['brightness', 'contrast', 'saturation', 'gamma', 'sharpness', 'rotate', 'grayscale', 'invert'];
+    expect(ADJUST_ORDER.filter((id) => before.includes(id))).toEqual(before);
+    for (const id of ['denoise', 'autolevels', 'clahe', 'channel']) expect(ADJUST_ORDER).toContain(id);
+  });
+
+  it('sends a channel and local contrast with the rest of the pipeline', () => {
+    const ops = buildOps(FILTERS, { ...neutral, clahe: 2, channel: 1, brightness: 1.2 });
+    expect(ops.map((o) => o.op)).toEqual(['clahe', 'brightness', 'channel']);
+    expect(ops.find((o) => o.op === 'channel').params).toEqual({ pick: 1 });
+  });
+
+  it('asks the server for the picture only when a filter has no CSS twin', () => {
+    expect(needsRender(FILTERS, { ...neutral, brightness: 1.3 })).toBe(false);
+    expect(needsRender(FILTERS, { ...neutral, sharpness: 2 })).toBe(true);
+    expect(needsRender(FILTERS, { ...neutral, channel: 2 })).toBe(true);
+  });
+
+  it('renders the preview turned and adjusted but leaves the crop to the viewer', () => {
+    const frame = { sourceOps: [{ op: 'rotate', params: { angle: 90 } }], rotation: 0, adjust: { ...neutral, clahe: 1 }, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } };
+    expect(previewOps(FILTERS, frame).map((o) => o.op)).toEqual(['rotate', 'clahe']);
+  });
+
+  it('sets a preset over the defaults, skipping a slider this server lacks', () => {
+    const text = ADJUST_PRESETS.find((p) => p.id === 'text');
+    const values = presetValues(FILTERS, text);
+    expect(values).toMatchObject({ grayscale: 1, contrast: 1.5, sharpness: 2.2, clahe: 1.2, brightness: 1 });
+    expect(values).not.toHaveProperty('saturation');
+    expect(activePreset(FILTERS, values)).toBe('text');
+    expect(activePreset(FILTERS, { ...values, brightness: 1.1 })).toBe(null);
+    expect(activePreset(FILTERS, neutral)).toBe(null);
   });
 });

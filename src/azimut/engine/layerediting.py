@@ -7,6 +7,7 @@ file, and its icons and derived drawing use the existing map-layer lifecycle.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import re
@@ -17,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import layout
 from ..workspace import Case
-from . import layerlinks, maplayers, satellite
+from . import iconlibrary, layerlinks, maplayers, satellite
 
 EDITABLE = "editable"
 WORK_FIELDS = ("title", "description", "document", "groups", "hidden", "marker_serial", "shape_serial",
@@ -34,6 +35,10 @@ SYMBOLS = ("pin", "circle", "star", "flag") + tuple(f"badge-{icon}" for icon in 
 ))
 #: What happened to the thing a marker shows, drawn as a stroke across its badge.
 STATUSES = ("damaged", "destroyed")
+#: How a layer draws and names the pictograms it holds, `{key: {"mode", "name"}}`
+#: (`iconlibrary.MODES`). A key absent here came with an imported map: it is drawn
+#: as it is, in its own colours.
+ICON_META = "icon_meta"
 #: How many addresses one marker cites.
 MAX_LINKS = 10
 MAX_LINK = 2000
@@ -159,11 +164,134 @@ def _group(spec: dict[str, Any], key: str | None) -> dict[str, Any]:
     raise maplayers.LayerError("this group is no longer in the layer")
 
 
+def adopt_icon(case: Case, layer: str, spec: dict[str, Any], key: str, *, source: str | None = None) -> None:
+    """Make sure the layer holds pictogram `key`, copying it in when it does not.
+
+    From `source`, another layer of the case, when a point is copied out of it
+    with its own icon; else from the analyst's library. The copy is what the
+    case keeps: a bundle opened elsewhere draws it, and the library can lose it
+    without a map changing. A pick from the library also brings the way the
+    library draws it now, so switching an icon to a disc there and picking it
+    again redraws this layer's markers that wear it.
+    """
+    if not iconlibrary.is_key(key):
+        raise maplayers.LayerError("choose an icon from the layer palette")
+    meta = spec.setdefault(ICON_META, {})
+    held = maplayers.icon_members(case, layer)
+    if source and source != layer:
+        if key in held:
+            return
+        try:
+            data = maplayers.icon(case, source, key)
+        except maplayers.LayerError as exc:
+            raise maplayers.LayerError("that layer no longer holds this icon") from exc
+        look = (maplayers._read_spec(case, source).get(ICON_META) or {}).get(key) or {}
+        meta[key] = {"mode": look.get("mode") if look.get("mode") in iconlibrary.MODES else "image",
+                     "name": str(look.get("name") or "")}
+    else:
+        entry = iconlibrary.entry(key)
+        if entry is None:
+            if key in held:
+                return
+            raise maplayers.LayerError("this icon is no longer in your library")
+        meta[key] = {"mode": entry["mode"], "name": entry["name"]}
+        if key in held:
+            return
+        try:
+            data = iconlibrary.png(key)
+        except iconlibrary.IconError as exc:
+            raise maplayers.LayerError(str(exc)) from exc
+    spec.setdefault("snapshot", {})["icons"] = maplayers.add_icons(case, layer, {key: data})
+
+
+def _restyle_icon(case: Case, layer: str, spec: dict[str, Any], targets: list[dict[str, Any]],
+                  changes: dict[str, Any], *, group: bool = False) -> None:
+    """What a pick does to the pictogram markers or a group wear.
+
+    Picking an icon puts it on them, once the layer holds its own copy. Picking
+    one of the app's symbols takes it off. A colour leaves it where it is: an
+    icon drawn in a disc takes the colour, and one drawn as it is keeps its own,
+    which the palette says. Losing a map's own icon to a colour pick was the one
+    way a copied map's look went for good.
+    """
+    source = changes.pop("icon_from", None)
+    if "icon" in changes:
+        key = changes.pop("icon") or ""
+        if key:
+            adopt_icon(case, layer, spec, key, source=source)
+    elif "symbol" in changes:
+        key = ""
+    else:
+        return
+    for target in targets:
+        if key:
+            target["icon"] = key
+        elif group:
+            target.pop("icon", None)
+        else:
+            target["icon"] = ""
+
+
+def layer_icons(case: Case, name: str) -> list[dict[str, Any]]:
+    """The pictograms a layer holds, most worn first, for a palette and for the library.
+
+    Each says its `digest`, the hash of its bytes as stored, which a library
+    icon taken from this layer remembers; how it is drawn; a `name`, the one it
+    was given or the group that wears it most; and how many features wear it.
+    """
+    with case.lock:
+        spec = maplayers._read_spec(case, name)
+        members = maplayers.icon_members(case, name)
+        if not members:
+            return []
+        meta = spec.get(ICON_META) or {}
+        if editable(spec):
+            features = spec["document"]["features"]
+        else:
+            features = json.loads(maplayers.drawing(case, name).read_text(encoding="utf-8")).get("features") or []
+        worn: dict[str, dict[str, int]] = {}
+        for feature in features:
+            properties = feature.get("properties") or {}
+            if properties.get("icon") in members:
+                groups = worn.setdefault(properties["icon"], {})
+                category = str(properties.get("category") or "")
+                groups[category] = groups.get(category, 0) + 1
+        out: list[dict[str, Any]] = []
+        for key, data in members.items():
+            look = meta.get(key) or {}
+            counts = worn.get(key, {})
+            commonest = max(counts, key=lambda category: counts[category]) if counts else ""
+            out.append({"key": key, "digest": hashlib.sha256(data).hexdigest()[:iconlibrary.KEY_LENGTH],
+                        "mode": look.get("mode") if look.get("mode") in iconlibrary.MODES else "image",
+                        "name": str(look.get("name") or commonest or ""), "count": sum(counts.values())})
+        out.sort(key=lambda icon: (-int(icon["count"]), str(icon["name"]).lower(), str(icon["key"])))
+        return out
+
+
+def icons_to_library(case: Case, name: str, keys: list[str]) -> dict[str, Any]:
+    """Put some of a layer's pictograms in the analyst's library, filed under the layer's name."""
+    with case.lock:
+        spec = maplayers._read_spec(case, name)
+        members = maplayers.icon_members(case, name)
+        held = {icon["key"]: icon for icon in layer_icons(case, name)}
+    title = str(spec.get("title") or name)
+    items = [{"png": members[key], "name": held[key]["name"] or f"{title} icon", "group": title,
+              "mode": held[key]["mode"], "alias": held[key]["digest"]}
+             for key in dict.fromkeys(keys) if key in members]
+    if not items:
+        raise maplayers.LayerError("this layer holds none of those icons")
+    try:
+        return iconlibrary.add_pngs(items)
+    except iconlibrary.IconError as exc:
+        raise maplayers.LayerError(str(exc)) from exc
+
+
 def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
     """Rebuild a drawing from the working collection, including an empty one."""
     groups = {group["id"]: group for group in _groups(spec)}
     features = copy.deepcopy(spec["document"]["features"])
     named = {entry["colour"]: entry["name"] for entry in palette(case)} if case else {}
+    meta = spec.get(ICON_META) or {}
     if case:
         layerlinks.follow(case, features, rendered=True)
     for feature in features:
@@ -181,7 +309,12 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
         if group.get("events"):
             properties["event"] = True
         if group["mode"] == "uniform":
-            properties.update({"colour": group["colour"], "symbol": group["symbol"], "icon": ""})
+            properties.update({"colour": group["colour"], "symbol": group["symbol"], "icon": group.get("icon") or ""})
+        if properties.get("icon"):
+            look = meta.get(properties["icon"]) or {}
+            properties["icon_mode"] = look.get("mode") if look.get("mode") in iconlibrary.MODES else "image"
+            if look.get("name"):
+                properties["icon_name"] = look["name"]
         if named.get(str(properties.get("colour") or "").lower()):
             properties["colour_name"] = named[str(properties["colour"]).lower()]
     # The first group is on top, for points and shapes alike.
@@ -244,9 +377,11 @@ def digest(spec: dict[str, Any]) -> str:
 
 
 def render_digest(case: Case, spec: dict[str, Any]) -> str:
-    """Redraw when a linked entity moves, goes to the Trash or comes back."""
+    """Redraw when a linked entity moves, goes to the Trash or comes back, or an icon is drawn another way."""
     links = layerlinks.digest_part(case, spec["document"]["features"])
-    return maplayers.digest((digest(spec) + json.dumps([links, palette(case)])).encode())
+    # a layer with no icon looks keeps the fingerprint it had, so its cache is not rebuilt for nothing
+    looks = json.dumps([links, palette(case)]) + (json.dumps(spec[ICON_META], sort_keys=True) if spec.get(ICON_META) else "")
+    return maplayers.digest((digest(spec) + looks).encode())
 
 
 def _save(case: Case, name: str, spec: dict[str, Any]) -> dict[str, Any]:
@@ -262,7 +397,11 @@ def _save(case: Case, name: str, spec: dict[str, Any]) -> dict[str, Any]:
     uniform = {group["name"]: group for group in _groups(spec) if group["mode"] == "uniform"}
     for entry in spec["summary"]["categories"]:
         if entry["name"] in uniform:
-            entry.update(symbol=uniform[entry["name"]]["symbol"], colour=uniform[entry["name"]]["colour"])
+            group = uniform[entry["name"]]
+            entry.update(symbol=group["symbol"], colour=group["colour"])
+            if group.get("icon"):
+                look = (spec.get(ICON_META) or {}).get(group["icon"]) or {}
+                entry.update(icon=group["icon"], icon_mode=look.get("mode") or "image")
     # How many features wear each colour, which the legend names from the case palette.
     colours: dict[str, int] = {}
     for feature in parsed["geojson"]["features"]:
@@ -379,6 +518,7 @@ def read(case: Case, name: str) -> dict[str, Any]:
         layerlinks.follow(case, document["features"], rendered=True)
         return {"layer": _row(case, name, spec), "document": document,
                 "groups": copy.deepcopy(_groups(spec)),
+                "icons": copy.deepcopy(spec.get(ICON_META) or {}),
                 "checkpoint": (spec.get("edit_checkpoint") or {}).get("id")}
 
 
@@ -864,11 +1004,14 @@ def _refuse_history(features: list[dict[str, Any]], act: str) -> None:
 def add_marker(
     case: Case, layer: str, *, lat: float, lon: float, name: str,
     colour: str, symbol: str, description: str = "",
-    group: str | None = None, at: str | None = None, **fields: Any,
+    group: str | None = None, at: str | None = None, icon: str = "", icon_from: str | None = None,
+    **fields: Any,
 ) -> dict[str, Any]:
     with case.lock:
         spec = _spec(case, layer)
         target = _group(spec, group)
+        if icon:
+            adopt_icon(case, layer, spec, icon, source=icon_from)
         spec["hidden"] = [name for name in spec.get("hidden", []) if name != target["name"]]
         features = spec["document"]["features"]
         if len(features) >= maplayers.MAX_FEATURES:
@@ -883,14 +1026,14 @@ def add_marker(
             name=name.strip() or f"Marker {sequence}", description=description,
             category=target["name"], colour=colour,
         )
-        properties.update({"key": key, "symbol": symbol, "group": target["id"]})
+        properties.update({"key": key, "symbol": symbol, "group": target["id"], "icon": icon})
         apply_fields(properties, fields)
         marker = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
                   "properties": properties}
         _born(spec, marker, at)
         features.append(marker)
         row = _save(case, layer, spec)
-        return {"layer": row, "marker": marker, "groups": _groups(spec)}
+        return {"layer": row, "marker": marker, "groups": _groups(spec), "icons": spec.get(ICON_META) or {}}
 
 
 def _marker(spec: dict[str, Any], key: str) -> dict[str, Any]:
@@ -924,6 +1067,7 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
             raise maplayers.LayerError("switch “Track over time” on to say when it shows")
         moment = _timed(spec, stored, changes.pop("at", None))
         drop = bool(changes.pop("drop_state", False))
+        _restyle_icon(case, layer, spec, [properties], changes)
         if moment is not None and properties.get("states") and "date" in changes:
             raise maplayers.LayerError("this feature's days are its history; change them there")
         shape = None
@@ -971,11 +1115,9 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
             set_end(stored, end)
         if unknown:
             set_end_unknown(stored)
-        # Choosing an app symbol replaces the imported pictogram on this marker.
-        if "symbol" in changes or "colour" in changes:
-            properties["icon"] = ""
         row = _save(case, layer, spec)
-        return {"layer": row, "marker": copy.deepcopy(stored), "groups": _groups(spec)}
+        return {"layer": row, "marker": copy.deepcopy(stored), "groups": _groups(spec),
+                "icons": spec.get(ICON_META) or {}}
 
 
 def promote(case: Case, layer: str, key: str) -> dict[str, Any]:
@@ -1036,6 +1178,7 @@ def update_group(case: Case, layer: str, key: str, changes: dict[str, Any]) -> d
         for field in ("mode", "colour", "symbol", "size", "stroke"):
             if field in changes:
                 group[field] = changes[field]
+        _restyle_icon(case, layer, spec, [group], changes, group=True)
         apply_style(group, {field: changes[field] for field in GROUP_STYLE if field in changes})
         if "labels" in changes:
             if changes["labels"]:
@@ -1176,6 +1319,7 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
                 return point
             return [shifted(child) for child in node]
 
+        _restyle_icon(case, layer, spec, [by_key[key]["properties"] for key in keys], changes)
         moving = [key for key in keys if offset and not by_key[key]["properties"].get("entity_id")]
         undo = _undo(spec, before=[{"key": key, "geometry": copy.deepcopy(by_key[key]["geometry"]),
                                     "time": _time_fields(by_key[key])}
@@ -1215,8 +1359,6 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
             apply_fields(props, {field: value for field, value in changes.items() if field in CLEARABLE
                                  and not ((moment is not None or props.get("states")) and field == "status")
                                  and not (props.get("states") and field == "date")})
-            if "symbol" in changes or "colour" in changes:
-                props["icon"] = ""
             if start is not None:
                 set_start(by_key[key], start)
             if end is not None:
@@ -1235,6 +1377,7 @@ def _group_back(raw: dict[str, Any]) -> dict[str, Any]:
     group: dict[str, Any] = {"id": raw["id"], "name": maplayers._text(raw["name"], maplayers.MAX_NAME),
                              "mode": raw.get("mode") if raw.get("mode") in ("uniform", "individual") else "individual",
                              "colour": raw.get("colour") or "#0072b2", "symbol": raw.get("symbol") or "pin",
+                             **({"icon": raw["icon"]} if iconlibrary.is_key(raw.get("icon")) else {}),
                              "size": min(3.0, max(0.5, float(raw.get("size") or 1))),
                              "stroke": min(12.0, max(0.5, float(raw.get("stroke") or 2)))}
     if not group["name"]:
@@ -1559,7 +1702,8 @@ def remove_group(case: Case, layer: str, key: str) -> dict[str, Any]:
 
 
 def add_links(case: Case, layer: str, items: list[dict[str, Any]], group: str | None, *,
-              symbol: str | None = None, colour: str | None = None, status: str = "") -> dict[str, Any]:
+              symbol: str | None = None, colour: str | None = None, status: str = "",
+              icon: str = "") -> dict[str, Any]:
     """Add markers that follow case items, in the group's style unless given one.
 
     Each item names an entity and the point it was picked at, which picks one of
@@ -1576,6 +1720,8 @@ def add_links(case: Case, layer: str, items: list[dict[str, Any]], group: str | 
     with case.lock:
         spec = _spec(case, layer)
         target = _group(spec, group)
+        if icon:
+            adopt_icon(case, layer, spec, icon)
         spec["hidden"] = [name for name in spec.get("hidden", []) if name != target["name"]]
         features = spec["document"]["features"]
         layerlinks.follow(case, features, rendered=False)
@@ -1595,8 +1741,9 @@ def add_links(case: Case, layer: str, items: list[dict[str, Any]], group: str | 
                     changed |= _follow_item(case, feature, entity, labels={picked.get("label") or ""})
                 continue
             properties = maplayers._properties(category=target["name"], colour=colour or target["colour"])
-            properties.update({"key": uuid.uuid4().hex, "entity_id": entity["id"],
-                               "group": target["id"], "symbol": symbol or target["symbol"]})
+            properties.update({"key": uuid.uuid4().hex, "entity_id": entity["id"], "group": target["id"],
+                               "symbol": symbol or target["symbol"],
+                               "icon": icon if icon or symbol else target.get("icon") or ""})
             feature = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
                        "properties": properties}
             _follow_item(case, feature, entity)
@@ -1808,12 +1955,17 @@ def layer_targets(case: Case, entity_id: str | None = None) -> list[dict[str, An
                 drawn = group if group.get("mode") == "uniform" else properties
                 style = {"symbol": drawn.get("symbol") or "pin",
                          "colour": str(drawn.get("colour") or group.get("colour") or "#0072b2").lower()}
+                if drawn.get("icon"):
+                    look = (spec.get(ICON_META) or {}).get(drawn["icon"]) or {}
+                    style.update(icon=drawn["icon"], icon_mode=look.get("mode") or "image")
                 if style not in styles:
                     styles.append(style)
             rows.append({
                 "name": row["name"], "title": row["title"],
-                "groups": [{field: group.get(field) for field in ("id", "name", "mode", "colour", "symbol")}
+                "groups": [{**{field: group.get(field) for field in ("id", "name", "mode", "colour", "symbol")},
+                            **({"icon": group["icon"]} if group.get("icon") else {})}
                            for group in _groups(spec)],
+                "icons": copy.deepcopy(spec.get(ICON_META) or {}),
                 "markers": [{"key": f["properties"]["key"], "group": f["properties"].get("group"),
                              "lon": f["geometry"]["coordinates"][0], "lat": f["geometry"]["coordinates"][1]}
                             for f in linked],

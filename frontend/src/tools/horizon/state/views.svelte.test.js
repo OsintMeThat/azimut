@@ -319,17 +319,17 @@ describe('opening a view', () => {
     expect(views.current).toEqual({ name: 'North ridge', title: 'North ridge' });
   });
 
-  it('lays a bench with no saved view, its eye left alone when told so', async () => {
+  it('lays a bench with no saved view: its eye, then its photo while the case holds it', async () => {
     const spec = await savedView();
     const { view, overlay, views } = setup();
     view.standAt({ lat: 45, lon: 6 });
-    await views.layWork({ spec: { ...spec, photo: null }, photo: spec.photo }, { photoHere: true, eye: false });
-    expect(view.observer).toMatchObject({ lat: 45, lon: 6 });
+    await views.layWork({ spec: { ...spec, photo: null }, photo: spec.photo }, { photoHere: false });
+    expect(view.observer).toEqual(spec.eye);
+    expect(overlay.source).toBeNull();
+    await views.layWork({ spec: { ...spec, photo: null }, photo: spec.photo }, { photoHere: true });
     expect(overlay.source.path).toBe(PHOTO);
     expect(overlay.strokes).toHaveLength(1);
     expect(views.current).toBeNull();
-    await views.layWork({ spec: { ...spec, photo: null }, photo: spec.photo }, { photoHere: false });
-    expect(view.observer).toEqual(spec.eye);
   });
 
   it('opens without a photo the case no longer holds, and says so', async () => {

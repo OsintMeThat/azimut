@@ -174,11 +174,16 @@ def export(case: Case, name: str, fmt: str, encoded_icons: dict[str, str], *,
         _element(_element(style, "PolyStyle"), "color", f"40{kml_colour[2:]}")
         icon_style = _element(style, "IconStyle")
         _element(icon_style, "scale", props.get("icon_scale", 1))
-        key = icon_key(str(props.get("symbol") or "pin"), f"#{colour}", str(props.get("status") or ""),
-                       props.get("provenance") == "external")
-        png = images.get(key)
         own = props.get("icon")
-        if own and fmt == "kmz":
+        marks = (str(props.get("status") or ""), props.get("provenance") == "external")
+        key = icon_key(str(props.get("symbol") or "pin"), f"#{colour}", *marks)
+        png = images.get(key)
+        # An icon the browser drew as the map does, in its disc or with its status
+        # stroke, goes as drawn; else the layer's own picture, as it is.
+        drawn = images.get(icon_key(f"own-{own}", f"#{colour}", *marks)) if own else None
+        if drawn and fmt == "kmz":
+            png = drawn
+        elif own and fmt == "kmz":
             try:
                 png = maplayers.icon(case, name, own)
             except maplayers.LayerError:

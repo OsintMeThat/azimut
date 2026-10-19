@@ -30,6 +30,8 @@
   import StorageTab from './settings/StorageTab.svelte';
   import SystemTab from './settings/SystemTab.svelte';
   import TemplatesTab from './settings/TemplatesTab.svelte';
+  import IconsTab from './settings/IconsTab.svelte';
+  import { iconLibrary } from '../lib/iconLibrary.svelte.js';
 
   // Keep workflow choices above app maintenance in the settings rail.
   const TABS = [
@@ -37,6 +39,7 @@
     { id: 'publishing', label: 'Publishing', icon: 'edit' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
     { id: 'templates', label: 'Templates', icon: 'layers' },
+    { id: 'icons', label: 'Icons', icon: 'star' },
     { id: 'extension', label: 'Capture extension', icon: 'crop' },
     { id: 'storage', label: 'Storage', icon: 'folder' },
     { id: 'system', label: 'System', icon: 'compass' },
@@ -385,10 +388,12 @@
         `${r.imported.length} setting${r.imported.length === 1 ? '' : 's'}`,
         r.templates ? `${r.templates} template${r.templates === 1 ? '' : 's'}` : null,
         r.signature ? 'signature' : null,
+        r.icons ? `${r.icons} icon${r.icons === 1 ? '' : 's'}` : null,
       ].filter(Boolean);
       toast(`Backup restored: ${restored.join(', ')}`, 'ok');
       await load();
       await loadTemplates();
+      if (r.icons) iconLibrary.load(true);
       sigBust += 1; // the logo changed on disk; re-fetch it past the cache
     } catch (e) {
       toast(`Could not import the backup: ${e.message}`, 'danger');
@@ -995,6 +1000,10 @@
 
       {#if tab === 'templates'}
         <TemplatesTab {newTemplate} {editTemplate} {duplicateTemplate} {savePrefs} bind:deleteTpl />
+      {/if}
+
+      {#if tab === 'icons'}
+        <IconsTab />
       {/if}
     </div>
   </div>

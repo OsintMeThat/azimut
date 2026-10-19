@@ -257,14 +257,19 @@ describe('finding a pin', () => {
     expect(document.querySelector('.find input')).toBeTruthy();
   });
 
-  it('offers nothing to search on a layer that is switched off', () => {
-    // a match is somewhere to go, and a layer nobody is drawing has nowhere
-    show({ rows: [{ ...LAYER, enabled: false }], search: finder(null) });
+  it('keeps the box in sight on a layer that is switched off, saying to turn it on', () => {
+    // a match is somewhere to go, and a layer nobody is drawing has nowhere; a box
+    // that vanished with the layer read as a search taken away
+    const search = finder(null);
+    show({ rows: [{ ...LAYER, enabled: false }], search });
     unfold('Sightings');
     byText('.legend-head', '2 groups').click();
     flushSync();
 
-    expect(document.querySelector('.find input')).toBeNull();
+    const box = document.querySelector('.find input');
+    expect(box.disabled).toBe(true);
+    expect(box.getAttribute('placeholder')).toBe('Turn the layer on to find a pin');
+    expect(search).not.toHaveBeenCalled();
     expect(rows('.cat')).toHaveLength(2);
   });
 

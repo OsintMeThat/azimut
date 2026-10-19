@@ -65,7 +65,7 @@ function settingsBlob() {
 
 const { default: Settings } = await import('./Settings.svelte');
 
-const TABS = ['general', 'publishing', 'imagery', 'templates', 'extension', 'storage', 'system'];
+const TABS = ['general', 'publishing', 'imagery', 'templates', 'icons', 'extension', 'storage', 'system'];
 
 let live = null;
 
@@ -139,6 +139,13 @@ describe('each section', () => {
     const text = show('templates');
     expect(text).toContain('No proof templates yet.');
     expect(text).toContain('No post templates yet.');
+  });
+
+  it('Icons says where icons come from and that maps keep their copies', () => {
+    const text = show('icons');
+    expect(text).toContain('Import files');
+    expect(text).toContain('Import a folder');
+    expect(text).toContain('so removing one here changes no map');
   });
 
   it('Extension offers the download and the pairing token', () => {

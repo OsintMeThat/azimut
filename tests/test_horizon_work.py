@@ -61,13 +61,16 @@ def test_the_bench_comes_back_as_it_was_left(client):
     cid = _case(client, "Bench")
     path = _photo(client, cid)
     spec = _spec()
-    work = {"view": None, "spec": spec, "photo": _photo_work(path), "find": _find_work()}
+    work = {"view": None, "spec": spec, "photo": _photo_work(path), "find": _find_work(), "mode": "find"}
 
     assert client.put(f"/api/cases/{cid}/horizon/work", json=work).status_code == 200
     back = client.get(f"/api/cases/{cid}/horizon/work").json()
 
     assert back["photo_here"] is True
     kept = back["work"]
+    # the mode it was left in, and whether a save keeps it all (not said: no)
+    assert kept["mode"] == "find"
+    assert kept["saved"] is False
     assert kept["spec"]["eye"] == spec["eye"]
     assert kept["photo"]["strokes"] == work["photo"]["strokes"]
     assert kept["find"]["alignments"][0]["heights"] == {"near": 12, "far": 0}
@@ -118,3 +121,4 @@ def test_the_bench_is_checked_at_the_edge(client):
     assert client.put(f"/api/cases/{cid}/horizon/work", json={"find": crowded}).status_code == 422
     wrong_spacing = {**_find_work(), "spacing": 333}
     assert client.put(f"/api/cases/{cid}/horizon/work", json={"find": wrong_spacing}).status_code == 422
+    assert client.put(f"/api/cases/{cid}/horizon/work", json={"mode": "horizon"}).status_code == 422

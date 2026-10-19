@@ -403,3 +403,9 @@ export function openCopernicusSettings() {
   uiState.settingsTab = 'imagery:sentinelhub';
   uiState.tool = 'settings';
 }
+
+/** Open Settings on the icon library, where the analyst's own icons are imported. */
+export function openIconSettings() {
+  uiState.settingsTab = 'icons';
+  uiState.tool = 'settings';
+}

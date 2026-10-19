@@ -634,11 +634,21 @@ export function mapFacade(map, container, mapId = '') {
      * What a camera that leans over the relief waits for: tilted before the
      * ground under it has arrived, the engine seats the centre at sea level,
      * under the mountains it is looking at.
+     *
+     * Read after the next frame the engine draws, never at once: right after the
+     * relief is laid none of its tiles has been asked for yet, so "every tile is
+     * in" holds for that moment, and the view leaned over sea level and then
+     * jumped by the height of the ground when it landed.
      */
     idle: () =>
       new Promise((resolve) => {
-        if (!map.isMoving() && map.areTilesLoaded()) resolve();
-        else map.once('idle', () => resolve());
+        const check = () => {
+          if (map.isMoving() || !map.areTilesLoaded()) return;
+          map.off('render', check);
+          resolve();
+        };
+        map.on('render', check);
+        map.triggerRepaint();
       }),
 
     /**

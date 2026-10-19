@@ -1752,7 +1752,7 @@
   // dead; the measure is the annotation of the same name, started on the point
   // instead of on a drag that would have to begin somewhere else. The camera is
   // shared, so the menu belongs to the side it was opened on and nothing else.
-  let pointMenu = $state(null); // { side, lat, lon, x, y, frame, lookup }
+  let pointMenu = $state(null); // { side, lat, lon, x, y, frame, origin, lookup }
   let pointLookupSeq = 0;
   let canvasA = $state(null);
   let canvasB = $state(null);
@@ -1764,10 +1764,14 @@
   function onMapContextMenu(side, at) {
     pointLookupSeq += 1;
     const element = (side === 'a' ? a : b).element;
+    const box = element?.getBoundingClientRect();
+    const stage = stageEl?.getBoundingClientRect();
     pointMenu = {
       ...at,
       side,
       frame: { width: element?.clientWidth ?? 0, height: element?.clientHeight ?? 0 },
+      // where that map sits in the stage, which is where the menu is drawn
+      origin: { left: box && stage ? box.left - stage.left : 0, top: box && stage ? box.top - stage.top : 0 },
       lookup: null,
     };
   }
@@ -2656,20 +2660,6 @@
           onbearingchange={(next) => onSurfaceBearing('a', next)}
           oncontextmenu={(at) => onMapContextMenu('a', at)}
         >
-          {#if pointMenu?.side === 'a'}
-            <MapContextMenu
-              at={pointMenu}
-              frame={pointMenu.frame}
-              zoom={view.zoom}
-              format={prefs.coordFormat}
-              actions={pointActions}
-              tools={pointTools}
-              lookup={pointMenu.lookup}
-              {fullscreen}
-              onpick={onPointMenu}
-              onclose={closePointMenu}
-            />
-          {/if}
           <LayerGeometry engine={a.ready ? a.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === a.engine} />
           <AddedLayersOverlay
             engine={a.ready ? a.engine : null}
@@ -2768,20 +2758,6 @@
           onbearingchange={(next) => onSurfaceBearing('b', next)}
           oncontextmenu={(at) => onMapContextMenu('b', at)}
         >
-          {#if pointMenu?.side === 'b'}
-            <MapContextMenu
-              at={pointMenu}
-              frame={pointMenu.frame}
-              zoom={view.zoom}
-              format={prefs.coordFormat}
-              actions={pointActions}
-              tools={pointTools}
-              lookup={pointMenu.lookup}
-              {fullscreen}
-              onpick={onPointMenu}
-              onclose={closePointMenu}
-            />
-          {/if}
           <LayerGeometry engine={b.ready ? b.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === b.engine} />
           <AddedLayersOverlay
             engine={b.ready ? b.engine : null}
@@ -2858,6 +2834,30 @@
           <Icon name="chevronRight" size={12} stroke={2.4} />
         </span>
       </button>
+    {/if}
+
+    <!-- Over the whole stage rather than inside the map it was opened on: there,
+         Swipe's clip cut it at the divider, B laid over it hid it, and Blink
+         flashed it with B. The box it is placed in is that map's own, and a
+         menu opened on the other map is placed anew. -->
+    {#if pointMenu}
+      {#key pointMenu.side}
+        <div class="point-menu" style:left={`${pointMenu.origin.left}px`} style:top={`${pointMenu.origin.top}px`}
+          style:width={`${pointMenu.frame.width}px`} style:height={`${pointMenu.frame.height}px`}>
+          <MapContextMenu
+            at={pointMenu}
+            frame={pointMenu.frame}
+            zoom={view.zoom}
+            format={prefs.coordFormat}
+            actions={pointActions}
+            tools={pointTools}
+            lookup={pointMenu.lookup}
+            {fullscreen}
+            onpick={onPointMenu}
+            onclose={closePointMenu}
+          />
+        </div>
+      {/key}
     {/if}
 
     <!-- Fade, Swipe and Blink stack both maps in one coordinate space. Their frame therefore sits above the
@@ -3342,6 +3342,10 @@
      shut its buttons under the highlights (see MapSurface's `.map-wrap`). */
   .compare-stage.blended .secondary { --map-fade: var(--opacity); }
   .compare-stage.overlay .secondary.blink-hidden { opacity: 0; pointer-events: none; }
+  /* Over the cards too, so a menu opened near the top is never under them. Only
+     the menu takes the pointer; the map beside it stays live. */
+  .point-menu { position: absolute; z-index: 660; pointer-events: none; }
+  .point-menu > :global(*) { pointer-events: auto; }
   .change-map {
     position: absolute;
     z-index: 545;
@@ -3395,7 +3399,8 @@
   /* the rail's tab lies over map A's edge, inside the frame being grabbed */
   .compare-tool.grabbing :global(.rail-tab) { visibility: hidden; }
   .compare-stage.capturing .source-bar,
-  .compare-stage.capturing .swipe-line { visibility: hidden; }
+  .compare-stage.capturing .swipe-line,
+  .compare-stage.capturing .point-menu { visibility: hidden; }
   .compare-stage.capture-a .secondary,
   .compare-stage.capture-b .primary { visibility: hidden; }
   .compare-stage.capturing.swipe .secondary { clip-path: none; }

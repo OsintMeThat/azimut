@@ -314,7 +314,7 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, horizon,
-        horizon_buildings, horizon_finds, horizon_views, horizon_work, ingest, inspect, mapplates, maplayers, media, notes, plates,
+        horizon_buildings, horizon_finds, horizon_views, horizon_work, icons, ingest, inspect, mapplates, maplayers, media, notes, plates,
         proofimports, proofs,
         proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
     )
@@ -353,6 +353,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(events.router)
     app.include_router(templates.router)
+    app.include_router(icons.router)
     # A sheet's CSV that the filesystem would not take. Handled once for the app rather
     # than at each of the ten routes that write one: the failure is the same wherever it
     # happens — a spreadsheet holding the file open on Windows, a read-only folder — and

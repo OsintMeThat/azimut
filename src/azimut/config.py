@@ -17,6 +17,7 @@ asks the question — every path is built from :func:`workspace_root`.
         ├── scratch/          # one-shot sessions, promotable to cases
         └── settings/
             ├── cookies.txt
+            ├── icons/        # the icon library: icons.json + one PNG per icon
             ├── signature.png
             ├── settings.json
             └── templates.json

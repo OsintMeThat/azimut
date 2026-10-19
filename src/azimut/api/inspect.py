@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import jobs
@@ -41,6 +42,10 @@ class RenderPreviewIn(BaseModel):
     path: str
     time: float | None = Field(default=None, ge=0)
     ops: list[Op] = []
+    format: Literal["png", "jpeg"] = "png"
+    # Snap `time` to the frame a player shows at that moment and say which in the
+    # X-Frame-Time header. Off, `time` is used exactly as sent.
+    snap: bool = False
 
 
 class FrameSpec(BaseModel):
@@ -138,31 +143,79 @@ def suggest_frames(case_id: str, body: SuggestIn) -> dict[str, str]:
     case = get_case(case_id)
 
     def work(set_progress):
-        return {
-            "frames": inspect_engine.suggest_frames(
-                case, body.path, body.count, body.min_gap, set_progress
-            )
-        }
+        return inspect_engine.suggest_frames(
+            case, body.path, body.count, body.min_gap, set_progress
+        )
 
     return {"job_id": jobs.start("suggest", work)}
 
 
+class OverviewIn(BaseModel):
+    path: str = Field(min_length=1)
+
+
+@router.post("/cases/{case_id}/inspect/overview")
+def video_overview(case_id: str, body: OverviewIn) -> dict[str, Any]:
+    """A video's hover thumbnails and waveform, plus its last focus scan.
+
+    Cached: the overview comes straight back, otherwise a job makes it. Either way
+    ``scan`` is the last saved focus scan (frames and shots), or null.
+    """
+    case = get_case(case_id)
+    try:
+        scan = inspect_engine.cached_scan(case, body.path)
+        overview = inspect_engine.cached_overview(case, body.path)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if overview is not None:
+        return {"overview": overview, "scan": scan}
+
+    def work(set_progress):
+        return inspect_engine.video_overview(case, body.path, set_progress)
+
+    return {"job_id": jobs.start("overview", work), "scan": scan}
+
+
+@router.get("/cases/{case_id}/inspect/overview/strip")
+def video_overview_strip(case_id: str, path: str) -> FileResponse:
+    """The tile sprite of a video's overview (404 until it has been made)."""
+    case = get_case(case_id)
+    try:
+        strip = inspect_engine.overview_strip(case, path)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if strip is None:
+        raise HTTPException(status_code=404, detail="no overview has been made for this video")
+    return FileResponse(strip, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
 @router.post("/cases/{case_id}/inspect/render-preview")
 def render_preview(case_id: str, body: RenderPreviewIn) -> Response:
-    """Render a recipe (frame/image + ops) to a PNG — nothing is filed.
+    """Render a recipe (frame/image + ops) to a PNG or JPEG — nothing is filed.
 
     Backs frame previews and collage pieces, and rebuilding both when a work or
     a collage is reopened.
     """
     case = get_case(case_id)
     ops = [op.model_dump() for op in body.ops]
+    time_s = body.time
     try:
-        png = inspect_engine.render_preview_png(case, body.path, time_s=body.time, ops=ops)
+        if body.snap and time_s is not None:
+            snapped = inspect_engine.frame_time_at(case.resolve_inside(body.path), time_s)
+            time_s = time_s if snapped is None else snapped
+        data, media_type = inspect_engine.render_preview(
+            case, body.path, time_s=time_s, ops=ops, fmt=body.format
+        )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (ValueError, RuntimeError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return Response(content=png, media_type="image/png")
+    headers = {"X-Frame-Time": f"{time_s:.6f}"} if body.snap and time_s is not None else None
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 @router.post("/cases/{case_id}/inspect/save-frames")

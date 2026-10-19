@@ -37,6 +37,27 @@ export function readSolo(params) {
   return raw === '1';
 }
 
+/** The route the page was loaded on, and whether that load was a reload (F5) rather than a link. */
+const loadedOn = typeof location === 'undefined' ? '' : splitHash(location.hash).route;
+const reloaded = (() => {
+  try {
+    return performance.getEntriesByType('navigation')[0]?.type === 'reload';
+  } catch {
+    return false;
+  }
+})();
+const reloadTaken = new Set();
+
+/**
+ * Whether the page was reloaded on this tool's route, said once: a tool that
+ * opens fresh after a reload asks it on mount, and a later visit is not a reload.
+ */
+export function reloadedInto(route) {
+  if (!reloaded || route !== loadedOn || reloadTaken.has(route)) return false;
+  reloadTaken.add(route);
+  return true;
+}
+
 /** …and back. An empty query leaves the plain `#route` the app has always written. */
 export function buildHash(route, params) {
   const query =

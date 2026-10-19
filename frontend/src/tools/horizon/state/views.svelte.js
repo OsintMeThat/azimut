@@ -187,19 +187,19 @@ export function createViewsState({
     open,
 
     /**
-     * The bench a reload brings back, laid over what the tab shows: `spec` the
-     * view as it stood (its eye only with `eye`), `photo` the photo and its work.
-     * Nothing it sets is saved; a trace or pins the same as the open view's are
-     * still that view's, so an unchanged view does not read as changed.
+     * The bench Resume brings back, laid over what the tab shows: `spec` the
+     * view as it stood, `photo` the photo and its work. Nothing it sets is
+     * saved; a trace or pins the same as the open view's are still that view's,
+     * so an unchanged view does not read as changed.
      */
-    async layWork({ spec = null, photo = null } = {}, { photoHere = false, eye = true } = {}) {
+    async layWork({ spec = null, photo = null } = {}, { photoHere = false } = {}) {
       const id = caseId();
       if (!id) return false;
       const mine = ++opened;
       const still = () => mine === opened && caseId() === id;
-      if (spec && eye) standAs(spec);
+      if (spec) standAs(spec);
       if (photo && photoHere) {
-        if (!(await layPhoto(id, photo, spec && eye ? spec : null, still))) return false;
+        if (!(await layPhoto(id, photo, spec, still))) return false;
       }
       if (saved && same(overlay.strokes, saved.strokes)) saved = { ...saved, strokes: overlay.strokes };
       if (saved && sameMarks(overlay.marks, saved.marks)) saved = { ...saved, marks: overlay.marks };

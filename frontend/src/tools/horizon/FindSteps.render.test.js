@@ -122,19 +122,6 @@ describe('the steps of Find', () => {
     expect(root.querySelector('.fs-place').textContent).toContain('ridges in front 90% on the terrain · 4 of 4 pairs in order');
   });
 
-  it('lists the earlier searches to open or delete', () => {
-    const onopensearch = vi.fn();
-    const onremovesearch = vi.fn();
-    const list = [{ name: 'old', title: 'Old search', status: 'done', best: { explained: 0.62 } }];
-    const root = steps({ find: fakeFind({ list }), onopensearch, onremovesearch });
-    const open = [...root.querySelectorAll('.fs-link')][0];
-    expect(open.textContent).toContain('best 62%');
-    open.click();
-    expect(onopensearch).toHaveBeenCalledWith('old');
-    root.querySelector('button[aria-label="Delete Old search"]').click();
-    expect(onremovesearch).toHaveBeenCalledWith('old');
-  });
-
   it('says what the search runs with, and warns of a short reach or any lens before it runs', () => {
     const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
     const ready = fakeFind({ area, areaProblem: '', searchProblem: '' });
@@ -155,6 +142,56 @@ describe('the steps of Find', () => {
     expect(root.textContent).toContain('Say the zoom, check how far the photo sees');
     // each place says its lens and how far it read, so a stray one shows
     expect(root.querySelector('.fs-place').textContent).toContain('22° lens · ridges within 5 km');
+  });
+});
+
+describe('the two faces of Find', () => {
+  it('numbers only the three steps a search needs, and folds what helps it under its gist', () => {
+    const root = steps({ find: fakeFind() });
+    expect([...root.querySelectorAll('.fs-num')].map((n) => n.textContent)).toEqual(['1', '2', '3']);
+    expect([...root.querySelectorAll('.fs-step h3')].map((h) => h.textContent.replace(/^\d/, ''))).toEqual(['Skyline', 'Area', 'Search']);
+    // the trace is done, so its number lights alone
+    expect([...root.querySelectorAll('.fs-step')].map((step) => step.classList.contains('done'))).toEqual([true, false, false]);
+    const parts = [...root.querySelectorAll('.fs-part')];
+    expect(parts.map((part) => [part.querySelector('.fs-part-title').textContent, part.querySelector('.fs-gist').textContent, part.open])).toEqual([
+      ['Alignments', 'None', false],
+      ['What you know', 'Any lens · ridges within 50 km · on foot', false],
+    ]);
+  });
+
+  it('unfolds the alignments while one is being made', () => {
+    const root = steps({ find: fakeFind({ pending: { step: 1 }, step: { text: 'Click what stands behind it on the photo' } }) });
+    const part = root.querySelector('.fs-part');
+    expect(part.open).toBe(true);
+    expect(part.textContent).toContain('2 of 4');
+  });
+
+  it('shows the search on show with when and what it was asked, and goes back to Prepare and again', () => {
+    const area = [[46.5, 7.8], [46.5, 7.9], [46.6, 7.9]];
+    const search = {
+      name: 'ridge',
+      title: 'Ridge search',
+      status: 'done',
+      created_at: '2026-10-14T19:05:00',
+      ask: { area, hints: { zoom: 'wide' }, who: { mode: 'drone' }, alignments: [{}] },
+      result: { verdict: 'match', places: [{ lat: 46.55, lon: 7.85, explained: 0.8 }], points: [] },
+    };
+    const find = fakeFind({ search });
+    const root = steps({ find });
+    const shown = root.querySelector('[aria-label="The search on show"]');
+    expect(shown.querySelector('h3').textContent).toBe('Ridge search');
+    expect(shown.textContent).toContain('14 Oct 2026, 19:05');
+    expect(shown.textContent).toMatch(/km² · wide lenses · ridges within 50 km · drone · 1 alignment/);
+    expect(root.querySelector('.fs-steps')).toBeNull();
+    buttonNamed(root, 'Change and search again').click();
+    flushSync();
+    expect(root.querySelector('[aria-label="The search on show"]')).toBeNull();
+    expect(root.querySelector('.fs-steps')).not.toBeNull();
+    buttonNamed(root, 'Back to the result').click();
+    flushSync();
+    expect(root.querySelector('[aria-label="The search on show"]')).not.toBeNull();
+    buttonNamed(root, 'Clear the results').click();
+    expect(find.closeSearch).toHaveBeenCalledOnce();
   });
 });
 

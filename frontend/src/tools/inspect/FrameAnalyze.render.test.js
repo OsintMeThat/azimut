@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 /**
- * The frame panel's reverse-search press, driven the way an analyst drives it: the
- * frame pressed on is the one handed over, and a second press while the first is
- * still rendering does not send it twice.
+ * The frame's Analyze tab, driven the way an analyst drives it: the reverse-search
+ * press hands over the frame pressed on, once, and a reading says whether it still
+ * describes the frame as it reads now.
  */
 
 vi.mock('../../lib/api.js', () => ({ api: { post: vi.fn(), get: vi.fn() } }));
@@ -15,7 +15,7 @@ vi.mock('../../lib/state.svelte.js', () => ({
   toast: vi.fn(),
 }));
 
-const { default: FrameMenu } = await import('./FrameMenu.svelte');
+const { default: FrameAnalyze } = await import('./FrameAnalyze.svelte');
 
 const FRAME = {
   id: 'fr1', path: 'media/clip.mp4', time: 12.4, url: 'blob:frame', adjust: {}, crop: null,
@@ -25,21 +25,18 @@ const FRAME = {
 let live = null;
 let target = null;
 
-function open(reverse, horizon = null) {
+function open(reverse, horizon = null, extra = {}) {
   target = document.createElement('div');
   document.body.append(target);
-  live = mount(FrameMenu, {
+  live = mount(FrameAnalyze, {
     target,
     props: {
       frame: FRAME,
-      filters: [],
-      analyses: [],
-      shared: {},
-      setRotation: vi.fn(),
+      analyses: [{ id: 'ela', label: 'Error Level Analysis' }],
+      onrun: vi.fn(),
       reverse,
       horizon,
-      onduplicate: vi.fn(),
-      frameSave: { defaultName: '00-00-12 clip', filedPath: null, busy: false, blocked: '', onsave: vi.fn() },
+      ...extra,
     },
   });
   flushSync();
@@ -98,5 +95,29 @@ describe('a frame matched in Horizon', () => {
   it('is not offered where no Horizon is wired', () => {
     open(vi.fn());
     expect(horizonButton()).toBeUndefined();
+  });
+});
+
+describe('a reading on the frame', () => {
+  const ELA = { id: 'ela', kind: 'image', url: 'data:image/png;base64,x', note: 'A hint, not proof.', shown: true, opacity: 0.85 };
+
+  it('runs the reading pressed on', () => {
+    const onrun = vi.fn();
+    open(vi.fn(), null, { onrun });
+    [...target.querySelectorAll('button')].find((b) => b.textContent.includes('Error Level Analysis')).click();
+    expect(onrun).toHaveBeenCalledWith('ela');
+  });
+
+  it('lays a picture reading over the frame, with its strength and its caveat', () => {
+    open(vi.fn(), null, { analysis: { ...ELA }, current: true });
+    expect(target.textContent).toContain('Show over the frame');
+    expect(target.textContent).toContain('A hint, not proof.');
+    expect(target.querySelector('input[type="range"]')).not.toBeNull();
+  });
+
+  it('asks to be run again once the frame was edited since', () => {
+    open(vi.fn(), null, { analysis: { ...ELA }, current: false });
+    expect(target.textContent).toContain('The frame changed since');
+    expect(target.textContent).not.toContain('Show over the frame');
   });
 });

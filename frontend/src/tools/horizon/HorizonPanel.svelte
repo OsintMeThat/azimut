@@ -4,21 +4,25 @@
    * then the settings as a sheet, a name on the left and its control on the
    * right, in groups a first-time user can scan.
    *
-   * - **Readings** sit first and keep their place: the marked point (in sight
+   * The groups follow the questions asked of the view, not how it is drawn:
+   *
+   * - **Measures** sit first and keep their place: the marked point (in sight
    *   or hidden, by how much) and the ground clicked in the view, each beside
    *   the mark the map and the view draw for it. Each holds its room while
    *   empty and says there how to fill it, so nothing under them moves when a
    *   click reads something.
-   * - **Photo**, while one is laid over the view: what its file says of its
-   *   lens, place and time, each offered with the act that applies it and
-   *   never applied unasked, the lens's curve, and the strokes traced on it.
-   * - **Viewpoint**: where the eye stands, who stands there, and how high.
-   * - **Lens**: how wide it sees, and whether the frame is a photo or the
-   *   panorama strip.
-   * - **On the view**: summit names, and the sun and moon with their time.
-   * - **More settings**, closed: tilt and roll (the view's own gestures set
-   *   them), how far the air lets the eye see and from how near the ground is
-   *   drawn, the ridge lines' density.
+   * - **Photo**, while one is laid over the view, everything said about it in
+   *   one place: the file (another one, or none), what it says of its lens,
+   *   place and time, each offered with the act that applies it and never
+   *   applied unasked, the lens's curve, the strokes traced on it, what the
+   *   analyst knows of it for Fit, and the places Fit found when one alone did
+   *   not stand out. What is done on the picture is the band over the view.
+   * - **Viewpoint**: where the eye stands, who stands there and how high,
+   *   then the camera: how wide it sees, whether the frame is a photo or the
+   *   panorama strip, and its tilt and roll (the view's own gestures set them).
+   * - **What the view shows**: summit names, ridge lines, buildings, the sun
+   *   and moon with their time, how far the air lets the eye see, and from how
+   *   near the ground is drawn.
    *
    * A folded group says its gist on its title line, so the sheet still reads
    * with every group closed. Every number has two small arrows for the fine
@@ -29,10 +33,13 @@
    * caret under the view. Progress is said once, in the header; what failed is
    * said here, beside the thing it concerns, with a way to try again.
    */
+  import { tick, untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import DateField from '../../components/DateField.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
   import NumberField from './NumberField.svelte';
+  import PhotoHints from './PhotoHints.svelte';
+  import { hintsSummary } from '../../lib/horizon/hints.js';
   import { copyText } from '../../lib/clipboard.js';
   import { fmtCoords } from '../../lib/state.svelte.js';
   import { focal35FromFov, fovFromFocal35 } from '../../lib/horizon/camera.js';
@@ -41,9 +48,10 @@
   import { marksSummary } from '../../lib/horizon/traceTools.js';
   import { bandsGradient, clockOf, minuteOf, skyLines, sunBands } from '../../lib/horizon/sky.js';
   import { targetReading } from '../../lib/horizon/readings.js';
-  import { distanceBetween } from '../../lib/horizon/geometry.js';
-  import { BEND_MAX, bendText, isZoned, localClock, reliefWords } from '../../lib/horizon/overlay.js';
+  import { distanceBetween, headingText } from '../../lib/horizon/geometry.js';
+  import { BEND_MAX, bendText, isAtPlace, isZoned, localClock, reliefWords } from '../../lib/horizon/overlay.js';
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
+  import { HORIZON_GROUPS, horizonSetting } from '../../lib/horizon/panelIndex.js';
 
   let {
     view,
@@ -56,8 +64,18 @@
     onturn = () => {},
     /** A photo or a video laid over the view (state/overlay.svelte.js), or null. */
     overlay = null,
+    /** Asked to lay another photo or video. */
+    onphoto = () => {},
+    /** The places Fit found on the turn, best first, when one alone did not stand out (`searchedPlaces`). */
+    places = [],
+    /** Asked to turn to one of them, by its index. */
+    onplace = () => {},
     /** The buildings round the eye (state/buildings.svelte.js), or null. */
     buildings = null,
+    /** A setting asked for by its id (lib/horizon/panelIndex.js): its group opens and its row lights. */
+    seek = null,
+    /** Told once the setting asked for is shown. */
+    onsought = () => {},
   } = $props();
 
   const observer = $derived(view.observer);
@@ -123,6 +141,8 @@
   const lens = $derived(photo ? overlay.lens : null);
   const lensOff = $derived(Boolean(lens) && Math.abs(lens.fov - camera.fov) > 0.05);
   const fileWord = $derived(photo?.kind === 'video' ? 'video' : 'photo');
+  /** What is known about the photo, summed up; '' while nothing is. */
+  const told = $derived(photo ? hintsSummary(overlay.hints, overlay.reach) : '');
   /** The lens's curve undone, said as a number with its kind. */
   const bendWords = $derived(bendText(overlay?.bend));
   const placed = $derived(photo && overlay.facts.gps && observer ? overlay.facts.gps : null);
@@ -184,40 +204,78 @@
   );
   // -- the groups, and what a folded one says on its title line ---------------------
 
-  const opened = $state({ photo: true, viewpoint: true, lens: true, view: true, more: false });
+  const opened = $state({ measures: true, photo: true, viewpoint: true, view: true });
 
-  const viewpointGist = $derived(observer ? `${MODE_LABELS[observer.mode]} · ${observer.height} m` : '');
-  const lensGist = $derived(
-    camera.projection === 'panorama' ? `Panorama · ${Math.round(camera.fov)}°` : `${Math.round(camera.fov)}° · ${focal} mm`
-  );
-  const onViewGist = $derived(
-    [view.peaksOn && 'Summits', view.skyOn && `Sun ${view.skyTime}`, buildings?.on && 'Buildings'].filter(Boolean).join(' · ') ||
-      'Nothing'
-  );
-  const moreGist = $derived(
-    [(camera.tilt || camera.roll) && 'Leaning', view.visibility && seeing, view.near && `Hidden under ${formatDistance(view.near, units)}`]
+  // a setting asked for from the command palette: shown once an eye stands and its rows are there
+  let panel = $state();
+  $effect(() => {
+    const id = seek;
+    if (!id || !observer || !panel) return;
+    untrack(async () => {
+      const one = horizonSetting(id);
+      if (one) opened[one.group] = true;
+      await tick();
+      const row = panel?.querySelector(`[data-setting="${id}"]`);
+      if (row) {
+        row.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+        row.classList.add('sought');
+        setTimeout(() => row.classList.remove('sought'), 1600);
+      }
+      onsought();
+    });
+  });
+
+  const measuresGist = $derived(
+    [reading && (view.target.visible ? 'Point in sight' : 'Point hidden'), view.pointed && `Ground ${formatDistance(view.pointed.distance, units)} away`]
       .filter(Boolean)
       .join(' · ')
   );
+  const viewpointGist = $derived(
+    observer
+      ? [
+          `${MODE_LABELS[observer.mode]} · ${observer.height} m`,
+          camera.projection === 'panorama' ? `Panorama ${Math.round(camera.fov)}°` : `${Math.round(camera.fov)}° · ${focal} mm`,
+          (camera.tilt || camera.roll) && 'Leaning',
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : ''
+  );
+  const viewGist = $derived(
+    [
+      view.peaksOn && 'Summits',
+      buildings?.on && 'Buildings',
+      view.skyOn && `Sun ${view.skyTime}`,
+      view.visibility && `Haze ${seeing}`,
+      view.near && `Hidden under ${formatDistance(view.near, units)}`,
+    ]
+      .filter(Boolean)
+      .join(' · ') || 'Terrain only'
+  );
 </script>
 
-{#snippet group(id, title, gist, body, frozen = false)}
+{#snippet group(id, title, gist, body, frozen = false, sheet = true)}
   <details class="hz-group" bind:open={opened[id]}>
     <summary>
       <span class="group-title">{title}</span>
       {#if !opened[id] && gist}<span class="gist">{gist}</span>{/if}
       <span class="chev" aria-hidden="true"><Icon name="chevronDown" size={13} /></span>
     </summary>
-    <fieldset class="sheet" disabled={frozen} title={frozen ? LOCKED_TITLE : undefined}>
-      {@render body()}
-    </fieldset>
+    {#if sheet}
+      <fieldset class="sheet" disabled={frozen} title={frozen ? LOCKED_TITLE : undefined}>
+        {@render body()}
+      </fieldset>
+    {:else}
+      <div class="unsheet">{@render body()}</div>
+    {/if}
   </details>
 {/snippet}
 
-<div class="horizon-panel">
+<div class="horizon-panel" bind:this={panel}>
   {#if observer}
-    <section class="readings" aria-label="Readings">
-      <div class="reading marked">
+    {#snippet measuresBody()}
+    <section class="readings" aria-label="Measures">
+      <div class="reading marked" data-setting="marked">
         <div class="top">
           <span
             class="glyph pin"
@@ -257,7 +315,7 @@
           {/if}
         </div>
       </div>
-      <div class="reading pointed">
+      <div class="reading pointed" data-setting="pointed">
         <div class="top">
           <span class="glyph crosshair" class:off={!view.pointed} aria-hidden="true">
             <svg width="14" height="14" viewBox="-7 -7 14 14"><circle r="3.5" /><path d="M-6.5 0h3M3.5 0h3M0 -6.5v3M0 3.5v3" /></svg>
@@ -291,6 +349,8 @@
         </div>
       </div>
     </section>
+    {/snippet}
+    {@render group('measures', HORIZON_GROUPS.measures, measuresGist, measuresBody, false, false)}
   {/if}
 
   {#if locked}
@@ -310,6 +370,16 @@
       <span class="value file" title={photo.name}>
         <span class="file-name">{photo.name}</span>
         {#if overlay.size.width}<span class="mono size">{overlay.size.width} × {overlay.size.height}</span>{/if}
+      </span>
+      <span class="wide acts">
+        <button type="button" class="btn btn-sm" onclick={onphoto} title="Lay another photo or video">Another file</button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          onclick={() => overlay.remove()}
+          title="Take the {fileWord} away"
+          aria-label="Take the {fileWord} away">Remove</button
+        >
       </span>
       <span class="key">Lens</span>
       {#if lens}
@@ -383,28 +453,50 @@
           >
           <span class="acts">
             <button type="button" class="btn btn-ghost btn-sm" onclick={() => overlay.undoStroke()} title="Take the last change to the trace back (Ctrl+Z)">Undo</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick={() => overlay.clearTrace()}>Clear</button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              onclick={() => overlay.clearTrace()}
+              title="Clear the whole trace (Ctrl+Z brings it back)"
+              aria-label="Clear the whole trace">Clear</button
+            >
           </span>
         </span>
+      {/if}
+      <div class="wide part" role="group" aria-label="What you know about the photo">
+        <h5 class="sub">What you know{#if told}<span class="told">{` · ${told}`}</span>{/if}</h5>
+        <PhotoHints {overlay} heading={camera.heading} />
+      </div>
+      {#if places.length > 1}
+        <div class="wide part" role="group" aria-label="Places that fit">
+          <h5 class="sub">Places that fit</h5>
+          {#each places as place, index (index)}
+            {@const at = isAtPlace(camera, place)}
+            <button type="button" class="place" class:on={at} aria-pressed={at} disabled={locked} onclick={() => onplace(index)}>
+              <strong class="mono">{headingText(place.camera.heading, place.camera.fov)}</strong>
+              <span>explains {Math.round(Math.max(0, place.explained) * 100)}% of the trace</span>
+            </button>
+          {/each}
+        </div>
       {/if}
       {#if reliefWords(view.panorama?.resolution)}
         <p class="hint wide">{reliefWords(view.panorama?.resolution)}</p>
       {/if}
       <p class="hint wide">{lens ? 'The lens is the file’s.' : 'No lens in the file: match it by eye or with Fit to trace.'} Alt+wheel on the view sets the height.</p>
     {/snippet}
-    {@render group('photo', photo.kind === 'video' ? 'Video' : 'Photo', photo.name, photoBody)}
+    {@render group('photo', photo.kind === 'video' ? 'Video' : 'Photo', told ? `${photo.name} · ${told}` : photo.name, photoBody)}
   {/if}
 
   {#if observer}
     {#snippet viewpointBody()}
-      <span class="key">Position</span>
+      <span class="key" data-setting="position">Position</span>
       <span class="value">
         <button type="button" class="coords mono" onclick={() => copyText(fmtCoords(observer.lat, observer.lon))} title="Copy coordinates">
           {fmtCoords(observer.lat, observer.lon)}
           <Icon name="copy" size={11} />
         </button>
       </span>
-      <span class="key">Who</span>
+      <span class="key" data-setting="who">Who</span>
       <span class="value">
         <span class="seg" role="group" aria-label="Who is looking">
           {#each MODES as mode (mode)}
@@ -420,7 +512,7 @@
           {/each}
         </span>
       </span>
-      <label class="key" for="hz-height">{HEIGHT_LABELS[observer.mode]}</label>
+      <label class="key" for="hz-height" data-setting="height">{HEIGHT_LABELS[observer.mode]}</label>
       <span class="value">
         <NumberField
           id="hz-height"
@@ -445,11 +537,8 @@
           <span class="hint">or drag the orange dot</span>
         </span>
       {/if}
-    {/snippet}
-    {@render group('viewpoint', 'Viewpoint', viewpointGist, viewpointBody, locked)}
-
-    {#snippet lensBody()}
-      <span class="key">Width</span>
+      <h5 class="sub wide">Camera</h5>
+      <span class="key" data-setting="width">Width</span>
       <span class="value pair">
         <NumberField
           label="Field of view in degrees"
@@ -478,7 +567,7 @@
       </span>
       <!-- a photo is a rectilinear frame: while one is laid there is no other to pick -->
       {#if !photo}
-        <span class="key">Frame</span>
+        <span class="key" data-setting="frame">Frame</span>
         <span class="value">
           <span class="seg" role="group" aria-label="Frame">
             <button
@@ -498,16 +587,81 @@
           </span>
         </span>
       {/if}
+      <span class="key" data-setting="tilt">Tilt</span>
+      <span class="value pair">
+        <NumberField
+          label="Tilt"
+          value={Number(camera.tilt.toFixed(1))}
+          unit="°"
+          step={0.1}
+          min={-89}
+          max={89}
+          disabled={locked}
+          onchange={(tilt) => view.look({ tilt: tilt ?? camera.tilt })}
+        />
+        <span class="key inline">Roll</span>
+        <NumberField
+          label="Roll"
+          value={Number(camera.roll.toFixed(1))}
+          unit="°"
+          step={0.1}
+          min={-180}
+          max={180}
+          disabled={locked}
+          onchange={(roll) => view.look({ roll: roll ?? camera.roll })}
+        />
+      </span>
+      <span class="wide">
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm level"
+          disabled={locked || (!camera.tilt && !camera.roll)}
+          onclick={() => view.look({ tilt: 0, roll: 0 })}>Level the view</button
+        >
+      </span>
     {/snippet}
-    {@render group('lens', 'Lens', lensGist, lensBody, locked)}
+    {@render group('viewpoint', HORIZON_GROUPS.viewpoint, viewpointGist, viewpointBody, locked)}
 
     {#snippet onViewBody()}
-      <label class="check wide" title="Names from OpenStreetMap via OpenFreeMap, read once this is on">
+      <label class="check wide" data-setting="peaks" title="Names from OpenStreetMap via OpenFreeMap, read once this is on">
         <input type="checkbox" checked={view.peaksOn} onchange={(event) => view.showPeaks(event.currentTarget.checked)} />
         <span>Summit names</span>
         <span class="source">OpenStreetMap</span>
       </label>
-      <label class="check wide">
+      {#if view.lines}
+        <span class="key" data-setting="ridges">Ridge lines</span>
+        <span class="value slide">
+          <span class="end">Fewer</span>
+          <input
+            type="range"
+            min="0"
+            max={RIDGE_STEPS.length - 1}
+            step="1"
+            value={view.ridges}
+            oninput={(event) => view.setRidges(event.currentTarget.value)}
+            aria-label="How many ridge lines"
+          />
+          <span class="end">More</span>
+        </span>
+      {/if}
+      {#if buildings}
+        <label class="check wide" data-setting="buildings" title="Buildings round the eye, raised from open data, read once this is on">
+          <input type="checkbox" checked={buildings.on} onchange={(event) => buildings.set({ on: event.currentTarget.checked })} />
+          <span>Buildings</span>
+          <span class="badge info beta" title="Still being refined: heights can be off">Beta</span>
+          <span class="source">Open data</span>
+        </label>
+        {#if buildings.on}
+          {@const said = buildings.layerRow}
+          {#if said.note}<p class="fact wide">{said.note}</p>{/if}
+          <span class="wide acts">
+            {#each said.actions as act (act.label)}
+              <button type="button" class="btn btn-sm" class:btn-ghost={act.quiet} onclick={act.run}>{act.label}</button>
+            {/each}
+          </span>
+        {/if}
+      {/if}
+      <label class="check wide" data-setting="sky">
         <input type="checkbox" checked={view.skyOn} onchange={(event) => view.showSky(event.currentTarget.checked)} />
         <span>Sun and moon paths</span>
       </label>
@@ -577,59 +731,7 @@
           <p class="fact wide">{line}</p>
         {/each}
       {/if}
-      {#if buildings}
-        <label class="check wide" title="Buildings round the eye, raised from open data, read once this is on">
-          <input type="checkbox" checked={buildings.on} onchange={(event) => buildings.set({ on: event.currentTarget.checked })} />
-          <span>Buildings</span>
-          <span class="source">Open data</span>
-        </label>
-        {#if buildings.on}
-          {@const said = buildings.layerRow}
-          {#if said.note}<p class="fact wide">{said.note}</p>{/if}
-          <span class="wide acts">
-            {#each said.actions as act (act.label)}
-              <button type="button" class="btn btn-sm" class:btn-ghost={act.quiet} onclick={act.run}>{act.label}</button>
-            {/each}
-          </span>
-        {/if}
-      {/if}
-    {/snippet}
-    {@render group('view', 'On the view', onViewGist, onViewBody)}
-
-    {#snippet moreBody()}
-      <span class="key">Tilt</span>
-      <span class="value pair">
-        <NumberField
-          label="Tilt"
-          value={Number(camera.tilt.toFixed(1))}
-          unit="°"
-          step={0.1}
-          min={-89}
-          max={89}
-          disabled={locked}
-          onchange={(tilt) => view.look({ tilt: tilt ?? camera.tilt })}
-        />
-        <span class="key inline">Roll</span>
-        <NumberField
-          label="Roll"
-          value={Number(camera.roll.toFixed(1))}
-          unit="°"
-          step={0.1}
-          min={-180}
-          max={180}
-          disabled={locked}
-          onchange={(roll) => view.look({ roll: roll ?? camera.roll })}
-        />
-      </span>
-      <span class="wide">
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm level"
-          disabled={locked || (!camera.tilt && !camera.roll)}
-          onclick={() => view.look({ tilt: 0, roll: 0 })}>Level the view</button
-        >
-      </span>
-      <span class="key">Visibility</span>
+      <span class="key" data-setting="visibility">Visibility</span>
       <span class="value slide">
         <input
           type="range"
@@ -644,28 +746,12 @@
         />
         <span class="end mono">{seeing}</span>
       </span>
-      <label class="key" for="hz-near" title="Leave out the ground closer than this, such as a wall or a slope in front of the eye">Hide nearer than</label>
+      <label class="key" for="hz-near" data-setting="near" title="Leave out the ground closer than this, such as a wall or a slope in front of the eye">Hide nearer than</label>
       <span class="value">
         <NumberField id="hz-near" label="Hide nearer than" value={view.near} unit="m" step={10} min={0} onchange={(near) => view.setNearLimit(near ?? 0)} />
       </span>
-      {#if view.lines}
-        <span class="key">Ridge lines</span>
-        <span class="value slide">
-          <span class="end">Fewer</span>
-          <input
-            type="range"
-            min="0"
-            max={RIDGE_STEPS.length - 1}
-            step="1"
-            value={view.ridges}
-            oninput={(event) => view.setRidges(event.currentTarget.value)}
-            aria-label="How many ridge lines"
-          />
-          <span class="end">More</span>
-        </span>
-      {/if}
     {/snippet}
-    {@render group('more', 'More settings', moreGist, moreBody)}
+    {@render group('view', HORIZON_GROUPS.view, viewGist, onViewBody)}
   {/if}
 </div>
 
@@ -886,6 +972,80 @@
   }
   .wide {
     grid-column: 1 / -1;
+  }
+  /* a part of a group, named on its own line */
+  .sub {
+    margin: 4px 0 -2px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .unsheet {
+    padding: 2px 0 14px;
+  }
+  /* the row a command palette search asked for, lit a moment */
+  .horizon-panel :global(.sought) {
+    border-radius: var(--r-sm);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+    transition: background 0.4s, box-shadow 0.4s;
+  }
+  .part {
+    display: grid;
+    gap: 8px;
+  }
+  .part .sub {
+    margin: 4px 0 0;
+  }
+  .part :global(.hints) {
+    width: auto;
+  }
+  .told {
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .place {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 8px;
+    border: none;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .place strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .place:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text-1) 7%, transparent);
+  }
+  .place.on {
+    background: var(--accent-soft);
+  }
+  .place.on strong {
+    color: var(--accent);
+  }
+  .place:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .place:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .beta {
+    padding: 0 6px;
+    font-size: 10.5px;
+    line-height: 16px;
   }
   .line {
     display: flex;

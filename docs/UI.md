@@ -22,7 +22,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Home** (the mark) | Overview, Guide | |
 | **Case** (rail, under the stages) | Timeline, Board, Graph, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
-| **Examine** | Inspect, Collage | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
+| **Examine** | Inspect, Collage | Edit Provenance, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
@@ -163,8 +163,9 @@ before; **Guide** is for somebody who has not.
 Rules:
 
 - **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS). It starts with
-  recently added documents, then searches tools, workspace cases and documents
-  in the current case. Arrow keys select a result, Enter opens it and Escape
+  recently added documents, then searches tools, Horizon's settings, workspace
+  cases and documents in the current case. A Horizon setting opens Horizon with
+  its inspector out, its group unfolded and its row lit a moment. Arrow keys select a result, Enter opens it and Escape
   returns focus. Changing case through `openCase` asks before discarding unsaved
   work; document handoffs retain their existing save and confirmation paths.
   Reads start only when the palette opens; document search uses bounded catalog
@@ -1004,8 +1005,17 @@ saved proofs and Notebook use those same destinations. Files already outside a
 case are never overwritten, and concurrent exports reserve distinct numbered
 names.
 
-The Settings backup carries portable settings, API keys, templates and the
-signature. It leaves absolute export paths, the workspace pointer and download
+Settings → Icons is the icon library: files, a folder or a zipped pack dropped or
+picked (PNG, JPEG, WebP, GIF or SVG, 512 KB a file, a thousand icons), each pack
+folder a group. The browser draws an SVG as a PNG before sending it; the server
+decodes every picture, keys out a flat background, trims it to what it paints,
+sizes it to the layers' icon weight and stores it under the hash of its pixels,
+so a picture imported twice is one icon. Each tile renames its icon, switches it
+between in a disc and as it is (guessed at import from how many colours it
+paints) and moves or removes it; a group renames or removes as a whole.
+
+The Settings backup carries portable settings, API keys, templates, the icon
+library and the signature. It leaves absolute export paths, the workspace pointer and download
 sessions on the machine that created them, and the UI tells the analyst to keep
 the downloaded backup private.
 
@@ -1597,10 +1607,51 @@ anything, since nothing is unsaved.
 
 **A strip instead of tabs.** Under the viewer, a video leads the strip and the frames
 cut from it follow, labelled by timecode. Clicking a tile is what the viewer and the
-panel show: the player with stepping, capture, orientation, clip adjustments and the
-sharpest-frame scan, or one frame with orientation, adjustments, crop, **Analyze**
-and reverse search. An image is its own single frame and needs no strip until
-**Duplicate** makes a second copy to crop differently. Removing a frame offers Undo.
+panel show: the player, or one frame. An image is its own single frame and needs no
+strip until **Duplicate** makes a second copy to crop differently. Removing a frame
+offers Undo.
+
+**The player reads the frame on screen.** The clock gives it to the millisecond with
+its number in the clip, and a capture cuts that very frame by its own timestamp: the
+browser shows the frame a time falls inside, ffmpeg cuts the first frame at or after
+it, so sending a time from inside a frame would cut the next one. The bar under the
+video carries the frames already cut, the marks, the shot changes and the sharpest
+frames a scan found, and an A–B loop; a press near a marker lands on it, and
+hovering shows the picture at that point. The sound runs along the bar as a
+waveform. The hover pictures and the waveform come on their own when a video opens,
+from one keyframe-only decode and one audio decode kept in the case's thumbnail
+cache. The video zooms, pans and turns like a frame, a click plays it, and the speed
+goes from 0.1× to 4×. Holding **O** shows the picture without its adjustments, on a
+video and on a frame.
+
+**The one press every visit needs stays on top of the panel.** Above the tabs sit
+**Capture frame** on the video, with the time it will cut and **Save N frames** once
+there are captures, and **Save to case** on a frame. C captures from the keyboard and
+takes as fast as it is pressed: the frame joins the strip at once and its picture
+follows, and taking the same frame twice only points at it. The panel is resized by
+its left edge. Its tabs keep their place for the session:
+
+- **Info**, what the file says about itself: the stream from the probe (resolution,
+  frame rate and whether it varies, codec, bit rate, sound, a turn stored in the
+  file, the software it went through), the capture date and position from its
+  metadata with the point opened on Satellite, and the file's size, SHA-256, source
+  and when it was added. The full metadata dump folds below. On a frame, the frame
+  comes first: the time and number it was cut at and its size after the crop.
+- **Adjust**: crop, orientation and tones. A live histogram reads the picture as it
+  is shown and says how much of it is pure black or white. Presets (dark scene,
+  haze, text and plates) set the sliders and leave them to move. Denoise, auto
+  levels, local contrast and a single colour channel join the sliders; a filter CSS
+  cannot preview is rendered by the server a moment after the sliders stop, so a
+  frame always reads as it will save. On the video, the same tab turns and tunes the
+  whole clip and saves it re-encoded.
+- **Moments**, on a video: marks set with **M** or **Mark here**, each labelled,
+  kept with the work and listed in playback order; and the scan, which reads every
+  frame once and finds the shot changes, with the sharpest frame of each shot, and
+  the sharpest frames overall. Its answer is kept, so the shots are on the bar the
+  next time the clip opens.
+- **Analyze**, on a frame: Error Level Analysis laid over the frame with its
+  strength, and asked again once the frame is edited; Reverse image search and
+  Match in Horizon.
 
 **Save to case is the one step that files media.** Each output carries its own block
 under the controls that shape it: a name that holds real text from the start, a
@@ -1971,6 +2022,23 @@ open for the next. With nothing selected it sets the next markers and the group
 they go into; with a selection it restyles it and can move it to another group. A
 group with one style draws every feature in it, so a pick on its features
 restyles the group, and the palette says so.
+
+The analyst's own icons come first in the palette's Icon part. **This layer's
+icons** are the ones the layer holds that the library does not, such as a copied
+map's; then the library from Settings → Icons, group by group; then the app's.
+With an empty library the palette says where icons are imported. A layer keeps a
+copy of each icon its markers wear, taken the moment one is picked, so a case
+opened on another machine draws them and removing one from the library changes
+no map. An icon is drawn **in a disc** (its shape inked on a disc of the marker's
+colour, as the app's pictograms are) or **as it is**, in its own colours and at
+the size imported maps draw theirs; the damage stroke, the external rim, the
+direction and the selection ring go round either. A colour pick never takes an
+icon off: one drawn as it is keeps its colours, and the palette says so. Only a
+pick of one of the app's symbols replaces it. A point copied out of a map with
+its own icon offers **Its own icon** first in the copy steps, already chosen.
+An unfolded layer row that holds icons says how many, with **Add these icons to
+my library**: a grid, all ticked, that files the chosen ones under the layer's
+name. A copy never fills the library on its own.
 
 **New group** creates a foldable group. Its ⋯ opens its settings: its name, **One
 style for the whole group** and that style, **Names on the map**, **Icon size**,
@@ -2343,14 +2411,17 @@ radar candidates on: water dark blue, vegetation grey-green, walls and hulls whi
 
 **3D** sits under the compass. Pressed, the imagery rises on the relief
 (Mapterhorn's open heights, AWS's set when Mapterhorn cannot be reached) and the
-view leans to 60°. **Tilt** looks straight down and back, Page Up and Page Down
+view leans to 20°, once the relief under it has arrived. **Tilt** looks straight
+down and back, Page Up and Page Down
 lean it ten degrees at a time, and a middle-drag or Shift+drag orbits round the
 ground grabbed. Over relief a plain drag keeps the grabbed ground under the hand,
 and the wheel zooms toward the ground under the pointer, as far for a notch or a
 trackpad swipe as on the flat map. **Real heights** can be raised to ×1.5, ×2 or
 ×3 to read a gentle slope, and the control turns amber while they are. On a
 billed basemap a **Far ground: Esri** pill says the ground past a flat view's
-reach is Esri's free imagery. A tilted view has no one scale, so the scale bar
+reach is Esri's free imagery. Borders are drawn from OpenStreetMap while 3D is on,
+lines on the ground and names standing up, because Esri's printed names would
+lie on the slopes. A tilted view has no one scale, so the scale bar
 steps aside while it leans, and Grid Search stays shut until 3D is off. The
 address keeps the tilt, the zoom to two decimals and the height the camera
 holds its centre at, so a reload or a second window opens on the same view.
@@ -2759,9 +2830,24 @@ Horizon has three modes on one switch at the left of its header: **View**, the
 terrain from the viewpoint; **Overlay**, a photo laid over it there and matched
 by hand; **Find**, an area of the map searched for where the photo was taken.
 The photo and its trace are the same in all three, and View only hides the
-photo. The mode is in the address, so a reload and Back return to it, and the
-work no save has kept yet (the photo, its trace, Find's area and alignments)
-is kept in the case and comes back with it.
+photo. The mode is in the address, so Back returns to it. A reload opens the
+tab on its map. The work no save has kept yet (the viewpoint, the photo, its
+trace, Find's area and alignments, the mode) is kept in the case and offered
+at the foot of that map: **Resume** lays it back, **Discard** lets it go, and
+anything started instead replaces it. Work a saved view or a search keeps is
+not offered; Open has it. A link that names a viewpoint still stands there.
+
+The inspector under the small map is grouped by what is asked of the view.
+**Measures** holds the marked point and the ground clicked in the view.
+**Viewpoint** holds where the eye stands and how high, then the camera: its
+width, the frame, tilt and roll. **What the view shows** holds summit names,
+ridge lines, buildings (marked Beta), the sun and moon, the haze and the
+nearest ground drawn. In Overlay, the **Photo** group says everything about
+the photo: its file (another one, or none), what the file says, the lens's
+curve, the trace (undo, clear), what you know about it for Fit, and the places
+Fit found when none stood out. The band over the view keeps what is done on
+the picture: the photo and terrain slider, Blink, Side by side, the pens,
+Detect, Reshape, the gap and Fit.
 
 The trace is edited with the same tools in Overlay's band and on Find's photo,
 one out at a time: the **Skyline** pen (T) for the edge against the sky, the
@@ -2776,6 +2862,19 @@ ridges had a pen. Fit lays the skyline strokes alone on the terrain, and Find
 also reads the ridges against the terrain's inner silhouettes and the pairs'
 order. Both let each piece of a cut collage turn, tilt and roll by a degree or
 so, and the view then reads each piece through its own camera.
+
+Find's side has two faces. **Prepare** numbers the three steps a search
+needs (Skyline, Area, Search), each lit once done; the warnings about the lens
+and the reach sit by the Search button. **Help the search** folds the optional
+parts, the alignments and what you know about the photo (who took it, the zoom,
+the reach), each with its gist on its title line; an alignment being made
+unfolds its own. **Result** shows the search on show: its name, when it was
+made and what it was asked with, its progress, verdict and places. **Change and
+search again** goes back to Prepare with the search's setup. The case's
+earlier searches are in the **Open** menu of Find's header, with when each was
+made and how it ended; opening one replaces the setup on screen. **New** beside
+it lets the photo, its trace and the setup go and asks for the next photo,
+asking first when no search keeps what is on screen.
 
 Find's photo shows as the search reads it, straightened from its lens's curve
 and between its corners when Overlay pulled them. **Lens curve** on its

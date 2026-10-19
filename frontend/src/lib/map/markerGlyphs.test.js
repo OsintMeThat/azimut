@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BADGE_GLYPHS, drawMarker, isBadge, markerParts, partTransform } from './markerGlyphs.js';
+import { BADGE_GLYPHS, drawMarker, drawOwnMarker, inkBox, isBadge, markerParts, MARKER_PIXELS, OWN_GLYPH, OWN_IMAGE_RATIO,
+  ownMarkerSide, ownParts, partTransform } from './markerGlyphs.js';
 import symbols from './layerSymbols.json';
 import { paths } from '../../components/Icon.svelte';
 
@@ -79,5 +80,59 @@ describe('marker glyphs', () => {
       expect(context.rotate).toHaveBeenCalledWith((-40 * Math.PI) / 180);
       expect(context.setTransform).toHaveBeenLastCalledWith(1, 0, 0, 1, 0, 0);
     } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe("a marker in one of the analyst's own icons", () => {
+  const context = () => ({ clearRect: vi.fn(), setTransform: vi.fn(), translate: vi.fn(), rotate: vi.fn(), fill: vi.fn(),
+    stroke: vi.fn(), drawImage: vi.fn(), setLineDash: vi.fn(), fillRect: vi.fn() });
+
+  it('stands on the badge disc in a disc, and on nothing as it is but the marks', () => {
+    const disc = ownParts('#d55e00', { mode: 'disc', status: 'damaged' });
+    expect(disc.under.map((part) => part.fill)).toEqual(['rgba(0, 0, 0, 0.35)', '#d55e00']);
+    expect(disc.over).toHaveLength(2);
+    const plain = ownParts('#d55e00', { mode: 'image', external: true });
+    expect(plain.under).toEqual([]);
+    expect(plain.over[0].dash).toEqual([6, 4]);
+  });
+
+  it('sizes a picture drawn as it is at the share of a badge the source icons are drawn at', () => {
+    expect(ownMarkerSide({ width: 64, height: 64 }, 'disc')).toBe(MARKER_PIXELS);
+    expect(ownMarkerSide({ width: 40, height: 40 }, 'image')).toBe(MARKER_PIXELS);
+    expect(ownMarkerSide({ width: 200, height: 100 }, 'image')).toBe(140);
+  });
+
+  it('inks the silhouette of a disc icon in the glyph colour, fitted to its painted part', () => {
+    vi.stubGlobal('Path2D', class {});
+    const scratch = context();
+    const canvas = { getContext: () => scratch };
+    const into = context();
+    const image = { width: 100, height: 100 };
+    drawOwnMarker(into, image, '#d55e00', { mode: 'disc', box: { x: 10, y: 30, w: 80, h: 40 } }, 1, () => canvas);
+    const fit = OWN_GLYPH / 80;
+    expect(scratch.drawImage).toHaveBeenCalledWith(image, 10, 30, 80, 40, (64 - 80 * fit) / 2, (64 - 40 * fit) / 2, 80 * fit, 40 * fit);
+    expect(scratch.globalCompositeOperation).toBe('source-in');
+    expect(scratch.fillStyle).toBe('#ffffff');
+    expect(into.drawImage).toHaveBeenCalledWith(canvas, 0, 0);
+    vi.unstubAllGlobals();
+  });
+
+  it('draws a picture as it is centred where its source centred it', () => {
+    vi.stubGlobal('Path2D', class {});
+    const into = context();
+    const image = { width: 120, height: 80 };
+    drawOwnMarker(into, image, '#d55e00', { mode: 'image' });
+    const side = ownMarkerSide(image, 'image');
+    expect(into.drawImage).toHaveBeenCalledWith(image, side / 2 - (120 * OWN_IMAGE_RATIO) / 2, side / 2 - (80 * OWN_IMAGE_RATIO) / 2,
+      120 * OWN_IMAGE_RATIO, 80 * OWN_IMAGE_RATIO);
+    vi.unstubAllGlobals();
+  });
+
+  it('finds the painted part of a picture, or takes all of it when its pixels cannot be read', () => {
+    const data = new Uint8ClampedArray(4 * 4 * 4);
+    data[(1 * 4 + 2) * 4 + 3] = 255; data[(2 * 4 + 1) * 4 + 3] = 255;
+    const canvas = { getContext: () => ({ drawImage: vi.fn(), getImageData: () => ({ data }) }) };
+    expect(inkBox({ width: 4, height: 4 }, () => canvas)).toEqual({ x: 1, y: 1, w: 2, h: 2 });
+    expect(inkBox({ width: 4, height: 4 }, () => null)).toEqual({ x: 0, y: 0, w: 4, h: 4 });
   });
 });

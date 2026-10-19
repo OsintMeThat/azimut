@@ -63,16 +63,6 @@ afterEach(() => {
 const button = (root, label) => root.querySelector(`button[aria-label="${label}"]`);
 
 describe('the band over a photo', () => {
-  it('clears the whole trace in one press, and has nothing to clear without one', () => {
-    const overlay = fakeOverlay();
-    const root = bar(overlay);
-    button(root, 'Clear the whole trace').click();
-    expect(overlay.clearTrace).toHaveBeenCalledOnce();
-    expect(button(root, 'Clear the whole trace').title).toMatch(/Ctrl\+Z brings it back/);
-    const empty = bar(fakeOverlay({ strokes: [] }));
-    expect(button(empty, 'Clear the whole trace')).toBeNull();
-  });
-
   it('hides the trace, rubs it out and asks for the skyline found', () => {
     const overlay = fakeOverlay();
     const ondetect = vi.fn();
@@ -220,35 +210,6 @@ describe('the band over a photo', () => {
     expect(fit.title).toMatch(/whole turn/);
   });
 
-  it('lists the places the search found when none stood out, and lights the one in view', () => {
-    const gap = { median: 0.4, span: 52, offset: 0.1, points: 40 };
-    const place = (heading, explained) => ({ camera: { heading, tilt: 1, fov: 60 }, gap: { median: 0.21 }, explained, close: true });
-    const onplace = vi.fn();
-    const view = { camera: { heading: 147.3, tilt: 1, fov: 60 }, ground: 'relief', lines: true, setLines: vi.fn() };
-    const places = [place(299.6, 0.47), place(147.3, 0.4)];
-    const root = bar(fakeOverlay(), { gap, view, places, onplace });
-    const open = button(root, 'Places that fit');
-    expect(open.textContent).toContain('2');
-    expect(root.querySelector('#hz-photo-places')).toBeNull();
-    open.click();
-    flushSync();
-    const rows = [...root.querySelectorAll('#hz-photo-places button')];
-    expect(rows.map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
-      '300° NW explains 47% of the trace',
-      '147° SE explains 40% of the trace',
-    ]);
-    expect(rows.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
-    rows[0].click();
-    expect(onplace).toHaveBeenCalledWith(0);
-    // Escape folds the list away
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    flushSync();
-    expect(root.querySelector('#hz-photo-places')).toBeNull();
-    // one place is the fit itself: nothing to choose between
-    const one = bar(fakeOverlay(), { gap, view, places: [place(299.6, 0.47)] });
-    expect(button(one, 'Places that fit')).toBeNull();
-  });
-
   it('keeps every button’s name when the band hides its words', () => {
     const root = bar(fakeOverlay());
     expect(button(root, 'Trace skyline')).not.toBeNull();
@@ -302,7 +263,7 @@ describe('the band over a photo', () => {
     const order = [...root.querySelectorAll('.overlay-bar > button, .overlay-bar > .zone.fade > button')].map(
       (b) => b.getAttribute('aria-label') ?? b.textContent.trim()
     );
-    expect(order.slice(1, 5)).toEqual(['Move the photo', 'Photo', 'Terrain', 'Move the terrain']);
+    expect(order.slice(0, 4)).toEqual(['Move the photo', 'Photo', 'Terrain', 'Move the terrain']);
     expect(root.querySelector('[role="radiogroup"]')).toBeNull();
     expect(button(root, 'Move the terrain').getAttribute('aria-pressed')).toBe('true');
     expect(button(root, 'Move the terrain').title).toBe('Drag and the wheel move the terrain');
@@ -335,100 +296,6 @@ describe('the band over a photo', () => {
     const root = bar(fakeOverlay(), { view, gap: { median: 0.4, span: 52, offset: 0.1, points: 40 } });
     const words = [...root.querySelectorAll('button')].map((b) => b.textContent.trim());
     for (const word of ['Ridge lines', 'Relief', 'Satellite', 'Plain']) expect(words).not.toContain(word);
-  });
-});
-
-describe('what the analyst knows about the photo', () => {
-  const told = (over = {}) =>
-    fakeOverlay({
-      hints: { zoom: 'any', facing: null, reach: 'auto' },
-      reach: null,
-      reachFound: null,
-      lens: null,
-      setHints: vi.fn(),
-      ...over,
-    });
-  const gap = { median: 0.4, span: 30, points: 40 };
-
-  it('sits beside Fit, says "What you know" until something is, then sums it up', () => {
-    const plain = bar(told(), { gap });
-    expect(button(plain, 'What you know').textContent).toContain('What you know');
-    const said = bar(told({ hints: { zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' }, reach: 20_000 }), { gap });
-    expect(said.querySelector('button[aria-label^="What you know:"]').textContent).toContain('Zoomed · 218° SW · within 20 km');
-  });
-
-  it('opens on the three things to say, each starting at not knowing', () => {
-    const overlay = told();
-    const root = bar(overlay, { gap, heading: 132.4 });
-    button(root, 'What you know').click();
-    flushSync();
-    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
-    expect(menu).not.toBeNull();
-    const checked = [...menu.querySelectorAll('[role="radio"][aria-checked="true"]')].map((b) => b.textContent.trim());
-    expect(checked).toEqual(['Any', 'Anywhere', 'Auto']);
-    // the words a zoom stands for are on its button
-    const zoomed = [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Zoomed');
-    expect(zoomed.title).toMatch(/10° to 35°/);
-    zoomed.click();
-    expect(overlay.setHints).toHaveBeenCalledWith({ zoom: 'zoomed' });
-    [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Roughly this way').click();
-    expect(overlay.setHints).toHaveBeenCalledWith({ facing: { heading: 132.4 } });
-    [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === '100 km').click();
-    expect(overlay.setHints).toHaveBeenCalledWith({ reach: 100_000 });
-    // Auto stops at 50 km, and says so
-    const auto = [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Auto');
-    expect(auto.title).toMatch(/up to 50 km/);
-  });
-
-  it('keeps the lens the photo says, and says the reach Fit found', () => {
-    const root = bar(told({ lens: { mm: 26, fov: 64.2 }, reachFound: 20_000 }), { gap });
-    button(root, 'What you know').click();
-    flushSync();
-    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
-    expect(menu.textContent).toContain('The photo says 26 mm, 64° across: Fit keeps it.');
-    expect([...menu.querySelectorAll('[role="radio"]')].some((b) => b.textContent.trim() === 'Zoomed')).toBe(false);
-    expect(menu.textContent).toContain('Fit found the skyline within 20 km.');
-  });
-
-  it('asks what kind of picture it is only when it may be a panorama, and says what a panorama is searched across', () => {
-    const plain = bar(told(), { gap });
-    button(plain, 'What you know').click();
-    flushSync();
-    expect(plain.textContent).not.toContain('Picture');
-    // a picture of any shape offers the choice; a wide one is pointed to Panorama
-    const collage = bar(told({ panoramaOffered: true, stitched: null, isPanorama: false, aspect: 2.1 }), { gap });
-    button(collage, 'What you know').click();
-    flushSync();
-    expect(collage.textContent).toContain('Picture');
-    expect(collage.textContent).not.toContain('reads better as Panorama');
-    const overlay = told({ panoramaOffered: true, stitched: null, isPanorama: false, aspect: 3.5 });
-    const root = bar(overlay, { gap });
-    button(root, 'What you know').click();
-    flushSync();
-    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
-    expect(menu.textContent).toContain('A phone’s panorama reads better as Panorama.');
-    [...menu.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === 'Panorama').click();
-    expect(overlay.setHints).toHaveBeenCalledWith({ picture: 'panorama' });
-    // read as one, the zoom words give way to the widths it is searched across
-    const strip = bar(told({ panoramaOffered: true, stitched: null, isPanorama: true, hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' } }), { gap });
-    button(strip, 'What you know: Panorama').click();
-    flushSync();
-    const stripMenu = strip.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
-    expect(stripMenu.textContent).toContain('Fit tries 60° to 360° across.');
-    expect([...stripMenu.querySelectorAll('[role="radio"]')].some((b) => b.textContent.trim() === 'Zoomed')).toBe(false);
-  });
-
-  it('says a stitched collage’s width, kept by Fit', () => {
-    const stitched = { degrees: 47.4, stitched: 15, by_hand: 4, warp: 'cylindrical', collage: 'Collage 9' };
-    const root = bar(
-      told({ panoramaOffered: true, stitched, isPanorama: true, lens: { fov: 47.4, stitched: true }, hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' } }),
-      { gap }
-    );
-    button(root, 'What you know: Panorama').click();
-    flushSync();
-    const menu = root.querySelector('[role="dialog"][aria-label="What you know about the photo"]');
-    expect(menu.textContent).toContain('Stitched by Azimut from Collage 9.');
-    expect(menu.textContent).toContain('47° across: Fit keeps it.');
   });
 });
 

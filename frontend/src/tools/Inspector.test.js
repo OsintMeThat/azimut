@@ -30,7 +30,7 @@ describe('Inspect — work that outlives the file it was started for', () => {
   });
 
   it('sends a pending save with the page as it closes', () => {
-    expect(source).toContain('<svelte:window onkeydown={onWindowKeydown} {onpagehide} />');
+    expect(source).toMatch(/<svelte:window onkeydown=\{onWindowKeydown\}.*\{onpagehide\} \/>/);
     expect(source).toContain('if (autosave.pending) writeWork({ keepalive: true }).catch(() => {});');
   });
 
@@ -41,8 +41,8 @@ describe('Inspect — work that outlives the file it was started for', () => {
 
 describe('Inspect — crop keys', () => {
   it('lets Escape leave the crop it found rather than applying the new one', () => {
-    expect(source).toContain("if (e.key === 'Enter') { e.preventDefault(); commitCrop(); }");
-    expect(source).toContain("else if (e.key === 'Escape') { e.preventDefault(); cancelCrop(); }");
+    expect(source).toContain("if (key === 'Enter') { e.preventDefault(); commitCrop(); }");
+    expect(source).toContain("else if (key === 'Escape') { e.preventDefault(); cancelCrop(); }");
     expect(source).toContain('if (activeFrame) activeFrame.crop = cropBefore;');
     expect(source).toContain('cropBefore = activeFrame.crop ? { ...activeFrame.crop } : null;');
   });

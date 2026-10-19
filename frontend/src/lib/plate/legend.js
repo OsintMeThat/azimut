@@ -30,6 +30,8 @@ export function kindOf(geometry) {
 /**
  * The rows a map's legend shows, `{ key, label, kind, colour, symbol, status, off }`,
  * `off` set on the rows the analyst left out (the inspector lists them, the page does not).
+ * A look in one of the analyst's own icons adds `icon` (`{ key, mode, layer }`) and is
+ * named after the icon.
  *
  * `context`:
  * - `rows`: the case's layers; `collection(name)`: a layer's features, or null while unread;
@@ -57,7 +59,8 @@ export function legendRows(map, context) {
         const kinds = group.kinds ?? [];
         const kind = kinds.includes('point') ? 'point' : kinds.includes('line') ? 'line' : 'area';
         const key = `${row.name}/${group.name}`;
-        if (!looks.has(key)) looks.set(key, { key, label: group.name, kind, colour: entry.colour || group.colour || categoryColour(group, index), symbol: group.symbol || 'pin', status: '' });
+        if (!looks.has(key)) looks.set(key, { key, label: group.name, kind, colour: entry.colour || group.colour || categoryColour(group, index), symbol: group.symbol || 'pin', status: '',
+          ...(group.icon ? { icon: { key: group.icon, mode: group.icon_mode === 'disc' ? 'disc' : 'image', layer: row.name } } : {}) });
       });
       continue;
     }
@@ -76,16 +79,18 @@ export function legendRows(map, context) {
         const group = groups[groupAt];
         const colour = String(entry.colour || properties.colour || categoryColour(group, Math.max(0, groupAt))).toLowerCase();
         const symbol = kind === 'point' ? properties.symbol || group?.symbol || 'pin' : '';
+        const icon = kind === 'point' ? properties.icon || '' : '';
         const status = kind === 'point' ? properties.status ?? '' : '';
-        const key = [row.name, properties.category, kind, colour, symbol, status].join('/');
+        const key = [row.name, properties.category, kind, colour, icon || symbol, status].join('/');
         // a look already listed needs no other feature placed in the frame
         if (looks.has(key) || !drawn(state.geometry)) continue;
         const named = colourName(colour);
         const uniform = group?.mode === 'uniform';
-        let label = uniform ? group.name : kind === 'point' ? symbolName(symbol) : named || properties.category || row.title;
+        let label = uniform ? group.name : kind === 'point' ? (icon && properties.icon_name) || symbolName(symbol) : named || properties.category || row.title;
         if (!uniform && named && label !== named) label = `${label}, ${named}`;
         if (STATUS_WORDS[status]) label = `${label}, ${STATUS_WORDS[status]}`;
-        looks.set(key, { key, label, kind, colour, symbol, status, group: properties.category || row.title });
+        looks.set(key, { key, label, kind, colour, symbol, status, group: properties.category || row.title,
+          ...(icon ? { icon: { key: icon, mode: properties.icon_mode === 'disc' ? 'disc' : 'image', layer: row.name } } : {}) });
       }
       if (past) for (const feature of past(row, features, at)) {
         const said = feature.properties ?? {};

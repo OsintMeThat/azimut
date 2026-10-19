@@ -5,14 +5,16 @@
    */
   import Icon from '../../components/Icon.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
 
   /** `places`: `{ layer, group, marker }` on this point (`placesOf`, `placesAt`). */
-  let { places = [], busy = false, onopen, onremove } = $props();
+  let { places = [], busy = false, caseId = null, onopen, onremove } = $props();
 </script>
 
 {#each places as place (`${place.layer.name}|${place.marker.key}`)}
   <div class="in-layer">
-    {#if place.group?.mode === 'uniform'}<MarkerSymbol symbol={place.group.symbol} colour={place.group.colour} size={14} />
+    {#if place.group?.mode === 'uniform'}<MarkerSymbol symbol={place.group.symbol} colour={place.group.colour} size={14}
+      icon={place.group.icon ? iconLibrary.look(place.group.icon, { caseId, layer: place.layer.name, meta: place.layer.icons }) : null} />
     {:else}<span class="dot" style={`--swatch:${place.group?.colour ?? '#0072b2'}`}></span>{/if}
     <span class="where">In {place.layer.title}{place.layer.groups.length > 1 && place.group ? ` › ${place.group.name}` : ''}</span>
     <button type="button" class="open" onclick={() => onopen(place)} title="Open it in the layer, on the map">Open</button>

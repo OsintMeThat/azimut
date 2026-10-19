@@ -6,7 +6,7 @@
    * the map looks. Off, the map is the flat picture every capture has always
    * been. On, the relief rises under the imagery, and the middle-drag that
    * turns the map tilts it too, as in Google Earth. Switched on, the view leans
-   * to a reading angle at once: relief seen straight down looks like the flat
+   * to a reading angle once the relief is in: relief seen straight down looks like the flat
    * map, and the switch would seem to do nothing. An exaggerated relief says
    * so in the control itself, since a slope drawn twice its height is a reading
    * aid and not how the ground looks.

@@ -207,9 +207,9 @@ def test_an_unknown_browser_lands_on_none(client):
 
 
 def test_an_older_backup_without_the_new_sections_still_imports(client):
-    """A file written before templates and the logo travelled: settings only."""
+    """A file written before templates, the logo and the icons travelled: settings only."""
     res = client.post("/api/settings/import", json={"settings": {"units": "imperial"}}).json()
-    assert res == {"imported": ["units"], "templates": 0, "signature": False}
+    assert res == {"imported": ["units"], "templates": 0, "signature": False, "icons": 0}
     assert client.get("/api/settings").json()["units"] == "imperial"
 
 

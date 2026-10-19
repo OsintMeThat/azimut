@@ -42,6 +42,11 @@ export function frameRecord(frame) {
   };
 }
 
+/** One timecoded mark on a video, as it is stored. */
+export function markRecord(mark) {
+  return { id: mark.id, time: mark.time, label: String(mark.label ?? '').trim() };
+}
+
 /** The body of a work save. */
 export function workSpec(work) {
   return {
@@ -50,6 +55,7 @@ export function workSpec(work) {
     videoFiled: work.videoFiled ?? null,
     activeFrameId: work.activeFrameId ?? null,
     frames: (work.frames ?? []).map(frameRecord),
+    marks: (work.marks ?? []).map(markRecord),
   };
 }
 
@@ -67,14 +73,14 @@ export function isUntouched(frame, filters) {
  * Whether the work holds anything at all.
  *
  * Opening a file to look at it must not file a work for it. A video has done
- * nothing until a frame is cut or the clip is adjusted; an image starts as one
- * frame, the image itself, and has done nothing until that frame changes or a
- * second one appears.
+ * nothing until a frame is cut, a moment is marked or the clip is adjusted; an
+ * image starts as one frame, the image itself, and has done nothing until that
+ * frame changes or a second one appears.
  */
 export function isPristine(work, filters, videoFilters) {
   const frames = work.frames ?? [];
   if (work.source?.kind === 'video') {
-    return frames.length === 0 && !hasVideoEdits(videoFilters, work.videoAdjust, work.videoRotation);
+    return frames.length === 0 && !(work.marks?.length) && !hasVideoEdits(videoFilters, work.videoAdjust, work.videoRotation);
   }
   return frames.length <= 1 && frames.every((f) => isUntouched(f, filters) && !f.filed);
 }

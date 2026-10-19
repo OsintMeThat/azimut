@@ -601,6 +601,36 @@ test("Difference's settings dock on the right over map B, stay put through a rea
   expect(errors).toEqual([]);
 });
 
+test('the right-click menu stays whole and on top in Swipe and Blink', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  // Every row of the menu answers for itself: nothing else is painted over it.
+  const onTop = () => page.getByRole('menu', { name: 'This point' }).evaluate((menu) =>
+    [...menu.querySelectorAll('[role="menuitem"]')].every((row) => {
+      const box = row.getBoundingClientRect();
+      return row.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    }));
+  const stage = await page.locator('.compare-stage').boundingBox();
+
+  // Opened on A just left of the divider, the menu crosses into B's half.
+  await page.getByRole('button', { name: 'Swipe', exact: true }).click();
+  const divider = await page.getByRole('slider', { name: 'Swipe divider on imagery' }).boundingBox();
+  await page.mouse.click(divider.x - 40, stage.y + stage.height / 2, { button: 'right' });
+  await expect(page.getByRole('menu', { name: 'This point' })).toBeVisible();
+  expect(await onTop()).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'This point' })).toHaveCount(0);
+
+  // Opened in Blink, it holds through both pictures.
+  await page.getByRole('button', { name: 'Blink', exact: true }).click();
+  await page.mouse.click(stage.x + stage.width / 2, stage.y + stage.height / 2, { button: 'right' });
+  const shown = page.locator('.surface-shell.secondary');
+  for (const hidden of [true, false]) {
+    await expect.poll(() => shown.evaluate((shell) => shell.classList.contains('blink-hidden'))).toBe(hidden);
+    expect(await onTop()).toBe(true);
+  }
+  expect(errors).toEqual([]);
+});
+
 test('takes the whole screen with both maps, and gives it up to the tab it hands over to', async ({ page }) => {
   const { errors } = await openCompare(page);
   const held = () => page.evaluate(() => document.fullscreenElement?.classList.contains('compare-tool') ?? false);

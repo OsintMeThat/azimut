@@ -56,7 +56,8 @@
   import { categoryColour } from '../lib/map/addedLayers.js';
   import { NEW_COLOUR, badgeImage, personalMarkerImage } from '../lib/map/addedLayer.js';
   import { layerPalette } from '../lib/map/layerPalette.svelte.js';
-  import { MARKER_PIXELS, drawMarker, isBadge } from '../lib/map/markerGlyphs.js';
+  import { MARKER_PIXELS, drawMarker, drawOwnMarker, isBadge, ownMarkerSide } from '../lib/map/markerGlyphs.js';
+  import { layerIconUrl, loadPicture, readyPicture } from '../lib/map/ownIcons.js';
   import symbols from '../lib/map/layerSymbols.json';
   import { asOf, hasHistory, isTracked, momentLabel, momentNow, stateAt } from '../lib/map/layerHistory.js';
   import { revealPlates } from '../lib/plateExport.js';
@@ -1120,13 +1121,26 @@
   });
 
   const markers = new Map();
+  /** Bumped as an own icon's picture arrives, so a legend drawn before it is drawn again. */
+  let iconsRead = $state(0);
   /** A marker's picture, `pixels` wide at least: drawn larger for a symbol on a print, in steps so few are kept. */
   function markerImage(symbol, colour, marks = {}, pixels = MARKER_PIXELS) {
     const times = Math.max(1, Math.min(8, Math.ceil(pixels / MARKER_PIXELS)));
-    const key = `${symbol}|${colour}|${marks.status ?? ''}|${times}`;
+    const own = marks.icon;
+    const key = `${own ? `own-${own.key}-${own.mode}` : symbol}|${colour}|${marks.status ?? ''}|${times}`;
     if (markers.has(key)) return markers.get(key);
     let canvas = null;
-    if (times > 1) {
+    if (own) {
+      // one of the analyst's icons, from the copy its layer keeps; read once, then drawn
+      const url = layerIconUrl(caseId, own.layer, own.key);
+      const picture = readyPicture(url);
+      if (!picture) { loadPicture(url).then((read) => { if (read) iconsRead += 1; }); return null; }
+      const side = ownMarkerSide(picture.image, own.mode);
+      canvas = document.createElement('canvas');
+      canvas.width = canvas.height = side * times;
+      const ctx = canvas.getContext('2d');
+      if (ctx) drawOwnMarker(ctx, picture.image, colour, { mode: own.mode, status: marks.status ?? '', box: picture.box }, times);
+    } else if (times > 1) {
       canvas = document.createElement('canvas');
       canvas.width = canvas.height = MARKER_PIXELS * times;
       const ctx = canvas.getContext('2d');
@@ -1143,7 +1157,7 @@
     return canvas;
   }
 
-  const decor = $derived({ legend, credits, images, markerImage, tokens, imperial: prefs.units === 'imperial', numbered: numbers,
+  const decor = $derived({ legend, credits, images, markerImage, iconsRead, tokens, imperial: prefs.units === 'imperial', numbered: numbers,
     numberOf: (id) => numbers.find((item) => item.id === id)?.number, tables, moments, dayLabel: momentLabel, refShown, place });
 
   // -- export --------------------------------------------------------------------------

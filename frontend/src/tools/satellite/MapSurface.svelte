@@ -342,6 +342,13 @@
     engine.idle().then(() => engine?.setPitch(deg));
   });
 
+  // Standing on its relief, Borders is drawn as lines rather than Esri's picture,
+  // whose printed names would lie on the slopes (`borders.js`).
+  $effect(() => {
+    const over = reliefReady;
+    if (ready && basemaps && reliefOffered) basemaps.setRelief(over);
+  });
+
   // Relief asks for its sources and tiles only once it is switched on.
   $effect(() => {
     const on = reliefPossible && reliefOn;

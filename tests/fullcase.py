@@ -196,7 +196,7 @@ def build_full_case(
             "spec": {"frames": [{
                 "id": "fr_1", "path": full.photo, "time": None,
                 "adjust": {"brightness": 1.2}, "crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5},
-            }]},
+            }], "marks": [{"id": "mk_1", "time": 1.5, "label": "Plate visible"}]},
         },
     )
     assert work.status_code == 200, work.text
@@ -599,6 +599,18 @@ def build_full_case(
         added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
                             json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
         assert added.status_code == 200, added.text
+        # A marker in the analyst's own icon: the layer takes its copy, so the case
+        # carries the picture and how it is drawn wherever it goes.
+        mark = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+        mark.paste((200, 30, 30, 255), (8, 8, 32, 32))
+        drawn = io.BytesIO()
+        mark.save(drawn, "PNG")
+        library = client.post("/api/icons", files=[("files", ("full-case-mark.png", drawn.getvalue(), "image/png"))])
+        assert library.status_code == 200, library.text
+        icon_key = next(icon["key"] for icon in library.json()["icons"] if icon["name"] == "Full case mark")
+        worn = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
+                           json={"lat": 48.81, "lon": 2.31, "name": "Own icon", "icon": icon_key})
+        assert worn.status_code == 200, worn.text
         ordered = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/groups/order",
                               json={"ids": [group_id, *[g["id"] for g in styled.json()["groups"]
                                                         if g["id"] != group_id]]})

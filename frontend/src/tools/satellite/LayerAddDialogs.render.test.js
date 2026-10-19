@@ -87,8 +87,35 @@ describe('a source layer’s feature put in one of the analyst’s layers', () =
     expect(document.querySelector('[aria-label="What it shows"] [aria-pressed="true"]').textContent).toBe('Destroyed');
     document.querySelector('[aria-label="Point icon Tank icon"]').click(); flushSync();
     byText('Add to Positions').click(); await settle();
-    expect(controller.copyTo).toHaveBeenCalledWith(mocks.rows[1], 'g1', { symbol: 'badge-tank', colour: '#d55e00' }, 'destroyed');
+    expect(controller.copyTo).toHaveBeenCalledWith(mocks.rows[1], 'g1', { symbol: 'badge-tank', icon: '', colour: '#d55e00' }, 'destroyed');
     expect(localStorage.getItem('azimut:layer-last:case')).toBe('b');
+  });
+
+  it('keeps the icon its map dressed it in unless another is picked, the layer copying the picture', async () => {
+    mocks.rows = [{ name: 'b', title: 'Second', editable: true }];
+    mocks.api.get.mockImplementation(async (url) => (url.includes('layer-targets') ? [front] : url.endsWith('/icons') ? [] : { colours: [] }));
+    const dressed = { geometry: { type: 'Point', coordinates: [2, 48] }, properties: { name: 'Strike', colour: '#d55e00', icon: 'abcdef0123456789' } };
+    const controller = { copying: { ...job(dressed), row: { name: 'GeoConfirmed-Yemen', title: 'GeoConfirmed', icons: 40 } },
+      copyTo: vi.fn(async () => ({})), cancelCopy: vi.fn() };
+    show(LayerCopyMenu, { controller }); await settle(); flushSync();
+    byText('Second').click(); flushSync();
+    byText('Positions').click(); flushSync();
+    const own = [...document.querySelectorAll('.fm-item.own')];
+    expect(own).toHaveLength(1);
+    expect(own[0].textContent).toContain('Its own icon');
+    expect(own[0].getAttribute('aria-pressed')).toBe('true');
+    byText('Add to Positions').click(); await settle();
+    expect(controller.copyTo).toHaveBeenLastCalledWith(mocks.rows[0], 'g1',
+      { symbol: 'pin', colour: '#d55e00', icon: 'abcdef0123456789', icon_from: 'GeoConfirmed-Yemen' }, '');
+    // another pick replaces it, and the point no longer asks for the map's picture
+    unmount(held); document.body.innerHTML = '';
+    show(LayerCopyMenu, { controller }); await settle(); flushSync();
+    byText('Second').click(); flushSync();
+    byText('Positions').click(); flushSync();
+    document.querySelector('[aria-label="Point icon Tank icon"]').click(); flushSync();
+    expect(document.querySelector('.fm-item.own').getAttribute('aria-pressed')).toBe('false');
+    byText('Add to Positions').click(); await settle();
+    expect(controller.copyTo).toHaveBeenLastCalledWith(mocks.rows[0], 'g1', { symbol: 'badge-tank', colour: '#d55e00', icon: '' }, '');
   });
 
   it('adds a line at once, in the group it is put in', async () => {

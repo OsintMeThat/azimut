@@ -1,14 +1,24 @@
 <script>
   /**
-   * The steps of Find, in the order the work goes: the skyline traced on the
-   * photo, the area drawn on the map, the alignments that narrow it (optional),
-   * what is known about the photo and who took it, then the search. Each step
-   * says where it stands in a line; what is rarely changed folds under More
+   * Find's side, in two faces.
+   *
+   * **Prepare** numbers only the three steps a search cannot run without: the
+   * skyline traced on the photo, the area drawn on the map, the search. Each
+   * says where it stands in a line, and its number lights once it is done.
+   * What narrows the search but is not needed (the alignments, what is known
+   * about the photo and who took it) folds under Help the search, each part
+   * saying its gist on its title line; the warnings about the lens and the
+   * reach stay by the Search button. What is rarely changed folds under More
    * settings.
+   *
+   * **Result** is the search on show: when it was made and what it was asked
+   * with, how far it has gone, then its verdict and its places. Change and
+   * search again goes back to Prepare, the setup still the search's. The
+   * case's earlier searches are opened from the header's Open menu.
    */
   import Icon from '../../components/Icon.svelte';
   import PhotoHints from './PhotoHints.svelte';
-  import { ALIGN_TOLERANCES, areaText, HEAT_RAMP, searchedReach, UNCLEAR_HELP, VERDICTS } from '../../lib/horizon/find.js';
+  import { ALIGN_TOLERANCES, areaPoints, areaText, HEAT_RAMP, searchedReach, searchedWhen, UNCLEAR_HELP, VERDICTS } from '../../lib/horizon/find.js';
   import { AUTO_REACH, reachText, ZOOMS } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
   import { estimateText, SPACINGS, WHO } from './state/find.svelte.js';
@@ -28,16 +38,17 @@
     onsearch = () => {},
     /** Asked to look from a place the search found, `{ lat, lon, heading, fov, tilt, roll, reach, height }`. */
     onplace = () => {},
-    /** Asked to open a search the case keeps, by name. */
-    onopensearch = () => {},
-    /** Asked to delete one, by name. */
-    onremovesearch = () => {},
     /** The place the map lights, by its index in the results, or -1. */
     lit = $bindable(-1),
   } = $props();
 
   let more = $state(false);
   let starting = $state(false);
+  /** The parts of Help the search unfolded; an alignment being made unfolds its own. */
+  const help = $state({ align: false, know: false });
+  $effect(() => {
+    if (find.pending) help.align = true;
+  });
 
   // how large the search would be, asked again a moment after what it depends on changes
   let estimateTimer = null;
@@ -57,15 +68,23 @@
   const search = $derived(find.search);
   const result = $derived(search?.status === 'done' ? search.result : null);
   const progress = $derived(search?.progress?.total ? Math.round((100 * search.progress.done) / search.progress.total) : 0);
-  const earlier = $derived(find.list.filter((row) => row.name !== search?.name));
 
-  /** What the search will run with, said before it runs: the lens, how far it reads, who took the photo. */
-  const told = $derived.by(() => {
-    const hints = overlay.hints ?? {};
-    const lens = overlay.lens;
-    const anyLens = !lens && !overlay.isPanorama && (hints.zoom ?? 'any') === 'any';
+  /** Back on Prepare while a search is on show; a search started or opened shows its Result. */
+  let preparing = $state(false);
+  let shownName = null;
+  $effect(() => {
+    const name = search?.name ?? null;
+    if (name === shownName) return;
+    shownName = name;
+    preparing = false;
+  });
+  const resultFace = $derived(Boolean(search) && !preparing);
+
+  /** What a search runs with, in a line: the lens, how far it reads, who took the photo. */
+  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground' }) {
+    const anyLens = !lens && !panorama && (hints.zoom ?? 'any') === 'any';
     const zoom = ZOOMS.find((z) => z.id === hints.zoom);
-    const lensWords = lens ? `a ${Math.round(lens.fov)}° lens` : overlay.isPanorama ? 'a panorama' : anyLens ? 'any lens' : `${zoom.label.toLowerCase()} lenses`;
+    const lensWords = lens ? `a ${Math.round(lens.fov)}° lens` : panorama ? 'a panorama' : anyLens || !zoom ? 'any lens' : `${zoom.label.toLowerCase()} lenses`;
     // a reach given is searched about that far: on to twice it, so the warning names the farther one
     const near = Number.isFinite(hints.reach) && searchedReach(hints.reach, AUTO_REACH) <= 10_000 ? searchedReach(hints.reach, AUTO_REACH) : null;
     const reachWords = Number.isFinite(hints.reach)
@@ -73,8 +92,29 @@
       : hints.reach === 'all'
         ? 'every ridge'
         : `ridges within ${reachText(AUTO_REACH)}`;
-    return { line: `${lensWords} · ${reachWords} · ${WHO[find.who.mode].label.toLowerCase()}`, anyLens, near };
+    return { line: `${lensWords} · ${reachWords} · ${(WHO[who] ?? WHO.ground).label.toLowerCase()}`, anyLens, near };
+  }
+
+  /** What the search will run with, said before it runs. */
+  const told = $derived(toldOf({ hints: overlay.hints ?? {}, lens: overlay.lens, panorama: overlay.isPanorama, who: find.who.mode }));
+
+  /** What the search on show was asked with, and when. */
+  const asked = $derived.by(() => {
+    const ask = search?.ask;
+    if (!ask) return '';
+    const area = areaText(areaPoints(ask.area));
+    const aligned = ask.alignments?.length ? `${ask.alignments.length} ${ask.alignments.length === 1 ? 'alignment' : 'alignments'}` : '';
+    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: ask.who?.mode }).line;
+    return [area, line, aligned].filter(Boolean).join(' · ');
   });
+
+  /** The gist of each part of Help the search, said on its title line. */
+  const alignGist = $derived(
+    find.alignments.length
+      ? `${find.alignments.length} ${find.alignments.length === 1 ? 'alignment' : 'alignments'}${find.meeting ? `, meeting within ${formatDistance(find.meeting.spread, units)}` : ''}`
+      : 'None'
+  );
+  const knowGist = $derived(told.line[0].toUpperCase() + told.line.slice(1));
 
   /** Time left as this machine has gone so far: "3 min", "40 s". */
   function leftText(seconds) {
@@ -117,146 +157,13 @@
 </script>
 
 <div class="fs">
-  <ol class="fs-steps">
-    <li class="fs-step" class:done={traced > 0}>
-      <h3><span class="fs-num">1</span>Skyline</h3>
-      {#if !overlay.source}
-        <p class="fs-say">Add the photo first.</p>
-      {:else if traced}
-        <p class="fs-say">{tracedText}. Rub out clouds, trees and buildings.</p>
-        {#if !overlay.marks?.inner?.length}
-          <p class="fs-say quiet">A ridge seen in front of farther land, not the sky? Draw it with the Ridge pen.</p>
-        {/if}
-      {:else}
-        <p class="fs-say">Trace the skyline on the photo, or press Detect.</p>
-      {/if}
-      {#if overlay.source && find.detail}
-        <p class="fs-say quiet">{reliefWords(find.detail)}</p>
-      {/if}
-    </li>
-
-    <li class="fs-step" class:done={find.area.length >= 3 && !find.areaProblem && find.drawing !== 'area'}>
-      <h3><span class="fs-num">2</span>Area</h3>
-      {#if find.drawing === 'area'}
-        <p class="fs-say">Click each corner on the map. Press the first one, or Enter, to close it.</p>
-        <div class="fs-acts">
-          <button
-            type="button"
-            class="btn btn-sm btn-primary"
-            disabled={find.area.length < 3}
-            onclick={() => find.closeArea()}>Done</button
-          >
-          <button type="button" class="btn btn-sm" onclick={() => find.clearArea()}>Cancel</button>
-        </div>
-      {:else if find.area.length >= 3}
-        <p class="fs-say">{areaText(find.area)}</p>
-        {#if find.areaProblem}<p class="fs-say bad">{find.areaProblem}</p>{/if}
-        <div class="fs-acts">
-          <button type="button" class="btn btn-sm" onclick={() => find.drawArea()}>Draw again</button>
-          <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.clearArea()}>Clear</button>
-        </div>
-      {:else}
-        <p class="fs-say">Where the photo may have been taken.</p>
-        <div class="fs-acts">
-          <button type="button" class="btn btn-sm btn-primary" onclick={() => find.drawArea()}><Icon name="polygon" size={13} />Draw the area</button>
-        </div>
-      {/if}
-    </li>
-
-    <li class="fs-step" class:done={find.alignments.length > 0}>
-      <h3><span class="fs-num">3</span>Alignments <span class="fs-optional">optional</span></h3>
-      <p class="fs-say">Two things standing one behind the other in the photo: the camera is on their line.</p>
-      {#each find.alignments as one, index (one.id)}
-        <div class="fs-align" style:--align={one.colour}>
-          <div class="fs-align-head">
-            <span class="fs-swatch">{index + 1}</span>
-            <span class="fs-align-what">
-              {#if Math.abs(one.offset) < 0.05}Lined up{:else}{Math.abs(one.offset).toFixed(1)}° apart in the photo{/if}
-            </span>
-            <button type="button" class="fs-x" onclick={() => find.removeAlignment(one.id)} title="Take this alignment away" aria-label="Take alignment {index + 1} away"
-              ><Icon name="x" size={12} /></button
-            >
-          </div>
-          {#if !one.offsetKnown}
-            <p class="fs-say quiet">The two stand apart across a photo of unknown lens: read as lined up.</p>
-          {/if}
-          <label class="fs-check">
-            <input type="checkbox" checked={one.tops} onchange={(event) => find.setTops(one.id, event.currentTarget.checked)} />
-            The top of the near one touches the far one
-          </label>
-          {#if one.tops}
-            <div class="fs-heights">
-              <label>Near top <input type="number" min="0" max="1000" step="1" value={one.heights.near} onchange={(event) => heightsOf(one, 'near', event.currentTarget.value)} /> m</label>
-              <label>Far top <input type="number" min="0" max="1000" step="1" value={one.heights.far} onchange={(event) => heightsOf(one, 'far', event.currentTarget.value)} /> m</label>
-            </div>
-            <p class="fs-say quiet">Over the ground; 0 is a summit or a ridge, read as the highest ground near the click.</p>
-            {#if touchLine(one)}
-              <p class="fs-say" class:bad={one.touch?.error}>{touchLine(one)}</p>
-            {/if}
-            {#each one.touch?.fits ?? [] as fit, n (n)}
-              <div class="fs-fit">
-                {#if fit.at}
-                  <span>Eye at {fit.at.eye} m, {formatDistance(fit.at.distance, units)} behind the near one</span>
-                  <button type="button" class="btn btn-sm" onclick={() => onstand(fit.at)}>Stand here</button>
-                {:else}
-                  <span>{formatDistance(fit.from.distance, units)} to {formatDistance(fit.to.distance, units)} behind it, {fit.to.eye} to {fit.from.eye} m up</span>
-                  <button type="button" class="btn btn-sm" onclick={() => onstand(fit.from)}>Stand here</button>
-                {/if}
-              </div>
-            {/each}
-          {/if}
-        </div>
-      {/each}
-      {#if find.pending}
-        <div class="fs-guide" role="status">
-          <span><strong>{find.pending.step + 1} of {ALIGN_TOTAL}</strong> · {find.step?.text}</span>
-          <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.cancelAlignment()}>Cancel</button>
-        </div>
-      {:else}
-        <div class="fs-acts">
-          <button type="button" class="btn btn-sm" disabled={!overlay.source} onclick={() => find.startAlignment()}
-            ><Icon name="plus" size={13} />Add an alignment</button
-          >
-        </div>
-      {/if}
-      {#if find.meeting}
-        <div class="fs-fit meet">
-          <span>The lines meet within {formatDistance(find.meeting.spread, units)}</span>
-          <button type="button" class="btn btn-sm btn-primary" onclick={() => onstand(find.meeting.at)}>Stand here</button>
-        </div>
-      {/if}
-    </li>
-
-    <li class="fs-step">
-      <h3><span class="fs-num">4</span>What you know</h3>
-      <div class="fs-row">
-        <span class="fs-name" id="find-who">Taken</span>
-        <div class="fs-pills" role="radiogroup" aria-labelledby="find-who">
-          {#each Object.entries(WHO) as [mode, one] (mode)}
-            <button type="button" role="radio" class:on={find.who.mode === mode} aria-checked={find.who.mode === mode} onclick={() => find.setWho({ mode })}
-              >{one.label}</button
-            >
-          {/each}
-        </div>
-      </div>
-      {#if find.who.mode !== 'ground'}
-        <div class="fs-row">
-          <span class="fs-name">Height</span>
-          <span class="fs-range">
-            <input type="number" min="1" max="15000" step="10" value={find.who.low} aria-label="Lowest" onchange={(event) => find.setWho({ low: Number(event.currentTarget.value) })} />
-            to
-            <input type="number" min="1" max="15000" step="10" value={find.who.high} aria-label="Highest" onchange={(event) => find.setWho({ high: Number(event.currentTarget.value) })} />
-            m {whoRange}
-          </span>
-        </div>
-      {/if}
-      {#if overlay.source}
-        <PhotoHints {overlay} facing={false} />
-      {/if}
-    </li>
-
-    <li class="fs-step" class:done={Boolean(result)}>
-      <h3><span class="fs-num">5</span>Search</h3>
+  {#if resultFace}
+    <section class="fs-result" aria-label="The search on show">
+      <button type="button" class="fs-back" onclick={() => (preparing = true)} title="Back to the setup, still this search's">
+        <Icon name="chevronLeft" size={13} />Prepare
+      </button>
+      <h3 class="fs-title">{search.title || 'Search'}</h3>
+      <p class="fs-say quiet">{[searchedWhen(search.created_at), asked].filter(Boolean).join(' · ')}</p>
       {#if find.searching}
         <p class="fs-say" role="status">
           {search.status === 'queued' ? 'Waiting its turn…' : `Searching: ${search.progress?.done ?? 0} of ${search.progress?.total || '…'} points`}{Number.isFinite(
@@ -318,92 +225,239 @@
           <span>more</span>
         </div>
         <p class="fs-say quiet">A score, not a probability: far ridges look alike over wide ground.</p>
+      {:else if search.status === 'failed'}
+        <p class="fs-say bad">{search.error || 'The search failed'}</p>
+      {:else if search.status === 'cancelled'}
+        <p class="fs-say">Stopped.</p>
+      {/if}
+      {#if !find.searching}
         <div class="fs-acts">
-          <button type="button" class="btn btn-sm" disabled={Boolean(find.searchProblem) || starting} onclick={start}>Search again</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick={() => (preparing = true)}>Change and search again</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.closeSearch()}>Clear the results</button>
         </div>
-      {:else}
-        {#if search?.status === 'failed'}
-          <p class="fs-say bad">{search.error || 'The search failed'}</p>
-        {:else if search?.status === 'cancelled'}
-          <p class="fs-say">Stopped.</p>
+      {/if}
+    </section>
+  {:else}
+    <ol class="fs-steps">
+      <li class="fs-step" class:done={traced > 0}>
+        <h3><span class="fs-num">1</span>Skyline</h3>
+        {#if !overlay.source}
+          <p class="fs-say">Add the photo first.</p>
+        {:else if traced}
+          <p class="fs-say">{tracedText}. Rub out clouds, trees and buildings.</p>
+          {#if !overlay.marks?.inner?.length}
+            <p class="fs-say quiet">A ridge seen in front of farther land, not the sky? Draw it with the Ridge pen.</p>
+          {/if}
+        {:else}
+          <p class="fs-say">Trace the skyline on the photo, or press Detect.</p>
         {/if}
-        {#if find.searchProblem}
+        {#if overlay.source && find.detail}
+          <p class="fs-say quiet">{reliefWords(find.detail)}</p>
+        {/if}
+      </li>
+
+      <li class="fs-step" class:done={find.area.length >= 3 && !find.areaProblem && find.drawing !== 'area'}>
+        <h3><span class="fs-num">2</span>Area</h3>
+        {#if find.drawing === 'area'}
+          <p class="fs-say">Click each corner on the map. Press the first one, or Enter, to close it.</p>
+          <div class="fs-acts">
+            <button
+              type="button"
+              class="btn btn-sm btn-primary"
+              disabled={find.area.length < 3}
+              onclick={() => find.closeArea()}>Done</button
+            >
+            <button type="button" class="btn btn-sm" onclick={() => find.clearArea()}>Cancel</button>
+          </div>
+        {:else if find.area.length >= 3}
+          <p class="fs-say">{areaText(find.area)}</p>
+          {#if find.areaProblem}<p class="fs-say bad">{find.areaProblem}</p>{/if}
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm" onclick={() => find.drawArea()}>Draw again</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.clearArea()}>Clear</button>
+          </div>
+        {:else}
+          <p class="fs-say">Where the photo may have been taken.</p>
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm btn-primary" onclick={() => find.drawArea()}><Icon name="polygon" size={13} />Draw the area</button>
+          </div>
+        {/if}
+      </li>
+
+      <li class="fs-step" class:done={Boolean(result)}>
+        <h3><span class="fs-num">3</span>Search</h3>
+        {#if find.searching}
+          <p class="fs-say">A search is running.</p>
+        {:else if find.searchProblem}
           <p class="fs-say">{find.searchProblem}.</p>
         {:else}
           <p class="fs-say">With {told.line}.</p>
-          {#if told.near}
-            <p class="fs-say warn">Ridges past {reachText(told.near)} are left out: a far skyline cannot be found.</p>
-          {/if}
-          {#if told.anyLens}
-            <p class="fs-say warn">Any lens finds more chance fits: say the zoom if you can.</p>
-          {/if}
           {#if find.estimated}
             <p class="fs-say">{estimateText(find.estimated)}</p>
           {/if}
         {/if}
+        {#if told.near}
+          <p class="fs-say warn">Ridges past {reachText(told.near)} are left out: a far skyline cannot be found.</p>
+        {/if}
+        {#if told.anyLens}
+          <p class="fs-say warn">Any lens finds more chance fits: say the zoom if you can.</p>
+        {/if}
         <div class="fs-acts">
-          <button type="button" class="btn btn-sm btn-primary" disabled={Boolean(find.searchProblem) || starting} onclick={start}
+          <button type="button" class="btn btn-sm btn-primary" disabled={Boolean(find.searchProblem) || starting || find.searching} onclick={start}
             ><Icon name="search" size={13} />Search</button
           >
+          {#if search}
+            <button type="button" class="btn btn-sm btn-ghost" onclick={() => (preparing = false)}>Back to the result</button>
+          {/if}
         </div>
-      {/if}
-      {#if earlier.length}
-        <div class="fs-earlier">
-          <span class="fs-name">Earlier searches</span>
-          {#each earlier as row (row.name)}
-            <div class="fs-earlier-row">
-              <button type="button" class="fs-link" onclick={() => onopensearch(row.name)} title="Open this search, its area and its map">
-                {row.title}
-                <small>{row.status === 'done' ? (row.best ? `best ${Math.round(row.best.explained * 100)}%` : 'nothing found') : row.status}</small>
-              </button>
-              <button type="button" class="fs-x" onclick={() => onremovesearch(row.name)} title="Delete this search" aria-label="Delete {row.title}"
-                ><Icon name="trash" size={12} /></button
-              >
+      </li>
+    </ol>
+
+    <section class="fs-help" aria-label="Help the search">
+      <h4 class="fs-help-head">Help the search <span class="fs-optional">optional</span></h4>
+      <details class="fs-part" bind:open={help.align}>
+        <summary>
+          <span class="fs-part-title">Alignments</span>
+          <span class="fs-gist">{alignGist}</span>
+          <Icon name="chevronDown" size={13} />
+        </summary>
+        <div class="fs-part-body">
+          <p class="fs-say">Two things standing one behind the other in the photo: the camera is on their line.</p>
+          {#each find.alignments as one, index (one.id)}
+            <div class="fs-align" style:--align={one.colour}>
+              <div class="fs-align-head">
+                <span class="fs-swatch">{index + 1}</span>
+                <span class="fs-align-what">
+                  {#if Math.abs(one.offset) < 0.05}Lined up{:else}{Math.abs(one.offset).toFixed(1)}° apart in the photo{/if}
+                </span>
+                <button type="button" class="fs-x" onclick={() => find.removeAlignment(one.id)} title="Take this alignment away" aria-label="Take alignment {index + 1} away"
+                  ><Icon name="x" size={12} /></button
+                >
+              </div>
+              {#if !one.offsetKnown}
+                <p class="fs-say quiet">The two stand apart across a photo of unknown lens: read as lined up.</p>
+              {/if}
+              <label class="fs-check">
+                <input type="checkbox" checked={one.tops} onchange={(event) => find.setTops(one.id, event.currentTarget.checked)} />
+                The top of the near one touches the far one
+              </label>
+              {#if one.tops}
+                <div class="fs-heights">
+                  <label>Near top <input type="number" min="0" max="1000" step="1" value={one.heights.near} onchange={(event) => heightsOf(one, 'near', event.currentTarget.value)} /> m</label>
+                  <label>Far top <input type="number" min="0" max="1000" step="1" value={one.heights.far} onchange={(event) => heightsOf(one, 'far', event.currentTarget.value)} /> m</label>
+                </div>
+                <p class="fs-say quiet">Over the ground; 0 is a summit or a ridge, read as the highest ground near the click.</p>
+                {#if touchLine(one)}
+                  <p class="fs-say" class:bad={one.touch?.error}>{touchLine(one)}</p>
+                {/if}
+                {#each one.touch?.fits ?? [] as fit, n (n)}
+                  <div class="fs-fit">
+                    {#if fit.at}
+                      <span>Eye at {fit.at.eye} m, {formatDistance(fit.at.distance, units)} behind the near one</span>
+                      <button type="button" class="btn btn-sm" onclick={() => onstand(fit.at)}>Stand here</button>
+                    {:else}
+                      <span>{formatDistance(fit.from.distance, units)} to {formatDistance(fit.to.distance, units)} behind it, {fit.to.eye} to {fit.from.eye} m up</span>
+                      <button type="button" class="btn btn-sm" onclick={() => onstand(fit.from)}>Stand here</button>
+                    {/if}
+                  </div>
+                {/each}
+              {/if}
             </div>
           {/each}
+          {#if find.pending}
+            <div class="fs-guide" role="status">
+              <span><strong>{find.pending.step + 1} of {ALIGN_TOTAL}</strong> · {find.step?.text}</span>
+              <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.cancelAlignment()}>Cancel</button>
+            </div>
+          {:else}
+            <div class="fs-acts">
+              <button type="button" class="btn btn-sm" disabled={!overlay.source} onclick={() => find.startAlignment()}
+                ><Icon name="plus" size={13} />Add an alignment</button
+              >
+            </div>
+          {/if}
+          {#if find.meeting}
+            <div class="fs-fit meet">
+              <span>The lines meet within {formatDistance(find.meeting.spread, units)}</span>
+              <button type="button" class="btn btn-sm btn-primary" onclick={() => onstand(find.meeting.at)}>Stand here</button>
+            </div>
+          {/if}
+        </div>
+      </details>
+
+      <details class="fs-part" bind:open={help.know}>
+        <summary>
+          <span class="fs-part-title">What you know</span>
+          <span class="fs-gist">{knowGist}</span>
+          <Icon name="chevronDown" size={13} />
+        </summary>
+        <div class="fs-part-body">
+          <div class="fs-row">
+            <span class="fs-name" id="find-who">Taken</span>
+            <div class="fs-pills" role="radiogroup" aria-labelledby="find-who">
+              {#each Object.entries(WHO) as [mode, one] (mode)}
+                <button type="button" role="radio" class:on={find.who.mode === mode} aria-checked={find.who.mode === mode} onclick={() => find.setWho({ mode })}
+                  >{one.label}</button
+                >
+              {/each}
+            </div>
+          </div>
+          {#if find.who.mode !== 'ground'}
+            <div class="fs-row">
+              <span class="fs-name">Height</span>
+              <span class="fs-range">
+                <input type="number" min="1" max="15000" step="10" value={find.who.low} aria-label="Lowest" onchange={(event) => find.setWho({ low: Number(event.currentTarget.value) })} />
+                to
+                <input type="number" min="1" max="15000" step="10" value={find.who.high} aria-label="Highest" onchange={(event) => find.setWho({ high: Number(event.currentTarget.value) })} />
+                m {whoRange}
+              </span>
+            </div>
+          {/if}
+          {#if overlay.source}
+            <PhotoHints {overlay} facing={false} />
+          {/if}
+        </div>
+      </details>
+    </section>
+
+    <div class="fs-more">
+      <button type="button" class="fs-fold" aria-expanded={more} onclick={() => (more = !more)}>
+        <Icon name={more ? 'chevronDown' : 'chevronRight'} size={13} />More settings
+      </button>
+      {#if more}
+        <div class="fs-row">
+          <span class="fs-name" id="find-spacing">Grid</span>
+          <div class="fs-pills" role="radiogroup" aria-labelledby="find-spacing">
+            {#each SPACINGS as spacing (spacing)}
+              <button
+                type="button"
+                role="radio"
+                class:on={find.settings.spacing === spacing}
+                aria-checked={find.settings.spacing === spacing}
+                title={spacing === 'auto' ? 'As fine as the area allows' : `A point every ${spacing} m`}
+                onclick={() => find.setSettings({ spacing })}>{spacing === 'auto' ? 'Auto' : formatDistance(spacing, units)}</button
+              >
+            {/each}
+          </div>
+        </div>
+        <div class="fs-row">
+          <span class="fs-name" id="find-tolerance">Line width</span>
+          <div class="fs-pills" role="radiogroup" aria-labelledby="find-tolerance">
+            {#each ALIGN_TOLERANCES as tolerance (tolerance)}
+              <button
+                type="button"
+                role="radio"
+                class:on={find.settings.tolerance === tolerance}
+                aria-checked={find.settings.tolerance === tolerance}
+                title="An alignment's camera stands within {tolerance}° of its line"
+                onclick={() => find.setSettings({ tolerance })}>±{tolerance}°</button
+              >
+            {/each}
+          </div>
         </div>
       {/if}
-    </li>
-  </ol>
-
-  <div class="fs-more">
-    <button type="button" class="fs-fold" aria-expanded={more} onclick={() => (more = !more)}>
-      <Icon name={more ? 'chevronDown' : 'chevronRight'} size={13} />More settings
-    </button>
-    {#if more}
-      <div class="fs-row">
-        <span class="fs-name" id="find-spacing">Grid</span>
-        <div class="fs-pills" role="radiogroup" aria-labelledby="find-spacing">
-          {#each SPACINGS as spacing (spacing)}
-            <button
-              type="button"
-              role="radio"
-              class:on={find.settings.spacing === spacing}
-              aria-checked={find.settings.spacing === spacing}
-              title={spacing === 'auto' ? 'As fine as the area allows' : `A point every ${spacing} m`}
-              onclick={() => find.setSettings({ spacing })}>{spacing === 'auto' ? 'Auto' : formatDistance(spacing, units)}</button
-            >
-          {/each}
-        </div>
-      </div>
-      <div class="fs-row">
-        <span class="fs-name" id="find-tolerance">Line width</span>
-        <div class="fs-pills" role="radiogroup" aria-labelledby="find-tolerance">
-          {#each ALIGN_TOLERANCES as tolerance (tolerance)}
-            <button
-              type="button"
-              role="radio"
-              class:on={find.settings.tolerance === tolerance}
-              aria-checked={find.settings.tolerance === tolerance}
-              title="An alignment's camera stands within {tolerance}° of its line"
-              onclick={() => find.setSettings({ tolerance })}>±{tolerance}°</button
-            >
-          {/each}
-        </div>
-      </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -597,6 +651,97 @@
     color: var(--text-2);
     font-size: var(--fs-xs);
   }
+  /* the search on show */
+  .fs-result {
+    display: grid;
+    gap: 8px;
+  }
+  .fs-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    justify-self: start;
+    padding: 2px 6px 2px 2px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .fs-back:hover {
+    color: var(--text-1);
+    background: color-mix(in srgb, var(--text-1) 7%, transparent);
+  }
+  .fs-title {
+    margin: 0;
+    font-size: var(--fs-md);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  /* what narrows the search without being needed: each part folded, its gist on its title line */
+  .fs-help {
+    display: grid;
+    gap: 2px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .fs-help-head {
+    margin: 0 0 4px;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .fs-help-head .fs-optional {
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .fs-part summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    list-style: none;
+    cursor: pointer;
+  }
+  .fs-part summary::-webkit-details-marker {
+    display: none;
+  }
+  .fs-part summary:hover {
+    background: color-mix(in srgb, var(--text-1) 5%, transparent);
+  }
+  .fs-part summary :global(svg) {
+    flex: none;
+    transform: rotate(-90deg);
+    transition: transform 0.15s;
+  }
+  .fs-part[open] summary :global(svg) {
+    transform: none;
+  }
+  .fs-part-title {
+    flex: none;
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .fs-gist {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--fs-xs);
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fs-part-body {
+    display: grid;
+    gap: 7px;
+    padding: 4px 4px 12px;
+  }
   .fs-more {
     display: grid;
     gap: 10px;
@@ -618,7 +763,7 @@
     text-transform: uppercase;
     cursor: pointer;
   }
-  .fs-step :global(.hints) {
+  .fs-part-body :global(.hints) {
     width: auto;
   }
   .fs-say.strong {
@@ -699,36 +844,5 @@
   .fs-ramp i {
     width: 14px;
     height: 8px;
-  }
-  .fs-earlier {
-    display: grid;
-    gap: 4px;
-    margin-top: 6px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-  }
-  .fs-earlier-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .fs-link {
-    flex: 1;
-    display: grid;
-    padding: 4px 6px;
-    border: none;
-    border-radius: var(--r-sm);
-    background: transparent;
-    color: var(--text-1);
-    font: inherit;
-    font-size: var(--fs-xs);
-    text-align: left;
-    cursor: pointer;
-  }
-  .fs-link:hover {
-    background: color-mix(in srgb, var(--text-1) 7%, transparent);
-  }
-  .fs-link small {
-    color: var(--text-3);
   }
 </style>

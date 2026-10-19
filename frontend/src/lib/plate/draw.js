@@ -351,7 +351,8 @@ function drawSwatch(ctx, entry, x, y, size, context) {
   const { scale } = context;
   ctx.save();
   if (entry.kind === 'point') {
-    const picture = context.markerImage?.(entry.symbol || 'pin', entry.colour, { status: entry.status ?? '' });
+    const picture = context.markerImage?.(entry.symbol || 'pin', entry.colour,
+      entry.icon ? { status: entry.status ?? '', icon: entry.icon } : { status: entry.status ?? '' });
     if (picture) ctx.drawImage(picture, x, y, size, size);
     else { ctx.fillStyle = entry.colour; ctx.beginPath(); ctx.arc(x + size / 2, y + size / 2, size / 3, 0, Math.PI * 2); ctx.fill(); }
   } else if (entry.kind === 'new') {

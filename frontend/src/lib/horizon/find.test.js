@@ -5,6 +5,7 @@ import {
   alignmentBearing,
   alignmentLine,
   alignmentWedge,
+  areaPoints,
   areaProblem,
   areaText,
   crossing,
@@ -17,7 +18,9 @@ import {
   meeting,
   onAlignment,
   photoOffset,
+  sameAsk,
   searchedReach,
+  searchedWhen,
 } from './find.js';
 import { destination, haversine } from '../measure.js';
 import { bearingBetween } from './geometry.js';
@@ -171,3 +174,58 @@ describe('a reach the analyst gives', () => {
     expect(searchedReach(100_000)).toBe(100_000);
   });
 });
+
+describe('a search kept, against the setup now', () => {
+  const ask = {
+    area: [[46.5, 7.8], [46.5, 7.9], [46.6, 7.9]],
+    who: { mode: 'ground', low: 1.7, high: 1.7 },
+    spacing: null,
+    alignments: [{ near: { lat: 46.55, lon: 7.85 }, far: { lat: 46.6, lon: 7.95 }, tops: false, heights: { near: 0, far: 0 } }],
+    photo: { path: 'media/ridge.jpg', strokes: [[{ u: 0.1, v: 0.4 }, { u: 0.5, v: 0.38 }]], marks: null },
+    hints: { zoom: 'wide', reach: 'auto' },
+  };
+  const now = () => ({
+    ...structuredClone(ask),
+    area: ask.area.map(([lat, lon]) => ({ lat, lon })),
+    photo: { ...structuredClone(ask.photo), marks: { lines: [0], inner: [], pairs: [], cuts: [] } },
+  });
+
+  it('reads the same setup the same, the area as pairs or points and empty marks as none', () => {
+    expect(sameAsk(ask, now())).toBe(true);
+  });
+
+  it('reads any change as changed, and nothing as not kept', () => {
+    const moved = now();
+    moved.area[0].lat += 0.01;
+    expect(sameAsk(ask, moved)).toBe(false);
+    const traced = now();
+    traced.photo.strokes.push([{ u: 0.6, v: 0.3 }]);
+    expect(sameAsk(ask, traced)).toBe(false);
+    const told = now();
+    told.hints = { zoom: 'zoomed', reach: 'auto' };
+    expect(sameAsk(ask, told)).toBe(false);
+    const flown = now();
+    flown.who = { mode: 'drone', low: 10, high: 120 };
+    expect(sameAsk(ask, flown)).toBe(false);
+    const cut = now();
+    cut.photo.marks.cuts = [0.5];
+    expect(sameAsk(ask, cut)).toBe(false);
+    expect(sameAsk(ask, null)).toBe(false);
+    expect(sameAsk(null, now())).toBe(false);
+  });
+});
+
+describe('a search in a line', () => {
+  it('says when it was made on this computer’s clock, and nothing for no date', () => {
+    expect(searchedWhen('2026-10-14T19:05:00')).toBe('14 Oct 2026, 19:05');
+    expect(searchedWhen(null)).toBe('');
+    expect(searchedWhen('not a date')).toBe('');
+  });
+
+  it('reads an area kept as pairs or drawn as points', () => {
+    expect(areaPoints([[1, 2]])).toEqual([{ lat: 1, lon: 2 }]);
+    expect(areaPoints([{ lat: 1, lon: 2, extra: true }])).toEqual([{ lat: 1, lon: 2 }]);
+    expect(areaPoints(null)).toEqual([]);
+  });
+});
+

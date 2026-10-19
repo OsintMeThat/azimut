@@ -100,18 +100,21 @@ describe('the Horizon inspector', () => {
     expect(root.querySelectorAll('details')).toHaveLength(0);
   });
 
-  it('names four groups, the rarely touched ones folded away', async () => {
+  it('names three groups by the question they answer, all open', async () => {
     const view = state();
     view.standAt(EYE);
     await settle();
     const root = render(HorizonPanel, { view, onmove: vi.fn() });
     const groups = [...root.querySelectorAll('details')].map((group) => [group.querySelector('.group-title').textContent, group.open]);
     expect(groups).toEqual([
+      ['Measures', true],
       ['Viewpoint', true],
-      ['Lens', true],
-      ['On the view', true],
-      ['More settings', false],
+      ['What the view shows', true],
     ]);
+    // the camera is part of the viewpoint, the haze part of what the view shows
+    const within = (title) => [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === title);
+    expect(within('Viewpoint').querySelector('input[aria-label="Tilt"]')).not.toBeNull();
+    expect(within('What the view shows').querySelector('input[aria-label="Visibility"]')).not.toBeNull();
     expect(text(root)).toContain('Eye height');
     expect(text(root)).toContain('Ground 2866 m above sea level');
     expect(text(root)).toContain('Summit names OpenStreetMap');
@@ -119,22 +122,51 @@ describe('the Horizon inspector', () => {
     expect(text(root)).not.toMatch(/Heading/);
   });
 
+  it('lights the row of a setting asked for from the palette, then says it is shown', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const onsought = vi.fn();
+    const root = render(HorizonPanel, { view, seek: 'visibility', onsought });
+    await vi.waitFor(() => expect(onsought).toHaveBeenCalledOnce());
+    const row = root.querySelector('[data-setting="visibility"]');
+    expect(row.closest('details').open).toBe(true);
+    expect(row.classList.contains('sought')).toBe(true);
+    // every setting the palette offers has its row; here no buildings are given and no ridge lines drawn
+    const { HORIZON_SETTINGS } = await import('../../lib/horizon/panelIndex.js');
+    const missing = HORIZON_SETTINGS.filter((one) => !root.querySelector(`[data-setting="${one.id}"]`)).map((one) => one.id);
+    expect(missing).toEqual(['ridges', 'buildings']);
+  });
+
+  it('marks the buildings as beta', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const buildings = { on: false, set: vi.fn(), layerRow: { note: '', actions: [] } };
+    const root = render(HorizonPanel, { view, buildings });
+    const row = [...root.querySelectorAll('label.check')].find((label) => label.textContent.includes('Buildings'));
+    expect(row.querySelector('.beta').textContent).toBe('Beta');
+  });
+
   it('says a folded group\'s gist on its title line, and only while it is folded', async () => {
     const view = state();
     view.standAt(EYE);
     await settle();
     const root = render(HorizonPanel, { view });
-    const lens = [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === 'Lens');
-    expect(lens.querySelector('.gist')).toBeNull();
-    lens.open = false;
-    lens.dispatchEvent(new Event('toggle'));
+    const point = [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === 'Viewpoint');
+    expect(point.querySelector('.gist')).toBeNull();
+    point.open = false;
+    point.dispatchEvent(new Event('toggle'));
     flushSync();
-    expect(lens.querySelector('.gist').textContent).toMatch(/^\d+° · \d+ mm$/);
-    const more = [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === 'More settings');
-    expect(more.querySelector('.gist')).toBeNull(); // nothing set there yet
+    expect(point.querySelector('.gist').textContent).toMatch(/ · \d+° · \d+ mm$/);
     view.look({ tilt: 3 });
     flushSync();
-    expect(more.querySelector('.gist').textContent).toBe('Leaning');
+    expect(point.querySelector('.gist').textContent).toMatch(/ · \d+ mm · Leaning$/);
+    const shows = [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === 'What the view shows');
+    shows.open = false;
+    shows.dispatchEvent(new Event('toggle'));
+    flushSync();
+    expect(shows.querySelector('.gist').textContent).not.toBe('');
   });
 
   it('says which kind of eye is pressed, and names its height for it', async () => {
@@ -194,8 +226,10 @@ describe('the Horizon inspector', () => {
     const readings = root.querySelector('.readings');
     expect(readings.textContent).toContain('Click the map to mark a point.');
     expect(readings.textContent).toContain('Click the view to read the ground there.');
-    // the readings come before the settings, so the settings never move under a click
-    expect(readings.compareDocumentPosition(root.querySelector('details')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // the measures come first, before the settings, so the settings never move under a click
+    const groups = root.querySelectorAll('details');
+    expect(groups[0].contains(readings)).toBe(true);
+    expect(readings.compareDocumentPosition(groups[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('stands on the ground clicked in the view', async () => {
@@ -347,9 +381,132 @@ describe('a photo laid over the view, in the inspector', () => {
       useLens: vi.fn(),
       undoStroke: vi.fn(),
       clearTrace: vi.fn(),
+      remove: vi.fn(),
+      hints: { zoom: 'any', facing: null, reach: 'auto' },
+      reach: null,
+      reachFound: null,
+      setHints: vi.fn(),
       ...over,
     };
   }
+
+  it('says everything about the photo in one group: another file, none, and the whole trace cleared in one press', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    const overlay = photo({ strokes: [[{ u: 0, v: 0.5 }, { u: 1, v: 0.5 }]] });
+    const onphoto = vi.fn();
+    const root = render(HorizonPanel, { view, overlay, onphoto });
+    button(root, 'Another file').click();
+    expect(onphoto).toHaveBeenCalledOnce();
+    root.querySelector('button[aria-label="Take the photo away"]').click();
+    expect(overlay.remove).toHaveBeenCalledOnce();
+    const clear = root.querySelector('button[aria-label="Clear the whole trace"]');
+    expect(clear.title).toMatch(/Ctrl\+Z brings it back/);
+    clear.click();
+    expect(overlay.clearTrace).toHaveBeenCalledOnce();
+    const empty = render(HorizonPanel, { view, overlay: photo() });
+    expect(empty.querySelector('button[aria-label="Clear the whole trace"]')).toBeNull();
+  });
+
+  it('lists the places Fit found when none stood out, and lights the one in view', async () => {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    view.look({ heading: 147.3, tilt: 1, fov: 60 });
+    const place = (heading, explained) => ({ camera: { heading, tilt: 1, fov: 60 }, gap: { median: 0.21 }, explained, close: true });
+    const onplace = vi.fn();
+    const root = render(HorizonPanel, { view, overlay: photo(), places: [place(299.6, 0.47), place(147.3, 0.4)], onplace });
+    const rows = [...root.querySelectorAll('[role="group"][aria-label="Places that fit"] button')];
+    expect(rows.map((b) => b.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      '300° NW explains 47% of the trace',
+      '147° SE explains 40% of the trace',
+    ]);
+    expect(rows.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    rows[0].click();
+    expect(onplace).toHaveBeenCalledWith(0);
+    // one place is the fit itself: nothing to choose between
+    const one = render(HorizonPanel, { view, overlay: photo(), places: [place(299.6, 0.47)] });
+    expect(one.querySelector('[role="group"][aria-label="Places that fit"]')).toBeNull();
+  });
+
+  /** The Photo group's "What you know", over a photo with `over`. */
+  async function knows(over = {}, heading = null) {
+    const view = state();
+    view.standAt(EYE);
+    await settle();
+    if (heading !== null) view.look({ heading });
+    const overlay = photo(over);
+    const root = render(HorizonPanel, { view, overlay });
+    return { overlay, root, heading: view.camera.heading, part: root.querySelector('[role="group"][aria-label="What you know about the photo"]') };
+  }
+  const radio = (part, label) => [...part.querySelectorAll('[role="radio"]')].find((b) => b.textContent.trim() === label);
+
+  it('says what is known on its title line, and on the folded group\'s', async () => {
+    const plain = await knows();
+    expect(plain.part.querySelector('h5').textContent).toBe('What you know');
+    const said = await knows({ hints: { zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' }, reach: 20_000 });
+    expect(said.part.querySelector('h5').textContent).toBe('What you know · Zoomed · 218° SW · within 20 km');
+    const group = [...said.root.querySelectorAll('details')].find((one) => one.querySelector('.group-title').textContent === 'Photo');
+    group.open = false;
+    group.dispatchEvent(new Event('toggle'));
+    flushSync();
+    expect(group.querySelector('.gist').textContent).toBe('summit.jpg · Zoomed · 218° SW · within 20 km');
+  });
+
+  it('asks the three things to say, each starting at not knowing', async () => {
+    const { overlay, part, heading } = await knows({}, 132.4);
+    expect(heading).toBeCloseTo(132.4, 5);
+    const checked = [...part.querySelectorAll('[role="radio"][aria-checked="true"]')].map((b) => b.textContent.trim());
+    expect(checked).toEqual(['Any', 'Anywhere', 'Auto']);
+    // the words a zoom stands for are on its button
+    expect(radio(part, 'Zoomed').title).toMatch(/10° to 35°/);
+    radio(part, 'Zoomed').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ zoom: 'zoomed' });
+    radio(part, 'Roughly this way').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ facing: { heading } });
+    radio(part, '100 km').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ reach: 100_000 });
+    // Auto stops at 50 km, and says so
+    expect(radio(part, 'Auto').title).toMatch(/up to 50 km/);
+  });
+
+  it('keeps the lens the photo says, and says the reach Fit found', async () => {
+    const { part } = await knows({ lens: { mm: 26, fov: 64.2 }, reachFound: 20_000 });
+    expect(part.textContent).toContain('The photo says 26 mm, 64° across: Fit keeps it.');
+    expect(radio(part, 'Zoomed')).toBeUndefined();
+    expect(part.textContent).toContain('Fit found the skyline within 20 km.');
+  });
+
+  it('asks what kind of picture it is only when it may be a panorama, and says what a panorama is searched across', async () => {
+    const plain = await knows();
+    expect(plain.part.textContent).not.toContain('Picture');
+    // a picture of any shape offers the choice; a wide one is pointed to Panorama
+    const collage = await knows({ panoramaOffered: true, stitched: null, isPanorama: false, aspect: 2.1 });
+    expect(collage.part.textContent).toContain('Picture');
+    expect(collage.part.textContent).not.toContain('reads better as Panorama');
+    const wide = await knows({ panoramaOffered: true, stitched: null, isPanorama: false, aspect: 3.5 });
+    expect(wide.part.textContent).toContain('A phone’s panorama reads better as Panorama.');
+    radio(wide.part, 'Panorama').click();
+    expect(wide.overlay.setHints).toHaveBeenCalledWith({ picture: 'panorama' });
+    // read as one, the zoom words give way to the widths it is searched across
+    const strip = await knows({ panoramaOffered: true, stitched: null, isPanorama: true, hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' } });
+    expect(strip.part.textContent).toContain('Fit tries 60° to 360° across.');
+    expect(radio(strip.part, 'Zoomed')).toBeUndefined();
+  });
+
+  it('says a stitched collage’s width, kept by Fit', async () => {
+    const stitched = { degrees: 47.4, stitched: 15, by_hand: 4, warp: 'cylindrical', collage: 'Collage 9' };
+    const { part } = await knows({
+      panoramaOffered: true,
+      stitched,
+      isPanorama: true,
+      lens: { fov: 47.4, stitched: true },
+      hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' },
+    });
+    expect(part.textContent).toContain('Stitched by Azimut from Collage 9.');
+    expect(part.textContent).toContain('47° across: Fit keeps it.');
+  });
 
   it('undoes a lens’s curve from a slider, says which kind, and double-click sets none', async () => {
     const view = state();
@@ -385,14 +542,16 @@ describe('a photo locked to the terrain, in the inspector', () => {
       bend: 0,
       locked: true,
       setBend: vi.fn(),
+      hints: { zoom: 'any', facing: null, reach: 'auto' },
+      reach: null,
+      remove: vi.fn(),
     };
     const root = render(HorizonPanel, { view, overlay, onmove: vi.fn() });
     expect(text(root)).toContain('Photo and terrain move together');
     const sheet = (title) =>
       [...root.querySelectorAll('details')].find((group) => group.querySelector('.group-title').textContent === title).querySelector('fieldset');
     expect(sheet('Viewpoint').disabled).toBe(true);
-    expect(sheet('Lens').disabled).toBe(true);
-    expect(sheet('On the view').disabled).toBe(false);
+    expect(sheet('What the view shows').disabled).toBe(false);
     expect(root.querySelector('input[aria-label="Lens distortion"]').disabled).toBe(true);
     expect(root.querySelector('input[aria-label="Tilt"]').disabled).toBe(true);
     expect(root.querySelector('input[aria-label="Visibility"]').disabled).toBe(false);

@@ -165,7 +165,7 @@
       {/if}
     </nav>
     {#if layerItems}
-      <LayerPlaces {places} busy={layerItems.busy} onopen={(place) => onopenlayer?.(place)}
+      <LayerPlaces {places} {caseId} busy={layerItems.busy} onopen={(place) => onopenlayer?.(place)}
         onremove={(place) => layerItems.remove(caseId, row.id, place)} />
     {/if}
 

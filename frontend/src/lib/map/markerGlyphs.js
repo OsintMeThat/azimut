@@ -20,6 +20,11 @@
  * Two marks ride on top of any marker, after GeoConfirmed's: a stroke across it
  * for something damaged, a cross for something destroyed. A point somebody else
  * geolocated wears a dashed rim instead of a solid one.
+ *
+ * A marker can also wear one of the analyst's own icons (`drawOwnMarker`). In a
+ * disc, its silhouette is the glyph, inked as a badge's is; as it is, the
+ * picture keeps its colours and the size the source layers draw theirs at, and
+ * the marks ride on it all the same.
  */
 import { paths } from '../../components/Icon.svelte';
 import { glyphInk } from '../proofIcons.js';
@@ -401,8 +406,7 @@ export function markerParts(symbol, colour, { status = '', external = false } = 
   // White on a strong disc, dark on a pale one, as the proof stamps do.
   const ink = glyphInk(colour, 1);
   return [
-    { d: ring(CENTRE, CENTRE, DISC + 1.6), fill: HALO, ...IMAGE_BOX },
-    { d: ring(CENTRE, CENTRE, DISC), fill: colour, stroke: '#fff', width: 2.5, dash, ...IMAGE_BOX },
+    ...discGround(colour, dash),
     ...layers.map(([mode, d, { width, rotate = 0 } = {}]) => {
       const paint = mode === 'fill' || mode === 'line' ? ink : colour;
       const solid = mode === 'fill' || mode === 'cut';
@@ -411,6 +415,119 @@ export function markerParts(symbol, colour, { status = '', external = false } = 
     }),
     ...statusParts(status, ACROSS.badge),
   ];
+}
+
+/** The coloured disc a badge's glyph sits on, ringed white, haloed dark. */
+function discGround(colour, dash = null) {
+  return [
+    { d: ring(CENTRE, CENTRE, DISC + 1.6), fill: HALO, ...IMAGE_BOX },
+    { d: ring(CENTRE, CENTRE, DISC), fill: colour, stroke: '#fff', width: 2.5, dash, ...IMAGE_BOX },
+  ];
+}
+
+/**
+ * An own icon's marker without its picture, for an SVG preview to slot the image
+ * into: `under` it the disc (none drawn as it is), `over` it the status strokes,
+ * and the dashed ring an external point drawn as it is wears instead of a rim.
+ */
+export function ownParts(colour, { mode = 'image', status = '', external = false } = {}) {
+  const disc = mode === 'disc';
+  return {
+    under: disc ? discGround(colour, external ? DASH : null) : [],
+    over: [
+      ...(!disc && external ? [{ d: ring(CENTRE, CENTRE, DISC), stroke: '#fff', width: 2.5, dash: DASH, ...IMAGE_BOX }] : []),
+      ...statusParts(status, ACROSS.badge),
+    ],
+  };
+}
+
+/** Where an own icon's glyph sits in a disc: its painted part fitted to this square, centred. */
+export const OWN_GLYPH = 36;
+/** A picture drawn as it is, at the share of a badge's scale the source layers' icons are drawn at. */
+export const OWN_IMAGE_RATIO = 0.7;
+
+/** The side of the image an own icon is drawn into, in marker pixels before `scale`. */
+export function ownMarkerSide(image, mode) {
+  if (mode === 'disc') return MARKER_PIXELS;
+  const side = Math.max(image?.width || 0, image?.height || 0) * OWN_IMAGE_RATIO;
+  return Math.max(MARKER_PIXELS, Math.ceil(side / 2) * 2);
+}
+
+/**
+ * Draws a marker wearing an own icon into a context `ownMarkerSide` × `scale`
+ * wide. `box` is the part of `image` that is painted (`inkBox`); `make(w, h)`
+ * gives the scratch canvas a disc's glyph is inked on.
+ */
+export function drawOwnMarker(context, image, colour, { mode = 'image', status = '', external = false, box = null } = {},
+  scale = 1, make = scratchCanvas) {
+  const side = ownMarkerSide(image, mode);
+  const offset = (side - MARKER_PIXELS) / 2;
+  const ink = box ?? { x: 0, y: 0, w: image.width, h: image.height };
+  context.clearRect(0, 0, side * scale, side * scale);
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  const { under, over } = ownParts(colour, { mode, status, external });
+  for (const part of under) paintPart(context, part, scale, offset);
+  if (mode === 'disc') {
+    // the silhouette, fitted and centred, then painted over in the glyph's ink
+    const fit = (OWN_GLYPH / Math.max(ink.w, ink.h, 1)) * scale;
+    const width = Math.ceil(MARKER_PIXELS * scale);
+    const glyph = make(width, width);
+    const inked = glyph?.getContext?.('2d');
+    if (inked) {
+      inked.drawImage(image, ink.x, ink.y, ink.w, ink.h,
+        (width - ink.w * fit) / 2, (width - ink.h * fit) / 2, ink.w * fit, ink.h * fit);
+      inked.globalCompositeOperation = 'source-in';
+      inked.fillStyle = glyphInk(colour, 1);
+      inked.fillRect(0, 0, width, width);
+      context.drawImage(glyph, 0, 0);
+    }
+  } else {
+    // as it is, centred as the source laid it out, so a pin's tip stays on its point
+    const fit = OWN_IMAGE_RATIO * scale;
+    const middle = (side * scale) / 2;
+    context.drawImage(image, middle - (image.width * fit) / 2, middle - (image.height * fit) / 2,
+      image.width * fit, image.height * fit);
+  }
+  for (const part of over) paintPart(context, part, scale, offset);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function scratchCanvas(width, height) {
+  if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(width, height);
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  return canvas;
+}
+
+/**
+ * The box `image` paints in, `{ x, y, w, h }` in its own pixels: what a disc
+ * fits, so a layer icon padded to centre its tip is not shrunk by its padding.
+ * The whole image when its pixels cannot be read.
+ */
+export function inkBox(image, make = scratchCanvas) {
+  const whole = { x: 0, y: 0, w: image?.width || 1, h: image?.height || 1 };
+  const canvas = make(whole.w, whole.h);
+  const context = canvas?.getContext?.('2d', { willReadFrequently: true });
+  if (!context?.getImageData) return whole;
+  try {
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, whole.w, whole.h);
+    let left = whole.w, top = whole.h, right = -1, bottom = -1;
+    for (let y = 0; y < whole.h; y++) {
+      for (let x = 0; x < whole.w; x++) {
+        if (data[(y * whole.w + x) * 4 + 3] <= 8) continue;
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+    }
+    return right < 0 ? whole : { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+  } catch {
+    return whole;
+  }
 }
 
 /** The stroke a damaged marker wears, two for a destroyed one, each on a dark bed. */
@@ -435,21 +552,24 @@ export function drawMarker(context, symbol, colour, marks = {}, scale = 1) {
   context.clearRect(0, 0, MARKER_PIXELS * scale, MARKER_PIXELS * scale);
   context.lineCap = 'round';
   context.lineJoin = 'round';
-  for (const part of markerParts(symbol, colour, marks)) {
-    context.setTransform(part.scale * scale, 0, 0, part.scale * scale, part.offset * scale, part.offset * scale);
-    if (part.rotate) {
-      context.translate(12, 12);
-      context.rotate((part.rotate * Math.PI) / 180);
-      context.translate(-12, -12);
-    }
-    const path = new Path2D(part.d);
-    if (part.fill) { context.fillStyle = part.fill; context.fill(path); }
-    if (part.stroke) {
-      context.strokeStyle = part.stroke; context.lineWidth = part.width;
-      context.setLineDash?.(part.dash ?? []);
-      context.stroke(path);
-      context.setLineDash?.([]);
-    }
-  }
+  for (const part of markerParts(symbol, colour, marks)) paintPart(context, part, scale);
   context.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/** One part of a marker, `shift` marker pixels in from the top left of a larger image. */
+function paintPart(context, part, scale, shift = 0) {
+  context.setTransform(part.scale * scale, 0, 0, part.scale * scale, (part.offset + shift) * scale, (part.offset + shift) * scale);
+  if (part.rotate) {
+    context.translate(12, 12);
+    context.rotate((part.rotate * Math.PI) / 180);
+    context.translate(-12, -12);
+  }
+  const path = new Path2D(part.d);
+  if (part.fill) { context.fillStyle = part.fill; context.fill(path); }
+  if (part.stroke) {
+    context.strokeStyle = part.stroke; context.lineWidth = part.width;
+    context.setLineDash?.(part.dash ?? []);
+    context.stroke(path);
+    context.setLineDash?.([]);
+  }
 }

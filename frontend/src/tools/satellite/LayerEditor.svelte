@@ -24,8 +24,11 @@
   import { axisZone } from '../../lib/caseAxis.svelte.js';
   import ClockField from '../../components/ClockField.svelte';
   import { LAYER_HELP } from '../../lib/map/layerHelp.js';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
 
   let { controller, ondone, onfly, ondeleteplace } = $props();
+  /** What a marker or a group wearing one of the analyst's icons shows in the list. */
+  const iconOf = (key) => (key ? iconLibrary.look(key, { caseId: controller.editor?.caseId, layer: controller.editor?.name, meta: controller.icons }) : null);
   $effect(() => layerPalette.load(controller.editor?.caseId));
   const selected = $derived(controller.selected);
   const groups = $derived(controller.groups ?? []);
@@ -288,7 +291,7 @@
               onclick={() => controller.toggleGroup(group)}><Icon name={hidden ? 'eyeOff' : 'eye'} size={13} /></button>
             <button class="group-title" aria-expanded={open} onclick={() => { controller.group = group.id; fold(group.id); }}>
               <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} />
-              {#if group.mode === 'uniform'}<MarkerSymbol symbol={group.symbol} colour={group.colour} size={15} />
+              {#if group.mode === 'uniform'}<MarkerSymbol symbol={group.symbol} colour={group.colour} icon={iconOf(group.icon)} size={15} />
               {:else}<span class="group-dot" style={`--swatch:${group.colour}`}></span>{/if}
               <span class="name">{group.name}</span><span class="count">{members.length}</span>
             </button>
@@ -320,6 +323,7 @@
                   <span class="feature-symbol" style={`color:${paint}`}>
                     {#if feature.geometry.type === 'Point'}
                       <MarkerSymbol symbol={(group.mode === 'uniform' ? group.symbol : feature.properties.symbol) || 'pin'} colour={paint}
+                        icon={iconOf(group.mode === 'uniform' ? group.icon : feature.properties.icon)}
                         status={feature.properties.status ?? ''} external={feature.properties.provenance === 'external'} size={15} />
                     {:else}<Icon name={String(feature.geometry.type).includes('Line') ? 'line' : 'polygon'} size={12} />{/if}
                   </span>

@@ -32,7 +32,8 @@ it('applies an icon and a colour at once and stays open for the next pick', () =
   // the disc, after its halo, is painted in the colour being edited
   expect(vessel.querySelectorAll('svg path')[1].getAttribute('fill')).toBe('#009e73');
   vessel.click(); flushSync();
-  expect(onpick).toHaveBeenLastCalledWith({ symbol: 'badge-ship' });
+  // one of the app's icons takes an own icon off the marker
+  expect(onpick).toHaveBeenLastCalledWith({ symbol: 'badge-ship', icon: '' });
   document.querySelector('[aria-label="Marker orange"]').click(); flushSync();
   expect(onpick).toHaveBeenLastCalledWith({ colour: '#d55e00' });
   expect(document.querySelector('[aria-label="Marker picker"]')).toBeTruthy();
@@ -44,7 +45,7 @@ it('offers the layer’s own styles first, and its groups when it can move featu
     groups: [{ id: 'a', name: 'Seen' }, { id: 'b', name: 'Checked' }], group: '', groupLabel: 'Add to' });
   open();
   document.querySelector('[aria-label="Marker as Star in #d55e00"]').click(); flushSync();
-  expect(onpick).toHaveBeenCalledWith({ symbol: 'star', colour: '#d55e00' });
+  expect(onpick).toHaveBeenCalledWith({ symbol: 'star', icon: '', colour: '#d55e00' });
   const select = document.querySelector('[aria-label="Marker group"]');
   expect(select.closest('label').textContent).toContain('Add to');
   // several groups in the selection: none is claimed

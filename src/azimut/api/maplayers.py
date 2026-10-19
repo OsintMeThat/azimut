@@ -159,6 +159,14 @@ class MarkerFields(BaseModel):
 
 #: A moment on a tracked layer's clock: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, "" for always.
 Moment = Annotated[str, Field(max_length=16)]
+#: A pictogram a marker wears, from the analyst's library or a layer of the case
+#: (`layerediting.adopt_icon`), or "" for none.
+IconKey = Annotated[str, Field(pattern=r"^([0-9a-f]{16})?$")]
+
+
+def _layer_name(value: str | None) -> str | None:
+    """The layer a point's own icon is copied from, named the way a save names it."""
+    return layout.slugify(value, "Layer") if value else None
 
 
 class MarkerIn(MarkerFields):
@@ -171,6 +179,9 @@ class MarkerIn(MarkerFields):
     symbol: str = "pin"
     description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
     group: str | None = Field(default=None, max_length=64)
+    icon: IconKey = ""
+    #: The layer `icon` is copied from, when a point leaves it wearing its own.
+    icon_from: str | None = Field(default=None, max_length=200)
 
     @field_validator("symbol")
     @classmethod
@@ -178,6 +189,11 @@ class MarkerIn(MarkerFields):
         if value not in layerediting.SYMBOLS:
             raise ValueError("choose an icon from the layer palette")
         return value
+
+    @field_validator("icon_from")
+    @classmethod
+    def _source(cls, value: str | None) -> str | None:
+        return _layer_name(value)
 
 
 class MarkerUpdateIn(MarkerFields):
@@ -198,11 +214,19 @@ class MarkerUpdateIn(MarkerFields):
     end: Moment | None = None
     #: Nobody knows when it left: no end, drawn as still there, said as unknown.
     end_unknown: Literal[True] | None = None
+    #: The pictogram it wears, "" taking it off; a symbol picked takes it off too.
+    icon: IconKey | None = None
+    icon_from: str | None = Field(default=None, max_length=200)
 
     @field_validator("symbol")
     @classmethod
     def _symbol(cls, value: str | None) -> str | None:
         return MarkerIn._symbol(value) if value is not None else None
+
+    @field_validator("icon_from")
+    @classmethod
+    def _source(cls, value: str | None) -> str | None:
+        return _layer_name(value)
 
 
 class GroupIn(BaseModel):
@@ -225,6 +249,8 @@ class GroupUpdateIn(BaseModel):
     line_arrow: str | None = Field(default=None, max_length=10)
     area_fill: str | None = Field(default=None, max_length=10)
     fill_opacity: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    #: The pictogram a group with one style draws its markers in, "" for its symbol.
+    icon: IconKey | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -255,6 +281,7 @@ class LinksIn(BaseModel):
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     #: What the new markers say of what they show: damaged or destroyed, intact when absent.
     status: Literal["damaged", "destroyed"] | None = None
+    icon: IconKey = ""
 
     @field_validator("symbol")
     @classmethod
@@ -546,7 +573,8 @@ def add_layer_links(case_id: str, name: str, body: LinksIn) -> dict[str, Any]:
     try:
         return layerediting.add_links(get_case(case_id), _stem(name),
                                       [item.model_dump() for item in body.items], body.group,
-                                      symbol=body.symbol, colour=body.colour, status=body.status or "")
+                                      symbol=body.symbol, colour=body.colour, status=body.status or "",
+                                      icon=body.icon)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 
@@ -747,6 +775,28 @@ def layer_icon(case_id: str, name: str, key: str) -> Response:
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+@router.get("/{case_id}/map-layers/{name}/icons")
+def layer_icons(case_id: str, name: str) -> list[dict[str, Any]]:
+    """The pictograms a layer holds, most worn first. Reads disk only."""
+    try:
+        return layerediting.layer_icons(get_case(case_id), _stem(name))
+    except layer_engine.LayerError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class IconKeysIn(BaseModel):
+    keys: list[Annotated[str, Field(pattern=r"^[0-9a-f]{1,32}$")]] = Field(min_length=1, max_length=layer_engine.MAX_ICONS)
+
+
+@router.post("/{case_id}/map-layers/{name}/icons/library")
+def layer_icons_to_library(case_id: str, name: str, body: IconKeysIn) -> dict[str, Any]:
+    """Some of a layer's pictograms filed in the analyst's library. Touches no network."""
+    try:
+        return layerediting.icons_to_library(get_case(case_id), _stem(name), body.keys)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
 
 
 class OrderIn(BaseModel):

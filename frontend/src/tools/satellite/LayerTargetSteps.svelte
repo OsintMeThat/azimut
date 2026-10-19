@@ -12,15 +12,21 @@
    * the row at the top, whichever step the menu is at. The
    * icon step starts on `initial` (a copied feature's own colour) over the
    * group's, and a line or an area (`point` false) skips it.
+   *
+   * A point copied out of a map that dressed it in its own icon (`ownIcon`,
+   * `{ key, from, src, mode, name }`) keeps it unless another is picked: "Its
+   * own icon" comes first in the icon step, already chosen, and the target layer
+   * takes a copy of the picture (`icon_from`).
    */
   import Icon from '../../components/Icon.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
   import LayerStylePalette from './LayerStylePalette.svelte';
-  import { LAYER_HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
+  import { ICON_HELP, LAYER_HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
+  import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
 
   let {
     /** The case's layers, the one used last first, and the `layer|group` keys the item is already in. */
-    targets = [], held = new Set(), busy = false, caseId = null, point = true, initial = null,
+    targets = [], held = new Set(), busy = false, caseId = null, point = true, initial = null, ownIcon = null,
     step = $bindable(null),
     onadd, oncreate,
   } = $props();
@@ -34,6 +40,17 @@
   const layer = $derived(step ? targets.find((one) => one.name === step.layer) ?? null : null);
   const group = $derived(layer && step?.group ? layer.groups.find((one) => one.id === step.group) ?? null : null);
   const inGroup = (one, part) => held.has(`${one.name}|${part?.id ?? ''}`);
+  const wearsOwn = $derived(!!ownIcon && style.icon === ownIcon.key && !!style.icon_from);
+  /** What the marker will wear: its own icon, one picked, or none. */
+  const shown = $derived(wearsOwn ? ownIcon
+    : style.icon && layer ? iconLibrary.look(style.icon, { caseId, layer: layer.name, meta: layer.icons }) : null);
+  const groupLook = (one, part) => (part.icon ? iconLibrary.look(part.icon, { caseId, layer: one.name, meta: one.icons }) : null);
+  /** A pick in the palette replaces the point's own icon: what it holds is the library's or this layer's. */
+  function pickStyle(changes) {
+    const next = { ...style, ...changes };
+    if ('icon' in changes) delete next.icon_from;
+    style = next;
+  }
   const inLayer = (one) => one.groups.some((part) => inGroup(one, part));
 
   function chooseLayer(one) {
@@ -42,7 +59,8 @@
   }
   function chooseGroup(one, part) {
     if (!part || part.mode === 'uniform' || !point) { onadd({ layer: one, group: part ?? null, style: null, status }); return; }
-    style = { symbol: initial?.symbol || part.symbol || 'pin', colour: initial?.colour || part.colour || '#0072b2' };
+    style = { symbol: initial?.symbol || part.symbol || 'pin', colour: initial?.colour || part.colour || '#0072b2',
+      ...(ownIcon ? { icon: ownIcon.key, icon_from: ownIcon.from } : {}) };
     step = { layer: one.name, group: part.id };
   }
   function back() { step = step?.group && layer?.groups.length > 1 ? { layer: step.layer } : null; }
@@ -74,12 +92,20 @@
   <button type="button" class="step-back" aria-label="Back" onclick={back}>
     <Icon name="chevronLeft" size={13} /><span>{layer.title}{layer.groups.length > 1 ? ` › ${group.name}` : ''}</span></button>
   {@render state()}
-  <LayerStylePalette label="Point icon" symbol={style.symbol} colour={style.colour} used={layer.styles ?? []} {caseId}
-    onpick={(changes) => (style = { ...style, ...changes })} />
+  {#if ownIcon}
+    <button type="button" class="fm-item own" aria-pressed={wearsOwn} title={ICON_HELP.itsOwnHint}
+      onclick={() => (style = { ...style, icon: ownIcon.key, icon_from: ownIcon.from })}>
+      <MarkerSymbol colour={style.colour} icon={ownIcon} {status} size={20} />
+      <span class="fm-grow">{ICON_HELP.itsOwn}</span>
+      {#if wearsOwn}<span class="fm-tick"><Icon name="check" size={13} /></span>{/if}
+    </button>
+  {/if}
+  <LayerStylePalette label="Point icon" symbol={style.symbol} colour={style.colour} icon={wearsOwn ? '' : style.icon ?? ''}
+    used={layer.styles ?? []} {caseId} layer={layer.name} meta={layer.icons ?? null} onpick={pickStyle} />
   <div class="add-row">
     <button type="button" class="btn btn-primary btn-sm" disabled={busy}
       onclick={() => onadd({ layer, group, style: { ...style }, status })}>
-      <MarkerSymbol symbol={style.symbol} colour={style.colour} {status} size={18} /> Add to {layer.groups.length > 1 ? group.name : layer.title}</button>
+      <MarkerSymbol symbol={style.symbol} colour={style.colour} icon={shown} {status} size={18} /> Add to {layer.groups.length > 1 ? group.name : layer.title}</button>
   </div>
 {:else if layer}
   <button type="button" class="step-back" aria-label="Back" onclick={back}>
@@ -89,7 +115,7 @@
     {@const inside = inGroup(layer, part)}
     <button type="button" class="fm-item" disabled={busy || inside} title={inside ? `Already in ${part.name}` : `Add to ${part.name}`}
       onclick={() => chooseGroup(layer, part)}>
-      {#if part.mode === 'uniform'}<MarkerSymbol symbol={part.symbol} colour={part.colour} size={16} />
+      {#if part.mode === 'uniform'}<MarkerSymbol symbol={part.symbol} colour={part.colour} icon={groupLook(layer, part)} size={16} />
       {:else}<span class="dot" style={`--swatch:${part.colour ?? '#0072b2'}`}></span>{/if}
       <span class="fm-grow">{part.name}</span>
       {#if inside}<span class="fm-tick"><Icon name="check" size={13} /></span>
