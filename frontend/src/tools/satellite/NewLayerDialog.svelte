@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import Modal from '../../components/Modal.svelte';
-  import { ACCEPTS } from '../../lib/map/addedLayers.js';
+  import { ACCEPTS, isMyMapsLink } from '../../lib/map/addedLayers.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { axisZone } from '../../lib/caseAxis.svelte.js';
   import { caseState } from '../../lib/state.svelte.js';
@@ -21,6 +21,10 @@
   let description = $state(untrack(() => source?.description ?? ''));
   let from = $state('blank');
   let file = $state(null);
+  let link = $state('');
+  /** What the layer starts from: a file, a My Maps link read once, or nothing. */
+  const start = $derived(source ? null : from === 'file' ? file : from === 'link' ? link.trim() : null);
+  const ready = $derived(!!title.trim() && (source || from === 'blank' || (from === 'file' ? !!file : isMyMapsLink(link))));
 </script>
 
 <Modal title={source ? 'Create editable copy' : 'New layer'} {onclose} width="420px">
@@ -43,6 +47,8 @@
         disabled={busy} onclick={() => (from = 'blank')}>Blank</button>
       <button class="btn" class:chosen={from === 'file'} aria-pressed={from === 'file'}
         disabled={busy} onclick={() => (from = 'file')}>From a file</button>
+      <button class="btn" class:chosen={from === 'link'} aria-pressed={from === 'link'}
+        disabled={busy} onclick={() => (from = 'link')}>From a My Maps link</button>
     </div>
     {#if from === 'file'}
       <label class="field">
@@ -51,14 +57,21 @@
           onchange={(event) => { file = event.currentTarget.files?.[0] ?? null; }} />
       </label>
       <p class="note">Keeps the original file and its bundled icons.</p>
+    {:else if from === 'link'}
+      <label class="field">
+        <span>Google My Maps link</span>
+        <input type="url" bind:value={link} maxlength="4000" disabled={busy}
+          placeholder="https://www.google.com/maps/d/viewer?mid=…" />
+      </label>
+      <p class="note">The map is read once, now. Later changes to it don't reach this layer.</p>
     {/if}
   {/if}
   <div class="actions">
     <button class="btn" disabled={busy} onclick={onclose}>Cancel</button>
-    <button class="btn btn-primary" disabled={busy || !title.trim() || (!source && from === 'file' && !file)}
-      onclick={() => oncreate(title.trim(), !source && from === 'file' ? file : null, description.trim(),
+    <button class="btn btn-primary" disabled={busy || !ready}
+      onclick={() => oncreate(title.trim(), start, description.trim(),
         track ? { on: true, zone: axisZone(caseState.current?.id) || 'UTC' } : null)}>
-      {busy ? 'Creating…' : 'Create layer'}
+      {busy ? (start ? 'Importing…' : 'Creating…') : 'Create layer'}
     </button>
   </div>
 </Modal>

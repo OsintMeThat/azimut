@@ -172,7 +172,7 @@ proof for publication.
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires and VIIRS night lights, with case pins filtered by kind and folder. |
 | ✅ **Imported & followed layers** | Imports KML, KMZ, GeoJSON and GPX, follows public My Maps and GeoConfirmed, and filters their legends and dates. |
-| ✅ **Personal map layers** | Draws and edits markers, lines and areas on any map from a movable bar, styled with pictograms, every edit undoable, each feature described in a sheet that saves as it goes and explains itself on hover. |
+| ✅ **Personal map layers** | Starts blank, from a file or from a My Maps link read once, then draws and edits markers, lines and areas on any map from a movable bar, styled with pictograms, every edit undoable, each feature described in a sheet that saves as it goes and explains itself on hover. |
 | ✅ **Points into a layer** | Follows places, proofs and files of the case as they move and as they are saved (a proof and its footage are one marker, named by the proof's description), reads pasted coordinates, map links and posts, and takes a Geo Proof point, a file played on the map or another layer's feature from the same step-by-step menu. |
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
@@ -189,7 +189,11 @@ proof for publication.
 | ✅ **Topographic & 3D plates** | Draws a plate's map on a topographic or staff-map ground (heights in colour, contour lines, summits, the Map's key-less layers), or in 3D on its heights with its ridge lines. |
 | ✅ **Plate framing & transitions** | Frames a map day by day or step by step, and goes from one to the next in the MP4 by a fade, the map flying there drawn frame by frame (blurred or sharp) and what is new fading in or drawn. |
 | ✅ **Plate workspace** | Widens or puts away the plate's list and inspector, folds the inspector's sections, finds what to add by a word, gives the page the whole screen in focus, and opens a plate in a tab of its own, edited in one tab at a time. |
-| ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
+| ✅ **Layers in every map** | Offers every layer, added ones included, in Compare, Detect and Horizon (Find's map included) from one Layers menu; Compare draws its one list on A, B or both, fires and nights on each side's day. |
+| ✅ **Find hints & trust** | Takes several zoom words and compass directions when unsure (none ticked is any), draws the directions as a fan on Find's map, and says how far a search's best place can be trusted, why, and what the area fits by chance. |
+| ✅ **Find: lines, ground and frames** | Says how far each traced line stands, where the eye stands (sea included) shown on the grid before the search, how the camera looks and whether it is a selfie, reads a phone's zoom by the picture's shape, and reads a stitched collage frame by frame. |
+| ✅ **Find: zones, sun and speed** | Searches finer zones and leaves zones out, over areas up to 10,000 km², tries a point clicked on the map, turns where the sun stood on a day into headings, and searches large grids on several cores. |
+| ✅ **Find: sea, lens and decoys** | Traces the sea's horizon with its own pen, measures a video's lens on its pan, and checks a search's places against decoys of its trace. |
 | ✅ **3D map** | Stands Satellite's imagery on public relief, tilted by hand or key, and files a tilted view as a credited capture that reopens as it was taken. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
@@ -335,6 +339,7 @@ stops making sense.
 - **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
 - **A live public map:** a layer published as GeoJSON at a public address (a Gist) that a uMap remote-data layer reads, so one press updates a map others follow.
 - **Dated layers by side in Compare:** a GeoConfirmed or other dated layer showing on each side only what was known by that side's date.
+- **Find, narrower still:** near a road or a track (OpenFreeMap's transportation layer, a line decoder and a tile cap per area), turns kept between searches of one area, a mirrored place shown flipped in Overlay, and the lens searched for a collage laid wholly by hand.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
 
 ## 8. Explicit non-goals
@@ -518,7 +523,11 @@ stops making sense.
   are opened — it must start as an SVG and carry no script, event handler,
   embedded document or reference leaving the file; and saving a proof, which posts
   the composer's rendered export and the images pasted into it, bounded as a
-  request and again as a decoded picture. Every body the browser assembles whole —
+  request and again as a decoded picture. A map plate's export is bounded as a request
+  too; a played plate's pictures come first in bounded batches, are checked by their
+  header (a PNG or a JPEG, bounded in pixels) and kept on disk as they came under a
+  random token, so ffmpeg is what decodes them; the export, a Stop or 15 idle minutes
+  lets them go. Every body the browser assembles whole —
   a table, a note, a picture — is refused by size before it is parsed, and the
   routes are not trusted to a list: `tests/test_hardening.py` walks them.
   Case imports extract only unique, non-symlink members declared

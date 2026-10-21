@@ -301,8 +301,7 @@ test('layer names and optional descriptions save as they are left, reopen and re
   await expect.poll(() => fixture.rows[0].title).toBe('Renamed map');
   await description.fill('Updated context'); await description.press('Tab');
   await expect.poll(() => fixture.rows[0].description).toBe('Updated context');
-  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
-  await menuItem(page, 'Layer actions', 'Discard changes…').click();
+  await panel.getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByRole('alertdialog', { name: 'Discard changes?' }).getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByRole('button', { name: 'Edit Original map', exact: true }).click();
   await expect(description).toHaveValue('Initial context');
@@ -340,8 +339,7 @@ test('group size and native dragging persist, while Discard restores the session
   await expect.poll(() => fixture.groups.get(fixture.rows[0].name)[0].name).toBe('Vehicles');
   await page.screenshot({ path: test.info().outputPath('group-size-and-order.png') });
   const discard = async () => {
-    await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
-    await menuItem(page, 'Layer actions', 'Discard changes…').click();
+    await panel.getByRole('button', { name: 'Discard changes', exact: true }).click();
   };
   await discard();
   const confirm = page.getByRole('alertdialog', { name: 'Discard changes?' });
@@ -351,10 +349,11 @@ test('group size and native dragging persist, while Discard restores the session
   await confirm.getByRole('button', { name: 'Discard changes', exact: true }).click();
   await expect(panel).not.toBeVisible();
   expect(fixture.groups.get(fixture.rows[0].name).map((group) => group.name)).toEqual(['Markers']);
-  // nothing changed yet: nothing to discard
+  // nothing changed yet: Discard just leaves, with no question
   await page.getByRole('button', { name: 'Edit Group map', exact: true }).click();
-  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
-  await expect(menuItem(page, 'Layer actions', 'Discard changes…')).toBeDisabled();
+  await panel.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(page.getByRole('alertdialog', { name: 'Discard changes?' })).toHaveCount(0);
+  await expect(panel).not.toBeVisible();
 });
 
 test('marker dragging and editable line and area vertices save geometry without creating case places', async ({ page }) => {
@@ -446,8 +445,7 @@ test('switching map tools keeps the same edit checkpoint and unsaved feature for
     await expect(page.locator(`.topbar button[title="Guide: ${tool[0].toUpperCase() + tool.slice(1)}"]`)).toBeVisible();
     await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Unsaved across maps');
   }
-  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
-  await menuItem(page, 'Layer actions', 'Discard changes…').click();
+  await panel.getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByRole('alertdialog', { name: 'Discard changes?' }).getByRole('button', { name: 'Discard changes', exact: true }).click();
   const own = fixture.rows.find((row) => row.editable);
   expect(fixture.collections.get(own.name)[0].properties.name).toBe('Original marker');

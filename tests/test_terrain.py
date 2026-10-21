@@ -189,6 +189,28 @@ def test_a_sampler_loads_each_tile_once():
     assert len(calls) == len(set(calls))
 
 
+def test_a_sampler_bounded_lets_its_oldest_tiles_go_and_reads_them_again_right():
+    calls: list[tuple[int, int, int]] = []
+    linear = _linear_fetch(1.0)
+
+    def fetch(z, x, y):
+        calls.append((z, x, y))
+        return linear(z, x, y)
+
+    free = terrain.Sampler(fetch=_linear_fetch(1.0))
+    bounded = terrain.Sampler(fetch=fetch, keep=2)
+    # four points far apart: four tiles, read one by one
+    lons = [7.0, 9.0, 11.0, 13.0]
+    for lon in lons:
+        assert float(bounded.heights(46.0, lon, 10)) == pytest.approx(float(free.heights(46.0, lon, 10)))
+        assert len(bounded._held) <= 2
+    # one read needing more tiles than kept still gets every one of them
+    many = bounded.heights(np.full(4, 46.0), np.array(lons), 10)
+    assert np.allclose(many, free.heights(np.full(4, 46.0), np.array(lons), 10))
+    # the first tile was let go and read again
+    assert len(calls) > len(set(calls))
+
+
 def test_a_profile_is_evenly_spaced_and_reads_a_level_matching_its_spacing():
     sampler = terrain.Sampler(fetch=_linear_fetch(0.001))
     along, lat, lon, heights, _ = terrain.profile([(45.8, 6.8), (46.0, 7.6)], 101, sampler)

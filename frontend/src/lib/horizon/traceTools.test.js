@@ -21,6 +21,7 @@ function fakeOverlay(over = {}) {
     erasing: false,
     linking: false,
     cutting: false,
+    distancing: false,
     pen: 'sky',
     magnet: true,
     front: null,
@@ -29,6 +30,7 @@ function fakeOverlay(over = {}) {
     setErasing: vi.fn(),
     setLinking: vi.fn(),
     setCutting: vi.fn(),
+    setDistancing: vi.fn(),
     setPen: vi.fn(),
     ...over,
   };
@@ -62,25 +64,33 @@ describe('the trace tools', () => {
     expect(idle.setLinking).toHaveBeenCalledWith(true);
     pressTool(idle, 'cut');
     expect(idle.setCutting).toHaveBeenCalledWith(true);
+    pressTool(idle, 'far');
+    expect(idle.setDistancing).toHaveBeenCalledWith(true);
+    pressTool(fakeOverlay({ distancing: true, setDistancing: idle.setDistancing }), 'far');
+    expect(idle.setDistancing).toHaveBeenLastCalledWith(false);
     putAway(drawing);
     expect(drawing.setLinking).toHaveBeenCalledWith(false);
     expect(drawing.setCutting).toHaveBeenCalledWith(false);
+    expect(drawing.setDistancing).toHaveBeenCalledWith(false);
   });
 
   it('say why one cannot come out yet', () => {
     expect(toolBlocked(fakeOverlay({ strokes: [[]] }), 'behind')).toBe('Draw two lines first');
     expect(toolBlocked(fakeOverlay({ strokes: [] }), 'erase')).toBe('Nothing to rub out yet');
     expect(toolBlocked(fakeOverlay(), 'cut')).toBe('');
+    expect(toolBlocked(fakeOverlay({ strokes: [] }), 'far')).toBe('Draw a line first');
   });
 
   it('say what the one out asks for, and what the trace holds', () => {
     expect(toolHint(fakeOverlay({ linking: true }))).toMatch(/^Click the line in front/);
     expect(toolHint(fakeOverlay({ linking: true, front: 3 }))).toMatch(/^Now click the line behind it/);
     expect(toolHint(fakeOverlay({ cutting: true }))).toMatch(/where two frames of the collage meet/);
+    expect(toolHint(fakeOverlay({ distancing: true }))).toBe('Pick how far, then click a line · the same again takes it away');
     expect(toolHint(fakeOverlay({ tracing: true, pen: 'ridge', magnet: false }))).toMatch(/ridge seen against farther land · drawn as is/);
     expect(toolHint(fakeOverlay())).toBe('');
     expect(marksSummary({ lines: [0, 1, 2], inner: [1, 2], pairs: [[1, 0]], cuts: [0.5] })).toBe('2 ridges · 1 pair · 2 pieces');
     expect(marksSummary({ lines: [0], inner: [], pairs: [], cuts: [] })).toBe('');
+    expect(marksSummary({ lines: [0, 1], inner: [], pairs: [], cuts: [], far: [{ line: 0, bands: ['b1'] }] })).toBe('1 distance');
   });
 });
 

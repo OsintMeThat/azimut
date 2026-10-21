@@ -166,6 +166,7 @@
   import SheetRowMenu from '../components/SheetRowMenu.svelte';
   import SheetRowPanel from '../components/SheetRowPanel.svelte';
   import { shortcut } from '../lib/keys.js';
+  import { middleClickPaste } from '../lib/clipboardPaste.js';
 
   const HEAD_H = 32;
   /** How long the two lines above the grid may be. Mirrors `engine/sheets.MAX_DESCRIPTION`,
@@ -1959,7 +1960,7 @@
    * other block is a table, and lands as a rectangle from where the cursor is.
    */
   function onPaste(event) {
-    if (!mine() || !openId || inAField(event.target) || editing) return;
+    if (!mine() || !openId || inAField(event.target) || editing || middleClickPaste()) return;
     const text = event.clipboardData?.getData('text/plain') ?? '';
     if (!text.trim()) return;
     event.preventDefault();

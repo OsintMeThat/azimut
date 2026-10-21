@@ -11,6 +11,7 @@ import {
   freshness,
   legend,
   looksLikeUrl,
+  isMyMapsLink,
   moveName,
   PALETTE,
   refreshedLabel,
@@ -376,6 +377,13 @@ describe('what the + accepts', () => {
     expect(looksLikeUrl('  http://example.org/a.kml  ')).toBe(true);
     expect(looksLikeUrl('sightings.kmz')).toBe(false);
     expect(looksLikeUrl('file:///etc/passwd')).toBe(false);
+  });
+
+  it('knows a My Maps link in each form the backend accepts', () => {
+    for (const link of ['https://www.google.com/maps/d/viewer?mid=1AbC', 'https://google.fr/maps/d/u/0/edit?usp=sharing&mid=x_y-z',
+      'https://www.google.com/maps/d/kml?mid=abc']) expect(isMyMapsLink(link)).toBe(true);
+    for (const link of ['https://example.org/a.kml', 'https://www.google.com/maps/@48.8,2.3,12z', 'mid=abc'])
+      expect(isMyMapsLink(link)).toBe(false);
   });
 
   it('offers exactly the formats the parser reads', () => {

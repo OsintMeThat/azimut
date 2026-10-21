@@ -39,6 +39,17 @@ async function openFind(page) {
   await page.route('**/api/horizon/**', async (route) => {
     const url = route.request().url();
     if (url.endsWith('/api/horizon/finds/estimate')) return route.fulfill({ json: { points: 64, coarse: 64, spacing: 250, step: 0.5 } });
+    if (url.endsWith('/api/horizon/finds/preview')) {
+      // a grid of 64 points, the top row on summits and one on water
+      const stands = route.request().postDataJSON().stands ?? [];
+      const points = Array.from({ length: 64 }, (_, i) => {
+        const kind = i === 63 ? 'water' : i < 8 ? 'summit' : 'slope';
+        const kept = kind !== 'water' && (!stands.length || stands.includes(kind));
+        return [46.55 + Math.floor(i / 8) * 0.0025, 7.82 + (i % 8) * 0.004, kind, kept];
+      });
+      const kinds = { summit: 8, slope: 55, valley: 0, plain: 0, water: 1 };
+      return route.fulfill({ json: { spacing: 250, total: 64, kept: points.filter((p) => p[3]).length, kinds, points } });
+    }
     return route.fulfill({ status: 404, json: { detail: 'No terrain in the browser fixture' } });
   });
   let reads = 0;
@@ -97,6 +108,29 @@ test.describe('Find where it was taken', () => {
     await expect(find).toHaveCount(0);
     await expect(page.locator('.hz-main')).not.toHaveAttribute('inert', '');
     await expect(page.getByRole('toolbar', { name: 'Photo over the view' })).toBeVisible();
+  });
+
+  test('the map has Horizon’s Layers menu, its switches shared with the small map', async ({ page }) => {
+    const { find } = await openFind(page);
+    await awaitMapReady(page, 2);
+    const map = find.getByRole('region', { name: 'Map and the area' });
+    await map.getByRole('button', { name: 'Map layers' }).click();
+    const menu = map.getByRole('dialog', { name: 'Base map and layers' });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('group', { name: 'Base map' }).getByRole('button', { name: 'Satellite' })).toHaveAttribute('aria-pressed', 'true');
+    const borders = menu.getByRole('button', { name: 'Borders', exact: true });
+    await expect(borders).toHaveAttribute('aria-pressed', 'true');
+    await borders.click();
+    await expect(borders).toHaveAttribute('aria-pressed', 'false');
+    // Escape closes the menu, and only the menu
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(find).toBeVisible();
+    // the switch holds on the small map
+    await find.getByRole('group', { name: 'Horizon mode' }).getByRole('button', { name: 'Overlay' }).click();
+    await page.locator('.hz-map').getByRole('button', { name: 'Map layers' }).click();
+    const small = page.locator('#hz-map-layers');
+    await expect(small.getByRole('button', { name: 'Borders', exact: true })).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('starts a new search beside Open: asks first while the trace is no search’s, then lets the photo go', async ({ page }) => {
@@ -178,6 +212,80 @@ test.describe('Find where it was taken', () => {
     await places.first().click();
     await expect(find).toHaveCount(0);
     await expect(page.getByRole('toolbar', { name: 'Photo over the view' })).toBeVisible();
+  });
+
+  test('ticks the directions, several zooms and the ground when unsure, searches with them and says how far to trust the place', async ({ page }) => {
+    const { find, asked } = await openFind(page);
+    await awaitMapReady(page, 2);
+    await trace(page, find);
+    const map = await find.getByRole('region', { name: 'Map and the area' }).boundingBox();
+    const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
+    await find.getByRole('button', { name: 'Draw the area' }).click();
+    for (const [fx, fy] of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) await page.mouse.click(...at(fx, fy));
+    await find.getByRole('button', { name: 'Done', exact: true }).first().click();
+
+    const help = find.getByRole('region', { name: 'Help the search' });
+    await help.locator('summary', { hasText: 'What you know' }).click();
+    const compass = help.locator('.fs-compass');
+    await expect(compass.getByRole('button', { name: 'Any' })).toHaveAttribute('aria-pressed', 'true');
+    await compass.getByRole('button', { name: 'NE', exact: true }).click();
+    await compass.getByRole('button', { name: 'E', exact: true }).click();
+    await expect(compass.getByRole('button', { name: 'Any' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(help.getByText('Only headings NE to E are searched, drawn on the map.')).toBeVisible();
+    await help.getByRole('button', { name: '×0.5', exact: true }).click();
+    await help.getByRole('button', { name: '×1', exact: true }).click();
+    await expect(help.getByText('Fit tries 50° to 120° across.')).toBeVisible();
+    await expect(find.getByText(/With zoom ×0.5 or ×1 · facing NE to E/)).toBeVisible();
+    // the ground the eye stands on: the grid read before the search says what it keeps
+    await expect(help.getByText('1 on water left out.')).toBeVisible();
+    await help.getByRole('button', { name: 'Summit or ridge' }).click();
+    await expect(help.getByText('Keeps 8 of 64 points (13%), 1 on water left out.')).toBeVisible();
+
+    await find.getByRole('button', { name: 'Search', exact: true }).click();
+    await expect(find.getByText('One place stands out')).toBeVisible({ timeout: 10_000 });
+    expect(asked[0].facing).toEqual(['ne', 'e']);
+    expect(asked[0].stands).toEqual(['summit']);
+    expect(asked[0].trace.within).toEqual([50, 120]);
+    await expect(find.locator('.fs-trust.solid')).toContainText('Solid: nothing speaks against the best place');
+  });
+
+  test('says how far a line stands, how the camera looks and a selfie, and sends it all to the search', async ({ page }) => {
+    const { find, asked } = await openFind(page);
+    await awaitMapReady(page, 2);
+    await trace(page, find);
+    // the Distance tool: pick how far, then click the line
+    await find.getByRole('button', { name: 'Say how far a line stands' }).click();
+    const chips = find.getByRole('group', { name: 'How far the line stands' });
+    await expect(chips).toBeVisible();
+    // 1–3 km is picked to start with: one more press widens it to 10 km
+    await expect(chips.getByRole('button', { name: '1–3 km' })).toHaveAttribute('aria-pressed', 'true');
+    await chips.getByRole('button', { name: '3–10 km' }).click();
+    // a point of the line as drawn on the photo
+    const spots = await find.locator('.fp-trace').first().evaluate((line) => line.getAttribute('points'));
+    const [x, y] = spots.split(' ')[4].split(',').map(Number);
+    const photo = await find.locator('.fp-marks').boundingBox();
+    await page.mouse.click(photo.x + x, photo.y + y);
+    await expect(find.locator('.fp-far text')).toHaveText('1–10 km');
+    await page.keyboard.press('Escape');
+
+    const map = await find.getByRole('region', { name: 'Map and the area' }).boundingBox();
+    const at = (fx, fy) => [map.x + map.width * fx, map.y + map.height * fy];
+    await find.getByRole('button', { name: 'Draw the area' }).click();
+    for (const [fx, fy] of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) await page.mouse.click(...at(fx, fy));
+    await find.getByRole('button', { name: 'Done', exact: true }).first().click();
+    const help = find.getByRole('region', { name: 'Help the search' });
+    await help.locator('summary', { hasText: 'What you know' }).click();
+    const camera = help.getByRole('group', { name: 'Camera' });
+    await camera.getByRole('button', { name: 'Looking down' }).click();
+    await camera.getByRole('button', { name: 'Selfie' }).click();
+    await expect(find.getByText(/lines 1–10 km away · on foot · looking down · mirrored too/).first()).toBeVisible();
+
+    await find.getByRole('button', { name: 'Search', exact: true }).click();
+    await expect(find.getByText('One place stands out')).toBeVisible({ timeout: 10_000 });
+    expect(asked[0].trace.far).toEqual([[0, 1000, 10000]]);
+    expect(asked[0].trace.line.every((one) => one === 0)).toBe(true);
+    expect(asked[0]).toMatchObject({ view: ['down'], mirror: true });
+    expect(asked[0].photo.marks.far).toEqual([{ line: 0, bands: ['b1', 'b3'] }]);
   });
 
   test('marks a ridge in front of the skyline, pairs them, cuts the collage and sends it all to the search', async ({ page }) => {

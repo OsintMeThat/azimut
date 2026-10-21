@@ -53,6 +53,9 @@ def _find_work() -> dict:
         "who": {"mode": "drone", "low": 10, "high": 120},
         "spacing": 250,
         "tolerance": 2,
+        "facing": ["sw", "w"],
+        "stands": ["summit", "slope"],
+        "zones": [{"points": [{"lat": 46.52, "lon": 7.82}, {"lat": 46.52, "lon": 7.84}, {"lat": 46.54, "lon": 7.84}], "spacing": 100, "out": False}],
         "search": None,
     }
 
@@ -76,6 +79,9 @@ def test_the_bench_comes_back_as_it_was_left(client):
     assert kept["find"]["alignments"][0]["heights"] == {"near": 12, "far": 0}
     assert kept["find"]["who"] == {"mode": "drone", "low": 10, "high": 120}
     assert kept["find"]["spacing"] == 250
+    assert kept["find"]["facing"] == ["sw", "w"]
+    assert kept["find"]["stands"] == ["summit", "slope"]
+    assert kept["find"]["zones"][0]["spacing"] == 100 and kept["find"]["zones"][0]["out"] is False
 
 
 def test_an_empty_case_has_no_bench_and_a_cleared_one_is_gone(client):

@@ -659,6 +659,12 @@ export function movedStep(spec, at, id, index) {
   return { ...(spec.steps ?? {}), [dayOf(at)]: list };
 }
 
+/** The days the plate was told to play, with the day `day` among them (`on`) or without it. */
+export function pickedDays(spec, day, on) {
+  const kept = (spec?.days ?? []).filter((item) => item !== day);
+  return on && day !== PAGE ? [...kept, day].sort() : kept;
+}
+
 /** Whether the plate holds a step on any day. */
 export const hasSteps = (spec) => Object.values(spec?.steps ?? {}).some((list) => list.length > 0);
 

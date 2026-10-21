@@ -3,8 +3,11 @@
    * The steps of the plate's day, in its play bar beside the days: the day itself
    * first, then each step in the order it is played. A press shows one; what is added then
    * belongs to it. **+** adds a step after the one shown. A step is dragged to
-   * another place, and its ⋯ names it, sets how long it holds, cuts straight into it
+   * another place, and its ⋯, always in sight, names it, sets how long it holds, cuts straight into it
    * when the video's transitions are on, or removes it with what stands on it.
+   *
+   * A day the play does not go through (no layer changes on it, no steps) says so, and a
+   * press on it adds it to the play; its ⋯ lets a day added that way go again.
    *
    * Every tile says how long it holds in the video, and a press on that time sets it:
    * the day its own seconds or the plate's, a step its own, never shorter than its
@@ -40,6 +43,11 @@
     ondayhold = null,
     /** The video's transitions are on, so a step can do without its own. */
     transitions = false,
+    /** Whether the play goes through the day shown, and whether it does because it was added to it. */
+    dayPlayed = true,
+    dayPicked = false,
+    /** `(on)`: the day shown added to the play, or let go; null where a plate plays no days. */
+    onplayday = null,
   } = $props();
 
   /** `{ step, index, anchor }` of the step being set, or `{ day: true, anchor }`. */
@@ -88,6 +96,14 @@
 
 <div class="steps" bind:this={strip} role="listbox" aria-label="Steps of the day" tabindex="-1" ondragover={(event) => event.preventDefault()} ondrop={drop}>
   <div class="slot">
+    {#if !dayPlayed && onplayday}
+      <button type="button" class="tile day idle" title="No layer changes on this day, so the play skips it. Press to add it"
+        onclick={() => onplayday(true)}>
+        <span class="thumb"><Icon name="plus" size={14} /></span>
+        <span class="tile-name">{dayLabel}</span>
+        <span class="tile-add">Add to the play</span>
+      </button>
+    {:else}
     <button type="button" class="tile day" class:on={!current} role="option" aria-selected={!current} title="The day itself, under its steps"
       onclick={() => onpick?.(null)}>
       <span class="thumb"><Icon name="plate" size={14} /></span>
@@ -96,6 +112,9 @@
     <button type="button" class="time" class:own={dayOwn} aria-label={`How long ${dayLabel} holds`}
       title={dayOwn ? 'How long this day holds in the video, its own time. Press to set it' : 'How long this day holds in the video, as every day does. Press to give it its own'}
       onclick={(event) => open({ day: true, anchor: event.currentTarget }, true)}>{timecode(daySeconds)}</button>
+    {/if}
+    <button type="button" class="more" aria-label={`Set ${dayLabel}`} title={dayPlayed ? 'How long it holds' : 'Add it to the play'}
+      onclick={(event) => open({ day: true, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
   </div>
   {#each steps as step, index (step.id)}
     {@const clip = firstClip(step)}
@@ -118,7 +137,7 @@
         title={clip ? 'How long this step holds in the video, at least its clip. Press to set it' : 'How long this step holds in the video. Press to set it'}
         onclick={(event) => open({ step, index, anchor: event.currentTarget }, true)}>{timecode(stepSeconds(step, elements))}</button>
       <button type="button" class="more" aria-label={`Set ${name(step, index)}`} title="Name, length, order, remove"
-        onclick={(event) => open({ step, index, anchor: event.currentTarget })}><Icon name="more" size={11} /></button>
+        onclick={(event) => open({ step, index, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
     </div>
   {/each}
   <button type="button" class="add" aria-label="Add a step" title={current ? 'Add a step after this one' : 'Add a step to this day, played after it'} onclick={() => onadd?.()}>
@@ -127,6 +146,10 @@
 
 {#if menu?.day}
   <FloatingMenu anchor={menu?.anchor} width={230} label="The day" role="dialog" onclose={() => (menu = null)}>
+    {#if !dayPlayed && onplayday}
+      <button type="button" class="fm-item" onclick={() => { menu = null; onplayday(true); }}>
+        <Icon name="plus" size={14} /><span class="fm-grow">Add this day to the play</span></button>
+    {:else}
     <div class="fields">
       <label title="Seconds this day holds in the video">Seconds<input class="input" type="number" min={LEAST_SECONDS} max={MOST_SECONDS} step="0.1"
         bind:this={secondsField} value={daySeconds} onchange={(event) => ondayhold?.(event.currentTarget.value)} /></label>
@@ -136,6 +159,13 @@
           As every day ({timecode(plateSeconds)})</button>
       {/if}
     </div>
+    {#if dayPicked && !steps.length && onplayday}
+      <div class="fm-sep"></div>
+      <button type="button" class="fm-item" title="No layer changes on this day: the play skips it again"
+        onclick={() => { menu = null; onplayday(false); }}>
+        <Icon name="minus" size={14} /><span class="fm-grow">Take it out of the play</span></button>
+    {/if}
+    {/if}
   </FloatingMenu>
 {:else if menu}
   {@const least = menu?.step ? leastSeconds(menu.step, elements) : 0}
@@ -168,11 +198,14 @@
   .slot { position: relative; display: flex; border-radius: var(--r-sm); }
   .slot.drop-before { box-shadow: -3px 0 var(--accent); }
   .slot.drop-after { box-shadow: 3px 0 var(--accent); }
-  .tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 14px; align-items: center; gap: 0 6px; width: 124px; flex: none;
-    padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2);
+  .tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 14px; align-items: center; gap: 0 6px; width: 140px; flex: none;
+    padding: 4px 22px 4px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2);
     font-size: 11px; text-align: left; cursor: pointer; }
   .tile:hover { border-color: var(--accent); color: var(--text-1); }
   .tile.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
+  .tile.idle { border-style: dashed; background: none; color: var(--text-3); }
+  .tile.idle:hover { color: var(--text-1); }
+  .tile-add { color: var(--accent); font-size: 10px; white-space: nowrap; }
   .thumb { position: relative; grid-row: span 2; display: grid; place-items: center; width: 40px; height: 26px; border-radius: 3px; overflow: hidden;
     background: var(--bg-3); color: var(--text-3); }
   .thumb video { width: 100%; height: 100%; object-fit: cover; }
@@ -186,9 +219,8 @@
   .time:hover, .time:focus-visible { background: var(--bg-3); color: var(--text-1); }
   .time.own { color: var(--accent); }
   .more { position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--r-sm);
-    color: var(--text-3); opacity: 0; cursor: pointer; }
-  .slot:hover .more, .more:focus-visible { opacity: 1; }
-  .more:hover { background: var(--bg-3); color: var(--text-1); }
+    color: var(--text-2); cursor: pointer; }
+  .more:hover, .more:focus-visible { background: var(--bg-3); color: var(--text-1); }
   .add { display: grid; place-items: center; width: 34px; flex: none; border: 1px dashed var(--border); border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
   .add:hover { border-color: var(--accent); color: var(--text-1); }
   .fields { display: grid; gap: 6px; padding: 6px; }

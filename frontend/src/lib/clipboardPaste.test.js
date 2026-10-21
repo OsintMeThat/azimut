@@ -5,6 +5,7 @@ import {
   hostOf,
   ignorePasteTarget,
   listenForPaste,
+  middleClickPaste,
   MAX_PASTE_IMAGE_BYTES,
   pasteImage,
   pasteProblem,
@@ -224,6 +225,23 @@ describe('the window listener', () => {
     const event = paste(clipboard({ text: 'https://example.com/x' }));
     expect(seen).toEqual([{ kind: 'url', url: 'https://example.com/x' }]);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('refuses the paste a middle click sends, and takes Ctrl+V again once it is over', () => {
+    // on Linux the middle button pastes the selection, and it is also the one that turns the map
+    const seen = [];
+    off = listenForPaste((payload) => seen.push(payload));
+    window.dispatchEvent(new MouseEvent('mousedown', { button: 1 }));
+    expect(middleClickPaste()).toBe(true);
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 1 }));
+    const event = paste(clipboard({ text: 'https://example.com/x' }));
+    expect(seen).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+    const later = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 10_000);
+    expect(middleClickPaste()).toBe(false);
+    paste(clipboard({ text: 'https://example.com/x' }));
+    expect(seen).toHaveLength(1);
+    later.mockRestore();
   });
 
   it('leaves a paste into a field alone', () => {

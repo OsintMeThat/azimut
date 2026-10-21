@@ -15,10 +15,26 @@
  * one, which is when an alignment says the most. Each line has a tolerance,
  * drawn as a narrow wedge, for the clicks and the maps being a little off.
  *
+ * The analyst may also tick which way the photo faces, one or several of the
+ * eight compass directions, those side by side read as one sector (the app's
+ * engine/finder.py reads them the same way): the map draws them as a fan. And
+ * the ground the eye stands on, a summit, a slope, a valley or a plain, which
+ * the app reads off the terrain (engine/landform.py) for every point of the
+ * grid before the search: the map shows each point in its ground's colour,
+ * grey where it is left out.
+ *
+ * Once a search is done, `reliability` says how far its best place can be
+ * trusted, from what the search already holds: rivals far off that explain the
+ * trace nearly as well, the chance fits of the area, a best place standing
+ * alone where its neighbours explain little, a trace with too few bumps to
+ * name one place, a camera pushed to the edge of what it may be, and the other
+ * searches of the same photo.
+ *
  * Everything here is a plain function of plain data, so the panel, the map and
  * the search read the same lines.
  */
 import { bearingBetween } from './geometry.js';
+import { cleanHints } from './hints.js';
 import { containsPoint, destination, haversine, polygonArea } from '../measure.js';
 
 /** Degrees either side of an alignment's line the camera may stand, by default. */
@@ -54,7 +70,7 @@ export const REACH_PAST = 2;
 export const searchedReach = (reach, auto = 50_000) => Math.max(reach, Math.min(reach * REACH_PAST, auto));
 
 export const AREA_MIN = 0.01e6;
-export const AREA_MAX = 2_500e6;
+export const AREA_MAX = 10_000e6;
 
 const RAD = Math.PI / 180;
 
@@ -260,6 +276,9 @@ export const VERDICTS = {
 };
 
 const corner = (p) => (Array.isArray(p) ? p : [p?.lat, p?.lon]).map((x) => Math.round(Number(x) * 1e6));
+const farKey = (m) => JSON.stringify(m?.far ?? []);
+const zonesKey = (zones) =>
+  (zones ?? []).map((zone) => [(zone.area ?? zone.points ?? []).map(corner), zone.out ? null : (zone.spacing ?? null), Boolean(zone.out)]);
 const marksKey = (m) => (m && (m.inner?.length || m.pairs?.length || m.cuts?.length) ? JSON.stringify([m.inner ?? [], m.pairs ?? [], m.cuts ?? []]) : '');
 
 /**
@@ -280,7 +299,14 @@ export function sameAsk(ask, now) {
     (ask.photo?.path ?? null) === (now.photo?.path ?? null) &&
     same(ask.photo?.strokes ?? [], now.photo?.strokes ?? []) &&
     marksKey(ask.photo?.marks) === marksKey(now.photo?.marks) &&
-    same(ask.hints ?? null, now.hints ?? null)
+    same(cleanHints(ask.hints), cleanHints(now.hints)) &&
+    same(cleanFacing(ask.facing), cleanFacing(now.facing)) &&
+    same(cleanStands(ask.stands), cleanStands(now.stands)) &&
+    same([...(ask.view ?? [])].sort(), [...(now.view ?? [])].sort()) &&
+    Boolean(ask.mirror) === Boolean(now.mirror) &&
+    farKey(ask.photo?.marks) === farKey(now.photo?.marks) &&
+    same(zonesKey(ask.zones), zonesKey(now.zones)) &&
+    same(ask.sun ?? null, now.sun ?? null)
   );
 }
 
@@ -301,3 +327,376 @@ export function areaPoints(area) {
 
 /** What to change when no place stands out, in the panel's words. */
 export const UNCLEAR_HELP = 'Say the zoom, check how far the photo sees, add an alignment or draw a smaller area.';
+
+// -- which way the photo faces ------------------------------------------------------
+
+/** The compass directions the photo may face, clockwise from north (engine/finder.py DIRECTIONS). */
+export const DIRECTIONS = [
+  { id: 'n', label: 'N', heading: 0 },
+  { id: 'ne', label: 'NE', heading: 45 },
+  { id: 'e', label: 'E', heading: 90 },
+  { id: 'se', label: 'SE', heading: 135 },
+  { id: 's', label: 'S', heading: 180 },
+  { id: 'sw', label: 'SW', heading: 225 },
+  { id: 'w', label: 'W', heading: 270 },
+  { id: 'nw', label: 'NW', heading: 315 },
+];
+
+/** Half the sector one direction stands for, degrees: the eight cover the turn. */
+export const DIRECTION_HALF = 360 / DIRECTIONS.length / 2;
+
+/** The directions ticked, in the compass's order, once each; anything else left out. */
+export function cleanFacing(words) {
+  const said = new Set(Array.isArray(words) ? words : []);
+  return DIRECTIONS.filter((d) => said.has(d.id)).map((d) => d.id);
+}
+
+/** A direction ticked or unticked. */
+export function toggleFacing(words, id) {
+  const now = cleanFacing(words);
+  return cleanFacing(now.includes(id) ? now.filter((one) => one !== id) : [...now, id]);
+}
+
+/** Runs of directions side by side round the turn, each a list of indexes, the first after a gap. */
+function runs(words) {
+  const ticked = new Set(cleanFacing(words).map((id) => DIRECTIONS.findIndex((d) => d.id === id)));
+  const count = DIRECTIONS.length;
+  if (!ticked.size || ticked.size === count) return [];
+  const start = [...ticked].find((i) => !ticked.has((i - 1 + count) % count));
+  const out = [];
+  for (let k = 0; k < count; k += 1) {
+    const i = (start + k) % count;
+    if (!ticked.has(i)) continue;
+    const last = out.at(-1);
+    if (last && (last.at(-1) + 1) % count === i) last.push(i);
+    else out.push([i]);
+  }
+  return out;
+}
+
+/** The sectors the directions ticked stand for, `{ centre, half }` in degrees; none for none ticked, or all. */
+export function facingSectors(words) {
+  const width = 2 * DIRECTION_HALF;
+  return runs(words).map((run) => ({ centre: (run[0] * width + ((run.length - 1) * width) / 2) % 360, half: run.length * DIRECTION_HALF }));
+}
+
+/** The directions ticked, as words: "NE to E", "N, S"; '' when the photo may face anywhere. */
+export function facingText(words) {
+  return runs(words)
+    .map((run) => (run.length === 1 ? DIRECTIONS[run[0]].label : `${DIRECTIONS[run[0]].label} to ${DIRECTIONS[run.at(-1)].label}`))
+    .join(', ');
+}
+
+/** Degrees between the points of a fan's arc. */
+const FAN_STEP = 5;
+
+/** The fan the map draws from a point: one ring per sector, out to `reach` metres. */
+export function facingFan(from, words, reach) {
+  return fanOf(from, facingSectors(words), reach);
+}
+
+/** The fan of any sectors (`{ centre, half }`), as `facingFan` draws the directions'. */
+export function fanOf(from, sectors, reach) {
+  return sectors.map(({ centre, half }) => {
+    const ring = [from];
+    const steps = Math.max(2, Math.ceil((2 * half) / FAN_STEP));
+    for (let i = 0; i <= steps; i += 1) ring.push(destination(from, centre - half + (2 * half * i) / steps, reach));
+    return ring;
+  });
+}
+
+/** The distances the fan is ringed at, metres, those within the reach searched. */
+export const FAN_RINGS = [5_000, 10_000, 20_000, 50_000, 100_000];
+
+/**
+ * The fan's rings: an arc across each sector at each distance in `FAN_RINGS`
+ * up to `reach`, `{ id, metres, points, label }`, `label` where its words go (the
+ * arc's middle).
+ */
+export function facingRings(from, words, reach) {
+  return ringsOf(from, facingSectors(words), reach);
+}
+
+/** The rings of any sectors' fan, as `facingRings` rings the directions'. */
+export function ringsOf(from, sectors, reach) {
+  const out = [];
+  for (const [n, { centre, half }] of sectors.entries()) {
+    const steps = Math.max(2, Math.ceil((2 * half) / FAN_STEP));
+    for (const metres of FAN_RINGS.filter((m) => m <= reach)) {
+      const points = [];
+      for (let i = 0; i <= steps; i += 1) points.push(destination(from, centre - half + (2 * half * i) / steps, metres));
+      out.push({ id: `${n}-${metres}`, metres, points, label: destination(from, centre, metres) });
+    }
+  }
+  return out;
+}
+
+/** The middle of an area's corners: where the fan is drawn from. */
+export function areaMiddle(points) {
+  const list = areaPoints(points);
+  if (!list.length) return null;
+  return { lat: list.reduce((sum, p) => sum + p.lat, 0) / list.length, lon: list.reduce((sum, p) => sum + p.lon, 0) / list.length };
+}
+
+// -- how far a result can be trusted -------------------------------------------------
+
+/** The words for how far a search's best place can be trusted. */
+export const TRUST = {
+  solid: 'Solid',
+  check: 'Check it',
+  weak: 'Weak',
+};
+
+/** A place far off that explains the trace within this much of the best one is a rival. */
+export const RIVAL_MARGIN = 0.1;
+/** Metres apart for two places to be separate answers (engine/finder.py SEPARATE_M). */
+export const SEPARATE_M = 3_000;
+/** The best place must stand this far above the area's chance fits to stand clear of them. */
+export const CHANCE_CLEAR = 0.15;
+/** A lens found within this ratio of the zoom tried's ends sits at its edge. */
+export const LENS_EDGE = 1.05;
+/** The most the camera may roll (engine/skymatch.py ROLL_REACH), and how near it reads as pushed to it. */
+export const ROLL_LIMIT = 5;
+const ROLL_NEAR = 0.2;
+/** A decoy of the trace (mirrored, upside down) explaining within this much of it at a place says the place fits any shape. */
+export const DECOY_MARGIN = 0.15;
+/** A camera on foot tilted this far or more, degrees, is worth a look. */
+export const TILT_STEEP = 12;
+/**
+ * The ground this near the best place, metres: where it is a real answer, the
+ * points there explain nearly as much (measured on the owner's solved views: 91
+ * to 96% of the best), where it is a chance fit far less (18 to 57%).
+ */
+export const SPOT_NEAR_M = 150;
+/** Below this share of the best, the neighbours say the best stands alone; read from this many of them at the least. */
+export const SPOT_SHARE = 0.75;
+const SPOT_POINTS = 6;
+/** A turn of the trace counts as a bump past this many pixels of the search's plane (1200 wide). */
+export const TURN_PX = 6;
+/** Fewer turns than this and the trace's shape is too plain to name one place. */
+export const TURNS_MIN = 5;
+
+/** How many times the trace turns up or down by `TURN_PX` or more, read across the picture from left to right. */
+export function traceTurns(trace) {
+  const xs = trace?.x ?? [];
+  const ys = trace?.y ?? [];
+  const scale = Number(trace?.half_width) > 0 ? Number(trace.half_width) : 600;
+  const order = xs.map((_, i) => i).sort((a, b) => xs[a] - xs[b]);
+  let turns = 0;
+  let way = 0;
+  let held = null;
+  for (const i of order) {
+    const y = ys[i] * scale;
+    if (held === null) held = y;
+    else if (way >= 0 && y < held - TURN_PX) {
+      if (way > 0) turns += 1;
+      way = -1;
+      held = y;
+    } else if (way <= 0 && y > held + TURN_PX) {
+      if (way < 0) turns += 1;
+      way = 1;
+      held = y;
+    } else if ((way > 0 && y > held) || (way < 0 && y < held)) held = y;
+  }
+  return turns;
+}
+
+/** What the points scored within `SPOT_NEAR_M` of the best place explain, in the middle; null with too few. */
+export function neighbourFit(best, points) {
+  const near = (points ?? [])
+    .filter((p) => Number.isFinite(p.explained) && p.explained >= 0)
+    .filter((p) => {
+      const apart = haversine(p, best);
+      return apart > 1 && apart <= SPOT_NEAR_M;
+    })
+    .map((p) => p.explained)
+    .sort((a, b) => a - b);
+  return near.length >= SPOT_POINTS ? near[Math.floor(near.length / 2)] : null;
+}
+
+/** The score most of the area reaches by chance: the top tenth of the points scored, or null with too few. */
+export function chanceFit(points) {
+  const scores = (points ?? [])
+    .map((p) => p.explained)
+    .filter((x) => Number.isFinite(x) && x >= 0)
+    .sort((a, b) => a - b);
+  if (scores.length < 10) return null;
+  return scores[Math.floor(0.9 * (scores.length - 1))];
+}
+
+const km = (metres) => `${Math.round(metres / 1000)} km`;
+const percent = (share) => `${Math.round(Math.max(0, share) * 100)}%`;
+
+/**
+ * How far the best place of a search can be trusted: `{ level, reasons, chance }`,
+ * `level` a key of TRUST, `reasons` what lowers it in a line each, `chance` the
+ * score the area reaches by chance. Read off the search alone and the case's
+ * other searches (`others`, rows as the list gives them): no point is scored
+ * again. A verdict that names no single place is weak whatever else; one that
+ * does is solid with nothing against it, worth a check with one thing, weak
+ * with two or more.
+ */
+export function reliability(result, { ask = null, name = null, others = [] } = {}) {
+  const places = result?.places ?? [];
+  const best = places[0];
+  const chance = chanceFit(result?.points);
+  if (!best) return { level: 'weak', reasons: [], chance };
+  const reasons = [];
+  const verdict = result.verdict;
+
+  if (verdict !== 'ambiguous') {
+    const rivals = places.slice(1).filter((p) => haversine(p, best) >= SEPARATE_M && p.explained >= best.explained - RIVAL_MARGIN);
+    if (rivals.length) {
+      const nearest = Math.min(...rivals.map((p) => haversine(p, best)));
+      reasons.push(
+        rivals.length === 1
+          ? `Another place ${km(nearest)} away explains nearly as much`
+          : `${rivals.length} other places, the nearest ${km(nearest)} away, explain nearly as much`
+      );
+    }
+  }
+  if (chance !== null && verdict !== 'unclear' && best.explained - chance < CHANCE_CLEAR) {
+    reasons.push(`Barely above the chance fits of the area (${percent(chance)})`);
+  }
+  const around = neighbourFit(best, result?.points);
+  if (around !== null && around < SPOT_SHARE * best.explained) {
+    reasons.push(`The ground ${SPOT_NEAR_M} m around explains much less (${percent(around)}): a lone spike`);
+  }
+
+  const trace = ask?.trace;
+  if (trace?.x?.length) {
+    const turns = traceTurns(trace);
+    if (turns < TURNS_MIN) reasons.push(`The trace turns only ${turns} ${turns === 1 ? 'time' : 'times'}: a plain shape fits many places`);
+  }
+  const within = trace && !trace.known && Array.isArray(trace.within) ? trace.within : null;
+  if (within && Number.isFinite(best.fov) && ask?.hints?.picture !== 'panorama') {
+    const [low, high] = [Math.min(...within), Math.max(...within)];
+    const lens = best.fov < 10 ? best.fov.toFixed(1) : Math.round(best.fov);
+    if (best.fov <= low * LENS_EDGE) reasons.push(`The lens found, ${lens}°, is the narrowest tried`);
+    else if (best.fov >= high / LENS_EDGE) reasons.push(`The lens found, ${lens}°, is the widest tried`);
+  }
+  if (Number.isFinite(best.roll) && Math.abs(best.roll) >= ROLL_LIMIT - ROLL_NEAR) {
+    reasons.push(`The camera had to roll ${Math.round(Math.abs(best.roll))}°, the most allowed`);
+  }
+  if ((ask?.who?.mode ?? 'ground') === 'ground' && Number.isFinite(best.tilt) && Math.abs(best.tilt) >= TILT_STEEP) {
+    reasons.push(`The camera tilts ${Math.round(Math.abs(best.tilt))}° ${best.tilt < 0 ? 'down' : 'up'}`);
+  }
+  if (best.inner != null && best.inner < 0.5) reasons.push('The ridges in front lie off the terrain there');
+  if (Number.isFinite(best.decoy) && best.decoy >= best.explained - DECOY_MARGIN) {
+    reasons.push(`A decoy of the trace fits there nearly as well (${percent(best.decoy)})`);
+  }
+  if (Array.isArray(best.pairs) && best.pairs[0] < best.pairs[1]) {
+    reasons.push(`${best.pairs[1] - best.pairs[0]} of ${best.pairs[1]} front and behind pairs are out of order`);
+  }
+
+  // another search of the same photo that names one place elsewhere, about as strongly
+  const photo = ask?.photo?.path;
+  if (photo) {
+    const elsewhere = (others ?? []).filter(
+      (row) =>
+        row.name !== name &&
+        row.photo === photo &&
+        row.status === 'done' &&
+        row.verdict === 'match' &&
+        row.best &&
+        row.best.explained >= best.explained - RIVAL_MARGIN &&
+        haversine(row.best, best) >= SEPARATE_M
+    );
+    if (elsewhere.length) {
+      const [first] = elsewhere;
+      reasons.push(`“${first.title ?? first.name}” found a place ${km(haversine(first.best, best))} away that explains ${percent(first.best.explained)}`);
+    }
+  }
+
+  const named = verdict === 'match';
+  const level = !named || reasons.length >= 2 ? 'weak' : reasons.length === 1 ? 'check' : 'solid';
+  return { level, reasons, chance };
+}
+
+// -- where the eye stands -------------------------------------------------------------
+
+/** The ground the eye may stand on, as the app reads it off the terrain (engine/landform.py), and its rule. */
+export const GROUNDS = [
+  { id: 'summit', label: 'Summit or ridge', title: 'In the top quarter of the ground within 400 m', colour: '#ff8a3d' },
+  { id: 'slope', label: 'Slope', title: 'Between the top and bottom quarters of the ground within 400 m', colour: '#e6d35a' },
+  { id: 'valley', label: 'Valley', title: 'In the bottom quarter of the ground within 400 m', colour: '#4fc3f7' },
+  { id: 'plain', label: 'Plain', title: 'Flat ground: within 8 m over 400 m, or 30 m over 1.5 km', colour: '#9be564' },
+  { id: 'water', label: 'Sea or lake', title: 'On a boat: points on the water are searched too', colour: '#2f6fe0' },
+];
+
+/** Water on the map's grid: the sea or a lake, left out on foot unless ticked. */
+export const WATER_COLOUR = '#2f6fe0';
+
+/** The grounds ticked, in the menu's order, once each; anything else left out. */
+export function cleanStands(words) {
+  const said = new Set(Array.isArray(words) ? words : []);
+  return GROUNDS.filter((g) => said.has(g.id)).map((g) => g.id);
+}
+
+/** A ground ticked or unticked. */
+export function toggleStand(words, id) {
+  const now = cleanStands(words);
+  return cleanStands(now.includes(id) ? now.filter((one) => one !== id) : [...now, id]);
+}
+
+/** The grounds ticked, as words: "summit or ridge or slope"; '' for any. */
+export function standsText(words) {
+  const labels = GROUNDS.filter((g) => cleanStands(words).includes(g.id)).map((g) => g.label.toLowerCase());
+  return labels.join(' or ');
+}
+
+/**
+ * What the grid before the search says about the ground (`/api/horizon/finds/preview`):
+ * how many points it keeps and why the rest go, '' while it is not read.
+ */
+export function groundText(preview, stands = []) {
+  if (!preview?.total) return '';
+  const water = preview.kinds?.water ?? 0;
+  const ticked = cleanStands(stands).length;
+  const wet = water && !cleanStands(stands).includes('water') ? `${water.toLocaleString('en-US')} on water left out` : '';
+  if (!ticked) return wet ? `${wet}.` : '';
+  const share = Math.round((100 * preview.kept) / preview.total);
+  return `Keeps ${preview.kept.toLocaleString('en-US')} of ${preview.total.toLocaleString('en-US')} points (${share}%)${wet ? `, ${wet}` : ''}.`;
+}
+
+/** The size of a search with the grid kept to the ground ticked: its coarse points and their filling-in scaled down alike. */
+export function withGround(estimated, preview) {
+  if (!estimated || !preview?.total || !(estimated.coarse > 0)) return estimated;
+  const dropped = estimated.coarse * (1 - preview.kept / preview.total);
+  const points = Math.max(0, Math.round(estimated.points - dropped));
+  const most = estimated.most != null ? Math.max(points, Math.round(estimated.most - dropped * 4)) : estimated.most;
+  return { ...estimated, points, most };
+}
+
+// -- the sun against the camera --------------------------------------------------------
+
+/** Where the sun may have stood against the camera, as Find offers it. */
+export const SUN_SIDES = [
+  { id: 'ahead', label: 'Ahead', title: 'The sun in front of the camera, in the picture or near it' },
+  { id: 'left', label: 'Left', title: 'The sun on the left of the picture: shadows fall to the right' },
+  { id: 'right', label: 'Right', title: 'The sun on the right of the picture: shadows fall to the left' },
+  { id: 'behind', label: 'Behind', title: 'The sun behind the camera: shadows fall away from it' },
+];
+
+/** Nothing said of the sun. */
+export const NO_SUN = Object.freeze({ date: '', start: '06:00', end: '18:00', sides: Object.freeze([]) });
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const HOUR = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** The sun as Find keeps it, whatever it was handed: sides in the menu order, hours as `HH:MM`. */
+export function cleanSun(sun) {
+  const said = new Set(Array.isArray(sun?.sides) ? sun.sides : []);
+  return {
+    date: DAY.test(sun?.date ?? '') ? sun.date : '',
+    start: HOUR.test(sun?.start ?? '') ? sun.start : NO_SUN.start,
+    end: HOUR.test(sun?.end ?? '') ? sun.end : NO_SUN.end,
+    sides: SUN_SIDES.filter((side) => said.has(side.id)).map((side) => side.id),
+  };
+}
+
+/** The sun a search is asked with, or null until a day and a side are said. */
+export function sunAsked(sun) {
+  const clean = cleanSun(sun);
+  return clean.date && clean.sides.length ? clean : null;
+}

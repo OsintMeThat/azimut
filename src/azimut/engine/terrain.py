@@ -471,12 +471,17 @@ class Sampler:
     `fetch` is the tile source; the default reads the cache and the network. A
     sampler given its own keeps away from the shared memory cache, so tests and
     real views never see each other's tiles.
+
+    `keep` bounds the tiles held, the oldest let go first, for a computation
+    that roams far (a search over thousands of square kilometres would hold
+    gigabytes): a tile let go is read again from the disk cache when needed.
     """
 
     fetch: Callable[[int, int, int], Fetched | None] | None = None
     sources: set[str] = field(default_factory=set)
     zooms: set[int] = field(default_factory=set)
-    _held: dict[Key, np.ndarray | None] = field(default_factory=dict)
+    keep: int | None = None
+    _held: OrderedDict[Key, np.ndarray | None] = field(default_factory=OrderedDict)
 
     def heights(
         self, lat: np.ndarray | float, lon: np.ndarray | float, zoom: int
@@ -510,7 +515,7 @@ class Sampler:
         gy = np.concatenate([ya, ya, yb, yb])
         tiles_across = 1 << zoom
         keys = (gx >> _SHIFT) * tiles_across + (gy >> _SHIFT)
-        self._load(zoom, np.unique(keys), tiles_across)
+        held = self._load(zoom, np.unique(keys), tiles_across)
 
         values = np.zeros(gx.size, dtype=np.float32)
         absent = np.zeros(gx.size, dtype=bool)
@@ -518,7 +523,7 @@ class Sampler:
         starts = np.flatnonzero(np.diff(keys[order])) + 1
         for segment in np.split(order, starts):
             key = int(keys[segment[0]])
-            heights = self._held[(zoom, key // tiles_across, key % tiles_across)]
+            heights = held[(zoom, key // tiles_across, key % tiles_across)]
             if heights is None:
                 if zoom > PLANET_ZOOM:
                     absent[segment] = True  # no survey this deep here: climb a level
@@ -582,13 +587,13 @@ class Sampler:
                     touched[(ly >> _SHIFT) * nx + (lx >> _SHIFT)] = True
         used = np.flatnonzero(touched)
         tiles_across = 1 << zoom
-        self._load(zoom, (tx_lo + used % nx) * tiles_across + (ty_lo + used // nx), tiles_across)
+        held = self._load(zoom, (tx_lo + used % nx) * tiles_across + (ty_lo + used // nx), tiles_across)
 
         mosaic = np.zeros((ny * TILE, width), dtype=np.float32)
         absent = np.zeros((ny, nx), dtype=bool)
         for slot in used:
             row, column = divmod(int(slot), nx)
-            heights = self._held[(zoom, tx_lo + column, ty_lo + row)]
+            heights = held[(zoom, tx_lo + column, ty_lo + row)]
             if heights is None:
                 absent[row, column] = True  # the sea at zero, or no survey this deep
             else:
@@ -619,11 +624,23 @@ class Sampler:
         self._sample(lat[climb], lon[climb], zoom - 1, out, where[climb])
         return True
 
-    def _load(self, zoom: int, keys: np.ndarray, tiles_across: int) -> None:
+    def _load(self, zoom: int, keys: np.ndarray, tiles_across: int) -> dict[Key, np.ndarray | None]:
+        """The tiles asked for, loaded where they were not held: a mapping of its own, so another
+        thread letting a tile go meanwhile takes nothing from this read."""
         wanted = [(zoom, int(k) // tiles_across, int(k) % tiles_across) for k in keys]
-        missing = [key for key in wanted if key not in self._held]
+        before = {key: self._held[key] for key in wanted if key in self._held}
+        missing = [key for key in wanted if key not in before]
+        if self.keep is not None:
+            for key in wanted:
+                if key in self._held:
+                    self._held.move_to_end(key)
+            # room for what this read needs, the oldest let go and never one it needs
+            needed = set(wanted)
+            spare = [key for key in self._held if key not in needed]
+            for key in spare[: max(0, len(self._held) + len(missing) - self.keep)]:
+                self._held.pop(key, None)
         if not missing:
-            return
+            return before
         shared = self.fetch is None
         to_fetch: list[Key] = []
         for key in missing:
@@ -631,11 +648,11 @@ class Sampler:
             if remembered is None:
                 to_fetch.append(key)
             else:
-                self._held[key] = remembered[0]
+                self._held[key] = before[key] = remembered[0]
                 if remembered[0] is not None:
                     self.sources.add(remembered[1])
         if not to_fetch:
-            return
+            return before
         fetch = self.fetch or tile
 
         def one(key: Key) -> tuple[Key, np.ndarray | None, str]:
@@ -663,11 +680,12 @@ class Sampler:
             with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
                 results = list(pool.map(one, to_fetch))
         for key, heights, source in results:
-            self._held[key] = heights
+            self._held[key] = before[key] = heights
             if heights is not None:
                 self.sources.add(source)
             if shared:
                 _remember(key, (heights, source))
+        return before
 
     def credits(self) -> list[dict[str, str]]:
         """Who to credit for the heights this sampler read."""

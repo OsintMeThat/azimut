@@ -106,7 +106,7 @@
   import MapSurface from './satellite/MapSurface.svelte';
   import SideBySide from './horizon/SideBySide.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
-  import LayerList from '../components/LayerList.svelte';
+  import MapLayersPanel from './horizon/MapLayersPanel.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
   import LayerGeometry from './satellite/LayerGeometry.svelte';
   import PersonalLayerPanel from './satellite/PersonalLayerPanel.svelte';
@@ -1211,7 +1211,7 @@
         known: !lens,
         reach,
         autoReach: AUTO_REACH,
-        ...searchHints(told, { lensKnown: !lens }),
+        ...searchHints(told, { lensKnown: !lens, aspect: overlay.aspect }),
         marks,
         pieceAt: (s) => overlay.pieceAt({ u: s.x / camera.width, v: s.y / camera.height }),
       });
@@ -1317,14 +1317,24 @@
     }
   }
 
-  /** Look from a place the search found, the view turned and the lens set as it found them. */
+  /**
+   * Look from a place the search found, the view turned and the lens set as it
+   * found them. A collage the search read frame by frame is laid as the
+   * panorama it spans, its middle where the frames say it faces.
+   */
   function lookFromPlace(place) {
     mode = 'overlay';
     view.standAt(place, { mode: finder.who.mode, height: place.height ?? finder.who.low });
-    // the pieces were eased for the cuts the search was asked with
-    easePieces(place.pieces, place, finder.search?.ask?.photo?.marks?.cuts ?? []);
-    if (Number.isFinite(place.heading)) {
-      view.look({ heading: place.heading, tilt: place.tilt ?? 0, roll: place.roll ?? 0, fov: place.fov ?? view.camera.fov });
+    const framed = place.frames ?? finder.search?.result?.frames;
+    if (framed && Number.isFinite(place.heading)) {
+      overlay.setHints({ picture: 'panorama' });
+      view.look({ projection: 'panorama', heading: place.heading + (framed.middle ?? 0), tilt: place.tilt ?? 0, roll: 0, fov: framed.span });
+    } else {
+      // the pieces were eased for the cuts the search was asked with
+      easePieces(place.pieces, place, finder.search?.ask?.photo?.marks?.cuts ?? []);
+      if (Number.isFinite(place.heading)) {
+        view.look({ heading: place.heading, tilt: place.tilt ?? 0, roll: place.roll ?? 0, fov: place.fov ?? view.camera.fov });
+      }
     }
     if (Number.isFinite(place.reach)) overlay.setReachFound(place.reach);
   }
@@ -1910,29 +1920,19 @@
         </button>
       {/if}
       {#if layersOpen}
-        <div class="hz-layers" id="hz-map-layers" role="dialog" aria-label="Base map and layers">
-          <div class="hz-bases" role="group" aria-label="Base map">
-            {#each bases as base (base.id)}
-              <button
-                type="button"
-                class:on={providerId === base.id}
-                aria-pressed={providerId === base.id}
-                title={base.title}
-                onclick={() => (providerId = base.id)}>{base.label}</button
-              >
-            {/each}
-          </div>
-          <LayerList
-            rows={layerRows}
-            added={myLayers.rows}
-            ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
-            onmanage={() => (uiState.tool = 'satellite')}
-            oneditadded={(row) => { layersOpen = false; mapLarge = true; personalLayers.open(row); }}
-            onnewpersonal={() => { layersOpen = false; mapLarge = true; personalLayers.newLayer(); }}
-            ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
-            bind:folded={layersFolded}
-          />
-        </div>
+        <MapLayersPanel
+          id="hz-map-layers"
+          {bases}
+          bind:providerId
+          rows={layerRows}
+          added={myLayers.rows}
+          ontoggleadded={(layer) => myLayers.toggle(caseState.current?.id, layer)}
+          onmanage={() => (uiState.tool = 'satellite')}
+          oneditadded={(row) => { layersOpen = false; mapLarge = true; personalLayers.open(row); }}
+          onnewpersonal={() => { layersOpen = false; mapLarge = true; personalLayers.newLayer(); }}
+          ondownloadadded={(row) => { layersOpen = false; personalLayers.download(row); }}
+          bind:folded={layersFolded}
+        />
       {/if}
       {#if offered}
         <div class="hz-resume" role="region" aria-label="Unsaved work">
@@ -1953,6 +1953,18 @@
       {overlay}
       {imagery}
       {overlays}
+      layers={{
+        bases,
+        rows: layerRows,
+        added: myLayers.rows,
+        drawn: uiState.tool === 'horizon' ? myLayers.drawn : [],
+        toggle: (layer) => myLayers.toggle(caseState.current?.id, layer),
+        caseId: caseState.current?.id ?? '',
+        drawing: addedLayers.drawing,
+        saved: mapLayers.has('saved') && caseState.current ? savedItems : null,
+        onmanage: () => (uiState.tool = 'satellite'),
+        onrefresh: reloadCase,
+      }}
       home={findHome}
       units={prefs.units}
       modes={MODES}
@@ -2469,49 +2481,6 @@
   .hz-map-btn:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 2px var(--accent);
-  }
-  .hz-layers {
-    position: absolute;
-    top: 42px;
-    right: 8px;
-    z-index: 701;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 260px;
-    max-height: calc(100% - 50px);
-    overflow-y: auto;
-    padding: 10px;
-    border-radius: var(--r-md);
-    background: var(--bg-1);
-    box-shadow:
-      0 0 0 1px var(--border),
-      0 8px 24px rgba(0, 0, 0, 0.35);
-    font-size: var(--fs-xs);
-  }
-  .hz-bases {
-    display: flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: var(--r-md);
-    background: var(--bg-0);
-    box-shadow: inset 0 0 0 1px var(--border);
-  }
-  .hz-bases button {
-    flex: 1;
-    min-height: 24px;
-    padding: 0 6px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-    cursor: pointer;
-  }
-  .hz-bases button:hover {
-    color: var(--text-1);
-  }
-  .hz-bases button.on {
-    color: var(--accent);
-    background: var(--accent-soft);
   }
   /* the small map's credits hold one line beside its scale bar, the whole of them under the pointer */
   .looking:not(.swapped) .hz-map :global(.maplibregl-ctrl-attrib) {

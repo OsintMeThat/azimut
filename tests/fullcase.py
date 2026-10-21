@@ -734,7 +734,7 @@ def _add_horizon_find(client, case_id: str, full: FullCase) -> None:
 
     terrain.forget_decoded()
 
-    fetch, terrain.tile = terrain.tile, Relief(peaks=(), plain=500.0)
+    fetch, terrain.tile = terrain.tile, Relief(peaks=(), plain=500.0, ripple=0.5)
     try:
         ring = [(46.0, 7.0), (46.0, 7.008), (46.006, 7.008), (46.006, 7.0)]
         searched = client.post(

@@ -16,6 +16,7 @@
    */
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import DistanceChips from './DistanceChips.svelte';
   import { clockTime } from '../../lib/inspect.js';
   import { gapDegrees, gapSpan } from '../../lib/horizon/overlay.js';
   import { detailsTitle, editing, magnetTitle, pressTool, TRACE_TOOLS, toolBlocked, toolOn } from '../../lib/horizon/traceTools.js';
@@ -134,7 +135,7 @@
   // what the band holds changes its width: a trace, its tools, the gap
   $effect(() => {
     void [overlay.source?.kind, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
-    void [overlay.linking, overlay.cutting, overlay.pen, overlay.front];
+    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.pen, overlay.front];
     void [gap, fitting, away];
     narrow();
   });
@@ -380,6 +381,8 @@
       <span class="say">{overlay.front === null ? 'Click the line in front, then the one behind it.' : 'Now click the line behind it.'}</span>
     {:else if overlay.cutting}
       <span class="say">Click where two frames of the collage meet.</span>
+    {:else if overlay.distancing}
+      <DistanceChips {overlay} />
     {:else if overlay.busy}
       <span class="say"><span class="spinner" aria-hidden="true"></span>Opening…</span>
     {:else if overlay.error}

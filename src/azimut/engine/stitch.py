@@ -629,6 +629,49 @@ def _solve_cameras(cv2, feats: list[Any], pairwise: list[Any]) -> list[Any]:
     return cameras
 
 
+# A pan turned less than this between its frames, degrees, says too little of its lens to trust.
+LENS_TURN_MIN = 4.0
+
+
+def lens_of_pan(images: list[Image.Image]) -> dict[str, Any]:
+    """The lens a pan was filmed with, read off its frames as the stitch solves them.
+
+    A camera turning on the spot gives frames whose overlaps fit only one focal
+    length: the rotation model (`_solve_cameras`) finds each frame's, so a zoom
+    that changed during the pan shows. Returns ``{"fovs": {index: degrees across},
+    "turn": degrees}``, `turn` how far the camera turned between the frames most
+    apart. Raises RuntimeError, said for the analyst, when the frames do not
+    overlap, do not solve, or turned too little to tell a lens.
+    """
+    import numpy as np
+
+    if len(images) < 2:
+        raise RuntimeError("Two frames of one pan at the least")
+    cv2 = _cv2()
+    arrays = [_work_array(img) for img in images]
+    feats = _detail_features(cv2, arrays)
+    pairwise, keep = _match_component(cv2, feats)
+    if len(keep) < 2:
+        raise RuntimeError("These frames do not overlap: the camera must pan, not cut")
+    if len(keep) < len(images):
+        feats = [feats[i] for i in keep]
+        pairwise, _ = _match_component(cv2, feats)
+    cameras = _solve_cameras(cv2, feats, pairwise)
+    turn = 0.0
+    for i in range(len(cameras)):
+        for j in range(i + 1, len(cameras)):
+            relative = np.asarray(cameras[j].R, dtype=np.float64) @ np.asarray(cameras[i].R, dtype=np.float64).T
+            cosine = float(np.clip((np.trace(relative) - 1) / 2, -1.0, 1.0))
+            turn = max(turn, math.degrees(math.acos(cosine)))
+    if turn < LENS_TURN_MIN:
+        raise RuntimeError("The camera hardly turned between these frames: pick a moment it pans")
+    fovs = {
+        idx: 2 * math.degrees(math.atan(arrays[idx].shape[1] / 2 / float(cameras[pos].focal)))
+        for pos, idx in enumerate(keep)
+    }
+    return {"fovs": fovs, "turn": turn}
+
+
 def _median(values: list[float]) -> float:
     ordered = sorted(values)
     mid = len(ordered) // 2

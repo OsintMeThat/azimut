@@ -63,8 +63,8 @@
   import { revealPlates } from '../lib/plateExport.js';
   import '../lib/plateFontFaces.js';
   import { plateCredits } from '../lib/plate/credits.js';
-  import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, scaleFor, scaleForWidth, videoSize } from '../lib/plate/exportPlate.js';
-  import { KIND_LABELS, PAPERS, longDay, MAP_KINDS, MAX_MAPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
+  import { canvasBlob, composePage, copyPage, evolutionSheet, postExport, QUALITIES, release, scaleFor, scaleForWidth, stagedPictures, videoSize } from '../lib/plate/exportPlate.js';
+  import { KIND_LABELS, PAPERS, longDay, MAP_KINDS, MAX_MAPS, ON_THE_GROUND, PX_PER_MM, SIGNATURE, THEMES, TOO_MANY_MAPS, facesOf, mapCount, inLook, addStep, pickedDays, beatKey, beatKeys, bornAt, currentStep, dayOf, framedAs, framingOf,
     fromTemplate, hasSteps, houseLayout, labelBox, listedOf, mainMap, mapsFirst, movedStep, newId, onPaper, pageSize, placeOf, settleOn, shownOn, stepsOf, SYMBOL, templateOf, textMeasurer,
     transitionsOf, unsettled, withoutStep, restacked, stepOf } from '../lib/plate/page.js';
   import { changes, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
@@ -486,6 +486,7 @@
       // the page as it shows, on the plate's own day
       const canvas = await render(160 / pageSize(plate.spec.page).width, undefined, { quick: true });
       const blob = await canvasBlob(canvas);
+      release(canvas);
       const body = new FormData();
       body.append('file', blob, 'preview.png');
       if (plate?.name === name) await api.put(`/api/cases/${owner}/map-plates/${encodeURIComponent(name)}/thumb`, body);
@@ -555,8 +556,10 @@
   const playable = $derived(moments.length > 0 && !plate?.template);
   const time = $derived(exportTime ?? (playBeat ? { ...(spec?.time ?? {}), at: playBeat.day } : spec?.time) ?? { at: null, trail: true, since: null, window: null });
   const at = $derived(time.at ?? null);
-  /** The days a played plate goes through: each change of its layers, and each day that holds steps. */
+  /** The days a played plate goes through: each change of its layers, each day that holds steps, each day added to it. */
   const playedDays = $derived(spec && playable ? playDays(spec, moments) : moments);
+  /** Whether the play goes through the day shown. */
+  const dayPlayed = $derived(!playable || playedDays.includes(dayOf(at)));
 
   /**
    * A plate whose layers change stands on a day of the calendar, never on a now that
@@ -1173,7 +1176,10 @@
    * step `step` (`day` undefined: the plate's own day and step, as shown).
    */
   async function render(scale, day, options = {}) {
-    return (await drawBeat(scale, day, options)).canvas;
+    const { canvas, context } = await drawBeat(scale, day, options);
+    // the maps' pictures are on the page now
+    release(...Object.values(context.maps));
+    return canvas;
   }
 
   /**
@@ -1222,6 +1228,7 @@
     try {
       const canvas = await render(280 / pageSize(spec.page).width, undefined, { quick: true });
       exportPreview = canvas.toDataURL('image/png');
+      release(canvas);
     } catch { exportPreview = ''; }
   }
 
@@ -1237,6 +1244,8 @@
     const check = () => { if (run.signal.aborted) throw stopped(); };
     framing = ''; selection = [];
     tilesMissing = 0;
+    // a played plate's pictures, sent as they are drawn
+    let pictures = null;
     try {
       let answer;
       if (format === 'png' || format === 'pdf') {
@@ -1245,7 +1254,9 @@
         const canvas = await render(scale, undefined, { transparent: format === 'png' && transparent });
         check();
         progress = 'Writing…';
-        answer = await postExport(caseId, { format, frames: [await canvasBlob(canvas)], widthMm, heightMm, transparent: format === 'png' && transparent,
+        const page = await canvasBlob(canvas);
+        release(canvas);
+        answer = await postExport(caseId, { format, frames: [page], widthMm, heightMm, transparent: format === 'png' && transparent,
           filename: name === plate.title ? [name, spec.time.at?.replace('T', ' ').replaceAll(':', 'h'), stepIndex >= 0 ? stepName(stepIndex) : '']
             .filter(Boolean).join(' ') : name, signal: run.signal });
       } else {
@@ -1262,40 +1273,44 @@
           check();
           progress = 'Writing…';
           const sheet = evolutionSheet(pages, picked.map((day) => momentLabel(day) || 'The page'), spec.theme);
-          answer = await postExport(caseId, { format: 'png', frames: [await canvasBlob(sheet)], widthMm, heightMm, filename: `${name} evolution`, signal: run.signal });
+          const drawn = await canvasBlob(sheet);
+          release(sheet, ...pages);
+          answer = await postExport(caseId, { format: 'png', frames: [drawn], widthMm, heightMm, filename: `${name} evolution`, signal: run.signal });
         } else {
           // each day, then each of its steps, each held its own seconds; a step's clips run over its picture in an MP4
           const scale = videoSize(spec, side).width / widthMm;
           const list = beats(spec, picked).slice(0, 120);
-          const frames = [];
+          pictures = stagedPictures(caseId, { signal: run.signal });
           const sent = [];
-          const overs = [];
           // an MP4 goes from one beat to the next by the plate's transitions, drawn here from the two beats
           const moves = format === 'mp4' ? transitionsOf(spec) : { on: false };
-          const tweens = [];
           let before = null;
           for (const [index, beat] of list.entries()) {
             check();
             progress = `Drawing ${momentLabel(beat.day) || 'the page'}${beat.step ? `, ${stepName(stepsOf(spec, beat.day).findIndex((item) => item.id === beat.step), beat.day)}` : ''} (${index + 1} of ${list.length})…`;
             const drawn = await drawBeat(scale, beat.day, { step: beat.step });
-            frames.push(await canvasBlob(drawn.canvas, 'image/jpeg', 0.9));
+            await pictures.add('frames', await canvasBlob(drawn.canvas, 'image/jpeg', 0.9));
+            // a transition is drawn from what the page was drawn from, never from the page itself
+            release(drawn.canvas);
             let tween = null;
             if (before && moves.on) {
               const changed = changes(spec, before, drawn);
               const cut = !!beat.step && stepsOf(spec, beat.day).find((item) => item.id === beat.step)?.transition === 'none';
               const plan = transitionPlan(moves, changed, { cut });
-              if (plan && tweens.length + plan.frames <= MAX_TWEENS) {
-                const start = tweens.length;
+              if (plan && pictures.count('tweens') + plan.frames <= MAX_TWEENS) {
+                const start = pictures.count('tweens');
                 // a map on the move is drawn again by its own engine at each frame of the way
                 const sitting = (id) => handles.get(id)?.sitting?.(scale / PX_PER_MM) ?? null;
                 if (plan.move) progress = `Drawing the move to ${momentLabel(beat.day) || 'the next step'}…`;
                 for await (const canvas of tweenFrames(spec, scale, before, drawn, plan, changed, { sitting })) {
                   check();
-                  tweens.push(await canvasBlob(canvas, 'image/jpeg', 0.88));
+                  await pictures.add('tweens', await canvasBlob(canvas, 'image/jpeg', 0.88));
                 }
-                tween = [start, tweens.length - start];
+                tween = [start, pictures.count('tweens') - start];
               }
             }
+            // only the beat just drawn is carried to the next: the maps of the one before go
+            if (before) release(...Object.values(before.context.maps));
             before = drawn;
             const clips = format === 'mp4' ? beatClips(spec, beat).map((element) => {
               const [start, end] = clipRange(element);
@@ -1303,22 +1318,28 @@
               return { src: element.src, start, end, box: [Math.max(0, x), Math.max(0, y), Math.max(2, w), Math.max(2, h)], fit: element.fit ?? 'contain',
                 sound: !!element.sound, volume: element.volume ?? 1 };
             }) : [];
-            if (clips.length) overs.push(await canvasBlob(overPage(scale)));
-            sent.push({ seconds: Math.round(beat.seconds * 1000) / 1000, ...(clips.length ? { clips, over: overs.length - 1 } : {}), ...(tween ? { tween } : {}) });
+            if (clips.length) {
+              const over = overPage(scale);
+              await pictures.add('overs', await canvasBlob(over));
+              release(over);
+            }
+            sent.push({ seconds: Math.round(beat.seconds * 1000) / 1000, ...(clips.length ? { clips, over: pictures.count('overs') - 1 } : {}), ...(tween ? { tween } : {}) });
           }
+          if (before) release(...Object.values(before.context.maps));
           check();
-          progress = format === 'mp4' && overs.length ? 'Making the video, clips included…' : 'Writing…';
+          progress = format === 'mp4' && pictures.count('overs') ? 'Making the video, clips included…' : 'Writing…';
           // beats all held alike and nothing else to say go out as one interval; otherwise each beat says its own
           const held = sent[0]?.seconds ?? 1;
-          const alike = !stepped && !tweens.length && sent.every((beat) => beat.seconds === held) && held >= 0.15 && held <= 6;
-          answer = await postExport(caseId, { format, frames, widthMm, heightMm, interval: Math.round(held * 1000), filename: name,
-            beats: alike ? null : sent, overs, tweens, signal: run.signal });
+          const alike = !stepped && !pictures.count('tweens') && sent.every((beat) => beat.seconds === held) && held >= 0.15 && held <= 6;
+          answer = await pictures.finish({ format, widthMm, heightMm, interval: Math.round(held * 1000), filename: name, beats: alike ? null : sent });
         }
       }
       const show = { label: 'Show', onClick: () => revealPlates(caseId).catch((error) => toast(error.message, 'warn')) };
       if (tilesMissing) toast(`${answer.file} written, but some map tiles had not loaded: a map may have blank patches. Export again once the map is drawn`, 'warn', 9000, show);
       else toast(`${answer.file} written`, 'ok', 5200, show);
     } catch (error) {
+      // the pictures already sent wait for nothing now
+      pictures?.drop();
       if (error.stopped || error.name === 'AbortError' || run.signal.aborted) { toast('The export was stopped; nothing was written', 'info', 3500); throw stopped(); }
       toast(error.message || 'The plate could not be exported', 'danger', 6000);
       throw error;
@@ -1338,6 +1359,7 @@
     try {
       const canvas = await render(scaleForWidth(spec, 1600));
       await copyPage(canvas);
+      release(canvas);
       toast('The page is on the clipboard', 'ok', 2400);
     } catch (error) {
       toast(error?.message ? `The page could not be copied: ${error.message}` : 'The page could not be copied', 'warn');
@@ -1468,7 +1490,7 @@
             <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
             <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>
             {#if moments.length}
-              <div class="cursor"><LayerTimeCursor time={time} {moments} precision={tracked[0]?.track?.precision ?? 'day'}
+              <div class="cursor"><LayerTimeCursor time={time} moments={playedDays} precision={tracked[0]?.track?.precision ?? 'day'}
                 zone={tracked[0]?.track?.zone ?? 'UTC'} label="The plate's day"
                 onchange={(patch) => { if (playing) stop(); if ('at' in patch && patch.at !== plate.spec.time.at) plate.spec.time.step = null; Object.assign(plate.spec.time, patch); }} /></div>
             {/if}
@@ -1476,6 +1498,8 @@
             <PlateSteps steps={daySteps} current={stepId} dayLabel={at ? momentLabel(at) : 'The page'} elements={plate.spec.elements}
               transitions={transitionsOf(plate.spec).on} daySeconds={daySeconds(plate.spec, at)} dayOwn={!!plate.spec.holds?.[dayOf(at)]}
               plateSeconds={plateSeconds(plate.spec)} ondayhold={holdDay}
+              {dayPlayed} dayPicked={(plate.spec.days ?? []).includes(dayOf(at))}
+              onplayday={playable ? (on) => (spec.days = pickedDays(spec, dayOf(at), on)) : null}
               caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
               onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} />
           </div>

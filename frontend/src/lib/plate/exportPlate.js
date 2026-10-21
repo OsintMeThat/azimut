@@ -83,25 +83,36 @@ export function evolutionSheet(pages, labels, theme, makeCanvas = () => document
   return canvas;
 }
 
+/**
+ * Canvases whose pixels go now, rather than when the garbage collector reaches them:
+ * a print page or a map drawn for it is tens of megabytes, and an export draws many.
+ */
+export function release(...canvases) {
+  for (const canvas of canvases) {
+    if (!canvas || !('width' in canvas)) continue;
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
 export function canvasBlob(canvas, type = 'image/png', quality = 0.92) {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('the page could not be encoded'))), type, quality));
 }
 
+const pictureName = (blob, stem) => `${stem}.${blob.type === 'image/jpeg' ? 'jpg' : 'png'}`;
+
 /**
- * Post one export: `frames` are blobs, one for a page, one per day for a played
- * plate. A plate played through its steps sends `beats`, one per frame (how long it
- * holds, the clips running over it, the transition it opens on), `overs`, what stands
- * over those clips, and `tweens`, the frames of its transitions.
+ * Post one export: a page sends its picture as `frames`, a played plate the
+ * `staged` token its pictures were sent under (`stagedPictures`). A plate played
+ * through its steps sends `beats`, one per frame (how long it holds, the clips running
+ * over it and what stands over them, the transition it opens on).
  */
-export function postExport(caseId, { format, frames, filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, overs = [], tweens = [],
+export function postExport(caseId, { format, frames = [], filename, widthMm, heightMm, interval = 900, transparent = false, beats = null, staged = '',
   signal = undefined }, post = api.post) {
   const body = new FormData();
-  frames.forEach((blob, index) => body.append('frames', blob, `${index}.${blob.type === 'image/jpeg' ? 'jpg' : 'png'}`));
-  if (beats) {
-    body.append('beats', JSON.stringify(beats));
-    overs.forEach((blob, index) => body.append('overs', blob, `over${index}.png`));
-    tweens.forEach((blob, index) => body.append('tweens', blob, `tween${index}.jpg`));
-  }
+  frames.forEach((blob, index) => body.append('frames', blob, pictureName(blob, index)));
+  if (staged) body.append('staged', staged);
+  if (beats) body.append('beats', JSON.stringify(beats));
   body.append('format', format);
   body.append('filename', filename);
   body.append('width_mm', String(widthMm));
@@ -109,4 +120,52 @@ export function postExport(caseId, { format, frames, filename, widthMm, heightMm
   body.append('interval', String(interval));
   if (transparent) body.append('transparent', 'true');
   return post(`/api/cases/${caseId}/map-plates/export`, body, signal ? { signal } : undefined);
+}
+
+/** A batch of a played plate's pictures goes out once it holds this much, or this many (`engine/mapplates.MAX_PICTURES_PER_POST`). */
+const BATCH_BYTES = 4_000_000;
+const BATCH_COUNT = 12;
+
+/**
+ * A played plate's pictures, sent to the server as they are drawn rather than held
+ * until the end: a long video is hundreds of them, which the tab and the server
+ * would both have held at once. `add(series, blob)` keeps one, `series` being
+ * 'frames', 'overs' (what stands over a beat's clips) or 'tweens' (the transitions'
+ * frames), each in its order, and sends its batch once full. `count(series)` is how
+ * many came. `finish(export)` sends what is left and writes the export
+ * (`postExport`'s fields); `drop()` lets the server forget them, for an export
+ * stopped on the way.
+ */
+export function stagedPictures(caseId, { signal = undefined, post = api.post, del = api.del } = {}) {
+  let staged = '';
+  const waiting = { frames: [], overs: [], tweens: [] };
+  const counts = { frames: 0, overs: 0, tweens: 0 };
+  async function send(series) {
+    const batch = waiting[series];
+    if (!batch.length) return;
+    waiting[series] = [];
+    const body = new FormData();
+    if (staged) body.append('staged', staged);
+    body.append('series', series);
+    batch.forEach((blob, index) => body.append('pictures', blob, pictureName(blob, `${series}${counts[series] - batch.length + index}`)));
+    staged = (await post(`/api/cases/${caseId}/map-plates/export/pictures`, body, signal ? { signal } : undefined)).staged;
+  }
+  return {
+    count: (series) => counts[series],
+    async add(series, blob) {
+      waiting[series].push(blob);
+      counts[series] += 1;
+      const held = waiting[series].reduce((sum, item) => sum + item.size, 0);
+      if (waiting[series].length >= BATCH_COUNT || held >= BATCH_BYTES) await send(series);
+    },
+    async finish(form) {
+      for (const series of Object.keys(waiting)) await send(series);
+      return postExport(caseId, { ...form, staged, signal }, post);
+    },
+    drop() {
+      Object.keys(waiting).forEach((series) => { waiting[series] = []; });
+      if (staged) del(`/api/cases/${caseId}/map-plates/export/pictures/${staged}`).catch(() => {});
+      staged = '';
+    },
+  };
 }

@@ -121,6 +121,38 @@ const EMPTY_STYLE = { version: 8, sources: {}, layers: [] };
  * capture and saved view records one whole number. The gesture itself stays
  * continuous — this only decides where it stops.
  */
+/** px a press may travel and still be a click: the engine's own tolerance. */
+const CLICK_TOLERANCE = 3;
+
+/**
+ * Keep the end of a drag from reaching the map as a click.
+ *
+ * The engine tells a click from a drag by where it saw the press, and forgets
+ * that press as soon as code moves the camera. Our own gestures move it that
+ * way (the ground pan over relief, the shift-drag turn), so each one ended in a
+ * click on whatever lay under the hand, and a pan over relief opened the card
+ * of the area it crossed. The press is read here, ahead of the engine, on
+ * `pointerdown` since a gesture that takes the press stops its `mousedown`.
+ *
+ * @param {HTMLElement} container the element the map fills
+ * @param {HTMLElement} canvas the engine's canvas, the only target guarded:
+ *   a click on a card or a marker is that element's own
+ * @param {AbortSignal} [signal] ends the guard with the map
+ */
+export function dropDraggedClicks(container, canvas, signal) {
+  let press = null;
+  container.addEventListener('pointerdown', (event) => {
+    press = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+  }, { capture: true, signal });
+  container.addEventListener('click', (event) => {
+    const from = press;
+    press = null;
+    if (!from || event.target !== canvas) return;
+    if (Math.hypot(event.clientX - from.x, event.clientY - from.y) < CLICK_TOLERANCE) return;
+    event.stopPropagation();
+  }, { capture: true, signal });
+}
+
 function settleOnLevel(map, following) {
   let settling = false;
   map.on('moveend', () => {
@@ -195,10 +227,13 @@ export async function createMapEngine(container, { view, imperial = false, settl
   });
   const mapId = `m${(mapsMade += 1)}`;
   maps.set(mapId, map);
+  const gone = new AbortController();
   map.once('remove', () => {
     maps.delete(mapId);
     reliefFallback.delete(mapId);
+    gone.abort();
   });
+  dropDraggedClicks(container, map.getCanvas(), gone.signal);
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
   if (controls) map.addControl(new NavigationControl({ showCompass: false }), 'top-left');

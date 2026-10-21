@@ -710,6 +710,26 @@ describe('a video of the case', () => {
     return { photo, player: players[0] };
   }
 
+  it('reads its lens off the pan around the moment on show, keeps it as the photo’s and lets it go', async () => {
+    const { photo, player } = await opened({ time: 12 });
+    player.emit('seeked');
+    api.post = vi.fn(async () => ({ fov: 41.2, fovs: [41, 41.2, 41.5], times: [10.5, 12, 13.5], turn: 18 }));
+    await photo.measureLens();
+    expect(api.post).toHaveBeenCalledWith('/api/horizon/lens', { case: 'c1', path: 'media/clip.mp4', time: 12 });
+    expect(photo.hints.lens).toEqual({ fov: 41.2, at: 12 });
+    expect(photo.lens).toEqual({ fov: 41.2, measured: true, at: 12 });
+    expect(photo.measuring).toBeNull();
+    photo.forgetLens();
+    expect(photo.hints.lens).toBeUndefined();
+    expect(photo.lens?.measured).toBeFalsy();
+    api.post = vi.fn(async () => {
+      throw new Error('The camera hardly turned between these frames: pick a moment it pans');
+    });
+    await photo.measureLens();
+    expect(photo.measuring).toEqual({ busy: false, error: 'The camera hardly turned between these frames: pick a moment it pans' });
+    expect(photo.lens?.measured).toBeFalsy();
+  });
+
   it('plays in the browser, the frame on show drawn on the view', async () => {
     const { photo, player } = await opened({ time: 14.2 });
     expect(photo.picture).toBe(player);
@@ -856,13 +876,13 @@ describe('a photo file opened as a picture', () => {
 describe('what the analyst knows about the photo', () => {
   it('knows nothing at first, and takes each hint alone', async () => {
     const photo = overlay();
-    photo.setHints({ zoom: 'zoomed' });
-    expect(photo.hints.zoom).toBe('any'); // nothing laid, nothing to say about it
+    photo.setHints({ zoom: ['zoomed'] });
+    expect(photo.hints.zoom).toEqual([]); // nothing laid, nothing to say about it
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
-    expect(photo.hints).toEqual({ picture: 'photo', zoom: 'any', facing: null, reach: 'auto' });
-    photo.setHints({ zoom: 'zoomed' });
+    expect(photo.hints).toEqual({ picture: 'photo', zoom: [], facing: null, reach: 'auto' });
+    photo.setHints({ zoom: ['zoomed', 'normal'] });
     photo.setHints({ facing: { heading: 218 } });
-    expect(photo.hints).toMatchObject({ zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' });
+    expect(photo.hints).toMatchObject({ zoom: ['normal', 'zoomed'], facing: { heading: 218 }, reach: 'auto' });
   });
 
   it('reads the trace against the reach the analyst set, else the one Fit found', async () => {
@@ -882,16 +902,17 @@ describe('what the analyst knows about the photo', () => {
   it('forgets it all with the photo, and a saved view brings it back', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
-    photo.setHints({ zoom: 'wide' });
+    photo.setHints({ zoom: ['wide'] });
     photo.setReachFound(50_000);
     await photo.openCase('c1', { path: 'media/other.jpg', kind: 'image' });
-    expect(photo.hints.zoom).toBe('any');
+    expect(photo.hints.zoom).toEqual([]);
     expect(photo.reachFound).toBeNull();
+    // a view saved when one zoom word was kept brings it back ticked alone
     photo.restoreWork({ hints: { zoom: 'telephoto', facing: { heading: 12 }, reach: 'auto' }, reach: 10_000 });
-    expect(photo.hints).toMatchObject({ zoom: 'telephoto', facing: { heading: 12 } });
+    expect(photo.hints).toMatchObject({ zoom: ['telephoto'], facing: { heading: 12 } });
     expect(photo.reach).toBe(10_000);
     photo.remove();
-    expect(photo.hints.zoom).toBe('any');
+    expect(photo.hints.zoom).toEqual([]);
   });
 });
 
@@ -949,8 +970,8 @@ describe('a panorama', () => {
     // what a saved view kept wins over the stitch
     const again = overlay(wide);
     await again.openCase('c1', { path: 'media/Collage 9.png', kind: 'image' });
-    again.restoreWork({ hints: { picture: 'photo', zoom: 'wide' } });
-    expect(again.hints).toMatchObject({ picture: 'photo', zoom: 'wide' });
+    again.restoreWork({ hints: { picture: 'photo', zoom: ['wide'] } });
+    expect(again.hints).toMatchObject({ picture: 'photo', zoom: ['wide'] });
     expect(again.isPanorama).toBe(false);
   });
 });
@@ -1065,11 +1086,50 @@ describe('the marks beside the trace', () => {
     expect(photo.marks.inner).toEqual([ridge]);
   });
 
+  it('says how far a line stands on a click with the Distance tool, the same again taking it away', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.restoreWork({ strokes: [across(0.3), across(0.6)] });
+    const [first] = photo.marks.lines;
+    photo.setDistancing(true);
+    expect(photo.distancing).toBe(true);
+    photo.setFarPicked(['b1', 'b3']);
+    expect(photo.farAt({ u: 0.5, v: 0.3 }, SCALE)).toBe(first);
+    expect(photo.marks.far).toEqual([{ line: first, bands: ['b1', 'b3'] }]);
+    expect(photo.farBadges.map((badge) => badge.label)).toEqual(['1–10 km']);
+    // a click off every line says nothing; the same distances again take them away
+    expect(photo.farAt({ u: 0.5, v: 0.95 }, SCALE)).toBeNull();
+    photo.farAt({ u: 0.5, v: 0.3 }, SCALE);
+    expect(photo.marks.far).toEqual([]);
+    // another tool out puts this one away
+    photo.setLinking(true);
+    expect(photo.distancing).toBe(false);
+  });
+
+  it('draws a line along the sea with the Sea line pen, and a click with another pen makes it that kind', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.setPen('sea');
+    expect(photo.tracing).toBe(true);
+    photo.addStroke(across(0.4));
+    const [line] = photo.marks.lines;
+    expect(photo.marks.sea).toEqual([line]);
+    photo.setPen('sky');
+    expect(photo.markLineAt({ u: 0.5, v: 0.4 }, SCALE)).toBe(true);
+    expect(photo.marks.sea).toEqual([]);
+    photo.setPen('sea');
+    photo.markLineAt({ u: 0.5, v: 0.4 }, SCALE);
+    expect(photo.marks.sea).toEqual([line]);
+  });
+
   it('lays saved marks back, and reads a trace kept before them by its shape', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
-    photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)], marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5] } });
-    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5] });
+    photo.restoreWork({
+      strokes: [across(0.3), across(0.5, 0.3, 0.6)],
+      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }] },
+    });
+    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [] });
     photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)] });
     expect(photo.marks.inner).toEqual([1]);
     // Detect lays the skyline afresh: the cuts stay, they belong to the photo

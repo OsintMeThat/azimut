@@ -82,4 +82,36 @@ describe('the steps of a day', () => {
     [...document.body.querySelectorAll('.fields button')].find((node) => node.textContent.includes('As every day')).click();
     expect(ondayhold).toHaveBeenLastCalledWith(null);
   });
+
+  it('adds a day the play skips from its tile or its ⋯', () => {
+    const onplayday = vi.fn();
+    show({ steps: [], current: null, dayPlayed: false, onplayday });
+    expect(document.body.querySelector('button[aria-label="How long 15 Oct 2026 holds"]')).toBeNull();
+    const tile = document.body.querySelector('.tile.idle');
+    expect(tile.textContent).toContain('Add to the play');
+    tile.click();
+    expect(onplayday).toHaveBeenLastCalledWith(true);
+    onplayday.mockClear();
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    [...document.body.querySelectorAll('.fm-item')].find((node) => node.textContent.includes('Add this day')).click();
+    expect(onplayday).toHaveBeenLastCalledWith(true);
+  });
+
+  it('lets a day added to the play go again, unless it holds steps', () => {
+    const onplayday = vi.fn();
+    show({ steps: [], current: null, dayPicked: true, onplayday });
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    [...document.body.querySelectorAll('.fm-item')].find((node) => node.textContent.includes('Take it out')).click();
+    expect(onplayday).toHaveBeenLastCalledWith(false);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ dayPicked: true, current: null, onplayday });
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    expect(document.body.textContent).not.toContain('Take it out');
+  });
+
+  it('gives the day a ⋯ of its own, as every step has', () => {
+    show({ daySeconds: 2 });
+    document.body.querySelector('button[aria-label="Set 15 Oct 2026"]').click(); flushSync();
+    expect(document.body.querySelector('.fields input[type="number"]').value).toBe('2');
+  });
 });

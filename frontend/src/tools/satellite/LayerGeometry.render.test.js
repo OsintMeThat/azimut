@@ -162,6 +162,17 @@ describe('layer geometry handles', () => {
     expect(controller.pasting).toEqual({ text: '48.85, 2.29' });
   });
 
+  it('takes no position from the paste a middle click sends while turning the camera', async () => {
+    const { controller } = await setup(null, []);
+    window.dispatchEvent(new MouseEvent('mousedown', { button: 1 }));
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    paste.clipboardData = { getData: () => '48.85, 2.29' };
+    window.dispatchEvent(paste); flushSync();
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 1 }));
+    window.dispatchEvent(paste); flushSync();
+    expect(controller.pasting).toBeFalsy();
+  });
+
   it('shows the edit bar with the tools and its Done', async () => {
     await setup(null, []);
     const bar = document.querySelector('[role="toolbar"][aria-label="Layer tools"]');

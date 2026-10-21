@@ -3,10 +3,24 @@
    * What the analyst knows about the photo, told to Fit: what kind of picture
    * it is when it may be a panorama, how zoomed it looks, roughly which way it
    * faces and how far it sees. Each line is optional and
-   * starts at "don't know"; each narrows the search the way a human would
+   * starts at "don't know"; the zoom words may be ticked several at once when
+   * unsure, none ticked being any lens. Each narrows the search the way a human would
    * (lib/horizon/hints.js holds the words and what they stand for).
    */
-  import { AUTO_REACH, FACING_HALF, PANORAMA_WITHIN, panoramaLikely, PICTURES, REACHES, reachText, ZOOMS } from '../../lib/horizon/hints.js';
+  import {
+    ANY_WITHIN,
+    AUTO_REACH,
+    cleanZoom,
+    FACING_HALF,
+    PANORAMA_WITHIN,
+    panoramaLikely,
+    PICTURES,
+    REACHES,
+    reachText,
+    toggleZoom,
+    ZOOMS,
+    zoomWithin,
+  } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
 
   let {
@@ -16,11 +30,19 @@
     heading = 0,
     /** Whether "which way it faces" is asked: not where no view looks yet. */
     facing = true,
+    /** Whether these are Find's hints, which read a stitched collage frame by frame. */
+    find = false,
   } = $props();
+  const framed = $derived(overlay.framesRead ?? null);
 
   const hints = $derived(overlay.hints);
   const lens = $derived(overlay.lens);
   const panorama = $derived(hints.picture === 'panorama');
+  /** A moment of the video as a clock: "0:12". */
+  const clockOf = (seconds) => `${Math.floor((seconds ?? 0) / 60)}:${String(Math.floor((seconds ?? 0) % 60)).padStart(2, '0')}`;
+  const ticked = $derived(cleanZoom(hints.zoom));
+  // in degrees across this picture: a portrait frame sees a phone's zoom across its short side
+  const lenses = $derived(zoomWithin(ticked, overlay.aspect));
 </script>
 
 <div class="hints">
@@ -49,25 +71,48 @@
 
   <div class="row">
     <span class="name" id="hz-hint-zoom">{panorama ? 'Width' : 'Zoom'}</span>
-    {#if panorama}
+    {#if framed && find}
+      <p class="said">Find reads {framed.collage} frame by frame: {framed.frames} frames, {Math.round(framed.lens)}° across each, as the stitch says.</p>
+    {:else if panorama}
       <p class="said">
         {#if lens}{Math.round(lens.fov)}° across: Fit keeps it.{:else}Fit tries {PANORAMA_WITHIN[0]}° to {PANORAMA_WITHIN[1]}° across.{/if}
       </p>
+    {:else if lens?.measured}
+      <p class="said">Measured on the video at {clockOf(lens.at)}: {Math.round(lens.fov)}° across. Fit and Find keep it.</p>
+      <div class="acts">
+        <button type="button" class="small" onclick={() => overlay.measureLens()}>Measure again here</button>
+        <button type="button" class="small" onclick={() => overlay.forgetLens()}>Forget</button>
+      </div>
     {:else if lens}
       <p class="said">The photo says {Math.round(lens.mm)} mm, {Math.round(lens.fov)}° across: Fit keeps it.</p>
+
     {:else}
-      <div class="pills" role="radiogroup" aria-labelledby="hz-hint-zoom">
-        {#each ZOOMS as zoom (zoom.id)}
+      <div class="pills" role="group" aria-labelledby="hz-hint-zoom">
+        {#each ZOOMS as word (word.id)}
           <button
             type="button"
-            role="radio"
-            class:on={hints.zoom === zoom.id}
-            aria-checked={hints.zoom === zoom.id}
-            title={zoom.title}
-            onclick={() => overlay.setHints({ zoom: zoom.id })}>{zoom.label}</button
+            class:on={ticked.includes(word.id)}
+            aria-pressed={ticked.includes(word.id)}
+            title={word.title}
+            onclick={() => overlay.setHints({ zoom: toggleZoom(ticked, word.id) })}>{word.label}</button
           >
         {/each}
       </div>
+      <p class="said">
+        {#if ticked.length}Fit tries {Math.round(lenses[0])}° to {Math.round(lenses[1])}° across.{:else}Any lens, {ANY_WITHIN[0]}° to {ANY_WITHIN[1]}°: tick one or several.{/if}
+      </p>
+      {#if overlay.source?.kind === 'video'}
+        <div class="acts">
+          <button
+            type="button"
+            class="small"
+            disabled={overlay.measuring?.busy}
+            title="Read the lens off the frames around this moment, where the camera pans"
+            onclick={() => overlay.measureLens()}>{overlay.measuring?.busy ? 'Measuring…' : 'Measure from the video'}</button
+          >
+        </div>
+        {#if overlay.measuring?.error}<p class="said bad">{overlay.measuring.error}</p>{/if}
+      {/if}
     {/if}
   </div>
 
@@ -187,5 +232,31 @@
     margin: 0;
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+  .said.bad {
+    color: var(--danger);
+  }
+  .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .small {
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .small:hover:not(:disabled) {
+    color: var(--text-1);
+  }
+  .small:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 </style>

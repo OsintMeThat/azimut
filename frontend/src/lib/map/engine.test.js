@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** The options each map was made with, in order, and the maps themselves. */
@@ -22,6 +23,7 @@ vi.mock('maplibre-gl', () => {
     getPitch() { return this.pitch; }
     getTerrain() { return null; }
     addControl() {}
+    getCanvas() { return null; }
   }
   return {
     MapLibreMap,
@@ -44,13 +46,14 @@ vi.mock('./tileBatch.js', () => ({
   readBatched: (url) => JSON.parse(url),
 }));
 
-const { createMapEngine } = await import('./engine.js');
+const { createMapEngine, dropDraggedClicks } = await import('./engine.js');
 
 /** A map container the engine can mark. */
 function box() {
   const classes = new Set();
   return {
     querySelector: () => null,
+    addEventListener: () => {},
     classList: {
       add: (name) => classes.add(name),
       toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)),
@@ -97,5 +100,32 @@ describe('a map engine', () => {
     await createMapEngine(box(), { view, controls: false, settle: false, fade: false });
     expect(made[0]).not.toHaveProperty('fadeDuration');
     expect(made[1].fadeDuration).toBe(0);
+  });
+
+  it('keeps the end of a drag from reaching the map as a click, whoever moved the camera', () => {
+    const container = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    const card = document.createElement('button');
+    container.append(canvas, card);
+    const gone = new AbortController();
+    dropDraggedClicks(container, canvas, gone.signal);
+    const clicks = [];
+    canvas.addEventListener('click', () => clicks.push('canvas'));
+    card.addEventListener('click', () => clicks.push('card'));
+    const press = (target, x, y, button = 0) =>
+      target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, button }));
+    const click = (target, x, y) => target.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+
+    press(canvas, 100, 100); click(canvas, 101, 102);
+    expect(clicks).toEqual(['canvas']);
+    // a pan: the hand let go far from where it pressed
+    press(canvas, 100, 100); click(canvas, 160, 130);
+    expect(clicks).toEqual(['canvas']);
+    // a card or a marker over the map answers its own click
+    press(card, 100, 100); click(card, 160, 130);
+    expect(clicks).toEqual(['canvas', 'card']);
+    gone.abort();
+    press(canvas, 100, 100); click(canvas, 160, 130);
+    expect(clicks).toEqual(['canvas', 'card', 'canvas']);
   });
 });

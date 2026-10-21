@@ -5,8 +5,7 @@
    * The map's bar does everything done to features (`LayerEditBar`); this
    * panel says what each one is, in the sheet of the selection
    * (`LayerFeatureSheet`), and keeps the groups in their order. Everything
-   * saves as it is set; Discard, in the layer's menu, takes the whole session
-   * back.
+   * saves as it is set; Discard, beside Done, takes the whole session back.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -243,8 +242,12 @@
     <Icon name="stack" size={13} />
     <input class="title" aria-label="Layer name" title="Rename the layer" bind:value={layerDetails.title} maxlength="200"
       disabled={controller.loading} onchange={saveDetails} onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
-    <button type="button" class="icon-act more-btn" aria-label="Layer actions" title="Description, time, download, discard" aria-expanded={layerMenu}
+    <button type="button" class="icon-act more-btn" aria-label="Layer actions" title="Description, time, download" aria-expanded={layerMenu}
       bind:this={layerMenuAnchor} disabled={controller.loading} onclick={() => (layerMenu = !layerMenu)}><Icon name="more" size={14} /></button>
+    <!-- with nothing changed it is a way back out: no question to ask -->
+    <button type="button" class="icon-act more-btn discard-btn" aria-label="Discard changes"
+      title={controller.changed ? 'Put the layer back as it was when editing started' : 'Stop editing, nothing changed'}
+      disabled={busy} onclick={() => (controller.changed ? (discard = true) : discardChanges())}><Icon name="undo" size={14} /></button>
     <!-- Leaving the layer from the panel too, where the eye is. The press keeps the focus where
          it is: leaving a field would save it, and Done saves it anyway. -->
     <button class="btn btn-primary btn-sm done" title="Save what is left in a field and stop editing this layer"
@@ -384,9 +387,6 @@
       <Icon name="download" size={14} /><span class="fm-grow">Download layer</span></button>
     <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={sendToMyMaps}>
       <Icon name="upload" size={14} /><span class="fm-grow">Send to My Maps…</span></button>
-    <div class="fm-sep"></div>
-    <button type="button" class="fm-item danger" disabled={busy || !controller.changed} onclick={() => { layerMenu = false; discard = true; }}>
-      <Icon name="undo" size={14} /><span class="fm-grow">Discard changes…</span></button>
   </FloatingMenu>
 {/if}
 
@@ -439,6 +439,8 @@
   /* a menu button reads as one: a ⋯ nobody sees is a menu nobody opens */
   .more-btn { border: 1px solid var(--border); background: var(--bg-2); color: var(--text-1); }
   .more-btn:hover:not(:disabled), .more-btn[aria-expanded='true'] { border-color: var(--accent); }
+  .discard-btn:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+  .discard-btn:disabled { opacity: 0.45; cursor: default; }
   .group-title { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 2px; text-align: left; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
   .active-group .group-title { color: var(--text-1); }
   .group-dot { width: 10px; height: 10px; background: var(--swatch); border-radius: 3px; flex: none; }

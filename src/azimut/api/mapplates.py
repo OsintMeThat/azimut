@@ -7,15 +7,23 @@ macOS too, and a rename carries the preview along.
 
 What a plate exports is drawn in the browser, which is where its maps are, and
 posted here to be written into the folder saved for views: a PNG, a PDF of the
-paper size, or the page played through its days as a GIF or an MP4. A plate with
-steps sends its sequence too: how long each picture holds, and the clips of the
-case's videos that run over it, which are read here from the case itself.
+paper size, or the page played through its days as a GIF or an MP4. A played
+plate's pictures come first, in batches as they are drawn, and are kept on disk
+until its export names them. A plate with steps sends its sequence too: how long
+each picture holds, and the clips of the case's videos that run over it, which are
+read here from the case itself.
 """
 
 from __future__ import annotations
 
+import asyncio
+import atexit
 import json
+import secrets
+import shutil
 import tempfile
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -35,8 +43,9 @@ from .naming import case_only, holders, read_created_at, slugify
 
 router = APIRouter(prefix="/api", tags=["map plates"])
 
-#: Read by `server.BulkBodyLimit` before an export is parsed.
+#: Read by `server.BulkBodyLimit` before an export, or a batch of its pictures, is parsed.
 MAX_EXPORT_BODY_BYTES = mapplates.MAX_EXPORT_BODY_BYTES
+MAX_PICTURES_BODY_BYTES = mapplates.MAX_PICTURES_BODY_BYTES
 #: A plate's save: its layout, with the pictures it keeps inside it, and its title.
 MAX_PLATE_BODY_BYTES = mapplates.MAX_SPEC_CHARS + 100_000
 
@@ -232,45 +241,170 @@ def clip_files(case: Case, sequence: list[mapplates.Beat]) -> dict[str, Path]:
     return files
 
 
-async def _played(case: Case, root: Path, format: str, frames: list[UploadFile], interval: int, beats: str,
-                  overs: list[UploadFile], tweens: list[UploadFile]) -> bytes:
-    """A GIF or an MP4 of a played plate, each picture checked and kept as it is read.
+# -- a played plate's pictures, sent as they are drawn ----------------------------------
 
-    An MP4's pictures are written into `root` one by one (`mapplates.keep_frame`), so a
-    long video with its transitions never holds more than one of them in memory; a GIF
-    keeps its frames in 255 colours. The first frame sets the size of all the others.
-    """
+#: How long a played plate's pictures wait, untouched, for the rest of their export.
+STAGE_IDLE_SECONDS = 15 * 60
+#: Played plates being sent at once, each with its folder of pictures.
+MAX_STAGED = 4
+#: Their folders, in the system's temporary folder.
+STAGE_PREFIX = "azimut-plate-"
+#: Each series of a played plate's pictures, in the order it came: how many it holds and how large each is.
+SERIES = {
+    "frames": (mapplates.MAX_FRAMES, mapplates.MAX_FRAME_BYTES),
+    "overs": (mapplates.MAX_FRAMES, mapplates.MAX_FRAME_BYTES),
+    "tweens": (mapplates.MAX_TWEENS, mapplates.MAX_TWEEN_BYTES),
+}
+
+
+@dataclass
+class Staged:
+    """A played plate's pictures as they come in, kept on disk until its export is written."""
+
+    case_id: str
+    root: Path
+    kept: mapplates.Kept = field(default_factory=mapplates.Kept)
+    #: The first picture's, which every other is held to.
     size: tuple[int, int] | None = None
-    kept: list[Any] = []
+    touched: float = field(default_factory=time.monotonic)
+    #: One batch at a time, so a series keeps its order and the export waits for the last.
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    async def take(upload: UploadFile, path: Path, *, max_bytes: int, alpha: bool = False) -> None:
-        nonlocal size
-        image = mapplates.picture(await upload.read(max_bytes + 1), max_bytes=max_bytes, max_pixels=mapplates.MAX_FRAME_PIXELS, alpha=alpha)
-        if size is None:
-            if max(image.size) > mapplates.MAX_VIDEO_EDGE:
-                raise mapplates.ExportError("a played plate is at most 3840 pixels across")
-            size = image.size
-        if format == "gif":
-            kept.append(mapplates.gif_frame(image, size))
-        else:
-            await run_in_threadpool(mapplates.keep_frame, image, size, path)
-        image.close()
-        await upload.close()
 
-    for index, frame in enumerate(frames):
-        await take(frame, root / f"f{index:04d}.png", max_bytes=mapplates.MAX_FRAME_BYTES)
-    sequence = mapplates.read_beats(beats, len(frames), len(overs), len(tweens)) if beats else None
+_staged: dict[str, Staged] = {}
+
+
+def _let_go(token: str) -> None:
+    staged = _staged.pop(token, None)
+    if staged is not None:
+        shutil.rmtree(staged.root, ignore_errors=True)
+
+
+def _make_room() -> None:
+    """The pictures of an export never finished go after a while, and the least recently sent to when too many wait.
+
+    Never those of a batch being kept or a video being made. `_staged` is kept in the
+    order the folders were last sent to, which a coarse clock could not tell apart.
+    """
+    now = time.monotonic()
+    idle = [token for token, staged in _staged.items() if not staged.lock.locked()]
+    for token in idle:
+        if now - _staged[token].touched > STAGE_IDLE_SECONDS:
+            _let_go(token)
+    idle = [token for token in idle if token in _staged]
+    while len(_staged) >= MAX_STAGED and idle:
+        _let_go(idle.pop(0))
+    # the folders an app stopped mid-export left behind: a closed window or a crash runs no exit code
+    waiting = {staged.root for staged in _staged.values()}
+    for folder in Path(tempfile.gettempdir()).glob(f"{STAGE_PREFIX}*"):
+        try:
+            left = folder not in waiting and time.time() - folder.stat().st_mtime > STAGE_IDLE_SECONDS
+        except OSError:
+            continue
+        if left:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+@atexit.register
+def _let_all_go() -> None:
+    """On a quiet exit the folders go at once; after a crash, the next export clears them."""
+    for token in list(_staged):
+        _let_go(token)
+
+
+def _staged_for(case_id: str, token: str) -> Staged:
+    staged = _staged.get(token)
+    if staged is None or staged.case_id != case_id:
+        raise HTTPException(status_code=404, detail="the pictures of this export are no longer waiting; export again")
+    return staged
+
+
+@router.post("/cases/{case_id}/map-plates/export/pictures")
+async def stage_pictures(
+    case_id: str,
+    series: Literal["frames", "overs", "tweens"] = Form(),
+    pictures: list[UploadFile] = File(),
+    staged: str = Form(default="", max_length=64),
+) -> dict[str, Any]:
+    """Keep a batch of a played plate's pictures on disk, as the browser draws them.
+
+    A long video is hundreds of pictures. Sent in batches and written as they come
+    (`mapplates.keep_frame`), they are never all in memory, here or in the browser.
+    The first batch opens a folder and answers its `staged` token, which the next
+    batches and the export name. Each series keeps its order: the frames, what stands
+    over the clips, the transitions' frames. A picture the export cannot take lets the
+    whole folder go.
+    """
+    get_case(case_id)
+    if len(pictures) > mapplates.MAX_PICTURES_PER_POST:
+        raise HTTPException(status_code=422, detail="too many pictures in one batch")
+    if staged:
+        stage = _staged_for(case_id, staged)
+        # the folder sent to last goes last
+        _staged[staged] = _staged.pop(staged)
+    else:
+        _make_room()
+        staged = secrets.token_urlsafe(16)
+        stage = _staged[staged] = Staged(case_id, Path(tempfile.mkdtemp(prefix=STAGE_PREFIX)))
+    most, max_bytes = SERIES[series]
+    async with stage.lock:
+        stage.touched = time.monotonic()
+        kept: list[Path] = getattr(stage.kept, series)
+        try:
+            if len(kept) + len(pictures) > most:
+                raise mapplates.ExportError(f"a played plate holds at most {most} of these pictures")
+            for upload in pictures:
+                raw = await upload.read(max_bytes + 1)
+                await upload.close()
+                # a series ffmpeg reads by one pattern keeps the format of its first picture; each
+                # picture over the clips is read on its own and keeps its own, see-through
+                suffix = kept[0].suffix if kept and series != "overs" else None
+                path, size = await run_in_threadpool(mapplates.keep_frame, raw, stage.root / f"{series[0]}{len(kept):04d}",
+                                                     size=stage.size, suffix=suffix, max_bytes=max_bytes)
+                stage.size = size
+                if max(size) > mapplates.MAX_VIDEO_EDGE:
+                    raise mapplates.ExportError("a played plate is at most 3840 pixels across")
+                kept.append(path)
+        except mapplates.ExportError as exc:
+            _let_go(staged)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"staged": staged, **{name: len(getattr(stage.kept, name)) for name in SERIES}}
+
+
+@router.delete("/cases/{case_id}/map-plates/export/pictures/{staged}")
+async def drop_pictures(case_id: str, staged: str) -> dict[str, Any]:
+    """Let go the pictures of an export stopped on the way."""
+    get_case(case_id)
+    dropped = staged in _staged and _staged[staged].case_id == case_id
+    if dropped:
+        _let_go(staged)
+    return {"dropped": dropped}
+
+
+def _gif_frames(paths: list[Path], size: tuple[int, int]) -> list[Any]:
+    return [mapplates.gif_frame(mapplates.picture(path.read_bytes(), max_bytes=mapplates.MAX_FRAME_BYTES,
+                                                  max_pixels=mapplates.MAX_FRAME_PIXELS), size) for path in paths]
+
+
+async def _played(case: Case, stage: Staged, format: str, interval: int, beats: str) -> bytes:
+    """A GIF or an MP4 of a played plate, from the pictures already kept on disk for it.
+
+    A GIF holds its frames in 255 colours; an MP4 is made by ffmpeg from the disk.
+    """
+    kept = stage.kept
+    if not (1 if beats else 2) <= len(kept.frames) <= mapplates.MAX_FRAMES:
+        raise mapplates.ExportError(f"a played plate holds 2 to {mapplates.MAX_FRAMES} days")
+    if kept.tweens and (format != "mp4" or not beats):
+        raise mapplates.ExportError("only a video plays transitions")
+    sequence = mapplates.read_beats(beats, len(kept.frames), len(kept.overs), len(kept.tweens)) if beats else None
     if format == "gif":
         durations = [round(beat.seconds * 1000) for beat in sequence] if sequence else None
-        return await run_in_threadpool(mapplates.gif_bytes, kept, interval, durations)
+        shown = await run_in_threadpool(_gif_frames, kept.frames, stage.size or (0, 0))
+        return await run_in_threadpool(mapplates.gif_bytes, shown, interval, durations)
     if sequence is None:
-        return await run_in_threadpool(mapplates.mp4_bytes, root, len(frames), interval)
+        return await run_in_threadpool(mapplates.mp4_bytes, kept.frames, interval)
     files = clip_files(case, sequence)
-    for index, over in enumerate(overs):
-        await take(over, root / f"o{index:04d}.png", max_bytes=mapplates.MAX_FRAME_BYTES, alpha=True)
-    for index, tween in enumerate(tweens):
-        await take(tween, root / f"t{index:04d}.png", max_bytes=mapplates.MAX_TWEEN_BYTES)
-    return await run_in_threadpool(mapplates.sequence_mp4, root, sequence, files)
+    return await run_in_threadpool(mapplates.sequence_mp4, stage.root, sequence, files, kept)
 
 
 @router.delete("/cases/{case_id}/map-plates/{name}")
@@ -287,7 +421,7 @@ def delete_plate(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/map-plates/export")
 async def export_plate(
     case_id: str,
-    frames: list[UploadFile] = File(),
+    frames: list[UploadFile] = File(default=[]),
     format: Literal["png", "pdf", "gif", "mp4"] = Form(),
     filename: str = Form(default=mapplates.FALLBACK, min_length=1, max_length=120),
     width_mm: float = Form(default=297, gt=0, le=mapplates.MAX_EDGE_MM),
@@ -295,37 +429,36 @@ async def export_plate(
     interval: int = Form(default=900, ge=150, le=6000),
     transparent: bool = Form(default=False),
     beats: str = Form(default="", max_length=400_000),
-    overs: list[UploadFile] = File(default=[]),
-    tweens: list[UploadFile] = File(default=[]),
+    staged: str = Form(default="", max_length=64),
 ) -> dict[str, Any]:
     """Write one export of a plate into the folder saved for views.
 
-    A PNG or a PDF is one page; a GIF or an MP4 is the page on each of its days,
-    two to `MAX_FRAMES` of them, each shown `interval` milliseconds. A transparent
-    PNG keeps the paper see-through.
+    A PNG or a PDF is one page, sent with it. A GIF or an MP4 is the page on each of
+    its days, two to `MAX_FRAMES` of them, each shown `interval` milliseconds: its
+    pictures were `staged` before it (`stage_pictures`), and go once it is written.
+    A transparent PNG keeps the paper see-through.
 
-    A plate played through its steps sends `beats`, one per picture: how long it
-    holds and, for an MP4, the clips that run over it (a video of the case, the part
-    of it, its box in pixels) with `overs`, the see-through pictures of what stands
-    over the clips. A clip's file is found inside the case, and must be a video.
-    An MP4's beat can open on its transition, frames of `tweens` played before it holds.
+    A plate played through its steps sends `beats`, one per frame: how long it holds
+    and, for an MP4, the clips that run over it (a video of the case, the part of it,
+    its box in pixels) and which of the see-through pictures stands over them. A
+    clip's file is found inside the case, and must be a video. An MP4's beat can open
+    on its transition, frames of the transitions' series played before it holds.
     """
     case = get_case(case_id)
     played = format in ("gif", "mp4")
-    if not played and len(frames) != 1:
+    if played and (frames or not staged):
+        raise HTTPException(status_code=422, detail="a played plate sends its pictures before it")
+    if not played and (len(frames) != 1 or staged):
         raise HTTPException(status_code=422, detail="a page is one picture")
-    if played and not (1 if beats else 2) <= len(frames) <= mapplates.MAX_FRAMES:
-        raise HTTPException(status_code=422, detail=f"a played plate holds 2 to {mapplates.MAX_FRAMES} days")
-    if len(overs) > mapplates.MAX_FRAMES:
-        raise HTTPException(status_code=422, detail="too many pictures for one sequence")
-    if tweens and (format != "mp4" or not beats):
-        raise HTTPException(status_code=422, detail="only a video plays transitions")
-    if len(tweens) > mapplates.MAX_TWEENS:
-        raise HTTPException(status_code=422, detail="too many transition frames for one video")
     try:
         if played:
-            with tempfile.TemporaryDirectory(prefix="azimut-plate-") as folder:
-                data = await _played(case, Path(folder), format, frames, interval, beats, overs, tweens)
+            stage = _staged_for(case_id, staged)
+            # the last batch is in before the video is made of them
+            async with stage.lock:
+                try:
+                    data = await _played(case, stage, format, interval, beats)
+                finally:
+                    _let_go(staged)
         else:
             raw = await frames[0].read(mapplates.MAX_PAGE_BYTES + 1)
             page = mapplates.picture(raw, max_bytes=mapplates.MAX_PAGE_BYTES, max_pixels=mapplates.MAX_PAGE_PIXELS,

@@ -222,6 +222,32 @@ describe('personal layer editing', () => {
     expect(api.patch).toHaveBeenCalledOnce();
   });
 
+  it('picks each marker a click puts down, unless the analyst picked another since', async () => {
+    const editor = store();
+    await editor.open(ROW);
+    editor.start();
+    editor.addPoint({ lat: 1, lon: 2 });
+    await editor.whenSaved();
+    expect(editor.selected.properties.key).toBe('m1');
+    expect(editor.selection).toEqual(['m1']);
+    expect(editor.placing).toBe(true);
+    // a name typed in the sheet is saved before the next click takes the sheet over
+    editor.form.name = 'Gate';
+    api.patch.mockResolvedValueOnce({ layer: ROW, marker: feature('m1', { name: 'Gate' }) });
+    editor.addPoint({ lat: 3, lon: 4 });
+    await editor.whenSaved();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/m1', { name: 'Gate' });
+    expect(editor.selected.properties.key).toBe('m2');
+    // a feature picked by hand while a save is on its way keeps the sheet
+    const gate = deferred();
+    api.post.mockImplementationOnce(() => gate.promise);
+    editor.addPoint({ lat: 5, lon: 6 });
+    editor.select('m1');
+    gate.resolve({ layer: ROW, marker: feature('m3') });
+    await editor.whenSaved();
+    expect(editor.selected.properties.key).toBe('m1');
+  });
+
   it('stops accepting clicks without losing ones already queued', async () => {
     const editor = store();
     await editor.open(ROW);

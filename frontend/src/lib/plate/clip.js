@@ -78,11 +78,13 @@ export function beats(spec, days) {
 
 /**
  * The days a played plate goes through, in order: the moments its layers change at,
- * and every day that holds steps of its own, a change or not, today among them.
+ * every day that holds steps of its own, a change or not, today among them, and the
+ * days the plate was told to play.
  */
 export function playDays(spec, moments) {
   const stepped = Object.entries(spec?.steps ?? {}).filter(([day, list]) => day !== PAGE && list?.length).map(([day]) => day);
-  return [...new Set([...moments, ...stepped])].sort();
+  const picked = (spec?.days ?? []).filter((day) => day !== PAGE);
+  return [...new Set([...moments, ...stepped, ...picked])].sort();
 }
 
 /** The whole of a sequence, in seconds. */

@@ -3,7 +3,9 @@
 `Relief` is a tile fetch a `terrain.Sampler` accepts. Each tile is drawn from
 an analytic height field (round Gaussian peaks over a flat plain), encoded the
 way Mapterhorn serves it, so a test exercises the whole path from tile to angle
-and knows the answer in closed form.
+and knows the answer in closed form. `ripple` lays a gentle swell of that many
+metres over the plain, as real ground has: a plain flat to the centimetre is
+water to engine/landform.py.
 """
 
 from __future__ import annotations
@@ -28,11 +30,14 @@ class Peak:
 class Relief:
     peaks: tuple[Peak, ...]
     plain: float = 0.0
+    ripple: float = 0.0
     calls: list[tuple[int, int, int]] = field(default_factory=list)
 
     def height(self, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
         lat, lon = np.broadcast_arrays(np.asarray(lat, float), np.asarray(lon, float))
         out = np.full(lat.shape, self.plain, dtype=np.float64)
+        if self.ripple:
+            out += self.ripple * np.sin(lat * 111_195.0 / 150.0) * np.cos(lon * 111_195.0 / 170.0)
         for peak in self.peaks:
             north = (lat - peak.lat) * 111_195.0
             east = (lon - peak.lon) * 111_195.0 * math.cos(math.radians(peak.lat))

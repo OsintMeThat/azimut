@@ -82,6 +82,8 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   let loading = $state(false);
   let selected = $state(null);
   let selection = $state([]);
+  // the marker a click just put down and picked, which the next click may take over from
+  let placed = null;
   let anchor = null;
   let form = $state(null);
   let details = $state(null);
@@ -283,13 +285,17 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     }
   }
 
-  /** A new layer, blank, from a file or a copy, opened for editing; `track` (`{ on, zone }`) follows it over time from the start. */
-  async function create(title, file = null, description = '', track = null) {
+  /**
+   * A new layer, blank, from a file, a My Maps link (`start` a string) or a copy, opened
+   * for editing; `track` (`{ on, zone }`) follows it over time from the start.
+   */
+  async function create(title, start = null, description = '', track = null) {
     const source = dialog?.source;
     const owner = caseId();
     const row = source
       ? await layers.copyEditable(source, title, description)
-      : file ? await layers.importEditable(file, title, description) : await layers.createEditable(title, description);
+      : typeof start === 'string' ? await layers.importMyMaps(start, title, description)
+        : start ? await layers.importEditable(start, title, description) : await layers.createEditable(title, description);
     // Creating a first case is allowed; switching an existing case meanwhile is not.
     if (!row || (owner && owner !== caseId())) return;
     dialog = null;
@@ -510,7 +516,15 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     }
     if (!placing || !editor || loading || caseId() !== editor.caseId) return false;
     const body = { lat: point.lat, lon: point.lon, ...draft, ...(group ? { group } : {}), ...stamp() };
-    enqueue((path) => api.post(`${path}/markers`, body));
+    enqueue((path) => api.post(`${path}/markers`, body), (answer) => {
+      // the new marker is picked so its sheet opens, unless something else was picked or drawn since
+      const key = answer?.marker?.properties.key;
+      if (!key || sketch || lassoing || selection.length > 1 || (selected && selected.properties.key !== placed)) return;
+      commitForm();
+      selected = features.find((feature) => feature.properties.key === key) ?? answer.marker;
+      selection = [key]; anchor = key; placed = key;
+      form = formOf(selected);
+    });
     return true;
   }
 

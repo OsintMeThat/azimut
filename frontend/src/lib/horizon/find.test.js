@@ -5,22 +5,43 @@ import {
   alignmentBearing,
   alignmentLine,
   alignmentWedge,
+  areaMiddle,
   areaPoints,
   areaProblem,
   areaText,
+  chanceFit,
+  cleanFacing,
+  cleanStands,
+  cleanSun,
   crossing,
+  facingFan,
   facingFrom,
+  facingRings,
+  facingSectors,
+  facingText,
+  fanOf,
   fromLocal,
+  groundText,
   HEAT_RAMP,
   heatStyle,
   inArea,
   local,
   meeting,
+  neighbourFit,
   onAlignment,
   photoOffset,
+  reliability,
   sameAsk,
   searchedReach,
+  ringsOf,
   searchedWhen,
+  standsText,
+  SUN_SIDES,
+  sunAsked,
+  toggleFacing,
+  toggleStand,
+  traceTurns,
+  withGround,
 } from './find.js';
 import { destination, haversine } from '../measure.js';
 import { bearingBetween } from './geometry.js';
@@ -192,6 +213,8 @@ describe('a search kept, against the setup now', () => {
 
   it('reads the same setup the same, the area as pairs or points and empty marks as none', () => {
     expect(sameAsk(ask, now())).toBe(true);
+    // a zoom word kept alone reads as that word ticked alone
+    expect(sameAsk(ask, { ...now(), hints: { zoom: ['wide'], reach: 'auto' } })).toBe(true);
   });
 
   it('reads any change as changed, and nothing as not kept', () => {
@@ -210,6 +233,18 @@ describe('a search kept, against the setup now', () => {
     const cut = now();
     cut.photo.marks.cuts = [0.5];
     expect(sameAsk(ask, cut)).toBe(false);
+    expect(sameAsk(ask, { ...now(), facing: ['n'] })).toBe(false);
+    expect(sameAsk(ask, { ...now(), stands: ['summit'] })).toBe(false);
+    expect(sameAsk(ask, { ...now(), view: ['down'] })).toBe(false);
+    expect(sameAsk(ask, { ...now(), mirror: true })).toBe(false);
+    const zoned = { ...ask, zones: [{ area: [[46.5, 7.8], [46.5, 7.81], [46.51, 7.81]], spacing: 100, out: false }] };
+    const zonedNow = { ...now(), zones: [{ area: [{ lat: 46.5, lon: 7.8 }, { lat: 46.5, lon: 7.81 }, { lat: 46.51, lon: 7.81 }], spacing: 100, out: false }] };
+    expect(sameAsk(zoned, zonedNow)).toBe(true);
+    expect(sameAsk(zoned, { ...zonedNow, zones: [{ ...zonedNow.zones[0], spacing: 250 }] })).toBe(false);
+    expect(sameAsk(zoned, now())).toBe(false);
+    const said = now();
+    said.photo.marks = { ...said.photo.marks, far: [{ line: 0, bands: ['b1'] }] };
+    expect(sameAsk(ask, said)).toBe(false);
     expect(sameAsk(ask, null)).toBe(false);
     expect(sameAsk(null, now())).toBe(false);
   });
@@ -229,3 +264,221 @@ describe('a search in a line', () => {
   });
 });
 
+
+describe('which way the photo faces', () => {
+  it('ticks directions in the compass order, once each, and nothing else', () => {
+    expect(cleanFacing(['e', 'n', 'e', 'north'])).toEqual(['n', 'e']);
+    expect(cleanFacing(undefined)).toEqual([]);
+    expect(toggleFacing(['n'], 'ne')).toEqual(['n', 'ne']);
+    expect(toggleFacing(['n', 'ne'], 'n')).toEqual(['ne']);
+  });
+
+  it('joins directions side by side into one sector, round north too, as the app does', () => {
+    expect(facingSectors(['n'])).toEqual([{ centre: 0, half: 22.5 }]);
+    expect(facingSectors(['n', 'ne', 'e'])).toEqual([{ centre: 45, half: 67.5 }]);
+    expect(facingSectors(['nw', 'n', 'ne'])).toEqual([{ centre: 0, half: 67.5 }]);
+    expect(facingSectors(['n', 's'])).toEqual([
+      { centre: 0, half: 22.5 },
+      { centre: 180, half: 22.5 },
+    ]);
+    // none ticked, or all, is any way
+    expect(facingSectors([])).toEqual([]);
+    expect(facingSectors(['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'])).toEqual([]);
+    expect(facingText(['nw', 'n', 'ne', 's'])).toBe('S, NW to NE');
+    expect(facingText(['ne'])).toBe('NE');
+    expect(facingText([])).toBe('');
+  });
+
+  it('draws a fan from the middle of the area, out as far as the search reads', () => {
+    const area = [
+      { lat: 10, lon: 40 },
+      { lat: 10, lon: 41 },
+      { lat: 11, lon: 41 },
+      { lat: 11, lon: 40 },
+    ];
+    const middle = areaMiddle(area);
+    expect(middle).toEqual({ lat: 10.5, lon: 40.5 });
+    const [ring] = facingFan(middle, ['e'], 20_000);
+    expect(ring[0]).toEqual(middle);
+    for (const point of ring.slice(1)) {
+      expect(haversine(middle, point)).toBeCloseTo(20_000, -1);
+      const bearing = bearingBetween(middle, point);
+      expect(bearing).toBeGreaterThanOrEqual(67.4);
+      expect(bearing).toBeLessThanOrEqual(112.6);
+    }
+    expect(facingFan(middle, ['n', 's'], 5_000)).toHaveLength(2);
+    expect(facingFan(middle, [], 5_000)).toEqual([]);
+  });
+
+  it('rings the fan at 5, 10, 20, 50 and 100 km, as far as the search reads', () => {
+    const middle = { lat: 10.5, lon: 40.5 };
+    const rings = facingRings(middle, ['e'], 20_000);
+    expect(rings.map((r) => r.metres)).toEqual([5_000, 10_000, 20_000]);
+    for (const ring of rings) {
+      for (const point of ring.points) expect(haversine(middle, point)).toBeCloseTo(ring.metres, -1);
+      // its words stand on the sector's middle
+      expect(bearingBetween(middle, ring.label)).toBeCloseTo(90, 3);
+    }
+    expect(facingRings(middle, ['n', 's'], 50_000)).toHaveLength(8);
+    expect(facingRings(middle, [], 50_000)).toEqual([]);
+  });
+});
+
+describe('how far a result can be trusted', () => {
+  const points = Array.from({ length: 21 }, (_, i) => ({ lat: 0, lon: 0, explained: i / 50 }));
+  const ask = { trace: { known: false, within: [30, 65] }, who: { mode: 'ground' }, photo: { path: 'media/p.png' } };
+  const best = { lat: 12.9, lon: 43.6, explained: 0.79, heading: 123, fov: 42, tilt: -3, roll: 1.7 };
+  const far = (km) => destination(best, 90, km * 1000);
+
+  it('reads the area’s chance fits off its top tenth', () => {
+    expect(chanceFit(points)).toBeCloseTo(0.36, 6);
+    expect(chanceFit(points.slice(0, 5))).toBeNull();
+  });
+
+  it('is solid when one place stands out and nothing speaks against it', () => {
+    const second = { ...far(10), explained: 0.5 };
+    expect(reliability({ verdict: 'match', places: [best, second], points }, { ask })).toEqual({ level: 'solid', reasons: [], chance: chanceFit(points) });
+  });
+
+  it('says each thing that lowers it, one alone asking for a check and two making it weak', () => {
+    const rival = { ...far(12), explained: 0.72 };
+    const one = reliability({ verdict: 'match', places: [best, rival], points }, { ask });
+    expect(one).toMatchObject({ level: 'check', reasons: ['Another place 12 km away explains nearly as much'] });
+    // a rival nearer than 3 km is the same hot spot
+    expect(reliability({ verdict: 'match', places: [best, { ...far(2), explained: 0.78 }], points }, { ask }).level).toBe('solid');
+    const pushed = { ...best, fov: 64, roll: -4.9, tilt: -16 };
+    expect(reliability({ verdict: 'match', places: [pushed], points }, { ask }).reasons).toEqual([
+      'The lens found, 64°, is the widest tried',
+      'The camera had to roll 5°, the most allowed',
+      'The camera tilts 16° down',
+    ]);
+    // a drone looks down as it likes; a lens the photo says has no edge to sit at
+    const drone = reliability({ verdict: 'match', places: [{ ...best, tilt: -30 }], points }, { ask: { ...ask, who: { mode: 'drone' } } });
+    expect(drone.level).toBe('solid');
+    const known = reliability({ verdict: 'match', places: [{ ...best, fov: 30 }], points }, { ask: { ...ask, trace: { known: true, within: [30, 65] } } });
+    expect(known.level).toBe('solid');
+    const marked = reliability({ verdict: 'match', places: [{ ...best, inner: 0.3, pairs: [1, 3] }], points }, { ask });
+    expect(marked).toMatchObject({ level: 'weak', reasons: ['The ridges in front lie off the terrain there', '2 of 3 front and behind pairs are out of order'] });
+  });
+
+  it('says when a decoy of the trace fits the best place nearly as well', () => {
+    const decoyed = reliability({ verdict: 'match', places: [{ ...best, decoy: 0.7 }], points }, { ask });
+    expect(decoyed.reasons).toEqual(['A decoy of the trace fits there nearly as well (70%)']);
+    expect(reliability({ verdict: 'match', places: [{ ...best, decoy: 0.3 }], points }, { ask }).level).toBe('solid');
+  });
+
+  it('says when the best barely rises above what the area fits by chance', () => {
+    const low = reliability({ verdict: 'match', places: [{ ...best, explained: 0.45 }], points }, { ask });
+    expect(low.reasons).toEqual(['Barely above the chance fits of the area (36%)']);
+  });
+
+  it('is weak whenever the verdict names no single place, without saying the verdict again', () => {
+    const rival = { ...far(30), explained: 0.77 };
+    const ambiguous = reliability({ verdict: 'ambiguous', places: [best, rival], points }, { ask });
+    expect(ambiguous).toMatchObject({ level: 'weak', reasons: [] });
+    expect(reliability({ verdict: 'loose', places: [best], points }, { ask }).level).toBe('weak');
+    expect(reliability({ verdict: 'none', places: [], points }, { ask }).level).toBe('weak');
+  });
+
+  it('weighs the other searches of the same photo that named a place elsewhere as strongly', () => {
+    const elsewhere = { name: 'other', title: 'Ridge search 2', status: 'done', verdict: 'match', photo: 'media/p.png', best: { ...far(29), explained: 0.75 } };
+    const told = reliability({ verdict: 'match', places: [best], points }, { ask, name: 'mine', others: [elsewhere] });
+    expect(told).toMatchObject({ level: 'check', reasons: ['“Ridge search 2” found a place 29 km away that explains 75%'] });
+    // not the search itself, another photo's, one that named no single place, a weaker one, or one that agrees
+    for (const row of [
+      { ...elsewhere, name: 'mine' },
+      { ...elsewhere, photo: 'media/q.png' },
+      { ...elsewhere, verdict: 'ambiguous' },
+      { ...elsewhere, best: { ...elsewhere.best, explained: 0.5 } },
+      { ...elsewhere, best: { ...far(1), explained: 0.8 } },
+    ]) {
+      expect(reliability({ verdict: 'match', places: [best], points }, { ask, name: 'mine', others: [row] }).level).toBe('solid');
+    }
+  });
+});
+
+describe('a best place standing alone, and a trace too plain', () => {
+  const best = { lat: 12.9, lon: 43.6, explained: 0.71, heading: 65, fov: 54, tilt: 2, roll: -2 };
+  const ask = { trace: { known: false, within: [30, 65] }, who: { mode: 'ground' } };
+  const ring = (explained, metres = 100) => Array.from({ length: 8 }, (_, i) => ({ ...destination(best, i * 45, metres), explained }));
+
+  it('reads what the ground right round the best place explains, from enough points', () => {
+    expect(neighbourFit(best, ring(0.66))).toBeCloseTo(0.66, 6);
+    // farther points, or too few, say nothing
+    expect(neighbourFit(best, ring(0.2, 400))).toBeNull();
+    expect(neighbourFit(best, ring(0.2).slice(0, 3))).toBeNull();
+  });
+
+  it('says a lone spike where the ground round it explains far less, and nothing where it rises too', () => {
+    const lone = reliability({ verdict: 'match', places: [best], points: ring(0.18) }, { ask });
+    expect(lone).toMatchObject({ level: 'check', reasons: ['The ground 150 m around explains much less (18%): a lone spike'] });
+    expect(reliability({ verdict: 'match', places: [best], points: ring(0.66) }, { ask }).level).toBe('solid');
+  });
+
+  it('counts the turns of the trace across the picture, small wobbles left out', () => {
+    const x = Array.from({ length: 61 }, (_, i) => -1 + i / 30);
+    const wavy = { x, y: x.map((v) => 0.05 * Math.sin(v * 9)), half_width: 600 };
+    expect(traceTurns(wavy)).toBe(6);
+    const wobbly = { x, y: x.map((v, i) => 0.002 * (i % 2)), half_width: 600 };
+    expect(traceTurns(wobbly)).toBe(0);
+    // read from left to right whatever order the points came in
+    expect(traceTurns({ ...wavy, x: [...wavy.x].reverse(), y: [...wavy.y].reverse() })).toBe(6);
+  });
+
+  it('says when the trace turns too few times to name one place', () => {
+    const x = Array.from({ length: 41 }, (_, i) => -1 + i / 20);
+    const plain = { ...ask, trace: { ...ask.trace, x, y: x.map((v) => 0.1 * Math.cos(v * 3)), half_width: 600 } };
+    const told = reliability({ verdict: 'match', places: [best], points: [] }, { ask: plain });
+    // one rise and fall across the picture: a single turn
+    expect(told.reasons).toEqual(['The trace turns only 1 time: a plain shape fits many places']);
+  });
+});
+
+describe('the sun against the camera', () => {
+  it('keeps the sides in the menu order and asks with the sun only once a day and a side are said', () => {
+    expect(cleanSun({ date: '2024-06-21', start: '7:00', end: '19:30', sides: ['behind', 'ahead', 'up'] })).toEqual({
+      date: '2024-06-21',
+      start: '06:00',
+      end: '19:30',
+      sides: ['ahead', 'behind'],
+    });
+    expect(sunAsked({ date: '', sides: ['ahead'] })).toBeNull();
+    expect(sunAsked({ date: '2024-06-21', sides: [] })).toBeNull();
+    expect(sunAsked({ date: '2024-06-21', sides: ['left'] })).toEqual({ date: '2024-06-21', start: '06:00', end: '18:00', sides: ['left'] });
+    expect(SUN_SIDES.map((side) => side.id)).toEqual(['ahead', 'left', 'right', 'behind']);
+  });
+
+  it('draws any sectors as a fan', () => {
+    const from = { lat: 10, lon: 40 };
+    expect(fanOf(from, [{ centre: 180, half: 45 }], 5_000)).toHaveLength(1);
+    expect(ringsOf(from, [{ centre: 180, half: 45 }], 10_000).map((r) => r.metres)).toEqual([5_000, 10_000]);
+  });
+});
+
+describe('where the eye stands', () => {
+  it('ticks grounds in the menu order, once each, and says them', () => {
+    expect(cleanStands(['plain', 'summit', 'plain', 'cliff'])).toEqual(['summit', 'plain']);
+    expect(toggleStand(['summit'], 'slope')).toEqual(['summit', 'slope']);
+    expect(toggleStand(['summit', 'slope'], 'summit')).toEqual(['slope']);
+    expect(standsText(['summit', 'slope'])).toBe('summit or ridge or slope');
+    expect(standsText([])).toBe('');
+  });
+
+  it('says what the grid keeps of the ground ticked, and the water left out', () => {
+    const preview = { total: 2400, kept: 640, kinds: { summit: 640, slope: 900, valley: 500, plain: 240, water: 120 } };
+    expect(groundText(preview, ['summit'])).toBe('Keeps 640 of 2,400 points (27%), 120 on water left out.');
+    expect(groundText({ ...preview, kept: 2280 }, [])).toBe('120 on water left out.');
+    expect(groundText({ ...preview, kinds: { ...preview.kinds, water: 0 } }, [])).toBe('');
+    expect(groundText(null, ['summit'])).toBe('');
+    // water ticked is searched, not left out
+    expect(groundText(preview, ['summit', 'water'])).toBe('Keeps 640 of 2,400 points (27%).');
+    expect(cleanStands(['water', 'plain'])).toEqual(['plain', 'water']);
+  });
+
+  it('shrinks the size said by what the ground leaves out, the filling-in with it', () => {
+    const estimated = { points: 1000, coarse: 800, most: 3400, step: 0.5 };
+    expect(withGround(estimated, { total: 800, kept: 200 })).toEqual({ points: 400, coarse: 800, most: 1000, step: 0.5 });
+    expect(withGround(estimated, null)).toBe(estimated);
+    expect(withGround(null, { total: 800, kept: 200 })).toBeNull();
+  });
+});

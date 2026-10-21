@@ -251,6 +251,8 @@ function orbitBudget(engine, pinned, angle) {
  * the point that was grabbed, which stays under the pointer: after each change
  * the map is panned so that point comes back to where it was pressed. A press
  * on the sky has no ground to hold, so the view then turns about its centre.
+ * The relief stops the eye: a move that would put it in the ground is not
+ * made, and the hand going back moves the view again at once.
  *
  * A middle click that never moved puts north back up, as on the flat map.
  *
@@ -277,22 +279,48 @@ export function startOrbitDrag(engine, event, { onPivot, onEnd } = {}) {
   onPivot?.(grab);
   let moved = false;
   let turned = { pitch, bearing };
+  // where the last move of the hand was read from: each move adds to the view
+  // the gesture has reached, so a move refused at the relief is not owed later
+  let from = start;
+  const ceiling = engine.maxPitch?.() ?? 90;
   // every jump of the gesture keeps the centre's height, or the engine re-seats
   // it on the slope under the centre and the camera leaps (`holdElevation`)
   const release = engine.holdElevation?.();
 
-  const move = (moved_) => {
-    const dx = moved_.clientX - start.x;
-    const dy = moved_.clientY - start.y;
-    if (!moved && Math.hypot(dx, dy) >= CLICK_SLOP) moved = true;
-    if (!moved) return;
-    const asked = { pitch: pitch - dy * ORBIT_TILT_PER_PX, bearing: bearing - dx * ORBIT_TURN_PER_PX };
+  const orbit = (asked) => {
     engine.setPitch(asked.pitch);
     engine.setBearing(asked.bearing);
-    const angle = (Math.abs(asked.pitch - turned.pitch) + Math.abs(asked.bearing - turned.bearing)) * (Math.PI / 180);
-    turned = asked;
     if (!pinned) return;
+    const angle = (Math.abs(asked.pitch - turned.pitch) + Math.abs(asked.bearing - turned.bearing)) * (Math.PI / 180);
     holdUnder(engine, pinned, grab, orbitBudget(engine, pinned, angle));
+  };
+  // The relief is a wall: a move that would take the eye into it is refused,
+  // where lifting the eye clear sent the camera up over the slope and beyond.
+  // The turn alone or the tilt alone may still pass, so the view slides along it.
+  const tried = (asked) => {
+    if (!engine.unlessItSinks) {
+      orbit(asked);
+      return true;
+    }
+    return engine.unlessItSinks(() => orbit(asked));
+  };
+
+  const move = (moved_) => {
+    if (!moved && Math.hypot(moved_.clientX - start.x, moved_.clientY - start.y) >= CLICK_SLOP) moved = true;
+    if (!moved) return;
+    const dx = moved_.clientX - from.x;
+    const dy = moved_.clientY - from.y;
+    from = { x: moved_.clientX, y: moved_.clientY };
+    const asked = {
+      pitch: Math.min(ceiling, Math.max(0, turned.pitch - dy * ORBIT_TILT_PER_PX)),
+      bearing: turned.bearing - dx * ORBIT_TURN_PER_PX,
+    };
+    const steps = [asked, { ...turned, bearing: asked.bearing }, { ...turned, pitch: asked.pitch }].filter(
+      (step, at) => (step.pitch !== turned.pitch || step.bearing !== turned.bearing)
+        && (at === 0 || step.pitch !== asked.pitch || step.bearing !== asked.bearing)
+    );
+    const passed = steps.find(tried);
+    if (passed) turned = passed;
   };
 
   const up = () => {
@@ -421,8 +449,10 @@ function groundBelow(engine, press, bottom) {
  * far off that a metre of height is pixels) holds the first ground below it,
  * which then keeps its distance from the hand: no jump when the drag starts.
  * With no ground anywhere down the screen it is not started: false. The press
- * is not stopped, so the engine still tells a click from a drag; the tool turns
- * the engine's own mouse pan off while this one is in use (`relief.js`).
+ * is not stopped, but moving the camera makes the engine forget it, so the
+ * click a drag ends in is dropped by the engine module (`dropDraggedClicks`);
+ * the tool turns the engine's own mouse pan off while this one is in use
+ * (`relief.js`).
  *
  * @param {object} engine the façade from `engine.js`
  * @param {MouseEvent} event the mousedown that starts it

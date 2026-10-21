@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { deflateSync } from 'node:zlib';
-import { awaitMapReady, installAppFixture } from './app.fixture.js';
+import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 
 /**
  * The 3D map, driven in a real browser.
@@ -231,4 +231,78 @@ test('a tilted capture opens leaning as it was taken, a flat one straight down',
   await page.getByRole('option', { name: /Flat quarry/ }).click();
   await expect(tilt(page)).toHaveText(/Tilt 0°/);
   await expect.poll(() => address(page).get('t')).toBe('0');
+});
+
+test('a pan over relief across a layer\'s area opens no card, and a click on it still does', async ({ page }) => {
+  const area = { type: 'Feature', id: 0, geometry: { type: 'Polygon',
+    coordinates: [[[-170, -80], [170, -80], [170, 80], [-170, 80], [-170, -80]]] },
+    properties: { name: 'Front line area', colour: '#d55e00', category: 'Areas', index: 0 } };
+  const row = { name: 'areas', title: 'Areas map', source: { kind: 'file', name: 'areas.kmz' },
+    features: 1, categories: [], icons: 0, sha256: 'b'.repeat(64), refresh: {}, hidden: [] };
+  await installAppFixture(page);
+  await serveRelief(page);
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [row] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/data**`,
+    (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [area] } }));
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await page.getByRole('button', { name: 'Areas map', exact: true }).click();
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+  const card = page.locator('.layer-card');
+
+  // our own ground pan moves the camera, which made the engine forget the press
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 120, y + 60, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  await expect(card).toHaveCount(0);
+
+  await page.mouse.click(x, y);
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Front line area');
+});
+
+test('the orbit stops at a massif behind the eye rather than climbing over it', async ({ page }) => {
+  test.slow();
+  // 3000 m: 35768 = 139 × 256 + 184
+  const MASSIF = solidPng(512, [139, 184, 0]);
+  // every tile wholly south of 46.6° is the massif, the view's own ground north of it the plateau
+  const northEdge = (z, y) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / 2 ** z)))) * (180 / Math.PI);
+  const tileOf = (key) => {
+    const [z, , y] = key.split('/').map(Number);
+    return northEdge(z, y) <= 46.6 ? MASSIF : PLATEAU;
+  };
+  await installAppFixture(page);
+  await serveRelief(page);
+  await page.route('**/api/terrain/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/terrain/batch') {
+      const keys = new URL(route.request().url()).searchParams.get('t').split(',');
+      return route.fulfill({ contentType: 'application/octet-stream',
+        body: Buffer.concat(keys.map((key, index) => batch([key], tileOf(key)).fill(index, 0, 1).fill(0, 1, 2))) });
+    }
+    const tile = path.match(/\/tiles\/(\d+\/\d+\/\d+)/);
+    if (tile) return route.fulfill({ contentType: 'image/png', body: tileOf(tile[1]) });
+    return route.fallback();
+  });
+  await page.goto('/#satellite?ll=46.66,7.9&z=13&t=20&e=200&p=esri-world-imagery');
+  await awaitMapReady(page);
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+  // up leans the view toward the horizon, which lowers the eye onto the massif behind it
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'middle' });
+  for (let step = 1; step <= 20; step += 1) await page.mouse.move(x, y - step * 14);
+  await page.mouse.up({ button: 'middle' });
+  await expect.poll(() => Number(address(page).get('t'))).toBeGreaterThan(30);
+  // lifting the eye clear instead tilted on to 85°, slid the zoom and threw the
+  // centre some 8 km south onto the massif
+  expect(Number(address(page).get('t'))).toBeLessThan(85);
+  expect(address(page).get('z')).toBe('13');
+  expect(address(page).get('ll')).toBe('46.66,7.9');
 });

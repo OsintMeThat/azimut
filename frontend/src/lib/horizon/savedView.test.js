@@ -87,9 +87,9 @@ describe('a view as the case keeps it', () => {
   });
 
   it('keeps what was known about the photo and the reach Fit found its skyline at', () => {
-    expect(photoSpec(fakeOverlay())).toMatchObject({ hints: { picture: 'photo', zoom: 'any', facing: null, reach: 'auto' }, reach: null });
-    const told = photoSpec(fakeOverlay({ hints: { zoom: 'telephoto', facing: { heading: 218.444, half: 30 }, reach: 10_000 }, reachFound: 20_000 }));
-    expect(told.hints).toEqual({ picture: 'photo', zoom: 'telephoto', facing: { heading: 218.4 }, reach: 10_000 });
+    expect(photoSpec(fakeOverlay())).toMatchObject({ hints: { picture: 'photo', zoom: [], facing: null, reach: 'auto' }, reach: null });
+    const told = photoSpec(fakeOverlay({ hints: { zoom: ['telephoto', 'zoomed'], facing: { heading: 218.444, half: 30 }, reach: 10_000 }, reachFound: 20_000 }));
+    expect(told.hints).toEqual({ picture: 'photo', zoom: ['zoomed', 'telephoto'], facing: { heading: 218.4 }, reach: 10_000 });
     expect(photoSpec(fakeOverlay({ hints: { picture: 'panorama' } })).hints.picture).toBe('panorama');
     expect(told.reach).toBe(20_000);
   });

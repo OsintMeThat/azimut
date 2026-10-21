@@ -100,7 +100,16 @@ describe('a transition between two beats', () => {
   const beat = (index, view) => ({ context: { at: null, place: { steps: ['s1'], index },
     views: { map: { view, frame }, inset: { view: { ...view, zoom: view.zoom - 4.5, bearing: 0 }, frame: insetFrame } },
     maps: { map: picture, inset: picture } } });
-  const all = async (frames) => { const out = []; for await (const canvas of frames) out.push(canvas); return out; };
+  /** Each frame read as it comes, as the export reads it: its canvas, and what was drawn on it since it was made blank. */
+  const all = async (frames) => {
+    const out = [];
+    for await (const canvas of frames) {
+      const { calls } = canvas.ctx;
+      out.push({ canvas, calls: calls.slice(calls.findLastIndex(([name]) => name === 'reset') + 1) });
+    }
+    return out;
+  };
+  const counted = (made) => () => { const canvas = fakeCanvas(); made.push(canvas); return canvas; };
 
   it('draws the map again at each frame of its flight, its inset following, then brings in what is new', async () => {
     const plan = transitionPlan({ ...TRANSITIONS, on: true, appear: 'fade' }, { moved: ['map'], fresh: ['z'] });
@@ -120,8 +129,31 @@ describe('a transition between two beats', () => {
     const filters = made.flatMap((canvas) => canvas.ctx.calls.filter(([name]) => name === 'filter').map(([, value]) => value));
     expect(filters.some((value) => value.startsWith('blur('))).toBe(true);
     // what is new is written in the frames after the move
-    const last = frames.at(-1).ctx.calls;
+    const last = frames.at(-1).calls;
     expect(last.some(([name, text]) => name === 'fillText' && text === 'New')).toBe(true);
+  });
+
+  it('draws every frame on the same few canvases, blank each time, and lets them go once done', async () => {
+    const plan = transitionPlan({ ...TRANSITIONS, on: true, appear: 'fade' }, { moved: ['map'], fresh: ['z'] });
+    const sitting = () => ({ at: async () => ({ picture, placer: null }), end: () => {} });
+    const made = [];
+    const frames = await all(tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'], fresh: ['z'] },
+      { sitting, makeCanvas: counted(made) }));
+    // the frame, a picture per map, the writing of both beats and their mix, however many frames
+    expect(frames).toHaveLength(plan.frames);
+    expect(made.length).toBeLessThanOrEqual(6);
+    const [{ canvas }] = frames;
+    expect(frames.every((frame) => frame.canvas === canvas)).toBe(true);
+    // each frame after the first starts from a blank canvas, so none shows through the next
+    expect(canvas.ctx.calls.filter(([name]) => name === 'reset')).toHaveLength(plan.frames - 1);
+    // none of their pixels is kept once the transition is done
+    expect(made.every((item) => item.width === 0 && item.height === 0)).toBe(true);
+
+    // a fade keeps the two pages it mixes, and nothing more
+    const fading = [];
+    const fade = transitionPlan({ ...TRANSITIONS, on: true, move: false, appear: 'none' }, {});
+    expect(await all(tweenFrames(spec, 2, beat(-1, far), beat(-1, far), fade, {}, { makeCanvas: counted(fading) }))).toHaveLength(fade.frames);
+    expect(fading).toHaveLength(3);
   });
 
   it('carries the two beats\' pictures along the way when the map cannot be lent, and gives a map back when stopped', async () => {
@@ -130,10 +162,13 @@ describe('a transition between two beats', () => {
     expect(frames).toHaveLength(plan.frames);
     const ended = [];
     const sitting = (id) => ({ at: async () => ({ picture, placer: null }), end: () => ended.push(id) });
-    const flying = tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'] }, { sitting, makeCanvas: fakeCanvas });
+    const made = [];
+    const flying = tweenFrames(spec, 2, beat(-1, far), beat(0, near), plan, { moved: ['map'] }, { sitting, makeCanvas: counted(made) });
     await flying.next();
     await flying.return();
     expect(ended.sort()).toEqual(['inset', 'map']);
+    // a stopped export lets the canvases go too
+    expect(made.length > 0 && made.every((item) => item.width === 0)).toBe(true);
   });
 
   it('places what is written over a map in 3D through its camera as it stands at each frame', async () => {

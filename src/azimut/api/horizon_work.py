@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from ..engine import horizon_work, terrain
 from ..workspace import CaseError
 from .cases import get_case
-from .horizon_finds import ALIGNMENTS_MAX, AREA_CORNERS_MAX, WhoIn
+from .horizon_finds import ALIGNMENTS_MAX, AREA_CORNERS_MAX, ZONES_MAX, Direction, Stand, View, WhoIn
 from .horizon_views import Photo, PhotoPoint, ViewSpec, _photo_here
 
 router = APIRouter(prefix="/api", tags=["horizon"])
@@ -54,6 +54,23 @@ class AlignmentWork(BaseModel):
     heights: Heights = Field(default_factory=Heights)
 
 
+class ZoneWork(BaseModel):
+    """A zone beside the area as Find holds it: its corners, its grid, and whether it is left out."""
+
+    points: list[MapPoint] = Field(default_factory=list, max_length=AREA_CORNERS_MAX)
+    spacing: Literal["auto", 100, 250, 500, 1000] = "auto"
+    out: bool = False
+
+
+class SunWork(BaseModel):
+    """The sun as Find holds it while it is set: a day (blank until typed), two hours, the sides ticked."""
+
+    date: str = Field(default="", pattern=r"^(\d{4}-\d{2}-\d{2})?$")
+    start: str = Field(default="06:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="18:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    sides: list[Literal["ahead", "left", "right", "behind"]] = Field(default_factory=list, max_length=4)
+
+
 class FindWork(BaseModel):
     """Find's setup: the area, the alignments, who took the photo, the settings, the search on show."""
 
@@ -62,6 +79,18 @@ class FindWork(BaseModel):
     who: WhoIn = Field(default_factory=WhoIn)
     spacing: Literal["auto", 100, 250, 500, 1000] = "auto"
     tolerance: float = Field(default=1.0, gt=0, le=10)
+    speed: Literal["gentle", "fast"] = "fast"
+    #: The compass directions the photo may face, none for any.
+    facing: list[Direction] = Field(default_factory=list, max_length=8)
+    #: The ground the eye may stand on, none for any.
+    stands: list[Stand] = Field(default_factory=list, max_length=5)
+    #: The camera looks down from a height, or up at a summit.
+    view: list[View] = Field(default_factory=list, max_length=2)
+    #: A selfie, searched mirrored too.
+    mirror: bool = False
+    zones: list[ZoneWork] = Field(default_factory=list, max_length=ZONES_MAX)
+    #: Where the sun stood against the camera, as Find holds it (its day may be blank while typed).
+    sun: SunWork | None = None
     search: str | None = Field(default=None, max_length=200)
 
 

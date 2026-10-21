@@ -288,5 +288,11 @@ export function looksLikeUrl(value) {
   return /^https?:\/\/\S+$/i.test(String(value ?? '').trim());
 }
 
+/** A Google My Maps link in any of its forms, the same test the backend makes. */
+export function isMyMapsLink(value) {
+  return /^https?:\/\/(www\.)?google\.[^/]+\/maps\/d\/(u\/\d+\/)?(viewer|edit|embed|kml)?\?[^#]*\bmid=[\w-]+/i
+    .test(String(value ?? '').trim());
+}
+
 /** The formats the file picker offers, and the parser accepts. */
 export const ACCEPTS = '.geojson,.json,.kml,.kmz,.gpx';

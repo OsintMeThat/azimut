@@ -475,3 +475,35 @@ def test_snap_falls_back_to_the_given_time_when_the_frame_is_unknown(client, mon
     )
     assert res.status_code == 200 and res.headers["x-frame-time"] == "1.250000"
     assert seen["time_s"] == 1.25
+
+
+@needs_ffmpeg
+def test_a_videos_lens_is_read_off_the_pan_around_a_moment(client, tmp_path):
+    import math
+
+    from stitchscene import _pan
+
+    # a camera panning 5° a second through a 520 px wide frame, its focal 520 px: 53° across
+    folder = tmp_path / "pan"
+    folder.mkdir()
+    for i, view in enumerate(_pan([5.0 * i / 10 for i in range(60)], width=520, height=420, focal=520.0)):
+        view.save(folder / f"f{i:03d}.png")
+    clip = tmp_path / "pan.mp4"
+    _ffmpeg("-framerate", "10", "-i", str(folder / "f%03d.png"), "-c:v", "libx264", "-qp", "0",
+            "-pix_fmt", "yuv444p", str(clip))
+    cid = client.post("/api/cases", json={"name": "Pan"}).json()["id"]
+    path = _upload_video(client, cid, clip)["path"]
+    read = client.post("/api/horizon/lens", json={"case": cid, "path": path, "time": 3.0})
+    assert read.status_code == 200, read.text
+    found = read.json()
+    assert found["fov"] == pytest.approx(2 * math.degrees(math.atan(260 / 520)), rel=0.06)
+    assert found["times"] == [1.5, 3.0, 4.5] and found["turn"] == pytest.approx(15.0, abs=2.0)
+    # a camera that never turns tells no lens, and says so
+    still = tmp_path / "still.mp4"
+    _ffmpeg("-loop", "1", "-i", str(folder / "f000.png"), "-t", "6", "-r", "10", "-c:v", "libx264", "-qp", "0",
+            "-pix_fmt", "yuv444p", str(still))
+    fixed = _upload_video(client, cid, still)["path"]
+    refused = client.post("/api/horizon/lens", json={"case": cid, "path": fixed, "time": 3.0})
+    assert refused.status_code == 422 and "hardly turned" in refused.json()["detail"]
+    # a photo has no pan to read
+    assert client.post("/api/horizon/lens", json={"case": cid, "path": "media/none.png", "time": 0}).status_code == 404

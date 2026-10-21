@@ -1,9 +1,11 @@
 """Find where a photo was taken: the grid, the alignments that narrow it, and the camera found again."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
-from azimut.engine import finder, horizon, skymatch, terrain, workqueue
+from azimut.engine import finder, horizon, horizon_finds, skymatch, terrain, workqueue
 from fakerelief import Peak, Relief, offset
 from skyturns import HALF, trace_on
 
@@ -22,7 +24,7 @@ PEAKS = tuple(
 @pytest.fixture(autouse=True)
 def synthetic_relief(monkeypatch):
     terrain.forget_decoded()
-    monkeypatch.setattr(terrain, "tile", Relief(peaks=PEAKS, plain=200.0))
+    monkeypatch.setattr(terrain, "tile", Relief(peaks=PEAKS, plain=200.0, ripple=0.5))
     yield
     terrain.forget_decoded()
 
@@ -96,6 +98,244 @@ def test_an_alignment_gives_the_heading_and_keeps_the_search_on_its_line():
     best = found["places"][0]
     assert terrain.distance(best["lat"], best["lon"], *CAMERA) < 400.0
     assert best["heading"] == pytest.approx(80.0, abs=3.5)
+
+
+def test_ticked_directions_are_joined_into_sectors_and_narrow_the_march():
+    assert finder.facing_sectors(["n"]) == ((0.0, 22.5),)
+    # side by side, round north too, they are one sector
+    assert finder.facing_sectors(["e", "n", "ne"]) == ((45.0, 67.5),)
+    assert finder.facing_sectors(["nw", "n", "ne"]) == ((0.0, 67.5),)
+    # apart, each is its own
+    assert finder.facing_sectors(["n", "s"]) == ((0.0, 22.5), (180.0, 22.5))
+    # none ticked, or all, is the whole turn; a word no compass has is left out
+    assert finder.facing_sectors([]) is None
+    assert finder.facing_sectors(list(finder.DIRECTIONS)) is None
+    assert finder.facing_sectors(["north"]) is None
+    lens = lambda **kw: finder.Trace(x=np.zeros(6), y=np.zeros(6), half_width=HALF, fov=40.0, known=True, **kw)  # noqa: E731
+    assert finder.turn_share(lens()) == 1.0
+    # one direction and a 40° lens: the sector, the photo's half width either side and a margin
+    assert finder.turn_share(lens(facing=finder.facing_sectors(["e"]))) == pytest.approx((45 + 40 + 4) / 360, abs=0.01)
+    # an unknown lens is marched as wide as the widest it may be
+    wide = finder.Trace(x=np.zeros(6), y=np.zeros(6), half_width=HALF, fov=40.0, within=(30.0, 110.0), facing=finder.facing_sectors(["e"]))
+    assert finder.turn_share(wide) == pytest.approx((45 + 110 + 4) / 360, abs=0.01)
+
+
+def test_directions_keep_the_search_to_their_sectors():
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 1_500.0), reach=REACH, spacing=500.0, fine=500.0)
+    facing_east = _photo()  # 80°: east
+    told = replace(facing_east, facing=finder.facing_sectors(["e"]))
+    found = finder.search(plan, told)
+    best = found["places"][0]
+    assert terrain.distance(best["lat"], best["lon"], *CAMERA) < 400.0
+    assert best["heading"] == pytest.approx(80.0, abs=3.0)
+    # told it faces south, every place found faces south
+    south = replace(facing_east, facing=finder.facing_sectors(["s"]))
+    for place in finder.search(plan, south)["places"]:
+        assert skymatch.within_sectors(place["heading"], ((180.0, 22.5),))
+
+
+def test_the_ground_ticked_keeps_the_grid_to_it_and_water_only_when_ticked(monkeypatch):
+    area = _square(CAMERA, 2_000.0)
+    plan = finder.Plan(area=area, spacing=500.0)
+    lat, lon = finder.grid(plan, 500.0)
+    # the camera's plain, round hills a few kilometres off: all plain or slope, none summit
+    shown = finder.preview(plan)
+    assert shown["total"] == lat.size == shown["kept"]
+    assert {kind for _, _, kind, _ in shown["points"]} <= {"plain", "slope", "valley"}
+    summits = finder.preview(finder.Plan(area=area, spacing=500.0, stands=("summit",)))
+    assert summits["kept"] == 0 and summits["total"] == lat.size
+    assert all(not kept for *_, kept in summits["points"])
+    plains = finder.preview(finder.Plan(area=area, spacing=500.0, stands=("plain", "valley")))
+    assert plains["kept"] == plains["kinds"]["plain"] + plains["kinds"]["valley"]
+    # on water, nobody on foot stands; a drone may fly over it
+    terrain.forget_decoded()
+    monkeypatch.setattr(terrain, "tile", Relief(peaks=(), plain=0.0))
+    wet = finder.preview(plan)
+    assert wet["kinds"]["water"] == wet["total"] and wet["kept"] == 0
+    assert finder.preview(finder.Plan(area=area, spacing=500.0, mode="drone"))["kept"] == wet["total"]
+    # a boat: water ticked keeps it
+    assert finder.preview(finder.Plan(area=area, spacing=500.0, stands=("water",)))["kept"] == wet["total"]
+    found = finder.search(finder.Plan(area=area, reach=REACH, spacing=500.0, fine=500.0), _photo())
+    assert found["points"] == [] and found["verdict"] == "none"
+
+
+def test_lines_said_how_far_set_the_reach_and_the_grid():
+    trace = _photo()
+    line = np.zeros(trace.x.size, dtype=np.int64)
+    said = replace(trace, marks=skymatch.Marks(line=line, far=((0, 3_000.0, 10_000.0),)))
+    # read as far as the farthest line can stand, no farther: what haze hides past it is never searched
+    far, cuts = finder.reaches(finder.Plan(area=[]), said)
+    assert far == pytest.approx(10_000.0 * skymatch.BAND_SLACK, abs=1.0) and cuts == []
+    # a line said nothing of leaves the reach to the rest of the setup
+    assert finder.reaches(finder.Plan(area=[]), trace) == finder.reaches(finder.Plan(area=[]))
+    # the grid is laid finely enough for the nearest line said
+    area = _square(CAMERA, 5_000.0)
+    assert finder.asked_spacing(finder.Plan(area=area)) == finder.auto_spacing(area)
+    assert finder.asked_spacing(finder.Plan(area=area, near=1_000.0)) == pytest.approx(finder.SAID_SHARE * 1_000.0)
+    assert finder.said_nearest([[0, 0.0, 1_000.0]]) == finder.SAID_NEAREST
+    assert finder.said_nearest([[0, 3_000.0, 10_000.0], [1, 1_000.0, 3_000.0]]) == 1_000.0
+    # an area too large for the spacing asked says so in its estimate
+    big = finder.estimate(finder.Plan(area=_square(CAMERA, 30_000.0), spacing=100.0))
+    assert big["asked"] == 100.0 and big["spacing"] > 100.0
+    assert finder.estimate(finder.Plan(area=_square(CAMERA, 1_000.0)))["asked"] is None
+
+
+def test_the_tilt_follows_who_took_the_photo_and_what_was_said():
+    assert finder.tilts_for("ground") == finder.TILTS["ground"]
+    assert finder.tilts_for("ground", ["down"])[0] == finder.LOOK_DOWN
+    assert finder.tilts_for("ground", ["up"])[1] == finder.LOOK_UP
+    assert finder.tilts_for("drone")[0] < -45
+
+
+def test_a_selfie_is_found_mirrored():
+    shot = _photo()
+    mirrored = replace(shot, x=-shot.x[::-1], y=shot.y[::-1])
+    plan = finder.Plan(area=[CAMERA] * 3, reach=REACH)
+    sampler = terrain.Sampler()
+    as_shot = finder.score_point(*CAMERA, mirrored, plan, sampler=sampler, quick=False)
+    both = finder.score_point(*CAMERA, replace(mirrored, mirror=True), plan, sampler=sampler, quick=False)
+    assert both["mirrored"] is True
+    assert both["explained"] > as_shot["explained"] + 0.2
+    assert both["heading"] == pytest.approx(80.0, abs=2.0)
+
+
+def test_the_turn_is_marched_as_wide_as_the_trace_spans():
+    lens = finder.Trace(x=np.array([-0.5, 0.5] * 3), y=np.zeros(6), half_width=HALF, fov=40.0, known=True)
+    assert finder.half_span(lens) == pytest.approx(20.0)
+    # a collage read frame by frame spans past its frames' lens
+    wide = replace(lens, x=np.array([-4.0, 3.0] * 3))
+    assert finder.half_span(wide) == pytest.approx(np.degrees(np.arctan(4.0 * np.tan(np.radians(20.0)))))
+
+
+def test_zones_lay_their_own_grid_and_zones_left_out_are_never_searched():
+    area = _square(CAMERA, 3_000.0)
+    finer = finder.Zone(area=_square(offset(*CAMERA, 45.0, 1_000.0), 500.0), spacing=100.0)
+    lake = finder.Zone(area=_square(offset(*CAMERA, 225.0, 1_500.0), 600.0), out=True)
+    plan = finder.Plan(area=area, spacing=500.0, zones=(finer, lake))
+    lat, lon, steps = finder.spaced_grid(plan, 500.0)
+    plain = finder.grid(finder.Plan(area=area, spacing=500.0), 500.0)[0].size
+    in_finer = finder.inside(finer.area, lat, lon)
+    # the zone's own 100 m grid, its points saying their spacing
+    assert in_finer.sum() >= 80 and set(steps[in_finer].tolist()) == {100.0}
+    assert set(steps[~in_finer].tolist()) == {500.0}
+    # nothing in the zone left out, even where the area covers it
+    assert not finder.inside(lake.area, lat, lon).any()
+    assert lat.size > plain
+    # a zone searched beyond the area adds its ground; a zone with no spacing is laid a third as wide
+    beyond = finder.Zone(area=_square(offset(*CAMERA, 90.0, 6_000.0), 800.0))
+    assert finder.zone_spacings(finder.Plan(area=area, zones=(beyond,)), 600.0) == [200.0]
+    far = finder.spaced_grid(finder.Plan(area=area, spacing=500.0, zones=(beyond,)), 500.0)
+    assert finder.inside(beyond.area, far[0], far[1]).sum() > 0
+    assert finder.within(plan, np.array([CAMERA[0]]), np.array([CAMERA[1]]))[0]
+    lake_middle = offset(*CAMERA, 225.0, 1_500.0)
+    assert not finder.within(plan, np.array([lake_middle[0]]), np.array([lake_middle[1]]))[0]
+    # the zones' grids between them are capped: their spacing widens alike
+    huge = finder.Zone(area=_square(CAMERA, 20_000.0), spacing=50.0)
+    assert finder.zone_spacings(finder.Plan(area=area, zones=(huge,)), 500.0)[0] > 50.0
+
+
+def test_a_search_with_a_zone_left_out_keeps_out_of_it():
+    lake = finder.Zone(area=_square(CAMERA, 400.0), out=True)
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 1_500.0), reach=REACH, spacing=500.0, fine=500.0, zones=(lake,))
+    found = finder.search(plan, _photo())
+    assert found["points"]
+    assert not finder.inside(lake.area, np.array([p["lat"] for p in found["points"]]), np.array([p["lon"] for p in found["points"]])).any()
+
+
+def test_headings_go_to_masks_and_back():
+    sectors = finder.facing_sectors(["n", "ne", "s"])
+    back = finder.mask_sectors(finder.heading_mask(sectors))
+    assert back is not None and len(back) == 2
+    # back to sectors and to headings again, within the degree a border rounds to
+    assert abs(int(finder.heading_mask(back).sum()) - int(finder.heading_mask(sectors).sum())) <= 2
+    assert abs(int(finder.heading_mask(sectors).sum()) - 135) <= 2
+    assert finder.mask_sectors(finder.heading_mask(None)) is None
+    assert finder.mask_sectors(np.zeros(360, dtype=bool)) == ()
+
+
+def test_the_sun_against_the_camera_gives_its_headings():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from azimut.engine import sky
+
+    noon = datetime(2024, 6, 21, 13, 0, tzinfo=ZoneInfo("Europe/Paris"))
+    azimuth = float(sky.positions(*CAMERA, [noon])["sun_azimuth"][0])
+    mask, read = finder.sun_headings(*CAMERA, "2024-06-21", "13:00", "13:00", ["ahead"])
+    assert read["up"] and read["zone"] == "Europe/Paris" and read["from"] == pytest.approx(azimuth, abs=0.1)
+    # facing the sun: a quarter turn about it
+    assert mask[int(azimuth)] and abs(int(mask.sum()) - 90) <= 1
+    assert not mask[int(azimuth + 180) % 360]
+    # the sun on the right: the camera faced a quarter turn short of it
+    right, _ = finder.sun_headings(*CAMERA, "2024-06-21", "13:00", "13:00", ["right"])
+    assert right[int(azimuth - 90) % 360] and not right[int(azimuth) % 360]
+    # a window widens it: the sun moves over the afternoon
+    afternoon, _ = finder.sun_headings(*CAMERA, "2024-06-21", "13:00", "17:00", ["ahead"])
+    assert afternoon.sum() > mask.sum() + 40
+    # at night the sun says nothing; no side said, nothing either
+    _, dark = finder.sun_headings(*CAMERA, "2024-06-21", "02:00", "03:00", ["ahead"])
+    assert dark["up"] is False
+    assert finder.sun_headings(*CAMERA, "2024-06-21", "13:00", "14:00", []) is None
+    # with compass directions, a heading must agree with both
+    south_sun = finder.facing_with_sun(finder.facing_sectors(["s", "sw"]), mask)
+    assert south_sun and finder.heading_mask(south_sun).sum() < finder.heading_mask(finder.facing_sectors(["s", "sw"])).sum()
+    assert finder.facing_with_sun(finder.facing_sectors(["n"]), mask) == ()
+
+
+def test_a_large_grid_is_scored_by_processes_and_finds_the_same_camera():
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 2_000.0), reach=REACH, spacing=250.0, fine=250.0)
+    trace = _photo()
+    assert finder.grid(plan, 250.0)[0].size >= finder.LANE_MIN_POINTS
+    told = []
+    alone = finder.search(plan, trace)
+    shared = finder.search(plan, trace, lanes=2, progress=lambda done, total: told.append((done, total)))
+    assert shared["places"][0]["lat"] == pytest.approx(alone["places"][0]["lat"], abs=1e-6)
+    assert shared["places"][0]["explained"] == pytest.approx(alone["places"][0]["explained"], abs=1e-6)
+    assert len(shared["points"]) == len(alone["points"])
+    # progress is told once a point, rising
+    assert [done for done, _ in told] == sorted(done for done, _ in told)
+    # a stop asked reaches the processes too
+    with pytest.raises(finder.Cancelled):
+        finder.search(plan, trace, lanes=2, cancelled=lambda: True)
+
+
+def test_a_fast_search_takes_the_cores_the_machine_can_spare(monkeypatch):
+    assert horizon_finds.lanes_for("gentle") == 1
+    monkeypatch.setattr("os.cpu_count", lambda: 16)
+    monkeypatch.setattr(horizon_finds, "_available_memory", lambda: 16e9)
+    assert horizon_finds.lanes_for("fast") == horizon_finds.LANES_MAX
+    monkeypatch.setattr(horizon_finds, "_available_memory", lambda: 2.5e9)
+    assert horizon_finds.lanes_for("fast") == 1
+    monkeypatch.setattr(horizon_finds, "_available_memory", lambda: None)
+    monkeypatch.setattr("os.cpu_count", lambda: 4)
+    assert horizon_finds.lanes_for(None) == 2
+
+
+def test_a_line_along_the_sea_lies_on_the_sea_s_horizon(monkeypatch):
+    coast = (12.7, 43.5)
+    land = Peak(*offset(*coast, 90.0, 3_000.0), height=400.0, radius=2_500.0)
+    headland = Peak(*offset(*coast, 225.0, 6_000.0), height=250.0, radius=900.0)
+    terrain.forget_decoded()
+    monkeypatch.setattr(terrain, "tile", Relief(peaks=(land, headland), plain=0.0))
+    # the sea's horizon from 2 m and from 200 m above it
+    assert finder.sea_horizon(2.0) == pytest.approx(5_400, rel=0.03)
+    assert finder.sea_horizon(200.0) == pytest.approx(54_100, rel=0.03)
+    swept = horizon.sweep(horizon.Observer(*coast), azimuths=np.arange(0.0, 360.0, 0.1), far=80_000.0)
+    turn = skymatch.Turn(0.0, 0.1, swept.skyline, distance=swept.skyline_distance)
+    x, y = trace_on(turn, heading=245.0, fov=60.0)
+    # the headland is one stroke, the sea's horizon past it another, said to be the sea
+    out_at_sea = turn.far(245.0 + skymatch.directions(x, y, fov=60.0)[0]) > 20_000
+    line = out_at_sea.astype(np.int64)
+    trace = finder.Trace(x=x, y=y, half_width=HALF, fov=60.0, known=True, floor=finder.FLOOR_M,
+                         marks=skymatch.Marks(line=line, sea=(1,)))
+    plan = finder.Plan(area=[coast] * 3)
+    sampler = terrain.Sampler()
+    found = finder.score_point(*coast, trace, plan, sampler=sampler, quick=False)
+    assert found["explained"] > 0.5 and found["heading"] == pytest.approx(245.0, abs=1.5)
+    # the same stroke said to stand within a kilometre cannot lie on that horizon
+    near = replace(trace, marks=skymatch.Marks(line=line, far=((1, 0.0, 1_000.0),)))
+    assert finder.score_point(*coast, near, plan, sampler=sampler, quick=False)["explained"] < found["explained"] - 0.3
+    terrain.forget_decoded()
 
 
 def test_a_search_stops_when_asked():
@@ -237,6 +477,121 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     assert client.get(f"/api/cases/{case_id}/horizon/finds/{name}").status_code == 404
 
 
+def test_a_search_keeps_the_directions_ticked_and_runs_with_them(client):
+    case_id = client.post("/api/cases", json={"name": "Facing search"}).json()["id"]
+    started = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(facing=["ne", "e"]))
+    assert started.status_code == 200, started.text
+    name = started.json()["name"]
+    client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    ask = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]
+    assert ask["facing"] == ["ne", "e"]
+    plan, trace = horizon_finds.plan_of(ask)
+    assert trace.facing == ((67.5, 45.0),)
+    assert plan.stands == ()
+    # every search keeps unsaid lines off the eye's own slope, and bounds the tilt as who took it
+    assert trace.floor == finder.FLOOR_M and trace.tilts == finder.TILTS["ground"] and not trace.mirror
+    _, looking = horizon_finds.plan_of({**ask, "view": ["down"], "mirror": True})
+    assert looking.tilts[0] == finder.LOOK_DOWN and looking.mirror
+    # a search saved before directions could be ticked keeps the trace's own sector, if any
+    _, old = horizon_finds.plan_of({**ask, "facing": None, "trace": {**ask["trace"], "facing": [200.0, 30.0]}})
+    assert old.facing == ((200.0, 30.0),)
+
+
+def test_a_search_keeps_how_far_its_lines_stand_how_the_camera_looks_and_a_selfie(client):
+    case_id = client.post("/api/cases", json={"name": "Said search"}).json()["id"]
+    count = len(_ask()["trace"]["x"])
+    trace = {**_ask()["trace"], "line": [0] * count, "far": [[0, 1_000.0, 3_000.0]]}
+    started = client.post(f"/api/cases/{case_id}/horizon/finds",
+                          json=_ask(trace=trace, view=["down"], mirror=True, stands=["water"]))
+    assert started.status_code == 200, started.text
+    name = started.json()["name"]
+    client.post(f"/api/cases/{case_id}/horizon/finds/{name}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    ask = client.get(f"/api/cases/{case_id}/horizon/finds/{name}").json()["ask"]
+    assert ask["view"] == ["down"] and ask["mirror"] is True and ask["stands"] == ["water"]
+    plan, read = horizon_finds.plan_of(ask)
+    assert read.marks.far == ((0, 1_000.0, 3_000.0),) and read.mirror and read.tilts[0] == finder.LOOK_DOWN
+    # the grid is laid for the nearest line said
+    assert plan.near == 1_000.0
+    # zones are kept with the question, and an area of a few thousand km² is searched
+    zones = [{"area": _ask()["area"], "spacing": 100.0}, {"area": [{"lat": lat, "lon": lon} for lat, lon in _square(CAMERA, 300.0)], "out": True}]
+    big = [{"lat": lat, "lon": lon} for lat, lon in _square(CAMERA, 35_000.0)]
+    zoned = client.post(f"/api/cases/{case_id}/horizon/finds", json=_ask(zones=zones, area=big))
+    assert zoned.status_code == 200, zoned.text
+    client.post(f"/api/cases/{case_id}/horizon/finds/{zoned.json()['name']}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    kept = client.get(f"/api/cases/{case_id}/horizon/finds/{zoned.json()['name']}").json()["ask"]["zones"]
+    assert kept[0]["spacing"] == 100.0 and kept[1]["out"] is True and len(kept[1]["area"][0]) == 2
+    zoned_plan, _ = horizon_finds.plan_of(client.get(f"/api/cases/{case_id}/horizon/finds/{zoned.json()['name']}").json()["ask"])
+    assert [zone.out for zone in zoned_plan.zones] == [False, True]
+    estimate = client.post("/api/horizon/finds/estimate", json=_ask(trace=trace)).json()
+    assert estimate["spacing"] <= finder.SAID_SHARE * 1_000.0 * 1.25 ** 8
+
+
+def test_the_sectors_a_setup_leaves_are_said_before_the_search(client):
+    area = _ask()["area"]
+    every = client.post("/api/horizon/finds/sectors", json={"area": area}).json()
+    assert every == {"sectors": None, "sun": None}
+    east = client.post("/api/horizon/finds/sectors", json={"area": area, "facing": ["e"]}).json()
+    assert east["sectors"] == [[90.0, 22.5]]
+    sun = {"date": "2024-06-21", "start": "13:00", "end": "13:00", "sides": ["ahead"]}
+    lit = client.post("/api/horizon/finds/sectors", json={"area": area, "sun": sun}).json()
+    assert lit["sun"]["up"] is True and len(lit["sectors"]) == 1 and lit["sectors"][0][1] == pytest.approx(45.5, abs=0.6)
+    none = client.post("/api/horizon/finds/sectors", json={"area": area, "facing": ["n"], "sun": sun}).json()
+    assert none["sectors"] == []
+    # a search the sun and the compass leave no heading to is refused, and a sun said badly too
+    case_id = client.post("/api/cases", json={"name": "Sun search"}).json()["id"]
+    url = f"/api/cases/{case_id}/horizon/finds"
+    assert client.post(url, json=_ask(facing=["n"], sun=sun)).status_code == 422
+    assert client.post(url, json=_ask(sun={**sun, "date": "21/06/2024"})).status_code == 422
+    assert client.post(url, json=_ask(sun={**sun, "sides": ["up"]})).status_code == 422
+    started = client.post(url, json=_ask(sun=sun))
+    assert started.status_code == 200, started.text
+    client.post(f"{url}/{started.json()['name']}/cancel")
+    workqueue.wait_until_idle(timeout=120)
+    ask = client.get(f"{url}/{started.json()['name']}").json()["ask"]
+    _, trace = horizon_finds.plan_of(ask)
+    assert trace.facing == horizon_finds.facing_of(ask) and trace.facing is not None
+
+
+def test_a_point_is_tried_alone_as_a_search_would_score_it(client):
+    case_id = client.post("/api/cases", json={"name": "Tried point"}).json()["id"]
+    body = {key: value for key, value in _ask().items() if key not in ("area", "spacing", "title")}
+    here = client.post(f"/api/cases/{case_id}/horizon/finds/try", json={**body, "at": {"lat": CAMERA[0], "lon": CAMERA[1]}})
+    assert here.status_code == 200, here.text
+    place = here.json()["place"]
+    assert place["explained"] > 0.5 and place["heading"] == pytest.approx(80.0, abs=2.0)
+    assert here.json()["frames"] is None
+    away = client.post(f"/api/cases/{case_id}/horizon/finds/try",
+                       json={**body, "at": dict(zip(("lat", "lon"), offset(*CAMERA, 200.0, 3_000.0)))}).json()["place"]
+    assert away["explained"] < place["explained"]
+    assert client.post(f"/api/cases/{case_id}/horizon/finds/try", json={**body, "at": {"lat": 95, "lon": 0}}).status_code == 422
+    assert client.post(f"/api/cases/{case_id}/horizon/finds/try", json={**body, "at": {"lat": 45, "lon": 6}, "reach": 7}).status_code == 422
+
+
+def test_a_finished_search_is_checked_against_decoys_of_its_trace(client):
+    case_id = client.post("/api/cases", json={"name": "Checked search"}).json()["id"]
+    url = f"/api/cases/{case_id}/horizon/finds"
+    name = client.post(url, json=_ask()).json()["name"]
+    workqueue.wait_until_idle(timeout=180)
+    assert client.get(f"{url}/{name}").json()["status"] == "done"
+    checked = client.post(f"{url}/{name}/check")
+    assert checked.status_code == 200, checked.text
+    record = checked.json()
+    assert record["result"]["checked"] is True
+    best = record["result"]["places"][0]
+    # the real trace explains the camera's place far better than its decoys do
+    assert best["decoy"] < best["explained"] - 0.3
+    assert client.get(f"{url}/{name}").json()["result"]["places"][0]["decoy"] == best["decoy"]
+    # a search still running, or gone, cannot be checked
+    running = client.post(url, json=_ask()).json()["name"]
+    assert client.post(f"{url}/{running}/check").status_code in (409, 200)
+    client.post(f"{url}/{running}/cancel")
+    workqueue.wait_until_idle(timeout=180)
+    assert client.post(f"{url}/nothing/check").status_code == 404
+
+
 def test_a_search_keeps_the_marks_beside_its_trace(client):
     case_id = client.post("/api/cases", json={"name": "Marked search"}).json()["id"]
     trace = {**_ask()["trace"], "ridge_x": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5], "ridge_y": [-0.3] * 6,
@@ -273,6 +628,18 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     estimate = client.post("/api/horizon/finds/estimate", json=_ask()).json()
     assert estimate["coarse"] > 0 and estimate["step"] == 0.5
     assert estimate["most"] >= estimate["points"]
+    assert estimate["turn"] == 1.0
+    # a direction ticked marches a share of the turn: the time said shrinks with it
+    east = client.post("/api/horizon/finds/estimate", json=_ask(facing=["e"])).json()
+    assert east["turn"] < 0.3 and east["points"] == estimate["points"]
+    # the grid before the search, each point with its ground, the ground ticked kept
+    shown = client.post("/api/horizon/finds/preview", json=_ask(stands=["summit"])).json()
+    assert shown["total"] > 0 and shown["kept"] == shown["kinds"]["summit"]
+    assert len(shown["points"]) == shown["total"]
+    # read before any trace is drawn: the area alone is enough
+    bare = client.post("/api/horizon/finds/preview", json={"area": _ask()["area"], "spacing": 500.0})
+    assert bare.status_code == 200, bare.text
+    assert bare.json()["total"] == shown["total"]
     case_id = client.post("/api/cases", json={"name": "Refused searches"}).json()["id"]
     url = f"/api/cases/{case_id}/horizon/finds"
     tiny = [{"lat": 45.0, "lon": 6.0}, {"lat": 45.0001, "lon": 6.0}, {"lat": 45.0, "lon": 6.0001}]
@@ -287,6 +654,16 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
         {"photo": {"path": "media/p.png", "strokes": [], "marks": {"cuts": [2.0]}}},
         {"photo": {"path": "media/p.png", "bend": 0.5}},
         {"photo": {"path": "media/p.png", "corners": [{"u": 0.0, "v": 0.0}] * 3}},
+        {"facing": ["north"]},
+        {"stands": ["cliff"]},
+        {"view": ["sideways"]},
+        {"area": [{"lat": lat, "lon": lon} for lat, lon in _square(CAMERA, 60_000.0)]},
+        {"zones": [{"area": tiny}]},
+        {"zones": [{"area": _ask()["area"], "spacing": 10}]},
+        # a line's distance needs each point's stroke, and its nearest before its farthest
+        {"trace": {**_ask()["trace"], "far": [[0, 1_000.0, 3_000.0]]}},
+        {"trace": {**_ask()["trace"], "line": [0] * len(_ask()["trace"]["x"]), "far": [[0, 3_000.0, 1_000.0]]}},
+        {"trace": {**_ask()["trace"], "sea": [0]}},
     ):
         assert client.post(url, json=_ask(**change)).status_code == 422
     assert client.get(f"{url}/nothing").status_code == 404

@@ -77,7 +77,7 @@ describe('the Horizon layout', () => {
   it('keeps how the ground is drawn on the view with a photo laid, out of the pen\'s way', () => {
     const view = readFileSync(new URL('./horizon/HorizonView.svelte', import.meta.url), 'utf8');
     expect(view).toContain(
-      'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting))'
+      'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing))'
     );
     expect(view).toContain('{#if controlsShown}\n    <div class="controls">');
     // the names keep clear of the corner only while the controls are in it
@@ -106,9 +106,18 @@ describe('the small map\'s layers', () => {
     expect(source).toContain("const HORIZON_LAYERS = ['boundaries', 'placenames', 'saved'];");
     expect(source).toContain("createMapLayerMemory('horizon', HORIZON_LAYERS)");
     expect(source).toContain("const myLayers = addedLayers.scope('horizon');");
-    expect(markup).toContain('<LayerList');
+    expect(markup).toContain('<MapLayersPanel');
     expect(markup).toContain('bind:folded={layersFolded}');
     expect(markup).toContain('added={myLayers.rows}');
+  });
+
+  it('hands the same switches and case layers to Find\'s map', () => {
+    const find = markup.slice(markup.indexOf('<Find\n'), markup.indexOf('/>', markup.indexOf('<Find\n')));
+    expect(find).toContain('rows: layerRows');
+    expect(find).toContain('added: myLayers.rows');
+    expect(find).toContain("drawn: uiState.tool === 'horizon' ? myLayers.drawn : []");
+    expect(find).toContain('toggle: (layer) => myLayers.toggle(caseState.current?.id, layer)');
+    expect(find).toContain("saved: mapLayers.has('saved') && caseState.current ? savedItems : null");
   });
 
   it('draws case layers only on screen and allows their cards only while editing', () => {

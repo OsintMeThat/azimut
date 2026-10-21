@@ -19,14 +19,24 @@ from ..engine import artifacts as artifact_engine
 from ..engine import finder, horizon, horizon_finds, skymatch, terrain, workqueue
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .horizon import HEIGHT_LIMITS, MATCH_PLANE_MAX, MATCH_POINTS_MAX, SKYLINE_CUTS, MarksIn
+from .horizon import HEIGHT_LIMITS, MARK_FAR_MAX, MATCH_PLANE_MAX, MATCH_POINTS_MAX, SKYLINE_CUTS, MarksIn
 from .horizon_views import Marks, PhotoPoint
 
 router = APIRouter(prefix="/api", tags=["horizon"])
 
 FALLBACK = "Search"
+#: A compass direction the photo may face (engine/finder.py DIRECTIONS).
+Direction = Literal["n", "ne", "e", "se", "s", "sw", "w", "nw"]
+#: The ground the eye may stand on (engine/landform.py STANDS).
+Stand = Literal["summit", "slope", "valley", "plain", "water"]
+#: Which way the camera looks when not about level (engine/finder.py `tilts_for`).
+View = Literal["down", "up"]
 AREA_CORNERS_MAX = 200
 ALIGNMENTS_MAX = 12
+ZONES_MAX = 12
+# An area or a zone is this large at the most, square metres, and this small at the least.
+AREA_MAX_M2 = 10_000e6
+AREA_MIN_M2 = 1e4
 
 
 class LatLon(BaseModel):
@@ -101,29 +111,91 @@ class PhotoIn(BaseModel):
     corners: list[PhotoPoint] | None = Field(default=None, min_length=4, max_length=4)
 
 
-class FindIn(BaseModel):
-    """What a search asks: where, for what trace, by whom, and how finely."""
+def _sized(area: list[LatLon], what: str) -> None:
+    size = finder.area_m2([(p.lat, p.lon) for p in area])
+    if size < AREA_MIN_M2:
+        raise ValueError(f"the {what} is too small to search")
+    if size > AREA_MAX_M2:
+        raise ValueError(f"the {what} is too large: keep it under {AREA_MAX_M2 / 1e6:.0f} km²")
 
-    title: str | None = Field(default=None, max_length=200)
-    photo: PhotoIn | None = None
-    trace: TraceIn
+
+class ZoneIn(BaseModel):
+    """A zone beside the area: searched on its own grid (`spacing` metres, None: finer than the area's), or left out."""
+
+    area: list[LatLon] = Field(min_length=3, max_length=AREA_CORNERS_MAX)
+    spacing: float | None = Field(default=None, ge=50, le=5000)
+    out: bool = False
+
+    @model_validator(mode="after")
+    def _sane(self) -> ZoneIn:
+        _sized(self.area, "zone")
+        return self
+
+
+class GroundIn(BaseModel):
+    """Where a search would look, by whom and on what ground: what its grid is laid from, the trace aside."""
+
     area: list[LatLon] = Field(min_length=3, max_length=AREA_CORNERS_MAX)
     who: WhoIn = Field(default_factory=WhoIn)
     reach: int | None = None
     spacing: float | None = Field(default=None, ge=50, le=5000)
     alignments: list[AlignmentIn] = Field(default_factory=list, max_length=ALIGNMENTS_MAX)
+    #: The ground the eye may stand on, none for any.
+    stands: list[Stand] = Field(default_factory=list, max_length=5)
+    #: How far the nearest traced line is said to stand, metres: the grid is laid finely enough for it.
+    near: float | None = Field(default=None, ge=0, le=MARK_FAR_MAX)
+    #: Zones searched on their own grid beside the area, or left out.
+    zones: list[ZoneIn] = Field(default_factory=list, max_length=ZONES_MAX)
+
+    @model_validator(mode="after")
+    def _sane(self) -> GroundIn:
+        if self.reach is not None and self.reach not in {int(c) for c in SKYLINE_CUTS}:
+            raise ValueError("a reach is one the panorama keeps its skyline at")
+        _sized(self.area, "area")
+        return self
+
+
+class SunIn(BaseModel):
+    """Where the sun stood against the camera, on a day, between two local hours at the place."""
+
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start: str = Field(default="06:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="18:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    sides: list[Literal["ahead", "left", "right", "behind"]] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def _sane(self) -> SunIn:
+        from datetime import date
+
+        try:
+            date.fromisoformat(self.date)
+        except ValueError as exc:
+            raise ValueError("the sun's day is a date, year first") from exc
+        return self
+
+
+class FindIn(GroundIn):
+    """What a search asks: where, for what trace, by whom, and how finely."""
+
+    title: str | None = Field(default=None, max_length=200)
+    photo: PhotoIn | None = None
+    trace: TraceIn
+    #: The compass directions the photo may face, none for any.
+    facing: list[Direction] = Field(default_factory=list, max_length=8)
+    #: The camera looks down from a height, or up at a summit: its tilt is let go that way.
+    view: list[View] = Field(default_factory=list, max_length=2)
+    #: A selfie: searched mirrored too.
+    mirror: bool = False
+    #: Where the sun stood against the camera, when the analyst says it.
+    sun: SunIn | None = None
+    #: Fast scores a large grid on several cores; gentle on one, leaving the computer free.
+    speed: Literal["gentle", "fast"] = "fast"
     hints: dict[str, Any] | None = None
 
     @model_validator(mode="after")
-    def _sane(self) -> FindIn:
-        if self.reach is not None and self.reach not in {int(c) for c in SKYLINE_CUTS}:
-            raise ValueError("a reach is one the panorama keeps its skyline at")
-        area = [(p.lat, p.lon) for p in self.area]
-        size = finder.area_m2(area)
-        if size < 1e4:
-            raise ValueError("the area is too small to search")
-        if size > 2_500e6:
-            raise ValueError("the area is too large: keep it under 2500 km²")
+    def _headings_left(self) -> FindIn:
+        if self.sun is not None and horizon_finds.facing_of(_asked(self)) == ():
+            raise ValueError("the sun and the directions ticked leave no heading to search")
         return self
 
 
@@ -132,14 +204,22 @@ def _names(case: Any) -> set[str]:
     return {path.stem.casefold() for path in folder.glob("*.json")} if folder.is_dir() else set()
 
 
+def _asked(body: GroundIn) -> dict[str, Any]:
+    """A question as the case keeps it: corners as `[lat, lon]` pairs."""
+    return {
+        **body.model_dump(),
+        "area": [[p.lat, p.lon] for p in body.area],
+        "zones": [{**zone.model_dump(), "area": [[p.lat, p.lon] for p in zone.area]} for zone in body.zones],
+    }
+
+
 @router.post("/cases/{case_id}/horizon/finds")
 def start_find(case_id: str, body: FindIn) -> dict[str, Any]:
     """Keep the question as a search of the case and start it on the background queue."""
     case = get_case(case_id)
     title = body.title or (f"{body.photo.title} search" if body.photo and body.photo.title else FALLBACK)
     name = layout.free_stem(_names(case), layout.slugify(title, FALLBACK), FALLBACK)
-    ask = body.model_dump()
-    ask["area"] = [[p.lat, p.lon] for p in body.area]
+    ask = _asked(body)
     ask.pop("title", None)
     record = horizon_finds.new_record(name, ask)
     rel = layout.horizon_find_rel(name)
@@ -150,11 +230,88 @@ def start_find(case_id: str, body: FindIn) -> dict[str, Any]:
     return {"name": name, **horizon_finds.row(name, record)}
 
 
+class SectorsIn(BaseModel):
+    """The headings a setup leaves to search: the compass directions ticked and the sun, at the area."""
+
+    area: list[LatLon] = Field(min_length=3, max_length=AREA_CORNERS_MAX)
+    facing: list[Direction] = Field(default_factory=list, max_length=8)
+    sun: SunIn | None = None
+
+
+@router.post("/horizon/finds/sectors")
+def find_sectors(body: SectorsIn) -> dict[str, Any]:
+    """The headings searched, as sectors `[middle, half width]` (None: every heading; []: none left), and
+    what the sun said: its zone and its azimuths over the window, and whether it was up."""
+    ask = {"area": [[p.lat, p.lon] for p in body.area], "facing": body.facing,
+           "sun": None if body.sun is None else body.sun.model_dump()}
+    sectors = horizon_finds.facing_of(ask)
+    return {
+        "sectors": None if sectors is None else [[round(c, 1), round(h, 1)] for c, h in sectors],
+        "sun": horizon_finds.sun_of(ask),
+    }
+
+
 @router.post("/horizon/finds/estimate")
 def estimate_find(body: FindIn) -> dict[str, Any]:
     """How many points a search would lay and refine, and the columns of its turns, before it runs."""
-    plan, trace = horizon_finds.plan_of({**body.model_dump(), "area": [[p.lat, p.lon] for p in body.area]})
-    return {**finder.estimate(plan), "step": finder.column_step(trace)}
+    plan, trace = horizon_finds.plan_of(_asked(body))
+    return {**finder.estimate(plan), "step": finder.column_step(trace), "turn": round(finder.turn_share(trace), 3)}
+
+
+@router.post("/horizon/finds/preview")
+def preview_find(body: GroundIn) -> dict[str, Any]:
+    """The grid a search would lay, each point with the ground it stands on and whether it is searched.
+
+    Reads the terrain over the area, which the search reads anyway: asked once the
+    analyst has drawn the area, never before.
+    """
+    plan = horizon_finds.plan_from(_asked(body))
+    try:
+        return finder.preview(plan)
+    except terrain.TerrainUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"The terrain could not be loaded: {exc}") from exc
+
+
+class TryIn(BaseModel):
+    """A trace tried from one point of the map, as a search would score it there: what a search
+    asks, the area aside."""
+
+    at: LatLon
+    photo: PhotoIn | None = None
+    trace: TraceIn
+    who: WhoIn = Field(default_factory=WhoIn)
+    reach: int | None = None
+    alignments: list[AlignmentIn] = Field(default_factory=list, max_length=ALIGNMENTS_MAX)
+    facing: list[Direction] = Field(default_factory=list, max_length=8)
+    view: list[View] = Field(default_factory=list, max_length=2)
+    mirror: bool = False
+    sun: SunIn | None = None
+    hints: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _sane(self) -> TryIn:
+        if self.reach is not None and self.reach not in {int(c) for c in SKYLINE_CUTS}:
+            raise ValueError("a reach is one the panorama keeps its skyline at")
+        return self
+
+
+@router.post("/cases/{case_id}/horizon/finds/try")
+def try_point(case_id: str, body: TryIn) -> dict[str, Any]:
+    """The trace tried from one point, searched in full as a search's best places are: how much it
+    explains there and the camera that lays it, before (or instead of) a whole search."""
+    case = get_case(case_id)
+    ask = body.model_dump()
+    ask["area"] = [[body.at.lat, body.at.lon]] * 3
+    plan, trace = horizon_finds.plan_of(ask)
+    plan, trace, framed = horizon_finds.on_frames(case, ask, plan, trace)
+    try:
+        place = finder.score_point(
+            body.at.lat, body.at.lon, trace, plan, sampler=terrain.Sampler(), quick=False,
+            heights=plan.final_heights or None,
+        )
+    except terrain.TerrainUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"The terrain could not be loaded: {exc}") from exc
+    return {"place": place, "frames": framed}
 
 
 @router.get("/cases/{case_id}/horizon/finds")
@@ -198,6 +355,22 @@ def cancel_find(case_id: str, name: str) -> dict[str, Any]:
         record["status"] = "cancelled"
         horizon_finds.write(case, safe, record)
     return horizon_finds.row(safe, record)
+
+
+@router.post("/cases/{case_id}/horizon/finds/{name}/check")
+def check_find(case_id: str, name: str) -> dict[str, Any]:
+    """A finished search's places tried again with decoy traces, the search kept with what they explain."""
+    case = get_case(case_id)
+    safe, record = _one(case, name)
+    if record.get("status") != "done" or not (record.get("result") or {}).get("places"):
+        raise HTTPException(status_code=409, detail="only a finished search with places can be checked")
+    try:
+        horizon_finds.check(case, record)
+    except terrain.TerrainUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"The terrain could not be loaded: {exc}") from exc
+    record["result"]["checked"] = True
+    horizon_finds.write(case, safe, record)
+    return {"name": safe, **record}
 
 
 @router.delete("/cases/{case_id}/horizon/finds/{name}")

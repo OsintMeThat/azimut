@@ -10,6 +10,9 @@
  *   inner  the ids of inner edges: a ridge seen against farther land, not the sky
  *   pairs  `[front, back]` ids: the first stands in front of the second
  *   cuts   where a collage is cut, across the photo (u, 0 to 1)
+ *   far    how far some lines stand: `{ line, bands }`, the ids of the
+ *          distances ticked (`DISTANCE_BANDS`), several when unsure
+ *   sea    the ids of lines along the sea's horizon: sky above, open sea below
  *
  * A stroke drawn along the skyline that lies under another one is an inner
  * edge whatever pen drew it: nothing under a line can be the sky's edge.
@@ -20,7 +23,46 @@ export const NO_MARKS = Object.freeze({
   inner: [],
   pairs: [],
   cuts: [],
+  far: [],
+  sea: [],
 });
+
+/**
+ * How far a line may stand, in the words the tool offers, and the metres each
+ * stands for. The search lays a line only on ground within the distances ticked
+ * (engine/skymatch.py `Marks.far`), give or take a third for the guess.
+ */
+export const DISTANCE_BANDS = Object.freeze([
+  { id: "near", label: "< 1 km", low: 0, high: 1_000 },
+  { id: "b1", label: "1–3 km", low: 1_000, high: 3_000 },
+  { id: "b3", label: "3–10 km", low: 3_000, high: 10_000 },
+  { id: "b10", label: "10–30 km", low: 10_000, high: 30_000 },
+  { id: "b30", label: "> 30 km", low: 30_000, high: 150_000 },
+]);
+
+/** The distances ticked, in the menu's order, once each; anything else left out. */
+export function cleanBands(bands) {
+  const said = new Set(Array.isArray(bands) ? bands : []);
+  return DISTANCE_BANDS.filter((band) => said.has(band.id)).map((band) => band.id);
+}
+
+/** The metres a line with these distances ticked may stand at, `[low, high]`, or null for none. */
+export function farRange(bands) {
+  const ticked = DISTANCE_BANDS.filter((band) => cleanBands(bands).includes(band.id));
+  if (!ticked.length) return null;
+  return [Math.min(...ticked.map((band) => band.low)), Math.max(...ticked.map((band) => band.high))];
+}
+
+/** The distances ticked, in a few words: "1–3 km", "1–10 km", "< 3 km", "> 10 km". */
+export function farLabel(bands) {
+  const range = farRange(bands);
+  if (!range) return "";
+  const [low, high] = range;
+  const km = (metres) => `${Math.round(metres / 1000)}`;
+  if (low === 0) return `< ${km(high)} km`;
+  if (high >= 150_000) return `> ${km(low)} km`;
+  return `${km(low)}–${km(high)} km`;
+}
 
 /** The most cuts and pairs a photo keeps. */
 export const CUTS_MAX = 12;
@@ -84,7 +126,14 @@ export function cleanMarks(marks, count) {
     .map((u) => Math.round(u * 10000) / 10000)
     .sort((a, b) => a - b)
     .slice(0, CUTS_MAX);
-  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts };
+  const sea = [...new Set((marks?.sea ?? []).filter((id) => known.has(id) && !inner.includes(id)))].sort((a, b) => a - b);
+  const far = [];
+  for (const one of marks?.far ?? []) {
+    const bands = cleanBands(one?.bands);
+    if (!known.has(one?.line) || !bands.length || far.some((f) => f.line === one.line)) continue;
+    far.push({ line: one.line, bands });
+  }
+  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea };
 }
 
 /** Whether two sets of marks say the same thing. */
@@ -96,7 +145,9 @@ export function sameMarks(a, b) {
     sameIds(x.inner, y.inner) &&
     sameIds(x.cuts, y.cuts) &&
     x.pairs.length === y.pairs.length &&
-    x.pairs.every((p, i) => p[0] === y.pairs[i][0] && p[1] === y.pairs[i][1])
+    x.pairs.every((p, i) => p[0] === y.pairs[i][0] && p[1] === y.pairs[i][1]) &&
+    JSON.stringify(x.far ?? []) === JSON.stringify(y.far ?? []) &&
+    sameIds(x.sea ?? [], y.sea ?? [])
   );
 }
 
@@ -108,7 +159,12 @@ export function sameCuts(a, b) {
 /** Marks with nothing in them but each stroke's id are none worth keeping. */
 export function marksSaid(marks) {
   return Boolean(
-    marks && (marks.inner.length || marks.pairs.length || marks.cuts.length),
+    marks &&
+      (marks.inner.length ||
+        marks.pairs.length ||
+        marks.cuts.length ||
+        marks.far?.length ||
+        marks.sea?.length),
   );
 }
 
@@ -230,13 +286,55 @@ export function togglePair(marks, front, back) {
   };
 }
 
-/** Marks with a stroke's id said to be an inner edge (`true`) or the skyline. */
+/** Marks with a stroke's id said to be an inner edge (`true`) or the skyline; an inner edge is no sea line. */
 export function setInner(marks, id, inner) {
   const rest = marks.inner.filter((one) => one !== id);
   return {
     ...marks,
     inner: inner ? [...rest, id].sort((a, b) => a - b) : rest,
+    sea: inner ? (marks.sea ?? []).filter((one) => one !== id) : (marks.sea ?? []),
   };
+}
+
+/** Marks with a stroke's id said to run along the sea's horizon (`true`), or not; a sea line is skyline. */
+export function setSea(marks, id, sea) {
+  const rest = (marks.sea ?? []).filter((one) => one !== id);
+  return {
+    ...marks,
+    inner: sea ? marks.inner.filter((one) => one !== id) : marks.inner,
+    sea: sea ? [...rest, id].sort((a, b) => a - b) : rest,
+  };
+}
+
+/** The distances ticked for a line, `[]` when none is said. */
+export function farOf(marks, id) {
+  return (marks?.far ?? []).find((one) => one.line === id)?.bands ?? [];
+}
+
+/**
+ * Marks with a line's distances said: `bands` ticked, or none to say nothing.
+ * The same distances said again take them away.
+ */
+export function setFar(marks, id, bands) {
+  const ticked = cleanBands(bands);
+  const had = farOf(marks, id);
+  const rest = (marks.far ?? []).filter((one) => one.line !== id);
+  const same = had.length === ticked.length && had.every((b, i) => b === ticked[i]);
+  return {
+    ...marks,
+    far: !ticked.length || same ? rest : [...rest, { line: id, bands: ticked }],
+  };
+}
+
+/** Each line's distance as drawn: its words at the middle of its longest stroke (`{ u, v }`). */
+export function farBadges(strokes, marks) {
+  return (marks?.far ?? [])
+    .map((one) => ({
+      line: one.line,
+      label: farLabel(one.bands),
+      at: middleOf(strokes, marks.lines, one.line),
+    }))
+    .filter((badge) => badge.at && badge.label);
 }
 
 /** Marks with a cut added at `u`, or the cut at `index` taken away. */

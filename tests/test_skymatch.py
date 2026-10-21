@@ -277,6 +277,58 @@ def test_a_sector_keeps_the_search_inside_it():
     assert not any(abs((fit.heading - 36.0 + 180) % 360 - 180) < 10 for fit in found.fits)
 
 
+def test_several_sectors_are_each_searched_and_nothing_between():
+    twice = skyturn([(30, 5, 3), (42, 3, 2), (210, 5, 3), (222, 3, 2)])
+    x, y = trace_on(twice, heading=36.0, fov=50.0)
+    both = skymatch.match(x, y, twice, half_width=HALF, fov=50.0, known=True, facing=((36.0, 10.0), (216.0, 10.0)))
+    headings = sorted(round(fit.heading) for fit in both.fits[:2])
+    assert headings == [36, 216]
+    # a sector holding neither copy, beside one that holds the second: only the second is offered
+    one = skymatch.match(x, y, twice, half_width=HALF, fov=50.0, known=True, facing=[(120.0, 20.0), (216.0, 15.0)])
+    assert one.fits[0].heading == pytest.approx(216.0, abs=0.5)
+    assert all(skymatch.within_sectors(fit.heading, ((120.0, 20.0), (216.0, 15.0))) for fit in one.fits)
+    assert skymatch.sectors_of((200.0, 30.0)) == ((200.0, 30.0),)
+    assert skymatch.sectors_of(None) is None and skymatch.sectors_of(()) is None
+
+
+def test_a_line_said_to_stand_near_is_laid_only_on_ground_that_near():
+    # the same skyline twice round the turn, once on ridges 2 km out and once on ridges 20 km out
+    twice = skyturn([(30, 5, 3), (42, 3, 2), (210, 5, 3), (222, 3, 2)])
+    distance = np.where(np.abs(((np.arange(twice.angles.size) * STEP) - 36 + 180) % 360 - 180) < 40, 2_000.0, 20_000.0)
+    turn = skymatch.Turn(0.0, STEP, twice.angles, distance=distance)
+    x, y = trace_on(turn, heading=216.0, fov=50.0)
+    line = np.zeros(x.size, dtype=np.int64)
+    near = skymatch.Marks(line=line, far=((0, 1_000.0, 3_000.0),))
+    found = skymatch.match(x, y, turn, half_width=HALF, fov=50.0, known=True, marks=near)
+    assert found.fits[0].heading == pytest.approx(36.0, abs=0.5)
+    # said far, the far copy; said nothing, either may come first
+    far = skymatch.Marks(line=line, far=((0, 10_000.0, 30_000.0),))
+    assert skymatch.match(x, y, turn, half_width=HALF, fov=50.0, known=True, marks=far).fits[0].heading == pytest.approx(216.0, abs=0.5)
+    # a floor keeps lines said nothing of off the ground nearer than it
+    floored = skymatch.match(x, y, turn, half_width=HALF, fov=50.0, known=True, floor=5_000.0)
+    assert floored.fits[0].heading == pytest.approx(216.0, abs=0.5)
+    assert all(abs(((fit.heading - 36.0 + 180) % 360) - 180) > 10 for fit in floored.fits)
+
+
+def test_bands_widen_what_the_analyst_said_and_say_nothing_without_strokes():
+    lines = np.array([0, 0, 1, 1, 2])
+    low, high = skymatch.bands_of(lines, 5, ((0, 1_000.0, 3_000.0), (1, 0.0, 1_000.0)), floor=250.0)
+    assert low[0] == pytest.approx(1_000.0 / skymatch.BAND_SLACK) and high[0] == pytest.approx(3_000.0 * skymatch.BAND_SLACK)
+    # said near: no floor under it; said nothing: the floor, and anywhere past it
+    assert low[2] == 0.0 and low[4] == 250.0 and np.isinf(high[4])
+    assert skymatch.bands_of(None, 3, ()) is None
+    assert skymatch.bands_of(None, 3, (), floor=100.0)[0].tolist() == [100.0] * 3
+
+
+def test_a_tilt_past_the_bounds_is_no_place():
+    x, y = trace_on(RANGE, heading=50.0, fov=40.0, tilt=-15.0)
+    free = skymatch.match(x, y, RANGE, half_width=HALF, fov=40.0, known=True)
+    assert free.fits[0].tilt == pytest.approx(-15.0, abs=0.5)
+    bounded = skymatch.match(x, y, RANGE, half_width=HALF, fov=40.0, known=True, tilts=(-10.0, 10.0))
+    assert all(-11.0 <= fit.tilt <= 11.0 for fit in bounded.fits)
+    assert not any(abs(((fit.heading - 50.0 + 180) % 360) - 180) < 2 for fit in bounded.fits)
+
+
 def test_the_turn_reads_the_same_with_and_without_holes():
     holed = skyturn([(40, 6, 3)], nan_between=(300, 301))
     plain = skyturn([(40, 6, 3)])

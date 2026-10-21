@@ -165,19 +165,55 @@ function carried(ctx, picture, from, view, frame) {
   ctx.restore();
 }
 
-/** A layer of the page, drawn on its own see-through canvas. */
-function layer(spec, scale, makeCanvas, draw) {
+/**
+ * A canvas made blank again, its state as a new one's. `reset` keeps the pixels' memory
+ * for the next frame; a browser without it is given its size again, which also wipes all.
+ */
+function blank(canvas) {
+  const ctx = canvas.getContext('2d');
+  if (typeof ctx.reset === 'function') ctx.reset();
+  // the same width set again wipes the canvas
+  else canvas.width = canvas.width;
+}
+
+/**
+ * The canvases one transition draws on, one by part of the frame, kept from a frame to
+ * the next. A 1080p frame is 10 MB a canvas and a frame of a move takes five: made anew
+ * at every frame, they piled up faster than the garbage collector took them, and a
+ * short video filled the memory. `take(part, width, height)` hands the part's canvas
+ * blank, `end()` lets them all go.
+ */
+function easel(makeCanvas) {
+  const kept = new Map();
+  return {
+    take(part, width, height) {
+      let canvas = kept.get(part);
+      if (!canvas) { canvas = makeCanvas(); kept.set(part, canvas); }
+      if (canvas.width !== width || canvas.height !== height) {
+        // a new size makes it blank
+        canvas.width = width;
+        canvas.height = height;
+      } else blank(canvas);
+      return canvas;
+    },
+    end() {
+      for (const canvas of kept.values()) { canvas.width = 0; canvas.height = 0; }
+      kept.clear();
+    },
+  };
+}
+
+/** A layer of the page, drawn on the see-through canvas of its `part`. */
+function layer(spec, scale, take, part, draw) {
   const { width, height } = pageSize(spec.page);
-  const canvas = makeCanvas();
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
+  const canvas = take(part, Math.round(width * scale), Math.round(height * scale));
   draw(canvas.getContext('2d'));
   return canvas;
 }
 
 /** Two pictures of the same size mixed, `share` of the second: what is the same in both stays as it is. */
-function mixed(spec, scale, makeCanvas, first, second, share) {
-  return layer(spec, scale, makeCanvas, (ctx) => {
+function mixed(spec, scale, take, part, first, second, share) {
+  return layer(spec, scale, take, part, (ctx) => {
     ctx.globalAlpha = 1 - share;
     ctx.drawImage(first, 0, 0);
     ctx.globalCompositeOperation = 'lighter';
@@ -189,17 +225,27 @@ function mixed(spec, scale, makeCanvas, first, second, share) {
 const madeCanvas = () => document.createElement('canvas');
 
 /**
- * The frames of one transition, one canvas at a time. `before` and `after` are the two
- * beats as they were drawn, `{ context }`: the context `draw.drawPage` drew them with,
- * their maps' pictures under `context.maps`. `plan` is `transitionPlan`'s.
+ * The frames of one transition, all on one canvas: read each before asking for the
+ * next, which is drawn over it. `before` and `after` are the two beats as they were
+ * drawn, `{ context }`: the context `draw.drawPage` drew them with, their maps'
+ * pictures under `context.maps`. `plan` is `transitionPlan`'s.
  *
  * `sitting(id)` lends the live map of that id for the move: `{ at(view), end() }`,
  * `at` resolving to the map drawn again at that view. Without it, or for a map it
  * cannot lend, the two beats' pictures of the map are carried along the way instead.
  */
 export async function* tweenFrames(spec, scale, before, after, plan, { moved = [], fresh = [] } = {}, { makeCanvas = madeCanvas, sitting = null } = {}) {
+  const canvases = easel(makeCanvas);
+  try {
+    yield* framesOf(spec, scale, before, after, plan, { moved, fresh }, { take: canvases.take, sitting });
+  } finally {
+    canvases.end();
+  }
+}
+
+async function* framesOf(spec, scale, before, after, plan, { moved, fresh }, { take, sitting }) {
   const reveal = plan.appear !== 'none' ? { ids: new Set(fresh), t: 0, mode: plan.appear } : null;
-  const page = (context) => layer(spec, scale, makeCanvas, (ctx) => drawPage(ctx, spec, { ...context, scale, paper: true, editing: false }));
+  const page = (context, part = 'frame') => layer(spec, scale, take, part, (ctx) => drawPage(ctx, spec, { ...context, scale, paper: true, editing: false }));
   if (plan.move) {
     const ways = flights(spec, before, after, moved);
     const lent = {};
@@ -215,23 +261,23 @@ export async function* tweenFrames(spec, scale, before, after, plan, { moved = [
         const views = stands[index];
         const drawn = {};
         const placers = {};
-        for (const [id, take] of Object.entries(lent)) {
-          if (!take) continue;
-          const { picture, placer } = await take.at(views[id]);
+        for (const [id, map] of Object.entries(lent)) {
+          if (!map) continue;
+          const { picture, placer } = await map.at(views[id]);
           drawn[id] = picture;
           if (placer) placers[id] = placer;
         }
         // the blur follows the speed, widest where the way is fastest, none for a move of a few pixels
         const blurred = fastest > 0 ? (speeds[index] / fastest) * Math.min(1, fastest / BLUR_FROM) : 0;
-        yield movingFrame(spec, scale, before, after, { ways, views, drawn, placers, t: index / plan.first, blurred }, reveal, plan, makeCanvas);
+        yield movingFrame(spec, scale, before, after, { ways, views, drawn, placers, t: index / plan.first, blurred }, reveal, plan, take);
       }
     } finally {
-      for (const take of Object.values(lent)) take?.end();
+      for (const map of Object.values(lent)) map?.end();
     }
   } else {
-    const next = page({ ...after.context, reveal });
-    const last = page(before.context);
-    for (let index = 1; index <= plan.first; index += 1) yield mixed(spec, scale, makeCanvas, last, next, ease(index / plan.first));
+    const next = page({ ...after.context, reveal }, 'next');
+    const last = page(before.context, 'last');
+    for (let index = 1; index <= plan.first; index += 1) yield mixed(spec, scale, take, 'frame', last, next, ease(index / plan.first));
   }
   const rest = plan.frames - plan.first;
   for (let index = 1; index <= rest; index += 1) {
@@ -244,7 +290,7 @@ export async function* tweenFrames(spec, scale, before, after, plan, { moved = [
  * there, or the two beats' pictures carried there), blurred as fast as it goes, and the
  * writing of both beats mixed over it, placed through the maps as they stand.
  */
-function movingFrame(spec, scale, before, after, { ways, views, drawn, placers = {}, t, blurred }, reveal, plan, makeCanvas) {
+function movingFrame(spec, scale, before, after, { ways, views, drawn, placers = {}, t, blurred }, reveal, plan, take) {
   // the writing changes over the middle of the way, the maps' old marks go early
   const share = plan.fade ? step(0.3, 0.7, t) : t < 0.5 ? 0 : 1;
   const gone = plan.fade ? step(0, 0.3, t) : 1;
@@ -255,7 +301,7 @@ function movingFrame(spec, scale, before, after, { ways, views, drawn, placers =
     for (const [id, way] of Object.entries(ways)) out[id] = { view: views[id], frame: way.frame, ...(placers[id] ?? {}) };
     return out;
   };
-  return layer(spec, scale, makeCanvas, (ctx) => {
+  return layer(spec, scale, take, 'frame', (ctx) => {
     drawBackground(ctx, spec, { ...after.context, scale });
     for (const element of spec.elements) {
       if (!MAP_KINDS.includes(element.kind) || element.hidden) continue;
@@ -266,9 +312,7 @@ function movingFrame(spec, scale, before, after, { ways, views, drawn, placers =
       if ((!was && !is) || !b) continue;
       const way = ways[element.id];
       const view = way ? views[element.id] : b.view;
-      const art = makeCanvas();
-      art.width = Math.round(b.frame.width * ratio);
-      art.height = Math.round(b.frame.height * ratio);
+      const art = take(`map ${element.id}`, Math.round(b.frame.width * ratio), Math.round(b.frame.height * ratio));
       const actx = art.getContext('2d');
       actx.scale(ratio, ratio);
       if (drawn[element.id]) {
@@ -298,8 +342,8 @@ function movingFrame(spec, scale, before, after, { ways, views, drawn, placers =
       ctx.drawImage(art, box[0], box[1], box[2], box[3]);
       ctx.restore();
     }
-    const writing = (side, extra = {}) => layer(spec, scale, makeCanvas, (lctx) => drawPage(lctx, spec, { ...side.context, ...extra, scale,
+    const writing = (side, part, extra = {}) => layer(spec, scale, take, part, (lctx) => drawPage(lctx, spec, { ...side.context, ...extra, scale,
       views: placed(side), maps: undefined, paper: false, editing: false }));
-    ctx.drawImage(mixed(spec, scale, makeCanvas, writing(before), writing(after, { reveal }), share), 0, 0);
+    ctx.drawImage(mixed(spec, scale, take, 'mix', writing(before, 'before'), writing(after, 'after', { reveal }), share), 0, 0);
   });
 }

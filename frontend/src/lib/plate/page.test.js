@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { facesOf, inLook, addStep, beatKey, beatKeys, bornAt, bornOn, bringTo, carryOn, currentStep, dayBefore, DECOR_MAX_PIXELS, decorDensity, endOn, framedAs, framingOf, standsOver, TRANSITIONS, transitionsOf, fillTokens, fitPage, fromTemplate, hasSteps, houseLayout,
-  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, placeOf, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
+  labelBox, landingIn, listedOf, longDay, mainMap, mapsFirst, movedStep, restacked, stepOf, onPaper, PAGE, PAGE_ZOOM, pageSize, periodSaid, pickedDays, placeOf, settleOn, shownOn, SIGNATURE, startOn, stepsOf, templateOf,
   turnable, unsettled, withoutStep, zoomPageAt } from './page.js';
 
 describe('a plate page', () => {
@@ -437,6 +437,19 @@ describe('the order of the page', () => {
     expect(stepOf(list, 'inset', -1)).toBe(5);
     expect(stepOf(list, 'map', -1)).toBeNull();
     expect(stepOf(list, 'hers', 1)).toBeNull();
+  });
+});
+
+describe('the days a plate is told to play', () => {
+  it('adds a day in order, once, and lets it go', () => {
+    const spec = { days: ['2026-10-20'] };
+    expect(pickedDays(spec, '2026-10-12', true)).toEqual(['2026-10-12', '2026-10-20']);
+    expect(pickedDays({ days: ['2026-10-12'] }, '2026-10-12', true)).toEqual(['2026-10-12']);
+    expect(pickedDays(spec, '2026-10-20', false)).toEqual([]);
+    expect(pickedDays({}, PAGE, true)).toEqual([]);
+  });
+  it('is no part of a template', () => {
+    expect(templateOf({ page: {}, theme: {}, time: {}, days: ['2026-10-12'], elements: [] }).days).toBeUndefined();
   });
 });
 

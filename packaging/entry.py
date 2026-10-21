@@ -4,7 +4,11 @@ Kept as a tiny shim so PyInstaller has a concrete script to analyze; all real
 logic lives in ``azimut.cli.main`` (the same code the ``azimut`` command runs).
 """
 
+import multiprocessing
+
 from azimut.cli import main
 
 if __name__ == "__main__":
+    # a search's processes start the executable again: this hands them their work instead of a second app
+    multiprocessing.freeze_support()
     main()

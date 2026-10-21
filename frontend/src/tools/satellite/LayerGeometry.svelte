@@ -17,6 +17,7 @@
   import { featuresInLoop, hitFeature, linesOf, markerDisc } from '../../lib/map/layerHit.js';
   import { isBadge } from '../../lib/map/markerGlyphs.js';
   import { SOURCE_ICON_SCALE } from '../../lib/map/addedLayer.js';
+  import { middleClickPaste } from '../../lib/clipboardPaste.js';
   import { layerIconUrl, readyPicture } from '../../lib/map/ownIcons.js';
   import { bearingToward, facingLabel, knobAt, screenNorth } from '../../lib/map/turnRing.js';
 
@@ -248,7 +249,7 @@
   $effect(() => {
     if (!editing) return;
     const paste = (event) => {
-      if (event.target?.closest?.('input, textarea, [contenteditable="true"]') || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      if (event.target?.closest?.('input, textarea, [contenteditable="true"]') || middleClickPaste() || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
       const text = event.clipboardData?.getData('text/plain') ?? '';
       if (!text.trim()) return;
       event.preventDefault();

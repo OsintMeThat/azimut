@@ -492,6 +492,77 @@ def strip_of(case: "Case", path: str) -> dict[str, Any] | None:
     return None
 
 
+def _frame_size(case: "Case", path: str) -> tuple[float, float] | None:
+    """A collage piece's source picture as filmed or shot, width and height in pixels."""
+    item = media_engine.read_item(case, path)
+    if not isinstance(item, dict):
+        return None
+    meta = item.get("video_metadata")
+    if isinstance(meta, dict):
+        for index in range(8):
+            prefix = f"streams {index} · "
+            if meta.get(prefix + "codec type") not in (None, "video"):
+                continue
+            try:
+                width, height = float(meta[prefix + "width"]), float(meta[prefix + "height"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            turned = any("rotation" in key and str(meta[key]).lstrip("-") in ("90", "270") for key in meta if key.startswith(prefix))
+            return (height, width) if turned else (width, height)
+        return None
+    try:
+        with Image.open(case.resolve_inside(path)) as image:
+            return float(image.width), float(image.height)
+    except (OSError, CaseError):
+        return None
+
+
+def frames_of(case: "Case", path: str) -> tuple[Any, dict[str, Any]] | None:
+    """A picture exported from a Collage document read as its frames (engine/frames.py).
+
+    Only for the picture the collage last exported while it is still that layout.
+    Returns the frames' model and what the tool says of it: `{ collage, frames,
+    stitched, lens, span, export }`, `lens` the frames' lens the stitch gives (None
+    when no frame was stitched), `span` how many degrees the picture spans read so
+    and `export` the outline the picture shows, in the collage's canvas pixels.
+    """
+    from . import frames
+
+    for rel, spec in _collage_specs(case):
+        exported = spec.get("exported")
+        if not isinstance(exported, dict) or exported.get("path") != path or not _export_current(case, spec):
+            continue
+        nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
+        sources = {}
+        for node in nodes:
+            source = str((node.get("save") or {}).get("path") or "")
+            if source and source not in sources:
+                size = _frame_size(case, source)
+                if size is not None:
+                    sources[source] = size
+        pieces = frames.pieces_of(spec, sources)
+        if len(pieces) < 2:
+            return None
+        # the export is the pieces trimmed to their bounds: the plane's middle and width are the outline's,
+        # in canvas pixels, however sharply the picture was drawn
+        export = (
+            float(max(piece.quad[:, 0].max() for piece in pieces)),
+            float(max(piece.quad[:, 1].max() for piece in pieces)),
+        )
+        model = frames.Model(pieces)
+        lens = frames.lens_of(model)
+        span = frames.strip(model, None, export, lens)[1] if lens is not None else None
+        return model, {
+            "collage": Path(rel).stem,
+            "frames": len(pieces),
+            "stitched": sum(1 for piece in pieces if piece.stitched),
+            "lens": None if lens is None else round(lens, 2),
+            "span": None if span is None else round(span, 2),
+            "export": [export[0], export[1]],
+        }
+    return None
+
+
 def load_collage(case: "Case", name: str) -> dict[str, Any] | None:
     rel = layout.collage_rel(layout.slugify(name, "Collage"))
     spec = _read(case.resolve_inside(rel))

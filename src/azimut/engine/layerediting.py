@@ -484,6 +484,29 @@ def from_file(case: Case, data: bytes, filename: str, title: str = "", descripti
                    origin=origin, images=images)
 
 
+def from_my_maps(case: Case, url: str, title: str = "", description: str = "") -> dict[str, Any]:
+    """Import a working copy of a My Maps, read once from its link.
+
+    The link only serves this import: the layer keeps no feed and is never
+    refreshed. Its web pictograms are fetched now, with the map itself.
+    """
+    address = str(url or "").strip()
+    if not maplayers.my_maps_mid(address):
+        raise maplayers.LayerError("this is not a Google My Maps link")
+    data, filename = maplayers.fetch(address)
+    parsed = maplayers.parse(data, filename=filename, title=title)
+    images = maplayers._pictograms(parsed, data, icons=True)
+    origin = {
+        "source": {"kind": "my_maps", "name": parsed["summary"]["title"], "url": address,
+                   "format": parsed["summary"]["format"]},
+        "sha256": maplayers.digest(data),
+        "copied_at": maplayers._now(),
+    }
+    return _create(case, title=title or parsed["summary"]["title"], description=description,
+                   features=parsed["geojson"]["features"], original=data,
+                   origin=origin, images=images)
+
+
 def copy_layer(case: Case, name: str, title: str = "", description: str = "") -> dict[str, Any]:
     """Copy the saved source and pictograms locally; never refresh its feed."""
     with case.lock:

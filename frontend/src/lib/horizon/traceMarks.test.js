@@ -2,8 +2,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   addCut,
+  cleanBands,
   cleanMarks,
   cutAt,
+  DISTANCE_BANDS,
+  farBadges,
+  farLabel,
+  farOf,
+  farRange,
   innerByShape,
   lineAt,
   liesUnder,
@@ -17,7 +23,9 @@ import {
   removeCut,
   sameCuts,
   sameMarks,
+  setFar,
   setInner,
+  setSea,
   skySamples,
   togglePair,
 } from './traceMarks.js';
@@ -26,9 +34,20 @@ const line = (v, from = 0, to = 1, count = 11) => Array.from({ length: count }, 
 
 describe('marks made whole', () => {
   it('gives each stroke an id and keeps only what names strokes there are', () => {
-    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [] });
-    const kept = cleanMarks({ lines: [4, 7], inner: [7, 9], pairs: [[7, 4], [7, 4], [4, 4], [4, 9]], cuts: [0.7, 0.3, 1.2, 0.005] }, 2);
-    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7] });
+    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [] });
+    const kept = cleanMarks(
+      {
+        lines: [4, 7],
+        inner: [7, 9],
+        pairs: [[7, 4], [7, 4], [4, 4], [4, 9]],
+        cuts: [0.7, 0.3, 1.2, 0.005],
+        far: [{ line: 4, bands: ['b3', 'b1', 'x'] }, { line: 4, bands: ['near'] }, { line: 9, bands: ['b1'] }, { line: 7, bands: [] }],
+        sea: [4, 4, 7, 9],
+      },
+      2
+    );
+    // a sea line is skyline: an inner edge cannot be one
+    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4] });
     // ids that do not match the strokes start again in order
     expect(cleanMarks({ lines: [1], inner: [1] }, 2).lines).toEqual([0, 1]);
   });
@@ -119,5 +138,57 @@ describe('the strokes changed', () => {
     expect(after.lines).toEqual([4, 7, 7]);
     expect(after.inner).toEqual([7]);
     expect(after.pairs).toEqual([[7, 4]]);
+  });
+});
+
+describe('how far a line stands', () => {
+  it('ticks distances in the menu order and reads them as metres and words', () => {
+    expect(DISTANCE_BANDS.map((band) => band.label)).toEqual(['< 1 km', '1–3 km', '3–10 km', '10–30 km', '> 30 km']);
+    expect(cleanBands(['b10', 'b1', 'b1', 'huge'])).toEqual(['b1', 'b10']);
+    expect(farRange(['b1', 'b3'])).toEqual([1_000, 10_000]);
+    expect(farRange([])).toBeNull();
+    expect(farLabel(['b1'])).toBe('1–3 km');
+    expect(farLabel(['near', 'b1'])).toBe('< 3 km');
+    expect(farLabel(['b10', 'b30'])).toBe('> 10 km');
+    expect(farLabel([])).toBe('');
+  });
+
+  it('says a line stands that far, and the same again says nothing', () => {
+    const marks = cleanMarks({ lines: [0, 1] }, 2);
+    const said = setFar(marks, 1, ['b3']);
+    expect(farOf(said, 1)).toEqual(['b3']);
+    expect(marksSaid(said)).toBe(true);
+    expect(sameMarks(said, marks)).toBe(false);
+    expect(farOf(setFar(said, 1, ['b1']), 1)).toEqual(['b1']);
+    expect(setFar(said, 1, ['b3']).far).toEqual([]);
+    expect(setFar(said, 1, []).far).toEqual([]);
+  });
+
+  it('names each line’s distance at the middle of its longest stroke, and keeps it through a rub', () => {
+    const strokes = [
+      [{ u: 0.1, v: 0.4 }, { u: 0.2, v: 0.4 }, { u: 0.3, v: 0.4 }],
+      [{ u: 0.5, v: 0.5 }],
+    ];
+    const marks = setFar(cleanMarks({ lines: [0, 1] }, 2), 0, ['b1']);
+    expect(farBadges(strokes, marks)).toEqual([{ line: 0, label: '1–3 km', at: { u: 0.2, v: 0.4 } }]);
+    // the stroke rubbed in two keeps its id, and its distance with it
+    expect(marksAfter(marks, [0, 0, 1]).far).toEqual([{ line: 0, bands: ['b1'] }]);
+    // a stroke gone takes its distance away
+    expect(marksAfter(marks, [1]).far).toEqual([]);
+  });
+});
+
+describe('lines along the sea', () => {
+  it('are skyline, never an inner edge, and either word takes the other back', () => {
+    const marks = cleanMarks({ lines: [0, 1] }, 2);
+    const sea = setSea(marks, 1, true);
+    expect(sea.sea).toEqual([1]);
+    expect(marksSaid(sea)).toBe(true);
+    expect(sameMarks(sea, marks)).toBe(false);
+    const ridge = setInner(sea, 1, true);
+    expect(ridge.inner).toEqual([1]);
+    expect(ridge.sea).toEqual([]);
+    expect(setSea(ridge, 1, true).inner).toEqual([]);
+    expect(setSea(sea, 1, false).sea).toEqual([]);
   });
 });

@@ -382,7 +382,7 @@ describe('a photo laid over the view, in the inspector', () => {
       undoStroke: vi.fn(),
       clearTrace: vi.fn(),
       remove: vi.fn(),
-      hints: { zoom: 'any', facing: null, reach: 'auto' },
+      hints: { zoom: [], facing: null, reach: 'auto' },
       reach: null,
       reachFound: null,
       setHints: vi.fn(),
@@ -446,23 +446,27 @@ describe('a photo laid over the view, in the inspector', () => {
     const plain = await knows();
     expect(plain.part.querySelector('h5').textContent).toBe('What you know');
     const said = await knows({ hints: { zoom: 'zoomed', facing: { heading: 218 }, reach: 'auto' }, reach: 20_000 });
-    expect(said.part.querySelector('h5').textContent).toBe('What you know · Zoomed · 218° SW · within 20 km');
+    expect(said.part.querySelector('h5').textContent).toBe('What you know · ×2–3 · 218° SW · within 20 km');
     const group = [...said.root.querySelectorAll('details')].find((one) => one.querySelector('.group-title').textContent === 'Photo');
     group.open = false;
     group.dispatchEvent(new Event('toggle'));
     flushSync();
-    expect(group.querySelector('.gist').textContent).toBe('summit.jpg · Zoomed · 218° SW · within 20 km');
+    expect(group.querySelector('.gist').textContent).toBe('summit.jpg · ×2–3 · 218° SW · within 20 km');
   });
 
   it('asks the three things to say, each starting at not knowing', async () => {
     const { overlay, part, heading } = await knows({}, 132.4);
     expect(heading).toBeCloseTo(132.4, 5);
     const checked = [...part.querySelectorAll('[role="radio"][aria-checked="true"]')].map((b) => b.textContent.trim());
-    expect(checked).toEqual(['Any', 'Anywhere', 'Auto']);
-    // the words a zoom stands for are on its button
-    expect(radio(part, 'Zoomed').title).toMatch(/10° to 35°/);
-    radio(part, 'Zoomed').click();
-    expect(overlay.setHints).toHaveBeenCalledWith({ zoom: 'zoomed' });
+    expect(checked).toEqual(['Anywhere', 'Auto']);
+    // no zoom word ticked is any lens, and it says so
+    expect(part.querySelectorAll('[aria-pressed="true"]')).toHaveLength(0);
+    expect(part.textContent).toContain('Any lens, 1.5° to 120°: tick one or several.');
+    // the words a zoom stands for are on its button, and a press ticks it
+    const zoomed = [...part.querySelectorAll('button[aria-pressed]')].find((b) => b.textContent.trim() === '×2–3');
+    expect(zoomed.title).toBe('Zoomed in two or three times');
+    zoomed.click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ zoom: ['zoomed'] });
     radio(part, 'Roughly this way').click();
     expect(overlay.setHints).toHaveBeenCalledWith({ facing: { heading } });
     radio(part, '100 km').click();
@@ -471,10 +475,36 @@ describe('a photo laid over the view, in the inspector', () => {
     expect(radio(part, 'Auto').title).toMatch(/up to 50 km/);
   });
 
+  it('takes several zoom words when unsure, and tries from the narrowest to the widest', async () => {
+    const { overlay, part } = await knows({ hints: { zoom: ['wide', 'normal'], facing: null, reach: 'auto' } });
+    const pressed = [...part.querySelectorAll('button[aria-pressed="true"]')].map((b) => b.textContent.trim());
+    expect(pressed).toEqual(['×0.5', '×1']);
+    expect(part.textContent).toContain('Fit tries 50° to 120° across.');
+    // a press on a ticked word unticks it, the others kept
+    [...part.querySelectorAll('button[aria-pressed]')].find((b) => b.textContent.trim() === '×0.5').click();
+    expect(overlay.setHints).toHaveBeenCalledWith({ zoom: ['normal'] });
+  });
+
+  it('reads a video’s lens off its pan on a press, says it, and lets it go', async () => {
+    const video = await knows({ source: { name: 'clip.mp4', kind: 'video' }, measureLens: vi.fn(), measuring: null });
+    const measure = [...video.part.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Measure from the video');
+    measure.click();
+    expect(video.overlay.measureLens).toHaveBeenCalledOnce();
+    const failed = await knows({ source: { name: 'clip.mp4', kind: 'video' }, measuring: { busy: false, error: 'The camera hardly turned' } });
+    expect(failed.part.textContent).toContain('The camera hardly turned');
+    const measured = await knows({ source: { name: 'clip.mp4', kind: 'video' }, lens: { fov: 41.2, measured: true, at: 72.4 }, forgetLens: vi.fn() });
+    expect(measured.part.textContent).toContain('Measured on the video at 1:12: 41° across. Fit and Find keep it.');
+    [...measured.part.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Forget').click();
+    expect(measured.overlay.forgetLens).toHaveBeenCalledOnce();
+    // a photo has no pan to read
+    const still = await knows();
+    expect(still.part.textContent).not.toContain('Measure from the video');
+  });
+
   it('keeps the lens the photo says, and says the reach Fit found', async () => {
     const { part } = await knows({ lens: { mm: 26, fov: 64.2 }, reachFound: 20_000 });
     expect(part.textContent).toContain('The photo says 26 mm, 64° across: Fit keeps it.');
-    expect(radio(part, 'Zoomed')).toBeUndefined();
+    expect(part.textContent).not.toContain('×2–3');
     expect(part.textContent).toContain('Fit found the skyline within 20 km.');
   });
 
@@ -490,9 +520,9 @@ describe('a photo laid over the view, in the inspector', () => {
     radio(wide.part, 'Panorama').click();
     expect(wide.overlay.setHints).toHaveBeenCalledWith({ picture: 'panorama' });
     // read as one, the zoom words give way to the widths it is searched across
-    const strip = await knows({ panoramaOffered: true, stitched: null, isPanorama: true, hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' } });
+    const strip = await knows({ panoramaOffered: true, stitched: null, isPanorama: true, hints: { picture: 'panorama', zoom: [], facing: null, reach: 'auto' } });
     expect(strip.part.textContent).toContain('Fit tries 60° to 360° across.');
-    expect(radio(strip.part, 'Zoomed')).toBeUndefined();
+    expect(strip.part.textContent).not.toContain('×2–3');
   });
 
   it('says a stitched collage’s width, kept by Fit', async () => {
@@ -502,7 +532,7 @@ describe('a photo laid over the view, in the inspector', () => {
       stitched,
       isPanorama: true,
       lens: { fov: 47.4, stitched: true },
-      hints: { picture: 'panorama', zoom: 'any', facing: null, reach: 'auto' },
+      hints: { picture: 'panorama', zoom: [], facing: null, reach: 'auto' },
     });
     expect(part.textContent).toContain('Stitched by Azimut from Collage 9.');
     expect(part.textContent).toContain('47° across: Fit keeps it.');
@@ -542,7 +572,7 @@ describe('a photo locked to the terrain, in the inspector', () => {
       bend: 0,
       locked: true,
       setBend: vi.fn(),
-      hints: { zoom: 'any', facing: null, reach: 'auto' },
+      hints: { zoom: [], facing: null, reach: 'auto' },
       reach: null,
       remove: vi.fn(),
     };

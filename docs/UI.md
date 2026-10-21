@@ -1950,10 +1950,12 @@ over the imagery is reachable from nowhere else. Each section states its own
 count, so the strip carries none — folded shut, the panel shows the active half's
 name and its number.
 
-**My layers** is a section inside **Layers**. **New layer** starts blank or from a
-local KMZ, KML, GeoJSON or GPX file. An added source layer also offers **Create
-editable copy**. Both routes keep the original file and its bundled pictograms;
-external icons are not fetched, and a followed source is not refreshed for a copy.
+**My layers** is a section inside **Layers**. **New layer** starts blank, from a
+local KMZ, KML, GeoJSON or GPX file, or from a Google My Maps link. An added source
+layer also offers **Create editable copy**. These routes keep the original source
+and its bundled pictograms, and nothing is refreshed afterwards. A file or a copy
+fetches no external icon; a My Maps link is read once, its web pictograms with it,
+and the layer keeps no tie to the map.
 The name offered is one no layer of the case has yet ("My layer 2"), and **Track
 over time** can be switched on there, from the start.
 
@@ -1996,7 +1998,7 @@ panel removes nothing.
 Double-clicking a line or an area opens its corners. A right-click on a feature
 opens its menu: style, status, **Clear the direction**, **Reshape**, **Save as
 case place** and removal, for the selection it is part of. **Add markers** accepts
-repeated map clicks; Escape stops adding. **Draw line** and **Draw area** collect
+repeated map clicks, each new marker picked so its sheet opens; Escape stops adding. **Draw line** and **Draw area** collect
 map clicks; Enter or **Save** saves, Esc cancels, and **Undo last point** takes a
 corner back. A corner placed within ten pixels of one already in the layer lands on
 it, so a line drawn to meet another meets it exactly; a white ring shows where, and
@@ -2115,15 +2117,16 @@ to the first remaining group. Editable shapes hold at most 4,096 coordinates.
 
 Switching tools keeps the editing session and feature form. The layer's name is a
 field in the editor's header, saved when left; its ⋯ adds or edits an optional
-description, downloads the layer, and offers **Discard changes…**. **New layer**
+description and downloads the layer. **Discard changes** is the undo-arrow button
+beside **Done**. **New layer**
 also accepts a description. Both fields travel with the layer.
 
 **Done**, in the bar or the panel, saves anything still in a field and any complete
 shape being drawn, then ends the session. Opening another layer for editing, or
-another case, leaves this one the same way, so a later **Discard changes…** goes back
-no further than the session it is pressed in. **Discard changes…** asks
-first, then restores the layer to its state when editing started. Separately
-saved case places remain in the case. The checkpoint survives a reload, so
+another case, leaves this one the same way, so a later **Discard changes** goes back
+no further than the session it is pressed in. With nothing changed it just
+leaves editing. Otherwise it asks first, then restores the layer to its state
+when editing started. Separately saved case places remain in the case. The checkpoint survives a reload, so
 reopening can still discard.
 
 A personal layer's time strip works as an added layer's does, on its features'
@@ -2851,10 +2854,14 @@ Detect, Reshape, the gap and Fit.
 
 The trace is edited with the same tools in Overlay's band and on Find's photo,
 one out at a time: the **Skyline** pen (T) for the edge against the sky, the
-**Ridge** pen (R) for a ridge seen against farther land, drawn cyan, **Behind**
+**Ridge** pen (R) for a ridge seen against farther land, drawn cyan, the **Sea
+line** pen (S) for the sea's horizon, drawn in blue dashes and searched where the
+sea's own horizon stands from the eye's height, **Behind**
 (P) to pair a line in front with the line behind it (a letter filled on the
 front one, ringed on the back one), **Cut** (X) to cut a hand-made collage
-where its frames meet, and the rubber (E). The **magnet** (M) says whether a
+where its frames meet, **Distance** (K) to say how far a line stands (pick one
+or several of < 1 km, 1–3, 3–10, 10–30 and > 30 km, then click the line; its
+distance shows under it), and the rubber (E). The **magnet** (M) says whether a
 line drawn snaps onto the photo's nearest edge; Alt does the other for one
 stroke. A click with a pen on a line makes it that pen's kind, and a skyline
 stroke lying under another one is read as a ridge, as is a trace saved before
@@ -2866,15 +2873,53 @@ so, and the view then reads each piece through its own camera.
 Find's side has two faces. **Prepare** numbers the three steps a search
 needs (Skyline, Area, Search), each lit once done; the warnings about the lens
 and the reach sit by the Search button. **Help the search** folds the optional
-parts, the alignments and what you know about the photo (who took it, the zoom,
+parts, the alignments and what you know about the photo (who took it, which
+way it faces, the ground the eye stands on, how the camera looks, the zoom,
 the reach), each with its gist on its title line; an alignment being made
-unfolds its own. **Result** shows the search on show: its name, when it was
-made and what it was asked with, its progress, verdict and places. **Change and
+unfolds its own. **Facing** is a compass: tick one or several of the eight
+directions, **Any** in its middle for none, and the map draws them as a fan
+from the area, ringed at 5, 10, 20, 50 and 100 km out to the reach searched.
+**Eye on** ticks a summit or ridge, a slope, a valley, a plain or the sea or a
+lake, each judged on the ground round the point; the map shows the grid in
+those colours, grey where a point is left out, and says how many points stay.
+**Camera** opens the tilt down (**Looking down**, from a height) or up
+(**Looking up**, at a summit), and **Selfie** searches the trace mirrored too.
+**Sun** says where the sun stood against the camera (ahead, left, right,
+behind) on a day between two local hours: the app turns it into the headings
+left, with the compass's, and draws them in the fan.
+For a video, **Measure from the video** reads the lens off the frames around
+the moment on show, where the camera pans; Fit and Find then keep it. The zoom
+words are a phone's (×0.5, ×1, ×2–3, ×5+), read across the picture's own shape, and take several ticks in Overlay as in Find: the search tries from
+the narrowest to the widest ticked, and none ticked is any lens. A line given a
+distance is searched only on ground that far, which also sets how far the turn
+is read and how fine the grid is; lines given none are kept off the ground at
+the eye's feet. A collage of a pan Azimut stitched is read frame by frame, each
+frame through its own camera at the stitch's lens, and a place found from it
+lays the collage as the panorama it spans. **Result** shows
+the search on show: its name, when it was made and what it was asked with, its
+progress, verdict, how far the best place can be trusted (**Solid**, **Check
+it** or **Weak**, with what lowers it and the score the area reaches by chance)
+and places, each with the area's chance score beside its own. **Check against
+decoys** tries the places again with the trace mirrored and upside down: a real
+place explains its own trace far better, and one a decoy fits nearly as well is
+marked so. **Change and
 search again** goes back to Prepare with the search's setup. The case's
 earlier searches are in the **Open** menu of Find's header, with when each was
 made and how it ended; opening one replaces the setup on screen. **New** beside
 it lets the photo, its trace and the setup go and asks for the next photo,
 asking first when no search keeps what is on screen.
+
+The Area step adds **Finer zone**s, each searched on a grid of its own (Auto
+is a third of the area's), and **Leave out** zones never searched, drawn
+dashed red. An area or a zone goes up to 10,000 km². **Try a point** tries the
+trace from a place clicked on the map, as a search scores its best places, and
+offers to look from there. **Speed** under More settings searches a large grid
+on several cores (Fast, the default) or on one (Gentle).
+
+Find's map has the small map's **Layers** button at its top right: the base
+map, then the same switches, so a layer turned on in Find stays on in Horizon.
+The case's layers and saved work are drawn under the area to trace it by, and
+let a click through while the area or an alignment is being drawn.
 
 Find's photo shows as the search reads it, straightened from its lens's curve
 and between its corners when Overlay pulled them. **Lens curve** on its
@@ -4945,7 +4990,9 @@ loop, without writing a day into the plate until it stops. Its day is always a d
 the calendar, today on its layers' clock for a new plate, never a "now" that would
 slide to the next day, so a plate reopens on the day it was left on; one saved on
 "now" before this moves to the day it was last saved, with what stood on it. The days
-played are its layers' changes and every day that holds steps. Events stay on its
+played are its layers' changes, every day that holds steps, and every day added to
+the play: a day between two changes says so on its tile, **Add to the play**, and
+its ⋯ takes it out again while it holds no steps. Events stay on its
 maps, faded, unless the plate's cursor says how many days. What is added on the map
 (a label, an arrow, a zone, rings, a cone, a distance, a shape) **belongs to the day
 it is made on**: the next day starts without it. The inspector shows it from a first
@@ -4968,7 +5015,7 @@ that step**, over what the day shows: the element list holds the day's elements 
 that step's, the step's marked. The inspector keeps a step's element on **This
 step** or **And after** (the steps after it, on the same day), or puts it back on
 the whole day; an element of the day goes **Only on** the step shown by a press. A
-step is dragged to another place in the strip, and its ⋯ names it, sets how long it
+step is dragged to another place in the strip, and its ⋯, always shown, names it, sets how long it
 holds, moves it, or removes it with what stands on it.
 
 **A day or a step frames a map its own way.** Past the first, each one shows the map
@@ -5008,8 +5055,8 @@ and what is new fades in or is drawn along its lines, or comes at once. The fram
 at the video's own 30 a second. A step's ⋯ can cut straight into it.
 Play shows the maps moving too. Everything goes into the folder saved for views.
 **Stop** ends an export under way and nothing is written; a map whose tiles had not
-all come in is drawn as it stood and the export says so. A long video is written to
-disk picture by picture as it comes, never held whole in memory.
+all come in is drawn as it stood and the export says so. A long video's pictures go
+to disk in batches as they are drawn, so neither the tab nor the app holds them all.
 The PDF holds the page as one picture at print resolution.
 
 **Keep as template** keeps the layout, its paper and colours, and the pictures kept

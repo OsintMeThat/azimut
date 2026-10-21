@@ -5,7 +5,7 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
  * The plate routes, kept in memory over the shared fixture: what was saved, what
  * was exported, and the templates kept.
  */
-async function plateFixture(page, store = { plates: new Map(), saves: [], exports: [], templates: [] }) {
+async function plateFixture(page, store = { plates: new Map(), saves: [], exports: [], pictures: [], templates: [] }) {
   await installAppFixture(page);
   await page.route('**/api/templates', (route) => route.fulfill({ json: { proof: [], post: [], map: store.templates } }));
   await page.route('**/api/templates/map', async (route) => {
@@ -21,6 +21,12 @@ async function plateFixture(page, store = { plates: new Map(), saves: [], export
     if (tail === '/export') {
       store.exports.push(request.postDataBuffer()?.toString('latin1') ?? '');
       return route.fulfill({ json: { file: 'Map plate.png', path: '/tmp/views', format: 'png' } });
+    }
+    // a played plate's pictures come first, in batches as they are drawn
+    if (tail === '/export/pictures') {
+      const body = request.postDataBuffer()?.toString('latin1') ?? '';
+      store.pictures.push(body);
+      return route.fulfill({ json: { staged: 'staged-1' } });
     }
     if (tail === '' && request.method() === 'GET') {
       return route.fulfill({ json: [...store.plates.values()].map((saved) => ({ name: saved.title, title: saved.title, maps: 1, thumb: null })) });
@@ -308,7 +314,10 @@ test('a day plays its steps, and a step plays a video of the case', async ({ pag
   await expect.poll(() => store.exports.length, { timeout: 60_000 }).toBe(1);
   expect(store.exports[0]).toContain('name="beats"');
   expect(store.exports[0]).toContain('"src":"media/strike.mp4"');
-  expect(store.exports[0]).toContain('name="overs"');
+  // the pictures went before it, what stands over the clip among them, and the export names them
+  expect(store.exports[0]).toContain('name="staged"\r\n\r\nstaged-1');
+  expect(store.pictures.some((body) => body.includes('name="series"\r\n\r\novers'))).toBe(true);
+  expect(store.pictures.some((body) => body.includes('name="series"\r\n\r\nframes'))).toBe(true);
 });
 
 test('a line and a text go on the map, a step frames the map its own way, and the video moves between them', async ({ page }) => {
@@ -556,4 +565,36 @@ test('a plate saved on now reopens on the day it was last saved, with what stood
   const note = spec.elements.find((element) => element.id === 'note');
   expect([note.onward, note.until]).toEqual(['2026-10-12', '2026-10-12']);
   await expect(page.locator('.steps [role="option"]').first()).toContainText('12 Oct 2026');
+});
+
+test('a day no layer changes on is added to the play from its tile, and let go from its ⋯', async ({ page }) => {
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 1,
+    categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };
+  const point = (lon) => ({ type: 'Point', coordinates: [lon, 48.86] });
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: point(2.31), properties: { key: 'k', name: 'Post', group: 'g', category: 'Posts',
+      states: [{ at: '2026-10-03', geometry: point(2.30) }, { at: '2026-10-09', geometry: point(2.31) }] } }] } }));
+  store.plates.set('Front', { title: 'Front', updated_at: '2026-10-06T12:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: '2026-10-06', step: null, trail: true, since: null, window: 7, hold: 1 },
+    elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.3, zoom: 12, bearing: 0 }, basemap: 'plain',
+      overlays: [], layers: [{ name: 'front', hidden: [], stroke: 1, icons: 1 }], grid: 'none' }] } });
+  await page.goto('/#plate');
+  await page.locator('.tile .open', { hasText: 'Front' }).click();
+  // the 6th falls between the layer's two changes: the play skips it until it is added
+  const idle = page.locator('.steps .tile.idle');
+  await expect(idle).toContainText('6 Oct 2026');
+  await expect(idle).toContainText('Add to the play');
+  await idle.click();
+  await expect.poll(() => lastSave(store)?.spec.days).toEqual(['2026-10-06']);
+  await expect(idle).toHaveCount(0);
+  await expect(page.locator('.steps .time').first()).toHaveText('0:01');
+  // its ⋯ lets it go again
+  await page.getByRole('button', { name: 'Set 6 Oct 2026' }).click();
+  await page.locator('.float-menu').getByRole('button', { name: 'Take it out of the play' }).click();
+  await expect.poll(() => lastSave(store)?.spec.days).toEqual([]);
+  await expect(idle).toHaveCount(1);
 });

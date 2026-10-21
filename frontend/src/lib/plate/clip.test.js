@@ -76,5 +76,7 @@ describe('a played plate', () => {
       .toEqual(['2026-10-10', '2026-10-12', '2026-10-15']);
     // the page of a plate with no day, and a day left with no step, play nothing of their own
     expect(playDays({ steps: { now: [{ id: 'p' }], '2026-10-11': [] } }, ['2026-10-14'])).toEqual(['2026-10-14']);
+    // a day the plate was told to play is played, a change of its layers or not
+    expect(playDays({ days: ['2026-10-12', 'now'] }, ['2026-10-10', '2026-10-14'])).toEqual(['2026-10-10', '2026-10-12', '2026-10-14']);
   });
 });

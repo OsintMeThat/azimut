@@ -22,6 +22,8 @@
     overlay,
     imagery,
     overlays = [],
+    /** The Layers menu of the map and what it draws, as FindMap takes them. */
+    layers = null,
     /** Where the map opens. */
     home,
     units = 'metric',
@@ -199,7 +201,7 @@
     {/if}
     <section class="find-col map" class:hidden={big === 'photo'} class:big={big === 'map'} aria-label="Map and the area">
       {#if home}
-        <FindMap {imagery} {overlays} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} bind:lit />
+        <FindMap {imagery} {overlays} {layers} {find} {home} imperial={units === 'imperial'} {onstand} {onplace} bind:lit />
       {/if}
       {@render guideIn('map')}
       <button

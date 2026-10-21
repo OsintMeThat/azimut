@@ -413,23 +413,36 @@ def test_a_view_keeps_what_was_known_about_the_photo_and_the_reach_fit_found(cli
     cid = _case(client, "Hinted views")
     photo = _photo(client, cid)
     spec = _spec(photo)
-    spec["photo"]["hints"] = {"picture": "panorama", "zoom": "telephoto", "facing": {"heading": 218.4}, "reach": 10_000}
+    spec["photo"]["hints"] = {"picture": "panorama", "zoom": ["zoomed", "wide"], "facing": {"heading": 218.4}, "reach": 10_000}
     spec["photo"]["reach"] = 20_000
     assert _save(client, cid, "Hinted", spec).status_code == 200
     kept = client.get(f"/api/cases/{cid}/horizon/views/Hinted").json()["spec"]["photo"]
-    assert kept["hints"] == {"picture": "panorama", "zoom": "telephoto", "facing": {"heading": 218.4}, "reach": 10_000}
+    # several zoom words ticked, kept in the menu's order
+    assert kept["hints"] == {"picture": "panorama", "zoom": ["wide", "zoomed"], "facing": {"heading": 218.4}, "reach": 10_000,
+                             "lens": None}
+    # a lens measured on the video's pan stays with the photo
+    spec["photo"]["hints"] = {"lens": {"fov": 41.2, "at": 12.5}}
+    assert _save(client, cid, "Measured", spec).status_code == 200
+    assert client.get(f"/api/cases/{cid}/horizon/views/Measured").json()["spec"]["photo"]["hints"]["lens"] == {"fov": 41.2, "at": 12.5}
     assert kept["reach"] == 20_000
+    # a view saved when one zoom word was kept has it alone, and "any" is none ticked
+    for word, ticked in (("telephoto", ["telephoto"]), ("any", [])):
+        spec["photo"]["hints"] = {"zoom": word}
+        assert _save(client, cid, f"One word {word}", spec).status_code == 200
+        assert client.get(f"/api/cases/{cid}/horizon/views/One word {word}").json()["spec"]["photo"]["hints"]["zoom"] == ticked
     # a view saved before hints existed knows nothing about its photo
     plain = _spec(photo)
     assert _save(client, cid, "Plain", plain).status_code == 200
     kept = client.get(f"/api/cases/{cid}/horizon/views/Plain").json()["spec"]["photo"]
-    assert kept["hints"] == {"picture": "photo", "zoom": "any", "facing": None, "reach": "auto"} and kept["reach"] is None
+    assert kept["hints"] == {"picture": "photo", "zoom": [], "facing": None, "reach": "auto", "lens": None} and kept["reach"] is None
 
 
 @pytest.mark.parametrize(
     "hints",
     [
         {"zoom": "huge"},
+        {"zoom": ["wide", "huge"]},
+        {"lens": {"fov": 400}},
         {"picture": "fisheye"},
         {"reach": 12_345},  # not a reach the panorama keeps its skyline at
         {"reach": "far"},
@@ -447,10 +460,13 @@ def test_a_view_keeps_the_marks_beside_its_trace(client):
     cid = _case(client, "Marked views")
     spec = _spec(_photo(client, cid))
     spec["photo"]["strokes"] = [[{"u": 0.1, "v": 0.41}, {"u": 0.3, "v": 0.38}], [{"u": 0.1, "v": 0.45}, {"u": 0.2, "v": 0.44}]]
-    spec["photo"]["marks"] = {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72]}
-    assert _save(client, cid, "Marked", spec).status_code == 200
+    spec["photo"]["marks"] = {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72],
+                              "far": [{"line": 0, "bands": ["b1", "b3"]}], "sea": [0]}
+    saved = _save(client, cid, "Marked", spec)
+    assert saved.status_code == 200, saved.text
     kept = client.get(f"/api/cases/{cid}/horizon/views/Marked").json()["spec"]["photo"]
-    assert kept["marks"] == {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72]}
+    assert kept["marks"] == {"lines": [0, 3], "inner": [3], "pairs": [[3, 0]], "cuts": [0.42, 0.72],
+                             "far": [{"line": 0, "bands": ["b1", "b3"]}], "sea": [0]}
     # a trace of the skyline alone keeps none
     plain = _spec(_photo(client, cid))
     assert _save(client, cid, "Plain", plain).status_code == 200
@@ -461,6 +477,8 @@ def test_a_view_keeps_the_marks_beside_its_trace(client):
     "marks",
     [
         {"pairs": [[1, 1]]},  # a stroke in front of itself
+        {"far": [{"line": 0, "bands": ["5 km"]}]},  # a distance no menu offers
+        {"far": [{"line": 0, "bands": []}]},
         {"pairs": [[1, 2, 3]]},
         {"cuts": [1.2]},  # past the photo's side
         {"lines": [-1]},

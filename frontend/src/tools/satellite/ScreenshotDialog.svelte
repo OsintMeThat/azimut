@@ -12,6 +12,7 @@
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
   import { shortcut } from '../../lib/keys.js';
+  import { middleClickPaste } from '../../lib/clipboardPaste.js';
 
   let {
     /** `{ lat, lon, zoom }` the map is on, which is what a pasted image is filed at. */
@@ -49,6 +50,7 @@
   }
 
   function onPaste(event) {
+    if (middleClickPaste()) return;
     const item = [...(event.clipboardData?.items ?? [])].find((entry) =>
       entry.type.startsWith('image/')
     );

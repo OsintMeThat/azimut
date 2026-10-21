@@ -26,6 +26,51 @@ make changes slowly over the ground.
 A reach the analyst gives is read as about that far: the turn is cut there and
 searched out to twice as far as well, so a ridge just past it still counts.
 
+The analyst may say which way the photo faces: one or several of the eight
+compass directions, each the 45° about it, those side by side read as one
+sector. Only those sectors of the turn are marched and slid over, which makes
+each point as much cheaper as the turn is narrowed, and leaves fewer headings
+for a wrong place to fit by chance.
+
+Where the eye stands narrows the ground too (engine/landform.py): the analyst may
+tick a summit or a ridge, a slope, a valley or a plain, and the grid and its
+filling-in keep only points on that ground; the refinement about a kept point
+is left free, since a summit's top and the slope beside it are one answer. Water
+is never stood on: on foot, points on the sea or a lake are left out everywhere.
+
+How far each line stands, when the analyst says it (skymatch `Marks.far`),
+narrows it three ways: a line is laid only on ground within its distances, the
+turn is read no farther than the farthest line can stand (so haze past it is
+nothing to search), and the grid is laid finely enough for the nearest line,
+a tenth or so of its distance. Lines the analyst says nothing of are kept off
+the ground nearer than `FLOOR_M`, the eye's own slope as the terrain's grain
+draws it. The camera's tilt is bounded by who took the photo (`TILTS`), wider
+when the analyst says it looks down from a height or up at a summit. A selfie
+may be mirrored: asked, the trace is searched as shot and mirrored, and a place
+says which.
+
+A line traced along the sea's horizon (`Marks.sea`) stands where the sea's own
+horizon does from the eye's height above it, a few kilometres from a beach and
+tens from a cliff: it is laid only on a skyline that far, which open sea makes
+and land rarely does.
+
+The sun narrows the heading too, when the analyst says where it stood against
+the camera (ahead, on the left, on the right, behind) on a day and between two
+local hours: the sun's azimuth over that window, read at the area's middle,
+gives the headings the camera may have faced, each side a quarter turn wide.
+Ticked with compass directions, a heading must agree with both.
+
+Zones drawn beside the area shape where it looks. A zone searched is laid on
+a grid of its own, finer than the area's where the analyst expects the camera
+(`Zone.spacing`), and searched with the area as one: one ranking, one map. A
+zone left out is never searched, whatever covers it (a lake, a place checked
+already). Each point refined about a kept one stays inside what is searched.
+
+A large grid is scored by several processes at once (`lanes`), each with the
+plan and its own terrain reader, its tiles bounded: threads would not help, the
+work holds Python's lock (measured: 4 threads slower than 1, 4 processes 2.2
+times faster than 1 over 480 points, 8 no faster than 4).
+
 Alignments (frontend lib/horizon/find.js) narrow it twice. A point off any
 alignment's line is not searched at all. And with the lens known, an alignment
 says which way the photo faces from each point: the bearing to its near point,
@@ -48,12 +93,13 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import numpy as np
 
-from . import horizon, skymatch, terrain
+from . import horizon, landform, skymatch, terrain
 
 # Searched when the analyst left the reach to Auto: these cuts and the turn out to the last.
 AUTO_FAR = 50_000.0
@@ -89,8 +135,13 @@ STANDOUT_MIN = 0.06
 # The coarse grid's spacing when left to Auto: about this many points over the area.
 AUTO_POINTS = 900
 NICE_SPACINGS = (100.0, 150.0, 250.0, 400.0, 500.0, 750.0, 1_000.0, 1_500.0, 2_000.0, 3_000.0)
-# The most points a coarse grid may hold, whatever spacing was asked.
-COARSE_MAX = 2_500
+# The most points a coarse grid may hold, whatever spacing was asked: past it the spacing widens, and
+# the estimate says so. The zones' own grids hold at most ZONES_MAX more between them.
+COARSE_MAX = 6_000
+ZONES_MAX = 6_000
+# A zone searched with no spacing of its own is laid this many times finer than the area, no finer than
+# the terrain's detail is worth.
+ZONE_SHARE = 1 / 3
 # Columns a thirtieth of the narrowest lens, within these bounds (degrees).
 STEP_MIN = 0.1
 STEP_MAX = 0.5
@@ -98,8 +149,38 @@ STEP_MAX = 0.5
 STEP_LENS_FLOOR = 6.0
 # Threads one sweep uses: the search runs on the analyst's machine beside everything else.
 WORKERS = 2
+# A grid this large is scored by several processes, when asked; and the tiles a search's terrain reader holds.
+LANE_MIN_POINTS = 200
+SEARCH_TILES = 256
 # A sector searched about the heading an alignment gives, degrees either side at the least.
 FACING_MIN = 3.0
+# A line the analyst says nothing of is laid on no ground nearer than this, metres: on foot, the
+# terrain's 30 m grain draws the eye's own slope as a ridge any trace can be laid on.
+FLOOR_M = 250.0
+# The camera's tilt a search allows, degrees, by who took the photo; looking down from a height or up
+# at a summit, as the analyst may say, opens it that way.
+TILTS: dict[str, tuple[float, float]] = {"ground": (-20.0, 25.0), "drone": (-80.0, 25.0), "aircraft": (-80.0, 15.0)}
+LOOK_DOWN = -60.0
+LOOK_UP = 60.0
+# The grid is laid at this share of the nearest distance a line is said to stand at, in metres,
+# reading a line said to stand nearer than a kilometre as this far.
+SAID_SHARE = 0.12
+SAID_NEAREST = 400.0
+# A line along the sea's horizon is laid on a skyline between these shares of the distance to the sea's
+# horizon from the eye's height above the sea; the eye is read at least this high (a deck, a beach).
+SEA_NEAR = 0.6
+SEA_FAR = 1.5
+SEA_EYE_MIN = 2.0
+# The compass directions the analyst may tick for where the photo faces, clockwise from north.
+DIRECTIONS = ("n", "ne", "e", "se", "s", "sw", "w", "nw")
+# Half the sector one direction stands for, degrees: the eight cover the turn.
+DIRECTION_HALF = 360.0 / len(DIRECTIONS) / 2
+# Where the sun stood against the camera, as the heading's turn from the sun's azimuth, degrees: the sun on
+# the right of the picture stands a quarter turn clockwise of where the camera faces.
+SUN_SIDES = {"ahead": 0.0, "right": -90.0, "behind": 180.0, "left": 90.0}
+# Half the headings each side stands for, degrees, and the minutes between the sun's positions read.
+SUN_HALF = 45.0
+SUN_EVERY_MIN = 10
 
 Verdict = Literal["match", "loose", "ambiguous", "none", "flat", "unclear"]
 
@@ -119,10 +200,46 @@ class Trace:
     known: bool = False
     within: tuple[float, float] | None = None
     projection: skymatch.Projection = "camera"
-    # a sector the analyst said the photo faces: middle and half width
-    facing: tuple[float, float] | None = None
-    # what else the analyst marked: inner edges, pairs, a collage's pieces
+    # the sectors the analyst said the photo faces, each its middle and half width; None for the whole turn
+    facing: tuple[skymatch.Sector, ...] | None = None
+    # what else the analyst marked: inner edges, pairs, a collage's pieces, how far lines stand
     marks: skymatch.Marks | None = None
+    # lines said nothing of are laid on no ground nearer than this, metres
+    floor: float = 0.0
+    # the camera's tilt allowed, degrees, low and high; None for any
+    tilts: tuple[float, float] | None = None
+    # a selfie: searched mirrored too
+    mirror: bool = False
+
+
+def tilts_for(mode: str, view: Sequence[str] = ()) -> tuple[float, float]:
+    """The tilts a search allows for who took the photo, opened down or up as the analyst says (`down`, `up`)."""
+    low, high = TILTS.get(mode, TILTS["ground"])
+    if "down" in view:
+        low = min(low, LOOK_DOWN)
+    if "up" in view:
+        high = max(high, LOOK_UP)
+    return low, high
+
+
+def said_bands(trace: Trace) -> tuple[np.ndarray, np.ndarray] | None:
+    """Each skyline point's band as the analyst said its line's distance (slack included), or None
+    unless every point has one."""
+    marks = trace.marks
+    if marks is None or not marks.far:
+        return None
+    bands = skymatch.bands_of(marks.line, trace.x.size, marks.far)
+    if bands is None or not np.isfinite(bands[1]).all():
+        return None
+    return bands
+
+
+def said_nearest(far: Sequence[Sequence[float]] | None) -> float | None:
+    """The nearest distance a line is said to stand at, metres, a line said nearer than a kilometre read
+    as `SAID_NEAREST`; None when no line's distance is said."""
+    if not far:
+        return None
+    return float(max(SAID_NEAREST, min(float(one[1]) for one in far)))
 
 
 @dataclass(frozen=True)
@@ -143,6 +260,16 @@ class Alignment:
 
 
 @dataclass(frozen=True)
+class Zone:
+    """A zone drawn beside the area: searched on its own grid, `spacing` metres apart (None: a third of the
+    area's, within the terrain's detail), or left out (`out`), whatever else covers it."""
+
+    area: Sequence[tuple[float, float]]
+    spacing: float | None = None
+    out: bool = False
+
+
+@dataclass(frozen=True)
 class Plan:
     """Where to search and who took the photo."""
 
@@ -155,12 +282,20 @@ class Plan:
     spacing: float | None = None  # the coarse grid's, metres; None is Auto
     fine: float | None = None  # the finest, metres; None reads it off the terrain (`detail`)
     alignments: Sequence[Alignment] = field(default_factory=tuple)
+    # the ground the eye may stand on (landform.STANDS), none for any
+    stands: Sequence[str] = ()
+    # the nearest a traced line is said to stand, metres: the grid is laid finely enough for it
+    near: float | None = None
+    # zones searched on their own grid beside the area, or left out
+    zones: Sequence[Zone] = field(default_factory=tuple)
 
 
 def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
     """The marks beside the skyline a saved trace holds (api/horizon.py `MarksIn`), or None."""
     pairs = trace.get("pairs") or []
-    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None:
+    far = trace.get("far") or []
+    sea = trace.get("sea") or []
+    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea:
         return None
 
     def ints(key: str) -> np.ndarray | None:
@@ -173,6 +308,8 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
         line=ints("line"), ridge_line=ints("ridge_line"),
         pairs=tuple((int(front), int(back)) for front, back in pairs),
         piece=ints("piece"), ridge_piece=ints("ridge_piece"),
+        far=tuple((int(stroke), float(nearest), float(farthest)) for stroke, nearest, farthest in far),
+        sea=tuple(int(stroke) for stroke in sea),
     )
 
 
@@ -243,6 +380,7 @@ def _along(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
     """
     line = plan.alignments[0]
     corners = [(float(a), float(o)) for a, o in plan.area]
+    corners += [(float(a), float(o)) for zone in plan.zones if not zone.out for a, o in zone.area]
     reach = max(terrain.distance(line.lat, line.lon, a, o) for a, o in corners)
     lats: list[float] = []
     lons: list[float] = []
@@ -257,13 +395,73 @@ def _along(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
     return np.array(lats), np.array(lons)
 
 
+def within(plan: Plan, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Which points are searched: in the area or a zone searched, and in no zone left out."""
+    lat = np.asarray(lat, dtype=np.float64)
+    lon = np.asarray(lon, dtype=np.float64)
+    keep = inside(plan.area, lat, lon)
+    for zone in plan.zones:
+        if not zone.out:
+            keep |= inside(zone.area, lat, lon)
+    for zone in plan.zones:
+        if zone.out:
+            keep &= ~inside(zone.area, lat, lon)
+    return keep
+
+
+def zone_spacings(plan: Plan, spacing: float) -> list[float]:
+    """Each zone searched's own spacing, metres (the area's `spacing` given), widened alike until the zones'
+    grids hold `ZONES_MAX` points between them; 0 for a zone left out."""
+    finest = FINE_PER_DETAIL * terrain.PLANET_DETAIL_M
+    wanted = [0.0 if zone.out else float(zone.spacing or max(finest, spacing * ZONE_SHARE)) for zone in plan.zones]
+    for _ in range(40):
+        count = sum(_polygon_grid(zone.area, step)[0].size for zone, step in zip(plan.zones, wanted) if step)
+        if count <= ZONES_MAX:
+            break
+        wanted = [step * 1.25 for step in wanted]
+    return wanted
+
+
 def grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    """The grid's points over the area and on the alignments' lines."""
+    """The grid's points over the area, and each zone searched on its own, out of the zones left out and on
+    the alignments' lines."""
+    lat, lon, _ = spaced_grid(plan, spacing)
+    return lat, lon
+
+
+def spaced_grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The grid (`grid`) with each point's own spacing, metres: the area's, or its zone's where a zone is
+    laid finer."""
     if plan.alignments:
         lat, lon = _along(plan, spacing)
-        keep = inside(plan.area, lat, lon) & on_lines(plan.alignments, lat, lon)
-        return lat[keep], lon[keep]
-    area = plan.area
+        keep = within(plan, lat, lon) & on_lines(plan.alignments, lat, lon)
+        return lat[keep], lon[keep], np.full(int(keep.sum()), spacing)
+    spacings = zone_spacings(plan, spacing) if plan.zones else []
+    parts = [(*_polygon_grid(plan.area, spacing), spacing)]
+    for zone, step in zip(plan.zones, spacings):
+        if step:
+            parts.append((*_polygon_grid(zone.area, step), step))
+    lat = np.concatenate([part[0] for part in parts])
+    lon = np.concatenate([part[1] for part in parts])
+    steps = np.concatenate([np.full(part[0].size, part[2]) for part in parts])
+    if plan.zones:
+        # inside a zone laid finer, its grid stands for the coarser ones
+        for zone, step in zip(plan.zones, spacings):
+            if step:
+                coarser = (steps > step) & inside(zone.area, lat, lon)
+                lat, lon, steps = lat[~coarser], lon[~coarser], steps[~coarser]
+        order = np.argsort(steps, kind="stable")
+        lat, lon, steps = lat[order], lon[order], steps[order]
+        _, first = np.unique(np.round(np.column_stack([lat, lon]), 6), axis=0, return_index=True)
+        first = np.sort(first)
+        lat, lon, steps = lat[first], lon[first], steps[first]
+        keep = within(plan, lat, lon)
+        lat, lon, steps = lat[keep], lon[keep], steps[keep]
+    return lat, lon, steps
+
+
+def _polygon_grid(area: Sequence[tuple[float, float]], spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """Points `spacing` metres apart over a polygon."""
     lat0, lon0 = area[0]
     lats = np.array([p[0] for p in area])
     lons = np.array([p[1] for p in area])
@@ -276,9 +474,55 @@ def grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
     return lat[keep], lon[keep]
 
 
+def standing(plan: Plan, lat: np.ndarray, lon: np.ndarray, sampler: terrain.Sampler, *, kinds: bool = True) -> np.ndarray:
+    """Which points the eye may stand at: on foot never on water unless it is ticked, and on the ground
+    ticked when `kinds`."""
+    keep = np.ones(lat.size, dtype=bool)
+    stands = [kind for kind in plan.stands if kind in landform.STANDS] if kinds else []
+    # on foot, nobody stands on water unless the analyst ticked it (a boat)
+    dry = plan.mode == "ground" and landform.WATER not in plan.stands
+    if not lat.size or (not dry and not stands):
+        return keep
+    ground = landform.kinds(lat, lon, sampler)
+    if dry:
+        keep &= ground != landform.WATER
+    if stands and len(stands) < len(landform.STANDS):
+        keep &= np.isin(ground, stands)
+    return keep
+
+
+def preview(plan: Plan, sampler: terrain.Sampler | None = None) -> dict[str, Any]:
+    """The coarse grid before a search, each point with the ground it stands on and whether it is searched."""
+    sampler = sampler or terrain.Sampler()
+    spacing = coarse_spacing(plan)
+    lat, lon = grid(plan, spacing)
+    ground = landform.kinds(lat, lon, sampler) if lat.size else np.array([], dtype=object)
+    kept = standing(plan, lat, lon, sampler)
+    counts = {kind: int(np.sum(ground == kind)) for kind in landform.STANDS}
+    return {
+        "spacing": spacing,
+        "total": int(lat.size),
+        "kept": int(kept.sum()),
+        "kinds": counts,
+        "points": [
+            [round(float(a), 6), round(float(o), 6), str(k), bool(on)] for a, o, k, on in zip(lat, lon, ground, kept)
+        ],
+    }
+
+
+def asked_spacing(plan: Plan) -> float:
+    """The coarse spacing asked: the analyst's, else Auto's, no wider than the nearest line said asks for."""
+    if plan.spacing:
+        return float(plan.spacing)
+    spacing = auto_spacing(plan.area)
+    if plan.near:
+        spacing = min(spacing, max(FINE_MIN, SAID_SHARE * plan.near))
+    return spacing
+
+
 def coarse_spacing(plan: Plan) -> float:
-    """The coarse grid's spacing: the analyst's, or Auto's, widened until the grid is within `COARSE_MAX`."""
-    spacing = plan.spacing or auto_spacing(plan.area)
+    """The coarse grid's spacing: the one asked (`asked_spacing`), widened until the grid is within `COARSE_MAX`."""
+    spacing = asked_spacing(plan)
     while grid(plan, spacing)[0].size > COARSE_MAX:
         spacing *= 1.25
     return spacing
@@ -321,9 +565,12 @@ def estimate(plan: Plan) -> dict[str, Any]:
     depth = levels(spacing, fine)
     refined = depth * KEEP * 8
     points = coarse + refined + _polish_count() + TOP
+    asked = asked_spacing(plan)
     return {
         "spacing": spacing, "fine": round(fine, 1), "coarse": coarse,
         "points": points, "levels": depth,
+        # the spacing asked, when the area was too large for it and a wider one is used
+        "asked": round(asked, 1) if spacing > asked * 1.01 else None,
         # where relief stands near, the cells are filled in: at most this many points in all
         "most": points + int(DENSE_MAX * coarse),
     }
@@ -332,8 +579,14 @@ def estimate(plan: Plan) -> dict[str, Any]:
 # -- one point -----------------------------------------------------------------
 
 
-def reaches(plan: Plan) -> tuple[float, list[float]]:
-    """How far the turn is read and where it is cut: Auto's cuts, or the analyst's reach and on to twice it."""
+def reaches(plan: Plan, trace: Trace | None = None) -> tuple[float, list[float]]:
+    """How far the turn is read and where it is cut: as far as the farthest line said can stand, cut at
+    each other line's; else Auto's cuts, or the analyst's reach and on to twice it."""
+    said = said_bands(trace) if trace is not None else None
+    if said is not None:
+        highs = sorted({round(float(v)) for v in said[1]})
+        far = float(min(horizon.FAR_MAX, highs[-1]))
+        return far, [float(v) for v in highs[:-1] if v < far]
     if not plan.reach:
         return AUTO_FAR, [c for c in AUTO_CUTS if c < AUTO_FAR]
     far = max(plan.reach, min(plan.reach * REACH_PAST, AUTO_FAR))
@@ -365,8 +618,141 @@ def column_step(trace: Trace) -> float:
     return float(min(STEP_MAX, max(STEP_MIN, narrowest / 30)))
 
 
-def _facing(trace: Trace, plan: Plan, lat: float, lon: float) -> tuple[float, float] | None:
-    """The sector searched from a point: an alignment's, the lens known; else the analyst's."""
+def facing_sectors(words: Sequence[str] | None) -> tuple[skymatch.Sector, ...] | None:
+    """The sectors the compass directions ticked stand for, those side by side joined; None for none or all."""
+    ticked = sorted({DIRECTIONS.index(word) for word in words or () if word in DIRECTIONS})
+    if not ticked or len(ticked) == len(DIRECTIONS):
+        return None
+    # runs of neighbours round the turn, the first starting after a gap
+    start = next(i for i in ticked if (i - 1) % len(DIRECTIONS) not in ticked)
+    order = [(start + k) % len(DIRECTIONS) for k in range(len(DIRECTIONS))]
+    runs: list[list[int]] = []
+    for i in order:
+        if i not in ticked:
+            continue
+        if runs and (runs[-1][-1] + 1) % len(DIRECTIONS) == i:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    width = 2 * DIRECTION_HALF
+    return tuple(
+        ((run[0] * width + (len(run) - 1) * width / 2) % 360.0, len(run) * DIRECTION_HALF) for run in runs
+    )
+
+
+def half_span(trace: Trace) -> float:
+    """Degrees the trace may reach either side of where the photo faces: half the widest lens tried,
+    or half its own width when it spans more (a collage read frame by frame)."""
+    lens = trace.fov if trace.known or trace.within is None else max(trace.within)
+    reach = float(np.abs(trace.x).max()) if trace.x.size else 1.0
+    if trace.projection == "panorama":
+        return max(lens / 2, reach * lens / 2)
+    return max(lens / 2, math.degrees(math.atan(reach * math.tan(math.radians(min(lens, 179.0)) / 2))))
+
+
+def heading_mask(sectors: Sequence[skymatch.Sector] | None) -> np.ndarray:
+    """The headings a list of sectors holds, degree by degree (360 of them): all when None."""
+    out = np.zeros(360, dtype=bool)
+    if sectors is None:
+        out[:] = True
+        return out
+    degrees = np.arange(360.0) + 0.5
+    for centre, half in sectors:
+        out |= np.abs((degrees - centre + 180.0) % 360.0 - 180.0) <= half
+    return out
+
+
+def mask_sectors(mask: np.ndarray) -> tuple[skymatch.Sector, ...] | None:
+    """Sectors holding the headings a degree-by-degree mask holds: None when it holds every one."""
+    if mask.all():
+        return None
+    if not mask.any():
+        return ()
+    start = int(np.flatnonzero(~mask)[0])
+    rolled = np.roll(mask, -start)
+    out: list[skymatch.Sector] = []
+    i = 0
+    while i < 360:
+        if not rolled[i]:
+            i += 1
+            continue
+        j = i
+        while j < 360 and rolled[j]:
+            j += 1
+        out.append((((start + (i + j) / 2) % 360.0), (j - i) / 2))
+        i = j
+    return tuple(out)
+
+
+def sun_headings(
+    lat: float, lon: float, day: str, start: str, end: str, sides: Sequence[str],
+) -> tuple[np.ndarray, dict[str, Any]] | None:
+    """The headings the sun allows, degree by degree, and what was read: `{ zone, from, to, up }`, `from`
+    and `to` the sun's azimuths over the window and `up` whether it stood above the horizon then.
+    `day` is a date, `start` and `end` local hours (`HH:MM`) at the point; None when no side is said."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from . import localtime, sky
+
+    said = [side for side in sides if side in SUN_SIDES]
+    if not said:
+        return None
+    zone = localtime.zone_for(lat, lon)
+    first = datetime.fromisoformat(f"{day}T{start}").replace(tzinfo=ZoneInfo(zone))
+    last = datetime.fromisoformat(f"{day}T{end}").replace(tzinfo=ZoneInfo(zone))
+    if last < first:
+        first, last = last, first
+    count = max(1, int((last - first).total_seconds() // (SUN_EVERY_MIN * 60)) + 1)
+    times = [first + timedelta(minutes=SUN_EVERY_MIN * i) for i in range(count)]
+    if times[-1] < last:
+        times.append(last)
+    where = sky.positions(lat, lon, times)
+    azimuth = np.asarray(where["sun_azimuth"], dtype=np.float64)
+    up = np.asarray(where["sun_altitude"], dtype=np.float64) > -1.0
+    mask = np.zeros(360, dtype=bool)
+    for side in said:
+        mask |= heading_mask([((a + SUN_SIDES[side]) % 360.0, SUN_HALF) for a in azimuth[up]])
+    read = {
+        "zone": zone,
+        "from": round(float(azimuth[0]), 1),
+        "to": round(float(azimuth[-1]), 1),
+        "up": bool(up.any()),
+    }
+    return mask, read
+
+
+def facing_with_sun(
+    facing: tuple[skymatch.Sector, ...] | None, sun: np.ndarray | None,
+) -> tuple[skymatch.Sector, ...] | None:
+    """The headings both the compass directions ticked and the sun allow, as sectors."""
+    if sun is None:
+        return facing
+    return mask_sectors(heading_mask(facing) & sun)
+
+
+def marched(columns: np.ndarray, facing: tuple[skymatch.Sector, ...] | None, half_width: float) -> np.ndarray:
+    """The columns of the turn a point marches: those a photo facing within the sectors can span,
+    `half_width` degrees either side."""
+    if facing is None:
+        return np.ones(columns.size, dtype=bool)
+    out = np.zeros(columns.size, dtype=bool)
+    for centre, half in facing:
+        reach_deg = half + half_width + 2.0
+        if reach_deg >= 180.0:
+            return np.ones(columns.size, dtype=bool)
+        out |= np.abs((columns - centre + 180.0) % 360.0 - 180.0) <= reach_deg
+    return out
+
+
+def turn_share(trace: Trace) -> float:
+    """The share of the turn a point marches, what the directions the analyst ticked save."""
+    columns = np.arange(0.0, 360.0, column_step(trace))
+    return float(marched(columns, trace.facing, half_span(trace)).mean())
+
+
+def _facing(trace: Trace, plan: Plan, lat: float, lon: float) -> tuple[skymatch.Sector, ...] | None:
+    """The sectors searched from a point: an alignment's, the lens known; else the analyst's."""
     if trace.known:
         for line in plan.alignments:
             if line.photo_x is None:
@@ -376,8 +762,29 @@ def _facing(trace: Trace, plan: Plan, lat: float, lon: float) -> tuple[float, fl
                 across = line.photo_x * trace.fov / 2
             else:
                 across = math.degrees(math.atan(line.photo_x * math.tan(math.radians(trace.fov) / 2)))
-            return ((toward - across) % 360.0, max(FACING_MIN, 2 * line.tolerance + 1.0))
+            return (((toward - across) % 360.0, max(FACING_MIN, 2 * line.tolerance + 1.0)),)
     return trace.facing
+
+
+def sea_horizon(altitude: float) -> float:
+    """How far the sea's horizon stands from an eye this high above it, metres (with refraction)."""
+    return math.sqrt(2 * horizon.effective_radius() * max(SEA_EYE_MIN, altitude))
+
+
+def _at_sea(marks: skymatch.Marks | None, altitude: float) -> skymatch.Marks | None:
+    """The marks with each sea line's distance said, from the eye's height above the sea."""
+    if marks is None or not marks.sea:
+        return marks
+    reach = sea_horizon(altitude)
+    said = tuple((stroke, SEA_NEAR * reach, SEA_FAR * reach) for stroke in marks.sea)
+    return replace(marks, far=tuple(marks.far) + said)
+
+
+def _mirrored(marks: skymatch.Marks | None) -> skymatch.Marks | None:
+    """The marks of a trace mirrored left to right: the inner edges with it, the strokes and pieces kept."""
+    if marks is None:
+        return None
+    return replace(marks, ridge_x=-marks.ridge_x)
 
 
 def score_point(
@@ -385,22 +792,25 @@ def score_point(
     heights: Sequence[float] | None = None, rough: bool = False, near_step: float = horizon.NEAR_STEP,
 ) -> dict[str, Any]:
     """How well the trace lies on the turn seen from a point: the best place and how much it explains."""
-    far, cuts = reaches(plan)
+    far, cuts = reaches(plan, trace)
     step = column_step(trace)
     facing = _facing(trace, plan, lat, lon)
     best: dict[str, Any] = {"lat": round(lat, 6), "lon": round(lon, 6), "explained": -1.0}
     columns = np.arange(0.0, 360.0, step)
-    # facing a known way, only the sector the photo can span is marched; the rest of the turn is left empty
-    marched = np.ones(columns.size, dtype=bool)
-    if facing is not None:
-        reach_deg = facing[1] + trace.fov / 2 + 2.0
-        if reach_deg < 180.0:
-            marched = np.abs((columns - facing[0] + 180.0) % 360.0 - 180.0) <= reach_deg
+    # facing a known way, only the sectors the photo can span are marched; the rest of the turn is left empty
+    marching = marched(columns, facing, half_span(trace))
     for height in heights or plan.heights:
         observer = horizon.Observer(lat, lon, plan.mode, float(height))
+        marks = trace.marks
+        reach = far
         try:
+            if marks is not None and marks.sea:
+                # the sea's horizon from this eye: the turn reads out past it
+                altitude = observer.altitude(float(sampler.heights(lat, lon, terrain.MAX_ZOOM)))
+                marks = _at_sea(marks, altitude)
+                reach = max(far, SEA_FAR * skymatch.BAND_SLACK * sea_horizon(altitude))
             swept = horizon.sweep(
-                observer, azimuths=columns[marched], far=far, cuts=cuts, sampler=sampler, workers=WORKERS,
+                observer, azimuths=columns[marching], far=reach, cuts=cuts, sampler=sampler, workers=WORKERS,
                 near_step=near_step,
             )
         except horizon.BelowGround:
@@ -408,29 +818,32 @@ def score_point(
 
         def whole(row: np.ndarray) -> np.ndarray:
             out = np.full(columns.size, np.nan)
-            out[marched] = row
+            out[marching] = row
             return out
 
         turns = [
             skymatch.Turn(0.0, step, whole(row), reach=float(at), distance=whole(far_row))
             for at, row, far_row in zip(swept.cuts, swept.skyline_cuts, swept.skyline_cuts_distance)
         ]
-        turns.append(skymatch.Turn(0.0, step, whole(swept.skyline), reach=far, distance=whole(swept.skyline_distance)))
+        turns.append(skymatch.Turn(0.0, step, whole(swept.skyline), reach=reach, distance=whole(swept.skyline_distance)))
         ridges = None
         if trace.marks is not None and trace.marks.ridge_x.size:
             ridges = skymatch.Ridges.of(
-                0.0, step, columns.size, np.flatnonzero(marched)[swept.ridge_column], swept.ridge_angle,
+                0.0, step, columns.size, np.flatnonzero(marching)[swept.ridge_column], swept.ridge_angle,
                 swept.ridge_distance,
             )
-        found = skymatch.match(
-            trace.x, trace.y, turns, half_width=trace.half_width, fov=trace.fov, known=trace.known,
-            within=trace.within, facing=facing, projection=trace.projection, quick=quick, rough=rough,
-            marks=trace.marks, ridges=ridges,
-        )
-        if not found.fits:
-            continue
-        fit = found.fits[0]
-        if fit.explained > best["explained"]:
+        tries = [(False, trace.x, marks)]
+        if trace.mirror:
+            tries.append((True, -trace.x, _mirrored(marks)))
+        for mirrored, x, marks in tries:
+            found = skymatch.match(
+                x, trace.y, turns, half_width=trace.half_width, fov=trace.fov, known=trace.known,
+                within=trace.within, facing=facing, projection=trace.projection, quick=quick, rough=rough,
+                marks=marks, ridges=ridges, floor=trace.floor, tilts=trace.tilts,
+            )
+            if not found.fits or found.fits[0].explained <= best["explained"]:
+                continue
+            fit = found.fits[0]
             best = {
                 "lat": round(lat, 6), "lon": round(lon, 6), "explained": round(fit.explained, 4),
                 "heading": round(fit.heading, 3), "tilt": round(fit.tilt, 3), "roll": round(fit.roll, 3),
@@ -438,6 +851,8 @@ def score_point(
                 "ground": round(swept.ground, 1), "verdict": found.verdict,
                 "relief": round(relief(next(t for t in turns if t.reach == fit.reach), fit), 1),
             }
+            if mirrored:
+                best["mirrored"] = True
             if fit.sky is not None:
                 best["sky"] = round(fit.sky, 4)
             if fit.inner is not None:
@@ -472,40 +887,125 @@ def _spread(points: list[dict[str, Any]], apart: float, most: int) -> list[dict[
 def search(
     plan: Plan, trace: Trace, *, sampler: terrain.Sampler | None = None,
     progress: Callable[[int, int], None] = lambda done, total: None,
-    cancelled: Callable[[], bool] = lambda: False,
+    cancelled: Callable[[], bool] = lambda: False, lanes: int = 1,
 ) -> dict[str, Any]:
     """Search the area for where the trace lies best: every point scored, the best places, a verdict.
 
-    `progress(done, total)` is told as points are scored; `cancelled()` is asked
-    between them and stops the search by raising `Cancelled`.
+    `progress(done, total)` is told as points are scored, one call at a time;
+    `cancelled()` is asked before each and stops the search by raising
+    `Cancelled`. `lanes` points are scored at once, each on its own thread: the
+    work is numpy's and lets the others run meanwhile.
     """
-    sampler = sampler or terrain.Sampler()
+    sampler = sampler or terrain.Sampler(keep=SEARCH_TILES)
     started = time.monotonic()
     spacing = coarse_spacing(plan)
     fine = fine_spacing(plan, sampler)
-    lat, lon = grid(plan, spacing)
+    lat, lon, steps = spaced_grid(plan, spacing)
+    on_ground = standing(plan, lat, lon, sampler)
+    lat, lon, steps = lat[on_ground], lon[on_ground], steps[on_ground]
     depth = levels(spacing, fine)
-    total = int(lat.size) + depth * KEEP * 8 + _polish_count() + TOP
+    count = {"total": int(lat.size) + depth * KEEP * 8 + _polish_count() + TOP}
     done = 0
     scored: list[dict[str, Any]] = []
     seen: set[tuple[float, float]] = set()
+    pool = _lanes(lanes, plan, trace) if lanes > 1 and lat.size >= LANE_MIN_POINTS else None
+
+    def tell() -> None:
+        nonlocal done
+        done += 1
+        progress(min(done, count["total"]), count["total"])
 
     def score(
         a: float, o: float, step: float, *, stage: str, heights: Sequence[float] | None = None,
     ) -> dict[str, Any]:
-        nonlocal done
         if cancelled():
             raise Cancelled
-        if stage == "rough":
-            point = score_point(a, o, trace, plan, sampler=sampler, rough=True, near_step=ROUGH_NEAR_M)
-        elif stage == "polish":
-            point = score_point(a, o, trace, plan, sampler=sampler, quick=True, near_step=POLISH_NEAR_M)
-        else:
-            point = score_point(a, o, trace, plan, sampler=sampler, quick=False, heights=heights)
-        point["spacing"] = step
-        done += 1
-        progress(min(done, total), total)
+        point = _score_stage(a, o, step, stage, heights, trace, plan, sampler)
+        tell()
         return point
+
+    def batch(
+        jobs: Sequence[tuple[float, float, float]], stage: str, heights: Sequence[float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Points scored in the order given: here, or by the processes when the search has them."""
+        if pool is None or len(jobs) < 2:
+            return [score(a, o, step, stage=stage, heights=heights) for a, o, step in jobs]
+        futures = {pool.submit(_lane_score, (a, o, step, stage, heights)): i for i, (a, o, step) in enumerate(jobs)}
+        out: list[dict[str, Any] | None] = [None] * len(jobs)
+        try:
+            for future in as_completed(futures):
+                out[futures[future]] = future.result()
+                tell()
+                if cancelled():
+                    raise Cancelled
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+        return [point for point in out if point is not None]
+
+    try:
+        return _search(plan, trace, sampler, spacing, fine, lat, lon, steps, depth, count, scored, seen, batch, progress, started)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _score_stage(
+    a: float, o: float, step: float, stage: str, heights: Sequence[float] | None, trace: Trace, plan: Plan,
+    sampler: terrain.Sampler,
+) -> dict[str, Any]:
+    """One point scored as a stage of the search asks: roughly, polished, or in full."""
+    if stage == "rough":
+        point = score_point(a, o, trace, plan, sampler=sampler, rough=True, near_step=ROUGH_NEAR_M)
+    elif stage == "polish":
+        point = score_point(a, o, trace, plan, sampler=sampler, quick=True, near_step=POLISH_NEAR_M)
+    else:
+        point = score_point(a, o, trace, plan, sampler=sampler, quick=False, heights=heights)
+    point["spacing"] = step
+    return point
+
+
+# what each process of a search holds: the plan, the trace and its own terrain reader
+_LANE: dict[str, Any] = {}
+
+
+def _lane_start(plan: Plan, trace: Trace, fetch: Any) -> None:
+    """A search's process made ready: its plan, its trace and a terrain reader of its own, its tiles bounded."""
+    if fetch is not None:
+        terrain.tile = fetch
+    _LANE.update(plan=plan, trace=trace, sampler=terrain.Sampler(keep=SEARCH_TILES))
+
+
+def _lane_score(job: tuple[float, float, float, str, Sequence[float] | None]) -> dict[str, Any]:
+    a, o, step, stage, heights = job
+    return _score_stage(a, o, step, stage, heights, _LANE["trace"], _LANE["plan"], _LANE["sampler"])
+
+
+def _lanes(lanes: int, plan: Plan, trace: Trace) -> ProcessPoolExecutor:
+    """Processes for a search, started the way every system can (spawn), told where tiles come from."""
+    import multiprocessing
+    import pickle
+
+    fetch: Any = terrain.tile
+    try:
+        pickle.dumps(fetch)
+    except Exception:  # a source only this process knows: the processes read the usual one
+        fetch = None
+    return ProcessPoolExecutor(
+        max_workers=lanes, mp_context=multiprocessing.get_context("spawn"),
+        initializer=_lane_start, initargs=(plan, trace, fetch),
+    )
+
+
+def _search(
+    plan: Plan, trace: Trace, sampler: terrain.Sampler, spacing: float, fine: float, lat: np.ndarray,
+    lon: np.ndarray, steps: np.ndarray, depth: int, count: dict[str, int], scored: list[dict[str, Any]],
+    seen: set[tuple[float, float]],
+    batch: Callable[..., list[dict[str, Any]]], progress: Callable[[int, int], None], started: float,
+) -> dict[str, Any]:
+    """The search's stages, each scoring its points through `batch`; `count["total"]` grows as the
+    filling-in adds points."""
 
     def about(point: dict[str, Any], step: float, reach: int) -> list[tuple[float, float]]:
         """Grid points `step` apart about a point, `reach` steps either way, not scored yet, in the area and on the lines."""
@@ -517,44 +1017,51 @@ def search(
                 lats, lons = _from_local(point["lat"], point["lon"], np.array([i * step]), np.array([j * step]))
                 a, o = float(lats[0]), float(lons[0])
                 key = (round(a, 6), round(o, 6))
-                if key in seen or not inside(plan.area, np.array([a]), np.array([o]))[0]:
+                if key in seen or not within(plan, np.array([a]), np.array([o]))[0]:
                     continue
                 if plan.alignments and not on_lines(plan.alignments, np.array([a]), np.array([o]))[0]:
                     continue
                 seen.add(key)
                 out.append((a, o))
+        # the refinement about a kept point is free, but never out on the water
+        if out and plan.mode == "ground":
+            dry = standing(plan, np.array([a for a, _ in out]), np.array([o for _, o in out]), sampler, kinds=False)
+            out = [one for one, keep in zip(out, dry) if keep]
         return out
 
     # ranked roughly over the whole grid
     for a, o in zip(lat, lon):
         seen.add((round(float(a), 6), round(float(o), 6)))
-        scored.append(score(float(a), float(o), spacing, stage="rough"))
+    scored.extend(batch([(float(a), float(o), float(own)) for a, o, own in zip(lat, lon, steps)], "rough"))
     # the cells near relief filled in, and ranked as roughly
     extra = filled(plan, scored, spacing, fine, seen)
-    total += len(extra)
-    for a, o, own in extra:
-        scored.append(score(a, o, own, stage="rough"))
+    if extra:
+        dry = standing(plan, np.array([a for a, _, _ in extra]), np.array([o for _, o, _ in extra]), sampler)
+        extra = [one for one, keep in zip(extra, dry) if keep]
+    count["total"] += len(extra)
+    scored.extend(batch(extra, "rough"))
     # refined three by three about the best, each from its own spacing, down to what the terrain is worth
     step = spacing
     for _ in range(depth):
         kept = _spread(scored, step, KEEP)
         step /= 3
+        jobs: list[tuple[float, float, float]] = []
         for point in kept:
             own = max(fine, min(step, point["spacing"] / 3))
-            for a, o in about(point, own, 1):
-                scored.append(score(a, o, own, stage="rough"))
+            jobs.extend((a, o, own) for a, o in about(point, own, 1))
+        scored.extend(batch(jobs, "rough"))
     # the three best polished on a finer grid, with the ground near the eye read finely
     polish_step = step / 2
+    jobs = []  # the polish's points, reusing the list's type
     for point in _spread(scored, max(APART_M, 2 * fine), POLISH):
-        for a, o in about(point, polish_step, POLISH_STEPS):
-            scored.append(score(a, o, polish_step, stage="polish"))
+        jobs.extend((a, o, polish_step) for a, o in about(point, polish_step, POLISH_STEPS))
+    scored.extend(batch(jobs, "polish"))
     # the best places, searched in full as a Fit is
-    places = []
-    for point in _spread(scored, max(APART_M, 2 * fine), TOP):
-        full = score(point["lat"], point["lon"], point["spacing"], stage="full", heights=plan.final_heights or None)
-        places.append(full if full["explained"] >= point["explained"] else point)
+    best = _spread(scored, max(APART_M, 2 * fine), TOP)
+    fulls = batch([(p["lat"], p["lon"], p["spacing"]) for p in best], "full", heights=plan.final_heights or None)
+    places = [full if full["explained"] >= point["explained"] else point for point, full in zip(best, fulls)]
     places.sort(key=lambda p: -p["explained"])
-    progress(total, total)
+    progress(count["total"], count["total"])
     rise = standout(places, scored)
     return {
         "verdict": verdict(places, rise),
@@ -576,7 +1083,7 @@ def filled(
 ) -> list[tuple[float, float, float]]:
     """Points filling in the cells of the coarse grid whose relief stands near: (lat, lon, spacing).
 
-    Each cell, `spacing` wide about its point, is filled in at `NEAR_SHARE` of
+    Each cell, as wide as its point's own spacing (`spacing` where it says none), is filled in at `NEAR_SHARE` of
     the distance to the ridges its point sees, no finer than `fine`. The cells
     nearest their relief come first; past `DENSE_MAX` times the grid's points,
     the rest are filled two by two, and none once even that does not fit.
@@ -589,18 +1096,19 @@ def filled(
         near = point.get("relief", math.inf)
         if not math.isfinite(near):
             break
-        count = int(round(spacing / max(fine, NEAR_SHARE * near)))
+        cell = float(point.get("spacing") or spacing)
+        count = int(round(cell / max(fine, NEAR_SHARE * near)))
         if count < 2:
             continue
         if len(out) + count * count > budget:
             count = 2
             if len(out) + count * count > budget:
                 break
-        own = spacing / count
-        offsets = (np.arange(count) + 0.5) / count * spacing - spacing / 2
+        own = cell / count
+        offsets = (np.arange(count) + 0.5) / count * cell - cell / 2
         gx, gy = np.meshgrid(offsets, offsets)
         lats, lons = _from_local(point["lat"], point["lon"], gx.ravel(), gy.ravel())
-        keep = inside(plan.area, lats, lons)
+        keep = within(plan, lats, lons)
         if plan.alignments:
             keep &= on_lines(plan.alignments, lats, lons)
         for a, o in zip(lats[keep], lons[keep]):

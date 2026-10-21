@@ -507,15 +507,18 @@
     map.setPixelRatio(ratio);
     map.resize();
     const jump = (view) => map.jumpTo({ center: [view.lon, view.lat], zoom: view.zoom, bearing: view.bearing ?? 0, pitch: view.pitch ?? 0 });
+    // each frame of the way is drawn on the picture of the one before, which is read by then
+    let picture = null;
     return {
       async at(view) {
         jump(view);
         // the tiles of the new view are asked for when it is next drawn
         await new Promise((resolve) => { map.once('render', resolve); map.triggerRepaint(); });
-        const { canvas } = await engine.snapshot({ timeout: 10000 });
-        return { picture: canvas, placer: inThreeD() ? projector(map) : null };
+        ({ canvas: picture } = await engine.snapshot({ timeout: 10000, into: picture }));
+        return { picture, placer: inThreeD() ? projector(map) : null };
       },
       end() {
+        if (picture) { picture.width = 0; picture.height = 0; picture = null; }
         if (!engine) return;
         map.setPixelRatio(before);
         jump(home);

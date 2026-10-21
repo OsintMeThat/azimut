@@ -33,8 +33,8 @@ const turn = (value) => {
 
 /** What was known about the photo, as the case keeps it (lib/horizon/hints.js). */
 function hintsSpec(hints) {
-  const { picture, zoom, facing, reach } = cleanHints(hints);
-  return { picture, zoom, facing: facing ? { heading: round(facing.heading, 1) } : null, reach };
+  const { picture, zoom, facing, reach, lens } = cleanHints(hints);
+  return { picture, zoom, facing: facing ? { heading: round(facing.heading, 1) } : null, reach, ...(lens ? { lens } : {}) };
 }
 
 /**

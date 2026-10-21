@@ -601,6 +601,10 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
       return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable/upload`, body),
         'Could not import the layer');
     },
+    importMyMaps(url, title, description = '') {
+      return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable/link`, { url, title, description }),
+        'Could not import the map');
+    },
     copyEditable(layer, title, description = '') {
       return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/editable-copy`, { title, description }),
         'Could not copy the layer');

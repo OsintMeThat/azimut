@@ -110,6 +110,12 @@ class EditableIn(BaseModel):
     description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
 
 
+class EditableLinkIn(BaseModel):
+    url: str = Field(min_length=1, max_length=4000)
+    title: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=layer_engine.MAX_DESCRIPTION)
+
+
 class TrackIn(BaseModel):
     """A personal layer followed over time; see `layerediting.set_track`."""
     on: bool | None = None
@@ -409,6 +415,15 @@ async def import_editable_layer(
     data = await file.read(MAX_UPLOAD + 1)
     try:
         return layerediting.from_file(get_case(case_id), data, file.filename or "layer", title, description)
+    except layer_engine.LayerError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{case_id}/map-layers/editable/link")
+def import_editable_link(case_id: str, body: EditableLinkIn) -> dict[str, Any]:
+    """A My Maps read once into a personal layer; the link is not followed after."""
+    try:
+        return layerediting.from_my_maps(get_case(case_id), body.url, body.title, body.description)
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
 

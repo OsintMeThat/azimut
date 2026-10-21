@@ -167,7 +167,7 @@
    * want the whole photo under the hand.
    */
   const controlsShown = $derived(
-    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting))
+    Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing))
   );
   /** The loupe over the photo while it shows anything but the whole photo, which the camera is then seen through. */
   const loupe = $derived(laid && view.camera.projection === 'camera' && loupeMoved(overlay.loupe) ? overlay.loupe : null);
@@ -725,7 +725,7 @@
   const tracing = $derived(laid && overlay.tracing);
   const erasing = $derived(laid && overlay.erasing);
   /** Pairing lines or cutting the collage: a click picks, nothing is dragged. */
-  const picking = $derived(laid && (overlay.linking || overlay.cutting));
+  const picking = $derived(laid && (overlay.linking || overlay.cutting || overlay.distancing));
   /** The photo's corners out to be pulled. */
   const warping = $derived(laid && overlay.warping);
   /** The photo held to the terrain: the view's gestures carry both, and none parts them. */
@@ -1026,6 +1026,7 @@
       const point = photoAt(shownLoupe, at.x, at.y, size);
       if (overlay.cutting) overlay.cutAt(point, photoScale);
       else if (overlay.linking) overlay.linkAt(point, photoScale);
+      else if (overlay.distancing) overlay.farAt(point, photoScale);
       return;
     }
     if (press.shaping) {
@@ -1258,7 +1259,7 @@
     else if (key === 'l' || key === 'L') overlay.setLocked(!overlay.locked);
     else if ((key === 'h' || key === 'H') && overlay.strokes.length) overlay.setTraceHidden(!overlay.traceHidden);
     else if ((key === 'd' || key === 'D') && overlay.strokes.length) overlay.setDetails(!overlay.details);
-    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting)) {
+    else if (key === 'Escape' && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing)) {
       event.stopPropagation();
       putAway(overlay);
       overlay.setWarping(false);
@@ -1522,6 +1523,8 @@
         <polyline class="trace under" class:picked={overlay.front === id} {points} />
         {#if overlay.marks.inner.includes(id)}
           <polyline class="trace over ridge" {points} />
+        {:else if overlay.marks.sea?.includes(id) && !(fit?.[index]?.length === stroke.length)}
+          <polyline class="trace over sea" {points} />
         {:else if fit?.[index]?.length === stroke.length}
           {#each fitRuns(stroke, fit[index]) as run, part (part)}
             <polyline class="trace over {run.kind}" points={onScreen(run.points)} />
@@ -1538,6 +1541,13 @@
             <text text-anchor="middle" dy="3.5">{badge.label}</text>
           </g>
         {/each}
+      {/each}
+      {#each detailsOn ? (overlay.farBadges ?? []) : [] as badge (badge.line)}
+        {@const spot = screenAt(shownLoupe, badge.at.u, badge.at.v, size)}
+        <g class="far" transform="translate({spot.x.toFixed(1)} {(spot.y + 16).toFixed(1)})">
+          <rect x={-badge.label.length * 3.1 - 5} y="-8" width={badge.label.length * 6.2 + 10} height="16" rx="8" />
+          <text text-anchor="middle" dy="3.5">{badge.label}</text>
+        </g>
       {/each}
     {/if}
     {#if drawing.length > 1}
@@ -1907,6 +1917,11 @@
   .trace.over.ridge {
     stroke: #4dd6ff;
   }
+  /* the sea's horizon: deep blue, a skyline the sea makes */
+  .trace.over.sea {
+    stroke: #5b8cff;
+    stroke-dasharray: 10 4;
+  }
   .trace.under.picked {
     stroke: rgba(255, 255, 255, 0.85);
     stroke-width: 7;
@@ -1928,6 +1943,16 @@
   }
   .pair.front text {
     fill: #111;
+  }
+  /* how far a line stands */
+  .far rect {
+    fill: rgba(0, 0, 0, 0.7);
+    stroke: #ffd166;
+    stroke-width: 1;
+  }
+  .far text {
+    font: 600 10px var(--font-sans, system-ui);
+    fill: #ffd166;
   }
   /* where a collage is cut */
   .cut {
@@ -2292,6 +2317,9 @@
   }
   .swatch.ridge {
     background: #4dd6ff;
+  }
+  .swatch.sea {
+    background: repeating-linear-gradient(90deg, #5b8cff 0 7px, transparent 7px 10px);
   }
   .swatch.terrain {
     height: 2px;

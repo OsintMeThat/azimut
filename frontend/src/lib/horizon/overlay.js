@@ -18,7 +18,7 @@
  */
 import { focal, principal, rayFor, toScreen, turnBetween } from './camera.js';
 import { headingText } from './geometry.js';
-import { pieceOf } from './traceMarks.js';
+import { farRange, pieceOf } from './traceMarks.js';
 import { distanceWithin, skylineWithin } from './panorama.js';
 import { FOV, heightFor } from './view.js';
 
@@ -929,8 +929,9 @@ export function tracePlane(samples, camera) {
  * The trace on the picture plane with the marks beside it (lib/horizon/traceMarks.js),
  * as the search reads them (api/horizon.py `MarksIn`): the skyline's points
  * as `tracePlane` gives them, the inner edges' apart (`ridge_x`, `ridge_y`),
- * and, when they matter, the stroke each point lies on (for the pairs) and
- * the piece of a collage it lies in: `pieceAt(sample)`, by default how many
+ * and, when they matter, the stroke each point lies on (for the pairs and the
+ * lines' distances, sent as `far`: a stroke, the nearest and farthest it
+ * stands, metres) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
  * of the marks' cuts stand left of it across the frame. Samples come from
  * `traceSamples`, each saying its stroke. Without marks, the plane alone.
  */
@@ -940,11 +941,11 @@ export function markedPlane(samples, camera, marks, pieceAt = null) {
   const lineOf = (s) => marks?.lines?.[s.stroke] ?? s.stroke;
   const sky = inner.size ? samples.filter((s) => !inner.has(lineOf(s))) : samples;
   const plane = tracePlane(sky, camera);
-  if (!inner.size && !marks?.pairs?.length && !cuts.length) return plane;
+  if (!inner.size && !marks?.pairs?.length && !cuts.length && !marks?.far?.length && !marks?.sea?.length) return plane;
   const ridge = samples.filter((s) => inner.has(lineOf(s)));
   const ridges = ridge.length ? tracePlane(ridge, camera) : { x: [], y: [] };
   const out = { ...plane, ridge_x: ridges.x, ridge_y: ridges.y };
-  if (marks?.pairs?.length) {
+  if (marks?.pairs?.length || marks?.far?.length || marks?.sea?.length) {
     // the search names strokes 0, 1… in the order they come
     const index = new Map();
     const named = (id) => {
@@ -953,7 +954,11 @@ export function markedPlane(samples, camera, marks, pieceAt = null) {
     };
     out.line = sky.map((s) => named(lineOf(s)));
     out.ridge_line = ridge.map((s) => named(lineOf(s)));
-    out.pairs = marks.pairs.filter(([f, b]) => index.has(f) && index.has(b)).map(([f, b]) => [index.get(f), index.get(b)]);
+    out.pairs = (marks.pairs ?? []).filter(([f, b]) => index.has(f) && index.has(b)).map(([f, b]) => [index.get(f), index.get(b)]);
+    out.far = (marks.far ?? [])
+      .filter((one) => index.has(one.line) && farRange(one.bands))
+      .map((one) => [index.get(one.line), ...farRange(one.bands)]);
+    out.sea = (marks.sea ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
   }
   if (cuts.length) {
     const piece = pieceAt ?? ((s) => pieceOf(cuts, s.x / camera.width));

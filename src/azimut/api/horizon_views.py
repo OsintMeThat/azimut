@@ -160,16 +160,27 @@ class PhotoPoint(BaseModel):
     v: float = Field(ge=-1, le=2, allow_inf_nan=False)
 
 
+class LineFar(BaseModel):
+    """How far a line stands: its id and the distances ticked (frontend lib/horizon/traceMarks.js DISTANCE_BANDS)."""
+
+    line: int = Field(ge=0, lt=MAX_LINE_ID)
+    bands: list[Literal["near", "b1", "b3", "b10", "b30"]] = Field(min_length=1, max_length=5)
+
+
 class Marks(BaseModel):
-    """What the analyst marked beside the skyline (frontend lib/horizon/marks.js): each stroke's id,
-    the ids of inner edges, pairs of ids (in front, behind) and where a collage is cut, across the photo."""
+    """What the analyst marked beside the skyline (frontend lib/horizon/traceMarks.js): each stroke's id,
+    the ids of inner edges, pairs of ids (in front, behind), where a collage is cut, across the photo,
+    and how far some lines stand."""
 
     lines: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     inner: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     pairs: list[list[int]] = Field(default_factory=list, max_length=MAX_PAIRS)
     cuts: list[float] = Field(default_factory=list, max_length=MAX_CUTS)
+    far: list[LineFar] = Field(default_factory=list, max_length=MAX_STROKES)
+    #: The ids of lines traced along the sea's horizon.
+    sea: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
 
-    @field_validator("lines", "inner")
+    @field_validator("lines", "inner", "sea")
     @classmethod
     def _ids(cls, ids: list[int]) -> list[int]:
         if any(not 0 <= one < MAX_LINE_ID for one in ids):
@@ -211,15 +222,39 @@ class Facing(BaseModel):
 REACHES = tuple(int(reach) for reach in SKYLINE_CUTS)
 
 
+#: The zoom words, widest first (frontend lib/horizon/hints.js ZOOMS).
+ZoomWord = Literal["wide", "normal", "zoomed", "telephoto"]
+ZOOM_WORDS: tuple[str, ...] = ("wide", "normal", "zoomed", "telephoto")
+
+
+class MeasuredLens(BaseModel):
+    """A lens read off the video's pan around a moment: degrees across, and the moment, seconds."""
+
+    fov: float = Field(ge=1, le=150, allow_inf_nan=False)
+    at: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+
 class Hints(BaseModel):
     """What the analyst knows about the photo, told to Fit (frontend lib/horizon/hints.js)."""
 
     #: A photo, or a panorama read through the view's strip.
     picture: Literal["photo", "panorama"] = "photo"
-    zoom: Literal["any", "wide", "normal", "zoomed", "telephoto"] = "any"
+    #: The zoom words ticked, none being any lens; a view saved when one word was kept has it alone ("any" is none).
+    zoom: list[ZoomWord] = Field(default_factory=list, max_length=len(ZOOM_WORDS))
     facing: Facing | None = None
+    #: The lens measured on the video, standing for the photo's own.
+    lens: MeasuredLens | None = None
     #: How far the photo sees: left to Fit, clear air, or one of the reaches.
     reach: Literal["auto", "all"] | int = "auto"
+
+    @field_validator("zoom", mode="before")
+    @classmethod
+    def _zoom_words(cls, zoom: Any) -> Any:
+        said = [] if zoom == "any" else [zoom] if isinstance(zoom, str) else zoom
+        if not isinstance(said, list):
+            return said
+        # in the menu's order, once each; a word no menu has is left for the check to refuse
+        return [word for word in ZOOM_WORDS if word in said] + [word for word in said if word not in ZOOM_WORDS]
 
     @field_validator("reach")
     @classmethod

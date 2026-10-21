@@ -158,12 +158,16 @@ const SEE_THROUGH = {
 };
 
 /** A copy of what the map's canvas holds this instant, which only the frame just drawn has. */
-function copyOf(source) {
-  const copy = document.createElement('canvas');
-  copy.width = source.width;
-  copy.height = source.height;
+function copyOf(source, into = null) {
+  const copy = into ?? document.createElement('canvas');
+  const fresh = copy.width !== source.width || copy.height !== source.height;
+  if (fresh) {
+    copy.width = source.width;
+    copy.height = source.height;
+  }
   const context = copy.getContext('2d');
   if (!context) throw new Error('this browser cannot capture the map');
+  if (!fresh) context.clearRect(0, 0, copy.width, copy.height);
   context.drawImage(source, 0, 0);
   return copy;
 }
@@ -481,6 +485,33 @@ export function mapFacade(map, container, mapId = '') {
         unfold();
       };
     },
+    /**
+     * A move of the hand's that stops at the relief rather than climb it.
+     *
+     * `move` jumps the camera as it likes. Whenever the eye ends inside the
+     * ground, the jump that put it there lifts it clear (`eyeGuard.js`, or the
+     * engine's own lift), and only such a lift changes the zoom of a move that
+     * turns, tilts and shifts: so a changed zoom means the move hit the relief,
+     * and the camera is put back exactly where it was. False then. A camera
+     * already inside before the move is lifted by that same jump back, so a
+     * gesture can never be stuck in the rock.
+     */
+    unlessItSinks(move) {
+      const before = {
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        pitch: map.getPitch(),
+        bearing: map.getBearing(),
+        elevation: map.getCenterElevation?.(),
+      };
+      move();
+      if (Math.abs(map.getZoom() - before.zoom) < 1e-9) return true;
+      const { elevation, ...rest } = before;
+      map.jumpTo({ ...rest, ...(Number.isFinite(elevation) ? { elevation } : {}) }, HAND);
+      return false;
+    },
+    /** How far this map may lean, in degrees. */
+    maxPitch: () => map.getMaxPitch(),
     /** How deep this map goes right now, in app zoom: its basemap's ceiling. */
     maxZoom: () => viewZoom(map.getMaxZoom()),
     /** Never animated: a rotation pans the map once per pointer move. */
@@ -662,8 +693,11 @@ export function mapFacade(map, container, mapId = '') {
      * `keep`, a test on a layer's id, takes the picture with only the layers it
      * passes: Difference reads the ground, not the borders or the case's marks
      * laid over one side.
+     *
+     * `into`, a canvas an earlier snapshot returned, is drawn over rather than a
+     * new one made: a caller taking one at every frame of a move keeps one canvas.
      */
-    async snapshot({ timeout = 12000, keep = null } = {}) {
+    async snapshot({ timeout = 12000, keep = null, into = null } = {}) {
       const complete = await new Promise((resolve) => {
         if (!map.isMoving() && map.areTilesLoaded()) {
           resolve(true);
@@ -683,7 +717,7 @@ export function mapFacade(map, container, mapId = '') {
       const canvas = await new Promise((resolve, reject) => {
         map.once('render', () => {
           try {
-            resolve(copyOf(map.getCanvas()));
+            resolve(copyOf(map.getCanvas(), into));
           } catch (error) {
             reject(error);
           }

@@ -18,6 +18,7 @@
    * curve changes.
    */
   import Icon from '../../components/Icon.svelte';
+  import DistanceChips from './DistanceChips.svelte';
   import { toast } from '../../lib/state.svelte.js';
   import { BEND_MAX, bendText } from '../../lib/horizon/overlay.js';
   import { paintStraightened } from '../../lib/horizon/warpPicture.js';
@@ -131,7 +132,7 @@
   }
 
   /** Whether a press or the wheel lands on the photo's own controls, which take it. */
-  const onControls = (event) => Boolean(event.target?.closest?.('button, input, .fp-curve'));
+  const onControls = (event) => Boolean(event.target?.closest?.('button, input, .fp-curve, .dc'));
 
   function onWheel(event) {
     if (!rect || onControls(event)) return;
@@ -158,7 +159,7 @@
     box.focus?.({ preventScroll: true });
     box.setPointerCapture?.(event.pointerId);
     const at = local(event);
-    if ((overlay.linking || overlay.cutting) && !asking) {
+    if ((overlay.linking || overlay.cutting || overlay.distancing) && !asking) {
       press = { picking: true };
       return;
     }
@@ -206,6 +207,7 @@
       const point = toFrame(at.x, at.y);
       if (overlay.cutting) overlay.cutAt(point, scale());
       else if (overlay.linking) overlay.linkAt(point, scale());
+      else if (overlay.distancing) overlay.farAt(point, scale());
       return;
     }
     if (was.tracing) {
@@ -289,7 +291,7 @@
   bind:this={box}
   class="fp"
   class:asking
-  class:pen={(overlay.tracing || overlay.linking || overlay.cutting) && !asking}
+  class:pen={(overlay.tracing || overlay.linking || overlay.cutting || overlay.distancing) && !asking}
   class:rubber={overlay.erasing && !asking}
   class:grab={zoom > 1 && !overlay.tracing && !overlay.erasing && !asking}
   bind:clientWidth={width}
@@ -324,7 +326,7 @@
             {#if overlay.front === id}
               <polyline class="fp-trace picked" points={path(stroke)} />
             {/if}
-            <polyline class="fp-trace" class:ridge={overlay.marks?.inner?.includes(id)} points={path(stroke)} />
+            <polyline class="fp-trace" class:ridge={overlay.marks?.inner?.includes(id)} class:sea={overlay.marks?.sea?.includes(id)} points={path(stroke)} />
           {/each}
           {#each overlay.pairBadges as badge (badge.label)}
             {#each [['front', badge.front], ['back', badge.back]] as [side, at] (side)}
@@ -334,6 +336,13 @@
                 <text text-anchor="middle" dy="3.5">{badge.label}</text>
               </g>
             {/each}
+          {/each}
+          {#each overlay.farBadges ?? [] as badge (badge.line)}
+            {@const spot = toScreen(badge.at)}
+            <g class="fp-far" transform="translate({spot.x.toFixed(1)} {(spot.y + 16).toFixed(1)})">
+              <rect x={-badge.label.length * 3.1 - 5} y="-8" width={badge.label.length * 6.2 + 10} height="16" rx="8" />
+              <text text-anchor="middle" dy="3.5">{badge.label}</text>
+            </g>
           {/each}
         {/if}
         {#if drawing.length > 1}
@@ -417,6 +426,9 @@
           ><Icon name="curve" size={14} /><span>{overlay.bend ? bendText(overlay.bend) : 'Lens curve'}</span></button
         >
       </div>
+      {#if overlay.distancing}
+        <DistanceChips {overlay} />
+      {/if}
       {#if curveOpen}
         <div bind:this={curveBox} id="fp-curve" class="fp-curve" role="group" aria-label="Lens curve">
           <input
@@ -502,6 +514,11 @@
   .fp-trace.ridge {
     stroke: #4dd6ff;
   }
+  /* the sea's horizon: deep blue, dashed */
+  .fp-trace.sea {
+    stroke: #5b8cff;
+    stroke-dasharray: 10 4;
+  }
   .fp-trace.picked {
     stroke: rgba(255, 255, 255, 0.85);
     stroke-width: 7;
@@ -524,6 +541,17 @@
   }
   .fp-pair.front text {
     fill: #111;
+  }
+  /* how far a line stands */
+  .fp-far rect {
+    fill: rgba(0, 0, 0, 0.7);
+    stroke: #ffd166;
+    stroke-width: 1;
+  }
+  .fp-far text {
+    font-size: 10px;
+    font-weight: 600;
+    fill: #ffd166;
   }
   /* where a collage is cut */
   .fp-cut {

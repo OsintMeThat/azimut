@@ -84,6 +84,7 @@ import {
   addCut,
   cleanMarks,
   cutAt,
+  farBadges,
   innerByShape,
   lineAt,
   liesUnder,
@@ -93,7 +94,9 @@ import {
   pairBadges,
   pieceOf,
   removeCut,
+  setFar,
   setInner,
+  setSea,
   togglePair,
 } from '../../../lib/horizon/traceMarks.js';
 import { skylineField, smoothPlanes, snapPath, traceSkyline } from '../../../lib/horizon/skyline.js';
@@ -238,6 +241,12 @@ export function createOverlayState({
   let front = $state(null);
   /** Cutting a collage in pieces: a click lays a cut across the photo, or takes one away. */
   let cutting = $state(false);
+  /** Reading the lens off the video's pan: `{ busy, error }` while asked or failed, null otherwise. */
+  let measuring = $state.raw(null);
+  let measuredAsk = 0;
+  /** Saying how far lines stand: the distances picked (lib/horizon/traceMarks.js DISTANCE_BANDS), laid on the line clicked. */
+  let distancing = $state(false);
+  let farPicked = $state.raw(['b1']);
   let traceTime = $state(null);
   // the trace as it was before each change, newest last
   let history = $state.raw([]);
@@ -303,6 +312,8 @@ export function createOverlayState({
   const cutsSeen = $derived(marks.cuts.map((u) => [toSeen({ u, v: 0 }), toSeen({ u, v: 1 })]));
   /** The pairs' letters where they show, on the straightened strokes (`pairBadges`). */
   const badges = $derived(marks.pairs.length ? pairBadges(seen, marks) : []);
+  /** Each line's distance where it shows, on the straightened strokes (`farBadges`). */
+  const farSeen = $derived(marks.far?.length ? farBadges(seen, marks) : []);
   /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
   const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
@@ -315,10 +326,19 @@ export function createOverlayState({
     lookThrough();
   }
 
+  /**
+   * How many degrees the picture spans as its stitch says: a collage Azimut
+   * stitched whole, or one read frame by frame (`facts.frames`); null when it says none.
+   */
+  function stripOf() {
+    if (facts.panorama?.degrees > 0) return facts.panorama;
+    return facts.frames?.span > 0 ? { degrees: facts.frames.span, collage: facts.frames.collage } : null;
+  }
+
   /** The view through the picture's own kind: a panorama's strip, else a camera with the photo's lens. */
   function lookThrough() {
     if (hints.picture === 'panorama') {
-      view.look({ projection: 'panorama', fov: panoramaWidth({ aspect: aspect(), stitched: facts.panorama }), roll: 0 });
+      view.look({ projection: 'panorama', fov: panoramaWidth({ aspect: aspect(), stitched: stripOf() }), roll: 0 });
       return;
     }
     const lens = lensOf();
@@ -339,13 +359,16 @@ export function createOverlayState({
   }
 
   /**
-   * The lens the picture says: a photo's from its EXIF, `{ mm, fov, workedOut }`;
-   * a panorama's from its stitch, `{ fov, stitched: true }`; null when it says none.
+   * The lens the picture says: one measured on the video, `{ fov, measured, at }`;
+   * a photo's from its EXIF, `{ mm, fov, workedOut }`; a panorama's from its
+   * stitch, `{ fov, stitched: true }`; null when it says none.
    */
   function lensOf() {
     const ratio = aspect();
+    // measured on the video's pan: the photo's own lens, as a focal would say it
+    if (hints.lens?.fov > 0 && hints.picture !== 'panorama') return { fov: hints.lens.fov, measured: true, at: hints.lens.at };
     if (hints.picture === 'panorama') {
-      const stitched = facts.panorama;
+      const stitched = stripOf();
       return stitched?.degrees > 0 ? { fov: panoramaWidth({ aspect: ratio, stitched }), stitched: true } : null;
     }
     const mm = facts.focal35_mm;
@@ -387,6 +410,7 @@ export function createOverlayState({
     erasing = false;
     linking = false;
     cutting = false;
+    distancing = false;
     front = null;
     pen = 'sky';
     traceHidden = false;
@@ -617,6 +641,7 @@ export function createOverlayState({
     erasing = false;
     linking = false;
     cutting = false;
+    distancing = false;
     front = null;
   }
 
@@ -727,6 +752,37 @@ export function createOverlayState({
     get hints() {
       return hints;
     },
+    /** Reading the lens off the video's pan: `{ busy, error }`, or null when not asked. */
+    get measuring() {
+      return measuring;
+    },
+    /**
+     * Read the lens off the video's pan around the moment on show
+     * (`/api/horizon/lens`), kept with what is known of the photo; says why
+     * when the frames do not tell it.
+     */
+    async measureLens() {
+      if (source?.kind !== 'video' || !source.caseId) return;
+      const at = time ?? 0;
+      const mine = (measuredAsk += 1);
+      measuring = { busy: true, error: '' };
+      try {
+        const read = await api.post('/api/horizon/lens', { case: source.caseId, path: source.path, time: at });
+        if (mine !== measuredAsk) return;
+        hints = cleanHints({ ...hints, lens: { fov: read.fov, at } });
+        measuring = null;
+        lookThrough();
+      } catch (failure) {
+        if (mine === measuredAsk) measuring = { busy: false, error: failure.message || 'The frames do not tell the lens' };
+      }
+    },
+    /** The lens measured let go: the zoom words again. */
+    forgetLens() {
+      measuredAsk += 1;
+      measuring = null;
+      const { lens: _lens, ...rest } = hints;
+      hints = cleanHints(rest);
+    },
     /** Say more, or less, about the photo: only the hints named change. */
     setHints(change) {
       if (!source) return;
@@ -749,6 +805,15 @@ export function createOverlayState({
     /** What the stitch says of a collage's picture: `{ degrees, stitched, by_hand, warp, collage }`, or null. */
     get stitched() {
       return facts.panorama ?? null;
+    },
+    /**
+     * A collage of a pan Find reads frame by frame, each through its own camera
+     * (api/horizon.py photo facts `frames`: `{ collage, frames, stitched, lens,
+     * span }`): null for any other picture, or once a curve or pulled corners
+     * lie over it, which the search then reads as one photo.
+     */
+    get framesRead() {
+      return facts.frames && !bend && !warp ? facts.frames : null;
     },
     /**
      * How far out the terrain's skyline is read against the trace, metres, or
@@ -1065,6 +1130,7 @@ export function createOverlayState({
         // drawn as a ridge, or lying under the trace there: nothing under a line is the sky's edge
         next = setInner(next, id, true);
       } else {
+        if (pen === 'sea') next = setSea(next, id, true);
         // a skyline drawn over strokes takes them for the ridges in front of it
         strokes.forEach((one, i) => {
           if (!next.inner.includes(next.lines[i]) && liesUnder(one, [stroke])) next = setInner(next, next.lines[i], true);
@@ -1176,16 +1242,20 @@ export function createOverlayState({
     get pairBadges() {
       return badges;
     },
+    /** Each line's distance at its stroke, straightened: `{ line, label, at }`. */
+    get farBadges() {
+      return farSeen;
+    },
     /** Which piece of the collage a point of the straightened photo lies in. */
     pieceAt(point) {
       return marks.cuts.length ? pieceOf(marks.cuts, toPhoto(point).u) : 0;
     },
-    /** The pen a stroke is drawn with: `sky` for the skyline, `ridge` for an inner edge. Taking one brings it out. */
+    /** The pen a stroke is drawn with: `sky` for the skyline, `ridge` for an inner edge, `sea` for the sea's horizon. Taking one brings it out. */
     get pen() {
       return pen;
     },
     setPen(kind) {
-      if (!['sky', 'ridge'].includes(kind)) return;
+      if (!['sky', 'ridge', 'sea'].includes(kind)) return;
       pen = kind;
       this.setTracing(true);
     },
@@ -1212,9 +1282,10 @@ export function createOverlayState({
       const id = lineAt(strokes, marks.lines, toPhoto(point), PICK_PX, scale);
       if (id === null) return false;
       const inner = pen === 'ridge';
-      if (marks.inner.includes(id) === inner) return true;
+      const sea = pen === 'sea';
+      if (marks.inner.includes(id) === inner && (marks.sea ?? []).includes(id) === sea) return true;
       keep();
-      marks = setInner(marks, id, inner);
+      marks = sea ? setSea(marks, id, true) : setSea(setInner(marks, id, inner), id, false);
       return true;
     },
     /** Whether a click picks strokes to pair, the one in front first. */
@@ -1285,6 +1356,35 @@ export function createOverlayState({
       const near = cutAt(marks.cuts, u, PICK_PX, scale.width);
       keep();
       marks = near >= 0 ? removeCut(marks, near) : addCut(marks, u);
+    },
+    /** Whether a click says how far the line clicked stands. */
+    get distancing() {
+      return distancing;
+    },
+    setDistancing(on) {
+      const next = Boolean(on) && strokes.length > 0;
+      if (next) toolsAway();
+      distancing = next;
+      if (distancing) traceHidden = false;
+    },
+    /** The distances a click lays on a line, as ticked (ids of DISTANCE_BANDS). */
+    get farPicked() {
+      return farPicked;
+    },
+    setFarPicked(bands) {
+      farPicked = Array.isArray(bands) ? [...bands] : [];
+    },
+    /**
+     * A click while saying distances, at `point` on the straightened photo
+     * shown `scale` big: the line there stands as far as picked, or says
+     * nothing again when it stood so already. Says the line hit, or null.
+     */
+    farAt(point, scale) {
+      const id = lineAt(strokes, marks.lines, toPhoto(point), PICK_PX, scale);
+      if (id === null) return null;
+      keep();
+      marks = setFar(marks, id, farPicked);
+      return id;
     },
     /** Every cut taken away. */
     clearCuts() {

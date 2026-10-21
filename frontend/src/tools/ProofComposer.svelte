@@ -110,6 +110,7 @@
   } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { shortcut } from '../lib/keys.js';
+  import { middleClickPaste } from '../lib/clipboardPaste.js';
   import {
     along, bearingTo, coneHandles, fovFromEdge, lensFov, CONE_BADGE, CONE_BADGE_MIN, CONE_BADGE_MAX,
   } from '../lib/viewCone.js';
@@ -1569,7 +1570,7 @@
    * rectangle followed by Ctrl+V pasted whatever image was in the clipboard.
    */
   function onPaste(e) {
-    if (uiState.tool !== 'proof' || isTextTarget(e.target)) return;
+    if (uiState.tool !== 'proof' || isTextTarget(e.target) || middleClickPaste()) return;
     const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
     if (clipboard && (shapeCopyFresh || !item)) {
       e.preventDefault();

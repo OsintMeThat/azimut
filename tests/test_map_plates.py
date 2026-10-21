@@ -2,6 +2,7 @@
 
 import io
 import json
+import time
 import zipfile
 
 import pytest
@@ -246,6 +247,24 @@ def export(client, owner, fmt, frames, **form):
                        data={"format": fmt, "filename": "Front line", **form})
 
 
+def stage(client, owner, series, pictures, staged=""):
+    files = [("pictures", (f"{series}{index}", io.BytesIO(picture), "application/octet-stream")) for index, picture in enumerate(pictures)]
+    return client.post(f"/api/cases/{owner}/map-plates/export/pictures", files=files,
+                       data={"series": series, **({"staged": staged} if staged else {})})
+
+
+def played(client, owner, fmt, frames, overs=(), tweens=(), **form):
+    """A played plate's export as the browser sends it: its pictures in batches first, then the export naming them."""
+    staged = ""
+    for series, pictures in (("frames", frames), ("overs", overs), ("tweens", tweens)):
+        for start in range(0, len(pictures), mapplates.MAX_PICTURES_PER_POST):
+            answer = stage(client, owner, series, list(pictures[start:start + mapplates.MAX_PICTURES_PER_POST]), staged)
+            if answer.status_code != 200:
+                return answer
+            staged = answer.json()["staged"]
+    return client.post(f"/api/cases/{owner}/map-plates/export", data={"format": fmt, "filename": "Front line", "staged": staged, **form})
+
+
 def test_a_page_is_written_as_a_png_in_the_views_folder(client, owner):
     answer = export(client, owner, "png", [png(fmt="JPEG")])
     assert answer.status_code == 200, answer.text
@@ -281,7 +300,7 @@ def test_a_pdf_is_the_paper_size(client, owner):
 
 
 def test_a_played_plate_is_a_gif_of_its_days(client, owner):
-    answer = export(client, owner, "gif", [png(colour=(200, 0, 0)), png(colour=(0, 0, 200)), png(colour=(0, 200, 0))])
+    answer = played(client, owner, "gif", [png(colour=(200, 0, 0)), png(colour=(0, 0, 200)), png(colour=(0, 200, 0))])
     assert answer.status_code == 200, answer.text
     from pathlib import Path
 
@@ -290,8 +309,10 @@ def test_a_played_plate_is_a_gif_of_its_days(client, owner):
 
 
 @pytest.mark.skipif(not ffmpeg.ffmpeg_available(), reason="no ffmpeg on this machine")
-def test_a_played_plate_is_an_mp4_of_its_days(client, owner):
-    answer = export(client, owner, "mp4", [png((641, 361)), png((641, 361), (0, 0, 0))], interval="500")
+@pytest.mark.parametrize("fmt", ["JPEG", "PNG"])
+def test_a_played_plate_is_an_mp4_of_its_days(client, owner, fmt):
+    # odd sides, which ffmpeg evens; the browser's JPEG goes in as it came
+    answer = played(client, owner, "mp4", [png((641, 361), fmt=fmt), png((641, 361), (0, 0, 0), fmt=fmt)], interval="500")
     assert answer.status_code == 200, answer.text
     from pathlib import Path
 
@@ -305,7 +326,8 @@ def test_a_played_plate_is_an_mp4_of_its_days(client, owner):
     ("png", [zipfile.ZipFile.__doc__.encode()]),
 ])
 def test_an_export_that_does_not_hold_is_refused(client, owner, fmt, frames):
-    assert export(client, owner, fmt, frames).status_code == 422
+    send = played if fmt in ("gif", "mp4") else export
+    assert send(client, owner, fmt, frames).status_code == 422
 
 
 # -- steps and their videos ------------------------------------------------------------
@@ -372,7 +394,10 @@ def test_a_beat_runs_its_clips_in_their_boxes_with_the_sound_asked_for(tmp_path)
     assert "overlay=x=100+(320-w)/2:y=50+(180-h)/2" in graph
     assert "force_original_aspect_ratio=increase,crop=200:200" in graph
     # what stands over the clips is laid last, on the whole frame
-    assert "[b2][4:v]overlay=0:0[b3]" in graph
+    assert "[4:v]tpad=stop_mode=clone:stop_duration=5.000[o]" in graph and "[b2][o]overlay=0:0[b3]" in graph
+    # the frame is decoded once and held for the beat, its sides made even
+    assert graph.startswith(f"[0:v]tpad=stop_mode=clone:stop_duration=5.000,{mapplates.EVEN_SIDES},setsar=1[b0]")
+    assert "-loop" not in command
     # only the clip asked to sound is heard, padded to the beat
     assert "[2:a]volume=0.50" in graph and "[3:a]" not in graph and "apad=whole_dur=5.000[a]" in graph
     assert command[command.index("-map", command.index("[v]") - 2) + 1:][:3] == ["[v]", "-map", "[a]"]
@@ -394,7 +419,7 @@ def test_a_sequence_that_does_not_hold_is_refused(raw, frames, overs):
 
 def test_a_played_gif_holds_each_beat_its_own_time(client, owner):
     beats = json.dumps([{"seconds": 1}, {"seconds": 2.5}])
-    answer = export(client, owner, "gif", [png(colour=(200, 0, 0)), png(colour=(0, 0, 200))], beats=beats)
+    answer = played(client, owner, "gif", [png(colour=(200, 0, 0)), png(colour=(0, 0, 200))], beats=beats)
     assert answer.status_code == 200, answer.text
     from pathlib import Path
 
@@ -414,7 +439,7 @@ def test_a_clip_must_be_a_video_of_the_case(client, owner):
 
     def sent(src):
         beats = json.dumps([{"seconds": 1, "clips": [{"src": src, "start": 0, "end": 1, "box": [0, 0, 40, 30]}]}])
-        return export(client, owner, "mp4", [png()], beats=beats)
+        return played(client, owner, "mp4", [png()], beats=beats)
 
     for src in ("../../elsewhere.mp4", "media/notes.txt", "media/gone.mp4"):
         answer = sent(src)
@@ -436,9 +461,7 @@ def test_a_played_plate_runs_its_steps_clips_with_their_sound(client, owner):
     Image.new("RGBA", (320, 240), (0, 0, 0, 0)).save(over, "PNG")
     beats = json.dumps([{"seconds": 0.5}, {"seconds": 1.5, "over": 0, "clips": [
         {"src": "media/strike.mp4", "start": 1, "end": 2.5, "box": [40, 30, 160, 120], "sound": True}]}])
-    files = [("frames", ("0.png", io.BytesIO(png((320, 240))), "image/png")), ("frames", ("1.png", io.BytesIO(png((320, 240), (0, 0, 0))), "image/png")),
-             ("overs", ("o.png", io.BytesIO(over.getvalue()), "image/png"))]
-    answer = client.post(f"/api/cases/{owner}/map-plates/export", files=files, data={"format": "mp4", "filename": "Sequence", "beats": beats})
+    answer = played(client, owner, "mp4", [png((320, 240)), png((320, 240), (0, 0, 0))], overs=[over.getvalue()], beats=beats)
     assert answer.status_code == 200, answer.text
     written = Path(answer.json()["path"]) / answer.json()["file"]
     probe = subprocess.run([ffmpeg.ffprobe_exe(), "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", str(written)],
@@ -562,11 +585,8 @@ def test_a_transition_plays_its_frames_before_its_beat_holds(tmp_path):
 
 
 def test_only_a_video_plays_transitions(client, owner):
-    files = [("frames", ("0.png", io.BytesIO(png()), "image/png")), ("frames", ("1.png", io.BytesIO(png()), "image/png")),
-             ("tweens", ("t.jpg", io.BytesIO(png(fmt="JPEG")), "image/jpeg"))]
     beats = json.dumps([{"seconds": 1}, {"seconds": 1, "tween": [0, 1]}])
-    answer = client.post(f"/api/cases/{owner}/map-plates/export", files=files, data={"format": "gif", "filename": "G", "beats": beats})
-    assert answer.status_code == 422
+    assert played(client, owner, "gif", [png(), png()], tweens=[png(fmt="JPEG")], beats=beats).status_code == 422
 
 
 @pytest.mark.skipif(not ffmpeg.ffmpeg_available(), reason="no ffmpeg on this machine")
@@ -574,11 +594,9 @@ def test_a_played_plate_opens_its_beats_on_their_transitions(client, owner):
     import subprocess
     from pathlib import Path
 
-    tweens = [("tweens", (f"t{index}.jpg", io.BytesIO(png((320, 240), (index * 15, 0, 0), fmt="JPEG")), "image/jpeg")) for index in range(15)]
-    files = [("frames", ("0.png", io.BytesIO(png((320, 240))), "image/png")), ("frames", ("1.png", io.BytesIO(png((320, 240), (0, 0, 0))), "image/png")),
-             *tweens]
+    tweens = [png((320, 240), (index * 15, 0, 0), fmt="JPEG") for index in range(15)]
     beats = json.dumps([{"seconds": 0.5}, {"seconds": 1, "tween": [0, 15]}])
-    answer = client.post(f"/api/cases/{owner}/map-plates/export", files=files, data={"format": "mp4", "filename": "Moving", "beats": beats})
+    answer = played(client, owner, "mp4", [png((320, 240)), png((320, 240), (0, 0, 0))], tweens=tweens, beats=beats)
     assert answer.status_code == 200, answer.text
     written = Path(answer.json()["path"]) / answer.json()["file"]
     probe = subprocess.run([ffmpeg.ffprobe_exe(), "-v", "error", "-show_entries", "format=duration", "-of", "json", str(written)],
@@ -603,6 +621,19 @@ def test_each_day_holds_its_own_seconds_or_the_plate_s(client, owner):
     assert client.post("/api/templates/map", json={"name": "Held", "data": {**data, "holds": {"now": 3}}}).status_code == 422
 
 
+def test_a_plate_keeps_the_days_it_was_told_to_play(client, owner):
+    spec = plate_spec(days=["2026-10-12", "2026-10-15T08:30"])
+    saved = save(client, owner, spec=spec)
+    assert saved.status_code == 200, saved.text
+    assert client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["days"] == ["2026-10-12", "2026-10-15T08:30"]
+    for days in (["yesterday"], ["2026-10-12"] * (mapplates.MAX_FRAMED_BEATS + 1)):
+        assert save(client, owner, spec=plate_spec(days=days)).status_code == 422
+    # a template keeps no day of a case
+    data = mapplates.template_of(spec)
+    assert "days" not in data
+    assert client.post("/api/templates/map", json={"name": "Days", "data": {**data, "days": ["2026-10-12"]}}).status_code == 422
+
+
 def test_a_plate_draws_a_bounded_number_of_maps(client, owner):
     maps = [{"id": f"m{index}", "kind": "map", "box": [0, 0, 10, 10], "view": {"lat": 0, "lon": 0, "zoom": 3}} for index in range(mapplates.MAX_MAPS)]
     assert save(client, owner, spec={"elements": maps}).status_code == 200
@@ -610,10 +641,142 @@ def test_a_plate_draws_a_bounded_number_of_maps(client, owner):
     assert save(client, owner, spec={"elements": [*maps, one_more]}).status_code == 422
 
 
-def test_a_video_frame_is_kept_on_disk_at_the_sequence_s_size_its_sides_even(tmp_path):
-    big = Image.new("RGB", (803, 601), (10, 20, 30))
-    mapplates.keep_frame(big, (401, 301), tmp_path / "f0000.png")
-    with Image.open(tmp_path / "f0000.png") as kept:
-        assert kept.size == (400, 300)
-    frame = mapplates.gif_frame(big, (401, 301))
+def test_a_video_frame_is_kept_as_the_browser_drew_it_when_it_fits(tmp_path):
+    drawn = png((401, 301), (10, 20, 30), fmt="JPEG")
+    # the first sets the sequence's size, and is written as it came: no pixel decoded and encoded again
+    path, size = mapplates.keep_frame(drawn, tmp_path / "f0000", size=None)
+    assert (path.name, size, path.read_bytes()) == ("f0000.jpg", (401, 301), drawn)
+    # one of another size is drawn again at the sequence's, in its series' format
+    path, size = mapplates.keep_frame(png((803, 601)), tmp_path / "f0001", size=size, suffix=".jpg")
+    with Image.open(path) as kept:
+        assert (path.name, kept.format, kept.size, size) == ("f0001.jpg", "JPEG", (401, 301), (401, 301))
+    # a see-through PNG kept on its own keeps its paper
+    clear = io.BytesIO()
+    Image.new("RGBA", (401, 301), (0, 0, 0, 0)).save(clear, "PNG")
+    path, _ = mapplates.keep_frame(clear.getvalue(), tmp_path / "o0000", size=size)
+    assert (path.name, path.read_bytes()) == ("o0000.png", clear.getvalue())
+    for raw in (b"", b"not a picture", png(fmt="GIF")):
+        with pytest.raises(mapplates.ExportError):
+            mapplates.keep_frame(raw, tmp_path / "bad", size=None)
+    frame = mapplates.gif_frame(Image.new("RGB", (803, 601)), (401, 301))
     assert (frame.mode, frame.size) == ("P", (401, 301))
+
+
+def test_a_played_plate_s_pictures_wait_on_disk_in_their_order_until_its_export(client, owner):
+    from azimut.api import mapplates as api_plates
+
+    first = stage(client, owner, "frames", [png((40, 30), (10, 0, 0), fmt="JPEG")])
+    assert first.status_code == 200, first.text
+    staged = first.json()["staged"]
+    root = api_plates._staged[staged].root
+    # the next batches name the folder the first one opened, and each series keeps its order
+    more = stage(client, owner, "frames", [png((40, 30), (20, 0, 0), fmt="JPEG"), png((40, 30), (30, 0, 0), fmt="JPEG")], staged)
+    over = stage(client, owner, "overs", [png((40, 30))], staged)
+    assert (more.json()["frames"], over.json()["overs"], over.json()["staged"]) == (3, 1, staged)
+    assert sorted(path.name for path in root.iterdir()) == ["f0000.jpg", "f0001.jpg", "f0002.jpg", "o0000.png"]
+    # another case never reaches them, and a token nobody gave is no folder
+    other = client.post("/api/cases", json={"name": "Other"}).json()["id"]
+    assert stage(client, other, "frames", [png(fmt="JPEG")], staged).status_code == 404
+    assert stage(client, owner, "frames", [png(fmt="JPEG")], "made-up").status_code == 404
+    # the export takes them, then lets the folder go
+    answer = client.post(f"/api/cases/{owner}/map-plates/export", data={"format": "gif", "filename": "Waited", "staged": staged})
+    assert answer.status_code == 200, answer.text
+    assert not root.exists() and staged not in api_plates._staged
+    # a played plate sends no picture with its export, a page no folder
+    assert export(client, owner, "gif", [png(), png()]).status_code == 422
+    assert export(client, owner, "png", [png()], staged=staged).status_code == 422
+
+
+def test_a_played_plate_s_pictures_are_let_go_when_they_cannot_be_used(client, owner, monkeypatch):
+    from azimut.api import mapplates as api_plates
+
+    # a picture the export cannot take lets the whole folder go
+    staged = stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"]
+    root = api_plates._staged[staged].root
+    assert stage(client, owner, "frames", [b"not a picture"], staged).status_code == 422
+    assert not root.exists()
+    # so does a series past its bound, and a batch past its own is refused before it is kept
+    monkeypatch.setitem(api_plates.SERIES, "tweens", (2, mapplates.MAX_TWEEN_BYTES))
+    staged = stage(client, owner, "tweens", [png(fmt="JPEG")] * 2).json()["staged"]
+    assert stage(client, owner, "tweens", [png(fmt="JPEG")], staged).status_code == 422
+    assert staged not in api_plates._staged
+    assert stage(client, owner, "frames", [png(fmt="JPEG")] * (mapplates.MAX_PICTURES_PER_POST + 1)).status_code == 422
+    # an export stopped on the way says so
+    staged = stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"]
+    root = api_plates._staged[staged].root
+    assert client.delete(f"/api/cases/{owner}/map-plates/export/pictures/{staged}").json() == {"dropped": True}
+    assert not root.exists()
+    assert client.delete(f"/api/cases/{owner}/map-plates/export/pictures/{staged}").json() == {"dropped": False}
+    # an export left unfinished goes after a while, and the oldest when too many wait
+    left = stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"]
+    monkeypatch.setattr(api_plates, "STAGE_IDLE_SECONDS", -1)
+    fresh = stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"]
+    assert left not in api_plates._staged and fresh in api_plates._staged
+    monkeypatch.setattr(api_plates, "STAGE_IDLE_SECONDS", 3600)
+    tokens = [stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"] for _ in range(api_plates.MAX_STAGED + 1)]
+    assert fresh not in api_plates._staged and all(token in api_plates._staged for token in tokens[1:])
+    assert len(api_plates._staged) == api_plates.MAX_STAGED
+    for token in list(api_plates._staged):
+        api_plates._let_go(token)
+
+
+def test_the_folders_an_app_stopped_mid_export_left_are_cleared_by_the_next(client, owner, monkeypatch, tmp_path):
+    import os
+    import tempfile
+
+    from azimut.api import mapplates as api_plates
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    orphan = tmp_path / f"{api_plates.STAGE_PREFIX}crashed"
+    orphan.mkdir()
+    (orphan / "f0000.jpg").write_bytes(png(fmt="JPEG"))
+    gone = time.time() - api_plates.STAGE_IDLE_SECONDS - 60
+    os.utime(orphan, (gone, gone))
+    # another app's export under way, or a folder of another name, is left alone
+    recent = tmp_path / f"{api_plates.STAGE_PREFIX}running"
+    recent.mkdir()
+    other = tmp_path / "someone-else"
+    other.mkdir()
+    os.utime(other, (gone, gone))
+    staged = stage(client, owner, "frames", [png(fmt="JPEG")]).json()["staged"]
+    assert not orphan.exists() and recent.exists() and other.exists()
+    assert api_plates._staged[staged].root.parent == tmp_path
+    api_plates._let_go(staged)
+
+
+@pytest.mark.skipif(not ffmpeg.ffmpeg_available(), reason="no ffmpeg on this machine")
+def test_a_beat_holds_its_frame_under_its_clip_and_what_stands_over_it(tmp_path):
+    import subprocess
+
+    exe = ffmpeg.ffmpeg_exe()
+    clip_file = tmp_path / "clip.mp4"
+    subprocess.run([exe, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=30", "-t", "1", "-pix_fmt", "yuv420p", str(clip_file)],
+                   check=True, timeout=60)
+    still = tmp_path / "f0000.jpg"
+    still.write_bytes(png((321, 241), (200, 30, 30), fmt="JPEG"))
+    over = io.BytesIO()
+    Image.new("RGBA", (321, 241), (0, 0, 0, 0)).save(over, "PNG")
+    (tmp_path / "o0000.png").write_bytes(over.getvalue())
+    clip = mapplates.ClipOut(src="media/clip.mp4", start=0, end=1, box=(20, 20, 160, 120))
+    target = tmp_path / "beat.mp4"
+    subprocess.run(mapplates.beat_command(exe, still, 1.5, [(clip, clip_file, False)], tmp_path / "o0000.png", target), check=True, timeout=120)
+    probe = subprocess.run([ffmpeg.ffprobe_exe(), "-v", "error", "-count_frames", "-select_streams", "v",
+                            "-show_entries", "stream=width,height,nb_read_frames", "-of", "json", str(target)],
+                           check=True, capture_output=True, text=True, timeout=60)
+    stream = json.loads(probe.stdout)["streams"][0]
+    # held its whole second and a half past the clip's one, at 30 a second, its sides made even
+    assert (stream["width"], stream["height"], int(stream["nb_read_frames"])) == (320, 240, 45)
+
+
+def test_every_ffmpeg_line_holds_its_threads_and_evens_the_sides(tmp_path):
+    clip = mapplates.ClipOut(src="media/a.mp4", start=0, end=2, box=(0, 0, 100, 100))
+    beat = mapplates.beat_command("ffmpeg", tmp_path / "f.jpg", 2, [(clip, tmp_path / "a.mp4", False)], tmp_path / "o.png", tmp_path / "b.mp4")
+    tween = mapplates.tween_command("ffmpeg", tmp_path / "t%04d.jpg", 0, 12, tmp_path / "w.mp4")
+    for command in (beat, tween):
+        # each input it decodes and the encoder, whatever the machine's cores
+        inputs = [index for index, arg in enumerate(command) if arg == "-i"]
+        for before, at in zip([0, *inputs], inputs):
+            assert command[at + 1].startswith("anullsrc") or "-threads" in command[before:at]
+        assert command[command.index("libx264") + 1:][:2] == ["-threads", mapplates.VIDEO_THREADS]
+        assert mapplates.EVEN_SIDES in command[command.index("-filter_complex") + 1]
+    assert 1 <= int(mapplates.VIDEO_THREADS) <= 4

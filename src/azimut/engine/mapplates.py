@@ -42,10 +42,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -452,6 +454,8 @@ class PlateSpec(Strict):
     transitions: Transitions = Field(default_factory=Transitions)
     #: The days that hold their own seconds in the video, by the day ("now" for the page, or a moment).
     holds: dict[Day, Seconds] = Field(default_factory=dict, max_length=MAX_FRAMED_BEATS)
+    #: The days played though no layer changes on them, picked on the plate's own calendar.
+    days: list[Day] = Field(default_factory=list, max_length=MAX_FRAMED_BEATS)
     elements: list[Element] = Field(default_factory=list, max_length=MAX_ELEMENTS)
 
     @model_validator(mode="after")
@@ -499,6 +503,8 @@ class TemplateData(PlateSpec):
             raise ValueError("a template keeps no framing of a day")
         if self.holds:
             raise ValueError("a template keeps no day's own time")
+        if self.days:
+            raise ValueError("a template keeps no days of a case")
         return self
 
 
@@ -578,8 +584,12 @@ MAX_VIDEO_EDGE = 3840
 TWEEN_FPS = 30
 MAX_TWEENS = 480
 MAX_TWEEN_BYTES = 2_000_000
-#: The body of the largest export, enforced before it is read (`server.BulkBodyLimit`).
-MAX_EXPORT_BODY_BYTES = max(MAX_PAGE_BYTES, MAX_FRAMES * MAX_FRAME_BYTES) + MAX_TWEENS * MAX_TWEEN_BYTES + 2_000_000
+#: The body of the largest export, enforced before it is read (`server.BulkBodyLimit`): a page,
+#: or a played plate's sequence, its pictures sent before it.
+MAX_EXPORT_BODY_BYTES = MAX_PAGE_BYTES + 2_000_000
+#: A played plate's pictures come in batches of at most this many, as the browser draws them.
+MAX_PICTURES_PER_POST = 16
+MAX_PICTURES_BODY_BYTES = MAX_PICTURES_PER_POST * MAX_FRAME_BYTES + 100_000
 #: How long ffmpeg may take over one video, or over one beat of a sequence.
 VIDEO_TIMEOUT = 300
 #: A played plate with steps runs at most half an hour, its beats at most four clips each.
@@ -587,17 +597,22 @@ MAX_SEQUENCE_SECONDS = 1800.0
 MAX_CLIPS_PER_BEAT = 4
 #: The frame rate a sequence is made at, its clips included.
 VIDEO_FPS = 30
+#: The threads one ffmpeg decodes and encodes with. Left to itself it takes one and a half
+#: per core, each holding frames of its own: a 1080p beat took a gigabyte on 16 cores.
+#: Four hold it near 350 MB on any machine, a beat as fast, a transition a little slower.
+VIDEO_THREADS = str(max(1, min(4, os.cpu_count() or 1)))
+#: H.264 in yuv420p wants even sides: a frame's last odd row or column is left out.
+EVEN_SIDES = "crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0"
+#: The file a video's picture is kept in, by the format the browser drew it in.
+FRAME_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png"}
 
 
 class ExportError(ValueError):
     """An export that cannot be made, said in one sentence the dialog can show."""
 
 
-def picture(raw: bytes, *, max_bytes: int, max_pixels: int, alpha: bool = False) -> Image.Image:
-    """A PNG or a JPEG the browser drew, checked by its header before a pixel is decoded.
-
-    With `alpha`, a PNG keeps its see-through paper; anything else is flattened to RGB.
-    """
+def opened(raw: bytes, *, max_bytes: int, max_pixels: int) -> Image.Image:
+    """A PNG or a JPEG the browser drew, checked by its header; not a pixel of it is decoded yet."""
     if not raw:
         raise ExportError("the page arrived empty")
     if len(raw) > max_bytes:
@@ -605,12 +620,23 @@ def picture(raw: bytes, *, max_bytes: int, max_pixels: int, alpha: bool = False)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
-            opened = Image.open(io.BytesIO(raw))
-            if opened.format not in ("PNG", "JPEG") or opened.width * opened.height > max_pixels:
-                raise ExportError("the page is not a picture this export can take")
-            return opened.convert("RGBA" if alpha and opened.format == "PNG" else "RGB")
-    except ExportError:
-        raise
+            image = Image.open(io.BytesIO(raw))
+    except Exception as exc:
+        raise ExportError("the page is not a picture this export can take") from exc
+    if image.format not in FRAME_SUFFIXES or image.width * image.height > max_pixels:
+        image.close()
+        raise ExportError("the page is not a picture this export can take")
+    return image
+
+
+def picture(raw: bytes, *, max_bytes: int, max_pixels: int, alpha: bool = False) -> Image.Image:
+    """A PNG or a JPEG the browser drew, checked by its header before a pixel is decoded.
+
+    With `alpha`, a PNG keeps its see-through paper; anything else is flattened to RGB.
+    """
+    image = opened(raw, max_bytes=max_bytes, max_pixels=max_pixels)
+    try:
+        return image.convert("RGBA" if alpha and image.format == "PNG" else "RGB")
     except Exception as exc:
         raise ExportError("the page is not a picture this export can take") from exc
 
@@ -637,19 +663,47 @@ def _dpi(image: Image.Image, width_mm: float) -> tuple[int, int]:
     return (dpi, dpi)
 
 
-def even(size: tuple[int, int]) -> tuple[int, int]:
-    """A frame's sides made even, which H.264 in yuv420p needs."""
-    return (size[0] - size[0] % 2, size[1] - size[1] % 2)
+def keep_frame(raw: bytes, stem: Path, *, size: tuple[int, int] | None, suffix: str | None = None,
+               max_bytes: int = MAX_FRAME_BYTES) -> tuple[Path, tuple[int, int]]:
+    """A picture the browser drew, kept on disk as a video frame: `(path, size)`.
 
-
-def keep_frame(image: Image.Image, size: tuple[int, int], path: Path) -> None:
-    """A picture written as a video frame, at the sequence's size and its sides even, so it is let go at once.
-
-    A long video is made of hundreds of these; held in memory together they would take
-    gigabytes, written to disk as they arrive they take one picture's worth.
+    A long video is made of hundreds of these, so one already at the sequence's `size`
+    (None for the first, which sets it) is written as it came: its pixels are decoded
+    once, by ffmpeg, never here. One of another size is drawn again at that size.
+    `suffix` is the format of its series, which ffmpeg reads by one pattern; a picture
+    in another is drawn again in it, and None keeps the picture's own.
     """
-    shown = image if image.size == size else image.resize(size, Image.Resampling.LANCZOS)
-    shown.crop((0, 0, *even(size))).save(path, compress_level=1)
+    image = opened(raw, max_bytes=max_bytes, max_pixels=MAX_FRAME_PIXELS)
+    try:
+        own = FRAME_SUFFIXES[image.format or ""]
+        size = size or image.size
+        path = stem.with_suffix(suffix or own)
+        if image.size == size and path.suffix == own:
+            path.write_bytes(raw)
+            return path, size
+        shown = image.convert("RGBA" if image.format == "PNG" and path.suffix == ".png" else "RGB")
+        if shown.size != size:
+            shown = shown.resize(size, Image.Resampling.LANCZOS)
+        if path.suffix == ".png":
+            shown.save(path, compress_level=1)
+        else:
+            shown.save(path, quality=95, subsampling=0)
+        return path, size
+    except ExportError:
+        raise
+    except Exception as exc:
+        raise ExportError("the page is not a picture this export can take") from exc
+    finally:
+        image.close()
+
+
+@dataclass
+class Kept:
+    """Where an export's pictures were kept: a frame per beat, what stands over its clips, its transitions' frames."""
+
+    frames: list[Path] = field(default_factory=list)
+    overs: list[Path] = field(default_factory=list)
+    tweens: list[Path] = field(default_factory=list)
 
 
 def gif_frame(image: Image.Image, size: tuple[int, int]) -> Image.Image:
@@ -676,18 +730,20 @@ def _ffmpeg() -> str:
     return exe
 
 
-def mp4_bytes(root: Path, count: int, interval: int) -> bytes:
-    """An H.264 video a phone and a slide deck both play, each of the `count` frames kept in `root` shown `interval` ms.
+def mp4_bytes(frames: list[Path], interval: int) -> bytes:
+    """An H.264 video a phone and a slide deck both play, each of the `frames` shown `interval` ms.
 
-    The frames are `f0000.png` onward, written by `keep_frame`; the last is held three times as long.
+    The frames are `f0000` onward in one folder, all in one format, written by `keep_frame`;
+    the last is held three times as long.
     """
     exe = _ffmpeg()
+    root, suffix, count = frames[0].parent, frames[0].suffix, len(frames)
     for extra in (count, count + 1):
-        shutil.copyfile(root / f"f{count - 1:04d}.png", root / f"f{extra:04d}.png")
+        shutil.copyfile(frames[-1], root / f"f{extra:04d}{suffix}")
     target = root / "plate.mp4"
-    command = [exe, "-hide_banner", "-loglevel", "error", "-y", "-framerate", f"1000/{interval}",
-               "-i", str(root / "f%04d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p",
-               "-r", "30", "-movflags", "+faststart", str(target)]
+    command = [exe, "-hide_banner", "-loglevel", "error", "-y", "-threads", VIDEO_THREADS, "-framerate", f"1000/{interval}",
+               "-i", str(root / f"f%04d{suffix}"), "-vf", EVEN_SIDES, "-c:v", "libx264", "-threads", VIDEO_THREADS,
+               "-pix_fmt", "yuv420p", "-r", "30", "-movflags", "+faststart", str(target)]
     _run(command, "the video took too long to make", "ffmpeg could not make the video")
     return target.read_bytes()
 
@@ -764,17 +820,19 @@ def beat_command(exe: str, still: Path, seconds: float, clips: list[tuple[ClipOu
 
     `clips` are `(clip, file, sounds)`, `sounds` true when the clip's sound is asked for and
     the file has one; every beat carries a stereo track, silent when none sounds, so the
-    beats join without a new encode.
+    beats join without a new encode. The frame and what stands over the clips are each
+    decoded once and held (`tpad`), rather than read again at every frame of the beat.
     """
     held = f"{seconds:.3f}"
+    hold = f"tpad=stop_mode=clone:stop_duration={held}"
     command = [exe, "-hide_banner", "-loglevel", "error", "-y",
-               "-loop", "1", "-framerate", str(VIDEO_FPS), "-t", held, "-i", str(still),
+               "-threads", VIDEO_THREADS, "-framerate", str(VIDEO_FPS), "-i", str(still),
                "-f", "lavfi", "-t", held, "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
     for clip, file, _ in clips:
-        command += ["-ss", f"{clip.start:.3f}", "-t", f"{clip.end - clip.start:.3f}", "-i", str(file)]
+        command += ["-threads", VIDEO_THREADS, "-ss", f"{clip.start:.3f}", "-t", f"{clip.end - clip.start:.3f}", "-i", str(file)]
     if over is not None:
-        command += ["-loop", "1", "-framerate", str(VIDEO_FPS), "-t", held, "-i", str(over)]
-    graph = ["[0:v]setsar=1[b0]"]
+        command += ["-threads", VIDEO_THREADS, "-framerate", str(VIDEO_FPS), "-i", str(over)]
+    graph = [f"[0:v]{hold},{EVEN_SIDES},setsar=1[b0]"]
     for index, (clip, _, _) in enumerate(clips):
         x, y, width, height = clip.box
         fitted = (f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}" if clip.fit == "cover"
@@ -783,7 +841,8 @@ def beat_command(exe: str, still: Path, seconds: float, clips: list[tuple[ClipOu
         graph.append(f"[b{index}][c{index}]overlay=x={x}+({width}-w)/2:y={y}+({height}-h)/2:eof_action=repeat[b{index + 1}]")
     last = len(clips)
     if over is not None:
-        graph.append(f"[b{last}][{len(clips) + 2}:v]overlay=0:0[b{last + 1}]")
+        graph.append(f"[{len(clips) + 2}:v]{hold}[o]")
+        graph.append(f"[b{last}][o]overlay=0:0[b{last + 1}]")
         last += 1
     graph.append(f"[b{last}]format=yuv420p[v]")
     sounded = [index for index, (_, _, sounds) in enumerate(clips) if sounds]
@@ -795,7 +854,7 @@ def beat_command(exe: str, still: Path, seconds: float, clips: list[tuple[ClipOu
     elif sounded:
         graph.append(f"[a{sounded[0]}]apad=whole_dur={held}[a]")
     command += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]" if sounded else "1:a", "-t", held,
-                "-r", str(VIDEO_FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-r", str(VIDEO_FPS), "-c:v", "libx264", "-threads", VIDEO_THREADS, "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", str(target)]
     return command
 
@@ -808,21 +867,21 @@ def tween_command(exe: str, pattern: Path, start: int, count: int, target: Path)
     held = f"{count / TWEEN_FPS:.3f}"
     # the frames are counted on the way in, at their own rate: out at the video's, there are more of them
     return [exe, "-hide_banner", "-loglevel", "error", "-y",
-            "-framerate", str(TWEEN_FPS), "-start_number", str(start), "-t", held, "-i", str(pattern),
+            "-threads", VIDEO_THREADS, "-framerate", str(TWEEN_FPS), "-start_number", str(start), "-t", held, "-i", str(pattern),
             "-f", "lavfi", "-t", held, "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-filter_complex", "[0:v]setsar=1,format=yuv420p[v]", "-map", "[v]", "-map", "1:a",
-            "-t", held, "-r", str(VIDEO_FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", str(target)]
+            "-filter_complex", f"[0:v]{EVEN_SIDES},setsar=1,format=yuv420p[v]", "-map", "[v]", "-map", "1:a",
+            "-t", held, "-r", str(VIDEO_FPS), "-c:v", "libx264", "-threads", VIDEO_THREADS, "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", str(target)]
 
 
-def sequence_mp4(root: Path, beats: list[Beat], files: dict[str, Path]) -> bytes:
+def sequence_mp4(root: Path, beats: list[Beat], files: dict[str, Path], kept: Kept) -> bytes:
     """A video of a plate's days and steps: each beat its frame held, its clips running in their boxes.
 
-    The pictures are already kept in `root` by `keep_frame`: a frame per beat (`f0000.png`
-    onward), what stands over the clips (`o…`) and the transitions' frames (`t…`). `files`
-    are the case's videos the clips name, already found inside the case. Each beat is
-    made on its own, after the transition it opens on when it has one, then the beats are
-    joined as they are.
+    The pictures are already `kept` in `root` by `keep_frame`: a frame per beat, what
+    stands over the clips and the transitions' frames (`t0000` onward, in one format).
+    `files` are the case's videos the clips name, already found inside the case. Each
+    beat is made on its own, after the transition it opens on when it has one, then the
+    beats are joined as they are.
     """
     exe = _ffmpeg()
     sounds: dict[str, bool] = {}
@@ -830,10 +889,10 @@ def sequence_mp4(root: Path, beats: list[Beat], files: dict[str, Path]) -> bytes
     for index, beat in enumerate(beats):
         if beat.tween is not None:
             lead = root / f"w{index:04d}.mp4"
-            _run(tween_command(exe, root / "t%04d.png", beat.tween[0], beat.tween[1], lead),
+            _run(tween_command(exe, root / f"t%04d{kept.tweens[0].suffix}", beat.tween[0], beat.tween[1], lead),
                  "the video took too long to make", "ffmpeg could not make the video")
             listing.append(f"file '{lead.name}'")
-        still = root / f"f{index:04d}.png"
+        still = kept.frames[index]
         clips = []
         for clip in beat.clips:
             file = files[clip.src]
@@ -841,7 +900,7 @@ def sequence_mp4(root: Path, beats: list[Beat], files: dict[str, Path]) -> bytes
                 sounds[clip.src] = has_sound(file)
             clips.append((clip, file, clip.sound and sounds.get(clip.src, False)))
         target = root / f"b{index:04d}.mp4"
-        over = root / f"o{beat.over:04d}.png" if beat.over is not None and beat.clips else None
+        over = kept.overs[beat.over] if beat.over is not None and beat.clips else None
         _run(beat_command(exe, still, beat.seconds, clips, over, target), "the video took too long to make", "ffmpeg could not make the video")
         listing.append(f"file '{target.name}'")
     (root / "beats.txt").write_text("\n".join(listing) + "\n", encoding="utf-8")

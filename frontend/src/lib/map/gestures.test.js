@@ -404,6 +404,54 @@ describe('orbiting over the relief', () => {
     expect(engine.pitches).toEqual([]);
   });
 
+  /** The orbit's engine with a wall of relief: any tilt past `wall` sinks the eye. */
+  function walledEngine(wall) {
+    const engine = orbitEngine();
+    let pitch = 20;
+    let bearing = 10;
+    engine.setPitch = (deg) => { pitch = deg; engine.pitches.push(deg); };
+    engine.setBearing = (deg) => { bearing = deg; engine.bearings.push(deg); };
+    engine.maxPitch = () => 85;
+    engine.refused = 0;
+    engine.unlessItSinks = (move) => {
+      const before = { pitch, bearing };
+      move();
+      if (pitch <= wall) return true;
+      engine.refused += 1;
+      ({ pitch, bearing } = before);
+      return false;
+    };
+    engine.view = () => ({ pitch, bearing });
+    return engine;
+  }
+
+  it('stops at the relief instead of climbing it, and slides along it with the turn', () => {
+    const engine = walledEngine(30);
+    turnFromPress(engine, press(1, 140, 120), { tilt: true });
+    // up to the wall: 20 + 32 px × 0.25 = 28°
+    drag(140, 88);
+    expect(engine.view().pitch).toBeCloseTo(28);
+    // further up hits it: the tilt is refused, nothing else moves
+    drag(140, 40);
+    expect(engine.view()).toEqual({ pitch: 28, bearing: 10 });
+    expect(engine.refused).toBeGreaterThan(0);
+    // up and sideways: the tilt stays at the wall and the turn still goes
+    drag(180, 20);
+    expect(engine.view().pitch).toBeCloseTo(28);
+    expect(engine.view().bearing).toBeCloseTo(10 - 40 * ORBIT_TURN_PER_PX);
+  });
+
+  it('moves again at once when the hand turns back from the relief', () => {
+    const engine = walledEngine(30);
+    turnFromPress(engine, press(1, 140, 120), { tilt: true });
+    drag(140, 88);
+    // a long way past the wall, all of it refused
+    drag(140, -200);
+    // a few pixels back down leans the view back by those pixels, not after 300 of them
+    drag(140, -192);
+    expect(engine.view().pitch).toBeCloseTo(28 - 8 * ORBIT_TILT_PER_PX);
+  });
+
   it('never moves the camera further than the orbit’s own arc to hold the pivot', () => {
     // a view grazing the ground: a hair of turn swings the pivot by degrees on screen
     const engine = orbitEngine({ swing: [-3, 6] });

@@ -113,8 +113,7 @@ describe('personal layers', () => {
     byText('Done').click(); await controller.whenSaved(); await Promise.resolve();
     expect(api.patch).toHaveBeenCalledWith('/api/cases/case/map-layers/work/edit', { title: 'Renamed', description: 'Context' });
     expect(finished(api)).toBe(false);
-    document.querySelector('[aria-label="Layer actions"]').click(); flushSync();
-    menuItem('Discard changes…').click(); flushSync();
+    document.querySelector('[aria-label="Discard changes"]').click(); flushSync();
     expect(document.querySelector('[role="alertdialog"]')).toBeTruthy();
   });
   it('reorders groups from a native drop and cancels a drop outside the list', () => {
@@ -160,13 +159,28 @@ describe('personal layers', () => {
     show(MyLayers, { ondone, controller });
     const name = document.querySelector('[aria-label="Feature name"]');
     type(name, 'Unsaved name');
-    const discard = () => { document.querySelector('[aria-label="Layer actions"]').click(); flushSync(); menuItem('Discard changes…').click(); flushSync(); };
+    // Discard sits in the header beside Done, not behind the layer's menu
+    const button = document.querySelector('header [aria-label="Discard changes"]');
+    const discard = () => { button.click(); flushSync(); };
     discard();
     expect(document.querySelector('[role="alertdialog"]').getAttribute('aria-label')).toBe('Discard changes?');
     expect(finished(api)).toBe(false);
     byText('Cancel').click(); flushSync(); expect(name.value).toBe('Unsaved name');
     discard();
     byText('Discard changes').click(); await controller.whenSaved(); await settle(); flushSync();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/edit/finish', expect.objectContaining({ discard: true }));
+    expect(ondone).toHaveBeenCalledOnce();
+  });
+
+  it('leaves at once through Discard when nothing changed', async () => {
+    const { controller, api } = await editing();
+    const ondone = vi.fn();
+    show(MyLayers, { ondone, controller });
+    const button = document.querySelector('header [aria-label="Discard changes"]');
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe('Stop editing, nothing changed');
+    button.click(); await controller.whenSaved(); await settle(); flushSync();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/edit/finish', expect.objectContaining({ discard: true }));
     expect(ondone).toHaveBeenCalledOnce();
   });
@@ -423,6 +437,22 @@ describe('new layer', () => {
     flushSync();
     expect(byText('Create layer').disabled).toBe(true);
     expect(document.body.textContent).toContain('Keeps the original file and its bundled icons.');
+  });
+
+  it('imports a My Maps once from its link, and only from a My Maps link', () => {
+    const oncreate = vi.fn();
+    show(NewLayerDialog, { oncreate, onclose: vi.fn() });
+    byText('From a My Maps link').click();
+    flushSync();
+    expect(document.body.textContent).toContain('The map is read once, now.');
+    const input = document.querySelector('input[type="url"]');
+    const type = (value) => { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); };
+    expect(byText('Create layer').disabled).toBe(true);
+    type('https://example.org/map.kml');
+    expect(byText('Create layer').disabled).toBe(true);
+    type(' https://www.google.com/maps/d/viewer?mid=1AbC ');
+    byText('Create layer').click();
+    expect(oncreate).toHaveBeenCalledWith('My layer', 'https://www.google.com/maps/d/viewer?mid=1AbC', '', null);
   });
 });
 

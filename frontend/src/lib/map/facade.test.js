@@ -257,6 +257,23 @@ describe('the map façade keeps the engine on its own side', () => {
     expect(done).toBe(true);
   });
 
+  it('puts a move back exactly when the eye had to be lifted out of the relief, and lets a clear one stand', () => {
+    // a lift is the only thing that changes the zoom of a turn, a tilt or a shift
+    let zoom = 15;
+    const centre = { lat: 46.5, lng: 7.9 };
+    const map = stubMap({ getZoom: () => zoom, getCenter: () => centre, getPitch: () => 50,
+      getCenterElevation: () => 2930 });
+    const facade = mapFacade(map);
+    expect(facade.unlessItSinks(() => map.jumpTo({ pitch: 52 }))).toBe(true);
+    expect(map.calls.jumpTo).toHaveLength(1);
+    expect(facade.unlessItSinks(() => {
+      map.jumpTo({ pitch: 60 });
+      zoom = 14.6;
+    })).toBe(false);
+    expect(map.calls.jumpTo.at(-1)).toEqual([
+      { center: centre, zoom: 15, pitch: 50, bearing: -37, elevation: 2930 }, HAND]);
+  });
+
   it('holds the centre’s height through a gesture, and re-seats it after with the camera kept', () => {
     const recalculated = [];
     const camera = {
@@ -669,6 +686,23 @@ describe('capturing the drawn pixels', () => {
       expect(shot.canvas).toBe(copy);
       expect([copy.width, copy.height]).toEqual([800, 600]);
       expect(copy.drawn).toEqual({ width: 800, height: 600 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('draws a capture over an earlier one handed back, rather than making a canvas each time', async () => {
+    const { map, copy } = capturable();
+    const cleared = [];
+    const reused = { width: 800, height: 600, drawn: null };
+    reused.getContext = () => ({ clearRect: (...area) => cleared.push(area), drawImage: (source) => (reused.drawn = source) });
+    try {
+      const shot = await mapFacade(map).snapshot({ into: reused });
+      expect(shot.canvas).toBe(reused);
+      // the picture before is wiped, so nothing of it shows through a see-through sky
+      expect(cleared).toEqual([[0, 0, 800, 600]]);
+      expect(reused.drawn).toEqual({ width: 800, height: 600 });
+      expect(copy.drawn).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

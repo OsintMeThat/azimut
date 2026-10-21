@@ -536,6 +536,38 @@ def test_a_picture_exported_from_a_stitched_collage_says_the_turn_it_spans(clien
     assert "panorama" not in client.get("/api/horizon/photo", params={"case": case_id, "path": strip}).json()
 
 
+def test_a_collage_of_a_pan_says_find_reads_it_frame_by_frame(client):
+    from framescene import H, W, _collage
+
+    case_id, clip = _case_with(client, "frame.jpg", _photo_bytes(size=(int(W), int(H)), focal35=None, gps=False, taken=None))
+    pieces, _, _ = _collage((-30.0, 0.0, 30.0))
+    nodes = [
+        {"id": f"nd_{i}", "save": {"path": clip, "time": float(i), "ops": [{"op": "remap", "params": piece.remap}]},
+         "w": piece.size[0], "h": piece.size[1], "quad": piece.quad.tolist()}
+        for i, piece in enumerate(pieces)
+    ]
+    width = int(max(piece.quad[:, 0].max() for piece in pieces))
+    height = int(max(piece.quad[:, 1].max() for piece in pieces))
+    picture = _photo_bytes(size=(width, height), focal35=None, gps=False, taken=None)
+    strip = client.post(
+        f"/api/cases/{case_id}/media/upload",
+        files={"file": ("Pan.jpg", io.BytesIO(picture), "application/octet-stream")},
+    ).json()["item"]["path"]
+    signature = json.dumps([[n["save"], n["quad"]] for n in nodes])
+    saved = client.post(f"/api/cases/{case_id}/collages", json={
+        "name": None, "title": "Pan",
+        "spec": {"width": width, "height": height, "nodes": nodes, "exported": {"path": strip, "signature": signature}},
+    })
+    assert saved.status_code == 200, saved.text
+    facts = client.get("/api/horizon/photo", params={"case": case_id, "path": strip}).json()
+    framed = facts["frames"]
+    assert framed["collage"] == "Pan" and framed["frames"] == 3 and framed["stitched"] == 3
+    assert framed["lens"] == pytest.approx(2 * math.degrees(math.atan(W / 2 / 700.0)), abs=0.1)
+    assert framed["span"] == pytest.approx(60 + framed["lens"], abs=4.0)
+    # the frame itself is no collage
+    assert "frames" not in client.get("/api/horizon/photo", params={"case": case_id, "path": clip}).json()
+
+
 def test_the_photo_route_stays_inside_the_case(client):
     case_id, _ = _case_with(client, "summit.jpg", _photo_bytes())
     assert client.get("/api/horizon/photo", params={"case": case_id, "path": "../../settings.json"}).status_code == 403

@@ -6,8 +6,10 @@
  *
  *   sky     the pen along the skyline, where the land meets the sky
  *   ridge   the pen along an inner edge, a ridge seen against farther land
+ *   sea     the pen along the sea's horizon, where the sky meets open sea
  *   behind  a click on the stroke in front, then on the one behind it
  *   cut     a click lays a cut across a collage where its frames meet
+ *   far     the distances picked, then a click on a line says it stands that far
  *   erase   the rubber
  *
  * The magnet beside them snaps what the pens draw onto the photo's edges;
@@ -32,6 +34,14 @@ export const TRACE_TOOLS = Object.freeze([
     title: "Draw a ridge seen against farther land, not the sky (R)",
   },
   {
+    id: "sea",
+    icon: "horizon",
+    label: "Sea line",
+    name: "Trace the sea's horizon",
+    key: "S",
+    title: "Draw the sea's horizon, where the sky meets open sea (S)",
+  },
+  {
     id: "behind",
     icon: "layers",
     label: "Behind",
@@ -47,6 +57,14 @@ export const TRACE_TOOLS = Object.freeze([
     key: "X",
     title:
       "Cut a collage where its frames meet: each piece is fitted a little on its own (X)",
+  },
+  {
+    id: "far",
+    icon: "ruler",
+    label: "Distance",
+    name: "Say how far a line stands",
+    key: "K",
+    title: "Say how far a line stands: pick the distances, then click the line (K)",
   },
   {
     id: "erase",
@@ -72,10 +90,11 @@ export function toolForKey(key) {
 
 /** Whether a tool is out. */
 export function toolOn(overlay, id) {
-  if (id === "sky" || id === "ridge")
+  if (id === "sky" || id === "ridge" || id === "sea")
     return Boolean(overlay.tracing) && overlay.pen === id;
   if (id === "behind") return Boolean(overlay.linking);
   if (id === "cut") return Boolean(overlay.cutting);
+  if (id === "far") return Boolean(overlay.distancing);
   if (id === "erase") return Boolean(overlay.erasing);
   return false;
 }
@@ -83,7 +102,11 @@ export function toolOn(overlay, id) {
 /** Whether any tool that edits the trace is out. */
 export function editing(overlay) {
   return Boolean(
-    overlay.tracing || overlay.erasing || overlay.linking || overlay.cutting,
+    overlay.tracing ||
+      overlay.erasing ||
+      overlay.linking ||
+      overlay.cutting ||
+      overlay.distancing,
   );
 }
 
@@ -118,6 +141,7 @@ export function traceLegend(
       ]
     : [{ id: "trace", label: "Your trace" }];
   if (marks?.inner?.length) items.push({ id: "ridge", label: "Ridge" });
+  if (marks?.sea?.length) items.push({ id: "sea", label: "Sea line" });
   if (terrain) items.push({ id: "terrain", label: "Terrain skyline" });
   if (ridgeLines) items.push({ id: "ridge-lines", label: "Terrain ridges" });
   if (level) items.push({ id: "level", label: "Eye level" });
@@ -136,17 +160,19 @@ export function toolBlocked(overlay, id) {
     return "Draw two lines first";
   if (id === "erase" && !overlay.strokes.length)
     return "Nothing to rub out yet";
+  if (id === "far" && !overlay.strokes.length) return "Draw a line first";
   return "";
 }
 
 /** Bring a tool out, or put it away when it is out already. */
 export function pressTool(overlay, id) {
   const on = toolOn(overlay, id);
-  if (id === "sky" || id === "ridge") {
+  if (id === "sky" || id === "ridge" || id === "sea") {
     if (on) overlay.setTracing(false);
     else overlay.setPen(id);
   } else if (id === "behind") overlay.setLinking(!on);
   else if (id === "cut") overlay.setCutting(!on);
+  else if (id === "far") overlay.setDistancing(!on);
   else if (id === "erase") overlay.setErasing(!on);
 }
 
@@ -156,6 +182,7 @@ export function putAway(overlay) {
   overlay.setErasing(false);
   overlay.setLinking(false);
   overlay.setCutting(false);
+  overlay.setDistancing(false);
 }
 
 /** What the trace holds besides the skyline, in a few words: '' when nothing. */
@@ -172,6 +199,12 @@ export function marksSummary(marks) {
     parts.push(
       marks.cuts.length === 1 ? "2 pieces" : `${marks.cuts.length + 1} pieces`,
     );
+  if (marks.far?.length)
+    parts.push(
+      marks.far.length === 1 ? "1 distance" : `${marks.far.length} distances`,
+    );
+  if (marks.sea?.length)
+    parts.push(marks.sea.length === 1 ? "1 sea line" : `${marks.sea.length} sea lines`);
   return parts.join(" · ");
 }
 
@@ -184,11 +217,15 @@ export function toolHint(overlay) {
   }
   if (overlay.cutting)
     return "Click where two frames of the collage meet · click a cut to take it away";
+  if (overlay.distancing)
+    return "Pick how far, then click a line · the same again takes it away";
   if (overlay.tracing) {
     const what =
       overlay.pen === "ridge"
         ? "Draw along a ridge seen against farther land"
-        : "Draw along the skyline";
+        : overlay.pen === "sea"
+          ? "Draw along the sea's horizon"
+          : "Draw along the skyline";
     return `${what} · ${overlay.magnet ? "it snaps to the edge · Alt draws freely" : "drawn as is · Alt snaps it"} · a click on a line makes it this kind`;
   }
   return "";

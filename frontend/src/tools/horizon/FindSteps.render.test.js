@@ -14,6 +14,9 @@ function fakeFind(over = {}) {
     step: null,
     meeting: null,
     who: { mode: 'ground', low: 1.7, high: 1.7 },
+    facing: [],
+    stands: [],
+    previewed: null,
     settings: { spacing: 'auto', tolerance: 1 },
     search: null,
     searching: false,
@@ -33,6 +36,32 @@ function fakeFind(over = {}) {
     removeAlignment: vi.fn(),
     setTops: vi.fn(),
     setWho: vi.fn(),
+    toggleFacing: vi.fn(),
+    clearFacing: vi.fn(),
+    toggleStand: vi.fn(),
+    preview: vi.fn(),
+    view: [],
+    mirror: false,
+    tried: null,
+    tryProblem: '',
+    zones: [],
+    zoneDrawn: null,
+    sun: { date: '', start: '06:00', end: '18:00', sides: [] },
+    sectors: null,
+    setSun: vi.fn(),
+    toggleSunSide: vi.fn(),
+    readSectors: vi.fn(),
+    drawZone: vi.fn(),
+    removeZone: vi.fn(),
+    setZoneSpacing: vi.fn(),
+    zoneProblem: () => '',
+    startTrying: vi.fn(),
+    stopTrying: vi.fn(),
+    clearTried: vi.fn(),
+    checking: false,
+    check: vi.fn(),
+    toggleView: vi.fn(),
+    setMirror: vi.fn(),
     setSettings: vi.fn(),
     ...over,
   };
@@ -131,8 +160,168 @@ describe('the steps of Find', () => {
     expect(hazed.textContent).toContain('Ridges past 10 km are left out: a far skyline cannot be found.');
     expect(hazed.textContent).toContain('Any lens finds more chance fits: say the zoom if you can.');
     const told = steps({ find: ready, overlay: { ...overlay, hints: { zoom: 'wide', reach: 'auto' } } });
-    expect(told.textContent).toContain('With wide lenses · ridges within 50 km · on foot.');
+    expect(told.textContent).toContain('With zoom ×0.5 · ridges within 50 km · on foot.');
     expect(told.textContent).not.toContain('left out');
+    // several zoom words and the directions ticked are said too
+    const unsure = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', facing: ['n', 'ne', 'e', 's'] }), overlay: { ...overlay, hints: { zoom: ['wide', 'normal'], reach: 'auto' } } });
+    expect(unsure.textContent).toContain('With zoom ×0.5 or ×1 · facing N to E, S · ridges within 50 km · on foot.');
+    expect(unsure.textContent).not.toContain('Any lens finds more chance fits');
+  });
+
+  it('ticks the directions the photo may face on a compass, any way in its middle', () => {
+    const find = fakeFind({ facing: ['ne'] });
+    const root = steps({ find });
+    const compass = root.querySelector('.fs-compass');
+    expect([...compass.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['NW', 'N', 'NE', 'W', 'Any', 'E', 'SW', 'S', 'SE']);
+    expect([...compass.querySelectorAll('[aria-pressed="true"]')].map((b) => b.textContent.trim())).toEqual(['NE']);
+    expect(root.textContent).toContain('Only headings NE are searched, drawn on the map.');
+    buttonNamed(compass, 'E').click();
+    expect(find.toggleFacing).toHaveBeenCalledWith('e');
+    buttonNamed(compass, 'Any').click();
+    expect(find.clearFacing).toHaveBeenCalledOnce();
+    const none = steps({ find: fakeFind() });
+    expect(none.querySelector('.fs-compass [aria-pressed="true"]').textContent.trim()).toBe('Any');
+    expect(none.textContent).toContain('Tick one or several if you know roughly.');
+  });
+
+  it('ticks the ground the eye stands on, says what the grid keeps, and the time with it', () => {
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const previewed = { total: 400, kept: 100, kinds: { summit: 100, slope: 200, valley: 60, plain: 20, water: 20 }, points: [] };
+    const find = fakeFind({ area, areaProblem: '', searchProblem: '', stands: ['summit'], previewed, estimated: { points: 600, coarse: 400, step: 0.5 } });
+    const root = steps({ find });
+    const row = root.querySelector('[aria-labelledby="find-stands"]');
+    expect([...row.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Summit or ridge', 'Slope', 'Valley', 'Plain', 'Sea or lake']);
+    expect(buttonNamed(row, 'Summit or ridge').getAttribute('aria-pressed')).toBe('true');
+    // each says its rule
+    expect(buttonNamed(row, 'Plain').title).toBe('Flat ground: within 8 m over 400 m, or 30 m over 1.5 km');
+    expect(root.textContent).toContain('Keeps 100 of 400 points (25%), 20 on water left out.');
+    // three quarters of the grid left out: 300 points fewer
+    expect(root.textContent).toContain('300 points, about 2 min.');
+    expect(root.textContent).toContain('on foot · on a summit or ridge');
+    buttonNamed(row, 'Valley').click();
+    expect(find.toggleStand).toHaveBeenCalledWith('valley');
+  });
+
+  it('checks a search against decoys of its trace on a press, and says what they explain', () => {
+    const points = Array.from({ length: 20 }, (_, i) => ({ lat: 0, lon: i / 100, explained: i / 50 }));
+    const place = { lat: 12.9, lon: 43.6, explained: 0.79, heading: 123, fov: 42, tilt: -3, roll: 1 };
+    const find = fakeFind({ search: { name: 's', status: 'done', ask: { area: [] }, result: { verdict: 'match', places: [place], points } } });
+    const root = steps({ find });
+    buttonNamed(root, 'Check against decoys').click();
+    expect(find.check).toHaveBeenCalledOnce();
+    expect(root.querySelector('.fs-place').textContent).toContain('chance 34%');
+    const checked = steps({
+      find: fakeFind({ search: { name: 's', status: 'done', ask: { area: [] }, result: { verdict: 'match', checked: true, places: [{ ...place, decoy: 0.22 }], points } } }),
+    });
+    expect(checked.textContent).toContain('Decoys of the trace explain at most 22% at the best place.');
+    expect(checked.querySelector('.fs-place').textContent).toContain('decoys 22%');
+    expect(buttonNamed(checked, 'Check against decoys')).toBeUndefined();
+  });
+
+  it('asks where the sun stood, on what day, and says the headings it leaves', () => {
+    const find = fakeFind();
+    const root = steps({ find });
+    const row = root.querySelector('[aria-labelledby="find-sun"]');
+    expect([...row.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Ahead', 'Left', 'Right', 'Behind']);
+    expect(root.textContent).toContain('Tick where the sun stood against the camera, with the day.');
+    buttonNamed(row, 'Left').click();
+    expect(find.toggleSunSide).toHaveBeenCalledWith('left');
+    const dated = { date: '2024-06-21', start: '13:00', end: '15:00', sides: ['left'] };
+    const read = steps({ find: fakeFind({ sun: dated, sectors: { sectors: [[180, 30], [20, 10]], sun: { from: 150.4, to: 209.6, up: true } } }) });
+    expect(read.textContent).toContain('Sun at 150° to 210° then: 80° of headings left, drawn on the map.');
+    expect(read.textContent).toContain('sun left on 2024-06-21');
+    const down = steps({ find: fakeFind({ sun: dated, sectors: { sectors: null, sun: { up: false } } }) });
+    expect(down.textContent).toContain('The sun was down then: it says nothing.');
+    const none = steps({ find: fakeFind({ sun: dated, sectors: { sectors: [], sun: { up: true } } }) });
+    expect(none.textContent).toContain('No heading agrees with both the sun and the directions ticked.');
+  });
+
+  it('adds zones finer or left out under the area, each with its grid and a way out', () => {
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 1.1 }, { lat: 1.1, lon: 1.1 }];
+    const zones = [
+      { id: 'a', points: [{ lat: 1.02, lon: 1.02 }, { lat: 1.02, lon: 1.03 }, { lat: 1.03, lon: 1.03 }], spacing: 100, out: false },
+      { id: 'b', points: [{ lat: 1.05, lon: 1.05 }, { lat: 1.05, lon: 1.06 }, { lat: 1.06, lon: 1.06 }], spacing: 'auto', out: true },
+    ];
+    const find = fakeFind({ area, areaProblem: '', zones });
+    const root = steps({ find });
+    const rows = [...root.querySelectorAll('.fs-zone')];
+    expect(rows.map((row) => row.querySelector('.fs-zone-what').textContent.split(' · ')[0])).toEqual(['Finer', 'Left out']);
+    // a zone left out has no grid to choose
+    expect(rows[1].querySelector('[role="group"]')).toBeNull();
+    buttonNamed(rows[0], '250 m').click();
+    expect(find.setZoneSpacing).toHaveBeenCalledWith('a', 250);
+    rows[1].querySelector('[aria-label="Take zone 2 away"]').click();
+    expect(find.removeZone).toHaveBeenCalledWith('b');
+    buttonNamed(root, 'Finer zone').click();
+    expect(find.drawZone).toHaveBeenCalledWith({ out: false });
+    buttonNamed(root, 'Leave out').click();
+    expect(find.drawZone).toHaveBeenCalledWith({ out: true });
+    const drawing = steps({ find: fakeFind({ area, areaProblem: '', drawing: 'zone', zoneDrawn: { id: 'c', points: [], out: true } }) });
+    expect(drawing.textContent).toContain('Click each corner of the zone to leave out.');
+  });
+
+  it('tries a point on the map, says what it explains there and looks from it', () => {
+    const find = fakeFind();
+    const onplace = vi.fn();
+    const root = steps({ find, onplace });
+    buttonNamed(root, 'Try a point').click();
+    expect(find.startTrying).toHaveBeenCalledOnce();
+    const place = { lat: 12.9, lon: 43.6, explained: 0.71, heading: 92, fov: 41, relief: 2_400 };
+    const tried = steps({ find: fakeFind({ drawing: 'try', tried: { at: place, place, frames: { span: 97 }, busy: false, error: '' } }), onplace });
+    const card = tried.querySelector('[aria-label="The point tried"]');
+    expect(card.textContent).toContain('Tried here: explains 71%');
+    expect(card.textContent).toContain('41° lens · ridges about 2.40 km out');
+    buttonNamed(card, 'Look from here').click();
+    expect(onplace).toHaveBeenCalledWith({ ...place, frames: { span: 97 } });
+    const blocked = steps({ find: fakeFind({ tryProblem: 'Open a case first' }) });
+    expect(buttonNamed(blocked, 'Try a point').disabled).toBe(true);
+  });
+
+  it('asks how the camera looks and whether it is a selfie, and says it with the rest', () => {
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const find = fakeFind({ area, areaProblem: '', searchProblem: '', view: ['down'], mirror: true });
+    const root = steps({ find });
+    const row = root.querySelector('[aria-labelledby="find-view"]');
+    expect([...row.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Looking down', 'Looking up', 'Selfie']);
+    expect(root.textContent).toContain('on foot · looking down · mirrored too');
+    buttonNamed(row, 'Looking up').click();
+    expect(find.toggleView).toHaveBeenCalledWith('up');
+    buttonNamed(row, 'Selfie').click();
+    expect(find.setMirror).toHaveBeenCalledWith(false);
+  });
+
+  it('says the lines the analyst set a distance on take the place of the reach', () => {
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const marks = { lines: [0, 1], inner: [1], pairs: [], cuts: [], far: [{ line: 0, bands: ['b1'] }] };
+    const root = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '' }), overlay: { ...overlay, marks, hints: { reach: 5000 } } });
+    expect(root.textContent).toContain('lines 1–3 km away');
+    expect(root.textContent).not.toContain('are left out');
+  });
+
+  it('says a collage of a pan is read frame by frame, its lens the stitch’s', () => {
+    const framed = { collage: 'Collage 10', frames: 6, stitched: 3, lens: 30.1, span: 97 };
+    const root = steps({ find: fakeFind(), overlay: { ...overlay, framesRead: framed, panoramaOffered: true } });
+    expect(root.textContent).toContain('6 frames of 30°');
+    expect(root.textContent).toContain('Find reads Collage 10 frame by frame: 6 frames, 30° across each, as the stitch says.');
+    expect(root.textContent).not.toContain('Any lens finds more chance fits');
+  });
+
+  it('says how far the best place can be trusted, why, and what the area fits by chance', () => {
+    const points = Array.from({ length: 20 }, (_, i) => ({ lat: 0, lon: i / 100, explained: i / 50 }));
+    const best = { lat: -4.2052, lon: 28.796, explained: 0.59, heading: 296, fov: 31.3, tilt: -1, roll: 3 };
+    const rival = { lat: -4.101, lon: 28.7955, explained: 0.53 };
+    const ask = { area: [], trace: { known: false, within: [30, 65] }, who: { mode: 'ground' }, photo: { path: 'media/p.png' } };
+    const weak = steps({ find: fakeFind({ search: { name: 's', status: 'done', ask, result: { verdict: 'match', places: [best, rival], points } } }) });
+    const block = weak.querySelector('.fs-trust');
+    expect(block.classList.contains('weak')).toBe(true);
+    expect(block.textContent).toContain('Weak');
+    expect([...block.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'Another place 12 km away explains nearly as much',
+      'The lens found, 31°, is the narrowest tried',
+    ]);
+    expect(block.textContent).toContain('Chance fits in this area reach about 34%.');
+    const solid = steps({ find: fakeFind({ search: { name: 's', status: 'done', ask, result: { verdict: 'match', places: [{ ...best, fov: 45 }], points } } }) });
+    expect(solid.querySelector('.fs-trust.solid').textContent).toContain('Solid: nothing speaks against the best place');
   });
 
   it('says when no place stands out, and what to change', () => {
@@ -181,7 +370,7 @@ describe('the two faces of Find', () => {
     const shown = root.querySelector('[aria-label="The search on show"]');
     expect(shown.querySelector('h3').textContent).toBe('Ridge search');
     expect(shown.textContent).toContain('14 Oct 2026, 19:05');
-    expect(shown.textContent).toMatch(/km² · wide lenses · ridges within 50 km · drone · 1 alignment/);
+    expect(shown.textContent).toMatch(/km² · zoom ×0.5 · ridges within 50 km · drone · 1 alignment/);
     expect(root.querySelector('.fs-steps')).toBeNull();
     buttonNamed(root, 'Change and search again').click();
     flushSync();

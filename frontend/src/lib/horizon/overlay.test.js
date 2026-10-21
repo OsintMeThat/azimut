@@ -839,6 +839,23 @@ describe('the marks beside the trace, as the search reads them', () => {
     // a piece read through the photo's own shape when the caller knows it
     expect(markedPlane(samples, FRAME, marks, () => 3).piece).toEqual([3, 3, 3]);
   });
+
+  it('sends how far lines stand, in metres, naming each stroke as the search does', () => {
+    const samples = [
+      { x: 100, y: 150, stroke: 0 },
+      { x: 300, y: 140, stroke: 1 },
+      { x: 500, y: 180, stroke: 1 },
+    ];
+    const marks = { lines: [5, 9], inner: [], pairs: [], cuts: [], far: [{ line: 9, bands: ['b1', 'b3'] }] };
+    const plane = markedPlane(samples, FRAME, marks);
+    expect(plane.line).toEqual([0, 1, 1]);
+    expect(plane.far).toEqual([[1, 1_000, 10_000]]);
+    expect(plane.pairs).toEqual([]);
+    // a sea line is named too, for the search to lay it on the sea's horizon
+    const sea = markedPlane(samples, FRAME, { lines: [5, 9], inner: [], pairs: [], cuts: [], far: [], sea: [9] });
+    expect(sea.line).toEqual([0, 1, 1]);
+    expect(sea.sea).toEqual([1]);
+  });
 });
 
 describe('a collage’s pieces as the search eased them', () => {

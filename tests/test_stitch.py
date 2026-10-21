@@ -554,3 +554,23 @@ def test_a_strip_moved_by_hand_after_the_stitch_says_nothing():
     assert stitch.strip_scale([_stitched(5, 500), _stitched(5.2, 900)]) is None
     assert stitch.strip_scale([_stitched(0, 500), _stitched(10, 800, warp="spherical")]) is None
     assert stitch.strip_scale([]) is None
+
+
+@pytest.mark.parametrize("focal", [520.0, 900.0])
+def test_a_pans_lens_is_read_off_its_frames(focal):
+    views = _pan([-10, 0, 10], width=520, height=420, focal=focal)
+    found = stitch.lens_of_pan(views)
+    truth = 2 * math.degrees(math.atan(260 / focal))
+    assert len(found["fovs"]) == 3
+    for fov in found["fovs"].values():
+        assert fov == pytest.approx(truth, rel=0.05)
+    assert found["turn"] == pytest.approx(20.0, abs=1.5)
+
+
+def test_a_pan_that_hardly_turns_or_frames_that_do_not_overlap_say_why():
+    with pytest.raises(RuntimeError, match="hardly turned"):
+        stitch.lens_of_pan(_pan([0, 1], width=520, height=420))
+    with pytest.raises(RuntimeError, match="do not overlap"):
+        stitch.lens_of_pan(_pan([0, 150], width=520, height=420))
+    with pytest.raises(RuntimeError, match="Two frames"):
+        stitch.lens_of_pan(_pan([0]))

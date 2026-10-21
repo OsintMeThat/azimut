@@ -578,6 +578,8 @@ class CutIn(BaseModel):
 # Strokes the marks may name, and pairs they may ask.
 MARK_STROKES_MAX = 400
 MARK_PAIRS_MAX = 50
+# The farthest a line may be said to stand, metres.
+MARK_FAR_MAX = 300_000.0
 
 
 class MarksIn(BaseModel):
@@ -587,7 +589,9 @@ class MarksIn(BaseModel):
     on the picture plane as the trace is. `line` and `ridge_line` name the
     stroke each point was drawn in, which `pairs` use: the stroke in front,
     then the stroke behind it. `piece` and `ridge_piece` say which piece of a
-    collage each point lies in.
+    collage each point lies in. `far` says how far strokes stand: each a stroke,
+    the nearest and the farthest it may be, metres. `sea` names the strokes
+    traced along the sea's horizon.
     """
 
     ridge_x: list[float] = Field(default_factory=list, max_length=MATCH_POINTS_MAX)
@@ -597,6 +601,8 @@ class MarksIn(BaseModel):
     pairs: list[list[int]] = Field(default_factory=list, max_length=MARK_PAIRS_MAX)
     piece: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
     ridge_piece: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
+    far: list[list[float]] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
+    sea: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
 
     def check_marks(self, points: int) -> None:
         """Each list as long as the points it describes, the strokes and pairs within bounds."""
@@ -618,10 +624,22 @@ class MarksIn(BaseModel):
         for pair in self.pairs:
             if len(pair) != 2 or pair[0] == pair[1] or any(not 0 <= v < MARK_STROKES_MAX for v in pair):
                 raise ValueError("a pair is two strokes, the one in front first")
+        for said in self.far:
+            if (
+                len(said) != 3 or not float(said[0]).is_integer() or not 0 <= said[0] < MARK_STROKES_MAX
+                or not 0 <= said[1] < said[2] <= MARK_FAR_MAX
+            ):
+                raise ValueError("a line's distance is its stroke, then the nearest and farthest it stands, metres")
+        if self.far and (self.line is None or (self.ridge_x and self.ridge_line is None)):
+            raise ValueError("a line's distance needs each point's stroke")
+        if any(not 0 <= stroke < MARK_STROKES_MAX for stroke in self.sea):
+            raise ValueError("a sea line names a stroke out of range")
+        if self.sea and self.line is None:
+            raise ValueError("a sea line needs each point's stroke")
 
     def marks(self) -> skymatch.Marks | None:
         """The marks as the search reads them, or None when there are none."""
-        if not self.ridge_x and not self.pairs and self.piece is None:
+        if not self.ridge_x and not self.pairs and self.piece is None and not self.far and not self.sea:
             return None
 
         def ints(values: list[int] | None) -> np.ndarray | None:
@@ -632,6 +650,8 @@ class MarksIn(BaseModel):
             line=ints(self.line), ridge_line=ints(self.ridge_line),
             pairs=tuple((int(front), int(back)) for front, back in self.pairs),
             piece=ints(self.piece), ridge_piece=ints(self.ridge_piece),
+            far=tuple((int(stroke), float(nearest), float(farthest)) for stroke, nearest, farthest in self.far),
+            sea=tuple(int(stroke) for stroke in self.sea),
         )
 
 
@@ -950,7 +970,9 @@ def photo_facts(case: str = Query(min_length=1), path: str = Query(min_length=1)
     the overlay laid over the view. A video's place and time come from its
     container; its lens is never written there. A picture exported from a
     collage Azimut stitched on a cylinder or a sphere says how many degrees of
-    turn it spans (`panorama`), which the tab reads it through."""
+    turn it spans (`panorama`), which the tab reads it through, and when some of
+    its frames were stitched, how Find reads it frame by frame (`frames`: the
+    collage, its frames, those stitched, their lens and the degrees it spans)."""
     from ..engine import enrich, inspectwork, media as media_engine
     from ..workspace import CaseError
     from .cases import get_case
@@ -968,11 +990,89 @@ def photo_facts(case: str = Query(min_length=1), path: str = Query(min_length=1)
         strip = inspectwork.strip_of(owner, path)
         if strip is not None:
             facts["panorama"] = strip
+        # a collage of a pan with frames Azimut stitched: Find reads its trace frame by frame
+        framed = inspectwork.frames_of(owner, path)
+        if framed is not None and framed[1].get("lens") is not None:
+            facts["frames"] = {key: framed[1][key] for key in ("collage", "frames", "stitched", "lens", "span")}
         return facts
     if kind == "video":
         found = enrich.video_facts(file) or {}
         return {"kind": kind, **{key: found[key] for key in ("gps", "taken_at") if key in found}}
     raise HTTPException(status_code=422, detail="only a photo or a video can be laid over the view")
+
+
+def _still(frames: list[Any]) -> bool:
+    """Whether frames are the same picture but for noise: a camera that did not move."""
+    small = [np.asarray(frame.convert("L").resize((64, 64)), dtype=np.float32) for frame in frames]
+    return max(float(np.abs(a - small[0]).mean()) for a in small[1:]) < STILL_GREY
+
+
+# Frames differing by less than this, in grey levels on average, are one picture.
+STILL_GREY = 2.0
+
+
+class LensIn(BaseModel):
+    """A moment of a case's video whose lens is to be read off the pan around it."""
+
+    case: str = Field(min_length=1, max_length=200)
+    path: str = Field(min_length=1, max_length=1000)
+    time: float = Field(ge=0, allow_inf_nan=False)
+
+
+# Seconds either side of the moment the frames are read at: first near, then farther when the camera
+# turned too little in between.
+LENS_SPREADS = (1.5, 3.0)
+
+
+@router.post("/lens")
+def lens_of_video(body: LensIn) -> dict[str, Any]:
+    """The lens a video was filmed with at a moment, read off three frames of the pan around it
+    (engine/stitch.py `lens_of_pan`): degrees across the moment's own frame, each frame's, and how far
+    the camera turned. Says why when the frames do not tell it (no pan, a cut, no overlap)."""
+    from ..engine import inspect as inspect_engine, media as media_engine, stitch
+    from ..workspace import CaseError
+    from .cases import get_case
+
+    owner = get_case(body.case)
+    try:
+        file = owner.resolve_inside(body.path)
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not file.is_file():
+        raise HTTPException(status_code=404, detail="no such file in the case")
+    if media_engine.media_kind(file.name) != "video":
+        raise HTTPException(status_code=422, detail="the lens is read off a video's pan")
+    reason = "The frames do not tell the lens"
+    for spread in LENS_SPREADS:
+        times = [t for t in (body.time - spread, body.time, body.time + spread) if t >= 0]
+        frames, kept = [], []
+        for t in times:
+            try:
+                frames.append(inspect_engine.extract_frame(file, t))
+                kept.append(t)
+            except RuntimeError:
+                continue
+        if len(frames) < 2:
+            continue
+        if _still(frames):
+            # the stitch takes what never moves for a channel's logo and drops it: say what it is
+            reason = "The camera hardly turned between these frames: pick a moment it pans"
+            continue
+        try:
+            found = stitch.lens_of_pan(frames)
+        except RuntimeError as exc:
+            reason = str(exc)
+            continue
+        fovs = [found["fovs"].get(i) for i in range(len(frames))]
+        middle = kept.index(body.time) if body.time in kept else None
+        fov = fovs[middle] if middle is not None and fovs[middle] is not None else float(np.median([f for f in fovs if f is not None]))
+        return {
+            "fov": round(float(fov), 2),
+            "fovs": [None if f is None else round(float(f), 2) for f in fovs],
+            "times": [round(t, 3) for t in kept],
+            "turn": round(float(found["turn"]), 1),
+        }
+    raise HTTPException(status_code=422, detail=reason)
 
 
 class PhotoHeadIn(BaseModel):

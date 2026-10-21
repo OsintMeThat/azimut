@@ -405,6 +405,34 @@ def test_copying_a_followed_layer_preserves_snapshot_and_never_refreshes(client,
     assert places(owner) == []
 
 
+def test_my_maps_link_is_read_once_into_a_personal_layer(client, owner, monkeypatch):
+    link = "https://www.google.com/maps/d/edit?mid=1AbC-d_E&usp=sharing"
+    asked = []
+    monkeypatch.setattr(maplayers, "fetch", lambda url: (asked.append(url), (dressed_kmz(), "Front.kmz"))[1])
+    response = client.post(f"/api/cases/{owner}/map-layers/editable/link",
+                           json={"url": link, "title": "Front", "description": "Imported"})
+    assert response.status_code == 200, response.text
+    row = response.json()
+    assert asked == [link]
+    assert row["editable"] and row["title"] == "Front" and row["features"] == 2 and row["icons"] == 1
+    assert row["origin"]["source"]["kind"] == "my_maps" and row["origin"]["source"]["url"] == link
+    monkeypatch.setattr(maplayers, "fetch", lambda *a: pytest.fail("the link is not followed"))
+    assert row["refresh"] == {} and not row["stale"]
+    assert client.post(f"/api/cases/{owner}/map-layers/{row['name']}/refresh").status_code == 422
+    marker(client, owner, row)
+    assert len(read(client, owner, row)["document"]["features"]) == 3
+    assert places(owner) == []
+
+
+@pytest.mark.parametrize("url", ["https://example.test/map.kml", "https://www.google.com/maps/@48.8,2.3,12z"])
+def test_a_link_that_is_not_a_my_maps_is_refused_before_any_fetch(client, owner, monkeypatch, url):
+    monkeypatch.setattr(maplayers, "fetch", lambda *a: pytest.fail("unexpected network"))
+    response = client.post(f"/api/cases/{owner}/map-layers/editable/link", json={"url": url})
+    assert response.status_code == 422
+    assert "My Maps" in response.json()["detail"]
+    assert client.get(f"/api/cases/{owner}/map-layers").json() == []
+
+
 def test_edit_routes_refuse_to_change_an_imported_source(client, owner):
     source = client.post(f"/api/cases/{owner}/map-layers/upload",
                          files={"file": ("source.kmz", io.BytesIO(dressed_kmz()))}).json()
