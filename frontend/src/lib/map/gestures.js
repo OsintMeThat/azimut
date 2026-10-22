@@ -133,23 +133,74 @@ export function startRotateDrag(engine, event, { onPivot, onEnd } = {}) {
 }
 
 /**
- * Start a turn if this press is one: the middle button, or Shift and the left
- * one where the tool lets Shift turn. True when it started. Over relief the
- * same press orbits instead, tilting as well as turning (`startOrbitDrag`).
+ * Start a turn if this press is one: the middle button, Shift and the left
+ * one where the tool lets Shift turn, or the second press of a double click
+ * held down where the tool lets it (for a hand with no middle button). True
+ * when it started. Over relief the same press orbits instead, tilting as well
+ * as turning (`startOrbitDrag`).
+ *
+ * A double click that never moved is still the engine's zoom; one that turned
+ * the map zooms nothing (`swallowDoubleClick`).
  *
  * @param {object} engine the façade from `engine.js`
  * @param {MouseEvent} event
  * @param {object} [opts]
  * @param {boolean} [opts.shift] whether Shift-drag turns here
+ * @param {boolean} [opts.double] whether a held double click turns here
  * @param {boolean} [opts.tilt] whether the map has relief to tilt over
  * @param {(pivot: object) => void} [opts.onPivot]
  * @param {() => void} [opts.onEnd]
  */
-export function turnFromPress(engine, event, { shift = true, tilt = false, onPivot, onEnd } = {}) {
+export function turnFromPress(engine, event, { shift = true, double = false, tilt = false, onPivot, onEnd } = {}) {
   const shiftDrag = shift && event.button === 0 && event.shiftKey;
-  if (event.button !== 1 && !shiftDrag) return false;
+  const held = double && event.button === 0 && event.detail === 2;
+  if (event.button !== 1 && !shiftDrag && !held) return false;
+  if (held) swallowDoubleClick(event);
   (tilt ? startOrbitDrag : startRotateDrag)(engine, event, { onPivot, onEnd });
   return true;
+}
+
+/**
+ * The double click that ends a press held and dragged, kept from the engine,
+ * which would zoom on it. One that never moved past a click goes through.
+ *
+ * The watch ends on that double click, or on the next press when none came:
+ * never on a timer, which a busy page runs after the input already queued, so
+ * a quick double click next would be swallowed too.
+ */
+export function swallowDoubleClick(event, target = window) {
+  const from = { x: event.clientX, y: event.clientY };
+  let moved = false;
+  let released = false;
+  let timer = null;
+  const watch = (e) => {
+    if (Math.hypot(e.clientX - from.x, e.clientY - from.y) >= CLICK_SLOP) moved = true;
+  };
+  const stop = () => {
+    clearTimeout(timer);
+    target.removeEventListener('mousemove', watch, true);
+    target.removeEventListener('dblclick', swallow, true);
+    target.removeEventListener('mouseup', release, true);
+    target.removeEventListener('mousedown', press, true);
+  };
+  const swallow = (e) => {
+    stop();
+    if (!moved) return;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  const release = () => {
+    released = true;
+    // a release far from the press may bring no double click at all
+    timer = setTimeout(stop, 1000);
+  };
+  const press = () => {
+    if (released) stop();
+  };
+  target.addEventListener('mousemove', watch, true);
+  target.addEventListener('dblclick', swallow, true);
+  target.addEventListener('mouseup', release, true);
+  target.addEventListener('mousedown', press, true);
 }
 
 /** Degrees of tilt per pixel dragged up or down, and of turn per pixel sideways. */

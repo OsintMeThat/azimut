@@ -900,6 +900,8 @@ remembered per workspace for the current session. Reloading restores the default
   Ctrl/cmd-click and shift-click select several rows first, and the drag carries
   all of them; folders are targets, never cargo. The tree scrolls itself when the
   pointer nears an edge mid-drag, since a native drag swallows the wheel.
+  A card or a row of the Media Library drags onto a folder the same way, and
+  only a file from the desktop raises the library's import overlay.
   Unfiling does not delete data. The **Files** tab (see Sources) presents the
   same tree with tiles, multi-select and context actions. It also exposes Trash
   with the same restore, permanent-delete and empty actions as the sidebar.
@@ -2413,21 +2415,37 @@ keeps what it read. The picture is the dual-polarisation composite Detect review
 radar candidates on: water dark blue, vegetation grey-green, walls and hulls white.
 
 **3D** sits under the compass. Pressed, the imagery rises on the relief
-(Mapterhorn's open heights, AWS's set when Mapterhorn cannot be reached) and the
-view leans to 20°, once the relief under it has arrived. **Tilt** looks straight
-down and back, Page Up and Page Down
-lean it ten degrees at a time, and a middle-drag or Shift+drag orbits round the
-ground grabbed. Over relief a plain drag keeps the grabbed ground under the hand,
-and the wheel zooms toward the ground under the pointer, as far for a notch or a
-trackpad swipe as on the flat map. **Real heights** can be raised to ×1.5, ×2 or
-×3 to read a gentle slope, and the control turns amber while they are. On a
-billed basemap a **Far ground: Esri** pill says the ground past a flat view's
-reach is Esri's free imagery. Borders are drawn from OpenStreetMap while 3D is on,
-lines on the ground and names standing up, because Esri's printed names would
-lie on the slopes. A tilted view has no one scale, so the scale bar
-steps aside while it leans, and Grid Search stays shut until 3D is off. The
-address keeps the tilt, the zoom to two decimals and the height the camera
-holds its centre at, so a reload or a second window opens on the same view.
+(Mapterhorn's open heights, AWS's set when Mapterhorn cannot be reached) on a
+globe the app draws itself, and the view leans to 20° once the relief under it
+has arrived. The flat map stays on screen until the globe stands where it was
+asked. Only the hand moves the view: a drag turns the Earth under the grabbed
+ground, a right-drag, middle-drag, Shift+drag or a double click held orbits round
+the ground pressed, the wheel and a double click slide the eye toward the ground
+under the pointer, as far for a notch or a trackpad swipe as on the flat map,
+and a drag on the sky looks round from where the eye stands. Ground grabbed
+near the horizon, where a pixel is kilometres, slips under the hand rather than
+throwing the view across the land. Ground that arrives sharpens in place and
+never moves the camera, the ground all round is held a few levels short of
+sharp so a quick turn or pan never shows it coarse, and the eye stops short of
+a slope rather than going through it. Rising, the view levels so the Earth stays in sight, out to the
+whole globe. **Tilt** looks straight down and back, and Page Up and Page Down
+lean it ten degrees at a time. **Real heights** can be raised to ×1.5, ×2 or ×3
+to read a gentle slope, and the control turns amber while they are. On a billed
+basemap a **Far ground: Esri** pill says the ground past a flat view's reach is
+Esri's free imagery. A tilted view has no one scale, so the scale bar steps
+aside while it leans, and Grid Search stays shut until 3D is off. The address
+keeps the tilt, the zoom to two decimals and the height of the ground at the
+centre, so a reload or a second window opens on the same view.
+
+The globe draws what the flat map shows. Lines and areas lie on the relief
+(borders, roads, the analyst's areas, a measure, the sun's path), and names, pins
+and dots stand upright at their ground, the size they are on the flat map,
+hidden past a ridge once the view stops. A click, a right-click or a card works
+on them as it does flat, and a dropped pin drags along the slopes. Active fires
+are drawn flat only, since a view to the horizon would spend their allowance:
+their switch rests while 3D is on, and comes back with it. **Classic** swaps in
+the map's former 3D view, kept in this browser. A browser without WebGL2 gets
+that view alone.
 
 A tilted capture is the picture the map draws, imagery on relief and nothing laid
 over it, filed with its tilt, bearing, exact zoom and, for a frame centred on
@@ -2494,15 +2512,16 @@ is none of those: the layer stays on, says it refills within ten minutes, and
 asks NASA nothing in the meantime. Tiles stop at z13. Farther in, the map
 draws those squares bigger instead of asking NASA for invented detail.
 
-**The reference layers** are key-less and each is simply on or off: Esri's
-borders (country, region, district, with names) and roads, OpenStreetMap's
-town, village and hamlet names from OpenFreeMap, Open Infrastructure Map's power
+**The reference layers** are key-less and each is simply on or off: borders
+drawn as lines from OpenStreetMap through OpenFreeMap (country, region and
+district, each in its own weight, with the names of countries, regions and
+cities), Esri's roads, OpenStreetMap's town, village and hamlet names, Open Infrastructure Map's power
 lines, OpenSeaMap's buoys and harbours, and the raw GPS traces people uploaded to
 OSM, which show tracks nobody has mapped yet. Borders and place names start on —
 reading imagery starts with which side of a line the ground is on and what the
 place is called — and none of the others fetches a tile before its switch is
 pressed. The place names fill in
-where Esri names only the cities. They are written in Latin script, and where
+under the borders' cities. They are written in Latin script, and where
 two would overlap the larger place is kept. The roads and the place names are
 greyed over a street map, since it already draws them. Power lines are drawn
 from vector tiles in the app's own small style, coloured by voltage on Open
@@ -2825,7 +2844,9 @@ turns it like a wheel about the point grabbed: a dashed circle marks that point,
 and the map follows the angle the pointer sweeps around it outside the circle.
 Inside, the map holds, so the pointer can cross the middle without a flip. Near
 north it settles on north, and Ctrl held lays the turn on 15° steps. A middle click puts north back up, as does Shift+↑;
-Shift+← and Shift+→ turn a step. The Move the point dialog in Geo Proof turns
+Shift+← and Shift+→ turn a step. In Satellite a double click held down on its
+second press turns the map too, for a hand with no middle button, unless a tool
+is reading the clicks; a double click that stays put still zooms in. The Move the point dialog in Geo Proof turns
 the same way, and Inspect's frame viewer takes the same drag, with a middle
 click standing the frame upright.
 
@@ -2861,24 +2882,37 @@ sea's own horizon stands from the eye's height, **Behind**
 front one, ringed on the back one), **Cut** (X) to cut a hand-made collage
 where its frames meet, **Distance** (K) to say how far a line stands (pick one
 or several of < 1 km, 1–3, 3–10, 10–30 and > 30 km, then click the line; its
-distance shows under it), and the rubber (E). The **magnet** (M) says whether a
+distance shows under it), **Sky only** (O) to say a skyline line has only sky
+above it, sure of it (a click on the line, again to take it back; "Sky only"
+shows over it), and the rubber (E). The **magnet** (M) says whether a
 line drawn snaps onto the photo's nearest edge; Alt does the other for one
 stroke. A click with a pen on a line makes it that pen's kind, and a skyline
 stroke lying under another one is read as a ridge, as is a trace saved before
 ridges had a pen. Fit lays the skyline strokes alone on the terrain, and Find
 also reads the ridges against the terrain's inner silhouettes and the pairs'
 order. Both let each piece of a cut collage turn, tilt and roll by a degree or
-so, and the view then reads each piece through its own camera.
+so, and the view then reads each piece through its own camera. A place where
+land stands over a line with only sky above loses its score as that share of
+the line grows, read as far as **Sees as far as** says, past where the line is
+searched if need be; left to Auto, as far as the place's own reach, since haze
+may hide a farther range. A place keeps its score up to a fiftieth of the line
+under land, and says the share under it.
 
 Find's side has two faces. **Prepare** numbers the three steps a search
 needs (Skyline, Area, Search), each lit once done; the warnings about the lens
-and the reach sit by the Search button. **Help the search** folds the optional
+and the reach sit by the Search button. A skyline standing high or low in the
+frame offers **Looking down** or **Looking up** when the camera must tilt about
+as far as is searched for who took it, or past it, and a picture read as one across 90° or more offers
+**Cut**, since its ends drift. Where the relief is the planet's 30 m model, the
+Skyline step offers **Round near lines**: the trace and the terrain are judged
+rounded alike where the ground stands nearer than 3 km, the nearer the rounder,
+since a near ridge's teeth are in no 30 m relief. **Help the search** folds the optional
 parts, the alignments and what you know about the photo (who took it, which
 way it faces, the ground the eye stands on, how the camera looks, the zoom,
 the reach), each with its gist on its title line; an alignment being made
 unfolds its own. **Facing** is a compass: tick one or several of the eight
 directions, **Any** in its middle for none, and the map draws them as a fan
-from the area, ringed at 5, 10, 20, 50 and 100 km out to the reach searched.
+from the area, ringed at 2, 5, 10, 20, 50 and 100 km out to the reach searched.
 **Eye on** ticks a summit or ridge, a slope, a valley, a plain or the sea or a
 lake, each judged on the ground round the point; the map shows the grid in
 those colours, grey where a point is left out, and says how many points stay.
@@ -2894,12 +2928,19 @@ the narrowest to the widest ticked, and none ticked is any lens. A line given a
 distance is searched only on ground that far, which also sets how far the turn
 is read and how fine the grid is; lines given none are kept off the ground at
 the eye's feet. A collage of a pan Azimut stitched is read frame by frame, each
-frame through its own camera at the stitch's lens, and a place found from it
-lays the collage as the panorama it spans. **Result** shows
+frame through its own camera at the stitch's lens, held level as the collage is
+laid (the stitch's own level drifts on a few frames). Looking from a place a
+search found lays the photo as the search read it: a collage's frames, or a cut
+collage's pieces, each where the search put it, and a selfie found mirrored
+flipped. **As searched**, lit in the band over the view, lays it flat again, as
+does taking a tool out or pulling a corner; the trace follows the photo, so
+what shows is what the search scored. **Result** shows
 the search on show: its name, when it was made and what it was asked with, its
 progress, verdict, how far the best place can be trusted (**Solid**, **Check
 it** or **Weak**, with what lowers it and the score the area reaches by chance)
-and places, each with the area's chance score beside its own. **Check against
+and places, each with the area's chance score beside its own. Where no place
+explains anything, the map shades where the trace lies nearest the terrain.
+**Check against
 decoys** tries the places again with the trace mirrored and upside down: a real
 place explains its own trace far better, and one a decoy fits nearly as well is
 marked so. **Change and
@@ -2914,7 +2955,12 @@ is a third of the area's), and **Leave out** zones never searched, drawn
 dashed red. An area or a zone goes up to 10,000 km². **Try a point** tries the
 trace from a place clicked on the map, as a search scores its best places, and
 offers to look from there. **Speed** under More settings searches a large grid
-on several cores (Fast, the default) or on one (Gentle).
+on several cores (Fast, the default) or on one (Gentle), and **Grid** lays a
+point every 20 m to 1 km, or Auto, as fine as about ten minutes of search
+allows: 20 m over a square kilometre, 50 m over a few. A grid picked is laid as
+picked, the map showing it before the search and the estimate saying the hours
+it takes, up to 100,000 points; past that it is laid wider, and Find says how
+wide.
 
 Find's map has the small map's **Layers** button at its top right: the base
 map, then the same switches, so a layer turned on in Find stays on in Horizon.

@@ -112,6 +112,7 @@
     viewLayout,
     waitingOf,
   } from '../lib/boardGroups.js';
+  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
 
   const PAGE = 100;
   /** A group's page: enough to read a group at a glance, small enough that the next
@@ -1539,14 +1540,15 @@
     bind:this={bodyElement}
     onkeydown={walkRows}
     ondragover={(e) => {
-      if (!caseState.current || snapshotReading) return;
+      if (!caseState.current || snapshotReading || !carriesOutsideFiles(e)) return;
       e.preventDefault();
       dragOver = true;
     }}
     ondragleave={(e) => {
-      if (e.target === e.currentTarget) dragOver = false;
+      if (leftZone(e)) dragOver = false;
     }}
     ondrop={(e) => {
+      if (!carriesOutsideFiles(e)) return;
       e.preventDefault();
       dragOver = false;
       importFiles(e.dataTransfer?.files);

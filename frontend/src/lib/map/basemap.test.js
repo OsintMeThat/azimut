@@ -10,6 +10,7 @@ import {
   tileTemplate,
   tileUrls,
 } from './basemap.js';
+import { BORDER_LINES } from './borders.js';
 
 /**
  * The provider shapes are the ones `/api/satellite/providers` really answers
@@ -171,6 +172,8 @@ describe('the source one provider is served from', () => {
 
 /** The FIRMS overlay's engine layers, lowest first (`firePoints.js`). */
 const FIRE_LAYERS = ['basemap-firms-foot-fill', 'basemap-firms-foot-ring', 'basemap-firms-foot-edge', 'basemap-firms-mark'];
+/** The borders' engine layers, lowest first (`borders.js`). */
+const BORDER_LAYERS = BORDER_LINES.layers.map((entry) => `basemap-boundaries-${entry.id}`);
 
 describe('the layers on a map', () => {
   /** A MapLibre map, as far as basemap.js reaches into it. */
@@ -589,10 +592,10 @@ describe('the layers on a map', () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
-      basemaps.setOverlay('boundaries', true);
-      basemaps.setOverlay('boundaries', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries']);
-      basemaps.setOverlay('boundaries', false);
+      basemaps.setOverlay('railway', true);
+      basemaps.setOverlay('railway', true);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway']);
+      basemaps.setOverlay('railway', false);
       expect(map.layers).toEqual([]);
     });
   });
@@ -646,7 +649,7 @@ describe('the layers on a map', () => {
       basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '24h' });
       basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-boundaries', ...FIRE_LAYERS]);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', ...BORDER_LAYERS, ...FIRE_LAYERS]);
     });
   });
 
@@ -658,7 +661,7 @@ describe('the layers on a map', () => {
       // its own track is a label nobody can read
       basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('railway', true);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-boundaries']);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', ...BORDER_LAYERS]);
     });
   });
 
@@ -676,7 +679,7 @@ describe('the layers on a map', () => {
       expect(map.layers.map((l) => l.id)).toEqual([
         'basemap-imagery',
         'basemap-railway',
-        'basemap-boundaries',
+        ...BORDER_LAYERS,
         'sfc-1-fill',
       ]);
     });
@@ -725,17 +728,16 @@ describe('the layers on a map', () => {
       // a dated template would break the week the build it names is removed
       expect(source).not.toHaveProperty('tiles');
       // over the borders, whose own names are the larger places
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries', 'basemap-placenames-label']);
+      expect(map.layers.map((l) => l.id)).toEqual([...BORDER_LAYERS, 'basemap-placenames-label']);
       expect(map.getLayer('basemap-placenames-label').source).toBe('basemap-placenames-openmaptiles');
 
       basemaps.setOverlay('placenames', false);
       expect(map.sources.has('basemap-placenames-openmaptiles')).toBe(false);
-      expect(map.layers.map((l) => l.id)).toEqual(['basemap-boundaries']);
+      expect(map.layers.map((l) => l.id)).toEqual(BORDER_LAYERS);
     });
   });
 
-  it('draws the borders as lines over relief, in their place in the stack, and as Esri’s picture again flat', async () => {
-    // Esri's borders have their names printed in: on relief they would lie on the slopes
+  it('draws the borders as OpenFreeMap’s lines and names, under the place names', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
@@ -743,53 +745,23 @@ describe('the layers on a map', () => {
       basemaps.setOverlay('roads', true);
       basemaps.setOverlay('boundaries', true);
       basemaps.setOverlay('placenames', true);
-      const roads = map.getLayer('basemap-roads');
-
-      basemaps.setRelief(true);
       const ids = map.layers.map((l) => l.id);
-      expect(ids).not.toContain('basemap-boundaries');
-      expect(map.sources.has('basemap-boundaries')).toBe(false);
-      const lines = ids.filter((id) => id.startsWith('basemap-boundaries-relief-'));
-      expect(lines).toContain('basemap-boundaries-relief-country');
-      expect(lines.at(-1)).toBe('basemap-boundaries-relief-names');
-      // over the roads, under the place names, as the picture was
+      const lines = ids.filter((id) => id.startsWith('basemap-boundaries-'));
+      expect(lines).toContain('basemap-boundaries-region');
+      expect(lines).toContain('basemap-boundaries-country');
+      expect(lines.at(-1)).toBe('basemap-boundaries-names');
+      // over the roads, under the place names
       expect(ids.slice(0, 2)).toEqual(['basemap-imagery', 'basemap-roads']);
-      expect(ids.slice(2, -1).every((id) => id.startsWith('basemap-boundaries-relief-'))).toBe(true);
+      expect(ids.slice(2, -1).every((id) => id.startsWith('basemap-boundaries-'))).toBe(true);
       expect(ids.at(-1)).toBe('basemap-placenames-label');
-      expect(map.sources.get('basemap-boundaries-relief-openmaptiles')).toMatchObject({
+      expect(map.sources.get('basemap-boundaries-openmaptiles')).toMatchObject({
         type: 'vector',
         url: 'https://tiles.openfreemap.org/planet',
         attribution: expect.stringContaining('OpenFreeMap'),
       });
-      // the others are not laid again: a rebuilt raster is every tile refetched
-      expect(map.getLayer('basemap-roads')).toBe(roads);
-
-      // saying so twice changes nothing
-      basemaps.setRelief(true);
-      expect(map.layers.map((l) => l.id)).toEqual(ids);
-
-      basemaps.setRelief(false);
-      expect(map.layers.map((l) => l.id)).toEqual([
-        'basemap-imagery', 'basemap-roads', 'basemap-boundaries', 'basemap-placenames-label',
-      ]);
-      expect(map.sources.has('basemap-boundaries-relief-openmaptiles')).toBe(false);
-    });
-  });
-
-  it('lays the borders switched on over relief as lines, and takes them all off', async () => {
-    await withStubbedGoogle(async ({ createBasemaps }) => {
-      const map = stubMap();
-      const basemaps = createBasemaps(stubEngine(map));
-      basemaps.setRelief(true);
-      // nothing to lay again while the borders are off
-      expect(map.layers).toEqual([]);
-      basemaps.setOverlay('boundaries', true);
-      expect(map.layers.every((l) => l.id.startsWith('basemap-boundaries-relief-'))).toBe(true);
-      basemaps.setOverlay('boundaries', true);
-      expect(map.getLayer('basemap-boundaries')).toBe(undefined);
       basemaps.setOverlay('boundaries', false);
-      expect(map.layers).toEqual([]);
-      expect(map.sources.size).toBe(0);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-imagery', 'basemap-roads', 'basemap-placenames-label']);
+      expect(map.sources.has('basemap-boundaries-openmaptiles')).toBe(false);
     });
   });
 
@@ -798,10 +770,9 @@ describe('the layers on a map', () => {
       const map = stubMap();
       const onOverlayTrouble = vi.fn();
       const basemaps = createBasemaps(stubEngine(map), { onOverlayTrouble });
-      basemaps.setRelief(true);
       basemaps.setOverlay('boundaries', true);
       const onError = map.calls.on.find(([name]) => name === 'error')[1];
-      onError({ sourceId: 'basemap-boundaries-relief-openmaptiles', error: { status: 503 } });
+      onError({ sourceId: 'basemap-boundaries-openmaptiles', error: { status: 503 } });
       expect(onOverlayTrouble).toHaveBeenCalledWith('boundaries');
     });
   });
@@ -816,8 +787,8 @@ describe('the layers on a map', () => {
       const ids = map.layers.map((l) => l.id);
       // over the tracks, under the names
       expect(ids[0]).toBe('basemap-railway');
-      expect(ids.at(-1)).toBe('basemap-boundaries');
-      expect(ids.slice(1, -1).every((id) => id.startsWith('basemap-power-'))).toBe(true);
+      expect(ids.slice(-BORDER_LAYERS.length)).toEqual(BORDER_LAYERS);
+      expect(ids.slice(1, -BORDER_LAYERS.length).every((id) => id.startsWith('basemap-power-'))).toBe(true);
     });
   });
 
@@ -837,7 +808,7 @@ describe('the layers on a map', () => {
         'basemap-roads',
         'basemap-railway',
         'basemap-seamarks',
-        'basemap-boundaries',
+        ...BORDER_LAYERS,
         'basemap-placenames-label',
         ...FIRE_LAYERS,
       ]);
@@ -920,7 +891,7 @@ describe('the picture itself, apart from what is laid over it', () => {
   it('counts the imagery and the second picture Blink lays on it as the ground', () => {
     expect(isGround('basemap-imagery')).toBe(true);
     expect(isGround('basemap-alternate')).toBe(true);
-    expect(isGround('basemap-boundaries')).toBe(false);
+    expect(isGround('basemap-boundaries-country')).toBe(false);
     expect(isGround('basemap-placenames-labels')).toBe(false);
     // the case's marks and added layers are laid over it too
     expect(isGround('sfc-3-fill')).toBe(false);

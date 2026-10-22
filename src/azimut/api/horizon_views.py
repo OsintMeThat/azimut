@@ -170,7 +170,7 @@ class LineFar(BaseModel):
 class Marks(BaseModel):
     """What the analyst marked beside the skyline (frontend lib/horizon/traceMarks.js): each stroke's id,
     the ids of inner edges, pairs of ids (in front, behind), where a collage is cut, across the photo,
-    and how far some lines stand."""
+    how far some lines stand, and which have only sky above them."""
 
     lines: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
     inner: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
@@ -179,8 +179,10 @@ class Marks(BaseModel):
     far: list[LineFar] = Field(default_factory=list, max_length=MAX_STROKES)
     #: The ids of lines traced along the sea's horizon.
     sea: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
+    #: The ids of skyline lines the analyst is sure have only sky above them.
+    clear: list[int] = Field(default_factory=list, max_length=MAX_STROKES)
 
-    @field_validator("lines", "inner", "sea")
+    @field_validator("lines", "inner", "sea", "clear")
     @classmethod
     def _ids(cls, ids: list[int]) -> list[int]:
         if any(not 0 <= one < MAX_LINE_ID for one in ids):

@@ -84,7 +84,7 @@ it('imports what is dropped on it and says what came of each file', async () => 
   await show();
   const drop = new Event('drop', { bubbles: true, cancelable: true });
   const files = [new File(['x'], 'tank.png')];
-  Object.defineProperty(drop, 'dataTransfer', { value: { files } });
+  Object.defineProperty(drop, 'dataTransfer', { value: { files, types: ['Files'] } });
   byLabel('Drop icons here').dispatchEvent(drop);
   for (let round = 0; round < 6; round++) { await tick(); await Promise.resolve(); }
   flushSync();

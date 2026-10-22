@@ -5,6 +5,7 @@
   import { subtreeCountFrom } from '../../lib/folderTree.js';
   import { formatSize } from '../../lib/trash.js';
   import { dragPayload, rangeSelected, toggleSelected } from '../../lib/rowSelect.js';
+  import { carriesMedia, droppedMedia } from '../../lib/drag.js';
   import Icon from '../Icon.svelte';
   import EntityRow from './EntityRow.svelte';
 
@@ -34,6 +35,8 @@
     onfoldermenu = () => {},
     onentitymenu = () => {},
     onfile = () => {},
+    /** Files dragged in from the Media library: `(entities, folder)`. */
+    onfilemedia = () => {},
     onactivate = () => {},
     oninfo = () => {},
     onunfile = () => {},
@@ -130,13 +133,25 @@
     dragOverFolder = undefined;
     ondragactive(false);
   }
+  // A folder takes the tree's own rows and the files dragged in from the Media
+  // library. A desktop file or a link is not its to take.
+  function onDragOverFolder(ev, folder) {
+    if (!dragRows && !carriesMedia(ev)) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    dragOverFolder = folder;
+  }
   function onDropFolder(ev, folder) {
     ev.preventDefault();
     const rows = dragRows;
     onDragEnd();
-    if (!rows?.length) return;
-    selected = new Set();
-    onfile(rows, folder);
+    if (rows?.length) {
+      selected = new Set();
+      onfile(rows, folder);
+      return;
+    }
+    const media = droppedMedia(ev);
+    if (media.length) onfilemedia(media, folder);
   }
   // The whole selection dims, not just the row under the cursor. Keyed on
   // `dragEntityId` because `dragRows` is deliberately non-reactive.
@@ -176,7 +191,7 @@
       class="frow"
       role="button"
       tabindex="0"
-      ondragover={(e) => { e.preventDefault(); dragOverFolder = ''; }}
+      ondragover={(e) => onDragOverFolder(e, '')}
       ondragleave={() => (dragOverFolder = undefined)}
       ondrop={(e) => onDropFolder(e, '')}
       class:dropping={dragOverFolder === ''}
@@ -279,7 +294,7 @@
     style="padding-left: {8 + depth * 14}px"
     role="button"
     tabindex="0"
-    ondragover={(e) => { e.preventDefault(); dragOverFolder = node.path; }}
+    ondragover={(e) => onDragOverFolder(e, node.path)}
     ondragleave={() => (dragOverFolder = undefined)}
     ondrop={(e) => onDropFolder(e, node.path)}
     onclick={() => ontoggle(node.path)}

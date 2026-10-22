@@ -146,7 +146,7 @@ class PostExtraTweet(CanonicalModel):
 
 
 class PostTemplateData(CanonicalModel):
-    mention: str = Field(default="@GeoConfirmed", max_length=120)
+    mention: str = Field(default="@GeoConfirmed", max_length=280)
     body: str = Field(default=DEFAULT_POST_BODY, min_length=1, max_length=16_000)
     mediaEnabled: StrictBool = True
     extraTweets: list[PostExtraTweet] = Field(default_factory=list, max_length=MAX_POST_TWEETS)

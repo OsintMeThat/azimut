@@ -20,7 +20,7 @@ const evaluate = (key, feature, zoom = 8) =>
 const YEMEN_SAUDI = line({ admin_level: 2, maritime: 0, disputed: 0 });
 const SANAA = place({ class: 'city', name: 'صنعاء', 'name:en': "Sana'a", 'name:latin': 'Ṣanʿāʾ', rank: 3 });
 
-describe('the borders over relief', () => {
+describe('the borders', () => {
   it('is a style the engine accepts with no glyph URL at all', () => {
     const style = {
       version: 8,
@@ -40,9 +40,10 @@ describe('the borders over relief', () => {
     expect(drawn('country', YEMEN_SAUDI)).toBe(true);
     expect(drawn('country-edge', YEMEN_SAUDI)).toBe(true);
     expect(drawn('region', line({ admin_level: 4 }))).toBe(true);
+    expect(drawn('region-edge', line({ admin_level: 4 }))).toBe(true);
     expect(drawn('district', line({ admin_level: 6 }))).toBe(true);
     expect(drawn('region', YEMEN_SAUDI)).toBe(false);
-    // municipalities are finer than the borders Esri draws
+    // municipalities are finer than a region's districts
     expect(['district', 'region', 'country'].some((id) => drawn(id, line({ admin_level: 8 })))).toBe(false);
   });
 
@@ -56,9 +57,10 @@ describe('the borders over relief', () => {
     expect(layer('country').paint).not.toHaveProperty('line-dasharray');
   });
 
-  it('draws the dark edge under the country line', () => {
+  it('draws a dark edge under the country and region lines', () => {
     const ids = BORDER_LINES.layers.map((entry) => entry.id);
     expect(ids.indexOf('country-edge')).toBeLessThan(ids.indexOf('country'));
+    expect(ids.indexOf('region-edge')).toBeLessThan(ids.indexOf('region'));
     expect(ids.at(-1)).toBe('names');
   });
 

@@ -20,6 +20,7 @@
   import { clockTime } from '../../lib/inspect.js';
   import { gapDegrees, gapSpan } from '../../lib/horizon/overlay.js';
   import { detailsTitle, editing, magnetTitle, pressTool, TRACE_TOOLS, toolBlocked, toolOn } from '../../lib/horizon/traceTools.js';
+  import { AS_SEARCHED } from '../../lib/horizon/laid.js';
 
   let {
     /** The overlay (state/overlay.svelte.js). */
@@ -135,7 +136,7 @@
   // what the band holds changes its width: a trace, its tools, the gap
   $effect(() => {
     void [overlay.source?.kind, overlay.strokes.length, overlay.erasing, overlay.warped, overlay.tracing, overlay.busy, overlay.error];
-    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.pen, overlay.front];
+    void [overlay.linking, overlay.cutting, overlay.distancing, overlay.clearing, overlay.pen, overlay.front];
     void [gap, fitting, away];
     narrow();
   });
@@ -351,6 +352,18 @@
           <Icon name="reset" size={14} />
         </button>
       {/if}
+      {#if overlay.asSearched}
+        <button
+          type="button"
+          class="act on"
+          aria-pressed="true"
+          onclick={() => overlay.layFlat()}
+          title={AS_SEARCHED[overlay.asSearched.kind] ?? AS_SEARCHED.pieces}
+          aria-label="Lay the photo flat"
+        >
+          <Icon name="layers" size={14} /><span class="word minor">As searched</span>
+        </button>
+      {/if}
     {/if}
   </div>
 
@@ -383,6 +396,8 @@
       <span class="say">Click where two frames of the collage meet.</span>
     {:else if overlay.distancing}
       <DistanceChips {overlay} />
+    {:else if overlay.clearing}
+      <span class="say">Click a skyline line with only sky above it.</span>
     {:else if overlay.busy}
       <span class="say"><span class="spinner" aria-hidden="true"></span>Opening…</span>
     {:else if overlay.error}

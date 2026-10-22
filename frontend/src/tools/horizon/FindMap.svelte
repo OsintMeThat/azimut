@@ -20,7 +20,7 @@
    */
   import { untrack } from 'svelte';
   import { createSurface } from '../../lib/map/surface.js';
-  import { alignmentLine, alignmentWedge, areaMiddle, facingSectors, fanOf, GROUNDS, heatStyle, ringsOf, WATER_COLOUR } from '../../lib/horizon/find.js';
+  import { alignmentLine, alignmentWedge, areaMiddle, facingSectors, fanOf, GROUNDS, heatOf, ringsOf, WATER_COLOUR } from '../../lib/horizon/find.js';
   import MapSurface from '../satellite/MapSurface.svelte';
   import MapNavigation from './MapNavigation.svelte';
   import MapLayersPanel from './MapLayersPanel.svelte';
@@ -123,20 +123,19 @@
       );
       return;
     }
-    const best = Math.max(result.places?.[0]?.explained ?? -1, ...points.map((p) => p.explained));
-    const low = Math.max(0, Math.min(...points.map((p) => p.explained)));
+    const heats = heatOf(points, Math.max(result.places?.[0]?.explained ?? -1, ...points.map((p) => p.explained)));
     heat.set(
       points.map((point, index) => {
         const half = (point.spacing || 100) / 2;
         const dLat = half / 111_195;
         const dLon = half / (111_195 * Math.cos((point.lat * Math.PI) / 180));
-        const { fill, opacity } = heatStyle(point.explained, best, low);
+        const { fill, opacity, tip } = heats[index];
         return {
           id: `heat-${index}`,
           kind: 'rect',
           bounds: { north: point.lat + dLat, south: point.lat - dLat, east: point.lon + dLon, west: point.lon - dLon },
           style: { stroke: fill, strokeWidth: 0, strokeOpacity: 0, fill, fillOpacity: opacity },
-          tip: `Explains ${Math.round(Math.max(0, point.explained) * 100)}% of the trace`,
+          tip,
         };
       })
     );

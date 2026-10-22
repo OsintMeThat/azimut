@@ -38,6 +38,15 @@ export function isTopOverlay(self) {
 }
 
 /**
+ * True while any overlay is open, so a page shortcut (Delete in the Collage) stays out
+ * of the dialog's way. Asked of the stack rather than the DOM: other tools stay mounted
+ * and use an `.overlay` class of their own.
+ */
+export function anyOverlayOpen() {
+  return stack.length > 0;
+}
+
+/**
  * Close the overlay on top, as Escape would. Answers whether one was open: one that
  * cannot be closed this way still holds the screen, and is left as it is.
  */

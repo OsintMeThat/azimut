@@ -84,6 +84,14 @@ off the ground nearer than a `floor` the search gives: on foot, the terrain's
 can be laid on with a steep tilt (measured on the owner's searches: 12 of 136
 places lay on ground 25 to 150 m away).
 
+A line the analyst is sure has only sky above it (`Marks.clear`) says more than
+where it lies: no terrain stands over it. The fit is blind to that side, since a
+part of the trace may be let go and a hill over one stretch costs no more than a
+stroke traced a little high. So a place where the terrain stands over such a line
+loses its score as that share of the line grows, read against the terrain as far
+as the analyst says the photo sees (`clear`), else as far as the place's own cut:
+haze past it may hide a range.
+
 The camera's tilt may be bounded too (`tilts`, degrees): a skyline filmed on foot
 is near level, and a place that needs the camera 40° down to lay the trace has
 found the ground, not the skyline.
@@ -170,9 +178,14 @@ QUICK_REFINED = 2
 ROUGH_POINTS = 80
 ROUGH_RATIO = 1.25
 # The score: the trace is judged in this many parts across its width, the weakest
-# `WEAKEST` of them averaged. A part a straight line already follows within this
-# many pixels has no shape of its own: it must only lie on the terrain that close.
+# `LET_GO` of them let go and the next `WEAKEST` averaged, so one stretch the
+# terrain cannot hold (a collage's edge, a ridge too near for its cell) does not
+# zero a place whose other parts fit, while a place must still fit across most
+# of the trace (measured on the owner's solved views, 2026-10-21). A part a
+# straight line already follows within this many pixels has no shape of its own:
+# it must only lie on the terrain that close.
 PARTS = 4
+LET_GO = 1
 WEAKEST = 2
 PART_FLOOR_PX = 5.0
 # A whole trace straying less than this from a straight line, in pixels, has next to no shape:
@@ -203,10 +216,30 @@ PIECE_STEPS = (9, 9, 5)
 BAND_SLACK = 1.33
 # A fit whose tilt ends this far past the bounds asked is no fit.
 TILT_SLACK = 1.0
+# Near lines rounded, when asked: the trace and the terrain under it are both averaged over this many times
+# the angle a cell of the terrain spans at the distance of the ground a point is laid on, out to `ROUND_FAR`
+# metres. A ridge a few hundred metres off is known to the terrain's cell only, so the teeth a photo shows on
+# it are in no terrain: the nearer, the rounder. Ground nearer than `ROUND_CLOSEST` is rounded as if it stood
+# that far: rounded harder still, a near hillside loses all its shape and passes for any trace. Measured on
+# the owner's solved views (2026-10-21): a whole cell, or no closest, lifted near hills' chance fits over a
+# cliff's truth; half a cell from a kilometre kept every truth first but the cliff, second.
+ROUND_SPAN = 0.5
+ROUND_FAR = 3_000.0
+ROUND_CLOSEST = 1_000.0
 # A pair of strokes standing in the wrong order takes this share of the score per pair asked.
 PAIR_COST = 0.5
 # A ridge stands in front of another when it is nearer by this share of the other's distance.
 PAIR_NEARER = 0.9
+# A point of a line said to have only sky above lies under the terrain when the terrain stands over it by more
+# than this many pixels and more than the angle the heights' own error spans at that terrain's distance, metres.
+# The terrain may stand over this share of such lines (a stroke's end run high, a spike in the heights); the
+# place keeps none of its score once it stands over the second. Measured on the owner's solved views with every
+# skyline line marked (2026-10-21): at 4 px a wide collage's own fit, 13 px off at 13 km, sank its truth from
+# first to seventeenth; at the loss's lost level no truth moved back, one rose to first, rivals lost score.
+CLEAR_PX = LOST_PX
+CLEAR_GRAIN_M = 15.0
+CLEAR_FREE = 0.02
+CLEAR_SHARE = 0.1
 
 Verdict = Literal["match", "loose", "ambiguous", "none", "flat"]
 Projection = Literal["camera", "panorama"]
@@ -340,7 +373,8 @@ class Marks:
     `ridge_piece` say which piece of a collage each point lies in. `far` says
     how far some strokes stand: (stroke, nearest, farthest) in metres. `sea`
     names the strokes traced along the sea's horizon, whose distance the eye's
-    height above the sea sets (engine/finder.py).
+    height above the sea sets (engine/finder.py). `clear` names the strokes the
+    analyst is sure have only sky above them.
     """
 
     ridge_x: np.ndarray = field(default_factory=lambda: np.empty(0))
@@ -352,6 +386,7 @@ class Marks:
     ridge_piece: np.ndarray | None = None
     far: tuple[tuple[int, float, float], ...] = ()
     sea: tuple[int, ...] = ()
+    clear: tuple[int, ...] = ()
 
     @property
     def cut(self) -> bool:
@@ -455,6 +490,8 @@ class Fit:
     # a collage's pieces, each (piece, turn, tilt, roll) from the whole's camera in degrees, which the view
     # lays each piece's skyline by
     pieces: tuple[tuple[int, float, float, float], ...] | None = None
+    # the share of the lines said to have only sky above that the terrain stands over
+    over: float | None = None
 
 
 @dataclass(frozen=True)
@@ -516,8 +553,8 @@ def explained_by(loss: np.ndarray, x: np.ndarray, y: np.ndarray, half_width: flo
 
     The whole trace is judged, and so is each part of it across the picture, a
     part with no shape of its own only asked to lie on the terrain: the score is
-    the lesser of the whole's and the weakest parts'. A straight trace explains
-    nothing, however well it lies on some hillside.
+    the lesser of the whole's and the weakest parts' once the very weakest is let
+    go. A straight trace explains nothing, however well it lies on some hillside.
     """
     line = _loss(off_line(x, y, half_width))
     whole_line = float(line.mean())
@@ -525,7 +562,7 @@ def explained_by(loss: np.ndarray, x: np.ndarray, y: np.ndarray, half_width: flo
     score = (whole_line - float(loss.mean())) / max(whole_line, LINE_FLOOR_LOSS)
     each = sorted(1.0 - float(loss[part].mean()) / max(float(line[part].mean()), PART_FLOOR_LOSS) for part in parts(x))
     if each:
-        score = min(score, float(np.mean(each[:WEAKEST])))
+        score = min(score, float(np.mean(each[LET_GO:LET_GO + WEAKEST] or each)))
     return float(min(1.0, max(0.0, score)))
 
 
@@ -576,6 +613,25 @@ def _through(
         fov, tilt, azimuth, elevation, lift, _per_degree(fov, half_width, projection), turned, projection,
         None if bands is None else bands[0], None if bands is None else bands[1],
     )
+
+
+def _rounded(azimuth: np.ndarray, rise: np.ndarray, turn: Turn, cell: float) -> tuple[np.ndarray, np.ndarray]:
+    """The trace's rise and the terrain's under it at each point, both rounded alike where the ground the point
+    is laid on stands nearer than `ROUND_FAR`: averaged over the trace's points within `ROUND_SPAN` times the
+    angle a `cell` metres wide spans there, so a trace lying exactly on the terrain still does."""
+    ground = turn.at(azimuth)
+    far = turn.far(azimuth)
+    near = np.isfinite(far) & (far < ROUND_FAR) & np.isfinite(ground)
+    if not near.any():
+        return rise, ground
+    sigma = np.degrees(ROUND_SPAN * cell / np.maximum(far[near], max(cell, ROUND_CLOSEST)))
+    held = np.isfinite(ground)
+    weight = np.exp(-0.5 * ((azimuth[None, :] - azimuth[near, None]) / sigma[:, None]) ** 2) * held[None, :]
+    weight /= weight.sum(axis=1, keepdims=True)
+    rise, ground = rise.copy(), ground.copy()
+    rise[near] = weight @ rise
+    ground[near] = weight @ np.where(held, ground, 0.0)
+    return rise, ground
 
 
 def _median_tilt(asked: np.ndarray, lost: np.ndarray, found: np.ndarray) -> np.ndarray:
@@ -681,12 +737,14 @@ def _refine(
     roll: float, half_width: float, free: bool, level: bool, widen: float = 1.03,
     start: float | None = None, projection: Projection = "camera", bounds: tuple[float, float] | None = None,
     bands: tuple[np.ndarray, np.ndarray] | None = None, tilts: tuple[float, float] | None = None,
+    rounding: float | None = None,
 ) -> Fit | None:
     """A coarse place made exact: heading searched finely, tilt laid onto the trace, lens and roll eased.
 
     The roll is eased about `roll`, never farther than `ROLL_REACH` from `start`
     (where the search began); an eased lens stays within `bounds`; points are
-    read within their `bands`, and a tilt past `tilts` is no fit.
+    read within their `bands`, and a tilt past `tilts` is no fit. With `rounding`,
+    the terrain's cell in metres, near lines are judged rounded (`_rounded`).
     """
     step = _step(fov)
     start = roll if start is None else start
@@ -712,7 +770,9 @@ def _refine(
         widen = 1 + (widen - 1) / 2
         ease = ROLL_EASE if ease is None else ease / 2
     seen = _through(x, y, fov, tilt, roll, half_width, projection=projection, bands=bands)
-    gap = _gate(seen.elevation - turn.at(heading + seen.azimuth), turn, heading + seen.azimuth, seen.low, seen.high)
+    azimuth = heading + seen.azimuth
+    rise, ground = _rounded(azimuth, seen.elevation, turn, rounding) if rounding else (seen.elevation, turn.at(azimuth))
+    gap = _gate(rise - ground, turn, azimuth, seen.low, seen.high)
     hit = ~np.isnan(gap)
     if hit.sum() < MIN_POINTS:
         return None
@@ -721,12 +781,14 @@ def _refine(
         return None
     loss = np.full(gap.size, LOST_LOSS)
     loss[hit] = _loss((gap[hit] - middle) * seen.per_degree)
+    # a rounded trace is judged on the shape it still has: rounded flat, it explains no more than a line
+    shape = y if not rounding else y + (rise - seen.elevation) * seen.per_degree / half_width
     return Fit(
         heading=heading % 360.0,
         tilt=float(np.clip(tilt - middle, -89.0, 89.0)),
         fov=fov,
         gap=float(np.median(np.abs(gap[hit] - middle))),
-        explained=explained_by(loss, x, y, half_width),
+        explained=explained_by(loss, x, shape, half_width),
         points=int(hit.sum()),
         roll=roll,
         reach=turn.reach,
@@ -777,13 +839,23 @@ def pieces_of(fit: Fit) -> list[dict[str, float]]:
     ]
 
 
+def under_terrain(azimuth: np.ndarray, elevation: np.ndarray, turn: Turn, per_degree: float) -> np.ndarray:
+    """Which directions the terrain's skyline stands over by more than `CLEAR_PX` pixels and more than the
+    heights' error at that terrain's distance (`CLEAR_GRAIN_M`)."""
+    above = turn.at(azimuth) - elevation
+    far = turn.far(azimuth)
+    grain = np.where(np.isfinite(far), np.degrees(np.arctan2(CLEAR_GRAIN_M, np.maximum(far, 1.0))), 0.0)
+    return np.nan_to_num(above, nan=-np.inf) > np.maximum(CLEAR_PX / per_degree, grain)
+
+
 def _judge(
     fit: Fit, x: np.ndarray, y: np.ndarray, turn: Turn, marks: Marks, ridges: Ridges | None,
     half_width: float, projection: Projection, bands: tuple[np.ndarray, np.ndarray] | None = None,
-    floor: float = 0.0,
+    floor: float = 0.0, clear: Turn | None = None,
 ) -> Fit:
     """A place judged on all the analyst marked: a collage's pieces eased, the inner edges read
-    against the terrain's ridges, the pairs' order checked."""
+    against the terrain's ridges, the pairs' order checked, the lines said to have only sky above
+    held clear of the terrain (`clear`, the turn as far as the photo is said to see, else the place's own)."""
     piece = marks.piece if marks.cut and marks.piece is not None and marks.piece.size == x.size else None
     offsets: dict[int, tuple[float, float, float]] = {}
     sky = fit.explained
@@ -837,10 +909,19 @@ def _judge(
             good = sum(1 for front, back in judged if far[front] < PAIR_NEARER * far[back])
             score *= 1.0 - PAIR_COST * (len(judged) - good) / len(judged)
             kept = (good, len(judged))
-    if piece is None and inner is None and kept is None:
+    over: float | None = None
+    if marks.clear and marks.line is not None and marks.line.size == x.size:
+        sure = np.isin(marks.line, marks.clear)
+        if sure.any():
+            azimuth, elevation, per = through(x[sure], y[sure], None if piece is None else piece[sure])
+            over = float(under_terrain(azimuth, elevation, clear or turn, per).mean())
+            score *= float(np.clip(1.0 - (over - CLEAR_FREE) / (CLEAR_SHARE - CLEAR_FREE), 0.0, 1.0))
+    if piece is None and inner is None and kept is None and over is None:
         return fit
     eased = tuple((k, *offsets[k]) for k in sorted(offsets)) or None
-    return replace(fit, explained=float(min(1.0, max(0.0, score))), sky=sky, inner=inner, pairs=kept, pieces=eased)
+    return replace(
+        fit, explained=float(min(1.0, max(0.0, score))), sky=sky, inner=inner, pairs=kept, pieces=eased, over=over,
+    )
 
 
 def match(
@@ -849,7 +930,7 @@ def match(
     within: tuple[float, float] | None = None, facing: Sector | Sequence[Sector] | None = None,
     level: bool = False, projection: Projection = "camera", quick: bool = False, rough: bool = False,
     marks: Marks | None = None, ridges: Ridges | None = None, floor: float = 0.0,
-    tilts: tuple[float, float] | None = None,
+    tilts: tuple[float, float] | None = None, rounding: float | None = None, clear: Turn | None = None,
 ) -> Match:
     """The headings, lenses and tilts that bring `turn` onto the trace (x, y), and a verdict.
 
@@ -870,7 +951,12 @@ def match(
     read against `ridges`, the terrain's silhouettes, when given. Points are
     read within the distances `marks.far` says their strokes stand at, those of
     strokes it says nothing of no nearer than `floor` metres; a place whose
-    camera tilts past `tilts` (degrees, low and high) is not one.
+    camera tilts past `tilts` (degrees, low and high) is not one. With
+    `rounding`, the terrain's cell in metres, near lines are judged rounded.
+    The lines `marks.clear` says have only sky above are read against `clear`,
+    the turn as far as the analyst says the photo sees, whatever cut a place
+    lies on; without it, against the place's own cut, as far as it says the
+    photo sees.
     """
     if projection == "panorama":
         level, roll = True, 0.0
@@ -911,9 +997,9 @@ def match(
         fit = _refine(x, y, turns[index], heading=h, tilt=float(np.clip(t, -89.0, 89.0)), fov=f, roll=r,
                       half_width=half_width, free=not known, level=level, start=roll,
                       widen=RANGE_EASE if within is not None else 1.03, projection=projection, bounds=bounds,
-                      bands=bands, tilts=tilts)
+                      bands=bands, tilts=tilts, rounding=rounding)
         if fit is not None and marks is not None:
-            fit = _judge(fit, x, y, turns[index], marks, ridges, half_width, projection, bands, floor)
+            fit = _judge(fit, x, y, turns[index], marks, ridges, half_width, projection, bands, floor, clear)
         refined.append(fit)
     found = sorted((fit for fit in refined if fit is not None), key=lambda fit: -fit.explained)
     if sectors is not None:

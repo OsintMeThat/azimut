@@ -5,11 +5,13 @@ import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 /**
  * The 3D map, driven in a real browser.
  *
- * The relief's gestures reach into the engine's own camera (`lib/map/relief.js`),
- * which is why the engine's version is pinned: this file is what proves a new
- * one. It stands the map on a flat plateau the fixture serves itself, in the
- * app's own tile batches, and asks only what an analyst can see and what the
- * backend was told.
+ * The 3D view is the app's own globe (`lib/globe`); the map engine's former 3D
+ * stays one press away (Classic) and keeps its own tests here, since its
+ * gestures reach into the engine's camera (`lib/map/relief.js`), which is why
+ * the engine's version is pinned: this file is what proves a new one. Both
+ * stand on a flat plateau the fixture serves itself, in the app's own tile
+ * batches, and the tests ask only what an analyst can see and what the backend
+ * was told.
  */
 
 /** A PNG of one colour, written by hand: the fixture needs no image library. */
@@ -94,9 +96,15 @@ const tilt = (page) => page.locator('.relief-ctl .tilt');
 const LEANS = { timeout: 15_000 };
 const gridSeat = (page) => page.getByRole('button', { name: 'Grid Search', exact: true });
 
+/** The map engine's former 3D rather than the globe, as the Classic button keeps it in this browser. */
+const CLASSIC = (page) => page.addInitScript(() => localStorage.setItem('azimut.relief.classic', '1'));
+/** The globe, drawn and placed (GlobeView keeps it unseen until then). */
+const globe = (page) => page.locator('.globe:not(.waiting) canvas:not(.marks)');
+
 async function openMap(page, hash = '#satellite', options = {}) {
   const fixture = await installAppFixture(page, options);
   await serveRelief(page);
+  if (options.classic) await CLASSIC(page);
   await page.goto(`/${hash}`);
   await awaitMapReady(page);
   return fixture;
@@ -110,8 +118,9 @@ test('the 3D switch stands the map on its relief and leans it to read it', async
   // relief seen straight down looks like the flat map, so the switch leans it
   await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
   await expect.poll(() => address(page).get('t')).toBe('20');
-  // a tilted view has no one scale, and a grid has no straight-down cells to sweep
-  await expect(page.locator('.map')).toHaveClass(/\btilted\b/);
+  // the globe draws it, over the flat map and its scale; a grid has no straight-down cells to sweep
+  await expect(globe(page)).toBeVisible();
+  await expect(page.locator('.map')).toHaveClass(/\bunder-globe\b/);
   await expect(gridSeat(page)).toBeDisabled();
 
   // Page Up and Down lean it further and back, as in Horizon
@@ -124,9 +133,101 @@ test('the 3D switch stands the map on its relief and leans it to read it', async
 
   // and off again: the flat map, its scale bar and its grid
   await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(page.locator('.globe')).toHaveCount(0);
+  await expect(page.locator('.map')).not.toHaveClass(/\bunder-globe\b/);
   await expect(page.locator('.map')).not.toHaveClass(/\btilted\b/);
   await expect(gridSeat(page)).toBeEnabled();
   await expect.poll(() => address(page).has('t')).toBe(false);
+});
+
+test('in the previous 3D view the map itself leans, with no one scale to show', async ({ page }) => {
+  await openMap(page, '#satellite', { classic: true });
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect(page.locator('.globe')).toHaveCount(0);
+  await expect(page.locator('.map')).toHaveClass(/\btilted\b/);
+  await expect(page.locator('.relief-ctl .classic')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('the globe takes the camera where the flat map holds it and gives it back there', async ({ page }) => {
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&b=30&p=esri-world-imagery');
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  // leaning swings the view round its centre: the centre, the zoom and the turn stay
+  await expect.poll(() => ['ll', 'z', 'b'].map((key) => address(page).get(key))).toEqual(['46.6,7.9', '13', '30']);
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(page.locator('.globe')).toHaveCount(0);
+  await expect.poll(() => ['ll', 'z', 'b'].map((key) => address(page).get(key))).toEqual(['46.6,7.9', '13', '30']);
+});
+
+test('a drag on the globe turns the Earth under the hand, and nothing moves once it lets go', async ({ page }) => {
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&t=40&e=200&p=esri-world-imagery');
+  await expect(tilt(page)).toHaveText(/Tilt 40°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  const box = await globe(page).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 200, y, { steps: 10 });
+  // held still before letting go: no fling
+  await page.waitForTimeout(200);
+  await page.mouse.up();
+  // the ground moved left under the hand, so the view now looks further east
+  await expect.poll(() => Number(address(page).get('ll')?.split(',')[1])).toBeGreaterThan(7.9);
+  const settled = address(page).toString();
+  await page.waitForTimeout(1500);
+  expect(address(page).toString()).toBe(settled);
+  // the turn and the tilt were the hand's to change, and it changed neither
+  expect(address(page).get('t')).toBe('40');
+});
+
+test('a double click held turns the map, flat and in 3D, and one that stays put still zooms in', async ({ page }) => {
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+  /** Click, then press again on the same spot and drag through `points` before letting go. */
+  const heldTurn = async (points) => {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.mouse.down({ clickCount: 2 });
+    for (const [px, py] of points) await page.mouse.move(px, py, { steps: 6 });
+    await page.mouse.up({ clickCount: 2 });
+  };
+
+  // flat: a quarter of the way round the press turns the map, and zooms nothing
+  await heldTurn([[x + 150, y], [x + 106, y + 106], [x, y + 150]]);
+  await expect.poll(() => Number(address(page).get('b') ?? 0)).toBeGreaterThan(0);
+  expect(address(page).get('z')).toBe('13');
+  await page.mouse.dblclick(x, y);
+  await expect.poll(() => address(page).get('z')).toBe('14');
+
+  // on the globe: sideways turns round the ground pressed, and a still double click comes a level closer
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  const turn = address(page).get('b');
+  await heldTurn([[x + 160, y]]);
+  await expect.poll(() => address(page).get('b')).not.toBe(turn);
+  const zoom = Number(address(page).get('z'));
+  await page.mouse.dblclick(x, y);
+  await expect.poll(() => Number(address(page).get('z'))).toBeGreaterThan(zoom + 0.5);
+});
+
+test('Classic swaps the globe for the previous 3D view and back, the view kept', async ({ page }) => {
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(globe(page)).toBeVisible(LEANS);
+  const classic = page.locator('.relief-ctl .classic');
+  await classic.click();
+  await expect(page.locator('.globe')).toHaveCount(0);
+  await expect(classic).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: '3D', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => address(page).get('ll')).toBe('46.6,7.9');
+  await classic.click();
+  await expect(globe(page)).toBeVisible(LEANS);
+  await expect.poll(() => address(page).get('ll')).toBe('46.6,7.9');
 });
 
 test('the 3D switch leans only once the relief under the view is in', async ({ page }) => {
@@ -147,23 +248,34 @@ test('the 3D switch leans only once the relief under the view is in', async ({ p
   await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
 });
 
-test('over relief the borders are lines, not Esri’s picture with its printed names', async ({ page }) => {
-  const { referenceTiles, placeNameTiles } = await openMap(page);
-  await expect.poll(() => referenceTiles.length).toBeGreaterThan(0);
+test('the borders are OpenFreeMap’s lines, flat and on the globe, and Esri’s reference picture is never asked', async ({ page }) => {
+  const { referenceTiles, placeNameTiles } = await openMap(page, '#satellite?ll=46.6,7.9&z=11&p=esri-world-imagery');
+  await expect.poll(() => placeNameTiles.some((url) => url.endsWith('.pbf'))).toBe(true);
   await page.getByRole('button', { name: '3D', exact: true }).click();
   await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
-
-  // new ground asks OpenFreeMap for its lines and Esri for nothing
-  const pictures = referenceTiles.length;
+  await expect(globe(page)).toBeVisible();
+  // the globe reads the same tiles for its ground, at its own address
   const lines = placeNameTiles.length;
-  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
-  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await page.mouse.move(640, 400);
+  await page.mouse.wheel(0, 600);
   await expect.poll(() => placeNameTiles.length).toBeGreaterThan(lines);
-  expect(referenceTiles.length).toBe(pictures);
+  expect(referenceTiles.filter((url) => url.includes('World_Boundaries'))).toEqual([]);
+});
 
-  // flat again, Esri's picture is back
-  await page.getByRole('button', { name: '3D', exact: true }).click();
-  await expect.poll(() => referenceTiles.length).toBeGreaterThan(pictures);
+/** Whether anything is drawn on the canvas the globe stands names and marks on. */
+const marksDrawn = (page) => page.locator('.globe canvas.marks').evaluate((canvas) => {
+  const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+  for (let i = 3; i < data.length; i += 4) if (data[i]) return true;
+  return false;
+});
+
+test('the place names stand on the globe, and go with their switch', async ({ page }) => {
+  await openMap(page, '#satellite?ll=46.6,7.9&z=12&t=30&e=200&p=esri-world-imagery', { placeNames: 'Qushayhi' });
+  await expect(tilt(page)).toHaveText(/Tilt 30°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  await expect.poll(() => marksDrawn(page), { timeout: 15_000 }).toBe(true);
+  await page.getByLabel('Place names', { exact: true }).click();
+  await expect.poll(() => marksDrawn(page)).toBe(false);
 });
 
 test('an address with a tilt opens that view, its zoom to the hundredth and its centre’s height', async ({ page }) => {
@@ -241,6 +353,7 @@ test('a pan over relief across a layer\'s area opens no card, and a click on it 
     features: 1, categories: [], icons: 0, sha256: 'b'.repeat(64), refresh: {}, hidden: [] };
   await installAppFixture(page);
   await serveRelief(page);
+  // the analyst's layers are drawn on the globe, and a click on one reaches its card
   await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [row] }));
   await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/data**`,
     (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [area] } }));
@@ -249,6 +362,7 @@ test('a pan over relief across a layer\'s area opens no card, and a click on it 
   await page.getByRole('button', { name: '3D', exact: true }).click();
   await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
   await page.getByRole('button', { name: 'Areas map', exact: true }).click();
+  await expect(globe(page)).toBeVisible();
   const map = await page.locator('.map').boundingBox();
   const x = map.x + map.width / 2, y = map.y + map.height / 2;
   const card = page.locator('.layer-card');
@@ -266,7 +380,7 @@ test('a pan over relief across a layer\'s area opens no card, and a click on it 
   await expect(card).toContainText('Front line area');
 });
 
-test('the orbit stops at a massif behind the eye rather than climbing over it', async ({ page }) => {
+for (const engine of ['globe', 'classic']) test(`the orbit stops at a massif behind the eye rather than climbing over it (${engine})`, async ({ page }) => {
   test.slow();
   // 3000 m: 35768 = 139 × 256 + 184
   const MASSIF = solidPng(512, [139, 184, 0]);
@@ -278,6 +392,7 @@ test('the orbit stops at a massif behind the eye rather than climbing over it', 
   };
   await installAppFixture(page);
   await serveRelief(page);
+  if (engine === 'classic') await CLASSIC(page);
   await page.route('**/api/terrain/**', (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/terrain/batch') {
@@ -304,5 +419,12 @@ test('the orbit stops at a massif behind the eye rather than climbing over it', 
   // centre some 8 km south onto the massif
   expect(Number(address(page).get('t'))).toBeLessThan(85);
   expect(address(page).get('z')).toBe('13');
-  expect(address(page).get('ll')).toBe('46.66,7.9');
+  if (engine === 'classic') expect(address(page).get('ll')).toBe('46.66,7.9');
+  else {
+    // the globe reads its centre where the middle of the screen meets the ground, which at
+    // this tilt moves by metres as the heights there sharpen
+    const [lat, lon] = address(page).get('ll').split(',').map(Number);
+    expect(Math.abs(lat - 46.66)).toBeLessThan(1e-4);
+    expect(Math.abs(lon - 7.9)).toBeLessThan(1e-4);
+  }
 });

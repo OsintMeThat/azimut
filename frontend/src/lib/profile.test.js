@@ -50,6 +50,24 @@ describe('an elevation profile', () => {
     // the blocking ground is the highest drawn: 400 m with 10 m of bulge
     expect(chart.blocked.y).toBe(Math.min(...chart.tops.map((point) => point.y)));
   });
+
+  it('cuts the crest where the eye stops seeing the ground, the pieces meeting', () => {
+    const chart = profileChart(
+      {
+        ...PROFILE,
+        sight: {
+          visible: false, blocked_at_m: 3000, eye_m: 101.7, target_m: 200, bulge_m: [0, 0, 0, 0, 0],
+          seen: [true, true, false, true, false],
+        },
+      },
+      BOX
+    );
+    expect(chart.sees.map((run) => run.seen)).toEqual([true, false, true, false]);
+    const [first, second] = chart.sees;
+    expect(first.path).toBe(`M${chart.tops[0].x},${chart.tops[0].y} L${chart.tops[1].x},${chart.tops[1].y}`);
+    expect(second.path.startsWith(`M${chart.tops[1].x},${chart.tops[1].y}`)).toBe(true);
+    expect(profileChart(PROFILE, BOX).sees).toEqual([]);
+  });
 });
 
 describe('reading the chart under the pointer', () => {
@@ -71,6 +89,12 @@ describe('the axes in the analyst’s units', () => {
     const imperial = profileChart(PROFILE, { ...BOX, units: 'imperial' });
     expect(imperial.xTicks.map((tick) => tick.label)).toEqual(['0', '1 mi', '2 mi']);
     expect(imperial.yTicks.every((tick) => tick.label.endsWith(' ft'))).toBe(true);
+  });
+
+  it('counts a line at sea in nautical miles over heights in metres', () => {
+    const sea = profileChart({ distance_m: [0, 3704, 7408], elevation: [0, 5, 0] }, { ...BOX, units: 'nautical' });
+    expect(sea.xTicks.at(-1).label).toBe('4 NM');
+    expect(sea.yTicks.every((tick) => tick.label.endsWith(' m'))).toBe(true);
   });
 
   it('reads a cliff in degrees rather than a grade past a hundred percent', () => {

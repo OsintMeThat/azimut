@@ -97,6 +97,8 @@ describe('a tilted view of the relief', () => {
   it('reads a tilt back, and refuses one the map could not take', () => {
     expect(readView(new URLSearchParams('ll=46,7&z=12&t=55')).pitch).toBe(55);
     expect(readView(new URLSearchParams('ll=46,7&z=12&t=0')).pitch).toBe(0);
+    // the globe's steepest, which it writes and must open again
+    expect(readView(new URLSearchParams('ll=46,7&z=12&t=88')).pitch).toBe(88);
     expect(readView(new URLSearchParams('ll=46,7&z=12&t=120')).pitch).toBeUndefined();
     expect(readView(new URLSearchParams('ll=46,7&z=12')).pitch).toBeUndefined();
   });

@@ -57,7 +57,8 @@
   import { bearingBetween, elsewhere, faceTowards, footprint, groundPoint } from '../lib/horizon/geometry.js';
   import { inspectorWidth, mapHeightFor } from '../lib/horizon/inspector.js';
   import { HZ } from '../lib/horizon/marks.js';
-  import { sameCuts, skySamples } from '../lib/horizon/traceMarks.js';
+  import { pieceOf, sameCuts, skySamples } from '../lib/horizon/traceMarks.js';
+  import { framesLaid, piecesLaid } from '../lib/horizon/laid.js';
   import { pieceVariants, searchedPair } from '../lib/horizon/cutView.js';
   import { minuteOf, skyAt, skyTracks } from '../lib/horizon/sky.js';
   import { horizonParams, readHorizonView } from '../lib/horizon/view.js';
@@ -134,6 +135,7 @@
   import ViewSwitch from '../components/ViewSwitch.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
   import Find from './horizon/Find.svelte';
+  import { carriesOutsideFiles } from '../lib/drag.js';
 
   const view = createHorizonState({ api });
   // buildings round the eye: nothing is asked of the app until their row is on
@@ -1085,7 +1087,7 @@
   const skyline = (azimuth, reach = overlay.reach) => skylineBetween(view.panorama, azimuth, reach);
   const traceCamera = $derived({ ...view.camera, width: frame.width, height: frame.height });
   // the trace as it shows on the straightened photo, which is what meets the terrain: every stroke, and the skyline's alone
-  const marked = $derived(photoOn && overlay.traceShown && frame.width ? traceSamples(overlay.strokesSeen, frame) : []);
+  const marked = $derived(photoOn && overlay.traceShown && frame.width ? traceSamples(overlay.strokesShown, frame) : []);
   const samples = $derived(skySamples(marked, overlay.marks));
 
   /**
@@ -1103,7 +1105,8 @@
       ? eased.pieces
       : null
   );
-  const pieced = $derived({ pieces, pieceAt: overlay.pieceAt });
+  // a photo laid as the search read it carries its pieces already: the terrain is read through one camera
+  const pieced = $derived({ pieces: overlay.asSearched ? null : pieces, pieceAt: overlay.pieceAt });
   /** Keep the pieces a place was found with, at the eye `at` and for the `cuts` the search read; none forgets them. */
   function easePieces(found, at = view.observer, cuts = overlay.marks.cuts) {
     eased = found?.length && at ? { pieces: found, cuts, at: { lat: at.lat, lon: at.lon }, photo: overlay.source?.path ?? null } : null;
@@ -1116,7 +1119,7 @@
   );
   /** How each traced point lies on the terrain, which the trace's colours show: green on it, red off it. */
   const traceKinds = $derived(
-    photoOn && overlay.traceShown && frame.width && view.panorama ? traceFit(overlay.strokesSeen, traceCamera, skyline, pieced) : null
+    photoOn && overlay.traceShown && frame.width && view.panorama ? traceFit(overlay.strokesShown, traceCamera, skyline, pieced) : null
   );
   /** The terrain's skyline over the photo, each piece of a collage where the search read it, with its margin. */
   const terrain = $derived(
@@ -1154,7 +1157,7 @@
       const note = pieces?.length ? 'Drawing the photo and the terrain, piece by piece…' : 'Drawing the photo and the terrain…';
       const drawn = await drawPair({ cut: true, note });
       if (!drawn) throw new Error('the view has not finished landing');
-      const strokes = overlay.traceShown && !overlay.traceHidden ? overlay.strokesSeen : [];
+      const strokes = overlay.traceShown && !overlay.traceHidden ? overlay.strokesShown : [];
       const { lines, inner } = overlay.marks;
       side = {
         ...drawn,
@@ -1188,6 +1191,8 @@
    */
   async function fit() {
     if (overlay.locked || fitting) return;
+    // a cut collage is fitted from its pieces as drawn, eased again; frames or a mirror stay laid as searched
+    if (overlay.marks.cuts.length) overlay.layFlat();
     if (!gap) {
       toast('Trace more of the skyline first', 'warn');
       return;
@@ -1328,12 +1333,21 @@
     const framed = place.frames ?? finder.search?.result?.frames;
     if (framed && Number.isFinite(place.heading)) {
       overlay.setHints({ picture: 'panorama' });
-      view.look({ projection: 'panorama', heading: place.heading + (framed.middle ?? 0), tilt: place.tilt ?? 0, roll: 0, fov: framed.span });
+      const look = { projection: 'panorama', heading: place.heading + (framed.middle ?? 0), tilt: place.tilt ?? 0, roll: 0, fov: framed.span };
+      view.look(look);
+      // each frame where the search read it, through its own camera
+      overlay.layAsSearched(framed.mesh ? framesLaid(framed, place, look, overlay.aspect) : null);
     } else {
       // the pieces were eased for the cuts the search was asked with
-      easePieces(place.pieces, place, finder.search?.ask?.photo?.marks?.cuts ?? []);
+      const cuts = finder.search?.ask?.photo?.marks?.cuts ?? [];
+      easePieces(place.pieces, place, cuts);
       if (Number.isFinite(place.heading)) {
         view.look({ heading: place.heading, tilt: place.tilt ?? 0, roll: place.roll ?? 0, fov: place.fov ?? view.camera.fov });
+        // each piece where the search eased it, the photo flipped where it was found mirrored
+        const how = { pieces: place.pieces, pieceOf: (u) => pieceOf(cuts, u), cuts, mirrored: Boolean(place.mirrored) };
+        overlay.layAsSearched(piecesLaid(view.camera, overlay.aspect, how));
+      } else {
+        overlay.layFlat();
       }
     }
     if (Number.isFinite(place.reach)) overlay.setReachFound(place.reach);
@@ -1449,14 +1463,13 @@
     }
   }
 
-  const carriesFiles = (event) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
   function onDragOver(event) {
-    if (layout !== 'looking' || !carriesFiles(event)) return;
+    if (layout !== 'looking' || !carriesOutsideFiles(event)) return;
     event.preventDefault();
     dropping = true;
   }
   function onDrop(event) {
-    if (layout !== 'looking' || !carriesFiles(event)) return;
+    if (layout !== 'looking' || !carriesOutsideFiles(event)) return;
     event.preventDefault();
     dropping = false;
     const file = event.dataTransfer.files?.[0];

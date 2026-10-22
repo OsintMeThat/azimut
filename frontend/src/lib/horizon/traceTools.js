@@ -10,6 +10,7 @@
  *   behind  a click on the stroke in front, then on the one behind it
  *   cut     a click lays a cut across a collage where its frames meet
  *   far     the distances picked, then a click on a line says it stands that far
+ *   clear   a click on a skyline line says only sky stands above it
  *   erase   the rubber
  *
  * The magnet beside them snaps what the pens draw onto the photo's edges;
@@ -67,6 +68,14 @@ export const TRACE_TOOLS = Object.freeze([
     title: "Say how far a line stands: pick the distances, then click the line (K)",
   },
   {
+    id: "clear",
+    icon: "skyClear",
+    label: "Sky only",
+    name: "Say only sky stands above a line",
+    key: "O",
+    title: "Click a skyline line you are sure has only sky above it (O)",
+  },
+  {
     id: "erase",
     icon: "eraser",
     label: "Rub out",
@@ -95,6 +104,7 @@ export function toolOn(overlay, id) {
   if (id === "behind") return Boolean(overlay.linking);
   if (id === "cut") return Boolean(overlay.cutting);
   if (id === "far") return Boolean(overlay.distancing);
+  if (id === "clear") return Boolean(overlay.clearing);
   if (id === "erase") return Boolean(overlay.erasing);
   return false;
 }
@@ -106,7 +116,8 @@ export function editing(overlay) {
       overlay.erasing ||
       overlay.linking ||
       overlay.cutting ||
-      overlay.distancing,
+      overlay.distancing ||
+      overlay.clearing,
   );
 }
 
@@ -150,6 +161,7 @@ export function traceLegend(
     if (marks?.cuts?.length) items.push({ id: "cut", label: "Cut" });
     if (marks?.pairs?.length)
       items.push({ id: "pair", label: "In front, behind" });
+    if (marks?.clear?.length) items.push({ id: "clear", label: "Only sky above" });
   }
   return items;
 }
@@ -160,7 +172,7 @@ export function toolBlocked(overlay, id) {
     return "Draw two lines first";
   if (id === "erase" && !overlay.strokes.length)
     return "Nothing to rub out yet";
-  if (id === "far" && !overlay.strokes.length) return "Draw a line first";
+  if ((id === "far" || id === "clear") && !overlay.strokes.length) return "Draw a line first";
   return "";
 }
 
@@ -173,6 +185,7 @@ export function pressTool(overlay, id) {
   } else if (id === "behind") overlay.setLinking(!on);
   else if (id === "cut") overlay.setCutting(!on);
   else if (id === "far") overlay.setDistancing(!on);
+  else if (id === "clear") overlay.setClearing(!on);
   else if (id === "erase") overlay.setErasing(!on);
 }
 
@@ -183,6 +196,7 @@ export function putAway(overlay) {
   overlay.setLinking(false);
   overlay.setCutting(false);
   overlay.setDistancing(false);
+  overlay.setClearing(false);
 }
 
 /** What the trace holds besides the skyline, in a few words: '' when nothing. */
@@ -205,6 +219,8 @@ export function marksSummary(marks) {
     );
   if (marks.sea?.length)
     parts.push(marks.sea.length === 1 ? "1 sea line" : `${marks.sea.length} sea lines`);
+  if (marks.clear?.length)
+    parts.push(marks.clear.length === 1 ? "1 line with only sky above" : `${marks.clear.length} lines with only sky above`);
   return parts.join(" · ");
 }
 
@@ -219,6 +235,8 @@ export function toolHint(overlay) {
     return "Click where two frames of the collage meet · click a cut to take it away";
   if (overlay.distancing)
     return "Pick how far, then click a line · the same again takes it away";
+  if (overlay.clearing)
+    return "Click a skyline line with only sky above it, no land rising over it · the same again takes it back";
   if (overlay.tracing) {
     const what =
       overlay.pen === "ridge"

@@ -1,12 +1,17 @@
 <script>
   /**
-   * The ground along an Elevation profile line, as a chart that fills the
-   * window it is in and redraws as that window is resized.
+   * The ground along a measured line, as a chart that fills the window it is in
+   * and redraws as that window is resized.
    *
    * Round heights up the side, round distances along the bottom, in the
-   * analyst's units, the ground filled under its crest. The pointer reads it: a
-   * rule follows the hand, a card says how far along, how high and how steep,
-   * and the same point is marked on the line on the map.
+   * analyst's units, the ground filled under its crest. The pointer reads it
+   * both ways: over the chart a rule follows the hand, a card says how far
+   * along, how high and how steep, and the same point is marked on the line on
+   * the map; over the line on the map, the chart reads where the pointer is. A
+   * click on the chart brings that point to the middle of the map.
+   *
+   * With a line of sight asked for, the crest is drawn again in the stretches
+   * the eye at A covers and the ones it does not.
    *
    * The sight verdict is read on the same curved, refracting Earth as every
    * horizon in the app (api/terrain.py). The ground is drawn with the Earth's
@@ -20,8 +25,12 @@
     busy = false,
     error = '',
     units = 'metric',
-    /** The sample under the pointer, `{ lat, lon }`, or null when it leaves. */
+    /** The sample read from the map, the pointer being over the line there. */
+    readIndex = null,
+    /** The sample under the pointer on the chart, or null when it leaves. */
     onhover = () => {},
+    /** A sample clicked on the chart. */
+    onpick = () => {},
   } = $props();
 
   let width = $state(600);
@@ -34,14 +43,15 @@
   const steepest = $derived(grades.length ? Math.max(...grades.map(Math.abs)) : 0);
   const sight = $derived(profile?.sight ?? null);
   const length = $derived(profile ? profile.distance_m.at(-1) : 0);
+  const shownIndex = $derived(hovered ?? readIndex);
   const reading = $derived(
-    hovered == null || !chart || hovered >= chart.tops.length
+    shownIndex == null || !chart || shownIndex >= chart.tops.length
       ? null
       : {
-          at: chart.tops[hovered],
-          distance: profile.distance_m[hovered],
-          height: profile.elevation[hovered],
-          grade: grades[hovered],
+          at: chart.tops[shownIndex],
+          distance: profile.distance_m[shownIndex],
+          height: profile.elevation[shownIndex],
+          grade: grades[shownIndex],
         }
   );
   // the card stays inside the chart, on whichever side of the rule has room
@@ -59,7 +69,13 @@
     const index = sampleNear(chart.tops, event.clientX - box.left);
     if (index === hovered) return;
     hovered = index;
-    onhover({ lat: profile.lat[index], lon: profile.lon[index] });
+    onhover(index);
+  }
+
+  function pick(event) {
+    if (!chart) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    onpick(sampleNear(chart.tops, event.clientX - box.left));
   }
 
   function pointerGone() {
@@ -96,6 +112,7 @@
         aria-label="Heights along the line"
         onpointermove={pointerAt}
         onpointerleave={pointerGone}
+        onclick={pick}
       >
         {#each chart.yTicks as tick (tick.label)}
           <line class="grid" x1="44" x2={width - 10} y1={tick.y} y2={tick.y} />
@@ -106,7 +123,10 @@
           <text class="axis" x={tick.x} y={height - 6} text-anchor={tick.x < 60 ? 'start' : 'middle'}>{tick.label}</text>
         {/each}
         <path class="area" d={chart.area} />
-        <path class="crest" d={chart.line} />
+        <path class="crest" class:faded={chart.sees.length} d={chart.line} />
+        {#each chart.sees as run, i (i)}
+          <path class="sees" class:hidden={!run.seen} d={run.path} />
+        {/each}
         <line class="base" x1="44" x2={width - 10} y1={chart.floor} y2={chart.floor} />
         {#if chart.sight}
           <path class="sight" class:clear={sight.visible} d={chart.sight.path} />
@@ -211,6 +231,18 @@
     stroke: #4cc3ff;
     stroke-width: 1.8;
     stroke-linejoin: round;
+  }
+  .crest.faded {
+    stroke-opacity: 0.35;
+  }
+  .sees {
+    fill: none;
+    stroke: var(--ok, #46a758);
+    stroke-width: 2.6;
+    stroke-linejoin: round;
+  }
+  .sees.hidden {
+    stroke: var(--danger, #e5484d);
   }
   .sight {
     fill: none;

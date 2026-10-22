@@ -163,6 +163,7 @@
   import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
   import { shortcut } from '../lib/keys.js';
+  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
 
   loadEntityTypes();
   loadRelationTypes();
@@ -5207,16 +5208,15 @@
       onwheel={onWheel}
       onpointerdown={onPointerDown}
       ondragover={(event) => {
-        if (!caseState.current) return;
+        if (!caseState.current || !carriesOutsideFiles(event)) return;
         event.preventDefault();
         dropOver = true;
       }}
       ondragleave={(event) => {
-        // Guarded on the container itself: the event fires for every child the
-        // pointer crosses, and an unguarded handler flickers the overlay off.
-        if (event.target === event.currentTarget) dropOver = false;
+        if (leftZone(event)) dropOver = false;
       }}
       ondrop={(event) => {
+        if (!carriesOutsideFiles(event)) return;
         event.preventDefault();
         dropOver = false;
         const at = stage?.getPointerPosition();

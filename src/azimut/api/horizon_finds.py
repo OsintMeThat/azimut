@@ -123,7 +123,7 @@ class ZoneIn(BaseModel):
     """A zone beside the area: searched on its own grid (`spacing` metres, None: finer than the area's), or left out."""
 
     area: list[LatLon] = Field(min_length=3, max_length=AREA_CORNERS_MAX)
-    spacing: float | None = Field(default=None, ge=50, le=5000)
+    spacing: float | None = Field(default=None, ge=20, le=5000)
     out: bool = False
 
     @model_validator(mode="after")
@@ -138,7 +138,7 @@ class GroundIn(BaseModel):
     area: list[LatLon] = Field(min_length=3, max_length=AREA_CORNERS_MAX)
     who: WhoIn = Field(default_factory=WhoIn)
     reach: int | None = None
-    spacing: float | None = Field(default=None, ge=50, le=5000)
+    spacing: float | None = Field(default=None, ge=20, le=5000)
     alignments: list[AlignmentIn] = Field(default_factory=list, max_length=ALIGNMENTS_MAX)
     #: The ground the eye may stand on, none for any.
     stands: list[Stand] = Field(default_factory=list, max_length=5)
@@ -186,6 +186,8 @@ class FindIn(GroundIn):
     view: list[View] = Field(default_factory=list, max_length=2)
     #: A selfie: searched mirrored too.
     mirror: bool = False
+    #: Lines nearer than a few kilometres judged rounded to the relief's coarse cell, the nearer the rounder.
+    round: bool = False
     #: Where the sun stood against the camera, when the analyst says it.
     sun: SunIn | None = None
     #: Fast scores a large grid on several cores; gentle on one, leaving the computer free.
@@ -285,6 +287,7 @@ class TryIn(BaseModel):
     facing: list[Direction] = Field(default_factory=list, max_length=8)
     view: list[View] = Field(default_factory=list, max_length=2)
     mirror: bool = False
+    round: bool = False
     sun: SunIn | None = None
     hints: dict[str, Any] | None = None
 

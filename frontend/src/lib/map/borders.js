@@ -1,13 +1,10 @@
 /**
- * The borders over relief, drawn from OpenFreeMap's vector tiles.
+ * The borders, drawn from OpenFreeMap's vector tiles.
  *
- * Esri's borders are a picture with the names printed into it. Laid on relief,
- * that picture follows the slopes: the names lie on the mountainsides, bent and
- * giant toward the horizon, under the upright place names. So while the 3D map
- * is on, the Borders layer draws the same reading from OpenStreetMap instead
- * (`basemap.js`): country, region and district lines draped on the ground, and
- * the names Esri printed (countries, regions, cities) standing upright like the
- * place names do. Towns and smaller stay with the place names.
+ * Country, region and district lines, and the names of countries, regions and
+ * cities standing upright over them. Lines rather than a picture: a region's
+ * line reads at every zoom, and on the relief the names stand up instead of
+ * lying on the slopes. Towns and smaller stay with the place names.
  *
  * Same tiles as the place names (`placeNames.js`): OpenMapTiles from
  * OpenFreeMap, free, key-less, read through the TileJSON that names the current
@@ -21,7 +18,7 @@ export const NAMED_CLASSES = ['country', 'state', 'province', 'city'];
 
 const CLASS = ['get', 'class'];
 const LEVEL = ['get', 'admin_level'];
-// sea borders are lines across the water, which Esri's picture leaves out too
+// sea borders are lines across the water, read off the coast instead
 const ON_LAND = ['!=', ['get', 'maritime'], 1];
 const DISPUTED = ['==', ['get', 'disputed'], 1];
 const LINE = '#f2efe6';
@@ -45,6 +42,19 @@ export const BORDER_LINES = {
         'line-opacity': 0.75,
         'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.9, 13, 1.6],
         'line-dasharray': [3, 2],
+      },
+    },
+    {
+      // a dark edge under the region line, so it reads over pale ground too
+      id: 'region-edge',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'boundary',
+      filter: ['all', ['in', LEVEL, ['literal', [3, 4]]], ON_LAND],
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': 'rgba(0, 0, 0, 0.35)',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.2, 12, 3.6],
       },
     },
     {

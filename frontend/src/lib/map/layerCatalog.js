@@ -23,7 +23,7 @@ export const LAYER_GROUPS = Object.freeze([
  * already carries its own names and roads. `keyed`: needs a free key in Settings.
  */
 export const LAYERS = Object.freeze([
-  { id: 'boundaries', label: 'Borders', group: 'reference', title: 'Country, region and district borders, from Esri' },
+  { id: 'boundaries', label: 'Borders', group: 'reference', title: 'Country, region and district borders, from OpenStreetMap via OpenFreeMap' },
   {
     id: 'placenames',
     label: 'Place names',

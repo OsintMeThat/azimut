@@ -129,7 +129,7 @@ class PanoramaIn(ViewIn):
 # would leave if the air stopped there. Left to itself a Fit tries those up to
 # 50 km (frontend lib/horizon/hints.js), since the skyline a photo shows is
 # often a nearer one than the turn's outermost; farther only when asked.
-SKYLINE_CUTS = (5_000.0, 10_000.0, 20_000.0, 50_000.0, 100_000.0)
+SKYLINE_CUTS = (2_000.0, 5_000.0, 10_000.0, 20_000.0, 50_000.0, 100_000.0)
 
 
 def _pack(array: np.ndarray) -> str:
@@ -591,7 +591,7 @@ class MarksIn(BaseModel):
     then the stroke behind it. `piece` and `ridge_piece` say which piece of a
     collage each point lies in. `far` says how far strokes stand: each a stroke,
     the nearest and the farthest it may be, metres. `sea` names the strokes
-    traced along the sea's horizon.
+    traced along the sea's horizon, `clear` those with only sky above them.
     """
 
     ridge_x: list[float] = Field(default_factory=list, max_length=MATCH_POINTS_MAX)
@@ -603,6 +603,7 @@ class MarksIn(BaseModel):
     ridge_piece: list[int] | None = Field(default=None, max_length=MATCH_POINTS_MAX)
     far: list[list[float]] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
     sea: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
+    clear: list[int] = Field(default_factory=list, max_length=MARK_STROKES_MAX)
 
     def check_marks(self, points: int) -> None:
         """Each list as long as the points it describes, the strokes and pairs within bounds."""
@@ -636,10 +637,14 @@ class MarksIn(BaseModel):
             raise ValueError("a sea line names a stroke out of range")
         if self.sea and self.line is None:
             raise ValueError("a sea line needs each point's stroke")
+        if any(not 0 <= stroke < MARK_STROKES_MAX for stroke in self.clear):
+            raise ValueError("a line with only sky above names a stroke out of range")
+        if self.clear and self.line is None:
+            raise ValueError("a line with only sky above needs each point's stroke")
 
     def marks(self) -> skymatch.Marks | None:
         """The marks as the search reads them, or None when there are none."""
-        if not self.ridge_x and not self.pairs and self.piece is None and not self.far and not self.sea:
+        if not self.ridge_x and not self.pairs and self.piece is None and not self.far and not self.sea and not self.clear:
             return None
 
         def ints(values: list[int] | None) -> np.ndarray | None:
@@ -652,6 +657,7 @@ class MarksIn(BaseModel):
             piece=ints(self.piece), ridge_piece=ints(self.ridge_piece),
             far=tuple((int(stroke), float(nearest), float(farthest)) for stroke, nearest, farthest in self.far),
             sea=tuple(int(stroke) for stroke in self.sea),
+            clear=tuple(int(stroke) for stroke in self.clear),
         )
 
 

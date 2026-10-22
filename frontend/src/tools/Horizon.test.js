@@ -77,7 +77,7 @@ describe('the Horizon layout', () => {
   it('keeps how the ground is drawn on the view with a photo laid, out of the pen\'s way', () => {
     const view = readFileSync(new URL('./horizon/HorizonView.svelte', import.meta.url), 'utf8');
     expect(view).toContain(
-      'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing))'
+      'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing))'
     );
     expect(view).toContain('{#if controlsShown}\n    <div class="controls">');
     // the names keep clear of the corner only while the controls are in it

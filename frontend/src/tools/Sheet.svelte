@@ -167,6 +167,7 @@
   import SheetRowPanel from '../components/SheetRowPanel.svelte';
   import { shortcut } from '../lib/keys.js';
   import { middleClickPaste } from '../lib/clipboardPaste.js';
+  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
 
   const HEAD_H = 32;
   /** How long the two lines above the grid may be. Mirrors `engine/sheets.MAX_DESCRIPTION`,
@@ -1260,6 +1261,7 @@
    * the media entity so the graph knows the row rests on it.
    */
   function onDrop(event) {
+    if (!carriesOutsideFiles(event)) return;
     event.preventDefault();
     dropping = false;
     const file = event.dataTransfer?.files?.[0];
@@ -4265,8 +4267,8 @@
 
     <div class="grid-panel">
     <div class="grid-wrap" class:dropping
-         ondragover={(event) => { event.preventDefault(); dropping = true; }}
-         ondragleave={() => (dropping = false)}
+         ondragover={(event) => { if (!carriesOutsideFiles(event)) return; event.preventDefault(); dropping = true; }}
+         ondragleave={(event) => { if (leftZone(event)) dropping = false; }}
          ondrop={onDrop}
          role="presentation">
     <!-- The grid takes the focus itself and says which cell the cursor is on, because the

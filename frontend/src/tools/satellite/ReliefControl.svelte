@@ -10,12 +10,19 @@
    * map, and the switch would seem to do nothing. An exaggerated relief says
    * so in the control itself, since a slope drawn twice its height is a reading
    * aid and not how the ground looks.
+   *
+   * The 3D view is the app's own globe; while it is new, the map engine's
+   * former 3D stays one press away (`classic`), to compare the two.
    */
   import { EXAGGERATIONS, READING_TILT } from '../../lib/map/relief.js';
 
   let {
     on = $bindable(false),
     exaggeration = $bindable(1),
+    /** The map engine's former 3D rather than the globe. */
+    classic = $bindable(false),
+    /** Whether the globe can be left for it: false where the globe cannot run at all. */
+    classicOffered = true,
     /** The camera's tilt now, in degrees from straight down. */
     pitch = 0,
     /** Tilt the camera to this many degrees, as soon as the relief is in to lean over. */
@@ -72,6 +79,16 @@
         <option value={step}>{step === 1 ? 'Real heights' : `Heights ×${step}`}</option>
       {/each}
     </select>
+    {#if classicOffered}
+      <button
+        class="classic"
+        aria-pressed={classic}
+        onclick={() => (classic = !classic)}
+        title={classic ? 'Back to the new 3D view' : 'Use the previous 3D view, to compare'}
+      >
+        Classic
+      </button>
+    {/if}
   {/if}
 </div>
 
@@ -123,5 +140,16 @@
   }
   .scale.raised {
     color: var(--warn);
+  }
+  .classic {
+    padding: 0 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    border-left: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .classic:hover,
+  .classic[aria-pressed='true'] {
+    color: var(--accent);
   }
 </style>

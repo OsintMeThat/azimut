@@ -123,6 +123,7 @@
     pictureUnder, nudgedLink, letGoOf, shiftedTies, markBounds, freeExtent,
   } from '../lib/freeMarks.js';
   import { pollWhile } from '../lib/poll.js';
+  import { carriesOutsideFiles } from '../lib/drag.js';
 
   const SCALE_STEP = 0.05;
   // Canvas handles are drawn, not styled, so the one accent has to be spelled
@@ -1592,6 +1593,7 @@
   }
 
   function onCanvasDrop(e) {
+    if (!carriesOutsideFiles(e)) return;
     const file = [...(e.dataTransfer?.files ?? [])].find((f) => f.type.startsWith('image/'));
     if (!file) return;
     e.preventDefault();

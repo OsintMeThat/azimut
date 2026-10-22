@@ -89,7 +89,7 @@
     <div class="pe-fields">
       <label class="fld">
         <span>Mention</span>
-        <input type="text" placeholder="@GeoConfirmed" maxlength="64" bind:value={data.mention} />
+        <input type="text" placeholder="@GeoConfirmed" maxlength="280" bind:value={data.mention} />
       </label>
 
       <fieldset class="fld">

@@ -375,12 +375,6 @@ describe('what is laid over the imagery', () => {
     );
   });
 
-  it('tells the layers when the map stands on its relief, so the borders lie as lines', () => {
-    // read before the guard, or the effect would never hear the relief come in
-    expect(surface).toContain('const over = reliefReady;');
-    expect(surface).toContain('if (ready && basemaps && reliefOffered) basemaps.setRelief(over);');
-  });
-
   it('offers the railways over any basemap and the roads only over imagery', () => {
     // OSM's own street map already draws its roads; it draws a railway as one
     // more line, which is the thing OpenRailwayMap is for
@@ -443,10 +437,17 @@ describe('what is laid over the imagery', () => {
     // said on the row, where it can be read without hovering a greyed switch;
     // no key, a key switched off and a refused key each say their own thing
     // (`keyState`, tested in lib/map/firms.test.js)
-    expect(rows).toContain('detail: fires.keyed ? firmsSummary : firmsKey.detail');
+    expect(rows).toContain("detail: !fires.keyed ? firmsKey.detail : onGlobe ? 'flat map only' : firmsSummary");
     expect(rows).toContain('actions: fires.keyed ? null : [{ label: firmsKey.action, quiet: true, run: openImagerySettings }]');
     expect(source).toContain('const firmsKey = $derived(keyState(fires));');
     expect(source).toContain("uiState.settingsTab = 'imagery';");
+  });
+
+  it('rests the fires while the globe draws, whose view to the horizon would spend their allowance', () => {
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['));
+    expect(rows).toContain('disabled: !fires.keyed || onGlobe');
+    expect(source).toContain('bind:onGlobe');
+    expect(surface).toContain("exclude: (id) => isGround(id) || id.startsWith('basemap-firms')");
   });
 
   it('asks its own backend why when a fire tile fails, once for the burst', () => {
@@ -467,12 +468,12 @@ describe('what is laid over the imagery', () => {
   it('asks for no tile until the choice is one the service can answer', () => {
     // a dated window with no date yet is the normal state of a panel someone
     // just switched, not a request
-    expect(source).toContain("fires.on && fires.keyed && firmsAskable && { id: 'firms'");
+    expect(source).toContain("fires.on && fires.keyed && firmsAskable && !onGlobe && { id: 'firms'");
     expect(source).toContain('const firmsAskable = $derived(askable(fires))');
   });
 
   it('asks its two questions in the row rather than in a card over the map', () => {
-    expect(source).toContain('controls: fires.on && fires.keyed ? firmsControls : null');
+    expect(source).toContain('controls: fires.on && fires.keyed && !onGlobe ? firmsControls : null');
     expect(layerRows).toContain('{#if row.controls?.length}');
     expect(layerRows).not.toContain('position: absolute');
   });

@@ -13,6 +13,7 @@
  *   far    how far some lines stand: `{ line, bands }`, the ids of the
  *          distances ticked (`DISTANCE_BANDS`), several when unsure
  *   sea    the ids of lines along the sea's horizon: sky above, open sea below
+ *   clear  the ids of skyline lines the analyst is sure have only sky above them
  *
  * A stroke drawn along the skyline that lies under another one is an inner
  * edge whatever pen drew it: nothing under a line can be the sky's edge.
@@ -25,6 +26,7 @@ export const NO_MARKS = Object.freeze({
   cuts: [],
   far: [],
   sea: [],
+  clear: [],
 });
 
 /**
@@ -127,13 +129,14 @@ export function cleanMarks(marks, count) {
     .sort((a, b) => a - b)
     .slice(0, CUTS_MAX);
   const sea = [...new Set((marks?.sea ?? []).filter((id) => known.has(id) && !inner.includes(id)))].sort((a, b) => a - b);
+  const clear = [...new Set((marks?.clear ?? []).filter((id) => known.has(id) && !inner.includes(id)))].sort((a, b) => a - b);
   const far = [];
   for (const one of marks?.far ?? []) {
     const bands = cleanBands(one?.bands);
     if (!known.has(one?.line) || !bands.length || far.some((f) => f.line === one.line)) continue;
     far.push({ line: one.line, bands });
   }
-  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea };
+  return { lines, inner, pairs: pairs.slice(0, PAIRS_MAX), cuts, far, sea, clear };
 }
 
 /** Whether two sets of marks say the same thing. */
@@ -147,7 +150,8 @@ export function sameMarks(a, b) {
     x.pairs.length === y.pairs.length &&
     x.pairs.every((p, i) => p[0] === y.pairs[i][0] && p[1] === y.pairs[i][1]) &&
     JSON.stringify(x.far ?? []) === JSON.stringify(y.far ?? []) &&
-    sameIds(x.sea ?? [], y.sea ?? [])
+    sameIds(x.sea ?? [], y.sea ?? []) &&
+    sameIds(x.clear ?? [], y.clear ?? [])
   );
 }
 
@@ -164,7 +168,8 @@ export function marksSaid(marks) {
         marks.pairs.length ||
         marks.cuts.length ||
         marks.far?.length ||
-        marks.sea?.length),
+        marks.sea?.length ||
+        marks.clear?.length),
   );
 }
 
@@ -286,14 +291,23 @@ export function togglePair(marks, front, back) {
   };
 }
 
-/** Marks with a stroke's id said to be an inner edge (`true`) or the skyline; an inner edge is no sea line. */
+/** Marks with a stroke's id said to be an inner edge (`true`) or the skyline; an inner edge is no sea line and has land above. */
 export function setInner(marks, id, inner) {
   const rest = marks.inner.filter((one) => one !== id);
   return {
     ...marks,
     inner: inner ? [...rest, id].sort((a, b) => a - b) : rest,
     sea: inner ? (marks.sea ?? []).filter((one) => one !== id) : (marks.sea ?? []),
+    clear: inner ? (marks.clear ?? []).filter((one) => one !== id) : (marks.clear ?? []),
   };
+}
+
+/** Marks with a skyline line said to have only sky above it, or not when it was said already; an inner edge stays as it is. */
+export function toggleClear(marks, id) {
+  if (marks.inner.includes(id)) return marks;
+  const had = (marks.clear ?? []).includes(id);
+  const rest = (marks.clear ?? []).filter((one) => one !== id);
+  return { ...marks, clear: had ? rest : [...rest, id].sort((a, b) => a - b) };
 }
 
 /** Marks with a stroke's id said to run along the sea's horizon (`true`), or not; a sea line is skyline. */
@@ -337,6 +351,13 @@ export function farBadges(strokes, marks) {
     .filter((badge) => badge.at && badge.label);
 }
 
+/** Where each line said to have only sky above is named: a quarter along its longest stroke (`{ line, at }`), clear of the middle's badges. */
+export function clearBadges(strokes, marks) {
+  return (marks?.clear ?? [])
+    .map((line) => ({ line, at: quarterOf(strokes, marks.lines, line) }))
+    .filter((badge) => badge.at);
+}
+
 /** Marks with a cut added at `u`, or the cut at `index` taken away. */
 export function addCut(marks, u) {
   return cleanMarks({ ...marks, cuts: [...marks.cuts, u] }, marks.lines.length);
@@ -355,14 +376,26 @@ export function marksAfter(marks, from) {
   return cleanMarks({ ...marks, lines }, lines.length);
 }
 
-/** Where on the photo a line is named: the middle point of its longest stroke. */
-function middleOf(strokes, lines, id) {
+/** A line's longest stroke, or null. */
+function longestOf(strokes, lines, id) {
   let longest = null;
   strokes.forEach((stroke, i) => {
     if (lines[i] === id && (!longest || stroke.length > longest.length))
       longest = stroke;
   });
+  return longest;
+}
+
+/** Where on the photo a line is named: the middle point of its longest stroke. */
+function middleOf(strokes, lines, id) {
+  const longest = longestOf(strokes, lines, id);
   return longest ? longest[Math.floor(longest.length / 2)] : null;
+}
+
+/** A quarter along a line's longest stroke. */
+function quarterOf(strokes, lines, id) {
+  const longest = longestOf(strokes, lines, id);
+  return longest ? longest[Math.floor(longest.length / 4)] : null;
 }
 
 /**

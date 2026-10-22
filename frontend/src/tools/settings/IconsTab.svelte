@@ -16,6 +16,7 @@
   import { DEFAULT_GROUP, iconLibrary } from '../../lib/iconLibrary.svelte.js';
   import { ICON_MODES } from '../../lib/map/layerHelp.js';
   import { toast } from '../../lib/state.svelte.js';
+  import { carriesOutsideFiles } from '../../lib/drag.js';
 
   /** The disc colour a preview is drawn in. */
   const PREVIEW = '#0072b2';
@@ -60,6 +61,7 @@
     bring(list);
   }
   function dropped(event) {
+    if (!carriesOutsideFiles(event)) return;
     event.preventDefault();
     over = false;
     bring(event.dataTransfer?.files);
@@ -91,7 +93,7 @@
     Your own icons, offered in every layer's palette. A layer keeps a copy of each icon it wears, so removing one here changes no map.
   </p>
   <div class="drop" class:over role="region" aria-label="Drop icons here"
-    ondragover={(event) => { event.preventDefault(); over = true; }} ondragleave={() => (over = false)} ondrop={dropped}>
+    ondragover={(event) => { if (!carriesOutsideFiles(event)) return; event.preventDefault(); over = true; }} ondragleave={() => (over = false)} ondrop={dropped}>
     <Icon name="upload" size={16} />
     <span>Drop icons here, or</span>
     <button class="btn btn-sm" disabled={busy} onclick={() => files?.click()}

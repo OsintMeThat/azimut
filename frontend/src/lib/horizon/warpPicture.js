@@ -10,6 +10,9 @@
  * photo, drawn on a 2D canvas rather than by the view, is straightened the
  * same way (`paintStraightened`), so the trace lies on it as on the view.
  *
+ * A photo laid as a search read it (lib/horizon/laid.js) is handed over the
+ * same way, each frame or piece of a collage where the search put it.
+ *
  * A 2D canvas has no perspective, so the photo is cut into a grid of cells,
  * each cell into two triangles, and every triangle is laid with the flat
  * transform that matches its three corners. Fine enough a grid and the eye
@@ -87,29 +90,44 @@ export function drawStraightened(ctx, picture, { width, height }, k, shape, out,
  * where `place(u, v)` (the photo's own point to the frame's, 0 to 1) puts
  * their corners. Says how many triangles were laid.
  */
-function drawMesh(ctx, picture, { width, height }, place, out, cells) {
-  const to = (u, v) => {
-    const p = place(u, v);
-    return [p.u * out.width, p.v * out.height];
-  };
+function drawMesh(ctx, picture, size, place, out, cells) {
+  const edges = Array.from({ length: cells + 1 }, (_, i) => i / cells);
+  return drawGrid(ctx, picture, size, place, out, edges, edges);
+}
+
+/**
+ * Lay `picture` on the grid whose edges are `us` across and `vs` down (0 to
+ * 1), each cell's two triangles where `place(u, v, cell)` puts their corners,
+ * `cell` the cell's middle, so a cell can be laid whole by what holds at its
+ * middle. A corner `place` puts nowhere (null) leaves its triangles out. Says
+ * how many triangles were laid.
+ */
+function drawGrid(ctx, picture, { width, height }, place, out, us, vs) {
   const from = (u, v) => [u * width, v * height];
   let laid = 0;
-  for (let row = 0; row < cells; row += 1) {
-    for (let column = 0; column < cells; column += 1) {
-      const u0 = column / cells;
-      const u1 = (column + 1) / cells;
-      const v0 = row / cells;
-      const v1 = (row + 1) / cells;
+  for (let row = 0; row + 1 < vs.length; row += 1) {
+    for (let column = 0; column + 1 < us.length; column += 1) {
+      const u0 = us[column];
+      const u1 = us[column + 1];
+      const v0 = vs[row];
+      const v1 = vs[row + 1];
+      const cell = { u: (u0 + u1) / 2, v: (v0 + v1) / 2 };
+      const to = (u, v) => {
+        const p = place(u, v, cell);
+        return p ? [p.u * out.width, p.v * out.height] : null;
+      };
       // the cell's own pixels, a pixel wide, so the clip has something under its widened edge
       const sx = Math.max(0, Math.floor(u0 * width) - 1);
       const sy = Math.max(0, Math.floor(v0 * height) - 1);
       const sw = Math.min(width, Math.ceil(u1 * width) + 1) - sx;
       const sh = Math.min(height, Math.ceil(v1 * height) + 1) - sy;
+      const [a, b, c, d] = [to(u0, v0), to(u1, v0), to(u1, v1), to(u0, v1)];
       const halves = [
-        [from(u0, v0), from(u1, v0), from(u1, v1), to(u0, v0), to(u1, v0), to(u1, v1)],
-        [from(u0, v0), from(u1, v1), from(u0, v1), to(u0, v0), to(u1, v1), to(u0, v1)],
+        [from(u0, v0), from(u1, v0), from(u1, v1), a, b, c],
+        [from(u0, v0), from(u1, v1), from(u0, v1), a, c, d],
       ];
       for (const [s0, s1, s2, d0, d1, d2] of halves) {
+        if (!d0 || !d1 || !d2) continue;
         const transform = triangleTransform([s0, s1, s2], [d0, d1, d2]);
         if (!transform) continue;
         const clip = widened([d0, d1, d2], SEAM_PX);
@@ -132,6 +150,17 @@ function drawMesh(ctx, picture, { width, height }, place, out, cells) {
 }
 
 /**
+ * Draw `picture` laid as a search read it (lib/horizon/laid.js: `place`, and
+ * the grid's edges `us` and `vs`) on a 2D context `out.width` × `out.height`.
+ * Says how many triangles were laid.
+ */
+export function drawLaid(ctx, picture, size, laid, out) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, out.width, out.height);
+  return drawGrid(ctx, picture, size, laid.place, out, laid.us, laid.vs);
+}
+
+/**
  * The photo between its corners as a new canvas: at the photo's own size, or
  * at most `PULL_PX` along its long side while `fast`. Null when this browser
  * offers no canvas or the corners have folded.
@@ -148,6 +177,11 @@ export function paintWarped(picture, corners, { fast = false } = {}) {
  */
 export function paintStraightened(picture, k, shape, { fast = false } = {}) {
   return paint(picture, fast, (ctx, size, out) => drawStraightened(ctx, picture, size, k, shape, out, fast ? BEND_CELLS.fast : BEND_CELLS.fine));
+}
+
+/** The photo laid as a search read it (lib/horizon/laid.js) as a new canvas, at the photo's own size. Null when this browser offers no canvas. */
+export function paintLaid(picture, laid) {
+  return paint(picture, false, (ctx, size, out) => drawLaid(ctx, picture, size, laid, out));
 }
 
 /** A canvas the picture's size (smaller while `fast`), drawn by `draw`; null when nothing was laid on it. */

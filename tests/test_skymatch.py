@@ -157,19 +157,47 @@ def test_the_straight_line_is_not_dragged_up_by_a_peak():
     assert off[np.abs(x) < 0.05].min() > 90.0
 
 
-def test_every_part_of_the_trace_must_fit():
+def test_one_part_of_the_trace_may_miss_but_not_two():
     x, y = trace_on(RANGE, heading=47.0, fov=52.0)
     loss = np.zeros(x.size)
     whole = skymatch.explained_by(loss, x, y, HALF)
-    # the right quarter lost: most of the trace still lies on the terrain, the score falls far more
+    # the right quarter lost (a collage's edge, a ridge too near for the terrain): let go, the rest still counts
     loss[x > 0.5] = skymatch.LOST_LOSS
-    part = skymatch.explained_by(loss, x, y, HALF)
-    assert whole == 1.0 and part < 0.6
+    one = skymatch.explained_by(loss, x, y, HALF)
+    assert whole == 1.0 and 0.5 < one < 0.8
+    # a second part lost as well: the place no longer fits across the trace
+    loss[x < -0.5] = skymatch.LOST_LOSS
+    two = skymatch.explained_by(loss, x, y, HALF)
+    assert two < 0.4
+    loss[x > 0] = skymatch.LOST_LOSS
+    assert skymatch.explained_by(loss, x, y, HALF) < 0.3
     # a part with no shape of its own is only asked to lie on the terrain
     flat = np.linspace(-0.9, 0.9, 200)
     bumped = np.where(flat < 0, 0.3 * np.exp(-((flat + 0.45) ** 2) / 0.01), 0.0)
     near = np.full(flat.size, float(skymatch._loss(np.array([1.0]))[0]))
     assert skymatch.explained_by(near, flat, bumped, HALF) > 0.8
+
+
+def test_near_lines_rounded_lose_the_teeth_the_terrain_cannot_hold():
+    # a ridge 400 m off, known to a 30 m cell: the photo shows teeth on it the terrain cannot
+    near = skymatch.Turn(0.0, STEP, RANGE.angles, distance=np.full(RANGE.angles.size, 400.0))
+    x, y = trace_on(near, heading=50.0, fov=40.0)
+    teeth = y + 0.02 * np.sin(x * 60)
+    drawn = skymatch.match(x, teeth, near, half_width=HALF, fov=40.0, known=True).fits[0]
+    rounded = skymatch.match(x, teeth, near, half_width=HALF, fov=40.0, known=True, rounding=30.0).fits[0]
+    assert drawn.explained < 0.6 and rounded.explained > 0.95
+    assert rounded.heading == pytest.approx(50.0, abs=0.2)
+    # a trace lying exactly on the terrain still does once rounded
+    assert skymatch.match(x, y, near, half_width=HALF, fov=40.0, known=True, rounding=30.0).fits[0].explained == 1.0
+    # the nearer, the rounder: a ridge 1.5 km off keeps more of its teeth
+    farther = skymatch.Turn(0.0, STEP, RANGE.angles, distance=np.full(RANGE.angles.size, 1_500.0))
+    less = skymatch.match(x, teeth, farther, half_width=HALF, fov=40.0, known=True, rounding=30.0).fits[0]
+    assert drawn.explained < less.explained < rounded.explained
+    # a far ridge is left as drawn
+    far = skymatch.Turn(0.0, STEP, RANGE.angles, distance=np.full(RANGE.angles.size, 10_000.0))
+    plain = skymatch.match(x, teeth, far, half_width=HALF, fov=40.0, known=True).fits[0]
+    kept = skymatch.match(x, teeth, far, half_width=HALF, fov=40.0, known=True, rounding=30.0).fits[0]
+    assert kept.explained == pytest.approx(plain.explained, abs=1e-9)
 
 
 def test_a_trace_matched_on_the_wrong_turn_scores_lower_than_today():
@@ -469,6 +497,47 @@ def test_a_pair_in_the_wrong_order_takes_a_share_of_the_score():
     assert bad.explained == pytest.approx(alone.explained * (1 - skymatch.PAIR_COST), abs=1e-6)
 
 
+def test_a_line_with_only_sky_above_loses_the_place_where_land_stands_over_it():
+    near = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
+    farther = skyturn([(58, 4.0, 4)], base=0.0)
+    over = farther.angles > near.angles
+    distance = np.where(over, 8_000.0, 3_000.0)
+    cut = skymatch.Turn(0.0, STEP, near.angles, reach=5_000.0, distance=np.full(near.angles.size, 3_000.0))
+    whole = skymatch.Turn(0.0, STEP, np.maximum(near.angles, farther.angles), reach=20_000.0, distance=distance)
+    x, y = trace_on(cut, heading=50.0, fov=40.0)
+    # the left half is one stroke, the right half, under the farther range, another
+    line = (x > 0).astype(np.int64)
+    # the place itself, the search held to its heading
+    at = (50.0, 3.0)
+    alone = skymatch.match(x, y, [cut, whole], half_width=HALF, fov=40.0, known=True, facing=at,
+                           marks=skymatch.Marks(line=line)).fits[0]
+    assert alone.reach == 5_000.0 and alone.over is None
+
+    def said(clear, seen=None):
+        marks = skymatch.Marks(line=line, clear=clear)
+        return skymatch.match(x, y, [cut, whole], half_width=HALF, fov=40.0, known=True, facing=at, marks=marks,
+                              clear=seen).fits[0]
+
+    # read as far as the place's own cut, or said to see 5 km, haze hides the range: nothing stands over the line
+    for hazy in (said((1,)), said((1,), cut)):
+        assert hazy.over == 0.0 and hazy.explained == pytest.approx(alone.explained, abs=1e-6)
+    # the photo said to see 20 km: the range stands over the right half, and the place is no place
+    clear = said((1,), whole)
+    assert clear.over > 0.3 and clear.explained == 0.0
+    # the left half has sky above it wherever the photo sees
+    assert said((0,), whole).over == 0.0
+
+
+def test_land_over_a_line_counts_past_the_heights_own_error():
+    turn = skymatch.Turn(0.0, 90.0, np.full(4, 3.0), distance=np.array([300.0, 3_000.0, 3_000.0, 3_000.0]))
+    per = 20.0
+    # 2° over, a hillside 300 m off: within what 15 m of error spans there; 3 km off it is not
+    under = skymatch.under_terrain(np.array([0.0, 90.0]), np.array([1.0, 1.0]), turn, per)
+    assert under.tolist() == [False, True]
+    # a few pixels over is the fit's own give, not land
+    assert not skymatch.under_terrain(np.array([90.0]), np.array([3.0 - 0.5]), turn, per)[0]
+
+
 def test_a_collage_cut_in_pieces_fits_each_a_little_on_its_own_and_no_more():
     x, y = trace_on(RANGE, heading=47.0, fov=52.0)
     right = x > 0
@@ -480,7 +549,7 @@ def test_a_collage_cut_in_pieces_fits_each_a_little_on_its_own_and_no_more():
     cut = skymatch.match(x, shifted, RANGE, half_width=HALF, fov=52.0, known=True,
                          marks=skymatch.Marks(piece=right.astype(np.int64))).fits[0]
     assert rise[0] - lower[0] > 0.4
-    assert cut.explained > whole.explained + 0.1
+    assert cut.explained > 0.99 and cut.explained > whole.explained + 0.05
     assert cut.sky == cut.explained
     # each piece says how it was eased: the right one tilted about half a degree from the left
     (left_piece, *left), (right_piece, *right_eased) = cut.pieces
@@ -492,4 +561,5 @@ def test_a_collage_cut_in_pieces_fits_each_a_little_on_its_own_and_no_more():
     far_off = np.where(right, y - 0.11, y)
     loose = skymatch.match(x, far_off, RANGE, half_width=HALF, fov=52.0, known=True,
                            marks=skymatch.Marks(piece=right.astype(np.int64))).fits[0]
-    assert loose.explained < 0.6
+    assert loose.explained < cut.explained - 0.3
+    assert all(abs(tilt) <= skymatch.PIECE_TILT + 1e-9 for _, _, tilt, _ in loose.pieces)

@@ -117,6 +117,35 @@ describe('the steps of Find', () => {
     const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
     const sized = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: { points: 1003, most: 3205, step: 0.5 } }) });
     expect(sized.textContent).toContain('1,003 points, about 5 min; up to 16 min where relief stands near.');
+    // a grid picked finer than the area allows is said widened; Auto widens unsaid
+    const wide = { points: 6000, step: 0.5, asked: 20, spacing: 244.1, zones_wider: 1.6 };
+    const picked = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', settings: { spacing: 20, tolerance: 1 }, estimated: wide }) });
+    expect(picked.textContent).toContain('Too large for a 20 m grid, even in hours: a point every 244 m. A zone searches finer.');
+    expect(picked.textContent).toContain('Zones too large for their grid: points 1.6× farther apart.');
+    const auto = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', estimated: wide }) });
+    expect(auto.textContent).not.toContain('Too large for a');
+  });
+
+  it('offers what the trace says: a camera looking down past the bounds, a wide picture to cut', () => {
+    const find = fakeFind({ traceSays: { looking: 'down', span: 50 } });
+    const root = steps({ find });
+    expect(root.textContent).toContain('The skyline stands high in the frame: the camera may look down.');
+    buttonNamed(root, 'Tick Looking down').click();
+    expect(find.toggleView).toHaveBeenCalledWith('down');
+    // ticked already, or the trace sits where the bounds reach: nothing to offer
+    expect(steps({ find: fakeFind({ traceSays: { looking: 'down', span: 50 }, view: ['down'] }) }).textContent).not.toContain('may look down');
+    expect(steps({ find: fakeFind({ traceSays: { looking: null, span: 50 } }) }).textContent).not.toContain('may look');
+    const up = steps({ find: fakeFind({ traceSays: { looking: 'up', span: 50 } }) });
+    expect(up.textContent).toContain('The skyline stands low in the frame: the camera may look up.');
+    // a picture read as one across 126°: cut it; a collage read frame by frame or cut already is left alone
+    const setCutting = vi.fn();
+    const wide = steps({ find: fakeFind({ traceSays: { looking: null, span: 126 } }), overlay: { ...overlay, setCutting } });
+    expect(wide.textContent).toContain('A wide picture drifts at its ends: cut it where its frames meet.');
+    buttonNamed(wide, 'Cut').click();
+    expect(setCutting).toHaveBeenCalledWith(true);
+    const framed = { collage: 'Collage 10', frames: 8, stitched: 3, lens: 30, span: 126 };
+    expect(steps({ find: fakeFind({ traceSays: { looking: null, span: 126 } }), overlay: { ...overlay, framesRead: framed } }).textContent).not.toContain('A wide picture');
+    expect(steps({ find: fakeFind({ traceSays: { looking: null, span: 126 } }), overlay: { ...overlay, marks: { lines: [0], inner: [], pairs: [], cuts: [0.4] } } }).textContent).not.toContain('A wide picture');
   });
 
   it('follows a running search and stops it', () => {
@@ -149,6 +178,39 @@ describe('the steps of Find', () => {
     const places = [{ lat: 12.702, lon: 43.5415, explained: 0.79, heading: 271.6, fov: 55, inner: 0.898, pairs: [4, 4] }];
     const root = steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'match', places, points: [] } } }) });
     expect(root.querySelector('.fs-place').textContent).toContain('ridges in front 90% on the terrain · 4 of 4 pairs in order');
+    expect(root.textContent).not.toContain('The map shades where');
+  });
+
+  it('says where land stands over the lines with only sky above, and nothing where none does', () => {
+    const place = { lat: 12.702, lon: 43.5415, explained: 0.31, heading: 271.6, fov: 55 };
+    const shown = (over) =>
+      steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'loose', places: [{ ...place, over }], points: [] } } }) })
+        .querySelector('.fs-place').textContent;
+    expect(shown(0.064)).toContain('land over the sky-only lines on 6% of them');
+    expect(shown(0)).not.toContain('sky-only');
+  });
+
+  it('offers to round near lines where the relief is coarse, and says so before the search', () => {
+    const setRound = vi.fn();
+    const area = [{ lat: 1, lon: 1 }, { lat: 1, lon: 2 }, { lat: 2, lon: 2 }];
+    const coarse = steps({ find: fakeFind({ detail: 30, round: false, setRound }) });
+    expect(coarse.textContent).toContain('Relief here is known to 30 m');
+    buttonNamed(coarse, 'Round near lines').click();
+    expect(setRound).toHaveBeenCalledWith(true);
+    const on = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', detail: 30, round: true }) });
+    expect(on.textContent).toContain('near lines rounded');
+    // a national survey holds near ridges as the photo shows them: nothing to round
+    const fine = steps({ find: fakeFind({ area, areaProblem: '', searchProblem: '', detail: 1, round: true }) });
+    expect(buttonNamed(fine, 'Round near lines')).toBeUndefined();
+    expect(fine.textContent).not.toContain('near lines rounded');
+  });
+
+  it('says what the map shows when nothing explains the trace', () => {
+    const places = [{ lat: 12.67, lon: 43.49, explained: 0, heading: 186, fov: 30, gap: 1.6 }];
+    const points = [{ lat: 12.67, lon: 43.49, explained: 0, gap: 1.6, spacing: 100 }, { lat: 12.73, lon: 43.5, explained: 0, gap: 0.4, spacing: 100 }];
+    const root = steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'none', places, points } } }) });
+    expect(root.textContent).toContain('Nothing in the area explains the trace');
+    expect(root.textContent).toContain('The map shades where the trace lies nearest the terrain.');
   });
 
   it('says what the search runs with, and warns of a short reach or any lens before it runs', () => {

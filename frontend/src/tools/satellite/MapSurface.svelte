@@ -23,12 +23,14 @@
    * a tile counted against the month is counted once, however many surfaces
    * drew it. Which provider *this* surface shows is its own.
    */
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
+  import { createDualEngine } from '../../lib/globe/dualEngine.js';
+  import { createMirror } from '../../lib/globe/mirror.js';
   import { createRelief, steadyZoom } from '../../lib/map/relief.js';
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
-  import { createBasemaps, imageryError, IMAGERY_SOURCE, OVERLAY_IDS } from '../../lib/map/basemap.js';
+  import { createBasemaps, imageryError, isGround, IMAGERY_SOURCE, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import { RADAR_ID, orbitMark } from '../../lib/radar.js';
   import { pictureDate } from '../../lib/map/pictureDate.js';
@@ -36,6 +38,7 @@
   import Compass from '../../components/Compass.svelte';
   import ImageryChip from './ImageryChip.svelte';
   import ReliefControl from './ReliefControl.svelte';
+  import GlobeView from './GlobeView.svelte';
 
   let {
     /** The shared catalogue + meter (state/imagery.svelte.js). */
@@ -72,6 +75,8 @@
     pitch = $bindable(0),
     /** True once the relief is on the map and the camera may lean over it. */
     reliefReady = $bindable(false),
+    /** True while the globe draws this surface, which leaves out the layers it cannot draw. */
+    onGlobe = $bindable(false),
     /** The façade, once the map is up. Null while it is not. */
     engine = $bindable(null),
     /** The map container, for the drag gestures a tool arms over it. */
@@ -124,6 +129,8 @@
   } = $props();
 
   let mapEl = $state();
+  /** The flat map's own façade; `engine` is the one the tool holds, which a globe takes over in 3D. */
+  let flat = null;
   let basemaps = null;
   let relief = null;
   let tileFailure = $state(null);
@@ -214,7 +221,9 @@
   async function build() {
     if (resetToHome) view = { ...home };
     try {
-      engine = await createMapEngine(mapEl, { view, imperial });
+      flat = await createMapEngine(mapEl, { view, imperial });
+      // a surface that offers relief draws it on the globe: the tool's façade follows whichever draws
+      engine = reliefOffered ? createDualEngine(flat) : flat;
     } catch (e) {
       // The engine draws through WebGL and a browser can refuse it: an old
       // driver, a machine with no GPU, a profile hardened to turn it off. It
@@ -227,7 +236,7 @@
     }
     element = mapEl;
     engine.setBearing(bearing);
-    basemaps = createBasemaps(engine, {
+    basemaps = createBasemaps(flat, {
       onMeteredTiles: onusage,
       // one billed map load, counted where it happens (the proxy can't see it)
       onWidgetLoad: (provider) => onwidgetload(provider.meter),
@@ -253,14 +262,14 @@
     // reported once its centre sits on the ground (lib/map/groundHold.js).
     relief = reliefOffered
       ? createRelief(
-          engine.impl,
+          flat.impl,
           () => api.get('/api/terrain/sources'),
           {
             imagery: IMAGERY_SOURCE,
             // a tilted view's turn is fetched ahead into the app's caches (lib/map/warmTurn.js)
             send: (body) => api.post('/api/tiles/warm', body),
           },
-          { mapId: engine.mapId }
+          { mapId: flat.mapId }
         )
       : null;
     // the façade wraps the centre back inside ±180 for us, which is what every
@@ -270,7 +279,8 @@
       onviewsettled(settled);
     });
     const offRotate = engine.on('rotate', (turned) => {
-      bearing = Math.round(turned.bearing);
+      // a turn a hair under 360 reads 0, not 360
+      bearing = Math.round(turned.bearing) % 360;
       onbearingchange(turned);
     });
     const offPitch = engine.on('pitch', (tilted) => (pitch = tilted.pitch));
@@ -287,7 +297,8 @@
       offClick();
       offMenu();
       basemaps.dispose();
-      engine.destroy();
+      flat.destroy();
+      flat = null;
       engine = null;
       element = null;
       ready = false;
@@ -301,6 +312,7 @@
 
   function retryImagery() {
     tileFailure = null;
+    engine?.globe?.retry();
     basemaps?.retry(shown.provider, shown.id, shown.cell);
   }
 
@@ -324,6 +336,71 @@
   const reliefPossible = $derived(reliefOffered && !shown.provider?.widget);
 
   /**
+   * The 3D view is the globe (lib/globe), drawn by the app. The flat engine's
+   * own 3D stays one press away while the globe is new, to compare the two
+   * (`classic`, kept in this browser), and is what a browser without WebGL2
+   * gets.
+   */
+  const CLASSIC = 'azimut.relief.classic';
+  let classic = $state(readClassic());
+  let globeRefused = $state(false);
+  // the globe has taken the screen (GlobeView `onvisible`); until then the flat map shows
+  let globeVisible = $state(false);
+  function readClassic() {
+    try {
+      return localStorage.getItem(CLASSIC) === '1';
+    } catch {
+      return false;
+    }
+  }
+  $effect(() => {
+    const value = classic;
+    try {
+      localStorage.setItem(CLASSIC, value ? '1' : '0');
+    } catch {
+      // a private window keeps the choice for this visit only
+    }
+  });
+  const globeOn = $derived(ready && reliefPossible && reliefOn && !classic && !globeRefused);
+
+  /**
+   * The globe is up: it takes the camera where the flat map holds it, and the
+   * tool's calls. The flat map's centre height is not handed over: without its
+   * own relief it reads 0 m, so the globe reads the ground there itself.
+   *
+   * It draws what the flat map holds (lib/globe/mirror.js), but the imagery,
+   * which it draws itself, and the fires, whose allowance a view to the
+   * horizon would spend (the tool leaves them out meanwhile).
+   */
+  let mirror = null;
+  function globeReady(globe, { marks }) {
+    const now = flat.camera();
+    globe.setCamera({ lat: now.lat, lon: now.lon, zoom: flat.exactZoom(), bearing: now.bearing, pitch: now.pitch });
+    engine.attachGlobe(globe);
+    mirror = createMirror(flat.impl, globe, { canvas: marks, exclude: (id) => isGround(id) || id.startsWith('basemap-firms') });
+    reliefReady = true;
+    onGlobe = true;
+  }
+
+  /** The globe goes: the flat map takes the camera back, level, where the globe stood. */
+  function globeGone(globe) {
+    const now = globe.camera();
+    const zoom = globe.exactZoom();
+    mirror?.destroy();
+    mirror = null;
+    onGlobe = false;
+    engine?.detachGlobe();
+    reliefReady = false;
+    globeVisible = false;
+    pitch = 0;
+    flat?.setCamera({ lat: now.lat, lon: now.lon, zoom, bearing: now.bearing, pitch: 0 });
+  }
+
+  function globeTrouble(error) {
+    tileFailure = { id: shown.id, message: imageryError(error, 1, '') };
+  }
+
+  /**
    * Lean the camera: at once over relief that is in, else as soon as it is
    * (the 3D switch leans the view while its relief is still on the way, and a
    * map without terrain holds any tilt at zero).
@@ -342,22 +419,18 @@
     engine.idle().then(() => engine?.setPitch(deg));
   });
 
-  // Standing on its relief, Borders is drawn as lines rather than Esri's picture,
-  // whose printed names would lie on the slopes (`borders.js`).
+  // Relief asks for its sources and tiles only once it is switched on, and the
+  // flat engine's only for its own 3D: the globe reads its relief itself.
   $effect(() => {
-    const over = reliefReady;
-    if (ready && basemaps && reliefOffered) basemaps.setRelief(over);
-  });
-
-  // Relief asks for its sources and tiles only once it is switched on.
-  $effect(() => {
-    const on = reliefPossible && reliefOn;
+    const on = reliefPossible && reliefOn && !globeOn;
     const scale = exaggeration;
     if (!ready || !relief) return;
     const shown = relief;
     shown
       .show(on, { exaggeration: scale })
-      .then(() => (reliefReady = shown.on))
+      .then(() => {
+        if (!untrack(() => globeOn)) reliefReady = shown.on;
+      })
       .catch((error) => {
         console.error(error);
         reliefOn = false;
@@ -445,7 +518,20 @@
   class:grabbing
   style:--map-controls-top={`${controlsTop}px`}
 >
-  <div class="map" class:hazed={reliefPossible && reliefOn} bind:this={mapEl}></div>
+  <div class="map" class:hazed={reliefPossible && reliefOn} class:under-globe={globeOn && globeVisible} bind:this={mapEl}></div>
+
+  {#if globeOn}
+    <GlobeView
+      {shown}
+      {exaggeration}
+      onready={globeReady}
+      onvisible={() => (globeVisible = true)}
+      onteardown={globeGone}
+      onrefused={() => (globeRefused = true)}
+      {onusage}
+      ontrouble={globeTrouble}
+    />
+  {/if}
 
   {#if refused}
     <p class="map-refused">The map needs WebGL, which this browser does not have.</p>
@@ -549,8 +635,8 @@
     <!-- Which way is up. Middle-dragging the map is what turns it. -->
     <Compass {bearing} onbearing={setBearing} />
     {#if reliefPossible}
-      <ReliefControl bind:on={reliefOn} bind:exaggeration {pitch} ontilt={lean}
-        onhint={(text) => toast(text, 'info', 6000)} />
+      <ReliefControl bind:on={reliefOn} bind:exaggeration bind:classic {pitch} ontilt={lean}
+        classicOffered={!globeRefused} onhint={(text) => toast(text, 'info', 6000)} />
       {#if reliefOn && pitch > 0 && shown.provider?.meter}
         <!-- lib/map/quotaGuard.js: past a flat view's reach the ground is Esri's -->
         <span
@@ -614,6 +700,16 @@
   .map.hazed {
     background: #c9d6e3;
   }
+  /* Under the globe the flat map keeps its size and its state, the box
+     everything is measured against, and lies over the globe see-through: its
+     markers and cards stand where the globe shows their point
+     (lib/globe/mirror.js), and the rest of it is hidden and lets the pointer
+     through (`engine.css`). */
+  .map.under-globe {
+    z-index: 2;
+    pointer-events: none;
+    background: transparent;
+  }
   .map-refused {
     position: absolute;
     inset: 0;
@@ -633,13 +729,16 @@
      :global is load-bearing — the reference windows are a child component, so
      a scoped selector would skip exactly the overlay the spec says must never
      be captured. */
-  .map-wrap.grabbing > :global(:not(.map):not(.marker-overlay)) {
+  .map-wrap.grabbing > :global(:not(.map):not(.globe):not(.marker-overlay)) {
     visibility: hidden;
   }
   .map-wrap.measuring :global(.map-surface),
   .map-wrap.selecting :global(.map-surface),
   .map-wrap.grid-drawing :global(.map-surface),
-  .map-wrap.tracing :global(.map-surface) {
+  .map-wrap.tracing :global(.map-surface),
+  .map-wrap.measuring :global(.globe canvas),
+  .map-wrap.selecting :global(.globe canvas),
+  .map-wrap.tracing :global(.globe canvas) {
     cursor: crosshair;
   }
   /* imagery date: small, low-contrast pill riding under the provider it dates */

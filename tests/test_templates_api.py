@@ -152,6 +152,15 @@ def test_post_template_tweet_count_is_bounded(client):
     assert response.status_code == 422
 
 
+def test_post_template_mention_holds_several_full_handles(client):
+    mention = "@geoconfirmed.org @uacontrolmap.bsky.social @ukrainedailyupdate.bsky.social"
+    response = client.post(
+        "/api/templates/post", json={"name": "Handles", "data": {"mention": mention}}
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["mention"] == mention
+
+
 def test_whitespace_only_names_are_rejected_on_create_and_edit(client):
     created = client.post("/api/templates/proof", json={"name": "Good", "data": {}})
     assert created.status_code == 200

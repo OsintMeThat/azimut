@@ -36,14 +36,15 @@
     standsText,
     UNCLEAR_HELP,
     VERDICTS,
+    WIDE_SPAN,
     withGround,
   } from '../../lib/horizon/find.js';
   import { AUTO_REACH, cleanZoom, reachText, zoomText } from '../../lib/horizon/hints.js';
   import { headingText } from '../../lib/horizon/geometry.js';
-  import { estimateText, SPACINGS, SPEEDS, VIEWS, WHO } from './state/find.svelte.js';
+  import { estimateText, SPACINGS, SPEEDS, VIEWS, WHO, widenedText } from './state/find.svelte.js';
   import { farLabel } from '../../lib/horizon/traceMarks.js';
   import { marksSummary } from '../../lib/horizon/traceTools.js';
-  import { reliefWords } from '../../lib/horizon/overlay.js';
+  import { COARSE_RELIEF_M, reliefWords } from '../../lib/horizon/overlay.js';
   import { formatDistance } from '../../lib/measure.js';
 
   let {
@@ -131,7 +132,7 @@
   const resultFace = $derived(Boolean(search) && !preparing);
 
   /** What a search runs with, in a line: the lens, which way it faces, how far it reads, who took the photo. */
-  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', facing = [], stands = [], marks = null, looking = [], mirror = false, framed = null, sun = null }) {
+  function toldOf({ hints = {}, lens = null, panorama = false, who = 'ground', facing = [], stands = [], marks = null, looking = [], mirror = false, round = false, framed = null, sun = null }) {
     const zoom = cleanZoom(hints.zoom);
     const anyLens = !framed && !lens && !panorama && !zoom.length;
     const lensWords = framed
@@ -168,6 +169,7 @@
       ...(ground ? [`on a ${ground}`] : []),
       ...VIEWS.filter((v) => looking.includes(v.id)).map((v) => v.label.toLowerCase()),
       ...(mirror ? ['mirrored too'] : []),
+      ...(round ? ['near lines rounded'] : []),
     ];
     return { line: parts.join(' · '), anyLens, near: allSaid ? null : near };
   }
@@ -184,10 +186,22 @@
       marks: overlay.marks,
       looking: find.view ?? [],
       mirror: find.mirror,
+      round: find.round && find.detail >= COARSE_RELIEF_M,
       framed: overlay.framesRead ?? null,
       sun: find.sun,
     })
   );
+
+  /** What the trace says the search should be told: a way the camera looks past what is searched, a picture to cut. */
+  const says = $derived(find.traceSays ?? null);
+  const lookingNudge = $derived.by(() => {
+    const id = says?.looking;
+    if (!id || find.view?.includes(id)) return null;
+    const label = VIEWS.find((v) => v.id === id)?.label ?? id;
+    const say = id === 'down' ? 'The skyline stands high in the frame: the camera may look down.' : 'The skyline stands low in the frame: the camera may look up.';
+    return { id, label, say };
+  });
+  const cutNudge = $derived(Boolean(says && !overlay.framesRead && says.span >= WIDE_SPAN && !overlay.marks?.cuts?.length));
 
   /** What the search on show was asked with, and when. */
   const asked = $derived.by(() => {
@@ -195,7 +209,7 @@
     if (!ask) return '';
     const area = areaText(areaPoints(ask.area));
     const aligned = ask.alignments?.length ? `${ask.alignments.length} ${ask.alignments.length === 1 ? 'alignment' : 'alignments'}` : '';
-    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: ask.who?.mode, facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), sun: ask.sun ?? null }).line;
+    const line = toldOf({ hints: ask.hints ?? {}, panorama: ask.hints?.picture === 'panorama', who: ask.who?.mode, facing: ask.facing ?? [], stands: ask.stands ?? [], marks: ask.photo?.marks ?? null, looking: ask.view ?? [], mirror: Boolean(ask.mirror), round: Boolean(ask.round), sun: ask.sun ?? null }).line;
     return [area, line, aligned].filter(Boolean).join(' · ');
   });
 
@@ -276,6 +290,9 @@
         <p class="fs-say quiet">It runs in the app: you can leave Find and come back.</p>
       {:else if result}
         <p class="fs-say strong">{VERDICTS[result.verdict] ?? ''}</p>
+        {#if !(result.places?.[0]?.explained > 0) && result.points?.some((p) => Number.isFinite(p.gap))}
+          <p class="fs-say">The map shades where the trace lies nearest the terrain.</p>
+        {/if}
         {#if result.verdict === 'unclear'}
           <p class="fs-say">{UNCLEAR_HELP}</p>
         {/if}
@@ -335,6 +352,9 @@
                         : ''}{place.pairs ? `${place.pairs[0]} of ${place.pairs[1]} ${place.pairs[1] === 1 ? 'pair' : 'pairs'} in order` : ''}</small
                     >
                   {/if}
+                  {#if place.over}
+                    <small>land over the sky-only lines on {Math.round(place.over * 100)}% of them</small>
+                  {/if}
                   <small
                     >{place.lat.toFixed(4)}, {place.lon.toFixed(4)}{Number.isFinite(place.decoy) ? ` · decoys ${Math.round(place.decoy * 100)}%` : ''}{trust?.chance !=
                     null
@@ -381,6 +401,17 @@
         {/if}
         {#if overlay.source && find.detail}
           <p class="fs-say quiet">{reliefWords(find.detail)}</p>
+          {#if find.detail >= COARSE_RELIEF_M}
+            <div class="fs-pills">
+              <button
+                type="button"
+                class:on={find.round}
+                aria-pressed={find.round}
+                title="Lines under 3 km are judged rounded to the relief, the nearer the rounder"
+                onclick={() => find.setRound(!find.round)}>Round near lines</button
+              >
+            </div>
+          {/if}
         {/if}
       </li>
 
@@ -461,6 +492,9 @@
           <p class="fs-say">With {told.line}.</p>
           {#if find.estimated}
             <p class="fs-say">{estimateText(withGround(find.estimated, find.previewed))}</p>
+            {#each widenedText(find.estimated, units, find.settings.spacing !== 'auto') as line (line)}
+              <p class="fs-say warn">{line}</p>
+            {/each}
           {/if}
         {/if}
         {#if told.near}
@@ -468,6 +502,20 @@
         {/if}
         {#if told.anyLens}
           <p class="fs-say warn">Any lens finds more chance fits: say the zoom if you can.</p>
+        {/if}
+        {#if lookingNudge}
+          <p class="fs-say warn">{lookingNudge.say}</p>
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm" onclick={() => find.toggleView(lookingNudge.id)}>Tick {lookingNudge.label}</button>
+          </div>
+        {/if}
+        {#if cutNudge}
+          <p class="fs-say warn">A wide picture drifts at its ends: cut it where its frames meet.</p>
+          <div class="fs-acts">
+            <button type="button" class="btn btn-sm" title="Each piece is then fitted a little on its own (X)" onclick={() => overlay.setCutting(true)}
+              ><Icon name="scissors" size={13} />Cut</button
+            >
+          </div>
         {/if}
         <div class="fs-acts">
           <button type="button" class="btn btn-sm btn-primary" disabled={Boolean(find.searchProblem) || starting || find.searching} onclick={start}
@@ -730,7 +778,7 @@
                 role="radio"
                 class:on={find.settings.spacing === spacing}
                 aria-checked={find.settings.spacing === spacing}
-                title={spacing === 'auto' ? 'As fine as the area allows' : `A point every ${spacing} m`}
+                title={spacing === 'auto' ? 'As fine as about ten minutes of search allow' : `A point every ${spacing} m`}
                 onclick={() => find.setSettings({ spacing })}>{spacing === 'auto' ? 'Auto' : formatDistance(spacing, units)}</button
               >
             {/each}

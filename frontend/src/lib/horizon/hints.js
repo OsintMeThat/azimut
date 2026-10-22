@@ -69,7 +69,7 @@ export const PANORAMA_WITHIN = [60, 360];
 export const PANORAMA_FRAME = 60;
 
 /** The reaches the panorama keeps its skyline at, metres: the app's SKYLINE_CUTS. */
-export const REACHES = [5_000, 10_000, 20_000, 50_000, 100_000];
+export const REACHES = [2_000, 5_000, 10_000, 20_000, 50_000, 100_000];
 
 /** The farthest reach Fit tries when left to itself, metres. */
 export const AUTO_REACH = 50_000;

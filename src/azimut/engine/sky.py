@@ -655,3 +655,47 @@ def day_curve(
         "moon_azimuth": [round(v, 2) for v in values["moon_azimuth"].tolist()],
         "moon_illuminated": [round(v, 4) for v in values["moon_illuminated"].tolist()],
     }
+
+
+def shadow_moments(
+    lat: float, lon: float, start: datetime, end: datetime, bearing: float
+) -> list[dict[str, Any]]:
+    """The instants of one day when the sun throws a shadow along ``bearing``.
+
+    A shadow points away from the sun, so the sun stands at ``bearing`` + 180°.
+    Its azimuth sweeps round the sky once a day, so the day is read on a
+    one-minute grid for the minutes the sun crosses that azimuth while it is up,
+    each then placed to the second. Near the tropics in summer the sun can cross
+    one azimuth twice; both instants come back. Each carries the sun's apparent
+    altitude, which is the one a shadow's length follows.
+    """
+    wanted = (bearing + 180.0) % 360.0
+    jd = _grid(start, end, 60)
+    values = _positions(lat, lon, jd)
+    # the signed gap to the wanted azimuth, in [-180, 180): it changes sign where
+    # the sun crosses the azimuth, and jumps by 360 where it crosses the opposite one
+    gap = (values["sun_azimuth"] - wanted + 180.0) % 360.0 - 180.0
+    up = values["sun_apparent_altitude"] > 0
+    sign = np.sign(gap)
+    for index in np.nonzero(sign == 0)[0]:
+        sign[index] = sign[index - 1] if index > 0 else 1.0
+
+    def offset(point: float) -> float:
+        one = _positions(lat, lon, np.array([point]))
+        return float((one["sun_azimuth"][0] - wanted + 180.0) % 360.0 - 180.0)
+
+    found: list[dict[str, Any]] = []
+    for index in np.nonzero(sign[:-1] != sign[1:])[0]:
+        if abs(gap[index + 1] - gap[index]) > 180.0 or not (up[index] or up[index + 1]):
+            continue
+        moment = _secant(offset, float(jd[index]), float(jd[index + 1]))
+        one = _positions(lat, lon, np.array([moment]))
+        altitude = float(one["sun_apparent_altitude"][0])
+        if altitude <= 0:
+            continue
+        found.append({
+            "moment": _to_datetime(moment),
+            "sun_azimuth": float(one["sun_azimuth"][0]),
+            "sun_altitude": altitude,
+        })
+    return found

@@ -52,6 +52,13 @@
  * straightened where it is shown and measured (`strokesSeen`); what the view
  * hands over (a stroke, a rub, a corner) is in the frame as it shows.
  *
+ * Looking from a place a search found, the photo is laid as the search read it
+ * (`layAsSearched`, lib/horizon/laid.js): a collage's frames or cut pieces
+ * where the search put each, a selfie found mirrored flipped. The view is
+ * handed it already laid, and the trace it draws and measures follows
+ * (`strokesShown`); Find still reads the trace as drawn. Taking a tool out,
+ * pulling a corner or bending the photo lays it flat again (`layFlat`).
+ *
  * The trace can be helped by the photo's own colours (lib/horizon/skyline.js):
  * a stroke snaps onto the sky's edge near it, and the whole skyline can be
  * found at once. Both are read in this browser, off the picture on show, and
@@ -83,6 +90,7 @@ import {
 import {
   addCut,
   cleanMarks,
+  clearBadges,
   cutAt,
   farBadges,
   innerByShape,
@@ -97,10 +105,11 @@ import {
   setFar,
   setInner,
   setSea,
+  toggleClear,
   togglePair,
 } from '../../../lib/horizon/traceMarks.js';
 import { skylineField, smoothPlanes, snapPath, traceSkyline } from '../../../lib/horizon/skyline.js';
-import { paintWarped } from '../../../lib/horizon/warpPicture.js';
+import { paintLaid, paintWarped } from '../../../lib/horizon/warpPicture.js';
 
 /** ms each side shows while blinking (Compare's Normal speed). */
 export const BLINK_MS = 800;
@@ -213,6 +222,7 @@ export function createOverlayState({
   cancel = clearTimeout,
   nextFrame = (fn) => requestAnimationFrame(fn),
   warpPicture = paintWarped,
+  layPicture = paintLaid,
 }) {
   let source = $state.raw(null);
   let still = $state.raw(null);
@@ -247,6 +257,8 @@ export function createOverlayState({
   /** Saying how far lines stand: the distances picked (lib/horizon/traceMarks.js DISTANCE_BANDS), laid on the line clicked. */
   let distancing = $state(false);
   let farPicked = $state.raw(['b1']);
+  /** Saying a skyline line has only sky above it: a click on the line, again to take it back. */
+  let clearing = $state(false);
   let traceTime = $state(null);
   // the trace as it was before each change, newest last
   let history = $state.raw([]);
@@ -267,6 +279,8 @@ export function createOverlayState({
   let warping = $state(false);
   /** A corner in the hand: the pulled photo is drawn lighter until it is let go. */
   let pulling = $state(false);
+  /** The photo laid as a search read it (lib/horizon/laid.js), or null where it lies as taken. */
+  let asSearched = $state.raw(null);
   /** The photo held to the terrain: nothing moves one against the other until it is let go. */
   let locked = $state(false);
   /** What a drag and the wheel move while the photo is not held to the terrain: `terrain` or `photo`. */
@@ -306,18 +320,30 @@ export function createOverlayState({
     return bend ? unitPoint(shown) : p;
   }
   const seen = $derived(bend || warp ? strokes.map((stroke) => stroke.map(toSeen)) : strokes);
+  /** A point of the straightened photo where it shows once laid as the search read it. */
+  const shownAt = (p, cell) => (asSearched ? (asSearched.place(p.u, p.v, cell) ?? p) : p);
+  /** The strokes where the view shows them: on the photo laid as the search read it, else as straightened. */
+  const shown = $derived(asSearched ? seen.map((stroke) => stroke.map((p) => shownAt(p))) : seen);
   /** The skyline's strokes alone, straightened: what Fit lays on the terrain's skyline. */
   const skySeen = $derived(marks.inner.length ? seen.filter((_, i) => !marks.inner.includes(marks.lines[i])) : seen);
   /** Each cut across the straightened photo, top and bottom (`[{ u, v }, { u, v }]`). */
   const cutsSeen = $derived(marks.cuts.map((u) => [toSeen({ u, v: 0 }), toSeen({ u, v: 1 })]));
-  /** The pairs' letters where they show, on the straightened strokes (`pairBadges`). */
-  const badges = $derived(marks.pairs.length ? pairBadges(seen, marks) : []);
-  /** Each line's distance where it shows, on the straightened strokes (`farBadges`). */
-  const farSeen = $derived(marks.far?.length ? farBadges(seen, marks) : []);
+  /** Each cut where the view shows it, the side before the seam laid by its own piece. */
+  const cutsShown = $derived(
+    asSearched ? cutsSeen.map((cut) => cut.map((p) => shownAt(p, { u: p.u - 1e-6, v: p.v }))) : cutsSeen
+  );
+  /** The pairs' letters where the view shows them, on its strokes (`pairBadges`). */
+  const badges = $derived(marks.pairs.length ? pairBadges(shown, marks) : []);
+  /** Each line's distance where the view shows it, on its strokes (`farBadges`). */
+  const farSeen = $derived(marks.far?.length ? farBadges(shown, marks) : []);
+  /** Each line said to have only sky above, where the view shows it (`clearBadges`). */
+  const clearSeen = $derived(marks.clear?.length ? clearBadges(shown, marks) : []);
   /** The photo's grid as it shows, while its corners are out to be pulled (`photoGrid`). */
   const grid = $derived(warping ? photoGrid(toSeen) : []);
   /** The photo drawn between its pulled corners, which the view is handed in its place. */
   const pulledPicture = $derived(warp && still && source?.kind === 'image' ? warpPicture(still, warp, { fast: pulling }) : null);
+  /** The photo laid as the search read it, which the view is handed in its place. */
+  const laidPicture = $derived(asSearched && still && source?.kind === 'image' ? layPicture(still, asSearched) : null);
 
   /** The view as the photo was taken: its lens, through the frame a photo is, with the lines over it. */
   function settleView() {
@@ -411,6 +437,7 @@ export function createOverlayState({
     linking = false;
     cutting = false;
     distancing = false;
+    clearing = false;
     front = null;
     pen = 'sky';
     traceHidden = false;
@@ -431,6 +458,7 @@ export function createOverlayState({
     warp = null;
     warping = false;
     pulling = false;
+    asSearched = null;
     locked = false;
     moving = 'terrain';
     hints = NO_HINTS;
@@ -642,6 +670,7 @@ export function createOverlayState({
     linking = false;
     cutting = false;
     distancing = false;
+    clearing = false;
     front = null;
   }
 
@@ -713,9 +742,21 @@ export function createOverlayState({
     get error() {
       return error;
     },
-    /** The picture to draw: the photo (between its corners once they are pulled), the video's player, or the frame the app read of it. */
+    /** The picture to draw: the photo (between its corners once they are pulled, or laid as a search read it), the video's player, or the frame the app read of it. */
     get picture() {
-      return video ?? pulledPicture ?? still;
+      return video ?? pulledPicture ?? laidPicture ?? still;
+    },
+    /** The photo laid as a search read it (`{ kind }`: frames, pieces or mirrored), or null where it lies as taken. */
+    get asSearched() {
+      return asSearched;
+    },
+    /** Lay the photo as a search read it (lib/horizon/laid.js); only a photo lying as taken, its curve and corners untouched, is laid. */
+    layAsSearched(laid) {
+      asSearched = laid?.place && source?.kind === 'image' && !bend && !warp ? laid : null;
+    },
+    /** The photo back as taken. */
+    layFlat() {
+      asSearched = null;
     },
     /** The photo as it was taken, or the video's frame on show: what a trace's points are measured on. */
     get rawPicture() {
@@ -954,6 +995,7 @@ export function createOverlayState({
     setTracing(on) {
       const next = Boolean(on) && Boolean(source);
       if (next) toolsAway();
+      if (next) asSearched = null;
       tracing = next;
       if (!tracing) return;
       warping = false;
@@ -967,6 +1009,7 @@ export function createOverlayState({
     setErasing(on) {
       const next = Boolean(on) && Boolean(source);
       if (next) toolsAway();
+      if (next) asSearched = null;
       erasing = next;
       if (!erasing) return;
       warping = false;
@@ -985,9 +1028,13 @@ export function createOverlayState({
     get strokes() {
       return strokes;
     },
-    /** The strokes where they show on the straightened photo: what is drawn and measured against the terrain. */
+    /** The strokes where they show on the straightened photo: what Find reads and a search is asked with. */
     get strokesSeen() {
       return seen;
+    },
+    /** The strokes where the view shows them, on the photo laid as a search read it: what is drawn and measured against the terrain. */
+    get strokesShown() {
+      return shown;
     },
 
     /** How much the lens's curve is undone, −BEND_MAX (barrel) to BEND_MAX (pincushion); 0 for none. */
@@ -998,6 +1045,7 @@ export function createOverlayState({
       const next = Number(k);
       if (!source || locked || hints.picture === 'panorama' || !Number.isFinite(next)) return;
       bend = Math.round(Math.min(BEND_MAX, Math.max(-BEND_MAX, next)) * 1000) / 1000;
+      if (bend) asSearched = null;
     },
     /** The photo's shape as the curve is measured in (`bendShape`). */
     get bendShape() {
@@ -1011,6 +1059,7 @@ export function createOverlayState({
       warping = Boolean(on) && source?.kind === 'image' && !locked && hints.picture !== 'panorama';
       if (!warping) return;
       toolsAway();
+      asSearched = null;
     },
     /** A corner taken in the hand (`true`) or let go: the photo is drawn finely again once it is. */
     setPulling(on) {
@@ -1033,6 +1082,7 @@ export function createOverlayState({
       if (source?.kind !== 'image' || locked || hints.picture === 'panorama' || next?.length !== 4 || !next.every((p) => Number.isFinite(p?.u) && Number.isFinite(p?.v))) return;
       const kept = next.map((p) => roundPoint(clampCorner(p)));
       warp = isFlat(kept) ? null : kept;
+      if (warp) asSearched = null;
     },
     /** One corner pulled to a point of the frame. */
     setCorner(index, point) {
@@ -1238,6 +1288,10 @@ export function createOverlayState({
     get cutsSeen() {
       return cutsSeen;
     },
+    /** The cuts where the view shows them, on the photo laid as a search read it. */
+    get cutsShown() {
+      return cutsShown;
+    },
     /** The pairs' letters and colours at their strokes, straightened. */
     get pairBadges() {
       return badges;
@@ -1245,6 +1299,10 @@ export function createOverlayState({
     /** Each line's distance at its stroke, straightened: `{ line, label, at }`. */
     get farBadges() {
       return farSeen;
+    },
+    /** Each line said to have only sky above, at its stroke, straightened: `{ line, at }`. */
+    get clearBadges() {
+      return clearSeen;
     },
     /** Which piece of the collage a point of the straightened photo lies in. */
     pieceAt(point) {
@@ -1295,6 +1353,7 @@ export function createOverlayState({
     setLinking(on) {
       const next = Boolean(on) && strokes.length > 1;
       if (next) toolsAway();
+      if (next) asSearched = null;
       linking = next;
       front = null;
       if (linking) traceHidden = false;
@@ -1347,6 +1406,7 @@ export function createOverlayState({
     setCutting(on) {
       const next = Boolean(on) && Boolean(source);
       if (next) toolsAway();
+      if (next) asSearched = null;
       cutting = next;
     },
     /** A click while cutting, at `point` on the straightened photo shown `scale` big. */
@@ -1364,6 +1424,7 @@ export function createOverlayState({
     setDistancing(on) {
       const next = Boolean(on) && strokes.length > 0;
       if (next) toolsAway();
+      if (next) asSearched = null;
       distancing = next;
       if (distancing) traceHidden = false;
     },
@@ -1384,6 +1445,31 @@ export function createOverlayState({
       if (id === null) return null;
       keep();
       marks = setFar(marks, id, farPicked);
+      return id;
+    },
+    /** Whether a click says the skyline line clicked has only sky above it. */
+    get clearing() {
+      return clearing;
+    },
+    setClearing(on) {
+      const next = Boolean(on) && strokes.length > 0;
+      if (next) toolsAway();
+      if (next) asSearched = null;
+      clearing = next;
+      if (clearing) traceHidden = false;
+    },
+    /**
+     * A click while saying where only sky stands above, at `point` on the
+     * straightened photo shown `scale` big: the skyline line there has only sky
+     * above it, or no longer when it had. Says the line hit, `{ ridge }` for an
+     * inner edge, which has land above it, or null.
+     */
+    clearAt(point, scale) {
+      const id = lineAt(strokes, marks.lines, toPhoto(point), PICK_PX, scale);
+      if (id === null) return null;
+      if (marks.inner.includes(id)) return { ridge: id };
+      keep();
+      marks = toggleClear(marks, id);
       return id;
     },
     /** Every cut taken away. */
@@ -1470,6 +1556,7 @@ export function createOverlayState({
       reach: found = null,
     } = {}) {
       if (!source) return;
+      asSearched = null;
       hints = cleanHints(told);
       if (hints.picture === 'panorama' && !offeredPanorama()) hints = { ...hints, picture: 'photo' };
       pictureSaid = true;

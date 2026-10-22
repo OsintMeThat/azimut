@@ -275,3 +275,42 @@ def test_a_sweep_without_cuts_has_none(relief):
     found = horizon.sweep(horizon.Observer(*EYE, "ground", 1.7), azimuths=[60.0], far=20_000.0,
                           sampler=_sampler(relief))
     assert found.cuts.size == 0 and found.skyline_cuts.shape[0] == 0
+
+
+# -- the viewshed --------------------------------------------------------------
+
+
+def _in_sight(found, azimuth, distance):
+    """Whether the viewshed holds the ground `distance` m out along `azimuth`."""
+    ray = int(round(azimuth / (360.0 / found.azimuths.size))) % found.azimuths.size
+    runs = found.runs[ray].reshape(-1, 2)
+    return bool(np.any((runs[:, 0] <= distance) & (distance <= runs[:, 1])))
+
+
+def test_a_viewshed_sees_the_face_of_a_hill_and_not_the_ground_behind_it(relief):
+    found = horizon.viewshed(horizon.Observer(*EYE), far=15_000, sampler=_sampler(relief))
+    assert found.azimuths.size == horizon.viewshed_rays(15_000)
+    assert _in_sight(found, 60.0, 3_000.0)
+    assert _in_sight(found, 60.0, 9_800.0)  # the slope that faces the eye
+    assert not _in_sight(found, 60.0, 11_500.0)  # the foot of its far side
+    assert 0.0 < found.share < 1.0
+
+
+def test_on_a_plain_the_viewshed_ends_at_the_horizon_and_a_mast_rises_past_it():
+    plain = Relief(peaks=())
+    eye = horizon.Observer(*EYE)
+    bare = horizon.viewshed(eye, far=12_000, rays=360, sampler=_sampler(plain))
+    # from 1.7 m the refracted horizon is about 5 km off: every ray stops there
+    for run in bare.runs:
+        assert run.size == 2 and run[0] == 0.0
+        assert run[1] == pytest.approx(math.sqrt(2 * horizon.effective_radius() * 1.7), rel=0.03)
+    mast = horizon.viewshed(eye, far=12_000, rays=360, target_height=10.0, sampler=_sampler(plain))
+    assert all(run[-1] == pytest.approx(mast.far) for run in mast.runs)
+    assert mast.share == pytest.approx(1.0)
+    assert bare.share < 0.25
+
+
+def test_a_viewshed_is_read_on_rays_a_hundred_metres_apart_at_its_edge():
+    assert horizon.viewshed_rays(1_000) == horizon.VIEWSHED_RAYS[0]
+    assert horizon.viewshed_rays(10_000) == math.ceil(2 * math.pi * 10_000 / 100)
+    assert horizon.viewshed_rays(30_000) == horizon.VIEWSHED_RAYS[1]

@@ -597,12 +597,12 @@ def test_a_panorama_keeps_its_skyline_at_each_reach_haze_could_leave(client):
     body = _ask(client, step=1.0, far=40_000).json()
     cuts = body["skyline_cuts"]
     # only the reaches short of the far limit: 80 km is past it
-    assert cuts["reach"] == pytest.approx([5_000.0, 10_000.0, 20_000.0], rel=0.01)
-    rows = _unpack(cuts["skylines"], "<f4", (3, body["azimuth"]["count"]))
+    assert cuts["reach"] == pytest.approx([2_000.0, 5_000.0, 10_000.0, 20_000.0], rel=0.01)
+    rows = _unpack(cuts["skylines"], "<f4", (4, body["azimuth"]["count"]))
     toward = 90  # the peak stands 15 km east
     # inside 10 km the peak's summit is not reached yet; by 20 km it is the skyline
-    assert rows[1, toward] < body["skyline"][toward] - 1.0
-    assert rows[2, toward] == pytest.approx(body["skyline"][toward], abs=1e-3)
+    assert rows[2, toward] < body["skyline"][toward] - 1.0
+    assert rows[3, toward] == pytest.approx(body["skyline"][toward], abs=1e-3)
     # a cut never stands over the whole turn
     assert np.all(rows <= np.asarray(body["skyline"]) + 1e-3)
 

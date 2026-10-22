@@ -28,10 +28,14 @@ A hand frame that overlaps nothing placed cannot be tied to the others and is
 left out, its points with it. The directions are then read through one virtual
 camera looking along the middle of the pan, so the search (engine/skymatch.py)
 runs unchanged: the pan's heading, tilt and roll are that camera's. The stitch
-expresses every frame in a frame of its own: the virtual camera is held level
-about the up the stitched frames agree on, the one square to every frame's
-side-to-side axis, which a camera held without roll keeps level (OpenCV's
-horizontal wave correction reads it the same way).
+expresses every frame in a frame of its own, so the virtual camera is held level
+about the up the analyst laid: a collage is laid with its horizon level by eye,
+so each row of the export lies on a cone about the world's up. Where the rows
+say too little (a collage too narrow) or disagree, it is held about the up the
+stitched frames agree on, the one square to every frame's side-to-side axis
+(OpenCV's horizontal wave correction reads it the same way). That one alone is
+not enough: a few frames stitched over a short arc of a wider pan leave it
+degrees off, and the skyline read through it climbs across the pan.
 """
 
 from __future__ import annotations
@@ -50,6 +54,17 @@ TIE_MIN = 12
 SIDE_MAX = 80.0
 # Stitched frames whose side-to-side axes lie closer than this, degrees, say too little of the up square to them.
 AXIS_TURN_MIN = 3.0
+# The export's rows the level is read from, as shares of its height, and the points read along each. A row
+# placed on less than half its width, or spanning less than `LEVEL_SPAN_MIN` degrees, says too little, and
+# rows whose ups part by more than `LEVEL_AGREE` degrees disagree: the stitched frames' up is kept then.
+LEVEL_ROWS = (0.35, 0.5, 0.65)
+LEVEL_POINTS = 201
+LEVEL_SPAN_MIN = 30.0
+LEVEL_AGREE = 3.0
+# The grid the export is laid on for the view (`mesh`): cells across and down. A cell straddling two
+# frames blends them over its width.
+MESH_ACROSS = 64
+MESH_DOWN = 16
 
 
 @dataclass(frozen=True)
@@ -210,14 +225,31 @@ class Model:
         sides = np.array([np.asarray(one.warp["r"], dtype=np.float64)[:, 0] for one in self._placed if one.piece.stitched])
         if len(sides) < 2:
             return np.array([0.0, -1.0, 0.0])
-        spread = max(
-            math.degrees(math.acos(float(np.clip(abs(a @ b), -1.0, 1.0)))) for i, a in enumerate(sides) for b in sides[i + 1:]
-        )
+        spread = max(_turn(a, b) for i, a in enumerate(sides) for b in sides[i + 1:])
         if spread < AXIS_TURN_MIN:
             return np.array([0.0, -1.0, 0.0])
         _, vectors = np.linalg.eigh(sides.T @ sides)
         axis = vectors[:, 0]
         return axis if axis[1] < 0 else -axis
+
+    def level(self, export: tuple[float, float]) -> np.ndarray:
+        """The world's up in the pan's frame as the analyst laid the collage: the axis of the cones the
+        export's rows lie on; the stitched frames' (`up`) where the rows say too little or disagree."""
+        width, height = export
+        ups = []
+        for share in LEVEL_ROWS:
+            rays = self.rays(np.linspace(0.0, width, LEVEL_POINTS), np.full(LEVEL_POINTS, height * share), self.per_radian or 1.0)
+            held = rays[np.all(np.isfinite(rays), axis=1)]
+            if len(held) < LEVEL_POINTS // 2 or math.degrees(math.acos(float(np.clip(held[0] @ held[-1], -1.0, 1.0)))) < LEVEL_SPAN_MIN:
+                continue
+            spread = held - held.mean(axis=0)
+            _, vectors = np.linalg.eigh(spread.T @ spread)
+            axis = vectors[:, 0]
+            ups.append(axis if axis[1] < 0 else -axis)
+        if not ups or max(_turn(a, b) for a in ups for b in ups) > LEVEL_AGREE:
+            return self.up()
+        up = np.mean(ups, axis=0)
+        return up / np.linalg.norm(up)
 
     def per_radian_for(self, lens: float, reference: int | None = None) -> float:
         """The export's pixels a radian spans for a lens across the reference frame, when none was stitched."""
@@ -314,6 +346,11 @@ class Model:
         return out
 
 
+def _turn(a: np.ndarray, b: np.ndarray) -> float:
+    """The angle between two directions or two axes, degrees, whichever way they point."""
+    return math.degrees(math.acos(float(np.clip(abs(a @ b) / (np.linalg.norm(a) * np.linalg.norm(b)), -1.0, 1.0))))
+
+
 def basis(rays: np.ndarray, up: np.ndarray | None = None) -> np.ndarray:
     """A virtual camera looking along the middle of the pan, level about `up` (the pan frame's own when
     None): rows right, down, forward."""
@@ -355,6 +392,8 @@ class Reading:
     # the export laid as a panorama about the virtual camera: its middle's heading from the camera's, and its width
     middle: float
     span: float
+    # the virtual camera, rows right, down, forward in the pan's frame (`basis`)
+    camera: np.ndarray
 
 
 def strip(model: Model, camera: np.ndarray | None, export: tuple[float, float], lens: float) -> tuple[float, float]:
@@ -363,7 +402,7 @@ def strip(model: Model, camera: np.ndarray | None, export: tuple[float, float], 
     width, height = export
     row = np.linspace(0.0, width, 101)
     rays = model.rays(row, np.full(row.size, height / 2), model.per_radian or 1.0)
-    camera = basis(rays, model.up()) if camera is None else camera
+    camera = basis(rays, model.level(export)) if camera is None else camera
     across = rays @ camera.T
     held = np.all(np.isfinite(across), axis=1)
     if held.sum() < 2:
@@ -396,7 +435,7 @@ def read(
         return (np.asarray(px, dtype=np.float64) + 1) * width / 2, height / 2 - np.asarray(py, dtype=np.float64) * width / 2
 
     rays = model.rays(*pixels(x, y), model.per_radian)
-    camera = basis(rays, model.up())
+    camera = basis(rays, model.level(export))
     sx, sy, kept = plane(rays, camera, lens)
     if ridge_x.size:
         rx, ry, ridge_kept = plane(model.rays(*pixels(ridge_x, ridge_y), model.per_radian), camera, lens)
@@ -406,8 +445,21 @@ def read(
     return Reading(
         x=sx[kept], y=sy[kept], kept=kept, ridge_x=rx[ridge_kept], ridge_y=ry[ridge_kept], ridge_kept=ridge_kept,
         lens=lens, half_width=model.per_radian * plane_width / width * math.tan(math.radians(lens) / 2),
-        middle=middle, span=span,
+        middle=middle, span=span, camera=camera,
     )
+
+
+def mesh(model: Model, camera: np.ndarray, export: tuple[float, float], lens: float) -> dict[str, Any]:
+    """The export as the search reads it, for the view to lay the collage the same way: a grid `across` ×
+    `down` cells over it, each corner's point on the virtual camera's plane (x right, y up, in half widths
+    of the frames' lens), row by row from the top left; None where no frame lies."""
+    width, height = export
+    u = np.linspace(0.0, 1.0, MESH_ACROSS + 1)
+    v = np.linspace(0.0, 1.0, MESH_DOWN + 1)
+    gu, gv = np.meshgrid(u, v)
+    x, y, readable = plane(model.rays(gu.ravel() * width, gv.ravel() * height, model.per_radian or 1.0), camera, lens)
+    points = [[round(float(a), 4), round(float(b), 4)] if ok else None for a, b, ok in zip(x, y, readable)]
+    return {"across": MESH_ACROSS, "down": MESH_DOWN, "points": points}
 
 
 def pieces_of(spec: dict[str, Any], sources: dict[str, tuple[float, float]]) -> list[Piece]:

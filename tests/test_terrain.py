@@ -1,6 +1,7 @@
 """Terrain heights: tiles, the disk cache, the fallback source and sampling."""
 
 import io
+import math
 import os
 import time
 
@@ -431,6 +432,8 @@ def test_the_profile_route_reads_a_line(client, monkeypatch):
     assert len(answer["distance_m"]) == len(answer["elevation"]) == 11
     assert answer["elevation"] == [800.0] * 11
     assert answer["distance_m"][0] == 0.0
+    # the ground at each point the line was drawn through
+    assert answer["corners"] == [800.0, 800.0]
 
 
 @pytest.mark.parametrize("body", [
@@ -460,10 +463,47 @@ def test_the_profile_says_the_earth_hides_a_point_10_km_out_from_a_standing_eye(
     mast = client.post("/api/terrain/profile", json={**line, "target_height": 10}).json()["sight"]
     assert mast["visible"] is True
     assert mast["eye_m"] == 1.7 and mast["target_m"] == 10.0
+    # 10 m of mast, less 6.8 m of bulge and the eye's 1.7 m: a hair over the level
+    assert mast["angle_deg"] == pytest.approx(math.degrees(1.47 / 10_000), abs=0.002)
     # the bulge is nothing at the ends and most in the middle
     bulge = mast["bulge_m"]
     assert bulge[0] == 0 and bulge[-1] == 0
     assert max(bulge) == pytest.approx(10_000**2 / 8 / (6_371_008.8 / 0.87), rel=0.02)
+
+
+def test_the_profile_says_which_stretch_of_the_line_the_eye_covers(client, monkeypatch):
+    # the same calm sea: the first stretch is in sight, the sea past the
+    # horizon is not, and a 10 m mast standing anywhere along it would be
+    _network(monkeypatch, lambda request: httpx.Response(404, text="Not found"))
+    line = {"points": [[43.0, 5.0], [43.0, 5.1226]], "samples": 400, "sight": True}
+    answer = client.post("/api/terrain/profile", json=line).json()
+    seen = answer["sight"]["seen"]
+    assert len(seen) == 400 and seen[0] is True
+    last = max(i for i, v in enumerate(seen) if v)
+    assert all(seen[: last + 1]) and not any(seen[last + 1:])
+    assert 4_000 < answer["distance_m"][last] < 6_000
+    mast = client.post("/api/terrain/profile", json={**line, "target_height": 10}).json()
+    assert all(mast["sight"]["seen"])
+
+
+def test_the_viewshed_route_reads_the_disc_round_a_point(client, monkeypatch):
+    _network(monkeypatch, lambda request: httpx.Response(404, text="Not found"))
+    answer = client.post("/api/terrain/viewshed", json={
+        "lat": 43.0, "lon": 5.0, "radius_m": 8_000}).json()
+    assert len(answer["runs"]) * answer["step_deg"] == pytest.approx(360.0)
+    assert answer["eye_m"] == 1.7 and answer["ground_m"] == 0.0
+    # the sea is in sight out to the horizon, about 5 km away, on every ray
+    assert all(run[0] == 0 and 4_500 < run[1] < 5_500 for run in answer["runs"])
+    assert 0.3 < answer["share"] < 0.45
+
+
+@pytest.mark.parametrize("body", [
+    {"lat": 43.0, "lon": 5.0, "radius_m": 30_001},
+    {"lat": 43.0, "lon": 5.0, "radius_m": 0},
+    {"lat": 89.0, "lon": 5.0, "radius_m": 1_000},
+])
+def test_the_viewshed_route_refuses_a_disc_too_wide_or_off_the_map(client, body):
+    assert client.post("/api/terrain/viewshed", json=body).status_code == 422
 
 
 def test_a_profile_without_the_question_carries_no_verdict(client, monkeypatch):

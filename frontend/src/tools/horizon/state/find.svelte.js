@@ -37,6 +37,7 @@ import {
   cleanFacing,
   cleanStands,
   cleanSun,
+  lookingOf,
   NO_SUN,
   sunAsked,
   meeting,
@@ -45,12 +46,14 @@ import {
   searchedReach,
   toggleFacing,
   toggleStand,
+  traceSpan,
 } from '../../../lib/horizon/find.js';
 import { AUTO_REACH, searchHints } from '../../../lib/horizon/hints.js';
 import { farRange } from '../../../lib/horizon/traceMarks.js';
 import { marksSaid } from '../../../lib/horizon/traceMarks.js';
-import { GAP_MIN_POINTS, markedPlane, traceSamples } from '../../../lib/horizon/overlay.js';
+import { COARSE_RELIEF_M, GAP_MIN_POINTS, markedPlane, traceSamples } from '../../../lib/horizon/overlay.js';
 import { pollWhile } from '../../../lib/poll.js';
+import { formatDistance } from '../../../lib/measure.js';
 
 /** Who took the photo, and the heights each may stand at by default (over the ground, an aircraft's above the sea). */
 export const WHO = {
@@ -60,7 +63,7 @@ export const WHO = {
 };
 
 /** The grid a search is laid on, metres between points; auto picks it from the area. */
-export const SPACINGS = ['auto', 100, 250, 500, 1000];
+export const SPACINGS = ['auto', 20, 50, 100, 250, 500, 1000];
 
 /** Nothing set yet: on foot, auto spacing, the usual tolerance. */
 export const NO_SETTINGS = Object.freeze({ spacing: 'auto', tolerance: ALIGN_TOLERANCE, speed: 'fast' });
@@ -100,6 +103,19 @@ export function estimateText({ points, most = points, step, turn = 1 }) {
   const size = `${points.toLocaleString('en-US')} points, ${durationText(points, step, turn)}`;
   if (!(most > points)) return `${size}.`;
   return `${size}; up to ${durationText(most, step, turn).replace('about ', '')} where relief stands near.`;
+}
+
+/**
+ * The grids the estimate lays wider than the analyst picked, the area or its zones holding more points than hours
+ * of search: a line each. `picked` is false while the area's grid is Auto, which widens as it must.
+ */
+export function widenedText({ asked, spacing, zones_wider: wider } = {}, units = 'metric', picked = true) {
+  const lines = [];
+  if (picked && asked && spacing) {
+    lines.push(`Too large for a ${formatDistance(asked, units)} grid, even in hours: a point every ${formatDistance(spacing, units)}. A zone searches finer.`);
+  }
+  if (wider) lines.push(`Zones too large for their grid: points ${wider.toFixed(1)}× farther apart.`);
+  return lines;
 }
 
 /** The most zones a search keeps beside its area. */
@@ -165,6 +181,8 @@ export function createFindState({ api, overlay, view }) {
   let trying = 0;
   /** A selfie: searched mirrored too. */
   let mirror = $state(false);
+  /** Near lines judged rounded where the relief is coarse. */
+  let rounding = $state(false);
   /** Where the sun stood against the camera, on a day between two local hours (lib/horizon/find.js NO_SUN). */
   let sun = $state.raw(NO_SUN);
   /** The headings the compass and the sun leave, as the app read them: `{ sectors, sun }`, or null. */
@@ -376,6 +394,7 @@ export function createFindState({ api, overlay, view }) {
       stands,
       view: looking,
       mirror,
+      round: rounding && detail >= COARSE_RELIEF_M,
       sun: sunAsked(sun),
       speed: settings.speed,
       reach: Number.isFinite(reach) ? reach : reach === 'all' ? 100_000 : null,
@@ -618,6 +637,7 @@ export function createFindState({ api, overlay, view }) {
         stands,
         view: looking,
         mirror,
+        round: rounding && detail >= COARSE_RELIEF_M,
         sun: sunAsked(sun),
       });
     },
@@ -694,6 +714,7 @@ export function createFindState({ api, overlay, view }) {
       stands = cleanStands(ask.stands);
       looking = cleanView(ask.view);
       mirror = Boolean(ask.mirror);
+      rounding = Boolean(ask.round);
       sun = cleanSun(ask.sun ?? NO_SUN);
       const kept = (ask.alignments ?? [])[0];
       settings = { spacing: ask.spacing ?? 'auto', tolerance: kept?.tolerance ?? settings.tolerance, speed: ask.speed === 'gentle' ? 'gentle' : 'fast' };
@@ -806,6 +827,14 @@ export function createFindState({ api, overlay, view }) {
     toggleView(id) {
       looking = cleanView(looking.includes(id) ? looking.filter((one) => one !== id) : [...looking, id]);
     },
+    /**
+     * What the trace itself says before a search: which way the camera must look past what is searched for
+     * who took the photo (`down`, `up` or null), and how many degrees the picture read as one spans.
+     */
+    get traceSays() {
+      const trace = planeOfTrace();
+      return trace ? { looking: lookingOf(trace, who.mode), span: traceSpan(trace) } : null;
+    },
     /** Where the sun stood against the camera: `{ date, start, end, sides }`. */
     get sun() {
       return sun;
@@ -839,6 +868,13 @@ export function createFindState({ api, overlay, view }) {
       } catch {
         if (sectorsAsked === key) sectors = null;
       }
+    },
+    /** Whether near lines are judged rounded, where the relief is coarse (`detail`). */
+    get round() {
+      return rounding;
+    },
+    setRound(on) {
+      rounding = Boolean(on);
     },
     /** Whether the photo is a selfie, searched mirrored too. */
     get mirror() {
@@ -893,7 +929,7 @@ export function createFindState({ api, overlay, view }) {
     /** The setup as the bench keeps it (api/horizon_work.py), or null while nothing is set. */
     get snapshot() {
       const plain = who.mode === 'ground' && settings.spacing === 'auto' && settings.tolerance === ALIGN_TOLERANCE && settings.speed === 'fast';
-      if (!area.length && !zones.length && !alignments.length && !search && !facing.length && !stands.length && !looking.length && !mirror && !sunAsked(sun) && !sun.sides.length && !sun.date && plain) return null;
+      if (!area.length && !zones.length && !alignments.length && !search && !facing.length && !stands.length && !looking.length && !mirror && !rounding && !sunAsked(sun) && !sun.sides.length && !sun.date && plain) return null;
       return {
         area: area.map(({ lat, lon }) => ({ lat, lon })),
         alignments: live.map((one) => ({
@@ -913,6 +949,7 @@ export function createFindState({ api, overlay, view }) {
         stands,
         view: looking,
         mirror,
+        round: rounding,
         sun,
         zones: zones
           .filter((zone) => zone.points.length >= 3)
@@ -959,6 +996,7 @@ export function createFindState({ api, overlay, view }) {
       stands = cleanStands(setup?.stands);
       looking = cleanView(setup?.view);
       mirror = Boolean(setup?.mirror);
+      rounding = Boolean(setup?.round);
       sun = cleanSun(setup?.sun ?? NO_SUN);
       settings = {
         spacing: SPACINGS.includes(setup?.spacing) ? setup.spacing : 'auto',

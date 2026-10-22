@@ -1,9 +1,9 @@
 /**
  * Town, village and hamlet names, drawn from OpenFreeMap's vector tiles.
  *
- * Esri's borders name countries, regions and cities, and little under them
- * wherever its own data is thin: a valley in Yemen reads blank at zoom 13 while
- * OpenStreetMap holds a name for every hamlet in it. OpenFreeMap serves that
+ * The borders name countries, regions and cities (`borders.js`); this names
+ * the towns, villages and hamlets under them, and OpenStreetMap holds a name
+ * for every hamlet in a valley Esri's own names left blank. OpenFreeMap serves that
  * data as OpenMapTiles vector tiles, free, key-less and with no request quota,
  * and this style reads only its `place` layer.
  *

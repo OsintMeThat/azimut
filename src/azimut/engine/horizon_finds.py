@@ -134,6 +134,8 @@ def trace_from(ask: dict[str, Any]) -> finder.Trace:
         floor=finder.FLOOR_M,
         tilts=finder.tilts_for(str(who.get("mode", "ground")), ask.get("view") or ()),
         mirror=bool(ask.get("mirror")),
+        # offered where the relief is the planet's coarse model: its cell is the one rounded to
+        rounding=terrain.PLANET_DETAIL_M if ask.get("round") else None,
     )
 
 
@@ -217,8 +219,9 @@ def on_frames(
     case: Case, ask: dict[str, Any], plan: finder.Plan, trace: finder.Trace,
 ) -> tuple[finder.Plan, finder.Trace, dict[str, Any] | None]:
     """The search read frame by frame when its photo is a collage Azimut stitched, with what the result
-    says of it: `{ collage, frames, stitched, lens, span, middle }`, `middle` the heading of the
-    picture's middle from the place's; the plan and trace as they were otherwise.
+    says of it: `{ collage, frames, stitched, lens, span, middle, mesh }`, `middle` the heading of the
+    picture's middle from the place's and `mesh` where each point of it was read (frames.mesh); the plan
+    and trace as they were otherwise.
 
     The trace must lie on the picture as exported: a curve or pulled corners laid over it since
     leave it read as one photo, as does a collage with no frame stitched (its lens unknown).
@@ -269,6 +272,8 @@ def on_frames(
     return plan, trace, {
         "collage": said["collage"], "frames": said["frames"], "stitched": said["stitched"],
         "lens": round(reading.lens, 2), "span": round(reading.span, 2), "middle": round(reading.middle, 2),
+        # where each point of the collage was read, so the view lays it as the search did
+        "mesh": frames.mesh(model, reading.camera, export, reading.lens),
     }
 
 
@@ -347,7 +352,9 @@ def check(case: Case, record: dict[str, Any]) -> list[dict[str, Any]]:
         for decoy in decoys:
             if decoy.marks is not None:
                 # the marks name the trace's own points: a decoy is judged on its skyline alone
-                decoy = replace(decoy, marks=replace(decoy.marks, ridge_x=np.empty(0), ridge_y=np.empty(0), pairs=(), piece=None, ridge_piece=None))
+                decoy = replace(decoy, marks=replace(
+                    decoy.marks, ridge_x=np.empty(0), ridge_y=np.empty(0), pairs=(), piece=None, ridge_piece=None, clear=(),
+                ))
             scored = finder.score_point(
                 float(place["lat"]), float(place["lon"]), decoy, plan, sampler=sampler, quick=False,
                 heights=plan.final_heights or None,

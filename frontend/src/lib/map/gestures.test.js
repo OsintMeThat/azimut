@@ -17,6 +17,7 @@ import {
   startRotateDrag,
   tiltFromKey,
   turnFromKey,
+  swallowDoubleClick,
   turnFromPress,
   viewReach,
 } from './gestures.js';
@@ -236,6 +237,47 @@ describe('which presses turn', () => {
     release();
     expect(turnFromPress(stubEngine(), { ...press(0), shiftKey: true })).toBe(true);
     release();
+  });
+
+  it('takes the second press of a double click held, where the tool lets it, and never a single press', () => {
+    expect(turnFromPress(stubEngine(), { ...press(0), detail: 2 }, { double: true })).toBe(true);
+    release();
+    expect(turnFromPress(stubEngine(), { ...press(0), detail: 2 })).toBe(false);
+    expect(turnFromPress(stubEngine(), { ...press(0), detail: 1 }, { double: true })).toBe(false);
+    // a held double click is the left button's only: the middle one already turns
+    expect(turnFromPress(stubEngine(), { ...press(2), detail: 2 }, { double: true })).toBe(false);
+  });
+
+  it('keeps the engine from zooming on a double click that turned the map, never on one that stayed', () => {
+    const heard = vi.fn();
+    document.body.addEventListener('dblclick', heard);
+    const doubleClick = () => {
+      const event = new window.MouseEvent('dblclick', { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(event);
+      return event;
+    };
+    swallowDoubleClick(press(0, 100, 100));
+    drag(140, 100);
+    release();
+    const turned = doubleClick();
+    expect(heard).not.toHaveBeenCalled();
+    expect(turned.defaultPrevented).toBe(true);
+    // gone with that double click, at once: a double click straight after zooms
+    doubleClick();
+    expect(heard).toHaveBeenCalledTimes(1);
+    swallowDoubleClick(press(0, 100, 100));
+    drag(102, 101);
+    release();
+    doubleClick();
+    expect(heard).toHaveBeenCalledTimes(2);
+    // a turn whose release brought no double click: the next press ends the watch
+    swallowDoubleClick(press(0, 100, 100));
+    drag(160, 100);
+    release();
+    window.dispatchEvent(new window.MouseEvent('mousedown', { clientX: 300, clientY: 300 }));
+    doubleClick();
+    expect(heard).toHaveBeenCalledTimes(3);
+    document.body.removeEventListener('dblclick', heard);
   });
 
   it('leaves a plain left press, and Shift where the tool keeps it', () => {

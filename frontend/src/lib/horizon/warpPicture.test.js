@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BEND_CELLS, drawStraightened, drawWarped, paintStraightened, paintWarped, PULL_PX, triangleTransform, WARP_CELLS } from './warpPicture.js';
+import { BEND_CELLS, drawLaid, drawStraightened, drawWarped, paintStraightened, paintWarped, PULL_PX, triangleTransform, WARP_CELLS } from './warpPicture.js';
 import { bendShape, straightened } from './overlay.js';
 
 /** A 2D context that keeps what it was asked to do. */
@@ -56,6 +56,16 @@ describe('a pulled photo drawn as a picture', () => {
     // and reads only its cell, a pixel wide
     const [, , [, sx, sy, sw, sh]] = draws[0];
     expect([sx, sy, sw, sh]).toEqual([0, 0, 101, 76]);
+  });
+
+  it('lays a photo as a search read it on its own grid, each cell by its middle, nothing where it lies nowhere', () => {
+    const ctx = recorder();
+    const laid = { us: [0, 0.5, 1], vs: [0, 1], place: (u, v, cell) => (cell.u > 0.5 ? null : { u: u + 0.1, v }) };
+    expect(drawLaid(ctx, 'photo', { width: 100, height: 50 }, laid, { width: 100, height: 50 })).toBe(2);
+    const draws = ctx.calls.filter(([kind]) => kind === 'draw');
+    const [x, y] = apply(draws[0][1], [0, 0]);
+    expect(x).toBeCloseTo(10, 6);
+    expect(y).toBeCloseTo(0, 6);
   });
 
   it('lays nothing for corners folded onto a line', () => {

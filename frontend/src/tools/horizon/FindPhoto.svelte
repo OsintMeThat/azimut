@@ -159,7 +159,7 @@
     box.focus?.({ preventScroll: true });
     box.setPointerCapture?.(event.pointerId);
     const at = local(event);
-    if ((overlay.linking || overlay.cutting || overlay.distancing) && !asking) {
+    if ((overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing) && !asking) {
       press = { picking: true };
       return;
     }
@@ -208,6 +208,7 @@
       if (overlay.cutting) overlay.cutAt(point, scale());
       else if (overlay.linking) overlay.linkAt(point, scale());
       else if (overlay.distancing) overlay.farAt(point, scale());
+      else if (overlay.clearing) overlay.clearAt(point, scale());
       return;
     }
     if (was.tracing) {
@@ -291,7 +292,7 @@
   bind:this={box}
   class="fp"
   class:asking
-  class:pen={(overlay.tracing || overlay.linking || overlay.cutting || overlay.distancing) && !asking}
+  class:pen={(overlay.tracing || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing) && !asking}
   class:rubber={overlay.erasing && !asking}
   class:grab={zoom > 1 && !overlay.tracing && !overlay.erasing && !asking}
   bind:clientWidth={width}
@@ -342,6 +343,13 @@
             <g class="fp-far" transform="translate({spot.x.toFixed(1)} {(spot.y + 16).toFixed(1)})">
               <rect x={-badge.label.length * 3.1 - 5} y="-8" width={badge.label.length * 6.2 + 10} height="16" rx="8" />
               <text text-anchor="middle" dy="3.5">{badge.label}</text>
+            </g>
+          {/each}
+          {#each overlay.clearBadges ?? [] as badge (badge.line)}
+            {@const spot = toScreen(badge.at)}
+            <g class="fp-clear" transform="translate({spot.x.toFixed(1)} {(spot.y - 16).toFixed(1)})">
+              <rect x="-29" y="-8" width="58" height="16" rx="8" />
+              <text text-anchor="middle" dy="3.5">Sky only</text>
             </g>
           {/each}
         {/if}
@@ -552,6 +560,17 @@
     font-size: 10px;
     font-weight: 600;
     fill: #ffd166;
+  }
+  /* a line with only sky above it */
+  .fp-clear rect {
+    fill: rgba(0, 0, 0, 0.7);
+    stroke: #8fd3ff;
+    stroke-width: 1;
+  }
+  .fp-clear text {
+    font-size: 10px;
+    font-weight: 600;
+    fill: #8fd3ff;
   }
   /* where a collage is cut */
   .fp-cut {

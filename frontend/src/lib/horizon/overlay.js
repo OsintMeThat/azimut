@@ -528,10 +528,13 @@ export function terrainMargin(panorama, azimuth, reach = null) {
  * a near ridge is known only that coarsely, so its rocks need no tracing.
  * Empty while the grain is unknown.
  */
+/** Relief known to this many metres or coarser is the planet's model, not a survey: near ridges are rounder in it than in a photo. */
+export const COARSE_RELIEF_M = 20;
+
 export function reliefWords(detail) {
   if (!(detail > 0)) return '';
   const metres = Math.round(detail);
-  return metres >= 20
+  return metres >= COARSE_RELIEF_M
     ? `Relief here is known to ${metres} m: trace a near ridge’s shape, not its rocks or trees.`
     : `Relief here is known to ${metres} m, from a national survey.`;
 }
@@ -929,9 +932,9 @@ export function tracePlane(samples, camera) {
  * The trace on the picture plane with the marks beside it (lib/horizon/traceMarks.js),
  * as the search reads them (api/horizon.py `MarksIn`): the skyline's points
  * as `tracePlane` gives them, the inner edges' apart (`ridge_x`, `ridge_y`),
- * and, when they matter, the stroke each point lies on (for the pairs and the
+ * and, when they matter, the stroke each point lies on (for the pairs, the
  * lines' distances, sent as `far`: a stroke, the nearest and farthest it
- * stands, metres) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
+ * stands, metres, the sea lines and those with only sky above, `clear`) and the piece of a collage it lies in: `pieceAt(sample)`, by default how many
  * of the marks' cuts stand left of it across the frame. Samples come from
  * `traceSamples`, each saying its stroke. Without marks, the plane alone.
  */
@@ -941,24 +944,26 @@ export function markedPlane(samples, camera, marks, pieceAt = null) {
   const lineOf = (s) => marks?.lines?.[s.stroke] ?? s.stroke;
   const sky = inner.size ? samples.filter((s) => !inner.has(lineOf(s))) : samples;
   const plane = tracePlane(sky, camera);
-  if (!inner.size && !marks?.pairs?.length && !cuts.length && !marks?.far?.length && !marks?.sea?.length) return plane;
+  const named = marks?.pairs?.length || marks?.far?.length || marks?.sea?.length || marks?.clear?.length;
+  if (!inner.size && !cuts.length && !named) return plane;
   const ridge = samples.filter((s) => inner.has(lineOf(s)));
   const ridges = ridge.length ? tracePlane(ridge, camera) : { x: [], y: [] };
   const out = { ...plane, ridge_x: ridges.x, ridge_y: ridges.y };
-  if (marks?.pairs?.length || marks?.far?.length || marks?.sea?.length) {
+  if (named) {
     // the search names strokes 0, 1… in the order they come
     const index = new Map();
-    const named = (id) => {
+    const name = (id) => {
       if (!index.has(id)) index.set(id, index.size);
       return index.get(id);
     };
-    out.line = sky.map((s) => named(lineOf(s)));
-    out.ridge_line = ridge.map((s) => named(lineOf(s)));
+    out.line = sky.map((s) => name(lineOf(s)));
+    out.ridge_line = ridge.map((s) => name(lineOf(s)));
     out.pairs = (marks.pairs ?? []).filter(([f, b]) => index.has(f) && index.has(b)).map(([f, b]) => [index.get(f), index.get(b)]);
     out.far = (marks.far ?? [])
       .filter((one) => index.has(one.line) && farRange(one.bands))
       .map((one) => [index.get(one.line), ...farRange(one.bands)]);
     out.sea = (marks.sea ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
+    out.clear = (marks.clear ?? []).filter((id) => index.has(id)).map((id) => index.get(id));
   }
   if (cuts.length) {
     const piece = pieceAt ?? ((s) => pieceOf(cuts, s.x / camera.width));

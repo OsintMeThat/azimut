@@ -190,6 +190,17 @@ describe('the band over a photo', () => {
     expect(button(video, 'Reshape the photo')).toBeNull();
   });
 
+  it('says the photo lies as the search read it, and lays it flat on a press', () => {
+    expect(button(bar(fakeOverlay()), 'Lay the photo flat')).toBeNull();
+    const layFlat = vi.fn();
+    const root = bar(fakeOverlay({ asSearched: { kind: 'frames' }, layFlat }));
+    const laid = button(root, 'Lay the photo flat');
+    expect(laid.textContent).toContain('As searched');
+    expect(laid.title).toBe('Each frame of the collage where the search read it: press to lay the photo flat');
+    laid.click();
+    expect(layFlat).toHaveBeenCalledOnce();
+  });
+
   it('lights the fit once there is a gap to close', () => {
     const quiet = bar(fakeOverlay());
     expect(button(quiet, 'Fit to trace')).toBeNull();

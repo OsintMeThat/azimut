@@ -313,7 +313,7 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
     if body.proof_place_auto is not None:
         settings["proof_place_auto"] = bool(body.proof_place_auto)
     if body.post_mention is not None:
-        settings["post_mention"] = body.post_mention.strip()[:64]
+        settings["post_mention"] = body.post_mention.strip()[:280]
     if body.post_target is not None:
         settings["post_target"] = body.post_target
     if body.post_template is not None:
@@ -710,7 +710,7 @@ class ImportedSettings(BaseModel):
     map_sync: bool = True
     capture_scale_north: bool = False
     proof_place_auto: bool = True
-    post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
+    post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=280)
     post_target: str = DEFAULT_POST_TARGET
     post_template: str = DEFAULT_POST_TEMPLATE
     post_prefill: bool = True

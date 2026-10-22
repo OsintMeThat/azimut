@@ -49,6 +49,7 @@ export function niceStep(span, count) {
 const AXIS_UNITS = {
   metric: { short: ['m', 1], long: ['km', 0.001], height: ['m', 1] },
   imperial: { short: ['ft', 3.28084], long: ['mi', 1 / 1609.344], height: ['ft', 3.28084] },
+  nautical: { short: ['m', 1], long: ['NM', 1 / 1852], height: ['m', 1] },
 };
 
 /** A tick's number without trailing zeros: 1, 2.5, 500. */
@@ -77,9 +78,9 @@ function ticks(lo, hi, step) {
  * 1609 m.
  *
  * @returns the filled `area` and its top `line`, the straight `sight` line and
- *   its two ends, where the ground is `blocked` in its way, the axes' labelled
- *   ticks, and `tops`, where each sample's ground is drawn, for a pointer
- *   reading the chart.
+ *   its two ends, where the ground is `blocked` in its way, the crest cut into
+ *   the stretches the eye `sees` and does not, the axes' labelled ticks, and
+ *   `tops`, where each sample's ground is drawn, for a pointer reading the chart.
  */
 export function profileChart(
   profile,
@@ -114,6 +115,14 @@ export function profileChart(
   const area = `M${r(x(0))},${floor} L${crest} L${r(x(span))},${floor} Z`;
   const line = `M${crest}`;
 
+  // the crest again, in the stretches the eye covers and the ones it does not
+  const sees = [];
+  for (const [i, seen] of (sight?.seen ?? []).entries()) {
+    const last = sees.at(-1);
+    if (last?.seen === seen) last.points.push(tops[i]);
+    else sees.push({ seen, points: last ? [last.points.at(-1), tops[i]] : [tops[i]] });
+  }
+
   let sightLine = null;
   let blocked = null;
   if (sight) {
@@ -143,7 +152,20 @@ export function profileChart(
 
   // how much taller than they are the heights are drawn: a chart is never at scale
   const stretch = innerH / (hi - lo || 1) / (innerW / span);
-  return { area, line, sight: sightLine, blocked, tops, floor, xTicks, yTicks, stretch };
+  return {
+    area,
+    line,
+    sight: sightLine,
+    blocked,
+    sees: sees
+      .filter((run) => run.points.length >= 2)
+      .map((run) => ({ seen: run.seen, path: `M${run.points.map((point) => `${point.x},${point.y}`).join(' L')}` })),
+    tops,
+    floor,
+    xTicks,
+    yTicks,
+    stretch,
+  };
 }
 
 /** The sample where the ground stands in the way of the sight line, or -1. */

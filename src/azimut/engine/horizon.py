@@ -420,3 +420,89 @@ def line_of_sight(
     blocking = float(np.max(elevation_angle(distances, heights, altitude, k)))
     margin = math.degrees(target - blocking)
     return margin >= 0, math.degrees(target), margin
+
+
+# The viewshed's rays: one every this many metres of arc at its edge, within these
+# counts. A 10 km viewshed is read on 630 rays, a 25 km one on 1440.
+VIEWSHED_ARC_M = 100.0
+VIEWSHED_RAYS = (360, 1440)
+
+
+@dataclass
+class Viewshed:
+    """The ground in sight from one point, ray by ray.
+
+    `runs` holds, for each azimuth, the stretches of its ray in sight as a flat
+    list of distances in metres, start and end in turn. A stretch is as wide as
+    the samples it is made of, so neighbouring rays' stretches tile the disc.
+    """
+
+    observer: Observer
+    ground: float
+    altitude: float
+    far: float
+    target_height: float
+    azimuths: np.ndarray
+    runs: list[np.ndarray]
+    share: float  # of the disc's area, in sight
+    sources: set[str] = field(default_factory=set)
+    zooms: set[int] = field(default_factory=set)
+
+
+def viewshed_rays(far: float) -> int:
+    """How many rays a viewshed of radius `far` is read on."""
+    low, high = VIEWSHED_RAYS
+    return int(min(max(math.ceil(2 * math.pi * far / VIEWSHED_ARC_M), low), high))
+
+
+def viewshed(
+    observer: Observer,
+    *,
+    far: float,
+    target_height: float = 0.0,
+    rays: int | None = None,
+    k: float = REFRACTION_K,
+    sampler: terrain.Sampler | None = None,
+    workers: int = WORKERS,
+) -> Viewshed:
+    """What ground within `far` metres of the observer can be seen.
+
+    The rays a panorama marches, read the other way round: a sample is in sight
+    when a target `target_height` above it stands at or above the highest angle
+    of the ground before it. The ground is bare earth, as every height here is:
+    buildings and trees are not in it.
+    """
+    sampler = sampler or terrain.Sampler()
+    ground = float(sampler.heights(observer.lat, observer.lon, terrain.MAX_ZOOM))
+    altitude = observer.altitude(ground)
+    count = rays or viewshed_rays(far)
+    az = np.arange(count, dtype=np.float64) * (360.0 / count)
+    distances = ray_distances(far)
+    distances = distances[distances <= far]
+    # each sample stands for the ground from halfway back to halfway on
+    edges = np.concatenate([[0.0], (distances[:-1] + distances[1:]) / 2, [float(distances[-1])]])
+    rings = edges[1:] ** 2 - edges[:-1] ** 2
+    heights = _ground(observer, az, distances, _bands(lod_zooms(distances, observer.lat)), sampler, workers)
+
+    runs: list[np.ndarray] = []
+    seen_area = 0.0
+    for start in range(0, count, CHUNK):
+        block = heights[start:start + CHUNK]
+        angles = elevation_angle(distances[None, :], block, altitude, k)
+        highest = np.maximum.accumulate(angles, axis=1)
+        before = np.concatenate([np.full((block.shape[0], 1), -np.inf), highest[:, :-1]], axis=1)
+        aims = angles if target_height == 0 else elevation_angle(
+            distances[None, :], block + target_height, altitude, k)
+        seen = aims >= before
+        seen_area += float((seen * rings[None, :]).sum())
+        steps = np.diff(np.pad(seen.astype(np.int8), ((0, 0), (1, 1))), axis=1)
+        for row in steps:
+            opens = np.flatnonzero(row == 1)
+            closes = np.flatnonzero(row == -1)
+            runs.append(np.column_stack([edges[opens], edges[closes]]).ravel())
+    return Viewshed(
+        observer=observer, ground=ground, altitude=altitude, far=float(distances[-1]),
+        target_height=target_height, azimuths=az, runs=runs,
+        share=seen_area / (float(rings.sum()) * count),
+        sources=set(sampler.sources), zooms=set(sampler.zooms),
+    )

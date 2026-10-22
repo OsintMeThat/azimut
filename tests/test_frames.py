@@ -54,6 +54,51 @@ def test_the_virtual_camera_is_level_and_the_trace_keeps_its_shape():
     assert reading.span == pytest.approx(60 + 2 * math.degrees(math.atan(W / 2 / FOCAL)), abs=4.0)
 
 
+def test_the_level_is_the_one_the_analyst_laid_when_the_stitch_is_rolled():
+    # a short stitch whose own up is 8° off the world's, as a few frames of a wider pan leave it
+    pieces, origin, rotations = _collage((-30.0, 0.0, 30.0))
+    roll = math.radians(8.0)
+    world = np.array([[math.cos(roll), -math.sin(roll), 0], [math.sin(roll), math.cos(roll), 0], [0, 0, 1]])
+    up = world @ np.array([0.0, -1.0, 0.0])
+
+    def seen_at(azimuth, elevation):
+        """Where a direction of the world lands on the collage as stitched."""
+        a, e = math.radians(azimuth), math.radians(elevation)
+        direction = world @ np.array([math.sin(a) * math.cos(e), -math.sin(e), math.cos(a) * math.cos(e)])
+        frame = rotations[int(np.argmin([abs(azimuth - yaw) for yaw in (-30.0, 0.0, 30.0)]))]
+        return np.array(_canvas(direction, frame, origin))
+
+    # the analyst turns the pieces on the canvas until the horizon lies level
+    left, right = seen_at(-30.0, 0.0), seen_at(30.0, 0.0)
+    turn = -math.atan2(right[1] - left[1], right[0] - left[0])
+    spin = np.array([[math.cos(turn), -math.sin(turn)], [math.sin(turn), math.cos(turn)]])
+    laid = [p.quad @ spin.T for p in pieces]
+    corner = np.min(np.concatenate(laid), axis=0)
+    moved = [frames.Piece(quad=q - corner, size=p.size, crop=p.crop, source=p.source, remap=p.remap) for q, p in zip(laid, pieces)]
+    model = frames.Model(moved)
+    export = (float(max(p.quad[:, 0].max() for p in moved)), float(max(p.quad[:, 1].max() for p in moved)))
+    assert _angle(model.up(), up) == pytest.approx(8.0, abs=0.5)
+    assert _angle(model.level(export), up) < 1.0
+    # rows placed on less than half their width say too little: the stitch's up stands
+    np.testing.assert_allclose(model.level((export[0] * 3, export[1])), model.up(), atol=1e-9)
+    # a level skyline reads level through the layout's up, where the stitch's alone would climb across the pan
+    azimuths = np.linspace(-38.0, 38.0, 40)
+    pts = np.array([spin @ seen_at(azimuth, 3.0) - corner for azimuth in azimuths])
+    x = pts[:, 0] / export[0] * 2 - 1
+    y = (export[1] / 2 - pts[:, 1]) / export[0] * 2
+    reading = frames.read(model, x, y, np.empty(0), np.empty(0), export)
+    from azimut.engine import skymatch
+    _, elevation = skymatch.directions(reading.x, reading.y, fov=reading.lens)
+    np.testing.assert_allclose(elevation, 3.0, atol=0.3)
+
+
+def test_a_stitch_laid_as_stitched_keeps_its_own_level():
+    pieces, _, _ = _collage((-30.0, 0.0, 30.0), pitch=4.0)
+    model = frames.Model(pieces)
+    export = (float(max(p.quad[:, 0].max() for p in pieces)), float(max(p.quad[:, 1].max() for p in pieces)))
+    assert _angle(model.level(export), model.up()) < 0.1
+
+
 def test_a_frame_laid_by_hand_is_tied_to_its_neighbours_by_their_overlap():
     pieces, origin, rotations = _collage((-30.0, 0.0), pitch=4.0, hand=25.0)
     model = frames.Model(pieces)
@@ -106,6 +151,13 @@ def test_a_search_on_a_stitched_collage_reads_its_trace_frame_by_frame(monkeypat
     plan = finder.Plan(area=[(0.0, 0.0)] * 3)
     _, read, framed = horizon_finds.on_frames(None, ask, plan, trace)
     assert framed["collage"] == "Pan" and framed["lens"] == pytest.approx(said["lens"], abs=0.01)
+    # with where each point of the collage was read, for the view to lay it the same way
+    mesh = framed["mesh"]
+    assert (mesh["across"], mesh["down"]) == (frames.MESH_ACROSS, frames.MESH_DOWN)
+    assert len(mesh["points"]) == (mesh["across"] + 1) * (mesh["down"] + 1)
+    middle = mesh["points"][(mesh["down"] // 2) * (mesh["across"] + 1):][: mesh["across"] + 1]
+    xs = [point[0] for point in middle if point is not None]
+    assert len(xs) > mesh["across"] // 2 and all(b > a for a, b in zip(xs, xs[1:]))
     # the lens is the frames', known; the trace keeps every point and its shape as filmed
     assert read.known and read.within is None and read.fov == pytest.approx(frames.lens_of(model))
     from azimut.engine import skymatch

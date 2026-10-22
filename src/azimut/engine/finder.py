@@ -132,13 +132,16 @@ SEPARATE_M = 3_000.0
 # The best place must stand this far above the area's top tenth of points to stand out: below,
 # many places fit about as well and none is named.
 STANDOUT_MIN = 0.06
-# The coarse grid's spacing when left to Auto: about this many points over the area.
-AUTO_POINTS = 900
-NICE_SPACINGS = (100.0, 150.0, 250.0, 400.0, 500.0, 750.0, 1_000.0, 1_500.0, 2_000.0, 3_000.0)
-# The most points a coarse grid may hold, whatever spacing was asked: past it the spacing widens, and
-# the estimate says so. The zones' own grids hold at most ZONES_MAX more between them.
+# The coarse grid's spacing when left to Auto: about this many points over the area, some ten minutes of
+# search, so a small area is searched every 50 or 20 m.
+AUTO_POINTS = 4_000
+NICE_SPACINGS = (20.0, 50.0, 100.0, 150.0, 250.0, 400.0, 500.0, 750.0, 1_000.0, 1_500.0, 2_000.0, 3_000.0)
+# The most points a coarse grid may hold: past it the spacing widens, and the estimate says so. Auto's grid
+# holds COARSE_MAX at the most and the zones' own grids ZONES_MAX more between them; a spacing the analyst
+# picks is kept up to PICKED_MAX, hours of search as the estimate says, for the area and its zones alike.
 COARSE_MAX = 6_000
 ZONES_MAX = 6_000
+PICKED_MAX = 100_000
 # A zone searched with no spacing of its own is laid this many times finer than the area, no finer than
 # the terrain's detail is worth.
 ZONE_SHARE = 1 / 3
@@ -210,6 +213,8 @@ class Trace:
     tilts: tuple[float, float] | None = None
     # a selfie: searched mirrored too
     mirror: bool = False
+    # near lines judged rounded to the terrain's cell, metres (skymatch._rounded); None to judge them as drawn
+    rounding: float | None = None
 
 
 def tilts_for(mode: str, view: Sequence[str] = ()) -> tuple[float, float]:
@@ -295,7 +300,8 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
     pairs = trace.get("pairs") or []
     far = trace.get("far") or []
     sea = trace.get("sea") or []
-    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea:
+    clear = trace.get("clear") or []
+    if not trace.get("ridge_x") and not pairs and trace.get("piece") is None and not far and not sea and not clear:
         return None
 
     def ints(key: str) -> np.ndarray | None:
@@ -310,6 +316,7 @@ def marks_of(trace: dict[str, Any]) -> skymatch.Marks | None:
         piece=ints("piece"), ridge_piece=ints("ridge_piece"),
         far=tuple((int(stroke), float(nearest), float(farthest)) for stroke, nearest, farthest in far),
         sea=tuple(int(stroke) for stroke in sea),
+        clear=tuple(int(stroke) for stroke in clear),
     )
 
 
@@ -411,15 +418,33 @@ def within(plan: Plan, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
 
 def zone_spacings(plan: Plan, spacing: float) -> list[float]:
     """Each zone searched's own spacing, metres (the area's `spacing` given), widened alike until the zones'
-    grids hold `ZONES_MAX` points between them; 0 for a zone left out."""
-    finest = FINE_PER_DETAIL * terrain.PLANET_DETAIL_M
-    wanted = [0.0 if zone.out else float(zone.spacing or max(finest, spacing * ZONE_SHARE)) for zone in plan.zones]
+    grids hold `ZONES_MAX` points between them, `PICKED_MAX` once a zone's spacing is picked; 0 for a zone
+    left out."""
+    wanted = _zones_wanted(plan, spacing)
+    most = PICKED_MAX if any(zone.spacing and not zone.out for zone in plan.zones) else ZONES_MAX
     for _ in range(40):
         count = sum(_polygon_grid(zone.area, step)[0].size for zone, step in zip(plan.zones, wanted) if step)
-        if count <= ZONES_MAX:
+        if count <= most:
             break
         wanted = [step * 1.25 for step in wanted]
     return wanted
+
+
+def _zones_wanted(plan: Plan, spacing: float) -> list[float]:
+    """Each zone's spacing as asked, metres (the area's `spacing` given, a third of it for Auto); 0 for one left out."""
+    finest = FINE_PER_DETAIL * terrain.PLANET_DETAIL_M
+    return [0.0 if zone.out else float(zone.spacing or max(finest, spacing * ZONE_SHARE)) for zone in plan.zones]
+
+
+def zones_wider(plan: Plan, spacing: float) -> float | None:
+    """How many times wider than asked the zones given a spacing are laid, holding too many points for it;
+    None when they are laid as asked."""
+    laid = zone_spacings(plan, spacing) if plan.zones else []
+    wider = max(
+        (step / want for zone, step, want in zip(plan.zones, laid, _zones_wanted(plan, spacing)) if zone.spacing and not zone.out),
+        default=1.0,
+    )
+    return round(wider, 2) if wider > 1.01 else None
 
 
 def grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray]:
@@ -521,10 +546,15 @@ def asked_spacing(plan: Plan) -> float:
 
 
 def coarse_spacing(plan: Plan) -> float:
-    """The coarse grid's spacing: the one asked (`asked_spacing`), widened until the grid is within `COARSE_MAX`."""
+    """The coarse grid's spacing: the one asked (`asked_spacing`), widened until the grid is within `COARSE_MAX`,
+    or `PICKED_MAX` for a spacing the analyst picked."""
     spacing = asked_spacing(plan)
-    while grid(plan, spacing)[0].size > COARSE_MAX:
-        spacing *= 1.25
+    most = PICKED_MAX if plan.spacing else COARSE_MAX
+    if not plan.alignments:
+        # a fine grid over a large area starts about as wide as it must end, not by laying millions of points
+        spacing = max(spacing, math.sqrt(area_m2(plan.area) / most))
+    while grid(plan, spacing)[0].size > most:
+        spacing *= 1.05
     return spacing
 
 
@@ -571,6 +601,8 @@ def estimate(plan: Plan) -> dict[str, Any]:
         "points": points, "levels": depth,
         # the spacing asked, when the area was too large for it and a wider one is used
         "asked": round(asked, 1) if spacing > asked * 1.01 else None,
+        # the zones given a spacing, when they hold too many points for it: how many times wider they are laid
+        "zones_wider": zones_wider(plan, spacing),
         # where relief stands near, the cells are filled in: at most this many points in all
         "most": points + int(DENSE_MAX * coarse),
     }
@@ -809,9 +841,14 @@ def score_point(
                 altitude = observer.altitude(float(sampler.heights(lat, lon, terrain.MAX_ZOOM)))
                 marks = _at_sea(marks, altitude)
                 reach = max(far, SEA_FAR * skymatch.BAND_SLACK * sea_horizon(altitude))
+            # a line said to have only sky above is read as far as the analyst says the photo sees, past
+            # where the trace is searched if need be: a range there would have shown over it
+            sees = plan.reach if marks is not None and marks.clear and plan.reach else None
+            read = max(reach, sees) if sees is not None else reach
+            extra = [reach] if read > reach else [sees] if sees is not None and sees < reach and sees not in cuts else []
             swept = horizon.sweep(
-                observer, azimuths=columns[marching], far=reach, cuts=cuts, sampler=sampler, workers=WORKERS,
-                near_step=near_step,
+                observer, azimuths=columns[marching], far=read, cuts=[*cuts, *extra], sampler=sampler,
+                workers=WORKERS, near_step=near_step,
             )
         except horizon.BelowGround:
             continue
@@ -821,11 +858,21 @@ def score_point(
             out[marching] = row
             return out
 
-        turns = [
+        rows = [
             skymatch.Turn(0.0, step, whole(row), reach=float(at), distance=whole(far_row))
             for at, row, far_row in zip(swept.cuts, swept.skyline_cuts, swept.skyline_cuts_distance)
         ]
-        turns.append(skymatch.Turn(0.0, step, whole(swept.skyline), reach=reach, distance=whole(swept.skyline_distance)))
+        full = skymatch.Turn(0.0, step, whole(swept.skyline), reach=read, distance=whole(swept.skyline_distance))
+        turns = rows[:len(cuts)]
+        clear = None
+        if read > reach:
+            # the trace is searched out to the reach, its lines with only sky above read on to the full sweep
+            turns.append(replace(rows[-1], reach=reach))
+            clear = full
+        else:
+            turns.append(full)
+            if sees is not None:
+                clear = rows[-1] if extra else next((t for t, cut in zip(turns, cuts) if cut == sees), full)
         ridges = None
         if trace.marks is not None and trace.marks.ridge_x.size:
             ridges = skymatch.Ridges.of(
@@ -839,7 +886,8 @@ def score_point(
             found = skymatch.match(
                 x, trace.y, turns, half_width=trace.half_width, fov=trace.fov, known=trace.known,
                 within=trace.within, facing=facing, projection=trace.projection, quick=quick, rough=rough,
-                marks=marks, ridges=ridges, floor=trace.floor, tilts=trace.tilts,
+                marks=marks, ridges=ridges, floor=trace.floor, tilts=trace.tilts, rounding=trace.rounding,
+                clear=clear,
             )
             if not found.fits or found.fits[0].explained <= best["explained"]:
                 continue
@@ -861,6 +909,8 @@ def score_point(
                 best["pairs"] = list(fit.pairs)
             if fit.pieces is not None:
                 best["pieces"] = skymatch.pieces_of(fit)
+            if fit.over is not None:
+                best["over"] = round(fit.over, 4)
     return best
 
 
@@ -1067,8 +1117,11 @@ def _search(
         "verdict": verdict(places, rise),
         "standout": None if rise is None else round(rise, 3),
         "places": places,
+        # each point with how far off the terrain the trace lies there, degrees: where nothing explains the
+        # trace, the map still shows where it lies nearest
         "points": [
-            {"lat": p["lat"], "lon": p["lon"], "explained": p["explained"], "spacing": round(p["spacing"], 1)}
+            {"lat": p["lat"], "lon": p["lon"], "explained": p["explained"], "spacing": round(p["spacing"], 1),
+             "gap": round(p["gap"], 2)}
             for p in scored if p["explained"] >= 0
         ],
         "spacing": round(spacing, 1),

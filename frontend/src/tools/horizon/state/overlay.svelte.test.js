@@ -460,6 +460,35 @@ describe('a photo pulled by its corners', () => {
     expect(photo.picture).toBe(still);
   });
 
+  it('lays the photo as a search read it, the trace shown with it, until a tool, a corner or a curve lays it flat', async () => {
+    const photo = overlay({ layPicture: (picture, laid) => ({ laidFrom: picture, kind: laid.kind }) });
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    const still = photo.picture;
+    photo.restoreWork({ strokes: [[{ u: 0.2, v: 0.5 }, { u: 0.4, v: 0.45 }]] });
+    const flipped = { kind: 'mirrored', us: [0, 1], vs: [0, 1], place: (u, v) => ({ u: 1 - u, v }) };
+    photo.layAsSearched(flipped);
+    expect(photo.asSearched.kind).toBe('mirrored');
+    expect(photo.picture).toMatchObject({ laidFrom: still, kind: 'mirrored' });
+    expect(photo.strokesShown[0][0].u).toBeCloseTo(0.8, 9);
+    // Find and the next search read the trace as drawn
+    expect(photo.strokesSeen[0][0].u).toBeCloseTo(0.2, 9);
+    photo.setTracing(true);
+    expect(photo.asSearched).toBeNull();
+    expect(photo.picture).toBe(still);
+    photo.setTracing(false);
+    photo.layAsSearched(flipped);
+    photo.setCorner(1, { u: 0.9, v: 0.1 });
+    expect(photo.asSearched).toBeNull();
+    // a photo pulled by its corners is not laid over them
+    photo.layAsSearched(flipped);
+    expect(photo.asSearched).toBeNull();
+    photo.resetWarp();
+    photo.layAsSearched(flipped);
+    photo.layFlat();
+    expect(photo.asSearched).toBeNull();
+    expect(photo.strokesShown).toBe(photo.strokesSeen);
+  });
+
   it('keeps a corner within reach of the frame', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
@@ -1106,6 +1135,30 @@ describe('the marks beside the trace', () => {
     expect(photo.distancing).toBe(false);
   });
 
+  it('says a skyline line has only sky above it on a click with the Sky only tool, never a ridge', async () => {
+    const photo = overlay();
+    await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
+    photo.addStroke(across(0.3));
+    photo.setPen('ridge');
+    photo.addStroke(across(0.6));
+    const [sky, ridge] = photo.marks.lines;
+    photo.setClearing(true);
+    expect(photo.clearing).toBe(true);
+    expect(photo.clearAt({ u: 0.5, v: 0.3 }, SCALE)).toBe(sky);
+    expect(photo.marks.clear).toEqual([sky]);
+    expect(photo.clearBadges.map((badge) => badge.line)).toEqual([sky]);
+    // a ridge has land above it; a click off every line says nothing; the same line again takes it back
+    expect(photo.clearAt({ u: 0.5, v: 0.6 }, SCALE)).toEqual({ ridge });
+    expect(photo.clearAt({ u: 0.5, v: 0.95 }, SCALE)).toBeNull();
+    photo.clearAt({ u: 0.5, v: 0.3 }, SCALE);
+    expect(photo.marks.clear).toEqual([]);
+    photo.undoStroke();
+    expect(photo.marks.clear).toEqual([sky]);
+    // another tool out puts this one away
+    photo.setDistancing(true);
+    expect(photo.clearing).toBe(false);
+  });
+
   it('draws a line along the sea with the Sea line pen, and a click with another pen makes it that kind', async () => {
     const photo = overlay();
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
@@ -1127,9 +1180,9 @@ describe('the marks beside the trace', () => {
     await photo.openCase('c1', { path: 'media/summit.jpg', kind: 'image' });
     photo.restoreWork({
       strokes: [across(0.3), across(0.5, 0.3, 0.6)],
-      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }] },
+      marks: { lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], clear: [4] },
     });
-    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [] });
+    expect(photo.marks).toEqual({ lines: [4, 8], inner: [], pairs: [[8, 4]], cuts: [0.5], far: [{ line: 4, bands: ['b3'] }], sea: [], clear: [4] });
     photo.restoreWork({ strokes: [across(0.3), across(0.5, 0.3, 0.6)] });
     expect(photo.marks.inner).toEqual([1]);
     // Detect lays the skyline afresh: the cuts stay, they belong to the photo

@@ -21,6 +21,7 @@
   import { gotoPoint } from '../lib/navigate.js';
   import { openInOptions } from '../lib/openIn.js';
   import { filedToast } from '../lib/folders.js';
+  import { carriesOutsideFiles, leftZone, startMediaDrag } from '../lib/drag.js';
   import { uploadFiles } from '../lib/mediaImport.js';
   import { TOOL_LABELS } from '../lib/workspaces.js';
   import { revealMediaFolder } from '../lib/reveal.js';
@@ -787,9 +788,20 @@
   }
 
   function onDrop(e) {
+    if (!carriesOutsideFiles(e)) return;
     e.preventDefault();
     dragOver = false;
     importFiles(e.dataTransfer.files);
+  }
+
+  // ── drag to a folder ───────────────────────────────────────────────────────
+  // A card or a row carries its file to a folder of the case sidebar. A drag
+  // that starts on a link inside stays the link's own.
+  let draggingPath = $state(null);
+  function onItemDragStart(e, item) {
+    if (e.target !== e.currentTarget) return;
+    startMediaDrag(e, item);
+    draggingPath = item.path;
   }
 
   // ── paste ────────────────────────────────────────────────────────────────
@@ -905,11 +917,12 @@
   role="region"
   aria-label="Media"
   ondragover={(e) => {
+    if (!carriesOutsideFiles(e)) return;
     e.preventDefault();
     dragOver = true;
   }}
   ondragleave={(e) => {
-    if (e.currentTarget === e.target) dragOver = false;
+    if (leftZone(e)) dragOver = false;
   }}
   ondrop={onDrop}
 >
@@ -1157,7 +1170,18 @@
             <span class="media-col-actions" aria-label="Actions"></span>
           </div>
           {#each filteredItems as item (mediaKey(item))}
-            <div class="media-row" class:focused={item.path === focusedPath} data-path={item.path} role="row">
+            <!-- Dragging to a folder is a shortcut; Info files a row from the keyboard. -->
+            <!-- svelte-ignore a11y_interactive_supports_focus -->
+            <div
+              class="media-row"
+              class:focused={item.path === focusedPath}
+              class:dragging={item.path === draggingPath}
+              data-path={item.path}
+              role="row"
+              draggable="true"
+              ondragstart={(e) => onItemDragStart(e, item)}
+              ondragend={() => (draggingPath = null)}
+            >
               <!-- The preview remains an image-only control; the row itself is not a card. -->
               <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
               <div
@@ -1174,6 +1198,7 @@
                     src={fileUrl(caseState.current.id, item.thumbnail)}
                     data-media-key={mediaKey(item)}
                     alt=""
+                    draggable="false"
                     loading="lazy"
                     decoding="async"
                     onerror={markBrokenThumb}
@@ -1242,10 +1267,16 @@
       {:else}
       <div class="grid" class:compact={view === 'small'}>
         {#each filteredItems as item (mediaKey(item))}
+          <!-- Dragging to a folder is a shortcut; Info files a card from the keyboard. -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="media-card card"
             class:focused={item.path === focusedPath}
+            class:dragging={item.path === draggingPath}
             data-path={item.path}
+            draggable="true"
+            ondragstart={(e) => onItemDragStart(e, item)}
+            ondragend={() => (draggingPath = null)}
           >
             <!-- thumbnail — click to lightbox for images -->
             <!-- The role and tab stop deliberately exist only for image previews. -->
@@ -1264,6 +1295,7 @@
                   src={fileUrl(caseState.current.id, item.thumbnail)}
                   data-media-key={mediaKey(item)}
                   alt={item.filename}
+                  draggable="false"
                   loading="lazy"
                   decoding="async"
                   onerror={markBrokenThumb}
@@ -1865,6 +1897,10 @@
   }
   .media-card:hover {
     border-color: var(--border-strong);
+  }
+  .media-card.dragging,
+  .media-row.dragging {
+    opacity: 0.5;
   }
   .media-card.focused {
     border-color: var(--accent);

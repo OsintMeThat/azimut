@@ -24,6 +24,8 @@ router = APIRouter(prefix="/api/terrain", tags=["terrain"])
 TILE_CACHE_CONTROL = "private, max-age=604800"
 MAX_PROFILE_POINTS = 100
 MAX_PROFILE_SAMPLES = 2048
+# How far a viewshed reaches: past this the rays cost more than a click should.
+MAX_VIEWSHED_RADIUS = 30_000
 
 
 def _unavailable(exc: terrain.TerrainUnavailable) -> HTTPException:
@@ -135,11 +137,15 @@ def profile(body: ProfileIn) -> dict[str, Any]:
     except terrain.TerrainUnavailable as exc:
         raise _unavailable(exc) from exc
     mid_lat = float(lat.mean())
+    corners = sampler.heights(
+        np.array([p[0] for p in body.points]), np.array([p[1] for p in body.points]), terrain.MAX_ZOOM)
     answer: dict[str, Any] = {
         "distance_m": [round(float(d), 1) for d in along],
         "lat": [round(float(v), 6) for v in lat],
         "lon": [round(float(v), 6) for v in lon],
         "elevation": [round(float(h), 1) for h in heights],
+        # the ground at each point the line was drawn through, read at its finest
+        "corners": [round(float(h), 1) for h in corners],
         "resolution_m": sampler.resolution(mid_lat),
         "credits": sampler.credits(),
     }
@@ -156,7 +162,9 @@ def _sight(
     Read on the same refraction-enlarged sphere as every horizon, from the
     profile's own samples. `bulge` is how far the Earth rises between the two
     ends at each sample, which is what a chart adds to the ground so the line
-    of sight can be drawn straight.
+    of sight can be drawn straight. `seen` says, sample by sample, whether a
+    target as high as the one at the end would be in sight standing there:
+    the stretches of the line the eye covers.
     """
     eye = float(heights[0]) + eye_height
     span = float(along[-1])
@@ -168,11 +176,56 @@ def _sight(
     margin = aim - float(angles[worst]) if angles.size else math.pi / 2
     radius = horizon.effective_radius()
     bulge = along * (span - along) / (2 * radius)
+    ground = horizon.elevation_angle(along, heights, eye)
+    before = np.concatenate([[-np.inf], np.maximum.accumulate(ground)[:-1]])
+    aims = horizon.elevation_angle(along, heights + target_height, eye)
+    seen = aims >= before
+    seen[0] = True
     return {
         "visible": margin >= 0,
+        # how far above (or below) the level the target stands, seen from the eye
+        "angle_deg": round(math.degrees(aim), 3),
         "margin_deg": round(math.degrees(margin), 4),
         "blocked_at_m": None if margin >= 0 else round(float(along[between][worst]), 1),
         "eye_m": round(eye, 1),
         "target_m": round(target, 1),
         "bulge_m": [round(float(b), 1) for b in bulge],
+        "seen": [bool(v) for v in seen],
+    }
+
+
+class ViewshedIn(BaseModel):
+    lat: float = Field(ge=-terrain.MAX_LAT, le=terrain.MAX_LAT)
+    lon: float = Field(ge=-180, le=180)
+    radius_m: float = Field(gt=0, le=MAX_VIEWSHED_RADIUS)
+    eye_height: float = Field(default=horizon.EYE_HEIGHT, ge=0, le=20_000)
+    target_height: float = Field(default=0.0, ge=0, le=20_000)
+
+
+@router.post("/viewshed")
+def viewshed(body: ViewshedIn) -> dict[str, Any]:
+    """The ground in sight from a point, out to a radius.
+
+    Each ray's stretches in sight come back as distances from the point, start
+    and end in turn, the rays evenly spaced from north round through east.
+    """
+    observer = horizon.Observer(body.lat, body.lon, "ground", body.eye_height)
+    sampler = terrain.Sampler()
+    try:
+        found = horizon.viewshed(
+            observer, far=body.radius_m, target_height=body.target_height, sampler=sampler)
+    except terrain.TerrainUnavailable as exc:
+        raise _unavailable(exc) from exc
+    return {
+        "lat": body.lat,
+        "lon": body.lon,
+        "radius_m": round(found.far, 1),
+        "ground_m": round(found.ground, 1),
+        "eye_m": round(found.altitude, 1),
+        "target_height": body.target_height,
+        "step_deg": 360.0 / found.azimuths.size,
+        "runs": [[round(float(d)) for d in run] for run in found.runs],
+        "share": round(found.share, 4),
+        "resolution_m": sampler.resolution(body.lat),
+        "credits": sampler.credits(),
     }

@@ -4,6 +4,7 @@
     quadsBounds, moveQuads, rotateQuads, scaleQuads,
   } from '../../lib/inspect.js';
   import { uiState } from '../../lib/state.svelte.js';
+  import { anyOverlayOpen } from '../../lib/overlayStack.js';
   import Icon from '../../components/Icon.svelte';
 
   // Interactive collage surface. Each node is a piece (a frame or a case image)
@@ -237,7 +238,7 @@
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    if (document.querySelector('.overlay')) return;
+    if (anyOverlayOpen()) return;
     e.preventDefault();
     collage.nodes = collage.nodes.filter((n) => !isSel(n.id));
     selectedIds = [];

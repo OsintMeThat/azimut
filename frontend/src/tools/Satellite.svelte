@@ -179,6 +179,8 @@
   // or from its control.
   let reliefOn = $state(false);
   let reliefReady = $state(false);
+  // the globe draws the map: the layers it cannot draw are left out meanwhile
+  let onGlobe = $state(false);
   let exaggeration = $state(1);
   let pitch = $state(0);
   // A tilted camera the address or a saved capture asked for, held until the
@@ -255,8 +257,8 @@
   // undifferentiated line.
   let railOverlay = $state(false);
   /**
-   * The other key-less reference layers, each simply on or off: Esri's borders
-   * and roads, OpenFreeMap's place names, Open Infrastructure Map's power
+   * The other key-less reference layers, each simply on or off: OpenFreeMap's
+   * borders and place names, Esri's roads, Open Infrastructure Map's power
    * lines, OpenSeaMap's sea marks and OSM's raw GPS traces. Borders and place
    * names start on, because every read of imagery starts with which side of a
    * line it is on and what the place is called; they are map tiles, the network
@@ -388,7 +390,8 @@
       refLayers.power && 'power',
       refLayers.seamarks && 'seamarks',
       refLayers.gpstraces && 'gpstraces',
-      fires.on && fires.keyed && firmsAskable && { id: 'firms', params: tileParams(fires) },
+      // a view to the horizon would spend the fires' allowance on every tile out to it
+      fires.on && fires.keyed && firmsAskable && !onGlobe && { id: 'firms', params: tileParams(fires) },
       night.on && nightAskable && { id: 'nightlights', params: nightParams(night) },
     ].filter(Boolean)
   );
@@ -792,6 +795,7 @@
     // a mode already waiting for a left drag, though: those own the button.
     turnFromPress(engine, e, {
       shift: !capture.armed && grid.drawMode !== 'rect',
+      double: doubleTurns(),
       // over relief the same press orbits, Google Earth style: up and down tilt
       tilt: reliefReady,
       onPivot: (pivot) => {
@@ -802,6 +806,9 @@
     });
   }
 
+  /** Whether a double click held turns the map: unless a mode is reading the clicks, or owns the left drag. */
+  const doubleTurns = () => !armedCursor && !capture.armed && grid.drawMode !== 'rect';
+
   /**
    * A plain drag over relief: the grabbed ground stays under the hand, near
    * ground and far alike (lib/map/gestures.js). Shift is the orbit's, and the
@@ -811,6 +818,8 @@
   function onGroundPanStart(e) {
     if (!engine || !reliefReady || e.button !== 0) return;
     if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    // the second press of a double click held is the turn's (`onMiddleRotateStart`)
+    if (e.detail === 2 && doubleTurns()) return;
     if (capture.armed || grid.drawMode === 'rect' || !engine.onSurface(e.target)) return;
     startGroundPan(engine, e);
   }
@@ -1370,6 +1379,9 @@
    * beside its switch, because hiding a layer and being done with it are two
    * different intentions and used to be the same button.
    */
+  /** Why the fires' switch rests while the globe draws: its allowance counts every tile out to the horizon. */
+  const FIRES_FLAT_ONLY = 'Active fires are drawn on the flat map only. Turn 3D off to see them';
+
   /** A layer's name and what it is, as every map states them (lib/map/layerCatalog.js). */
   const catalogued = (id) => ({ id, label: layerInfo(id).label, title: layerInfo(id).title });
 
@@ -1419,17 +1431,17 @@
     {
       ...catalogued('firms'),
       on: fires.on,
-      disabled: !fires.keyed,
-      detail: fires.keyed ? firmsSummary : firmsKey.detail,
-      ...(fires.keyed ? {} : { title: firmsKey.title }),
+      disabled: !fires.keyed || onGlobe,
+      detail: !fires.keyed ? firmsKey.detail : onGlobe ? 'flat map only' : firmsSummary,
+      ...(!fires.keyed ? { title: firmsKey.title } : onGlobe ? { title: FIRES_FLAT_ONLY } : {}),
       toggle: () => (fires.on = !fires.on),
       // A switch that cannot be pressed says why and where to go, on the row
       // itself rather than only on a greyed-out eye nobody hovers.
       actions: fires.keyed ? null : [{ label: firmsKey.action, quiet: true, run: openImagerySettings }],
       // its two questions — which instrument, and over what — are asked in the
       // row rather than in a card of its own floating somewhere
-      controls: fires.on && fires.keyed ? firmsControls : null,
-      note: fires.on && fires.keyed ? firmsNote(fires, fires.paused) : '',
+      controls: fires.on && fires.keyed && !onGlobe ? firmsControls : null,
+      note: fires.on && fires.keyed && !onGlobe ? firmsNote(fires, fires.paused) : '',
     },
     {
       ...catalogued('nightlights'),
@@ -2421,6 +2433,7 @@
         bind:exaggeration
         bind:pitch
         bind:reliefReady
+        bind:onGlobe
         bind:ready={mapReady}
         bind:refused={mapRefused}
         bind:providerId

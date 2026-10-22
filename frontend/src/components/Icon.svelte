@@ -174,6 +174,8 @@
     freehand: 'M3 17c3-9 5 5 8-2s4-8 6-2 3-2 4-5',
     // a near ridge drawn under a farther one: an inner edge of the land
     ridge: 'M2 19l6-6 4 3 3-3 7 6M2 11l5-4 4 2 4-3 7 5',
+    // a skyline, and a tick in the open sky over it
+    skyClear: 'M2 19l6-6 4 3 3-3 7 6M8.5 7.5l2.5 2.5 5-5.5',
     // a collage cut where its frames meet
     scissors: 'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12',
     // a stroke drawn snaps onto the nearest edge

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { createFindState, estimateText, WHO } from './find.svelte.js';
+import { createFindState, estimateText, WHO, widenedText } from './find.svelte.js';
 import { destination } from '../../../lib/measure.js';
 
 const CAMERA = { lat: 16.9988, lon: 45.0938 };
@@ -67,6 +67,9 @@ describe('zones beside the area', () => {
     expect(find.zones[0].spacing).toBe(100);
     find.setZoneSpacing(find.zones[0].id, 77); // no such grid
     expect(find.zones[0].spacing).toBe(100);
+    find.setZoneSpacing(find.zones[0].id, 20);
+    expect(find.zones[0].spacing).toBe(20);
+    find.setZoneSpacing(find.zones[0].id, 100);
     find.drawZone({ out: true });
     find.addCorner({ lat: 17, lon: 45 });
     find.closeArea();
@@ -230,6 +233,11 @@ describe('who took it', () => {
     expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast' });
     find.setSettings({ spacing: 333, tolerance: -1 });
     expect(find.settings).toEqual({ spacing: 250, tolerance: 2, speed: 'fast' });
+    // grids as fine as 20 m, for a small area or a zone
+    find.setSettings({ spacing: 20 });
+    expect(find.settings.spacing).toBe(20);
+    find.setSettings({ spacing: 50 });
+    expect(find.settings.spacing).toBe(50);
   });
 });
 
@@ -266,6 +274,38 @@ describe('the search', () => {
     const view = { camera: { heading: 0, tilt: 0, roll: 0, fov: 60, projection: 'camera' } };
     return { find: createFindState({ api, overlay, view }), api, overlay };
   }
+
+  it('asks for near lines rounded only where the relief is coarse', async () => {
+    const elevation = { resolution_m: 30 };
+    const { find, api } = laid({ get: vi.fn(async () => elevation) });
+    find.setArea(area);
+    find.setRound(true);
+    expect(find.round).toBe(true);
+    await find.readDetail();
+    await find.start('c1');
+    expect(api.post.mock.calls.at(-1)[1].round).toBe(true);
+    expect(find.snapshot.round).toBe(true);
+    // a survey's metre: the relief holds near ridges, nothing is rounded
+    const fine = laid({ get: vi.fn(async () => ({ resolution_m: 1 })) });
+    fine.find.setArea(area);
+    fine.find.setRound(true);
+    await fine.find.readDetail();
+    await fine.find.start('c1');
+    expect(fine.api.post.mock.calls.at(-1)[1].round).toBe(false);
+  });
+
+  it('reads off the trace which way the camera looks and how wide the picture spans', () => {
+    const { find, overlay } = laid();
+    expect(find.traceSays.looking).toBeNull();
+    expect(find.traceSays.span).toBeGreaterThan(20);
+    // a portrait frame from a wide phone lens, the skyline near its top: a camera on foot looks down past the bounds
+    const high = stroke.map((p) => ({ u: p.u, v: 0.08 + (p.v - 0.4) / 4 }));
+    Object.assign(overlay, { aspect: 9 / 16, strokes: [high], strokesSeen: [high], hints: { ...overlay.hints, zoom: 'wide' } });
+    expect(find.traceSays.looking).toBe('down');
+    // a drone may look that far down already
+    find.setWho({ mode: 'drone' });
+    expect(find.traceSays.looking).toBeNull();
+  });
 
   it('says what keeps it from running, then asks the app with the trace, the area and who took it', async () => {
     const { find, api } = laid();
@@ -630,5 +670,23 @@ describe('the time a search takes', () => {
   it('shrinks with the share of the turn each point reads', () => {
     expect(estimateText({ points: 600, step: 0.5 })).toBe('600 points, about 3 min.');
     expect(estimateText({ points: 600, step: 0.5, turn: 0.25 })).toBe('600 points, about a minute.');
+  });
+});
+
+describe('a grid laid wider than picked', () => {
+  it('is said, for the area and for the zones', () => {
+    expect(widenedText({ asked: null, spacing: 244.1, zones_wider: null })).toEqual([]);
+    expect(widenedText({ asked: 20, spacing: 244.1, zones_wider: null })).toEqual([
+      'Too large for a 20 m grid, even in hours: a point every 244 m. A zone searches finer.',
+    ]);
+    expect(widenedText({ asked: null, spacing: 500, zones_wider: 2.44 })).toEqual(['Zones too large for their grid: points 2.4× farther apart.']);
+  });
+
+  it('leaves Auto alone: it widens as it must', () => {
+    expect(widenedText({ asked: 48, spacing: 75, zones_wider: null }, 'metric', false)).toEqual([]);
+  });
+
+  it('speaks the analyst’s units', () => {
+    expect(widenedText({ asked: 20, spacing: 244.1 }, 'imperial')[0]).toBe('Too large for a 66 ft grid, even in hours: a point every 801 ft. A zone searches finer.');
   });
 });

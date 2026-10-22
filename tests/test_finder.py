@@ -56,8 +56,10 @@ def test_the_grid_lies_over_the_area_and_on_the_lines():
 
 
 def test_the_spacing_and_the_columns_follow_the_area_and_the_lens():
-    assert finder.auto_spacing(_square(CAMERA, 5_000.0)) == 400.0
-    assert finder.auto_spacing(_square(CAMERA, 1_000.0)) == 100.0
+    # Auto lays some four thousand points: every 250 m over 100 km², 50 m over 4 km², 20 m over one
+    assert finder.auto_spacing(_square(CAMERA, 5_000.0)) == 250.0
+    assert finder.auto_spacing(_square(CAMERA, 1_000.0)) == 50.0
+    assert finder.auto_spacing(_square(CAMERA, 500.0)) == 20.0
     assert finder.levels(900.0, 100.0) == 2
     assert finder.levels(100.0, 100.0) == 0
     # refined as finely as the terrain is worth: GLO-30 here, so 60 m, the analyst's own when said
@@ -70,7 +72,8 @@ def test_the_spacing_and_the_columns_follow_the_area_and_the_lens():
     assert finder.column_step(lens(fov=60.0, within=(1.5, 120.0))) == pytest.approx(0.2)
     assert finder.column_step(lens(fov=5.0, within=(1.0, 12.0))) == finder.STEP_MIN
     big = finder.estimate(finder.Plan(area=_square(CAMERA, 30_000.0), spacing=100.0))
-    assert big["coarse"] <= finder.COARSE_MAX
+    assert big["coarse"] <= finder.PICKED_MAX
+    assert finder.estimate(finder.Plan(area=_square(CAMERA, 30_000.0)))["coarse"] <= finder.COARSE_MAX
 
 
 def test_the_camera_is_found_again_from_its_skyline():
@@ -174,10 +177,20 @@ def test_lines_said_how_far_set_the_reach_and_the_grid():
     assert finder.asked_spacing(finder.Plan(area=area, near=1_000.0)) == pytest.approx(finder.SAID_SHARE * 1_000.0)
     assert finder.said_nearest([[0, 0.0, 1_000.0]]) == finder.SAID_NEAREST
     assert finder.said_nearest([[0, 3_000.0, 10_000.0], [1, 1_000.0, 3_000.0]]) == 1_000.0
-    # an area too large for the spacing asked says so in its estimate
-    big = finder.estimate(finder.Plan(area=_square(CAMERA, 30_000.0), spacing=100.0))
-    assert big["asked"] == 100.0 and big["spacing"] > 100.0
+    # a spacing picked is kept for hours of search: 20 m over 25 km² is some 62,000 points
+    kept = finder.estimate(finder.Plan(area=_square(CAMERA, 2_500.0), spacing=20.0))
+    assert kept["spacing"] == 20.0 and kept["asked"] is None and kept["coarse"] > finder.COARSE_MAX
     assert finder.estimate(finder.Plan(area=_square(CAMERA, 1_000.0)))["asked"] is None
+    # past that the grid widens and says so, started near where it ends rather than from millions of points
+    big = finder.estimate(finder.Plan(area=_square(CAMERA, 30_000.0), spacing=20.0))
+    assert big["asked"] == 20.0 and big["spacing"] > 20.0 and big["coarse"] <= finder.PICKED_MAX
+    assert big["coarse"] > 0.9 * finder.PICKED_MAX
+
+
+def test_near_lines_are_rounded_to_the_planet_s_cell_when_asked():
+    ask = {**_ask(), "area": [[lat, lon] for lat, lon in _square(CAMERA, 1_500.0)]}
+    assert horizon_finds.trace_from(ask).rounding is None
+    assert horizon_finds.trace_from({**ask, "round": True}).rounding == terrain.PLANET_DETAIL_M
 
 
 def test_the_tilt_follows_who_took_the_photo_and_what_was_said():
@@ -195,7 +208,8 @@ def test_a_selfie_is_found_mirrored():
     as_shot = finder.score_point(*CAMERA, mirrored, plan, sampler=sampler, quick=False)
     both = finder.score_point(*CAMERA, replace(mirrored, mirror=True), plan, sampler=sampler, quick=False)
     assert both["mirrored"] is True
-    assert both["explained"] > as_shot["explained"] + 0.2
+    # the score lets one quarter of the trace go, so a flipped trace keeps some of its fit (0.83 here)
+    assert both["explained"] > as_shot["explained"] + 0.15
     assert both["heading"] == pytest.approx(80.0, abs=2.0)
 
 
@@ -232,6 +246,12 @@ def test_zones_lay_their_own_grid_and_zones_left_out_are_never_searched():
     # the zones' grids between them are capped: their spacing widens alike
     huge = finder.Zone(area=_square(CAMERA, 20_000.0), spacing=50.0)
     assert finder.zone_spacings(finder.Plan(area=area, zones=(huge,)), 500.0)[0] > 50.0
+    # and the estimate says by how much, for the zones given a spacing only
+    wider = finder.estimate(finder.Plan(area=area, spacing=500.0, zones=(huge,)))["zones_wider"]
+    assert wider == pytest.approx(finder.zone_spacings(finder.Plan(area=area, zones=(huge,)), 500.0)[0] / 50.0, rel=0.01)
+    fine = finder.Zone(area=_square(CAMERA, 500.0), spacing=20.0)
+    assert finder.estimate(finder.Plan(area=area, spacing=500.0, zones=(fine,)))["zones_wider"] is None
+    assert finder.zones_wider(finder.Plan(area=area, zones=(finder.Zone(area=huge.area),)), 500.0) is None
 
 
 def test_a_search_with_a_zone_left_out_keeps_out_of_it():
@@ -335,6 +355,40 @@ def test_a_line_along_the_sea_lies_on_the_sea_s_horizon(monkeypatch):
     # the same stroke said to stand within a kilometre cannot lie on that horizon
     near = replace(trace, marks=skymatch.Marks(line=line, far=((1, 0.0, 1_000.0),)))
     assert finder.score_point(*coast, near, plan, sampler=sampler, quick=False)["explained"] < found["explained"] - 0.3
+    terrain.forget_decoded()
+
+
+def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(monkeypatch):
+    eye = (12.7, 43.5)
+    hill = Peak(*offset(*eye, 90.0, 3_000.0), height=300.0, radius=1_000.0)
+    mountain = Peak(*offset(*eye, 100.0, 8_000.0), height=1_500.0, radius=1_500.0)
+    terrain.forget_decoded()
+    monkeypatch.setattr(terrain, "tile", Relief(peaks=(hill, mountain), plain=0.0))
+    # haze stops the air at 5 km: the hill is the skyline, the mountain behind it unseen
+    swept = horizon.sweep(horizon.Observer(*eye), azimuths=np.arange(0.0, 360.0, 0.1), far=20_000.0, cuts=[5_000.0])
+    x, y = trace_on(skymatch.Turn(0.0, 0.1, swept.skyline_cuts[0]), heading=95.0, fov=40.0)
+    # the line said to stand 1 to 3 km off: the turn is searched no farther than that, whatever the reach
+    line = np.zeros(x.size, dtype=np.int64)
+    said = skymatch.Marks(line=line, far=((0, 1_000.0, 3_000.0),))
+    sure = replace(said, clear=(0,))
+    trace = finder.Trace(x=x, y=y, half_width=HALF, fov=40.0, known=True)
+    sampler = terrain.Sampler()
+
+    def scored(reach, marks):
+        plan = finder.Plan(area=[eye] * 3, reach=reach)
+        return finder.score_point(*eye, replace(trace, marks=marks), plan, sampler=sampler, quick=False)
+
+    found = scored(10_000.0, said)
+    assert found["explained"] > 0.5 and "over" not in found
+    # left to Auto or said to see 5 km, the line has only sky above it as far as that: the mountain is haze's
+    for reach in (None, 5_000.0):
+        kept = scored(reach, sure)
+        assert kept["over"] == 0.0 and kept["explained"] == pytest.approx(found["explained"], abs=1e-3)
+    # said to see 10 km, the mountain stands over the line, read past where the line is searched: no place
+    lost = scored(10_000.0, sure)
+    assert lost["over"] > 0.2 and lost["explained"] == 0.0 and lost["reach"] == found["reach"]
+    # a saved trace carries the lines it says have only sky above
+    assert finder.marks_of({"line": [0, 0, 1], "clear": [1]}).clear == (1,)
     terrain.forget_decoded()
 
 
@@ -464,6 +518,8 @@ def test_a_search_is_kept_in_the_case_runs_and_lists(client):
     assert record["status"] == "done", record.get("error")
     best = record["result"]["places"][0]
     assert terrain.distance(best["lat"], best["lon"], *CAMERA) < 600.0
+    # every point says how far off the terrain the trace lies there, for a map with nothing explained
+    assert all(point["gap"] >= 0 for point in record["result"]["points"])
     [row] = client.get(f"/api/cases/{case_id}/horizon/finds").json()
     assert row["name"] == name and row["status"] == "done" and row["best"]["explained"] > 0.5
     # the same title again takes the next free name
@@ -581,8 +637,9 @@ def test_a_finished_search_is_checked_against_decoys_of_its_trace(client):
     record = checked.json()
     assert record["result"]["checked"] is True
     best = record["result"]["places"][0]
-    # the real trace explains the camera's place far better than its decoys do
-    assert best["decoy"] < best["explained"] - 0.3
+    # the real trace explains the camera's place better than its decoys do, by more than the margin
+    # that marks a place any shape fits (lib/horizon/find.js DECOY_MARGIN; 0.35 to 0.45 on solved views)
+    assert best["decoy"] < best["explained"] - 0.15
     assert client.get(f"{url}/{name}").json()["result"]["places"][0]["decoy"] == best["decoy"]
     # a search still running, or gone, cannot be checked
     running = client.post(url, json=_ask()).json()["name"]
@@ -629,6 +686,10 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
     assert estimate["coarse"] > 0 and estimate["step"] == 0.5
     assert estimate["most"] >= estimate["points"]
     assert estimate["turn"] == 1.0
+    # a grid as fine as 20 m may be asked, and is kept as asked
+    fine = client.post("/api/horizon/finds/estimate", json=_ask(spacing=20.0))
+    assert fine.status_code == 200, fine.text
+    assert fine.json()["spacing"] == 20.0 and fine.json()["asked"] is None and fine.json()["zones_wider"] is None
     # a direction ticked marches a share of the turn: the time said shrinks with it
     east = client.post("/api/horizon/finds/estimate", json=_ask(facing=["e"])).json()
     assert east["turn"] < 0.3 and east["points"] == estimate["points"]
@@ -660,10 +721,14 @@ def test_a_search_says_its_size_first_and_refuses_what_it_cannot_run(client):
         {"area": [{"lat": lat, "lon": lon} for lat, lon in _square(CAMERA, 60_000.0)]},
         {"zones": [{"area": tiny}]},
         {"zones": [{"area": _ask()["area"], "spacing": 10}]},
+        {"spacing": 10},
         # a line's distance needs each point's stroke, and its nearest before its farthest
         {"trace": {**_ask()["trace"], "far": [[0, 1_000.0, 3_000.0]]}},
         {"trace": {**_ask()["trace"], "line": [0] * len(_ask()["trace"]["x"]), "far": [[0, 3_000.0, 1_000.0]]}},
         {"trace": {**_ask()["trace"], "sea": [0]}},
+        # a line with only sky above needs each point's stroke, and a stroke there is
+        {"trace": {**_ask()["trace"], "clear": [0]}},
+        {"trace": {**_ask()["trace"], "line": [0] * len(_ask()["trace"]["x"]), "clear": [100_000]}},
     ):
         assert client.post(url, json=_ask(**change)).status_code == 422
     assert client.get(f"{url}/nothing").status_code == 404

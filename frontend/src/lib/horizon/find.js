@@ -265,6 +265,25 @@ export function heatStyle(explained, best, low = 0) {
   return { fill: step, opacity: Math.round((0.12 + 0.6 * t * t) * 100) / 100 };
 }
 
+/**
+ * Each scored point's heat on the map, `{ fill, opacity, tip }`: by what it explains, or, where no point
+ * explains anything, by how far off the terrain the trace lies there (`gap`, degrees), so the places it lies
+ * nearest still show.
+ */
+export function heatOf(points, best = Math.max(-1, ...points.map((p) => p.explained))) {
+  const gaps = points.map((p) => p.gap).filter(Number.isFinite);
+  if (best <= 0 && gaps.length) {
+    const near = Math.min(...gaps);
+    const off = Math.max(...gaps);
+    return points.map((p) => ({
+      ...heatStyle(Number.isFinite(p.gap) ? -p.gap : -off, -near, -off),
+      tip: Number.isFinite(p.gap) ? `Explains 0%: the trace lies ${p.gap.toFixed(1)}° off the terrain` : 'Explains 0%',
+    }));
+  }
+  const low = Math.max(0, Math.min(...points.map((p) => p.explained)));
+  return points.map((p) => ({ ...heatStyle(p.explained, best, low), tip: `Explains ${Math.round(Math.max(0, p.explained) * 100)}% of the trace` }));
+}
+
 /** A search's verdict in the panel's words. */
 export const VERDICTS = {
   match: 'One place stands out',
@@ -304,6 +323,7 @@ export function sameAsk(ask, now) {
     same(cleanStands(ask.stands), cleanStands(now.stands)) &&
     same([...(ask.view ?? [])].sort(), [...(now.view ?? [])].sort()) &&
     Boolean(ask.mirror) === Boolean(now.mirror) &&
+    Boolean(ask.round) === Boolean(now.round) &&
     farKey(ask.photo?.marks) === farKey(now.photo?.marks) &&
     same(zonesKey(ask.zones), zonesKey(now.zones)) &&
     same(ask.sun ?? null, now.sun ?? null)
@@ -406,7 +426,7 @@ export function fanOf(from, sectors, reach) {
 }
 
 /** The distances the fan is ringed at, metres, those within the reach searched. */
-export const FAN_RINGS = [5_000, 10_000, 20_000, 50_000, 100_000];
+export const FAN_RINGS = [2_000, 5_000, 10_000, 20_000, 50_000, 100_000];
 
 /**
  * The fan's rings: an arc across each sector at each distance in `FAN_RINGS`
@@ -475,6 +495,41 @@ const SPOT_POINTS = 6;
 export const TURN_PX = 6;
 /** Fewer turns than this and the trace's shape is too plain to name one place. */
 export const TURNS_MIN = 5;
+
+/** The tilts a search allows for who took the photo, degrees down and up (engine/finder.py `TILTS`). */
+export const TILTS = { ground: [-20, 25], drone: [-80, 25], aircraft: [-80, 15] };
+/** A picture read as one spanning this many degrees or more drifts at its ends: cut, each piece is fitted on its own. */
+export const WIDE_SPAN = 90;
+
+/** Degrees up from the plane's middle of a point `v` half widths up, through a `fov` lens or a panorama. */
+function angleOf(v, fov, projection) {
+  const half = fov / 2;
+  return projection === 'panorama' ? v * half : (Math.atan(v * Math.tan((half * Math.PI) / 180)) * 180) / Math.PI;
+}
+
+/** How many degrees a trace's plane spans across (`x` in half widths of its `fov`). */
+export function traceSpan({ x = [], fov = 0, projection = 'camera' } = {}) {
+  if (!x.length || !(fov > 0)) return 0;
+  return angleOf(Math.max(...x), fov, projection) - angleOf(Math.min(...x), fov, projection);
+}
+
+/** Degrees short of a tilt bound at which the trace already offers to look past it: a ridge stands a few degrees over the horizon. */
+export const LOOK_MARGIN = 5;
+
+/**
+ * Which way the camera must look for the skyline to stand where it is traced: a far skyline lies about level,
+ * so one high in the frame asks the camera down and one low asks it up. 'down' or 'up' once that comes within
+ * `LOOK_MARGIN` of what a search allows for who took the photo (`TILTS`), else null.
+ */
+export function lookingOf({ y = [], fov = 0, projection = 'camera' } = {}, mode = 'ground') {
+  if (!y.length || !(fov > 0)) return null;
+  const sorted = [...y].sort((a, b) => a - b);
+  const tilt = -angleOf(sorted[Math.floor(sorted.length / 2)], fov, projection);
+  const [low, high] = TILTS[mode] ?? TILTS.ground;
+  if (tilt < low + LOOK_MARGIN) return 'down';
+  if (tilt > high - LOOK_MARGIN) return 'up';
+  return null;
+}
 
 /** How many times the trace turns up or down by `TURN_PX` or more, read across the picture from left to right. */
 export function traceTurns(trace) {

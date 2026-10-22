@@ -951,6 +951,12 @@ def test_display_prefs_default_and_round_trip(client):
     assert reloaded["post_target"] == "bluesky"
 
 
+def test_default_mention_holds_several_full_handles(client):
+    mention = "@geoconfirmed.org @uacontrolmap.bsky.social @ukrainedailyupdate.bsky.social"
+    saved = client.put("/api/settings/prefs", json={"post_mention": mention})
+    assert saved.json()["post_mention"] == mention
+
+
 def test_post_template_default_is_none_and_round_trips(client):
     assert client.get("/api/settings").json()["post_template"] == ""
 

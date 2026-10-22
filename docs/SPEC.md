@@ -194,7 +194,12 @@ proof for publication.
 | ✅ **Find: lines, ground and frames** | Says how far each traced line stands, where the eye stands (sea included) shown on the grid before the search, how the camera looks and whether it is a selfie, reads a phone's zoom by the picture's shape, and reads a stitched collage frame by frame. |
 | ✅ **Find: zones, sun and speed** | Searches finer zones and leaves zones out, over areas up to 10,000 km², tries a point clicked on the map, turns where the sun stood on a day into headings, and searches large grids on several cores. |
 | ✅ **Find: sea, lens and decoys** | Traces the sea's horizon with its own pen, measures a video's lens on its pan, and checks a search's places against decoys of its trace. |
+| ✅ **Find: as searched** | Levels a collage as it is laid, lets one stretch of the trace miss, rounds near lines on coarse relief when asked, searches grids down to 20 m, and lays a photo looked from a place as the search read it. |
+| ✅ **Find: sky only** | A line marked with only sky above drops the places where land stands over it, as far as the photo is said to see (now from 2 km); a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
 | ✅ **3D map** | Stands Satellite's imagery on public relief, tilted by hand or key, and files a tilted view as a credited capture that reopens as it was taken. |
+| ✅ **Globe 3D view** | Draws Satellite's 3D on a globe of the app's own whose eye only the hand moves, so the view never jumps as the ground loads, with the former 3D view one press away to compare. |
+| ✅ **Globe layers** | Draws what the flat map holds on the globe: borders, names and the analyst's layers, the case's places, measures and the sun's path, with clicks and cards as flat; active fires stay flat. |
+| ✅ **Vector borders** | Draws Borders as OpenStreetMap lines from OpenFreeMap on every map, regions and districts in their own weight. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
@@ -206,7 +211,7 @@ proof for publication.
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
 | ✅ **Subjects & case analysis** | Corrects and merges subjects, indexes their events, searches across scripts and reviews proposed account and site connections. |
 | ✅ **Geolocation worklists** | Opens recent sheets, tracks imported files awaiting a proof and indexes every proof point with its date, source and coordinates. |
-| ✅ **Files & navigation** | Files work into the active folder, offers contextual actions and filters, and retraces tools and documents with guarded Back and Forward. |
+| ✅ **Files & navigation** | Files work into the active folder, files a Media Library card dragged onto a sidebar folder, offers contextual actions and filters, and retraces tools and documents with guarded Back and Forward. |
 | ✅ **Command palette** | Ctrl+K or ⌘K searches tools, cases and current-case documents, starts with recently added items and protects unsaved work. |
 | ✅ **Shared analyzers & areas** | Exports an analyzer of your own as a file, checks included or left behind, and an area or a group as the ground it is, names, colours and folder kept. Imports either without overwriting what is here, so the work travels without the settings backup and its keys. |
 | ✅ **Copernicus layers & figures** | Writes composite, index and script layers with a preview on the map, offers them in every map tab, reads an index or single-band layer as a Detect rule, draws a rule back as a layer and moves its line live on the last test's readings, and lays several renderings of one pass out as a captioned figure. |
@@ -224,6 +229,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | Tool | What it does |
 |------|--------------|
 | **Horizon buildings** | Buildings stand in Horizon round the eye, from open sources merged by a stated rule (national surveys, OpenStreetMap, Overture, 3D-GloBFP, Google's 2.5D heights), each saying where its height comes from; a saved view keeps them. |
+| **Globe only** | Retires the map engine's former 3D view (Classic) and its 3D code once the globe has been used on real cases, and draws active fires there within their allowance. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
@@ -340,6 +346,7 @@ stops making sense.
 - **A live public map:** a layer published as GeoJSON at a public address (a Gist) that a uMap remote-data layer reads, so one press updates a map others follow.
 - **Dated layers by side in Compare:** a GeoConfirmed or other dated layer showing on each side only what was known by that side's date.
 - **Find, narrower still:** near a road or a track (OpenFreeMap's transportation layer, a line decoder and a tile cap per area), turns kept between searches of one area, a mirrored place shown flipped in Overlay, and the lens searched for a collage laid wholly by hand.
+- **Sun and moon on the globe:** the bodies in the 3D view's sky at the hour the Sun & moon panel is on, and the relief lit from where the sun stands then.
 - **The sky over the area, not the tile:** Detect's pass list and its newest pass judged by the cloud over the drawn area (one small SCL read per pass) rather than the 110 km tile's figure.
 
 ## 8. Explicit non-goals
@@ -359,7 +366,10 @@ stops making sense.
   yt-dlp, gallery-dl, OpenCV) runs server-side.
 - **Frontend**: Svelte + Konva/canvas, served by the backend, opened in the
   default browser. The map is MapLibre GL behind `lib/map`'s façade, so tools
-  speak points, positions and view events and never the engine. Rail =
+  speak points, positions and view events and never the engine. Satellite's 3D
+  view is a WebGL2 globe of the app's own (`lib/globe`) answering the same
+  façade while it is on, and drawing the flat map's own layers by reading its
+  style (`lib/globe/mirror.js`). Rail =
   workspaces in pipeline order, tools are tabs inside them (see
   [UI.md](UI.md)).
 - **Settings and secrets:** in-app tabs group general preferences, publishing,

@@ -11,6 +11,7 @@
   import Modal from '../../components/Modal.svelte';
   import SourcePicker from '../../components/SourcePicker.svelte';
   import Icon from '../../components/Icon.svelte';
+  import { carriesOutsideFiles } from '../../lib/drag.js';
 
   let {
     /** The open case's id, or null in one-shot mode. */
@@ -58,6 +59,7 @@
   }
 
   function onDrop(event) {
+    if (!carriesOutsideFiles(event)) return;
     event.preventDefault();
     over = false;
     const file = event.dataTransfer?.files?.[0];
@@ -73,6 +75,7 @@
       role="region"
       aria-label="Drop a photo or a video here"
       ondragover={(event) => {
+        if (!carriesOutsideFiles(event)) return;
         event.preventDefault();
         over = true;
       }}

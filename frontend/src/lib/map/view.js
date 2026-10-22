@@ -82,7 +82,8 @@ export function readView(params) {
   }
 
   const tilt = Number(get('t'));
-  const tilted = get('t') !== null && get('t') !== undefined && within(tilt, 0, 85);
+  // the globe leans to 88°, the map engine's own 3D to 85° and it holds anything past it there
+  const tilted = get('t') !== null && get('t') !== undefined && within(tilt, 0, 90);
   const zoom = Number(get('z'));
   if (get('z') !== null && get('z') !== undefined && within(zoom, 0, 24)) {
     view.zoom = writtenZoom(zoom, tilted);

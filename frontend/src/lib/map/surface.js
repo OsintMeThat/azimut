@@ -660,8 +660,8 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
         ? { ...shape, points: patch.points }
         : patch.bounds
           ? { ...shape, bounds: patch.bounds }
-          : patch.at
-            ? { ...shape, at: patch.at }
+          : patch.at || patch.radiusM
+            ? { ...shape, ...(patch.at && { at: patch.at }), ...(patch.radiusM && { radiusM: patch.radiusM }) }
             : null;
       if (moved) diff.newGeometry = shapeGeometry(moved);
       source()?.updateData({ update: [diff] });

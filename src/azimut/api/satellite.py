@@ -1564,6 +1564,50 @@ def _instant(value: str, field: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+@router.get("/geo/shadow")
+def shadow_for_point(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    day: str = Query(alias="date"),
+    bearing: float = Query(ge=0, le=360),
+    length: float = Query(gt=0, le=10_000),
+    zone: str | None = None,
+) -> dict[str, Any]:
+    """When one local day's sun threw a shadow along a bearing, and how tall its caster stands.
+
+    The analyst draws a shadow on dated imagery from an object's foot to its tip.
+    Its direction gives the sun's azimuth, so the hour of the picture, and the
+    sun's height then turns the shadow's length into the object's:
+    ``length × tan(altitude)``. Exact for level ground and a picture taken
+    straight down. Pure computation, like ``/geo/sky``.
+    """
+    if zone and not localtime.known_zone(zone):
+        raise HTTPException(status_code=422, detail="zone must be an IANA zone name")
+    zone_name = zone or localtime.zone_for(lat, lon)
+    try:
+        target = calendar_date.fromisoformat(day)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD") from exc
+    start, end = localtime.day_bounds(target, zone_name)
+    moments = sky.shadow_moments(lat, lon, start, end, bearing)
+    return {
+        "lat": lat,
+        "lon": lon,
+        "date": target.isoformat(),
+        "zone": zone_name,
+        "sun_azimuth": round((bearing + 180.0) % 360.0, 1),
+        "moments": [
+            {
+                **(_dated(found["moment"], zone_name) or {}),
+                "sun_azimuth": round(found["sun_azimuth"], 1),
+                "sun_altitude": round(found["sun_altitude"], 2),
+                "height_m": round(length * math.tan(math.radians(found["sun_altitude"])), 1),
+            }
+            for found in moments
+        ],
+    }
+
+
 @router.get("/geo/zone")
 def zone_at(
     lat: float = Query(ge=-90, le=90),

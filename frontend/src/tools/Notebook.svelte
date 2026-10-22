@@ -28,6 +28,7 @@
   import Modal from '../components/Modal.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
   import NoCase from '../components/NoCase.svelte';
+  import { carriesOutsideFiles } from '../lib/drag.js';
 
   let tabs = $state([]); // [{ id: 'case' | entity id, noteId }]
   let activeId = $state('case');
@@ -663,6 +664,7 @@
 
   function onWriterDrop(event) {
     event.preventDefault();
+    if (!carriesOutsideFiles(event)) return;
     const image = [...(event.dataTransfer?.files ?? [])].find((file) => file.type.startsWith('image/'));
     if (image) importImage(image);
   }

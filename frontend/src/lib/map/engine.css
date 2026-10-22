@@ -372,3 +372,19 @@
   stroke-width: 2;
   filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
 }
+
+/* Under the globe (`under-globe`, tools/satellite/MapSurface.svelte) the map
+   shows neither its picture nor its buttons, which would move the hidden map,
+   and lets the pointer through to the globe; its markers and cards stay over
+   it and answer the hand. */
+.under-globe .maplibregl-canvas,
+.under-globe .maplibregl-control-container {
+  visibility: hidden;
+}
+.under-globe .maplibregl-canvas-container {
+  pointer-events: none;
+}
+.under-globe .maplibregl-marker,
+.under-globe .maplibregl-popup {
+  pointer-events: auto;
+}

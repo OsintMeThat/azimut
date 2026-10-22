@@ -23,6 +23,7 @@ import {
   fromLocal,
   groundText,
   HEAT_RAMP,
+  heatOf,
   heatStyle,
   inArea,
   local,
@@ -42,6 +43,8 @@ import {
   toggleStand,
   traceTurns,
   withGround,
+  lookingOf,
+  traceSpan,
 } from './find.js';
 import { destination, haversine } from '../measure.js';
 import { bearingBetween } from './geometry.js';
@@ -185,6 +188,17 @@ describe('the heatmap', () => {
     // one point alone is the best
     expect(heatStyle(0.4, 0.4, 0.4).fill).toBe(HEAT_RAMP.at(-1));
   });
+
+  it('shades by how far off the terrain the trace lies where nothing explains it, so the map is never blank', () => {
+    const scored = heatOf([{ explained: 0.6, gap: 0.2 }, { explained: 0.1, gap: 0.9 }]);
+    expect(scored[0]).toMatchObject({ fill: HEAT_RAMP.at(-1), tip: 'Explains 60% of the trace' });
+    const none = heatOf([{ explained: 0, gap: 0.3 }, { explained: 0, gap: 2.1 }, { explained: 0 }]);
+    expect(none[0]).toMatchObject({ fill: HEAT_RAMP.at(-1), tip: 'Explains 0%: the trace lies 0.3° off the terrain' });
+    expect(none[1].fill).toBe(HEAT_RAMP[0]);
+    expect(none[2]).toMatchObject({ fill: HEAT_RAMP[0], tip: 'Explains 0%' });
+    // a search kept before points said their gap draws as it did
+    expect(heatOf([{ explained: 0 }, { explained: 0 }])[0].tip).toBe('Explains 0% of the trace');
+  });
 });
 
 
@@ -310,16 +324,16 @@ describe('which way the photo faces', () => {
     expect(facingFan(middle, [], 5_000)).toEqual([]);
   });
 
-  it('rings the fan at 5, 10, 20, 50 and 100 km, as far as the search reads', () => {
+  it('rings the fan at 2, 5, 10, 20, 50 and 100 km, as far as the search reads', () => {
     const middle = { lat: 10.5, lon: 40.5 };
     const rings = facingRings(middle, ['e'], 20_000);
-    expect(rings.map((r) => r.metres)).toEqual([5_000, 10_000, 20_000]);
+    expect(rings.map((r) => r.metres)).toEqual([2_000, 5_000, 10_000, 20_000]);
     for (const ring of rings) {
       for (const point of ring.points) expect(haversine(middle, point)).toBeCloseTo(ring.metres, -1);
       // its words stand on the sector's middle
       expect(bearingBetween(middle, ring.label)).toBeCloseTo(90, 3);
     }
-    expect(facingRings(middle, ['n', 's'], 50_000)).toHaveLength(8);
+    expect(facingRings(middle, ['n', 's'], 50_000)).toHaveLength(10);
     expect(facingRings(middle, [], 50_000)).toEqual([]);
   });
 });
@@ -451,7 +465,7 @@ describe('the sun against the camera', () => {
   it('draws any sectors as a fan', () => {
     const from = { lat: 10, lon: 40 };
     expect(fanOf(from, [{ centre: 180, half: 45 }], 5_000)).toHaveLength(1);
-    expect(ringsOf(from, [{ centre: 180, half: 45 }], 10_000).map((r) => r.metres)).toEqual([5_000, 10_000]);
+    expect(ringsOf(from, [{ centre: 180, half: 45 }], 10_000).map((r) => r.metres)).toEqual([2_000, 5_000, 10_000]);
   });
 });
 
@@ -482,3 +496,29 @@ describe('where the eye stands', () => {
     expect(withGround(null, { total: 800, kept: 200 })).toBeNull();
   });
 });
+
+describe('what the trace says before a search', () => {
+  it('reads which way the camera looks from where the skyline stands in the frame', () => {
+    // a portrait phone frame from a hilltop: the skyline 1.2 half widths up through a 51° lens asks about 30° down
+    const high = { y: [1.13, 1.2, 1.31], fov: 51, projection: 'camera' };
+    expect(lookingOf(high, 'ground')).toBe('down');
+    expect(lookingOf(high, 'drone')).toBeNull();
+    expect(lookingOf({ y: [0.05, 0.1, 0.2], fov: 51 }, 'ground')).toBeNull();
+    expect(lookingOf({ y: [-1.6, -1.5, -1.4], fov: 60 }, 'ground')).toBe('up');
+    expect(lookingOf({ y: [], fov: 51 })).toBeNull();
+    // a panorama reads its rows evenly: 0.4 half widths up a 60° strip is 12°, a whole one 30°
+    expect(lookingOf({ y: [0.3, 0.4, 0.5], fov: 60, projection: 'panorama' }, 'ground')).toBeNull();
+    expect(lookingOf({ y: [0.9, 1, 1.1], fov: 60, projection: 'panorama' }, 'ground')).toBe('down');
+    // the same height through a long lens is a small angle: 12° up a 24° frame stays well within the bounds
+    expect(lookingOf({ y: [0.9, 1, 1.1], fov: 24, projection: 'camera' }, 'ground')).toBeNull();
+    // a ridge stands over the horizon, so a skyline asking 17° down is offered already
+    expect(lookingOf({ y: [0.9, 1, 1.1], fov: 33.2 }, 'ground')).toBe('down');
+  });
+
+  it('says how wide a trace spans', () => {
+    expect(traceSpan({ x: [-1, 0, 1], fov: 60 })).toBeCloseTo(60, 6);
+    expect(traceSpan({ x: [-0.8, 0.76], fov: 125.78, projection: 'panorama' })).toBeCloseTo(98.1, 1);
+    expect(traceSpan({ x: [], fov: 60 })).toBe(0);
+  });
+});
+

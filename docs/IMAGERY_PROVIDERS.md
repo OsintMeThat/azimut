@@ -666,7 +666,7 @@ Checked 2026-09-13.
 
 | Layer | Source | Licence / terms | Notes |
 |---|---|---|---|
-| Borders | Esri `Reference/World_Boundaries_and_Places` | Esri terms, as World Imagery | carries the larger place names |
+| Borders | OpenFreeMap `planet` vector tiles (OpenMapTiles schema), the same TileJSON as Place names | data ODbL © OSM contributors, © OpenMapTiles, OpenFreeMap credited; no key and no quota | `boundary` lines (country, region, district) and the names of countries, regions and cities from `place`, in English else `name:latin`; drawn as lines on every map, the 3D one included. Checked 2026-10-21 |
 | Place names | OpenFreeMap `planet` vector tiles (OpenMapTiles schema), found through its TileJSON since the tile paths change with each weekly build | data ODbL © OSM contributors, © OpenMapTiles, OpenFreeMap credited; no key and no quota | `place` layer only, towns down to hamlets, in `name:latin`; imagery only; the browser draws the text, so no glyphs are fetched. Checked 2026-09-27 |
 | Roads | Esri `Reference/World_Transportation` | Esri terms, as World Imagery | imagery only |
 | Railways | OpenRailwayMap `standard` | © OSM contributors, style © OpenRailwayMap | |

@@ -4,6 +4,7 @@ import {
   addCut,
   cleanBands,
   cleanMarks,
+  clearBadges,
   cutAt,
   DISTANCE_BANDS,
   farBadges,
@@ -27,6 +28,7 @@ import {
   setInner,
   setSea,
   skySamples,
+  toggleClear,
   togglePair,
 } from './traceMarks.js';
 
@@ -34,7 +36,7 @@ const line = (v, from = 0, to = 1, count = 11) => Array.from({ length: count }, 
 
 describe('marks made whole', () => {
   it('gives each stroke an id and keeps only what names strokes there are', () => {
-    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [] });
+    expect(cleanMarks(null, 3)).toEqual({ lines: [0, 1, 2], inner: [], pairs: [], cuts: [], far: [], sea: [], clear: [] });
     const kept = cleanMarks(
       {
         lines: [4, 7],
@@ -43,11 +45,12 @@ describe('marks made whole', () => {
         cuts: [0.7, 0.3, 1.2, 0.005],
         far: [{ line: 4, bands: ['b3', 'b1', 'x'] }, { line: 4, bands: ['near'] }, { line: 9, bands: ['b1'] }, { line: 7, bands: [] }],
         sea: [4, 4, 7, 9],
+        clear: [9, 7, 4],
       },
       2
     );
-    // a sea line is skyline: an inner edge cannot be one
-    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4] });
+    // a sea line is skyline, and so is a line with only sky above: an inner edge can be neither
+    expect(kept).toEqual({ lines: [4, 7], inner: [7], pairs: [[7, 4]], cuts: [0.3, 0.7], far: [{ line: 4, bands: ['b1', 'b3'] }], sea: [4], clear: [4] });
     // ids that do not match the strokes start again in order
     expect(cleanMarks({ lines: [1], inner: [1] }, 2).lines).toEqual([0, 1]);
   });
@@ -190,5 +193,26 @@ describe('lines along the sea', () => {
     expect(ridge.sea).toEqual([]);
     expect(setSea(ridge, 1, true).inner).toEqual([]);
     expect(setSea(sea, 1, false).sea).toEqual([]);
+  });
+});
+
+describe('lines with only sky above', () => {
+  it('are said of a skyline line and taken back the same way, never of an inner edge', () => {
+    const marks = cleanMarks({ lines: [0, 1, 2], inner: [2] }, 3);
+    const sure = toggleClear(marks, 1);
+    expect(sure.clear).toEqual([1]);
+    expect(marksSaid(sure)).toBe(true);
+    expect(sameMarks(sure, marks)).toBe(false);
+    expect(toggleClear(sure, 1).clear).toEqual([]);
+    // a ridge has land above it
+    expect(toggleClear(marks, 2)).toBe(marks);
+    expect(setInner(sure, 1, true).clear).toEqual([]);
+  });
+
+  it('are named a quarter along their longest stroke, clear of the badges at the middle', () => {
+    const strokes = [line(0.3, 0, 0.4, 5), line(0.4, 0.5, 1, 9)];
+    const marks = toggleClear(cleanMarks({ lines: [3, 3] }, 2), 3);
+    expect(clearBadges(strokes, marks)).toEqual([{ line: 3, at: strokes[1][2] }]);
+    expect(clearBadges(strokes, cleanMarks({ lines: [3, 3] }, 2))).toEqual([]);
   });
 });

@@ -267,7 +267,7 @@ describe('Media Library browse controls', () => {
     expect(source).toContain('const LIST_SORTS = [');
     expect(source).toContain('function setHeaderSort(next)');
     expect(source).toContain('class="media-row media-head"');
-    expect(source).toContain('class="media-row" class:focused={item.path === focusedPath}');
+    expect(source).toMatch(/class="media-row"\s+class:focused={item.path === focusedPath}/);
     expect(source).not.toContain('.list-view .media-card');
   });
 
