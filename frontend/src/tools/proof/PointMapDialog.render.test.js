@@ -155,12 +155,12 @@ describe('moving a proof point on the map', () => {
     expect(onpick).not.toHaveBeenCalled();
   });
 
-  it('offers the reference layers, the borders and the place names already on', async () => {
+  it('offers the reference layers, the borders already on', async () => {
     await open();
 
     expect(setOverlay).toHaveBeenCalledWith('boundaries', true, null);
     expect(setOverlay).toHaveBeenCalledWith('railway', false, undefined);
-    expect(setOverlay).toHaveBeenCalledWith('placenames', true, null);
+    expect(setOverlay).toHaveBeenCalledWith('placenames', false, undefined);
 
     button('Layers').click();
     flushSync();
@@ -184,12 +184,12 @@ describe('moving a proof point on the map', () => {
     await settle();
     expect(setOverlay).toHaveBeenCalledWith('railway', true, null);
 
-    // the village names come off like any other layer
+    // the village names go on like any other layer
     [...document.querySelectorAll('.layers button')]
       .find((entry) => entry.getAttribute('aria-label') === 'Place names')
       .click();
     await settle();
-    expect(setOverlay).toHaveBeenCalledWith('placenames', false, undefined);
+    expect(setOverlay).toHaveBeenCalledWith('placenames', true, null);
   });
 
   it('checks a point before a save, handing it back without closing', async () => {

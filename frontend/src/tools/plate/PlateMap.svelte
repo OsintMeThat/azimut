@@ -16,9 +16,13 @@
    * a Wayback release among them. A topographic ground traces its contour lines for
    * the view it shows, from the heights the relief is drawn with (`contours.js`).
    *
-   * A map drawn in 3D stands on those heights, tilted, and can trace its ridges'
-   * crests (`ridges.js`). It reports how it places a point of the ground, the heights
-   * included, so what the plate writes over it lands where the ground is.
+   * A map drawn in 3D stands on those heights, tilted, on the app's own globe
+   * (`lib/globe`): the flat map stays under it, holding the ground's lines and the
+   * case's layers, which the globe lays on its relief (`mirror.js`), and the globe
+   * draws the picture, or the plain ground's colour, tints and shading, itself
+   * (`globeView.js`). It can trace its ridges' crests (`ridges.js`), and reports how
+   * it places a point of the ground, the heights included, so what the plate writes
+   * over it lands where the ground is.
    *
    * A browser draws only so many maps at once, and takes the oldest one's drawing
    * back when another asks: a plate's map that loses it is built again where it
@@ -26,7 +30,10 @@
    */
   import { onMount, untrack } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
-  import { IMAGERY_SOURCE, createBasemaps } from '../../lib/map/basemap.js';
+  import { IMAGERY_SOURCE, createBasemaps, isGround, sourceMaxZoom } from '../../lib/map/basemap.js';
+  import { createGlobe } from '../../lib/globe/globe.js';
+  import { createMirror } from '../../lib/globe/mirror.js';
+  import { between, eased, globeCamera, globeGround, plateView } from '../../lib/plate/globeView.js';
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { asOf, isTracked } from '../../lib/map/layerHistory.js';
@@ -36,8 +43,7 @@
   import { gridLevel, halved, heightGrid } from '../../lib/plate/heights.js';
   import { contourLines, contourStep } from '../../lib/plate/contours.js';
   import { ridgeLines } from '../../lib/plate/ridges.js';
-  import { browserHeights } from '../../lib/map/eyeGuard.js';
-  import { SKY } from '../../lib/map/relief.js';
+  import { browserHeights } from '../../lib/map/reliefHeights.js';
   import { WAYBACK_ID, waybackId } from '../../lib/wayback.js';
   import { layerCell } from '../../lib/usage.js';
   import { uiState } from '../../lib/state.svelte.js';
@@ -81,6 +87,19 @@
   /** True while a transition borrows the map to draw its way (`sitting`): it reports and traces nothing. */
   let posing = false;
 
+  /** The globe a map with relief is drawn on (lib/globe), and what lays the flat map's layers on it. */
+  let globe = $state.raw(null);
+  let mirror = null;
+  let globeCanvas = $state();
+  let marksCanvas = $state();
+  /** The browser cannot draw the globe (no WebGL2): the map stays flat. */
+  let globeRefused = $state(false);
+  /** Takes the globe down, while it is up: before the flat map it lays the layers of. */
+  let stopGlobe = null;
+  /** A map standing on the heights, which the globe draws. */
+  const relieved = $derived(element.kind === 'map' && (element.terrain ?? 0) > 0);
+  const onGlobe = $derived(ready && relieved && !globeRefused);
+
   function frame() {
     return { width: container?.clientWidth || width, height: container?.clientHeight || height };
   }
@@ -88,8 +107,9 @@
   /** Whether the map stands on the heights or leans: then it places the ground itself. */
   const inThreeD = () => (untrack(() => element.terrain) ?? 0) > 0 || (engine?.impl?.getPitch?.() ?? 0) > 0.5;
 
-  /** Where the camera stands now, as a plate keeps a view. */
-  function cameraOf(map) {
+  /** Where the camera stands now, as a plate keeps a view: the globe's while it draws the map. */
+  function cameraOf(map = engine?.impl) {
+    if (globe) return plateView(globe.camera(), globe.exactZoom());
     const centre = map.getCenter();
     return { lat: centre.lat, lon: ((centre.lng + 540) % 360) - 180, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
   }
@@ -102,6 +122,14 @@
 
   /** How this map places the ground on its frame, and back, through its own camera and heights. */
   function projector(map) {
+    if (globe) {
+      const drawn = globe;
+      return {
+        project: ([lon, lat]) => { const at = drawn.latLngToContainerPoint({ lat, lon }); return [at.x, at.y]; },
+        // the sky has no ground under it: a point there is read as the middle of the view
+        unproject: ([x, y]) => { const at = drawn.containerPointToLatLng({ x, y }) ?? drawn.camera(); return [((at.lon + 540) % 360) - 180, at.lat]; },
+      };
+    }
     return {
       project: ([lon, lat]) => { const point = map.project([lon, lat]); return [point.x, point.y]; },
       unproject: ([x, y]) => { const at = map.unproject([x, y]); return [((at.lng + 540) % 360) - 180, at.lat]; },
@@ -196,6 +224,7 @@
     onready?.({ snapshot, sitting });
     return () => {
       ready = false;
+      stopGlobe?.();
       clearTimeout(traceTimer);
       clearTimeout(catchUp);
       for (const { layer } of drawn.values()) layer.destroy();
@@ -250,7 +279,8 @@
 
   function applyGestures(on) {
     const map = engine?.impl;
-    if (!map) return;
+    // on the globe, the globe takes the hand, and its canvas only while the map is framed
+    if (!map || globe) return;
     // the hand turns a plate's map too: a right-drag or a Ctrl-drag, and two fingers
     for (const handler of [map.dragPan, map.scrollZoom, map.doubleClickZoom, map.touchZoomRotate, map.keyboard, map.dragRotate]) {
       if (on) handler?.enable?.(); else handler?.disable?.();
@@ -262,6 +292,7 @@
   $effect(() => {
     const next = view;
     const map = ready ? engine?.impl : null;
+    void globe; // a globe come up is placed where the view says
     if (!map || !next) return;
     // the map's own move comes back rounded as the plate keeps it, its tilt included: a jump there would stop the drag
     if (sameView(cameraOf(map), next)) return;
@@ -270,39 +301,126 @@
     untrack(() => {
       settingView = element.kind === 'inset';
       // played, it flies there as the video's transition does (`tween.flight`)
-      if (glide > 0) map.flyTo({ ...camera, duration: glide });
+      if (globe) {
+        if (glide > 0) flyGlobe(next, glide);
+        else {
+          stopFlight();
+          globe.setCamera(globeCamera(next));
+        }
+      } else if (glide > 0) map.flyTo({ ...camera, duration: glide });
       else map.jumpTo(camera);
       settingView = false;
       if (element.kind === 'inset') report();
     });
   });
 
-  // -- standing on the heights -------------------------------------------------------
+  // -- standing on the heights: the globe -------------------------------------------
 
-  const TERRAIN = 'plate-terrain';
-  // A map in 3D stands on the heights, this many times as tall; flat again at 0.
+  // A map with relief is drawn on the globe, laid over the flat map; flat again at 0.
   $effect(() => {
-    const height = element.kind === 'map' ? element.terrain ?? 0 : 0;
-    const info = relief;
-    const map = ready ? engine?.impl : null;
-    if (!map) return;
-    // the engine moves as the heights come and go, and a move reports to the page: none of it is this effect's to follow
-    untrack(() => {
-      if (height > 0 && info?.tiles) {
-        if (!map.getSource(TERRAIN)) {
-          map.addSource(TERRAIN, { type: 'raster-dem', tiles: [info.tiles], tileSize: info.tile_size, maxzoom: info.max_zoom,
-            encoding: info.encoding, attribution: info.sources?.[0]?.attribution ?? '' });
-        }
-        map.setTerrain({ source: TERRAIN, exaggeration: height });
-        map.setSky?.(SKY);
-      } else if (map.getTerrain?.()) {
-        map.setTerrain(null);
-        if (map.getSource(TERRAIN)) map.removeSource(TERRAIN);
-      }
+    if (!onGlobe || !globeCanvas || !marksCanvas) return;
+    untrack(() => startGlobe());
+    return () => stopGlobe?.();
+  });
+
+  function startGlobe() {
+    const made = createGlobe(globeCanvas);
+    if (!made) {
+      globeRefused = true;
+      return;
+    }
+    made.setExaggeration(element.terrain ?? 1);
+    made.setCamera(globeCamera(view));
+    lookOnGlobe(made);
+    // the case's layers, the plain ground's lines and names, the contour lines and the
+    // ridges are the flat map's; the picture is the globe's own
+    mirror = createMirror(engine.impl, made, { canvas: marksCanvas, exclude: (id) => isGround(id) });
+    globe = made;
+    const offs = [
+      made.on('view-move', report),
+      made.on('view-settled', traceSoon),
+      // the drawing taken back is the flat map's case too: both are built again where they stood
+      made.on('lost', onLost),
+    ];
+    traced = '';
+    report();
+    traceSoon();
+    stopGlobe = () => {
+      stopGlobe = null;
+      offs.forEach((off) => off());
+      stopFlight();
+      // the flat map takes the view where the globe left it, not where it stood when the globe came up
+      const last = plateView(made.camera(), made.exactZoom());
+      mirror?.destroy();
+      mirror = null;
+      globe = null;
+      made.destroy();
+      settingView = true;
+      engine?.impl.jumpTo({ center: [last.lon, last.lat], zoom: last.zoom, bearing: last.bearing, pitch: last.pitch });
+      settingView = false;
+      // the mirror gave the flat map back its hand as it found it: it follows the plate's again
+      applyGestures(untrack(() => interactive));
+      traced = '';
       report();
       traceSoon();
-    });
+    };
+  }
+
+  /** What the globe draws the ground in: the plate's picture and its tone, or its plain ground. */
+  function lookOnGlobe(drawn = globe) {
+    if (!drawn) return;
+    const ground = untrack(() => element.basemap) || 'plain';
+    drawn.setGround(globeGround(ground, { plain: untrack(() => element.plain) ?? {},
+      shaded: untrack(() => element.overlays ?? []).includes('relief'), intensity: untrack(() => element.relief) ?? 1 }));
+    const provider = ground.startsWith('plain') ? null : untrack(() => providers).find((entry) => entry.id === ground);
+    if (!provider) {
+      drawn.setImagery(null);
+      drawn.setTone(null);
+      return;
+    }
+    const id = ground === WAYBACK_ID ? waybackId(ground, untrack(() => element.release)) : provider.id;
+    const cell = layerCell(provider, Math.round(cameraOf().zoom + 1));
+    drawn.setImagery({ id, metered: Boolean(provider.meter), cell, deepest: sourceMaxZoom(provider, cell) });
+    drawn.setTone(untrack(() => element.tone) ?? {});
+  }
+
+  // the ground, its tone or its plain look changed: the globe draws it again
+  $effect(() => {
+    void plainKey;
+    void JSON.stringify(element.tone ?? {});
+    void element.release;
+    void providers;
+    if (globe) untrack(() => lookOnGlobe());
   });
+
+  // how many times as tall the heights stand
+  $effect(() => {
+    const height = element.terrain ?? 0;
+    if (globe && height > 0) globe.setExaggeration(height);
+  });
+
+  /** A camera flight on the globe to `target` over `ms`, as the flat map's `flyTo`; stopped by the next. */
+  let flight = 0;
+  function stopFlight() {
+    if (flight) cancelAnimationFrame(flight);
+    flight = 0;
+  }
+  function flyGlobe(target, ms) {
+    stopFlight();
+    const from = cameraOf();
+    // the ground's height under the way is the start's until the landing reads its own,
+    // so a flight asks the app for no height at every frame
+    const elevation = globe?.centreElevation();
+    const started = performance.now();
+    const step = (now) => {
+      if (!globe) return;
+      const t = Math.min(1, (now - started) / ms);
+      const at = globeCamera(between(from, target, eased(t)));
+      globe.setCamera(t < 1 && Number.isFinite(elevation) ? { ...at, elevation } : at);
+      flight = t < 1 ? requestAnimationFrame(step) : 0;
+    };
+    flight = requestAnimationFrame(step);
+  }
 
   // -- contour lines and ridges, traced for the view ----------------------------------
 
@@ -330,14 +448,16 @@
 
   /** The part of the ground the lines are traced over: what the frame shows, held near it on a leaning map. */
   function groundBox(map) {
-    const view = { lat: map.getCenter().lat, lon: map.getCenter().lng, zoom: map.getZoom(), bearing: map.getBearing() };
-    const flat = flatCorners(view, frame());
+    const camera = cameraOf(map);
+    const flat = flatCorners({ lat: camera.lat, lon: camera.lon, zoom: camera.zoom, bearing: camera.bearing }, frame());
     const lons = flat.map(([lon]) => lon);
     const lats = flat.map(([, lat]) => lat);
     const [west, east, south, north] = [Math.min(...lons), Math.max(...lons), Math.min(...lats), Math.max(...lats)];
-    const pad = map.getPitch() > 0.5 ? 1.5 : 0.1;
-    const bounds = map.getBounds();
+    const pad = camera.pitch > 0.5 ? 1.5 : 0.1;
     const near = [west - (east - west) * pad, south - (north - south) * pad, east + (east - west) * pad, north + (north - south) * pad];
+    // the globe's view reaches the horizon: the lines are traced near what the frame shows, and on the map
+    if (globe) return [Math.max(near[0], -180), Math.max(near[1], -85), Math.min(near[2], 180), Math.min(near[3], 85)];
+    const bounds = map.getBounds();
     return [Math.max(near[0], bounds.getWest()), Math.max(near[1], bounds.getSouth()), Math.min(near[2], bounds.getEast()), Math.min(near[3], bounds.getNorth())];
   }
 
@@ -349,7 +469,8 @@
     if (!want.ridges && map.getSource(RIDGES)) { map.removeLayer(RIDGES); map.removeSource(RIDGES); }
     if ((!want.contours && !want.ridges) || !info?.tiles) return;
     const box = groundBox(map);
-    const level = gridLevel(box, map.getZoom() - 0.5, info.max_zoom);
+    const zoom = cameraOf(map).zoom;
+    const level = gridLevel(box, zoom - 0.5, info.max_zoom);
     const key = JSON.stringify([level, box.map((value) => Math.round(value * 1e3)), want]);
     if (key === traced) return;
     traced = key;
@@ -359,7 +480,7 @@
       let low = Infinity;
       let high = -Infinity;
       for (const value of grid.heights) { if (value < low) low = value; if (value > high) high = value; }
-      setContours(map, contourLines(grid, contourStep(map.getZoom(), low, high)));
+      setContours(map, contourLines(grid, contourStep(zoom, low, high), { anchors: !!globe }));
     }
     if (want.ridges) {
       const lines = ridgeLines(halved(grid));
@@ -478,6 +599,8 @@
     clearTimeout(traceTimer);
     await tracing;
     await (tracing = trace().catch(() => {}));
+    // on the globe, with what the flat map lays on it and the names standing there
+    if (globe) return globe.snapshot({ ratio, laid: true, timeout: 20000 });
     const before = map.getPixelRatio();
     map.setPixelRatio(ratio);
     try {
@@ -501,6 +624,7 @@
     const map = engine?.impl;
     if (!map) return null;
     const home = cameraOf(map);
+    if (globe) return sittingOnGlobe(map, globe, ratio, home);
     const before = map.getPixelRatio();
     clearTimeout(traceTimer);
     posing = true;
@@ -527,12 +651,37 @@
       },
     };
   }
+
+  /** `sitting` on the globe: each view of the way placed, drawn once in, and captured at `ratio`. */
+  function sittingOnGlobe(map, drawn, ratio, home) {
+    clearTimeout(traceTimer);
+    stopFlight();
+    posing = true;
+    let picture = null;
+    return {
+      async at(next) {
+        drawn.setCamera(globeCamera(next));
+        ({ canvas: picture } = await drawn.snapshot({ ratio, laid: true, timeout: 10000, into: picture }));
+        return { picture, placer: projector(map) };
+      },
+      end() {
+        if (picture) { picture.width = 0; picture.height = 0; picture = null; }
+        if (globe === drawn) drawn.setCamera(globeCamera(home));
+        posing = false;
+      },
+    };
+  }
 </script>
 
 <div class="plate-map" class:live={interactive} class:dim={element.hidden} bind:this={container}
   style:left="{element.box[0] * PX_PER_MM}px" style:top="{element.box[1] * PX_PER_MM}px"
   style:width="{width}px" style:height="{height}px" style:opacity={element.hidden ? 0.15 : element.opacity ?? 1}
   style:visibility={away ? 'hidden' : null}>
+  {#if onGlobe}
+    <canvas class="globe" style:pointer-events={interactive ? null : 'none'} bind:this={globeCanvas} aria-label="The map in 3D, on its relief"></canvas>
+    <canvas class="globe-marks" bind:this={marksCanvas} aria-hidden="true"></canvas>
+  {/if}
+  {#if relieved && globeRefused}<p class="refused flat">This browser cannot draw the map in 3D: it needs WebGL2. It is drawn flat.</p>{/if}
   {#if failed}<p class="refused">This browser cannot draw the map.</p>
   {:else if crowded}<p class="refused">The browser has too many maps open to draw this one. Close another tab or tool with a map, then come back to the plate.</p>{/if}
 </div>
@@ -543,4 +692,10 @@
   /* The plate prints its own credits, in its credits box. */
   .plate-map :global(.maplibregl-ctrl-attrib), .plate-map :global(.maplibregl-ctrl-logo) { display: none; }
   .refused { margin: 0; padding: 12px; color: #555; font-size: 12px; }
+  .refused.flat { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; background: rgba(255, 255, 255, 0.85); }
+  /* the globe over the flat map, which still holds the lines and layers it draws */
+  .globe, .globe-marks { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; }
+  .globe { touch-action: none; user-select: none; cursor: grab; }
+  .globe:active { cursor: grabbing; }
+  .globe-marks { pointer-events: none; }
 </style>

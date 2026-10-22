@@ -48,8 +48,8 @@ describe('what each side of a pair draws', () => {
 });
 
 describe('the switcher over the list', () => {
-  it('starts a new pair on borders and place names, drawn on both sides', () => {
-    expect(freshLayers()).toEqual({ ids: ['boundaries', 'placenames'], side: 'ab' });
+  it('starts a new pair on the borders, drawn on both sides', () => {
+    expect(freshLayers()).toEqual({ ids: ['boundaries'], side: 'ab' });
   });
 
   it('starts it on the layers the case last had on, when it kept any', () => {

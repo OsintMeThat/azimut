@@ -25,6 +25,7 @@ import {
   HEAT_RAMP,
   heatOf,
   heatStyle,
+  overText,
   inArea,
   local,
   meeting,
@@ -198,6 +199,20 @@ describe('the heatmap', () => {
     expect(none[2]).toMatchObject({ fill: HEAT_RAMP[0], tip: 'Explains 0%' });
     // a search kept before points said their gap draws as it did
     expect(heatOf([{ explained: 0 }, { explained: 0 }])[0].tip).toBe('Explains 0% of the trace');
+  });
+
+  it('says why a point was ruled out: land over a sky-only line, on what share and how far out', () => {
+    expect(overText(0.234, 7_400)).toBe('land rises over the sky-only lines on 23%, 7 km out');
+    expect(overText(0.03)).toBe('land rises over the sky-only lines on 3%');
+    const tips = heatOf([{ explained: 0.6, gap: 0.2 }, { explained: 0, gap: 0.4, over: 0.4, over_far: 12_000 }]);
+    expect(tips[0].tip).toBe('Explains 60% of the trace');
+    expect(tips[1].tip).toBe('Ruled out: land rises over the sky-only lines on 40%, 12 km out');
+    // nothing explains the trace anywhere: the ruled-out points still say why
+    const none = heatOf([{ explained: 0, gap: 0.3, over: 0.2, over_far: 5_000 }, { explained: 0, gap: 1.1 }]);
+    expect(none.map((p) => p.tip)).toEqual([
+      'Ruled out: land rises over the sky-only lines on 20%, 5 km out',
+      'Explains 0%: the trace lies 1.1° off the terrain',
+    ]);
   });
 });
 

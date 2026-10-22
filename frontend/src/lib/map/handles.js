@@ -38,7 +38,7 @@ export function cornerHandles(points, { prefix, onMove, onDrop = () => {}, ends 
       className: [HANDLE.className, name && 'named'].filter(Boolean).join(' '),
       title: name ? `Drag to move ${name}` : 'Drag to move this point',
       draggable: true,
-      zIndex: 900,
+      zIndex: 560,
       onDrag: (at) => onMove(index, { lat: at.lat, lon: at.lon }),
       onDragEnd: () => onDrop(index),
     };
@@ -71,7 +71,7 @@ export function ghostHandles(points, { prefix, closed = false, onInsert, onMove,
       ...GHOST,
       title: 'Drag to bend the line here',
       draggable: true,
-      zIndex: 899,
+      zIndex: 559,
       onDragStart: () => (index = -1),
       onDrag: (at) => {
         const point = { lat: at.lat, lon: at.lon };

@@ -202,6 +202,20 @@ describe('drawing a measure', () => {
     expect(tool.measures).toEqual([]);
   });
 
+  it('writes a corner its angle outside it, on the measure in hand only', () => {
+    px = 100_000;
+    const tool = store();
+    tool.open();
+    drawn(tool, A, B, C);
+    const angle = words().last.find((word) => word.id.endsWith('angle-1'));
+    // the corner at B opens west and north: its outside is east and south, down and right on screen
+    const [dx, dy] = angle.html.match(/translate\((-?[\d.]+)px,(-?[\d.]+)px\)/).slice(1).map(Number);
+    expect(dx).toBeGreaterThan(0);
+    expect(dy).toBeGreaterThan(0);
+    drawn(tool, D, { lat: D.lat + 0.01, lon: D.lon }, { lat: D.lat + 0.01, lon: D.lon + 0.01 });
+    expect(words().last.filter((word) => word.id.includes('angle'))).toHaveLength(1);
+  });
+
   it('lets a corner go only while the shape keeps enough of them', () => {
     const tool = store();
     tool.open();
@@ -243,7 +257,8 @@ describe('the map while the tool is open', () => {
     const tool = store();
     tool.open();
     drawn(tool, A, B);
-    expect(words().last.map((word) => word.html)).toEqual(['<span>1.55 km · 090°</span>']);
+    // set off above a level leg, clear of the dot that bends it
+    expect(words().last.map((word) => word.html)).toEqual(['<span style="transform:translate(0.0px,-13.0px)">1.55 km · 090°</span>']);
     drawn(tool, C, { lat: C.lat, lon: C.lon + 0.00005 });
     expect(words().last).toHaveLength(1);
   });
@@ -304,6 +319,17 @@ describe('the ground under a line', () => {
     await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
   });
 
+  it('reads the line in hand once the 3D view comes up', async () => {
+    const tool = store();
+    tool.open();
+    drawn(tool, A, B);
+    tool.readAgain();
+    expect(api.post).not.toHaveBeenCalled();
+    relief = true;
+    tool.readAgain();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+  });
+
   it('draws what the eye at A sees of the line in two colours, and where the ground is in the way', async () => {
     relief = true;
     const tool = store();
@@ -329,6 +355,40 @@ describe('the ground under a line', () => {
     expect(shapes().patches.some(([id]) => id === `m${line.id}`)).toBe(true);
     corner.onDragEnd();
     await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(3));
+  });
+
+  it('starts nothing at the click a dropped corner brings, then starts a measure again', () => {
+    vi.useFakeTimers();
+    try {
+      const tool = store();
+      tool.open();
+      const line = drawn(tool, A, B);
+      const corner = shapes().last.find((shape) => shape.id === `m${line.id}-corner-1`);
+      corner.onDrag(C);
+      corner.onDragEnd();
+      expect(tool.addPoint(C)).toBe(true);
+      expect(tool.measures).toHaveLength(1);
+      expect(tool.drawing).toBe(false);
+      expect(tool.selectedId).toBe(line.id);
+      vi.advanceTimersByTime(500);
+      tool.addPoint(D);
+      expect(tool.measures).toHaveLength(2);
+      expect(tool.drawing).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('puts the heights chart away and shows it again, and the Ground switch brings it back', () => {
+    const tool = store();
+    expect(tool.chartShown).toBe(true);
+    tool.showChart(false);
+    expect(tool.chartShown).toBe(false);
+    tool.showChart(true);
+    expect(tool.chartShown).toBe(true);
+    tool.showChart(false);
+    tool.setGround(true);
+    expect(tool.chartShown).toBe(true);
   });
 
   it('keeps only the answer to the last question asked', async () => {
@@ -367,8 +427,13 @@ describe('what a line of two points is used as', () => {
     const line = drawn(tool, A, B);
     tool.setUse(line.id, 'ring');
     tool.setRings(line.id, 3);
-    expect(shapes().last.filter((shape) => shape.kind === 'circle')).toHaveLength(3);
+    // each ring on its dark casing, in a colour of its own
+    const rings = shapes().last.filter((shape) => shape.kind === 'circle');
+    expect(rings).toHaveLength(6);
+    expect(rings.filter((ring) => ring.id.endsWith('-casing'))).toHaveLength(3);
+    expect(new Set(rings.filter((ring) => !ring.id.endsWith('-casing')).map((ring) => ring.style.stroke))).toEqual(new Set(['#2de0ff']));
     expect(tool.readout).toBe('Radius 1.55 km');
+    expect(tool.readingOf(line.id)).toBe('Radius 1.55 km');
     tool.setUse(line.id, 'ring');
     expect(shapes().last.some((shape) => shape.kind === 'circle')).toBe(false);
   });

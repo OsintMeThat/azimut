@@ -19,6 +19,12 @@
  * a hillshade from the north-west, gently over a picture that has its own
  * shadows, and veiled by the air between it and the eye, thicker low down.
  *
+ * Without a picture the ground is drawn plain (`setGround`): a colour, the
+ * heights tinted over it, and its slopes shaded over what is laid on it, as a
+ * plate's quiet and topographic grounds are drawn flat. A picture takes the
+ * flat map's tone (`setTone`): faded over the plain ground, greyed, lit,
+ * contrasted, its hue turned, by the flat map's own formulas.
+ *
  * WebGL2 is the one requirement; without it `createRenderer` answers null.
  */
 import { EARTH, length, localFrame, sub } from './earth.js';
@@ -32,6 +38,64 @@ const LOG_FAR = Math.log2(FAR / NEAR);
 const BARE = [0.55, 0.55, 0.52];
 /** How strongly the slope lights a picture, which already holds its own shadows. */
 const SHADING = 0.45;
+/** Height stops a tinted ground takes at most. */
+export const TINT_STOPS = 10;
+
+/** A `#rrggbb` colour as three channels from 0 to 1. */
+export function rgbOf(hex) {
+  const value = /^#?([0-9a-f]{6})$/i.exec(String(hex ?? ''))?.[1];
+  if (!value) return null;
+  return [0, 2, 4].map((i) => parseInt(value.slice(i, i + 2), 16) / 255);
+}
+
+/**
+ * The plain ground the shader draws where there is no picture: `colour`, the
+ * heights `tints` (metres, colour) laid over it at `tintOpacity`, and the
+ * slopes shaded at `shade` over what is laid on the ground too (`shadeLaid`).
+ * Without a style, the pale stone a ground waits for its picture on.
+ */
+export function groundUniforms(style = null) {
+  const stops = (style?.tints ?? [])
+    .map(([metres, hex]) => [Number(metres), rgbOf(hex)])
+    .filter(([metres, rgb]) => Number.isFinite(metres) && rgb)
+    .slice(0, TINT_STOPS);
+  const at = new Float32Array(TINT_STOPS);
+  const colours = new Float32Array(TINT_STOPS * 3);
+  stops.forEach(([metres, rgb], i) => {
+    at[i] = metres;
+    colours.set(rgb, i * 3);
+  });
+  return {
+    bare: rgbOf(style?.colour) ?? BARE,
+    tintCount: stops.length,
+    tintAt: at,
+    tintColour: colours,
+    tintOpacity: Math.min(1, Math.max(0, style?.tintOpacity ?? 0.85)),
+    shade: Math.min(1, Math.max(0, style?.shade ?? 1)),
+    shadeLaid: style ? 1 : 0,
+  };
+}
+
+/**
+ * A picture's tone as the flat map paints a raster (`raster-opacity`,
+ * `-saturation`, `-brightness-max`, `-contrast`, `-hue-rotate`): the same
+ * factors its shader is handed, so a picture looks the same on both.
+ */
+export function toneUniforms(tone = {}) {
+  const angle = ((tone.hue ?? 0) * Math.PI) / 180;
+  const s = Math.sin(angle);
+  const c = Math.cos(angle);
+  const saturation = tone.saturation ?? 0;
+  const contrast = tone.contrast ?? 0;
+  return {
+    spin: [(2 * c + 1) / 3, (-Math.sqrt(3) * s - c + 1) / 3, (Math.sqrt(3) * s - c + 1) / 3],
+    saturation: saturation > 0 ? 1 - 1 / (1.001 - saturation) : -saturation,
+    contrast: contrast > 0 ? 1 / (1 - contrast) : 1 + contrast,
+    brightnessLow: tone.brightnessMin ?? 0,
+    brightnessHigh: tone.brightness ?? 1,
+    opacity: Math.min(1, Math.max(0, tone.opacity ?? 1)),
+  };
+}
 
 const AIR = `
 const float R = ${EARTH.toFixed(1)};
@@ -95,9 +159,10 @@ uniform vec3 rgt; uniform vec3 cup; uniform vec3 fwd;
 uniform vec2 focal;
 uniform float exaggeration;
 uniform vec4 box;
-out vec3 vRel; out vec3 vUp; out vec3 vN; out vec2 vUv; out vec2 vTileUv; out float vDepth; out float vH;
+out vec3 vRel; out vec3 vUp; out vec3 vN; out vec2 vUv; out vec2 vTileUv; out float vDepth; out float vH; out float vMetres;
 void main() {
   float lift = h * exaggeration;
+  vMetres = h;
   vec3 p = offset + base + up * lift;
   float z = dot(p, fwd);
   vRel = p;
@@ -115,11 +180,33 @@ void main() {
 const GROUND_FS = `#version 300 es
 precision highp float;
 ${AIR}
-in vec3 vRel; in vec3 vUp; in vec3 vN; in vec2 vUv; in vec2 vTileUv; in float vDepth; in float vH;
+in vec3 vRel; in vec3 vUp; in vec3 vN; in vec2 vUv; in vec2 vTileUv; in float vDepth; in float vH; in float vMetres;
 uniform sampler2D picture; uniform float pictured;
 uniform sampler2D overlay; uniform float overlaid; uniform vec4 overlayBox;
 uniform float eyeAlt;
+uniform vec3 bare;
+uniform int tintCount; uniform float tintAt[${TINT_STOPS}]; uniform vec3 tintColour[${TINT_STOPS}]; uniform float tintOpacity;
+uniform float shade; uniform float shadeLaid;
+uniform vec3 spin; uniform float saturation; uniform float contrast;
+uniform float brightnessLow; uniform float brightnessHigh; uniform float opacity;
 out vec4 colour;
+// the heights' colour, between the two stops a height falls between
+vec3 tint(float m) {
+  if (m <= tintAt[0]) return tintColour[0];
+  for (int i = 1; i < ${TINT_STOPS}; i += 1) {
+    if (i >= tintCount) break;
+    if (m <= tintAt[i]) return mix(tintColour[i - 1], tintColour[i], (m - tintAt[i - 1]) / max(tintAt[i] - tintAt[i - 1], 1e-3));
+  }
+  return tintColour[tintCount - 1];
+}
+// a picture in the flat map's tone (its raster shader, step for step)
+vec3 toned(vec3 c) {
+  vec3 rgb = vec3(dot(c, spin.xyz), dot(c, spin.zxy), dot(c, spin.yzx));
+  float average = (c.r + c.g + c.b) / 3.0;
+  rgb += (average - rgb) * saturation;
+  rgb = (rgb - 0.5) * contrast + 0.5;
+  return mix(vec3(brightnessLow), vec3(brightnessHigh), rgb);
+}
 void main() {
   gl_FragDepth = clamp(log2(max(vDepth, ${NEAR.toFixed(1)}) / ${NEAR.toFixed(1)}) / ${LOG_FAR.toFixed(6)}, 0.0, 1.0);
   vec3 up = normalize(vUp);
@@ -128,15 +215,24 @@ void main() {
   vec3 north = cross(up, east);
   vec3 light = normalize(up * 1.2 + north * 0.7 - east * 0.7);
   float lit = 0.62 + 0.5 * max(dot(n, light), 0.0);
-  vec3 ground = pictured > 0.5 ? texture(picture, vUv).rgb * mix(1.0, lit, ${SHADING.toFixed(2)})
-                               : vec3(${BARE.map((c) => c.toFixed(2)).join(', ')}) * lit;
+  vec3 plain = bare;
+  if (tintCount > 0) plain = mix(plain, tint(vMetres), tintOpacity);
+  // a ground with no style waits for its picture lit by its relief; a styled one is shaded over what lies on it
+  float plainLight = mix(1.0, lit, shade);
+  vec3 ground = pictured > 0.5
+    ? mix(plain, toned(clamp(texture(picture, vUv).rgb, 0.0, 1.0)), opacity) * mix(1.0, lit, ${SHADING.toFixed(2)})
+    : plain * (shadeLaid > 0.5 ? 1.0 : plainLight);
   // what the flat map lays on the ground (drape.js), premultiplied, unshaded so its lines stay crisp
   if (overlaid > 0.5) {
     vec4 laid = texture(overlay, vTileUv * overlayBox.xy + overlayBox.zw);
     ground = ground * (1.0 - laid.a) + laid.rgb;
   }
+  if (pictured < 0.5 && shadeLaid > 0.5) ground *= plainLight;
   colour = vec4(mix(ground, HAZE, airBetween(length(vRel), eyeAlt, vH)), 1.0);
 }`;
+
+/** The ground as Satellite draws it: pictures as they are, a pale stone until they come. */
+const LOOK = { plain: groundUniforms(null), tone: toneUniforms() };
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -267,7 +363,7 @@ function build(gl) {
      * the quarters a bit each (north-west first), all four for the whole tile,
      * and `drape` what is laid over the picture, as `picture` is.
      */
-    draw({ view, size, tiles, exaggeration }) {
+    draw({ view, size, tiles, exaggeration, look = LOOK }) {
       const { forward, right, up, eye, f } = view;
       gl.viewport(0, 0, size.width, size.height);
       gl.clearColor(0, 0, 0, 1);
@@ -304,6 +400,20 @@ function build(gl) {
       gl.uniform1f(ground.u.eyeAlt, eyeAlt);
       gl.uniform1i(ground.u.picture, 0);
       gl.uniform1i(ground.u.overlay, 1);
+      const { plain, tone } = look;
+      gl.uniform3fv(ground.u.bare, plain.bare);
+      gl.uniform1i(ground.u.tintCount, plain.tintCount);
+      gl.uniform1fv(ground.u['tintAt[0]'], plain.tintAt);
+      gl.uniform3fv(ground.u['tintColour[0]'], plain.tintColour);
+      gl.uniform1f(ground.u.tintOpacity, plain.tintOpacity);
+      gl.uniform1f(ground.u.shade, plain.shade);
+      gl.uniform1f(ground.u.shadeLaid, plain.shadeLaid);
+      gl.uniform3fv(ground.u.spin, tone.spin);
+      gl.uniform1f(ground.u.saturation, tone.saturation);
+      gl.uniform1f(ground.u.contrast, tone.contrast);
+      gl.uniform1f(ground.u.brightnessLow, tone.brightnessLow);
+      gl.uniform1f(ground.u.brightnessHigh, tone.brightnessHigh);
+      gl.uniform1f(ground.u.opacity, tone.opacity);
       for (const tile of tiles) {
         const rel = sub(tile.centre, eye);
         gl.uniform3f(ground.u.offset, rel[0], rel[1], rel[2]);

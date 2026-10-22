@@ -181,12 +181,14 @@ describe('the steps of Find', () => {
     expect(root.textContent).not.toContain('The map shades where');
   });
 
-  it('says where land stands over the lines with only sky above, and nothing where none does', () => {
+  it('says where land stands over the lines with only sky above, how far out, and when that rules a place out', () => {
     const place = { lat: 12.702, lon: 43.5415, explained: 0.31, heading: 271.6, fov: 55 };
-    const shown = (over) =>
-      steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'loose', places: [{ ...place, over }], points: [] } } }) })
+    const shown = (over, more = {}) =>
+      steps({ find: fakeFind({ search: { name: 's', status: 'done', result: { verdict: 'loose', places: [{ ...place, over, ...more }], points: [] } } }) })
         .querySelector('.fs-place').textContent;
-    expect(shown(0.064)).toContain('land over the sky-only lines on 6% of them');
+    expect(shown(0.034, { over_far: 7_400 })).toContain('land rises over the sky-only lines on 3%, 7 km out');
+    expect(shown(0.034)).not.toContain('Ruled out');
+    expect(shown(0.23, { explained: 0, over_far: 12_000 })).toContain('Ruled out: land rises over the sky-only lines on 23%, 12 km out');
     expect(shown(0)).not.toContain('sky-only');
   });
 
@@ -337,6 +339,12 @@ describe('the steps of Find', () => {
     expect(onplace).toHaveBeenCalledWith({ ...place, frames: { span: 97 } });
     const blocked = steps({ find: fakeFind({ tryProblem: 'Open a case first' }) });
     expect(buttonNamed(blocked, 'Try a point').disabled).toBe(true);
+    // a point ruled out by land over a sky-only line says why
+    const ruled = { ...place, explained: 0, over: 0.3, over_far: 6_000 };
+    const out = steps({ find: fakeFind({ tried: { at: ruled, place: ruled, frames: null, busy: false, error: '' } }) });
+    expect(out.querySelector('[aria-label="The point tried"]').textContent).toContain(
+      'Ruled out: land rises over the sky-only lines on 30%, 6 km out',
+    );
   });
 
   it('asks how the camera looks and whether it is a selfie, and says it with the rest', () => {

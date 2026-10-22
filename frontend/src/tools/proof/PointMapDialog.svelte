@@ -63,8 +63,8 @@
   // Where the pin starts: the opening camera, read once. The dialog is opened on
   // one row and closed on it, so a later view would be a different question.
   let at = $state(untrack(() => ({ lat: view.lat, lon: view.lon })));
-  // The borders and the place names, which are what finding a spot needs.
-  let on = $state(['boundaries', 'placenames']);
+  // The borders, which are what finding a spot needs first.
+  let on = $state(['boundaries']);
   let layersOpen = $state(false);
   let surface = null;
 
@@ -107,7 +107,7 @@
         size,
         anchor,
         draggable: true,
-        zIndex: 1000,
+        zIndex: 570,
         onDrag: (moved) => (at = moved),
       },
     ]);

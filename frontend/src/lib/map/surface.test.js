@@ -439,6 +439,15 @@ describe('a mark is HTML at a position', () => {
     expect(onDragEnd).toHaveBeenCalledWith('sw');
   });
 
+  it('keeps a handle’s press, let go where it stands, off the map underneath', () => {
+    // the map's click would start a new measure on the corner the hand meant to take
+    createSurface(stubEngine()).set([{ id: 'corner', kind: 'marker', at: { lat: 1, lon: 2 }, draggable: true }]);
+    const event = new window.MouseEvent('click', { bubbles: true });
+    const stopped = vi.spyOn(event, 'stopPropagation');
+    marks[0].element.dispatchEvent(event);
+    expect(stopped).toHaveBeenCalled();
+  });
+
   it('says when the pointer arrives and leaves', () => {
     const onOver = vi.fn();
     const onOut = vi.fn();

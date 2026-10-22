@@ -1040,8 +1040,8 @@ export async function installAppFixture(page, options = {}) {
       return route.fulfill({ contentType: 'image/png', body: CLEAR_TILE_PNG });
     }
 
-    // The place names are OpenFreeMap's vector tiles, found through its TileJSON,
-    // and are on whenever a map opens, like Borders. A tile is empty unless the
+    // The borders and the place names are OpenFreeMap's vector tiles, found
+    // through its TileJSON, and Borders is on whenever a map opens. A tile is empty unless the
     // spec names a village (`placeNames`), so no label lands on what another
     // spec is looking at; with one, every tile holds that village.
     if (url.hostname === 'tiles.openfreemap.org') {
@@ -1543,6 +1543,15 @@ export async function installAppFixture(page, options = {}) {
       const field = url.searchParams.get('attr') ?? '';
       const value = url.searchParams.get('value') ?? '';
       const linked = url.searchParams.get('linked') ?? '';
+      const folder = url.searchParams.get('folder') ?? '';
+      const unfiled = url.searchParams.get('unfiled') === 'true';
+      const recursive = url.searchParams.get('recursive') === 'true';
+      const filedIn = (entity) => {
+        const at = entity.attrs?.folder ?? '';
+        if (unfiled) return !at;
+        if (!folder) return true;
+        return at === folder || (recursive && at.startsWith(`${folder}/`));
+      };
       const savedView = analysisViews.find(
         (view) => view.id === url.searchParams.get('view')
       );
@@ -1581,6 +1590,7 @@ export async function installAppFixture(page, options = {}) {
             .some((heldValue) => String(heldValue ?? '').toLowerCase().includes(term))) &&
           (!field || !value || String(entity.attrs?.[field] ?? '') === value) &&
           (!linked || reaches(entity.id, linked)) &&
+          filedIn(entity) &&
           (!inPeriod || inPeriod.has(entity.id))
       );
       const order = url.searchParams.get('order') ?? '';
@@ -1607,14 +1617,16 @@ export async function installAppFixture(page, options = {}) {
       catalogQueries.push(url.search);
       // `catalogPage` makes the fixture answer in pages, which is the only way to
       // reach the surface's server-search mode: a case that fits one page filters
-      // in the browser and never asks a second question.
+      // in the browser and never asks a second question. The cursor is the offset
+      // of the next page, so a surface that reads every page gets to the end.
       const page = options.catalogPage ?? 0;
-      const items = page ? ordered.slice(0, page) : ordered;
+      const from = Number(url.searchParams.get('cursor')) || 0;
+      const items = page ? ordered.slice(from, from + page) : ordered;
       const byType = {};
       for (const entity of matching) byType[entity.type] = (byType[entity.type] ?? 0) + 1;
       return json(route, {
         items,
-        next_cursor: page && matching.length > page ? 'cursor-2' : null,
+        next_cursor: page && matching.length > from + page ? String(from + page) : null,
         total: matching.length,
         ...(url.searchParams.get('counts') === 'type' ? { by_type: byType } : {}),
       });

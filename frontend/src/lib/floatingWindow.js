@@ -7,8 +7,9 @@
  * the element the window floats in; bounds are that element's `{ w, h }`.
  *
  * Where a window was left is remembered in the browser, per window, so a chart
- * dragged out of the way stays out of the way the next time it opens. That is
- * a habit of this screen, not case state, which is why it lives there.
+ * dragged out of the way stays out of the way the next time it opens, and so
+ * is whether it was folded down to its title bar. That is a habit of this
+ * screen, not case state, which is why it lives there.
  */
 
 /** What every window keeps between itself and the edge of the map. */
@@ -68,6 +69,26 @@ export function savedWindow(id) {
 export function saveWindow(id, rect) {
   try {
     localStorage.setItem(KEY(id), JSON.stringify(rect));
+  } catch {
+    // remembered for this view only
+  }
+}
+
+const FOLD_KEY = (id) => `azimut.window.${id}.folded`;
+
+/** Whether this window was last left folded to its title bar. */
+export function savedFold(id) {
+  try {
+    return localStorage.getItem(FOLD_KEY(id)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveFold(id, folded) {
+  try {
+    if (folded) localStorage.setItem(FOLD_KEY(id), '1');
+    else localStorage.removeItem(FOLD_KEY(id));
   } catch {
     // remembered for this view only
   }

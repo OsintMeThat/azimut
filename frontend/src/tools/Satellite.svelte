@@ -13,8 +13,7 @@
   import { createMapLayerMemory } from '../lib/map/layerMemory.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
-  import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
-  import { createProfileState } from './satellite/state/profile.svelte.js';
+  import { createMeasureState } from './satellite/state/measure.svelte.js';
   import { createSkyState } from './satellite/state/sky.svelte.js';
   import { createGridState } from './satellite/state/grid.svelte.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
@@ -38,14 +37,7 @@
   import { FREE_FAR_PROVIDER } from '../lib/map/quotaGuard.js';
   import { bearingBetween } from '../lib/horizon/geometry.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
-  import {
-    createReliefWheel,
-    startGroundPan,
-    startRectDrag,
-    tiltFromKey,
-    turnFromKey,
-    turnFromPress,
-  } from '../lib/map/gestures.js';
+  import { startRectDrag, tiltFromKey, turnFromKey, turnFromPress } from '../lib/map/gestures.js';
   import { exaggerationOf } from '../lib/map/relief.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
@@ -110,9 +102,10 @@
   import MapLayers from './satellite/MapLayers.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import MapStatusBar from './satellite/MapStatusBar.svelte';
-  import ElevationProfile from './satellite/ElevationProfile.svelte';
-  import ProfilePanel from './satellite/ProfilePanel.svelte';
-  import ProfileQuestion from './satellite/ProfileQuestion.svelte';
+  import MeasureGround from './satellite/MeasureGround.svelte';
+  import MeasureOverlay from './satellite/MeasureOverlay.svelte';
+  import MeasureKeepMenu from './satellite/MeasureKeepMenu.svelte';
+  import SightVerdict from './satellite/SightVerdict.svelte';
   import FloatingWindow from '../components/FloatingWindow.svelte';
   import MarkerMenu from './satellite/MarkerMenu.svelte';
   import MeasurePanel from './satellite/MeasurePanel.svelte';
@@ -259,14 +252,14 @@
   /**
    * The other key-less reference layers, each simply on or off: OpenFreeMap's
    * borders and place names, Esri's roads, Open Infrastructure Map's power
-   * lines, OpenSeaMap's sea marks and OSM's raw GPS traces. Borders and place
-   * names start on, because every read of imagery starts with which side of a
-   * line it is on and what the place is called; they are map tiles, the network
-   * a map is opened to use. The rest fetch no tile until their switch is pressed.
+   * lines, OpenSeaMap's sea marks and OSM's raw GPS traces. Borders start on,
+   * because every read of imagery starts with which side of a line it is on;
+   * they are map tiles, the network a map is opened to use. The rest fetch no
+   * tile until their switch is pressed.
    */
   const refLayers = $state({
     boundaries: true,
-    placenames: true,
+    placenames: false,
     roads: false,
     power: false,
     seamarks: false,
@@ -274,10 +267,10 @@
   });
   /**
    * The catalogue layers each case was left on, kept in this browser
-   * (`lib/map/layerMemory.js`): borders, place names and the saved work for a
-   * case that never said otherwise. The fire and night layers are not among them.
+   * (`lib/map/layerMemory.js`): borders and the saved work for a case that
+   * never said otherwise. The fire and night layers are not among them.
    */
-  const switchMemory = createMapLayerMemory('satellite', ['boundaries', 'placenames', 'saved']);
+  const switchMemory = createMapLayerMemory('satellite', ['boundaries', 'saved']);
   /** The case the switches were last set for, which is the case they are kept under. */
   let layersFor = null;
   const switchedOn = $derived(
@@ -460,48 +453,134 @@
   // Fullscreen: the tool covers the whole viewport; SAVED stays collapsible (item 4).
   let fullscreen = $state(false);
 
-  // Measure tools (item 5): distance / area / angle, in their own store.
+  // The Measure tool (state/measure.svelte.js): lines and areas, what a line of
+  // two points is used as, and the ground under a line.
   const measure = createMeasureState({
     engine: () => engine,
+    api,
     units: () => prefs.units,
+    coords: (lat, lon) => fmtCoords(lat, lon),
+    relief: () => reliefOn,
+    snapTargets: () => measureTargets(),
+    pictureDate: () => surface?.provenance?.()?.imageryDate ?? null,
+    copy: (text) => copyText(text, { said: 'Coordinates copied' }),
   });
-  // The Elevation profile tool: a line drawn for its ground (state/profile.svelte.js).
-  const profile = createProfileState({ engine: () => engine, api });
+  // Alt held keeps a click off what is already there
+  let altHeld = $state(false);
+  // the measure kept in a layer, while its menu is open: { id, feature, anchor }
+  let keeping = $state(null);
 
   /**
-   * Where the profile's window first opens: low and centred, unless the line
-   * lies there, then high. After that it opens where it was left.
+   * What a measure's click lands on: the case's places and the analyst's pins in
+   * view, and the dropped pin. Read once the map stops, not at every move.
    */
-  function profileWindowPlace(box) {
-    const w = Math.min(820, box.w - 24);
-    const low = { x: Math.max(12, (box.w - w) / 2), y: box.h - 330, w, h: 240 };
-    const drawn = engine ? profile.points.map((point) => engine.latLngToContainerPoint(point)) : [];
-    if (!drawn.length) return low;
-    const covers = (rect) =>
-      drawn.some((at) => at.x >= rect.x && at.x <= rect.x + rect.w && at.y >= rect.y && at.y <= rect.y + rect.h);
-    const high = { ...low, y: 70 };
-    return covers(low) && !covers(high) ? high : low;
+  let targetsMemo = { at: -1, list: [] };
+  let viewStamp = 0;
+  function measureTargets() {
+    if (targetsMemo.at === viewStamp) return targetsMemo.list;
+    const box = engine?.viewBounds?.();
+    const inView = (lat, lon) =>
+      !box || (lat <= box.north && lat >= box.south && (box.west <= box.east ? lon >= box.west && lon <= box.east : lon >= box.west || lon <= box.east));
+    const list = [];
+    for (const row of savedWork.rows) {
+      if (row.lat != null && row.lon != null && inView(row.lat, row.lon)) list.push({ lat: row.lat, lon: row.lon, label: row.title || 'Saved place' });
+    }
+    for (const row of addedLayers.rows ?? []) {
+      for (const feature of addedLayers.collection(row.name)?.features ?? []) {
+        if (feature.geometry?.type !== 'Point') continue;
+        const [lon, lat] = feature.geometry.coordinates;
+        if (inView(lat, lon)) list.push({ lat, lon, label: feature.properties?.name || row.title });
+      }
+    }
+    if (markerLatLng) list.push({ ...markerLatLng, label: 'The pin' });
+    targetsMemo = { at: viewStamp, list };
+    return list;
   }
 
-  // while a profile line is being clicked out, its next stretch follows the pointer
+  /**
+   * Where the ground window first opens: a wide band low on the map, or high,
+   * clear of the tool's panel, if the line lies low.
+   */
+  function groundWindowPlace(box) {
+    const w = Math.min(980, box.w - 24);
+    const low = { x: Math.max(12, (box.w - w) / 2), y: box.h - 420, w, h: 330 };
+    // right of the rail and its open panel, which also clears the search above them
+    const beside = Math.min(12 + toolsWidth + 12, Math.max(12, box.w - 572));
+    // the line as drawn on screen, a point every few pixels' worth of each leg
+    const corners = engine && measure.selected ? measure.selected.points.map((point) => engine.latLngToContainerPoint(point)) : [];
+    const drawn = corners.flatMap((at, i) =>
+      i ? Array.from({ length: 12 }, (_, k) => ({ x: corners[i - 1].x + ((at.x - corners[i - 1].x) * k) / 11, y: corners[i - 1].y + ((at.y - corners[i - 1].y) * k) / 11 })) : []
+    );
+    const covered = (rect) => drawn.filter((at) => at.x >= rect.x && at.x <= rect.x + rect.w && at.y >= rect.y && at.y <= rect.y + rect.h).length;
+    const high = { x: beside, y: 12, w: Math.min(w, box.w - beside - 12), h: 330 };
+    return covered(high) < covered(low) ? high : low;
+  }
+
+  // the pointer over the map: the stretch being drawn follows it, the chart reads the line under it
   $effect(() => {
-    if (!engine || !profile.on || profile.finished) return;
-    return engine.on('pointer-move', (at) => profile.follow(at));
+    if (!engine || !measure.on) return;
+    return engine.on('pointer-move', (at) => measure.follow(at, { free: altHeld }));
   });
 
-  /** The profile's question asked in Horizon: standing at A, facing B, B marked. */
-  function lookAlongProfile() {
-    const a = profile.points[0];
-    const b = profile.points.at(-1);
+  // a map come to rest: the words that fit are placed again, and what a click lands on read again
+  $effect(() => {
+    if (!engine) return;
+    return engine.on('view-settled', () => {
+      viewStamp += 1;
+      measure.viewChanged();
+    });
+  });
+
+  // the flat map zooms on a double click, which ends a measure here: kept from it while the tool is open
+  $effect(() => {
+    if (!measure.on || !mapEl) return;
+    const swallow = (event) => {
+      if (!mapEl?.contains(event.target)) return;
+      event.stopPropagation();
+      event.preventDefault();
+    };
+    window.addEventListener('dblclick', swallow, true);
+    return () => window.removeEventListener('dblclick', swallow, true);
+  });
+
+  // the 3D view switched on reads the ground of the line in hand, as it reads the relief anyway
+  $effect(() => {
+    if (reliefOn) untrack(() => measure.readAgain());
+  });
+
+  /** A line's question asked in Horizon: standing at A, facing B, B marked. */
+  function lookAlong(id) {
+    const m = measure.measures.find((one) => one.id === id);
+    const a = m?.points[0];
+    const b = m?.points.at(-1);
     if (!a || !b) return;
     lookFrom({
       lat: a.lat,
       lon: a.lon,
       heading: bearingBetween(a, b),
-      eyeHeight: profile.eyeHeight,
-      mark: { lat: b.lat, lon: b.lon, height: profile.targetHeight },
+      eyeHeight: measure.eyeHeight,
+      mark: { lat: b.lat, lon: b.lon, height: measure.targetHeight },
     });
   }
+
+  function keepMeasure(id, anchor) {
+    const feature = measure.feature(id);
+    if (feature) keeping = { id, feature, anchor };
+  }
+
+  /** The selected line's sight, stood in the air over the 3D view. */
+  const measureAir = $derived.by(() => {
+    const m = measure.selected;
+    const ground = measure.ground?.answer;
+    if (!onGlobe || !m || m.closed || m.points.length !== 2 || !ground?.sight || !ground.corners) return null;
+    return {
+      a: m.points[0],
+      b: m.points[1],
+      eye: ground.sight.eye_m,
+      target: ground.sight.target_m,
+      blockedAt: ground.sight.blocked_at_m,
+    };
+  });
 
   /**
    * Which half of the panel is showing.
@@ -627,6 +706,8 @@
       }
     );
     window.addEventListener('keydown', onKeydown);
+    window.addEventListener('keyup', onKeyup);
+    window.addEventListener('blur', onKeyup);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     // the user clicked the extension after a refused capture — close the loop
     const offActivated = onActivated(() =>
@@ -634,12 +715,13 @@
     );
     return () => {
       window.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('keyup', onKeyup);
+      window.removeEventListener('blur', onKeyup);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       viewLink?.close();
       viewLink = null;
       offActivated();
       measure.destroy();
-      profile.destroy();
       sky.destroy();
       grid.destroy();
       footprint.destroy();
@@ -658,24 +740,23 @@
   $effect(() => {
     const element = mapEl;
     if (!element) return;
-    // middle-mouse or shift drag rotates the view, and tilts it over relief
+    // middle-mouse or shift drag rotates the view (the 3D view's own gestures are the globe's)
     element.addEventListener('mousedown', onMiddleRotateStart, true);
-    // over relief a plain drag holds the grabbed ground under the hand, and the
-    // wheel zooms toward the ground under the pointer
-    element.addEventListener('mousedown', onGroundPanStart, true);
-    element.addEventListener('wheel', onReliefWheel, { capture: true, passive: false });
     // left-drag draws the capture marquee when that mode is armed
     element.addEventListener('mousedown', onSelectDrag, true);
     // …and a Grid Search area when the rectangle tool is armed
     element.addEventListener('mousedown', onGridRectStart, true);
     return () => {
       element.removeEventListener('mousedown', onMiddleRotateStart, true);
-      element.removeEventListener('mousedown', onGroundPanStart, true);
-      element.removeEventListener('wheel', onReliefWheel, { capture: true });
       element.removeEventListener('mousedown', onSelectDrag, true);
       element.removeEventListener('mousedown', onGridRectStart, true);
     };
   });
+
+  /** Alt let go, or the window left with it held: clicks land on what is there again. */
+  function onKeyup(e) {
+    if (e.type === 'blur' || e.key === 'Alt') altHeld = false;
+  }
 
   function onKeydown(e) {
     if (uiState.tool !== 'satellite') return;
@@ -688,11 +769,19 @@
     // Page Up and Down tilt it over relief, unless they are scrolling a panel
     const onMap = e.target === document.body || Boolean(mapEl?.contains(e.target));
     if (!typing && reliefReady && onMap && tiltFromKey(engine, e)) return;
-    // Enter finishes a measured line or area, or a profile line: their points
-    // become handles, and a profile reads the ground
-    if (!typing && e.key === 'Enter' && (profile.finish() || (measure.mode && measure.finish()))) {
+    if (e.key === 'Alt') altHeld = true;
+    // Enter finishes a measure: its points become handles, and a line reads its ground
+    if (!typing && e.key === 'Enter' && measure.finish()) {
       e.preventDefault();
       return;
+    }
+    // Backspace takes the last point back while a measure is drawn; Delete, or
+    // Backspace once it is finished, takes the selected one off the map
+    if (!typing && measure.on && (e.key === 'Backspace' || e.key === 'Delete')) {
+      if ((e.key === 'Backspace' && measure.undo()) || measure.removeSelected()) {
+        e.preventDefault();
+        return;
+      }
     }
     // Enter confirms a polygon area, same as the Confirm button
     if (grid.on && grid.drawMode === 'polygon' && !typing && e.key === 'Enter') {
@@ -718,6 +807,8 @@
     if (grid.reviewKey) return grid.stopReview();
     if (capture.menuOpen && !capture.armed) return void (capture.menuOpen = false);
     if (sky.placing) return sky.togglePlacing();
+    // a measure being drawn is finished, then let go of, before the tool closes
+    if (measure.on && measure.escape()) return;
     if (armedMode) return disarm(modes);
     if (capture.menuOpen) return void (capture.menuOpen = false);
     // native fullscreen already exits on Esc (handled by onFullscreenChange);
@@ -786,9 +877,8 @@
 
   // --- middle-drag rotate, Google-Earth style ---
   // Grab a point and drag sideways: the map turns around *that* point (not the
-  // centre), with a sober target marking the pivot. Over relief the drag also
-  // tilts, up toward the horizon. A middle click alone puts north back up
-  // (lib/map/gestures.js).
+  // centre), with a sober target marking the pivot. A middle click alone puts
+  // north back up (lib/map/gestures.js).
   function onMiddleRotateStart(e) {
     if (!engine) return;
     // Shift and the left button turns too, as it did on the old map. Never over
@@ -796,8 +886,6 @@
     turnFromPress(engine, e, {
       shift: !capture.armed && grid.drawMode !== 'rect',
       double: doubleTurns(),
-      // over relief the same press orbits, Google Earth style: up and down tilt
-      tilt: reliefReady,
       onPivot: (pivot) => {
         rotatePivot = pivot;
         rotating = true;
@@ -808,38 +896,6 @@
 
   /** Whether a double click held turns the map: unless a mode is reading the clicks, or owns the left drag. */
   const doubleTurns = () => !armedCursor && !capture.armed && grid.drawMode !== 'rect';
-
-  /**
-   * A plain drag over relief: the grabbed ground stays under the hand, near
-   * ground and far alike (lib/map/gestures.js). Shift is the orbit's, and the
-   * marquee and the grid rectangle own the left button while they are armed;
-   * a marker or a control under the press keeps it.
-   */
-  function onGroundPanStart(e) {
-    if (!engine || !reliefReady || e.button !== 0) return;
-    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-    // the second press of a double click held is the turn's (`onMiddleRotateStart`)
-    if (e.detail === 2 && doubleTurns()) return;
-    if (capture.armed || grid.drawMode === 'rect' || !engine.onSurface(e.target)) return;
-    startGroundPan(engine, e);
-  }
-
-  /** The wheel over relief, one per map: it eases a zoom over several frames. */
-  let reliefWheel = null;
-  $effect(() => {
-    const surface = engine;
-    if (!surface) return;
-    reliefWheel = createReliefWheel(surface);
-    return () => {
-      reliefWheel?.stop();
-      reliefWheel = null;
-    };
-  });
-
-  function onReliefWheel(e) {
-    if (!reliefReady || !reliefWheel) return;
-    reliefWheel.wheel(e);
-  }
 
   // Actions that leave the tool — switching to another tool, opening a browser
   // tab — can't do anything visible while the map owns the whole screen, so
@@ -1153,7 +1209,6 @@
       engine.setView(point, center.zoom);
     } else if (id === 'measure') {
       if (!modes.measure.isOn()) arm(modes, 'measure');
-      if (measure.mode !== 'distance') setMeasureMode('distance');
       measure.addPoint(point);
     } else if (id === 'sky') {
       if (!sky.on) arm(modes, 'sky');
@@ -1242,8 +1297,7 @@
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
-    if (profile.addPoint(at)) return;
-    measure.addPoint(at);
+    if (measure.on) measure.addPoint(measure.snap(at, { free: altHeld }).point);
   }
 
   /**
@@ -1266,21 +1320,12 @@
       close: () => myLayers.stop(),
       pointing: () => myLayers.armed,
     },
-    profile: {
-      isOn: () => profile.on,
-      open: () => profile.open(),
-      close: () => profile.close(),
-      // a finished line is moved by its handles, not by clicks
-      pointing: () => profile.on && !profile.finished,
-    },
     measure: {
-      isOn: () => measure.panelOpen || Boolean(measure.mode),
-      open: () => measure.togglePanel(),
-      close: () => {
-        measure.setMode(null);
-        if (measure.panelOpen) measure.togglePanel();
-      },
-      pointing: () => Boolean(measure.mode),
+      isOn: () => measure.on,
+      open: () => measure.open(),
+      close: () => measure.close(),
+      // every click is a point while the tool is open; a finished one moves by its handles
+      pointing: () => measure.on,
     },
     grid: {
       isOn: () => grid.on,
@@ -1329,6 +1374,8 @@
   /** …and the imagery corner stops short of its width, wrapping rather than
    *  sliding under it on a narrow map. */
   let searchWidth = $state(0);
+  // the rail and its open panel, which the ground window opens beside
+  let toolsWidth = $state(0);
   /** Its own height, so the engine's zoom buttons stack under it rather than
    *  behind it — and keep doing so when a tool is added to the rail. */
   let railHeight = $state(0);
@@ -1524,11 +1571,6 @@
   function pickTool(id) {
     if (id === 'reference') return refs.openPicker();
     arm(modes, id);
-  }
-
-  function setMeasureMode(mode) {
-    // the sub-mode inside the armed measure tool; arming it is the rail's
-    if (measure.setMode(mode)) capture.disarm();
   }
 
   // fly the map to a capture's recorded point (item 7)
@@ -2005,7 +2047,7 @@
         at: markerLatLng,
         ...markerIcon(markerStyle),
         draggable: true,
-        zIndex: 1000,
+        zIndex: 570,
         onDrag: (at) => (markerLatLng = at),
       },
     ]);
@@ -2572,13 +2614,12 @@
            in. Only verbs live here; what is *drawn* over the imagery is a layer
            and is listed in the panel on the right. -->
       {#if !myLayers.editor}
-      <div class="map-tools" style:top={`${railTop}px`}>
+      <div class="map-tools" style:top={`${railTop}px`} bind:clientWidth={toolsWidth}>
         <MapRail
           sections={RAIL}
           bind:height={railHeight}
           state={{
             measure: { on: modes.measure.isOn() },
-            profile: { on: profile.on },
             grid: { on: grid.on, disabled: reliefOn, title: reliefOn ? GRID_FLAT_ONLY : undefined },
             sky: { on: sky.on },
             reference: {
@@ -2597,17 +2638,10 @@
           <div class="mode-panel">
             {#if armedMode === 'measure'}
               <MeasurePanel
-                mode={measure.mode}
-                setMode={setMeasureMode}
-                clear={() => measure.clear()}
-                points={measure.points}
-                finished={measure.finished}
-              />
-            {:else if armedMode === 'profile'}
-              <ProfilePanel
-                points={profile.points.length}
-                finished={profile.finished}
-                clear={() => profile.clear()}
+                tool={measure}
+                onkeep={keepMeasure}
+                oncopy={(id) => copyText(measure.text(id))}
+                onlook={lookAlong}
               />
             {:else if armedMode === 'sky'}
               <SunPanel
@@ -2726,39 +2760,57 @@
         <TurnGuide x={rotatePivot.x} y={rotatePivot.y} />
       {/if}
 
-      <!-- A profile line's ground, in a window the analyst moves and sizes, with
-           the point under the pointer marked on the line itself. -->
-      {#if profile.showing}
+      <!-- What the Measure tool draws on the screen: the stretch to come while a
+           measure is drawn, and in 3D the line of sight standing in the air. -->
+      {#if measure.on}
+        <MeasureOverlay engine={mapReady ? engine : null} live={measure.live} air={measureAir} />
+      {/if}
+
+      <!-- A measured line's ground, in a window the analyst moves and sizes, read
+           both ways with the line on the map. -->
+      {#if measure.on && measure.selected && !measure.drawing && !measure.selected.closed && measure.groundOn && measure.ground && measure.chartShown}
         <FloatingWindow
-          id="elevation-profile"
-          title="Elevation profile"
+          id="measure-ground"
+          title={`Ground along measure ${measure.selectedId}`}
           icon="profile"
-          min={{ w: 420, h: 210 }}
-          placement={profileWindowPlace}
-          onclose={() => profile.close()}
+          foldable
+          min={{ w: 560, h: 290 }}
+          placement={groundWindowPlace}
+          onclose={() => measure.showChart(false)}
         >
           {#snippet header()}
-            <ProfileQuestion
-              eyeHeight={profile.eyeHeight}
-              targetHeight={profile.targetHeight}
-              sight={profile.profile?.sight ?? null}
-              units={prefs.units}
-              setHeights={(heights) => profile.setHeights(heights)}
-              onlook={profile.points.length >= 2 ? lookAlongProfile : null}
+            <SightVerdict
+              sight={measure.selected.points.length === 2 ? (measure.ground.answer?.sight ?? null) : null}
+              corners={measure.selected.points.length === 2 ? (measure.ground.answer?.corners ?? null) : null}
+              busy={measure.ground.busy}
+              units={measure.units}
             />
           {/snippet}
-          <ElevationProfile
-            profile={profile.profile}
-            busy={profile.busy}
-            error={profile.error}
-            units={prefs.units}
-            onhover={(at) => profile.showReading(at)}
+          <MeasureGround
+            tool={measure}
+            onlook={() => lookAlong(measure.selectedId)}
+            onpick={(index) => {
+              const answer = measure.ground.answer;
+              if (answer) engine?.setView({ lat: answer.lat[index], lon: answer.lon[index] }, center.zoom);
+            }}
           />
         </FloatingWindow>
       {/if}
 
-      <!-- Where you are and what the armed tool is reading, then the two acts
-           that take something off the map. The imagery provider left this bar
+      {#if keeping && caseState.current}
+        <MeasureKeepMenu
+          caseId={caseState.current.id}
+          feature={keeping.feature}
+          anchor={keeping.anchor}
+          onclose={() => (keeping = null)}
+          ondone={() => {
+            measure.remove(keeping.id);
+            keeping = null;
+          }}
+        />
+      {/if}
+
+      <!-- Where you are, then the two acts that take something off the map. The imagery provider left this bar
            for the surface's own corner: it describes the picture, not the
            tool, and two compared surfaces each show their own. -->
       <MapStatusBar
@@ -2767,8 +2819,6 @@
         zoom={center.zoom}
         pinned={moveMode && !!markerLatLng}
         copy={copyCoords}
-        reading={measure.mode ? (measure.readout ?? '') : ''}
-        hint={measure.mode && !measure.readout ? MEASURE_HINT[measure.mode] : ''}
       >
         <!-- What marks the point and whether it is the centre: one square, set
              once, beside the two acts that are pressed all day. -->

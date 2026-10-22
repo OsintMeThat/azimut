@@ -79,8 +79,18 @@ export function colourField(alpha, fill, halo, haloWidth, size) {
  *   an icon the flat map holds, as the engine keeps it
  * @param {(width: number, height: number) => HTMLCanvasElement | OffscreenCanvas} [o.canvas]
  * @param {() => number} [o.ratio] device pixels per CSS pixel
+ * @param {number} [o.sharpest] the most device pixels a name is written at per CSS pixel
+ * @param {number} [o.perFrame] new names a frame may write; a capture writes them all at once
+ * @param {number} [o.size] the names' atlas, device pixels a side
  */
-export function createGlyphs({ image, canvas = makeCanvas, ratio = () => globalThis.devicePixelRatio || 1 }) {
+export function createGlyphs({
+  image,
+  canvas = makeCanvas,
+  ratio = () => globalThis.devicePixelRatio || 1,
+  sharpest = 2,
+  perFrame = NEW_PER_FRAME,
+  size: side = ATLAS,
+}) {
   const kept = new Map();
   let probe = null;
   // the names' atlas: its canvas, the shelf being filled, and the page the names on it belong to
@@ -91,13 +101,13 @@ export function createGlyphs({ image, canvas = makeCanvas, ratio = () => globalT
 
   /** Room for a `w` by `h` picture on the atlas, wiping it when none is left. */
   function room(w, h) {
-    atlas ??= canvas(ATLAS, ATLAS);
-    if (shelf.x + w > ATLAS) shelf = { x: 0, y: shelf.y + shelf.height + 1, height: 0 };
-    if (shelf.y + h > ATLAS) {
+    atlas ??= canvas(side, side);
+    if (shelf.x + w > side) shelf = { x: 0, y: shelf.y + shelf.height + 1, height: 0 };
+    if (shelf.y + h > side) {
       page.live = false;
       page = { live: true };
       for (const [key, value] of kept) if (value?.page) kept.delete(key);
-      atlas.getContext('2d').clearRect(0, 0, ATLAS, ATLAS);
+      atlas.getContext('2d').clearRect(0, 0, side, side);
       shelf = { x: 0, y: 0, height: 0 };
     }
     const at = { x: shelf.x, y: shelf.y };
@@ -147,10 +157,10 @@ export function createGlyphs({ image, canvas = makeCanvas, ratio = () => globalT
       const key = JSON.stringify(['t', spec.text, spec.size, spec.font, spec.colour, spec.halo, spec.haloWidth, spec.spacing, spec.maxWidth]);
       const held = kept.get(key);
       if (held) return held;
-      if (written >= NEW_PER_FRAME) return null;
+      if (written >= perFrame) return null;
       written += 1;
       return keep(key, () => {
-        const scale = Math.min(2, ratio());
+        const scale = Math.min(sharpest, ratio());
         const font = cssFont(spec.font, spec.size);
         const width = measure(font, spec.spacing);
         const lines = wrapWords(spec.text, spec.maxWidth, width);
@@ -158,8 +168,8 @@ export function createGlyphs({ image, canvas = makeCanvas, ratio = () => globalT
         const lineHeight = spec.size * 1.2;
         const w = Math.ceil(Math.max(...lines.map(width), 1) + 2 * halo + 2);
         const h = Math.ceil(lines.length * lineHeight + 2 * halo);
-        const sw = Math.min(ATLAS, Math.ceil(w * scale));
-        const sh = Math.min(ATLAS, Math.ceil(h * scale));
+        const sw = Math.min(side, Math.ceil(w * scale));
+        const sh = Math.min(side, Math.ceil(h * scale));
         const at = room(sw, sh);
         const ctx = atlas.getContext('2d');
         ctx.save();

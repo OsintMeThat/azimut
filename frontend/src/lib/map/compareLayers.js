@@ -37,8 +37,8 @@ export const LAYER_SIDES = Object.freeze([
   { id: 'ab', label: 'AB', title: 'Draw the layers on both sides' },
 ]);
 
-/** What a new pair starts with, as Detect does: borders and place names. */
-export const DEFAULT_LAYERS = Object.freeze(['boundaries', 'placenames']);
+/** What a new pair starts with, as Detect does: the borders. */
+export const DEFAULT_LAYERS = Object.freeze(['boundaries']);
 
 /** Whether the switcher has a side draw the list. */
 export const reaches = (side, which) => side === 'ab' || side === which;

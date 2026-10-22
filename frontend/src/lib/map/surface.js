@@ -382,6 +382,10 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
         event.preventDefault();
         element.click();
       });
+    } else if (shape.draggable) {
+      // a handle pressed and let go where it stands is not a click on the map
+      // behind it, which would start a measure or drop a vertex there
+      element.addEventListener('click', (event) => event.stopPropagation());
     }
     if (shape.onContextMenu) {
       element.addEventListener('contextmenu', (event) => {

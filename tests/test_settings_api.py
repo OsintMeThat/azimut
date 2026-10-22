@@ -591,6 +591,44 @@ def test_sentinel2_proxy_never_asks_upstream_past_the_native_ceiling(client, mon
     assert body["usage"]["sentinelhub"][body["month"]] == 1  # one tile, not sixteen
 
 
+def test_sentinel2_proxy_never_asks_upstream_shallower_than_it_renders(client, monkeypatch):
+    """Sentinel Hub refuses a pixel over 1500 m (400), which the 3D view's
+    coarse ground asked for. Below its floor the proxy says "no imagery" itself."""
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    upstream = _upstream(content=_png_bytes(), headers={"content-type": "image/png"})
+    _use_tile_upstream(monkeypatch, upstream)
+
+    listed = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
+    assert listed["sentinel2"]["min_zoom"] == 7 and listed["esri-world-imagery"]["min_zoom"] == 0
+    # grid 5 == view z6 for a 512px provider: too coarse, never asked
+    assert client.get("/api/tiles/sentinel2/5/16/11").status_code == 404
+    assert upstream.urls == []
+    # grid 6 == view z7: the shallowest it renders
+    assert client.get("/api/tiles/sentinel2/6/33/22").status_code == 200
+    assert "TILEMATRIX=7" in upstream.urls[0]
+
+
+def test_sentinel2_proxy_waits_out_the_rate_limit(client, monkeypatch):
+    """Sentinel Hub allows 300 requests a minute, which a tilted 3D view's burst
+    can pass. Its 429 is waited out as it asks, not said as a spent allowance."""
+    from azimut.engine import tiles
+
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    answers = [httpx.Response(429, headers={"retry-after": "9"}), httpx.Response(200, content=b"JPEGDATA")]
+    asked: list[str] = []
+
+    def get(url):
+        asked.append(url)
+        return answers.pop(0)
+
+    paused: list[float] = []
+    monkeypatch.setattr(tiles.time, "sleep", paused.append)
+    _use_tile_upstream(monkeypatch, get)
+    assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 200
+    assert len(asked) == 2
+    assert paused == [tiles.THROTTLE_PAUSE_MAX]  # never the nine seconds it asked
+
+
 def test_sentinel_layers_does_not_touch_the_network_without_check(client, monkeypatch):
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
 

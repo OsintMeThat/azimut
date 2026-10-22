@@ -244,6 +244,21 @@ describe('the window listener', () => {
     later.mockRestore();
   });
 
+  it('refuses the middle click’s paste on the 3D globe too, whose presses send no mouse events', () => {
+    // the globe takes its presses as pointer events and cancels them, so the
+    // browser sends no mousedown: the middle button is heard on the pointer alone
+    const seen = [];
+    off = listenForPaste((payload) => seen.push(payload));
+    const later = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 20_000);
+    expect(middleClickPaste()).toBe(false);
+    window.dispatchEvent(new PointerEvent('pointerdown', { button: 1 }));
+    expect(middleClickPaste()).toBe(true);
+    window.dispatchEvent(new PointerEvent('pointerup', { button: 1 }));
+    paste(clipboard({ text: '46.5, 7.9' }));
+    expect(seen).toEqual([]);
+    later.mockRestore();
+  });
+
   it('leaves a paste into a field alone', () => {
     // in a search box or a title input, Ctrl+V is the ordinary one
     const input = document.createElement('input');

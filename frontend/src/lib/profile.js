@@ -62,6 +62,53 @@ export function gradeDegrees(percent) {
   return (Math.atan(Math.abs(percent) / 100) * 180) / Math.PI;
 }
 
+/**
+ * How steep the ground reads at a glance, in the bands the crest is coloured
+ * in: a walk, a climb, a scramble, a cliff. Bounds are in degrees.
+ */
+export const SLOPE_BANDS = [
+  { id: 'flat', below: 3, colour: '#6fcf97', label: 'under 3°' },
+  { id: 'gentle', below: 8, colour: '#c6d65e', label: '3 to 8°' },
+  { id: 'steep', below: 15, colour: '#efb446', label: '8 to 15°' },
+  { id: 'harsh', below: 25, colour: '#e9803f', label: '15 to 25°' },
+  { id: 'cliff', below: Infinity, colour: '#e05252', label: '25° and over' },
+];
+
+/** The band a grade (in percent) falls in. */
+export function slopeBand(percent) {
+  const degrees = gradeDegrees(percent);
+  return SLOPE_BANDS.find((band) => degrees < band.below);
+}
+
+/**
+ * How far the line of sight passes over the ground at a sample, in metres:
+ * negative where the ground stands in its way. Null without a sight.
+ */
+export function clearanceAt(profile, index) {
+  const sight = profile?.sight;
+  if (!sight || index == null || index >= profile.distance_m.length) return null;
+  const span = profile.distance_m.at(-1) || 1;
+  const along = profile.distance_m[index] / span;
+  const line = sight.eye_m + (sight.target_m - sight.eye_m) * along;
+  return line - (profile.elevation[index] + (sight.bulge_m?.[index] ?? 0));
+}
+
+/** Points through `tops` from `from` to `to` (inclusive) as an SVG path. */
+function through(tops, from, to) {
+  return `M${tops.slice(from, to + 1).map((point) => `${point.x},${point.y}`).join(' L')}`;
+}
+
+/** Consecutive samples sharing a key, as `[key, from, to]`, each run starting where the last ended. */
+function runsOf(keys) {
+  const runs = [];
+  keys.forEach((key, i) => {
+    const last = runs.at(-1);
+    if (last && last[0] === key) last[2] = i;
+    else runs.push([key, last ? last[2] : i, i]);
+  });
+  return runs.filter(([, from, to]) => to > from);
+}
+
 /** The multiples of `step` inside [lo, hi]. */
 function ticks(lo, hi, step) {
   const out = [];
@@ -84,7 +131,7 @@ function ticks(lo, hi, step) {
  */
 export function profileChart(
   profile,
-  { width, height, units = 'metric', left = 44, right = 10, top = 10, bottom = 22 }
+  { width, height, units = 'metric', left = 44, right = 10, top = 10, bottom = 22, marks = [] }
 ) {
   const { distance_m: distance, elevation, sight = null } = profile;
   const axis = AXIS_UNITS[units] ?? AXIS_UNITS.metric;
@@ -115,25 +162,49 @@ export function profileChart(
   const area = `M${r(x(0))},${floor} L${crest} L${r(x(span))},${floor} Z`;
   const line = `M${crest}`;
 
-  // the crest again, in the stretches the eye covers and the ones it does not
-  const sees = [];
-  for (const [i, seen] of (sight?.seen ?? []).entries()) {
-    const last = sees.at(-1);
-    if (last?.seen === seen) last.points.push(tops[i]);
-    else sees.push({ seen, points: last ? [last.points.at(-1), tops[i]] : [tops[i]] });
+  // the crest again, in the stretches the eye covers and the ones it does not,
+  // the hidden ground shaded down to the floor
+  const sees = runsOf(sight?.seen ?? []).map(([seen, from, to]) => ({ seen, path: through(tops, from, to) }));
+  const hidden = runsOf(sight?.seen ?? [])
+    .filter(([seen]) => !seen)
+    .map(([, from, to]) => `M${tops[from].x},${floor} L${through(tops, from, to).slice(1)} L${tops[to].x},${floor} Z`);
+  // …and in the bands of its slope, each stretch between two samples by its own
+  const steepness = [];
+  for (let i = 1; i < distance.length; i += 1) {
+    const run = distance[i] - distance[i - 1];
+    const band = slopeBand(run > 0 ? ((elevation[i] - elevation[i - 1]) / run) * 100 : 0);
+    const last = steepness.at(-1);
+    if (last?.band === band.id) last.to = i;
+    else steepness.push({ band: band.id, colour: band.colour, from: i - 1, to: i });
   }
+  for (const run of steepness) run.path = through(tops, run.from, run.to);
 
   let sightLine = null;
   let blocked = null;
   if (sight) {
     const eye = { x: r(x(0)), y: r(y(sight.eye_m)) };
     const target = { x: r(x(span)), y: r(y(sight.target_m)) };
-    sightLine = { eye, target, path: `M${eye.x},${eye.y} L${target.x},${target.y}` };
+    sightLine = {
+      eye,
+      target,
+      path: `M${eye.x},${eye.y} L${target.x},${target.y}`,
+      // where the eye and the target stand over their ground
+      posts: [`M${tops[0].x},${tops[0].y} L${eye.x},${eye.y}`, `M${tops.at(-1).x},${tops.at(-1).y} L${target.x},${target.y}`],
+    };
     if (sight.blocked_at_m != null) {
       const at = blockedSample(profile);
       blocked = { x: r(x(distance[at])), y: r(y(ground[at])) };
+      // the stretch of sight past the ground in its way
+      const share = (distance[at] || 0) / span;
+      const cut = { x: r(eye.x + (target.x - eye.x) * share), y: r(eye.y + (target.y - eye.y) * share) };
+      sightLine.clear = `M${eye.x},${eye.y} L${cut.x},${cut.y}`;
+      sightLine.cut = `M${cut.x},${cut.y} L${target.x},${target.y}`;
     }
   }
+  // the corners of the line, where its legs meet
+  const corners = marks
+    .filter((d) => d > 0 && d < span)
+    .map((d, i) => ({ n: i + 1, x: r(x(d)) }));
 
   // distances: the long unit once the line reaches one of it
   const [longLabel, perLong] = axis.long;
@@ -157,9 +228,10 @@ export function profileChart(
     line,
     sight: sightLine,
     blocked,
-    sees: sees
-      .filter((run) => run.points.length >= 2)
-      .map((run) => ({ seen: run.seen, path: `M${run.points.map((point) => `${point.x},${point.y}`).join(' L')}` })),
+    sees,
+    hidden,
+    steepness,
+    corners,
     tops,
     floor,
     xTicks,

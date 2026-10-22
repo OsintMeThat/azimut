@@ -43,6 +43,24 @@ MAX_TILE_TRIES = 3
 # retry costs nothing on the meter — only a 2xx is ever counted.
 TRANSIENT_STATUSES = frozenset({502, 503, 504})
 RETRY_PAUSE = 0.5  # before asking an overloaded service again, in seconds
+# A 429 from upstream is the provider's rate (Sentinel Hub: 300 a minute), which
+# a tilted 3D view's burst of tiles can pass: wait as it asks, at most this long,
+# and ask again. Our own quota pause is a 429 the proxy raises, never retried.
+THROTTLED = 429
+THROTTLE_PAUSE_MAX = 2.0
+
+
+def retry_pause(response: httpx.Response) -> float | None:
+    """Seconds to wait before asking for this tile again, or None for a verdict."""
+    if response.status_code in TRANSIENT_STATUSES:
+        return RETRY_PAUSE
+    if response.status_code != THROTTLED:
+        return None
+    try:
+        asked = float(response.headers.get("retry-after", RETRY_PAUSE))
+    except ValueError:
+        asked = RETRY_PAUSE
+    return min(max(asked, RETRY_PAUSE), THROTTLE_PAUSE_MAX)
 RADAR_TILE_TIMEOUT = 45.0  # Sentinel-1, rendered from the GRD per request
 
 
@@ -56,6 +74,10 @@ class Provider:
     # Deepest zoom with native pixels. The view may continue farther by upscaling
     # the last native tile without issuing higher-zoom provider requests.
     max_native_zoom: int | None = None
+    # Shallowest view zoom the provider can render at all (Sentinel Hub refuses a
+    # pixel over 1500 m). Shallower tiles answer "no imagery" without asking it,
+    # and the 3D view draws that ground from the free basemap.
+    min_zoom: int = 0
     needs_key: bool = False
     subdomains: tuple[str, ...] = field(default_factory=tuple)  # for {s} templates
     # True for satellite/aerial imagery, False for street/base maps. Drives the UI:
@@ -119,6 +141,9 @@ GOOGLE_JS_LOADER_URL = "https://maps.googleapis.com/maps/api/js?key={key}&v=week
 SENTINELHUB_WMTS_URL = sentinel.wmts_url()
 # Default eco threshold for both Sentinel layers; Settings can override it.
 SENTINEL_ECO_MAX_ZOOM = 7
+# Sentinel Hub renders no pixel over 1500 m, which a 512 px tile reaches from view
+# zoom 7 (measured: the tile grid's level 5 answers 400, level 6 answers).
+SENTINEL_MIN_ZOOM = 7
 
 BUILTIN_PROVIDERS: tuple[Provider, ...] = (
     Provider(
@@ -265,6 +290,7 @@ def all_providers() -> list[Provider]:
                 attribution="© Copernicus Sentinel data / Sentinel Hub",
                 max_zoom=18,
                 max_native_zoom=14,
+                min_zoom=SENTINEL_MIN_ZOOM,
                 imagery=True,
                 capturable=True,
                 cacheable=True,
@@ -290,6 +316,7 @@ def all_providers() -> list[Provider]:
                 attribution="© Copernicus Sentinel data / Sentinel Hub",
                 max_zoom=18,
                 max_native_zoom=14,
+                min_zoom=SENTINEL_MIN_ZOOM,
                 imagery=True,
                 capturable=True,
                 cacheable=True,
@@ -591,8 +618,9 @@ def _default_fetch(client: httpx.Client, url: str) -> Image.Image | None:
             if last:
                 raise
             continue
-        if response.status_code in TRANSIENT_STATUSES and not last:
-            time.sleep(RETRY_PAUSE)
+        pause = retry_pause(response)
+        if pause is not None and not last:
+            time.sleep(pause)
             continue
         break
     if response.status_code == 404:

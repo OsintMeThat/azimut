@@ -20,14 +20,16 @@ function harness({ budget } = {}) {
   );
   const release = vi.fn();
   const onMetered = vi.fn();
+  const onFailed = vi.fn();
   const pictures = createPictures({
     fetch,
     upload: (bitmap) => ({ texture: bitmap.name, bytes: 1000 }),
     release,
     onMetered,
+    onFailed,
     ...(budget ? { budget } : {}),
   });
-  return { pictures, pending, fetch, release, onMetered };
+  return { pictures, pending, fetch, release, onMetered, onFailed };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -94,6 +96,33 @@ describe('the pictures of the globe', () => {
     pending[0].resolve(bitmap('billed'));
     await flush();
     expect(onMetered).toHaveBeenCalledWith('google-satellite');
+  });
+
+  it('asks the free provider for ground coarser than the chosen one renders', () => {
+    // Sentinel Hub refuses a pixel over 1500 m, and a refusal raised the error panel
+    const { pictures, pending } = harness();
+    pictures.setImagery({ provider: 'sentinel2', metered: true, shift: 1, deepest: 13, shallowest: 6 });
+    pictures.begin();
+    pictures.pictureFor(tile(5, 16, 11), 0);
+    pictures.pictureFor(tile(8, 133, 90), 1);
+    pictures.end();
+    expect(pending.map((p) => [p.provider, p.z])).toEqual([[FREE_FAR_PROVIDER, 4], ['sentinel2', 7]]);
+  });
+
+  it('says a refusal of the chosen imagery, not of the free ground under it', async () => {
+    const { pictures, pending, onFailed } = harness();
+    pictures.setImagery({ provider: 'sentinel2', metered: true, shift: 1, deepest: 13, shallowest: 6 });
+    pictures.begin();
+    pictures.pictureFor(tile(5, 16, 11), 0);
+    pictures.pictureFor(tile(8, 133, 90), 1);
+    pictures.end();
+    const refused = Object.assign(new Error('refused'), { status: 400 });
+    pending[0].reject(refused);
+    await flush();
+    expect(onFailed).not.toHaveBeenCalled();
+    pending[1].reject(refused);
+    await flush();
+    expect(onFailed).toHaveBeenCalledWith('sentinel2', refused);
   });
 
   it('lays a few arrivals a frame, so a burst never stalls one', async () => {

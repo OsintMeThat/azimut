@@ -29,6 +29,7 @@
     GROUNDS,
     HEAT_RAMP,
     SUN_SIDES,
+    overText,
     reliability,
     searchedReach,
     searchedWhen,
@@ -353,7 +354,7 @@
                     >
                   {/if}
                   {#if place.over}
-                    <small>land over the sky-only lines on {Math.round(place.over * 100)}% of them</small>
+                    <small>{place.explained <= 0 ? 'Ruled out: ' : ''}{overText(place.over, place.over_far)}</small>
                   {/if}
                   <small
                     >{place.lat.toFixed(4)}, {place.lon.toFixed(4)}{Number.isFinite(place.decoy) ? ` · decoys ${Math.round(place.decoy * 100)}%` : ''}{trust?.chance !=
@@ -553,6 +554,9 @@
               ? `${place.fov < 10 ? place.fov.toFixed(1) : Math.round(place.fov)}° lens · `
               : ''}{Number.isFinite(place.relief) ? `ridges about ${formatDistance(place.relief, units)} out · ` : ''}{place.lat.toFixed(4)}, {place.lon.toFixed(4)}
           </p>
+          {#if place.over}
+            <p class="fs-say quiet">{place.explained <= 0 ? 'Ruled out: ' : ''}{overText(place.over, place.over_far)}</p>
+          {/if}
           <div class="fs-acts">
             {#if place.heading != null}
               <button type="button" class="btn btn-sm" onclick={() => onplace({ ...place, frames: find.tried.frames })}>Look from here</button>

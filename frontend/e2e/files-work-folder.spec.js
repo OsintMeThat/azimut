@@ -125,3 +125,37 @@ test('the sidebar switches to the to-do lists and renames a folder from its menu
   await expect(sidebar.locator('.frow', { hasText: 'Harbour' })).toBeVisible();
   fixture.expectNoUnexpectedRequests();
 });
+
+test('a folder opens on all its files when they sit past the first catalog page', async ({ page }) => {
+  // The bug this pins: the grid showed the open folder's share of the case's first
+  // 200 rows. A folder of six, four of them filed late, opened on two under a
+  // case-wide "Show more".
+  const row = (id, folder) => ({
+    ...gate,
+    id,
+    label: id,
+    attrs: { ...gate.attrs, ...(folder ? { folder } : {}) },
+  });
+  const catalog = [
+    row('strike-1', 'Strikes'),
+    row('strike-2', 'Strikes'),
+    ...Array.from({ length: 200 }, (_, i) => row(`loose-${i}`)),
+    ...[3, 4, 5, 6].map((n) => row(`strike-${n}`, 'Strikes')),
+  ];
+  const fixture = await installAppFixture(page, {
+    cases: [{ id: CASE_ID, name: 'Browser Test', scratch: false, entities: [], links: [], folders: ['Strikes'] }],
+    catalog,
+    catalogPage: 200,
+  });
+  await page.route(`**/api/cases/${CASE_ID}/todos`, (route) =>
+    route.fulfill({ json: { revision: 0, lists: [{ id: 'default', name: 'Tasks', tasks: [] }] } })
+  );
+  await page.goto('/#files');
+
+  const grid = page.locator('.grid-pane');
+  await grid.locator('.tile.folder', { hasText: 'Strikes' }).dblclick();
+  await expect(grid.locator('.tile.entity')).toHaveCount(6);
+  await expect(page.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+  expect(fixture.catalogQueries.some((query) => query.includes('folder=Strikes'))).toBe(true);
+  fixture.expectNoUnexpectedRequests();
+});

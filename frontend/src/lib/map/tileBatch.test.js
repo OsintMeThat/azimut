@@ -1,16 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  appTile,
-  BATCH_PROTOCOL,
-  batchedTemplate,
-  batchedTerrainTemplate,
-  batchPath,
-  createTileBatcher,
-  FALLBACK_STATUS,
-  readBatched,
-  readFrames,
-  singleUrl,
-} from './tileBatch.js';
+import { appTile, createTileBatcher, readFrames } from './tileBatch.js';
 
 /** One tile of a batch answer, as api/tile_batch.py writes it. */
 function frame(index, status, text) {
@@ -54,29 +43,6 @@ function fakeApp() {
   return { fetch, requests, keys: (request) => new URL(request.url, 'http://app').searchParams.get('t').split(',') };
 }
 
-describe('the addresses of batched tiles', () => {
-  it('names the map and the source, and reads back', () => {
-    expect(batchedTemplate('m2', 'esri-world-imagery')).toBe(
-      `${BATCH_PROTOCOL}://m2/imagery/esri-world-imagery/{z}/{x}/{y}`
-    );
-    expect(batchedTerrainTemplate('m2')).toBe(`${BATCH_PROTOCOL}://m2/terrain/{z}/{x}/{y}`);
-    const picture = readBatched(`${BATCH_PROTOCOL}://m2/imagery/sentinel2~TRUE~2026-05-01/14/8001/5002`);
-    expect(picture).toEqual({ mapId: 'm2', kind: 'imagery', providerId: 'sentinel2~TRUE~2026-05-01', z: 14, x: 8001, y: 5002 });
-    const relief = readBatched(`${BATCH_PROTOCOL}://m2/terrain/11/1068/723`);
-    expect(relief).toEqual({ mapId: 'm2', kind: 'terrain', providerId: null, z: 11, x: 1068, y: 723 });
-    expect(readBatched('/api/tiles/esri/1/0/0')).toBeNull();
-    expect(readBatched(`${BATCH_PROTOCOL}://m2/other/1/0/0`)).toBeNull();
-  });
-
-  it('keeps the address a tile always had for asking it alone', () => {
-    expect(singleUrl(readBatched(`${BATCH_PROTOCOL}://m1/imagery/esri-world-imagery/5/3/4`))).toBe(
-      '/api/tiles/esri-world-imagery/5/3/4'
-    );
-    expect(singleUrl(readBatched(`${BATCH_PROTOCOL}://m1/terrain/5/3/4`))).toBe('/api/terrain/tiles/5/3/4');
-    expect(batchPath({ kind: 'imagery', providerId: 'esri-world-imagery' })).toBe('/api/tiles/batch/esri-world-imagery');
-    expect(batchPath({ kind: 'terrain' })).toBe('/api/terrain/batch');
-  });
-});
 
 describe('reading a batch answer', () => {
   it('hands over each tile once all of it is in, across any chunking', async () => {
@@ -148,7 +114,7 @@ describe('asking tiles many at a time', () => {
     const tile = batcher.get('/api/tiles/batch/esri', 5, 1, 1);
     await settled();
     app.requests[0].refuse(404);
-    await expect(tile).rejects.toMatchObject({ status: 404, batch: true });
+    await expect(tile).rejects.toMatchObject({ status: 404 });
   });
 
   it('keeps to its share of the connections and its size, and sends the rest as they free up', async () => {
@@ -207,7 +173,7 @@ describe('asking tiles many at a time', () => {
 });
 
 describe('a tile through the app', () => {
-  const asked = { kind: 'imagery', providerId: 'esri-world-imagery', z: 5, x: 3, y: 4 };
+  const asked = { providerId: 'esri-world-imagery', z: 5, x: 3, y: 4 };
   const single = (status, body) =>
     vi.fn(async () => ({
       ok: status === 200,
@@ -217,58 +183,16 @@ describe('a tile through the app', () => {
       arrayBuffer: async () => new TextEncoder().encode(body).buffer,
     }));
 
-  it('asks a flat map’s tile alone, at the address it always had', async () => {
+  it('asks the tile at the address it always had', async () => {
     const fetch = single(200, 'tile');
-    const batcher = { get: vi.fn() };
-    const { data } = await appTile(asked, { batched: false, batcher, fetch });
+    const { data } = await appTile(asked, { fetch });
     expect(text(data)).toBe('tile');
     expect(fetch).toHaveBeenCalledWith('/api/tiles/esri-world-imagery/5/3/4', { signal: undefined });
-    expect(batcher.get).not.toHaveBeenCalled();
   });
 
-  it('asks a tilted map’s tile in a batch, and hands a failed one over with its status and reason', async () => {
-    const reason = new TextEncoder().encode('paused').buffer;
-    const batcher = { get: vi.fn(async () => ({ status: 429, data: reason })) };
-    const fetch = vi.fn();
-    const failure = await appTile(asked, { batched: true, batcher, fetch }).catch((error) => error);
-    expect(batcher.get).toHaveBeenCalledWith('/api/tiles/batch/esri-world-imagery', 5, 3, 4, undefined);
+  it('hands over a tile that failed with its status and reason', async () => {
+    const failure = await appTile(asked, { fetch: single(429, 'paused') }).catch((e) => e);
     expect(failure.status).toBe(429);
     expect(await failure.body.text()).toBe('paused');
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('asks the tile alone when the app refused the batch whole, and never after an abort', async () => {
-    const refused = Object.assign(new Error('refused'), { batch: true, status: 404 });
-    const fetch = single(200, 'alone');
-    const { data } = await appTile(asked, { batched: true, batcher: { get: async () => Promise.reject(refused) }, fetch });
-    expect(text(data)).toBe('alone');
-    const aborted = Object.assign(new Error('gone'), { name: 'AbortError' });
-    const none = vi.fn();
-    await expect(
-      appTile(asked, { batched: true, batcher: { get: async () => Promise.reject(aborted) }, fetch: none })
-    ).rejects.toBe(aborted);
-    expect(none).not.toHaveBeenCalled();
-  });
-
-  it('hands over a tile that failed alone with its status', async () => {
-    const failure = await appTile(asked, { batched: false, batcher: null, fetch: single(502, 'down') }).catch((e) => e);
-    expect(failure.status).toBe(502);
-  });
-
-  it('says when the fallback relief drew a tile, batched or alone', async () => {
-    const relief = { kind: 'terrain', providerId: null, z: 5, x: 3, y: 4 };
-    const stitched = new TextEncoder().encode('stitched').buffer;
-    const batched = await appTile(relief, {
-      batched: true,
-      batcher: { get: async () => ({ status: FALLBACK_STATUS, data: stitched }) },
-    });
-    expect([text(batched.data), batched.fallback]).toEqual(['stitched', true]);
-    const fallbackAlone = vi.fn(async () => ({
-      ok: true,
-      status: FALLBACK_STATUS,
-      arrayBuffer: async () => stitched,
-    }));
-    expect((await appTile(relief, { batched: false, batcher: null, fetch: fallbackAlone })).fallback).toBe(true);
-    expect((await appTile(relief, { batched: false, batcher: null, fetch: single(200, 'primary') })).fallback).toBe(false);
   });
 });

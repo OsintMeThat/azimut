@@ -14,7 +14,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 # Aliased: this module already imports the ``time`` module for tile timing, and
 # the sky routes need the datetime classes of the same names.
 from datetime import date as calendar_date, datetime, time as wall_clock, timedelta, timezone
-from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
@@ -41,7 +40,6 @@ from ..engine import (
     terrain,
     tilecache,
     tiles,
-    tilewarm,
     wayback,
 )
 from ..workspace import Case, CaseError
@@ -216,6 +214,7 @@ def providers() -> list[dict[str, Any]]:
             # map stops its requests there and magnifies the last native tile
             # instead of asking for one that doesn't exist.
             "max_native_zoom": p.max_native_zoom,
+            "min_zoom": p.min_zoom,
             "needs_key": p.needs_key,
             "imagery": p.imagery,
             "capturable": p.capturable,
@@ -719,8 +718,9 @@ def _serve_tile(
         if attempt == 1 and provider.session and upstream.status_code in (401, 403):
             google_tiles.invalidate(google_tiles.key_from_url(provider.url))
             continue
-        if upstream.status_code in tiles.TRANSIENT_STATUSES and not last:
-            time.sleep(tiles.RETRY_PAUSE)
+        pause = tiles.retry_pause(upstream)
+        if pause is not None and not last:
+            time.sleep(pause)
             continue
         break
 
@@ -771,6 +771,11 @@ def _native_grid_zoom(provider: tiles.Provider) -> int | None:
     return provider.max_native_zoom - z_shift
 
 
+def _min_grid_zoom(provider: tiles.Provider) -> int:
+    """The shallowest tile-grid level the provider can render (``min_zoom`` is a view zoom)."""
+    return max(0, provider.min_zoom - int(math.log2(provider.tile_size // tiles.TILE_SIZE)))
+
+
 @router.get("/tiles/{provider_id}/{z}/{x}/{y}")
 def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     """Live-map tiles for every provider, proxied through the app.
@@ -795,7 +800,7 @@ def batched_tiles(
 ) -> StreamingResponse:
     """Live-map tiles of one provider, many in one answer (api/tile_batch.py).
 
-    What a tilted map asks for. Each tile is served exactly as `tile_proxy`
+    What the 3D view asks for. Each tile is served exactly as `tile_proxy`
     serves it, cache, meter, native ceiling and overzoom included, and carries
     the status that route would have answered.
     """
@@ -832,6 +837,8 @@ def serve_tile(provider: tiles.Provider, z: int, x: int, y: int) -> Response:
     # fetch and let the climb below magnify the native tile instead — same
     # pixels, no quota. The live map already stops asking at that level, so this
     # is the guard for anything that doesn't.
+    if z < _min_grid_zoom(provider):
+        raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
     native_z = _native_grid_zoom(provider)
     beyond_native = max(0, z - native_z) if native_z is not None else 0
     served = None if beyond_native else _serve_tile(provider, z, x, y)
@@ -878,64 +885,14 @@ def serve_tile(provider: tiles.Provider, z: int, x: int, y: int) -> Response:
     raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
 
 
-# One list of a full turn: 8 headings of a tilted view rarely pass 600 tiles.
-WARM_MAX_TILES = 1200
-WARM_MAX_TERRAIN = 400
-_warmer = tilewarm.Warmer()
-
-
-class WarmIn(BaseModel):
-    """What a full turn of a tilted map will show, nearest first."""
-
-    provider: str | None = None
-    tiles: list[tuple[int, int, int]] = Field(default_factory=list, max_length=WARM_MAX_TILES)
-    terrain: list[tuple[int, int, int]] = Field(default_factory=list, max_length=WARM_MAX_TERRAIN)
-
-
 def warmable(provider: tiles.Provider) -> bool:
     """Whether a provider's tiles may be fetched before they are shown.
 
     Free and cacheable only: a billed tile fetched ahead is quota spent on a
-    view that may never be turned to, and a tile that may not be cached has
-    nowhere to wait.
+    view that may never be looked at, and a tile that may not be cached has
+    nowhere to wait. Horizon lays such imagery over a view (api/horizon.py).
     """
     return provider.cacheable and not provider.meter and not provider.widget and not provider.session
-
-
-def _warm_imagery(provider: tiles.Provider, z: int, x: int, y: int) -> None:
-    if not tilecache.has(provider.id, z, x, y):
-        _serve_tile(provider, z, x, y)  # stores what it fetched
-
-
-def _warm_terrain(z: int, x: int, y: int) -> None:
-    if not terrain.known(z, x, y):
-        terrain.tile(z, x, y)  # stores what it fetched
-
-
-@router.post("/tiles/warm")
-def warm_tiles(body: WarmIn) -> dict[str, Any]:
-    """Fetch the tiles a turn of a tilted map will show into the disk caches.
-
-    The map sends this when a tilted view settles (lib/map/warmTurn.js). It is
-    the analyst's own looking around, read a little ahead; a billed provider is
-    never read ahead. A newer list replaces the one still in flight.
-    """
-    jobs: list[tilewarm.Job] = []
-    if body.provider and body.tiles:
-        try:
-            provider = tiles.get_provider(body.provider)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if warmable(provider):
-            native_z = _native_grid_zoom(provider)
-            for z, x, y in body.tiles:
-                ceiling = provider.max_zoom if native_z is None else min(provider.max_zoom, native_z)
-                if 0 <= z <= ceiling and 0 <= x < (1 << z) and 0 <= y < (1 << z):
-                    jobs.append(partial(_warm_imagery, provider, z, x, y))
-    for z, x, y in body.terrain:
-        if 0 <= z <= terrain.PLANET_ZOOM and 0 <= x < (1 << z) and 0 <= y < (1 << z):
-            jobs.append(partial(_warm_terrain, z, x, y))
-    return {"queued": _warmer.replace(jobs)}
 
 
 #: The three things a placard can turn out to mean, once the key-status

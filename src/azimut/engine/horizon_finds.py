@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .. import __version__, layout
-from . import finder, horizon, skymatch, terrain, workqueue
+from . import finder, horizon, skymatch, terrain, turncache, workqueue
 from .media import write_json_atomic
 
 if TYPE_CHECKING:
@@ -316,6 +316,7 @@ def run(case: Case, job: dict[str, Any]) -> None:
             lanes=lanes_for(record["ask"].get("speed")),
         )
     except finder.Cancelled as exc:
+        turncache.sweep()
         if read(case, name) is not None:
             record.update(status="cancelled")
             write(case, name, record)
@@ -324,6 +325,8 @@ def run(case: Case, job: dict[str, Any]) -> None:
         record.update(status="failed", error=f"The terrain could not be loaded: {exc}")
         write(case, name, record)
         raise workqueue.JobRefused(record["error"]) from exc
+    # the turns this search kept, held under their budget
+    turncache.sweep()
     if read(case, name) is None:
         raise workqueue.JobCancelled(f"search {name!r} was deleted while it ran")
     total = record["progress"]["total"]

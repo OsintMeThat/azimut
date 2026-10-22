@@ -800,3 +800,28 @@ test('Difference reads the pictures without the layers, so one may stay on A alo
   await expect.poll(async () => !(await mapMiddle(page, 0)).equals(bare)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('side by side, the pointer over one map is echoed as a cross on the other', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  const shellA = page.locator('.surface-shell.primary');
+  const shellB = page.locator('.surface-shell.secondary');
+  const boxA = await shellA.boundingBox();
+  const boxB = await shellB.boundingBox();
+  await page.mouse.move(boxA.x + boxA.width / 2 + 40, boxA.y + boxA.height / 2 - 30);
+  const cross = shellB.locator('.linked-cursor');
+  await expect(cross).toBeVisible();
+  // Same camera, same pane size: the same offset from B's centre.
+  const at = await cross.boundingBox();
+  expect(Math.abs(at.x + at.width / 2 - (boxB.x + boxB.width / 2 + 40))).toBeLessThan(3);
+  expect(Math.abs(at.y + at.height / 2 - (boxB.y + boxB.height / 2 - 30))).toBeLessThan(3);
+  await expect(shellA.locator('.linked-cursor')).toHaveCount(0);
+  // And the other way round.
+  await page.mouse.move(boxB.x + boxB.width / 2, boxB.y + boxB.height / 2);
+  await expect(shellA.locator('.linked-cursor')).toBeVisible();
+  await expect(cross).toHaveCount(0);
+  // Overlaid, one pointer already sits on both pictures.
+  await page.getByRole('button', { name: 'Swipe', exact: true }).click();
+  await page.mouse.move(boxA.x + 60, boxA.y + boxA.height / 2);
+  await expect(page.locator('.linked-cursor')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

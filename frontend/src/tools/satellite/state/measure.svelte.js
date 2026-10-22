@@ -64,12 +64,18 @@ const SEEN = '#66b578';
 const HIDDEN = '#d97070';
 const LINE = { stroke: AMBER, strokeWidth: 2.5, strokeOpacity: 0.95 };
 const QUIET = { stroke: AMBER, strokeWidth: 2, strokeOpacity: 0.7 };
+const CASING = { stroke: '#000', strokeWidth: 6, strokeOpacity: 0.35, interactive: false };
 const DOT = { radius: 4, stroke: '#fff', strokeWidth: 2, fill: AMBER, fillOpacity: 1, interactive: false };
 const READ_AT = { radius: 6, stroke: '#4cc3ff', strokeWidth: 2.5, fill: '#111', fillOpacity: 1, interactive: false };
 const BLOCKED = { radius: 6, stroke: '#fff', strokeWidth: 2, fill: HIDDEN, fillOpacity: 1, interactive: false };
-const RING = { stroke: AMBER, strokeWidth: 1.5, strokeOpacity: 0.85, dash: [3, 2], interactive: false };
-const CONE = { stroke: AMBER, strokeWidth: 1.5, strokeOpacity: 0.85, fill: AMBER, fillOpacity: 0.12, interactive: false };
-const VIEWSHED = { fill: SEEN, fillOpacity: 0.35, interactive: false };
+// what a line is used as, in a bright cyan on a dark casing: apart from the amber line, and read on any ground
+const SKY = '#2de0ff';
+const RING = { stroke: SKY, strokeWidth: 2.5, strokeOpacity: 1, interactive: false };
+const CONE = { stroke: SKY, strokeWidth: 2.5, strokeOpacity: 1, fill: SKY, fillOpacity: 0.18, interactive: false };
+const USE_CASING = { stroke: '#000', strokeWidth: 5.5, strokeOpacity: 0.5, interactive: false };
+// a fill alone: a surface strokes what names no stroke of its own
+const BARE = { strokeWidth: 0, strokeOpacity: 0 };
+const VIEWSHED = { ...BARE, fill: SKY, fillOpacity: 0.3, interactive: false };
 const GONE = { stroke: AMBER, strokeWidth: 1, strokeOpacity: 0, fillOpacity: 0, interactive: false };
 
 /** How finely a line's ground is read: enough for a ridge, little enough to answer fast. */
@@ -83,6 +89,8 @@ export const VIEWSHED_REACH = 30_000;
 const SNAP_PX = 12;
 /** …and to be on the measure's own last point, which finishes it. */
 const SAME_PX = 8;
+/** ms after a corner is let go in which a map click is the drop's, not a new measure. */
+const DROP_CLICK_MS = 400;
 
 const UNITS_KEY = 'azimut:measureUnits';
 const GROUND_KEY = 'azimut:measureGround';
@@ -148,6 +156,9 @@ export function createMeasureState({
   let words = null;
   let fills = null;
   let dragging = null; // the measure whose corner is under the hand
+  let droppedAt = -Infinity; // when a corner was last let go
+  // the heights chart, put away from its window or the panel until shown again
+  let chartShown = $state(true);
 
   const units = () => unitsChoice ?? appUnits() ?? 'metric';
   const byId = (id) => measures.find((m) => m.id === id) ?? null;
@@ -206,8 +217,10 @@ export function createMeasureState({
       if (runs.length) style.strokeOpacity = 0.25;
       if (m.closed) {
         // only the outline is the area's: a click inside it starts a measure there
-        out.push({ id: `m${m.id}-fill`, kind: 'polygon', points, style: { fill: AMBER, fillOpacity: mine ? 0.18 : 0.1, interactive: false } });
+        out.push({ id: `m${m.id}-fill`, kind: 'polygon', points, style: { ...BARE, fill: AMBER, fillOpacity: mine ? 0.18 : 0.1, interactive: false } });
       }
+      // a dark casing under the line keeps it read over bright ground
+      out.push({ id: `m${m.id}-casing`, kind: 'line', points: m.closed ? closedRing(points) : points, style: CASING });
       out.push({
         id: `m${m.id}`,
         kind: 'line',
@@ -232,6 +245,7 @@ export function createMeasureState({
       if (at >= 0) out.push({ id: `m${m.id}-blocked`, kind: 'dot', at: { lat: ground.lat[at], lon: ground.lon[at] }, style: BLOCKED });
     }
     for (const [i, shape] of useShapes(m).entries()) {
+      out.push({ ...shape, id: `m${m.id}-use-${i}-casing`, style: USE_CASING });
       out.push({ ...shape, id: `m${m.id}-use-${i}`, style: shape.kind === 'circle' ? RING : CONE });
     }
     if (m.id === drawingId) {
@@ -291,8 +305,11 @@ export function createMeasureState({
     if (!layers()) return;
     const list = [];
     for (const m of measures) {
+      const mine = m.id === selectedId || m.id === drawingId;
       for (const word of labels(m, units())) {
         if (word.kind === 'leg' && pixelsApart(word.from, word.to) < word.text.length * 6.5 + 24) continue;
+        // a corner's angle is read on the measure in hand; on the others it is clutter
+        if (word.kind === 'angle' && !mine) continue;
         list.push(wordMark(m, word));
       }
       const extra = useWord(m);
@@ -306,13 +323,64 @@ export function createMeasureState({
     return `measure-word ${word.kind}${m.id === selectedId || m.id === drawingId ? ' mine' : ''}`;
   }
 
+  /**
+   * Where a word sits off its point on screen, in pixels: a leg's beside the
+   * leg, clear of the dot that bends it, a line's whole length past its end,
+   * and a corner's angle outside the corner, along the line that halves it.
+   */
+  function wordOffset(word) {
+    const unit = (p, q) => {
+      const length = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+      return [(q.x - p.x) / length, (q.y - p.y) / length];
+    };
+    if (word.kind === 'leg') {
+      const [a, b] = [screen(word.from), screen(word.to)];
+      if (!a || !b) return [0, -13];
+      const [ux, uy] = unit(a, b);
+      // the side of the leg that is up the screen, far enough for the word's width
+      let [nx, ny] = [-uy, ux];
+      if (ny > 0 || (ny === 0 && nx < 0)) [nx, ny] = [-nx, -ny];
+      const half = (word.text.length * 6.6 + 10) / 2;
+      const reach = Math.abs(nx) * (half + 6) + Math.abs(ny) * 13;
+      return [nx * reach, ny * reach];
+    }
+    if (word.kind === 'total') {
+      // past the end of the line, where it was heading
+      const [a, b] = [screen(word.around[0]), screen(word.at)];
+      if (!a || !b) return [0, -18];
+      const [ux, uy] = unit(a, b);
+      const reach = Math.abs(ux) * ((word.text.length * 6.6 + 10) / 2 + 12) + Math.abs(uy) * 18;
+      return [ux * reach, uy * reach];
+    }
+    if (word.kind === 'angle') {
+      const [v, a, b] = [screen(word.at), screen(word.around[0]), screen(word.around[1])];
+      if (!v || !a || !b) return [16, -16];
+      const [ax, ay] = unit(v, a);
+      const [bx, by] = unit(v, b);
+      let [ox, oy] = [-(ax + bx), -(ay + by)];
+      const length = Math.hypot(ox, oy);
+      // a straight corner has no outside: the word stands off to one side
+      [ox, oy] = length < 1e-3 ? [-ay, ax] : [ox / length, oy / length];
+      return [ox * 24, oy * 24];
+    }
+    // what a use answered stands under A, clear of its handle
+    if (word.kind.startsWith('use')) return [0, 26];
+    return [0, 0];
+  }
+
+  function wordHtml(word) {
+    const [dx, dy] = wordOffset(word);
+    const moved = dx || dy ? ` style="transform:translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)"` : '';
+    return `<span${moved}>${escape(word.text)}</span>`;
+  }
+
   function wordMark(m, word) {
     return {
       id: `m${m.id}-${word.id}`,
       kind: 'marker',
       at: word.at,
       className: wordClass(m, word),
-      html: `<span>${escape(word.text)}</span>`,
+      html: wordHtml(word),
       keyboard: false,
     };
   }
@@ -329,7 +397,7 @@ export function createMeasureState({
       const share = answers[m.id]?.viewshed?.answer?.share;
       if (share != null) text = `${Math.round(share * 100)}% in sight`;
     }
-    return text ? wordMark(m, { id: 'use', kind: 'use', at: m.points[0], text }) : null;
+    return text ? wordMark(m, { id: 'use', kind: m.use === 'viewshed' ? 'use reach' : 'use', at: m.points[0], text }) : null;
   }
 
   function drawFills() {
@@ -368,20 +436,21 @@ export function createMeasureState({
     m.points[index] = plain(at);
     const points = m.points.map(plain);
     shapes?.patch(`m${id}`, { points: m.closed ? closedRing(points) : points });
+    shapes?.patch(`m${id}-casing`, { points: m.closed ? closedRing(points) : points });
     if (m.closed) shapes?.patch(`m${id}-fill`, { points });
     for (const [i, shape] of useShapes(m).entries()) {
-      shapes?.patch(`m${id}-use-${i}`, shape.kind === 'circle' ? { at: shape.at, radiusM: shape.radiusM } : { points: shape.points });
+      const moved = shape.kind === 'circle' ? { at: shape.at, radiusM: shape.radiusM } : { points: shape.points };
+      shapes?.patch(`m${id}-use-${i}-casing`, moved);
+      shapes?.patch(`m${id}-use-${i}`, moved);
     }
     for (const word of labels(m, units())) {
-      words?.patch(`m${id}-${word.id}`, {
-        at: word.at,
-        icon: { html: `<span>${escape(word.text)}</span>`, className: wordClass(m, word) },
-      });
+      words?.patch(`m${id}-${word.id}`, { at: word.at, icon: { html: wordHtml(word), className: wordClass(m, word) } });
     }
   }
 
   function dropCorner(id) {
     dragging = null;
+    droppedAt = Date.now();
     forget(id);
     draw();
     drawFills();
@@ -622,12 +691,27 @@ export function createMeasureState({
       return readIndex;
     },
 
+    /** Whether the heights chart of the line in hand is shown, when its ground is read. */
+    get chartShown() {
+      return chartShown;
+    },
+
+    showChart(next) {
+      chartShown = Boolean(next);
+    },
+
     /** The selected line's ground and what its eye sees, once asked. */
     get ground() {
       return answers[selectedId]?.ground ?? null;
     },
 
-    /** What the status bar reads: the measure being drawn, else the one selected. */
+    /** What one measure reads, with what its use answered. */
+    readingOf(id) {
+      const m = byId(id);
+      return m ? readoutOf(m) : '';
+    },
+
+    /** What the measure being drawn reads, else the one selected. */
     get readout() {
       const m = drawing() ?? selected();
       return m ? readoutOf(m) : '';
@@ -694,6 +778,8 @@ export function createMeasureState({
       if (!on) return false;
       const point = plain(at);
       const m = drawing();
+      // the click a drop can bring, once the handle under it is drawn again, starts nothing
+      if (!m && Date.now() - droppedAt < DROP_CLICK_MS) return true;
       if (!m) {
         const fresh = newMeasure(nextId++, point);
         measures = [...measures, fresh];
@@ -798,6 +884,11 @@ export function createMeasureState({
     /** The sample the chart reads, marked on the line too, or none. */
     showReading,
 
+    /** The 3D view came up: the line in hand reads its ground, as the switch would have it. */
+    readAgain() {
+      if (on && selectedId != null) ask(selectedId);
+    },
+
     /** The map moved: the words that fit on screen are placed again. */
     viewChanged() {
       if (on && dragging == null) drawWords();
@@ -813,6 +904,8 @@ export function createMeasureState({
 
     setGround(next) {
       groundChoice = Boolean(next);
+      // turned on, the ground shows its chart again
+      if (groundChoice) chartShown = true;
       remember(GROUND_KEY, groundChoice ? 'on' : null);
       if (selectedId != null) ask(selectedId);
       draw();
@@ -838,34 +931,46 @@ export function createMeasureState({
     /** A line of two points given an exact length, B moved along its bearing. */
     setLength(id, metres) {
       if (!isPair(byId(id)) || !(metres > 0)) return;
-      change(id, (m) => (m.points[1] = destination(m.points[0], pairReading(m).bearing, metres)));
+      change(id, (m) => {
+        m.points[1] = destination(m.points[0], pairReading(m).bearing, metres);
+      });
     },
 
     /** …or an exact bearing, B moved round A at the same length. */
     setBearing(id, degrees) {
       if (!isPair(byId(id)) || !Number.isFinite(degrees)) return;
-      change(id, (m) => (m.points[1] = destination(m.points[0], degrees, pairReading(m).length)));
+      change(id, (m) => {
+        m.points[1] = destination(m.points[0], degrees, pairReading(m).length);
+      });
     },
 
     /** What a line of two points is used as, or back to a plain line with the same press. */
     setUse(id, use) {
       if (!isPair(byId(id))) return;
-      change(id, (m) => (m.use = m.use === use ? null : use));
+      change(id, (m) => {
+        m.use = m.use === use ? null : use;
+      });
     },
 
     setRings(id, count) {
-      change(id, (m) => (m.rings = Math.max(1, Math.min(MAX_RINGS, Math.round(Number(count)) || 1))));
+      change(id, (m) => {
+        m.rings = Math.max(1, Math.min(MAX_RINGS, Math.round(Number(count)) || 1));
+      });
     },
 
     setAperture(id, degrees) {
       const value = Number(degrees);
       if (!(value > 0 && value <= 360)) return;
-      change(id, (m) => (m.aperture = value));
+      change(id, (m) => {
+        m.aperture = value;
+      });
     },
 
     /** The day a shadow was cast, when the picture's own date is not the one. */
     setShadowDate(id, date) {
-      change(id, (m) => (m.shadowDate = date || null));
+      change(id, (m) => {
+        m.shadowDate = date || null;
+      });
     },
 
     /** The day a shadow is read on: the analyst's, else the picture's. */
@@ -878,7 +983,9 @@ export function createMeasureState({
     setClosed(id, closed) {
       const m = byId(id);
       if (!m || (closed && m.points.length < 3)) return;
-      change(id, (one) => (one.closed = closed));
+      change(id, (one) => {
+        one.closed = closed;
+      });
     },
 
     /** The measure as text to paste. */

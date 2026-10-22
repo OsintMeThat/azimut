@@ -11,18 +11,16 @@
    * so in the control itself, since a slope drawn twice its height is a reading
    * aid and not how the ground looks.
    *
-   * The 3D view is the app's own globe; while it is new, the map engine's
-   * former 3D stays one press away (`classic`), to compare the two.
+   * The 3D view is the app's own globe (`lib/globe`). A browser that cannot
+   * draw it (`refused`) keeps the switch, greyed, saying why.
    */
   import { EXAGGERATIONS, READING_TILT } from '../../lib/map/relief.js';
 
   let {
     on = $bindable(false),
     exaggeration = $bindable(1),
-    /** The map engine's former 3D rather than the globe. */
-    classic = $bindable(false),
-    /** Whether the globe can be left for it: false where the globe cannot run at all. */
-    classicOffered = true,
+    /** The browser cannot draw the 3D view (no WebGL2, or its context lost). */
+    refused = false,
     /** The camera's tilt now, in degrees from straight down. */
     pitch = 0,
     /** Tilt the camera to this many degrees, as soon as the relief is in to lean over. */
@@ -55,7 +53,8 @@
     class="toggle"
     aria-pressed={on}
     onclick={toggle}
-    title={on ? 'Back to the flat map' : 'Show the relief in 3D'}
+    disabled={refused}
+    title={refused ? 'This browser cannot draw the 3D view: it needs WebGL2' : on ? 'Back to the flat map' : 'Show the relief in 3D'}
   >
     3D
   </button>
@@ -79,16 +78,6 @@
         <option value={step}>{step === 1 ? 'Real heights' : `Heights ×${step}`}</option>
       {/each}
     </select>
-    {#if classicOffered}
-      <button
-        class="classic"
-        aria-pressed={classic}
-        onclick={() => (classic = !classic)}
-        title={classic ? 'Back to the new 3D view' : 'Use the previous 3D view, to compare'}
-      >
-        Classic
-      </button>
-    {/if}
   {/if}
 </div>
 
@@ -141,15 +130,8 @@
   .scale.raised {
     color: var(--warn);
   }
-  .classic {
-    padding: 0 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    border-left: 1px solid var(--border);
-    cursor: pointer;
-  }
-  .classic:hover,
-  .classic[aria-pressed='true'] {
-    color: var(--accent);
+  .toggle:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 </style>

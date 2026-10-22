@@ -3,8 +3,8 @@
 A browser keeps six connections to one host, and every tile of the live map
 comes through the app (api/satellite.py, api/terrain.py). Tilted toward the
 horizon, a view asks for a hundred tiles at once, and each one waited for a
-free connection before the app even heard of it. So the tilted map asks for
-up to `BATCH_MAX` tiles in one request (lib/map/tileBatch.js): the app fetches
+free connection before the app even heard of it. So the 3D view (lib/globe)
+asks for up to `BATCH_MAX` tiles in one request (lib/map/tileBatch.js): the app fetches
 them side by side and writes each as soon as it is done, so a slow tile holds
 up none of the others.
 

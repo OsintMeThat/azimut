@@ -98,3 +98,33 @@ it('leaves the tool’s own chrome above the controls', () => {
       .toBeGreaterThan(controls);
   }
 });
+
+it('keeps the marks a tool lays on its map under its own chrome', () => {
+  // A mark carries its z-index on its own element, which the lifted isolation
+  // above lets out of the map: a measure's handle at 900 painted over the ground
+  // window, a grid handle at 1200 over the rail. Marks stay under the engine's
+  // controls, so every panel, window and menu clears them.
+  const controls = zOf(read('lib/map/engine.css'), '.maplibregl-ctrl-top-left,');
+  for (const path of [
+    'lib/map/handles.js',
+    'tools/Satellite.svelte',
+    'tools/satellite/state/grid.svelte.js',
+    'tools/Horizon.svelte',
+    'tools/horizon/FindMap.svelte',
+    'tools/proof/PointMapDialog.svelte',
+  ]) {
+    const marks = [...read(path).matchAll(/zIndex:\s*(\d+)/g)].map((found) => Number(found[1]));
+    expect(marks.length, `${path} lays no mark with a z-index any more`).toBeGreaterThan(0);
+    for (const z of marks) expect(z, `a mark in ${path} would cover the tool's chrome`).toBeLessThan(controls);
+  }
+  // and a floating window over the map clears them
+  expect(zOf(read('components/FloatingWindow.svelte'), '.floating {')).toBeGreaterThan(controls);
+});
+
+it('opens the ground window over the rail and its panel, under the search’s list', () => {
+  // At 620 it opened behind the Measure panel that had just drawn its line.
+  const satellite = read('tools/Satellite.svelte');
+  const window = zOf(read('components/FloatingWindow.svelte'), '.floating {');
+  expect(window).toBeGreaterThan(zOf(satellite, '.map-tools {'));
+  expect(window).toBeLessThan(zOf(satellite, '.map-bar {'));
+});

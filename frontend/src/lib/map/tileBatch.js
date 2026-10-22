@@ -1,24 +1,21 @@
 /**
- * A tilted map's tiles, asked of the app many at a time (the 3D map, SPEC v3).
+ * Tiles asked of the app many at a time: the globe's pictures and heights
+ * (`lib/globe`, the 3D view).
  *
- * Every tile of the live map comes through the app, over the six connections a
- * browser keeps to one host. Tilted toward the horizon, a view asks for a
- * hundred tiles at once and each one used to wait for a free connection before
- * the app even heard of it. So with relief on, the tiles the engine asks for in
- * one go are sent as one request per source (api/tile_batch.py), at most
- * `BATCH_IN_FLIGHT` at a time so the app's other calls keep a connection. The
- * app fetches them side by side and writes each one as it is done, and each is
- * handed to the engine as it arrives: a slow tile holds up none of the others.
+ * Every tile comes through the app, over the six connections a browser keeps to
+ * one host. Tilted toward the horizon, a view asks for a hundred tiles at once
+ * and each one used to wait for a free connection before the app even heard of
+ * it. So the tiles asked in one go are sent as one request per source
+ * (api/tile_batch.py), at most `BATCH_IN_FLIGHT` at a time so the app's other
+ * calls keep a connection. The app fetches them side by side and writes each one
+ * as it is done, and each is handed over as it arrives: a slow tile holds up
+ * none of the others.
  *
- * A flat map asks one tile at a time, exactly as it always has: the same
- * address, the same browser cache.
- *
- * The engine reaches the tiles through a protocol of ours (`BATCH_PROTOCOL`),
- * whose addresses name the map, so the handler can tell a tilted map from a
- * flat one, and the source: a provider's imagery or the relief.
+ * The flat map asks one tile at a time, at the address it always had; a billed
+ * provider's goes through the guard (`quotaGuard.js`), which hands it here
+ * (`appTile`).
  */
 
-export const BATCH_PROTOCOL = 'azimut-tiles';
 /** Tiles one request carries (api/tile_batch.py allows 64). */
 export const BATCH_MAX = 32;
 /** Requests in flight at once, of the browser's six connections to the app. */
@@ -28,41 +25,9 @@ export const BATCH_WAIT = 4;
 /** Bytes of a frame's head: index (u16), status (u16), length (u32). */
 const HEAD = 8;
 
-/** The address an imagery source asks for its tiles at, on one map. */
-export function batchedTemplate(mapId, providerId) {
-  return `${BATCH_PROTOCOL}://${mapId}/imagery/${providerId}/{z}/{x}/{y}`;
-}
-
-/** …and the relief's. */
-export function batchedTerrainTemplate(mapId) {
-  return `${BATCH_PROTOCOL}://${mapId}/terrain/{z}/{x}/{y}`;
-}
-
-const READ = new RegExp(`^${BATCH_PROTOCOL}://([^/]+)/(?:imagery/([^/]+)|terrain)/(\\d+)/(\\d+)/(\\d+)$`);
-
-/** One of those addresses read back, or null for anything that is not one. */
-export function readBatched(url) {
-  const found = READ.exec(url ?? '');
-  if (!found) return null;
-  const [, mapId, providerId, z, x, y] = found;
-  return {
-    mapId,
-    kind: providerId ? 'imagery' : 'terrain',
-    providerId: providerId ?? null,
-    z: Number(z),
-    x: Number(x),
-    y: Number(y),
-  };
-}
-
-/** Where one such tile is asked for on its own: the address it always had. */
-export function singleUrl({ kind, providerId, z, x, y }) {
-  return kind === 'terrain' ? `/api/terrain/tiles/${z}/${x}/${y}` : `/api/tiles/${providerId}/${z}/${x}/${y}`;
-}
-
-/** Where a batch of one source's tiles is asked for. */
-export function batchPath({ kind, providerId }) {
-  return kind === 'terrain' ? '/api/terrain/batch' : `/api/tiles/batch/${providerId}`;
+/** Where one tile is asked for on its own: the address it always had. */
+function singleUrl({ providerId, z, x, y }) {
+  return `/api/tiles/${providerId}/${z}/${x}/${y}`;
 }
 
 function abortError() {
@@ -114,48 +79,26 @@ function tileError(status, body, statusText = '') {
 }
 
 /**
- * The status of a relief tile the fallback source drew (api/terrain.py): a
- * payload transformed on its way, four of AWS's tiles stitched into one.
- */
-export const FALLBACK_STATUS = 203;
-
-/**
- * One tile through the app, as the engine wants it back (`{ data }`, or an
- * error carrying the status and the reason): in a batch when `batched`, at the
- * address it always had otherwise, or when the app refused the batch whole.
- * `fallback` says the fallback relief drew it, for a capture that credits it.
+ * One imagery tile through the app at its own address, as the engine wants it
+ * back: `{ data }`, or an error carrying the status and the reason.
  *
- * @param {{ kind: string, providerId: string|null, z: number, x: number, y: number }} asked
- * @param {object} opts
- * @param {boolean} opts.batched whether the map is tilted over relief
- * @param {ReturnType<typeof createTileBatcher>} opts.batcher
+ * @param {{ providerId: string, z: number, x: number, y: number }} asked
+ * @param {object} [opts]
  * @param {AbortSignal} [opts.signal]
  * @param {typeof fetch} [opts.fetch]
  */
-export async function appTile(asked, { batched, batcher, signal, fetch: fetcher = (...args) => globalThis.fetch(...args) }) {
-  if (batched) {
-    try {
-      const { status, data } = await batcher.get(batchPath(asked), asked.z, asked.x, asked.y, signal);
-      if (status !== 200 && status !== FALLBACK_STATUS) {
-        throw tileError(status, new Blob([data], { type: 'text/plain' }));
-      }
-      return { data, fallback: status === FALLBACK_STATUS };
-    } catch (error) {
-      // a request refused whole is no reason to leave a hole: ask this tile alone
-      if (!error?.batch) throw error;
-    }
-  }
+export async function appTile(asked, { signal, fetch: fetcher = (...args) => globalThis.fetch(...args) } = {}) {
   const response = await fetcher(singleUrl(asked), { signal });
   if (!response.ok) throw tileError(response.status, await response.blob(), response.statusText);
-  return { data: await response.arrayBuffer(), fallback: response.status === FALLBACK_STATUS };
+  return { data: await response.arrayBuffer() };
 }
 
 /**
- * The requests that carry a map's tiles in batches.
+ * The requests that carry the globe's tiles in batches.
  *
  * `get` answers `{ status, data }` for one tile of one source, or rejects with
- * an AbortError once its signal says the engine no longer wants it, or with an
- * error marked `batch` when the app refused the request as a whole. Asks for the
+ * an AbortError once its signal says the tile is no longer wanted, or with the
+ * app's status when it refused the request as a whole. Asks for the
  * same source made within `wait` ms share a request; the same tile asked twice
  * before it goes is asked once.
  *
@@ -237,8 +180,6 @@ export function createTileBatcher({
       if (!response.ok || !response.body) {
         const failure = new Error(`The app answered ${response.status}`);
         failure.status = response.status;
-        // the whole request refused, as opposed to one of its tiles
-        failure.batch = true;
         failure.body = await response.blob?.().catch?.(() => null);
         for (const list of lists) for (const ask of list) settle(ask, ask.reject, failure);
         return;
@@ -258,7 +199,7 @@ export function createTileBatcher({
 
   return {
     /**
-     * @param {string} path the source's batch route (`batchPath`)
+     * @param {string} path the source's batch route (`/api/tiles/batch/{provider}`, `/api/terrain/batch`)
      * @param {AbortSignal} [signal]
      */
     get(path, z, x, y, signal) {

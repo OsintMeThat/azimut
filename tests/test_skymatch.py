@@ -501,31 +501,70 @@ def test_a_line_with_only_sky_above_loses_the_place_where_land_stands_over_it():
     near = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
     farther = skyturn([(58, 4.0, 4)], base=0.0)
     over = farther.angles > near.angles
-    distance = np.where(over, 8_000.0, 3_000.0)
-    cut = skymatch.Turn(0.0, STEP, near.angles, reach=5_000.0, distance=np.full(near.angles.size, 3_000.0))
-    whole = skymatch.Turn(0.0, STEP, np.maximum(near.angles, farther.angles), reach=20_000.0, distance=distance)
-    x, y = trace_on(cut, heading=50.0, fov=40.0)
+    x, y = trace_on(near, heading=50.0, fov=40.0)
     # the left half is one stroke, the right half, under the farther range, another
     line = (x > 0).astype(np.int64)
     # the place itself, the search held to its heading
     at = (50.0, 3.0)
+
+    def turns(range_at):
+        cut = skymatch.Turn(0.0, STEP, near.angles, reach=5_000.0, distance=np.full(near.angles.size, 3_000.0))
+        whole = skymatch.Turn(0.0, STEP, np.maximum(near.angles, farther.angles), reach=50_000.0,
+                              distance=np.where(over, range_at, 3_000.0))
+        return cut, whole
+
+    cut, whole = turns(8_000.0)
     alone = skymatch.match(x, y, [cut, whole], half_width=HALF, fov=40.0, known=True, facing=at,
                            marks=skymatch.Marks(line=line)).fits[0]
     assert alone.reach == 5_000.0 and alone.over is None
 
-    def said(clear, seen=None):
+    def said(clear, seen=None, both=(cut, whole)):
         marks = skymatch.Marks(line=line, clear=clear)
-        return skymatch.match(x, y, [cut, whole], half_width=HALF, fov=40.0, known=True, facing=at, marks=marks,
+        return skymatch.match(x, y, list(both), half_width=HALF, fov=40.0, known=True, facing=at, marks=marks,
                               clear=seen).fits[0]
 
-    # read as far as the place's own cut, or said to see 5 km, haze hides the range: nothing stands over the line
-    for hazy in (said((1,)), said((1,), cut)):
-        assert hazy.over == 0.0 and hazy.explained == pytest.approx(alone.explained, abs=1e-6)
-    # the photo said to see 20 km: the range stands over the right half, and the place is no place
+    # said to see 5 km, haze hides the range: nothing stands over the line
+    hazy = said((1,), cut)
+    assert hazy.over == 0.0 and hazy.explained == pytest.approx(alone.explained, abs=1e-6)
+    # said to see 50 km, the range stands over the right half, and the place is no place
     clear = said((1,), whole)
-    assert clear.over > 0.3 and clear.explained == 0.0
+    assert clear.over > 0.3 and clear.explained == 0.0 and clear.over_far == pytest.approx(8_000.0)
+    # left to Auto, a range under three times as far as the line still counts (owner, 2026-10-22: places
+    # with mountains behind a sky-only line), and the place says how far out it stands
+    auto = said((1,))
+    assert auto.over > skymatch.CLEAR_HARD and auto.explained == 0.0 and auto.over_far == pytest.approx(8_000.0)
+    # one seven times as far haze may well hide: the place keeps its score
+    far = said((1,), both=turns(20_000.0))
+    assert far.over == 0.0 and far.explained == pytest.approx(alone.explained, abs=1e-6)
     # the left half has sky above it wherever the photo sees
     assert said((0,), whole).over == 0.0
+    assert said((0,)).over == 0.0
+
+
+def test_a_line_with_only_sky_above_lies_on_the_top_of_the_land_it_would_show():
+    ridge = skyturn([(50, 2.0, 4)], base=0.5)
+    nearer = skymatch.Turn(0.0, STEP, ridge.angles, reach=5_000.0, distance=np.full(ridge.angles.size, 3_000.0))
+    # a range 5 km out stands over the ridge left of the heading, one 20 km out over all of it
+    behind = skyturn([(40, 4.0, 5)], base=0.0)
+    middle = skymatch.Turn(0.0, STEP, np.maximum(ridge.angles, behind.angles), reach=10_000.0,
+                           distance=np.where(behind.angles > ridge.angles, 5_000.0, 3_000.0))
+    whole = skymatch.Turn(0.0, STEP, np.maximum(middle.angles, 6.0), reach=50_000.0,
+                          distance=np.full(ridge.angles.size, 20_000.0))
+    tops = skymatch._tops([nearer, middle, whole])
+    # from the nearest cut, a line laid 3 km out shows land to 9 km over it: the range 5 km out, not the 20 km one
+    assert np.array_equal(tops[0].angles, middle.angles)
+    assert np.array_equal(tops[1].angles, middle.angles) and np.array_equal(tops[2].angles, whole.angles)
+    # traced on the ridge, sure of only sky above it: on the nearest cut the line is laid on the range over its
+    # left part and fits worse than as a plain line, whatever is ruled after
+    x, y = trace_on(ridge, heading=50.0, fov=30.0)
+    line = np.zeros(x.size, dtype=np.int64)
+    plain = skymatch.match(x, y, nearer, half_width=HALF, fov=30.0, known=True, facing=(50.0, 3.0),
+                           marks=skymatch.Marks(line=line)).fits[0]
+    sure = skymatch.match(x, y, [nearer, middle, whole], half_width=HALF, fov=30.0, known=True, facing=(50.0, 3.0),
+                          marks=skymatch.Marks(line=line, clear=(0,)))
+    assert all(fit.explained < plain.explained - 0.2 for fit in sure.fits)
+    # a turn whose distances the sweep did not say leaves the lines on their cut
+    assert skymatch._tops([skymatch.Turn(0.0, STEP, ridge.angles), whole]) == [None, None]
 
 
 def test_land_over_a_line_counts_past_the_heights_own_error():

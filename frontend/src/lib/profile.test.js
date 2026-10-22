@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { blockedSample, climb, gradeDegrees, niceStep, profileChart, sampleNear, slopes, stretchLabel } from './profile.js';
+import {
+  blockedSample,
+  clearanceAt,
+  climb,
+  gradeDegrees,
+  niceStep,
+  profileChart,
+  sampleNear,
+  slopeBand,
+  slopes,
+  stretchLabel,
+} from './profile.js';
 
 const PROFILE = {
   distance_m: [0, 1000, 2000, 3000, 4000],
@@ -118,5 +129,56 @@ describe('what the chart says about itself', () => {
     expect(stretchLabel(chart.stretch)).toMatch(/^Heights ×\d/);
     expect(stretchLabel(1.05)).toBe('');
     expect(stretchLabel(24.4)).toBe('Heights ×24');
+  });
+});
+
+describe('the crest read at a glance', () => {
+  it('bands a slope by how it walks: flat, gentle, steep, harsh, cliff', () => {
+    expect(slopeBand(2).id).toBe('flat');
+    expect(slopeBand(-10).id).toBe('gentle');
+    expect(slopeBand(20).id).toBe('steep');
+    expect(slopeBand(40).id).toBe('harsh');
+    expect(slopeBand(-150).id).toBe('cliff');
+  });
+
+  it('colours the crest by its slope, one stretch a band, each starting where the last ended', () => {
+    const chart = profileChart(PROFILE, BOX);
+    // the four stretches climb 20%, fall 5%, climb 15% and fall 20%
+    expect(chart.steepness.map((run) => run.band)).toEqual(['steep', 'flat', 'steep']);
+    expect(chart.steepness[1].path).toBe(`M${chart.tops[1].x},${chart.tops[1].y} L${chart.tops[2].x},${chart.tops[2].y}`);
+    expect(chart.steepness[2].path.startsWith(`M${chart.tops[2].x},${chart.tops[2].y}`)).toBe(true);
+  });
+
+  it('shades the ground the eye does not see, down to the floor', () => {
+    const sight = { visible: false, blocked_at_m: 1000, eye_m: 101.7, target_m: 200, bulge_m: [0, 0, 0, 0, 0], seen: [true, true, false, false, true] };
+    const chart = profileChart({ ...PROFILE, sight }, BOX);
+    expect(chart.hidden).toHaveLength(1);
+    expect(chart.hidden[0].startsWith(`M${chart.tops[1].x},${chart.floor} L`)).toBe(true);
+    expect(chart.hidden[0].endsWith(`L${chart.tops[3].x},${chart.floor} Z`)).toBe(true);
+  });
+
+  it('stands the eye and the target over their ground, and cuts the sight where the ground blocks it', () => {
+    const sight = { visible: false, blocked_at_m: 1000, eye_m: 101.7, target_m: 200, bulge_m: [0, 0, 0, 0, 0] };
+    const chart = profileChart({ ...PROFILE, sight }, BOX);
+    const [atA, atB] = chart.sight.posts;
+    expect(atA).toBe(`M${chart.tops[0].x},${chart.tops[0].y} L${chart.sight.eye.x},${chart.sight.eye.y}`);
+    expect(atB.endsWith(`L${chart.sight.target.x},${chart.sight.target.y}`)).toBe(true);
+    // a quarter of the way along, the clear stretch ends and the blocked one begins
+    const cut = chart.sight.clear.split(' L')[1];
+    expect(chart.sight.cut.startsWith(`M${cut}`)).toBe(true);
+    expect(Number(cut.split(',')[0])).toBe(144);
+  });
+
+  it('marks the corners of the line along it, numbered', () => {
+    const chart = profileChart(PROFILE, { ...BOX, marks: [1000, 3000] });
+    expect(chart.corners).toEqual([{ n: 1, x: 144 }, { n: 2, x: 344 }]);
+  });
+
+  it('says how far the sight passes over the ground, and under it where it is blocked', () => {
+    const sight = { eye_m: 100, target_m: 300, bulge_m: [0, 0, 0, 0, 0] };
+    // halfway the sight is at 200 m over ground at 250 m
+    expect(clearanceAt({ ...PROFILE, sight }, 2)).toBe(-50);
+    expect(clearanceAt({ ...PROFILE, sight }, 4)).toBe(100);
+    expect(clearanceAt(PROFILE, 2)).toBe(null);
   });
 });

@@ -1054,14 +1054,18 @@
     return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  // List view must not sort only the first catalog page. Fetch the exact open
-  // folder, or every descendant folder while searching, through the bounded
-  // endpoint and merge the pages before applying the local column sort.
+  // An open folder must not show only its share of the first catalog page: a
+  // folder of six whose rows sit past the case's first 200 opened on two and a
+  // "Show more" for the whole case. Fetch the exact open folder (or Unfiled) in
+  // every view. List view also sorts a search, so it fetches every descendant
+  // folder then, or the whole case at the root; the grids search through `pl`.
   $effect(() => {
     const id = caseState.current?.id;
     const folders = caseState.current?.folders ?? [];
     caseState.rev;
-    const needsCompleteList = view === 'list' && !filtering && (Boolean(cwd) || showUnfiled || searching);
+    const needsCompleteList = !filtering && (
+      searching ? view === 'list' : Boolean(cwd) || showUnfiled
+    );
     if (!id || !needsCompleteList) {
       completeFolderRun += 1;
       completeFolderEntities = null;
@@ -1430,7 +1434,7 @@
                 <span class="lcol-added">{fmtAdded(e)}</span>
               </div>
             {/each}
-            {#if !curFolders.length && !curEntities.length && !showRootUnfiled}
+            {#if !completeFolderLoading && !curFolders.length && !curEntities.length && !showRootUnfiled}
               <div class="grid-empty">
                 <Icon name="folder" size={34} />
                 <p>
@@ -1499,7 +1503,12 @@
             {/if}
           {/if}
 
-          {#each curEntities as e (e.id)}
+          {#if completeFolderLoading}
+            <div class="list-status grid-status" role="status">Loading all files in this folder…</div>
+          {:else if completeFolderError}
+            <div class="list-status grid-status error" role="status">Could not load the complete folder. Showing loaded items.</div>
+          {/if}
+          {#each completeFolderLoading ? [] : curEntities as e (e.id)}
             <div
               class="tile entity"
               class:selected={selected.includes(e.id)}
@@ -1538,7 +1547,7 @@
             </div>
           {/each}
 
-          {#if !curFolders.length && !curEntities.length && !showRootUnfiled}
+          {#if !completeFolderLoading && !curFolders.length && !curEntities.length && !showRootUnfiled}
             <div class="grid-empty">
               <Icon name="folder" size={34} />
               <p>
@@ -1565,7 +1574,7 @@
             </button>
             <span>Showing {fl.items.length} of {fl.total}</span>
           </div>
-        {:else if !showTrash && !filtering && pl.hasMore}
+        {:else if !showTrash && !filtering && pl.hasMore && completeFolderEntities === null && !completeFolderLoading}
           <div class="show-more">
             <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
               {pl.loading ? 'Loading…' : 'Show more'}
@@ -2284,6 +2293,9 @@
   }
   .list-status.error {
     color: var(--danger);
+  }
+  .grid-status {
+    grid-column: 1 / -1;
   }
   .lrow.entity:hover,
   .lrow.folder:hover {

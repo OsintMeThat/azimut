@@ -3,7 +3,10 @@
  * height, every fifth one bolder and written with its height.
  *
  * Traced from a grid of heights (`heights.js`) by marching squares, joined into
- * lines, thinned to what shows, and handed to the map as GeoJSON.
+ * lines, thinned to what shows, rounded, and handed to the map as GeoJSON.
+ * Marching squares cut a line into straight steps across each cell of the
+ * grid, where the ground curves: the corners are cut away a few times
+ * (`smoothed`), so a line follows the slope as a surveyor draws it.
  */
 
 /** The interval between two lines at a map's zoom, in metres: about what a printed map of that scale uses. */
@@ -99,6 +102,31 @@ export function joined(pieces) {
   return lines;
 }
 
+/**
+ * A line rounded by cutting its corners `rounds` times (Chaikin): each step
+ * between two points keeps its quarter and three-quarter marks. A ring, whose
+ * last point is its first, stays a ring; an open line keeps its two ends.
+ */
+export function smoothed(points, rounds = 2) {
+  if (points.length < 3) return points;
+  const [fx, fy] = points[0];
+  const [lx, ly] = points.at(-1);
+  const ring = fx === lx && fy === ly;
+  let line = points;
+  for (let round = 0; round < rounds; round += 1) {
+    const next = ring ? [] : [line[0]];
+    for (let i = 0; i < line.length - 1; i += 1) {
+      const [ax, ay] = line[i];
+      const [bx, by] = line[i + 1];
+      next.push([ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25], [ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75]);
+    }
+    if (ring) next.push(next[0]);
+    else next.push(line.at(-1));
+    line = next;
+  }
+  return line;
+}
+
 /** A line thinned to the points that change its shape by more than `tolerance` (Douglas-Peucker). */
 export function thinned(points, tolerance = 0.6) {
   if (points.length < 3) return points;
@@ -124,12 +152,44 @@ export function thinned(points, tolerance = 0.6) {
   return points.filter((_, index) => keep[index]);
 }
 
+/** Grid points between two heights written on one line, about what the flat map leaves between two (`symbol-spacing`). */
+const LABEL_SPACING = 300;
+/** A line shorter than this many grid points is not written on. */
+const LABEL_SHORTEST = 60;
+
+/**
+ * Where a line's height is written by a map that cannot write along a line (the
+ * globe): a point every `spacing` grid points of its length, the first half that
+ * in, or the middle of a line too short for one.
+ */
+export function labelAnchors(line, spacing = LABEL_SPACING) {
+  const lengths = line.slice(1).map(([x, y], index) => Math.hypot(x - line[index][0], y - line[index][1]));
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  if (total < LABEL_SHORTEST) return [];
+  const anchors = [];
+  let walked = 0;
+  let next = Math.min(spacing / 2, total / 2);
+  lengths.forEach((length, index) => {
+    const [ax, ay] = line[index];
+    const [bx, by] = line[index + 1];
+    while (length > 0 && walked + length >= next) {
+      const t = (next - walked) / length;
+      anchors.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
+      next += spacing;
+    }
+    walked += length;
+  });
+  return anchors;
+}
+
 /**
  * The contour lines of a grid as GeoJSON lines, `properties.ele` their height and
  * `properties.index` true every `INDEX_EVERY` lines. Lines shorter than `shortest`
  * grid points are left out: a hillock's ring says nothing at the map's scale.
+ * `anchors` adds the points the bolder lines' heights are written at, for a map
+ * that writes names at a point only (the globe, `labelAnchors`).
  */
-export function contourLines(grid, step, { shortest = 6, tolerance = 0.6 } = {}) {
+export function contourLines(grid, step, { shortest = 6, tolerance = 0.6, rounds = 2, anchors = false } = {}) {
   let low = Infinity;
   let high = -Infinity;
   for (const value of grid.heights) {
@@ -141,9 +201,14 @@ export function contourLines(grid, step, { shortest = 6, tolerance = 0.6 } = {})
   for (let level = Math.ceil(Math.max(low, 0.5) / step) * step; level < high; level += step) {
     for (const line of isoline(grid, level)) {
       if (line.length < shortest) continue;
-      const thin = thinned(line, tolerance);
-      features.push({ type: 'Feature', properties: { ele: level, index: level % (step * INDEX_EVERY) === 0 },
-        geometry: { type: 'LineString', coordinates: thin.map(([x, y]) => grid.lonLat(x, y).map((value) => Math.round(value * 1e6) / 1e6)) } });
+      // thinned to its shape first, so the rounding is not undone by the thinning after it
+      const thin = smoothed(thinned(line, tolerance), rounds);
+      const index = level % (step * INDEX_EVERY) === 0;
+      const ground = ([x, y]) => grid.lonLat(x, y).map((value) => Math.round(value * 1e6) / 1e6);
+      features.push({ type: 'Feature', properties: { ele: level, index }, geometry: { type: 'LineString', coordinates: thin.map(ground) } });
+      if (anchors && index) {
+        for (const at of labelAnchors(thin)) features.push({ type: 'Feature', properties: { ele: level, index }, geometry: { type: 'Point', coordinates: ground(at) } });
+      }
     }
   }
   return { type: 'FeatureCollection', features };

@@ -43,7 +43,7 @@ import {
 import { EARTH, add, dot, ecef, geodetic, haversine, length, localFrame, metresPerPixel, normalize, raySphere, scale, sub, wrapLon } from './earth.js';
 import { createDrapes } from './drapes.js';
 import { createPictures } from './pictures.js';
-import { createRenderer } from './renderer.js';
+import { createRenderer, groundUniforms, toneUniforms } from './renderer.js';
 import { createTree } from './tree.js';
 
 /** Asks for what is out of view come after every ask for what is in it. */
@@ -108,6 +108,8 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
   let camera = cameraFor({ lat: 20, lon: 0, zoom: 2 }, { width: 800, height: 600 });
   let exaggeration = 1;
   let imagery = null;
+  // how the ground is drawn: a plain ground where there is no picture, and the pictures' tone
+  let look = { plain: groundUniforms(null), tone: toneUniforms() };
   let fallbackRelief = false;
   let destroyed = false;
   let lost = false;
@@ -329,7 +331,10 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
 
   const local = (e) => {
     const box = canvas.getBoundingClientRect();
-    return { x: e.clientX - box.left, y: e.clientY - box.top };
+    // a page scaled to the window (a plate) shows the canvas larger or smaller than its own pixels
+    const sx = box.width ? css.width / box.width : 1;
+    const sy = box.height ? css.height / box.height : 1;
+    return { x: (e.clientX - box.left) * sx, y: (e.clientY - box.top) * sy };
   };
 
   function stopMotion() {
@@ -380,9 +385,7 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
       } else press.kind = 'look';
     }
     canvas.setPointerCapture?.(e.pointerId);
-    // the press is the map's: no text selected, no page scrolled by the middle button,
-    // and a field that had the keys gives them back, so Page Up and Down tilt
-    e.preventDefault();
+    // a field that had the keys gives them back, so Page Up and Down tilt
     const focused = document.activeElement;
     if (focused && focused !== document.body) focused.blur?.();
   }
@@ -561,6 +564,13 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
     hover = null;
     relay('mouseout', e);
   };
+  // The press is the map's: no text selected, no page scrolled by the middle
+  // button. Said on the mouse event the press brings rather than on the pointer
+  // one: cancelling a pointer press keeps the browser from sending the mouse
+  // events at all, and the page hears presses by those (a menu closing on a
+  // press outside it, the guard on a middle click's paste in lib/clipboardPaste.js).
+  const onMouseDown = (e) => e.preventDefault();
+  canvas.addEventListener('mousedown', onMouseDown);
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', onMove);
   canvas.addEventListener('pointerup', onUp);
@@ -667,6 +677,7 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
       size: { width: canvas.width, height: canvas.height },
       tiles,
       exaggeration,
+      look,
     });
     loading = waiting + pictures.waiting;
     const sightsDue = laid ? traceSights(going) : false;
@@ -911,6 +922,8 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
       lastClick = null;
     },
     onSurface: (target) => target === canvas,
+    /** A wheel over something laid on the view (a marker, a card): it zooms as over the ground under it. */
+    wheel: (e) => onWheel(e),
     tilesLoading: () => loading > 0 || Boolean(press) || Boolean(fling) || wheel.pending !== 0,
     drewReliefFallback: () => fallbackRelief,
     /** Resolves once the view has stopped and every tile it wants is drawn. */
@@ -925,21 +938,56 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
      * `timeout` ms with `complete` false. The imagery on its relief alone, as
      * every tilted capture is, so `keep` has nothing to choose.
      */
-    async snapshot({ timeout = 12000 } = {}) {
-      const complete = await Promise.race([api.idle().then(() => true), new Promise((r) => setTimeout(() => r(false), timeout))]);
-      // drawn and copied in one go: the canvas keeps no frame once it is shown,
-      // and without what is laid on the ground, which a capture leaves out
+    async snapshot({ timeout = 12000, ratio = null, laid: withLaid = false, into = null } = {}) {
+      // drawn at `ratio` device pixels per CSS pixel for a print, as far as the GPU allows
+      if (ratio) {
+        const most = Math.min(8192, renderer.gl.getParameter(renderer.gl.MAX_RENDERBUFFER_SIZE) || 4096);
+        const scale = Math.min(ratio, most / css.width, most / css.height);
+        canvas.width = Math.max(1, Math.round(css.width * scale));
+        canvas.height = Math.max(1, Math.round(css.height * scale));
+        changed();
+      }
+      const deadline = new Promise((r) => setTimeout(() => r(false), timeout));
+      const settled = api.idle().then(async () => {
+        // what is laid on the ground is painted tile by tile after the tiles come
+        while (withLaid && laid && drapes.waiting > 0 && !destroyed) await api.idle();
+        return true;
+      });
+      const complete = await Promise.race([settled, deadline]);
+      // drawn and copied in one go: the canvas keeps no frame once it is shown.
+      // A tilted capture is the imagery on its relief alone; a plate's takes
+      // what is laid on the ground and what stands on it too.
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
-      draping = false;
+      draping = withLaid;
       draw(performance.now());
-      const copy = document.createElement('canvas');
+      const copy = into ?? document.createElement('canvas');
       copy.width = canvas.width;
       copy.height = canvas.height;
-      copy.getContext('2d').drawImage(canvas, 0, 0);
+      const ctx = copy.getContext('2d');
+      ctx.drawImage(canvas, 0, 0);
+      if (withLaid) laid?.paintMarks?.(ctx, canvas.width / css.width);
       draping = true;
+      if (ratio) {
+        measure();
+        changed();
+      }
       schedule();
       return { canvas: copy, complete };
+    },
+    /**
+     * The ground drawn where there is no picture: `{ colour, tints, tintOpacity,
+     * shade }` (renderer.js `groundUniforms`), or null for the pale stone a
+     * ground waits for its picture on.
+     */
+    setGround(style) {
+      look = { ...look, plain: groundUniforms(style) };
+      schedule();
+    },
+    /** The pictures' tone, as the flat map paints a raster (renderer.js `toneUniforms`). */
+    setTone(tone) {
+      look = { ...look, tone: toneUniforms(tone ?? {}) };
+      schedule();
     },
     on(name, handler) {
       if (!listeners.has(name)) listeners.set(name, new Set());
@@ -953,7 +1001,7 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
      */
     setImagery(next) {
       imagery = next
-        ? { provider: next.id, metered: Boolean(next.metered), shift: Math.round(Math.log2((next.cell ?? 256) / 256)), deepest: next.deepest }
+        ? { provider: next.id, metered: Boolean(next.metered), shift: Math.round(Math.log2((next.cell ?? 256) / 256)), deepest: next.deepest, shallowest: next.shallowest ?? 0 }
         : null;
       pictures.setImagery(imagery);
       schedule();
@@ -1068,6 +1116,7 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);
       resizer.disconnect();
+      canvas.removeEventListener('mousedown', onMouseDown);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);

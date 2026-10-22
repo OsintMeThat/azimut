@@ -211,18 +211,6 @@ def _forget(z: int, x: int, y: int) -> None:
                 pass
 
 
-def known(z: int, x: int, y: int) -> bool:
-    """Whether a tile, or its known absence, is on disk already, without reading it."""
-    for source in SOURCES:
-        for ext in _MEDIA:
-            if _path(source.id, z, x, y, ext).is_file():
-                return True
-    try:
-        return time.time() - _path(_NONE, z, x, y).stat().st_mtime < NONE_TTL_DAYS * 86400
-    except OSError:
-        return False
-
-
 _fetching: dict[Key, threading.Lock] = {}
 _fetching_guard = threading.Lock()
 

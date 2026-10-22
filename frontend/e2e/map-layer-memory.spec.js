@@ -73,7 +73,7 @@ test('a case opens again on the layers it was left on, the fires left off', asyn
 
   await expect(eye(page, 'Railways')).toHaveAttribute('aria-pressed', 'true');
   await expect(eye(page, 'Borders')).toHaveAttribute('aria-pressed', 'false');
-  await expect(eye(page, 'Place names')).toHaveAttribute('aria-pressed', 'true');
+  await expect(eye(page, 'Place names')).toHaveAttribute('aria-pressed', 'false');
   await expect(eye(page, LAYER.title)).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => fixture.railTiles.length).toBeGreaterThan(laid);
 });

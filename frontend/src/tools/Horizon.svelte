@@ -814,11 +814,11 @@
   });
   $effect(() => () => fireKey.destroy());
   /**
-   * Every layer the other maps offer (lib/map/layerSet), with borders, place
-   * names and the case's saved work on in a case that never said otherwise: they
-   * say where one is. Each case opens on the layers it was left on.
+   * Every layer the other maps offer (lib/map/layerSet), with borders and the
+   * case's saved work on in a case that never said otherwise: they say where one
+   * is. Each case opens on the layers it was left on.
    */
-  const HORIZON_LAYERS = ['boundaries', 'placenames', 'saved'];
+  const HORIZON_LAYERS = ['boundaries', 'saved'];
   const mapLayers = createLayerSet({
     fireKey,
     initial: HORIZON_LAYERS,
@@ -918,7 +918,7 @@
         size: [12, 12],
         title: held ? 'Photo and terrain move together: move one alone to turn' : 'Drag to turn the view',
         draggable: !held,
-        zIndex: 901,
+        zIndex: 574,
         onDragStart: () => (aiming = true),
         onDrag: (at) => {
           view.look({ heading: bearingBetween(eye, at) });
@@ -939,7 +939,7 @@
         size: [16, 16],
         title: held ? 'The viewpoint, held while the photo is locked' : 'The viewpoint: drag to move it',
         draggable: !held,
-        zIndex: 900,
+        zIndex: 573,
         onDrag: (at) => (dragAt = at),
         onDragEnd: () => {
           if (dragAt) view.standAt(dragAt);
@@ -955,7 +955,7 @@
         size: [14, 13],
         anchor: [7, 13],
         title: 'The marked point',
-        zIndex: 880,
+        zIndex: 572,
       },
       pointed && {
         id: 'pointed',
@@ -965,7 +965,7 @@
         html: CROSSHAIR,
         size: [22, 22],
         title: 'Clicked in the view',
-        zIndex: 870,
+        zIndex: 571,
       },
     ]);
   });

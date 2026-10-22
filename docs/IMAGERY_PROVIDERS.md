@@ -391,6 +391,7 @@ swap is limited to those overview zooms.
 |-------|-------|-------------|
 | Native resolution | 10 m/px ≈ 9.55 m/px at `TILEMATRIX=14` | `max_native_zoom=14`; deeper requests only buy server-side upsampling |
 | Useful zoom | z18 | `max_zoom=18` on magnified native tiles |
+| Coarsest pixel | 1500 m/px, so z7 for a 512 px tile | `min_zoom=7`; shallower tiles answer 404 unasked, and the 3D view draws that ground from Esri |
 | Free quota | **30 000 requests + 30 000 PU/month** (Copernicus General) | `meter="sentinelhub"`; per-account and editable in Settings |
 | Rate | 300 req/min, 300 PU/min | why tiles stay 512 |
 | PU cost | 512×512, 3 bands, 8-bit = **exactly 1 PU** | one tile = 1 request = 1 PU, so the counter is faithful |
@@ -710,22 +711,16 @@ days (one request, `/api/satellite/sentinel/dates`), again only when the eye
 moves farther than 10 km. The meter counts every tile, and a paused quota
 refuses the batch.
 
-**The turn read ahead** (`/api/tiles/warm`, `engine/tilewarm.py`): when a tilted
-3D view rests, the map asks its own engine which tiles eight headings around it
-would cover and the app fetches them into the disk caches, so a quick turn reads
-them from disk. Free cacheable providers and the relief only; a billed one is
-never read ahead. It is the analyst's own looking around, read a little early.
-
-**A tilted map's tiles come in batches** (`/api/tiles/batch/{provider}`,
+**The 3D view's tiles come in batches** (`/api/tiles/batch/{provider}`,
 `/api/terrain/batch`, `api/tile_batch.py`; `lib/map/tileBatch.js`). A browser
 keeps six connections to the app, and a view tilted toward the horizon asks for a
-hundred tiles at once. With relief on, the tiles the map asks for in one go travel
-as one request per source, up to 32 of them, at most four requests at a time so
-the app's other calls keep a connection. The app fetches them side by side and
-writes each as it is done, so a slow tile holds up none of the others. Each tile
-is served exactly as its own route serves it: same cache, same meter, same
-overzoom, same status when it fails. A flat map still asks each tile at its own
-address, and a batch the app refuses whole falls back to that.
+hundred tiles at once. The tiles the globe (Satellite's 3D, a plate's 3D map) asks
+for in one go travel as one request per source, up to 32 of them, at most four
+requests at a time so the app's other calls keep a connection. The app fetches
+them side by side and writes each as it is done, so a slow tile holds up none of
+the others. Each tile is served exactly as its own route serves it: same cache,
+same meter, same overzoom, same status when it fails. A flat map asks each tile
+at its own address.
 
 ## GeoConfirmed is a query, not a feed
 

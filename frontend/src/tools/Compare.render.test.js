@@ -746,14 +746,14 @@ describe('Compare', () => {
       'Reference', 'Events', 'Case', 'My layers', 'Added layers',
     ]);
     expect(menu.querySelectorAll('button.eye')).toHaveLength(10);
-    // a new pair starts on borders and place names, as Detect does
+    // a new pair starts on the borders, as Detect does
     const on = () => [...menu.querySelectorAll('button.eye[aria-pressed="true"]')].map((entry) => entry.getAttribute('aria-label'));
-    expect(on()).toEqual(['Borders', 'Place names']);
+    expect(on()).toEqual(['Borders']);
 
     eye('Roads').click();
     flushSync();
     expect(eye('Roads').getAttribute('aria-pressed')).toBe('true');
-    expect(trigger().textContent).toContain('3');
+    expect(trigger().textContent).toContain('2');
 
     // The fires follow each side's picture: World Imagery dates both to 2024-01-02,
     // once each surface has asked (half a second after it settles).
@@ -781,8 +781,8 @@ describe('Compare', () => {
     await settle();
     const saved = post.mock.calls.findLast(([path]) => path === '/api/cases/case-a/compare/sessions')[1].spec;
     // one list, kept on each side as sessions always held it
-    expect(saved.a.overlays).toEqual(['boundaries', 'placenames', 'roads', 'firms']);
-    expect(saved.b.overlays).toEqual(['boundaries', 'placenames', 'roads', 'firms']);
+    expect(saved.a.overlays).toEqual(['boundaries', 'roads', 'firms']);
+    expect(saved.b.overlays).toEqual(['boundaries', 'roads', 'firms']);
     expect(saved.a.firms).toMatchObject({ sensor: 'viirs', window: 'dates', first: '2024-01-02' });
     expect(saved.b.firms).toMatchObject({ sensor: 'viirs', window: 'dates', first: '2024-01-02' });
   });
@@ -816,7 +816,7 @@ describe('Compare', () => {
     eye('Night lights').click();
     flushSync();
     expect(JSON.parse(localStorage.getItem('azimut:map-layers:case-a')).maps.compare)
-      .toEqual(['boundaries', 'placenames', 'roads']);
+      .toEqual(['boundaries', 'roads']);
     unmount(live);
     live = null;
     target.remove();
@@ -828,7 +828,7 @@ describe('Compare', () => {
     flushSync();
     const on = [...target.querySelectorAll('.layer-menu button.eye[aria-pressed="true"]')]
       .map((entry) => entry.getAttribute('aria-label'));
-    expect(on).toEqual(['Borders', 'Place names', 'Roads']);
+    expect(on).toEqual(['Borders', 'Roads']);
   });
 
   it('moves the whole list onto A, B or both from the switcher, AB by default', async () => {
@@ -849,7 +849,7 @@ describe('Compare', () => {
     // the switcher moves the list, it does not show another one
     button('B', sides).click();
     flushSync();
-    expect(on()).toEqual(['Borders', 'Place names', 'Roads']);
+    expect(on()).toEqual(['Borders', 'Roads']);
     expect(menu.textContent).not.toContain('only');
     const draws = async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -863,7 +863,7 @@ describe('Compare', () => {
       const { a, b } = post.mock.calls.findLast(([path]) => path === '/api/cases/case-a/compare/sessions')[1].spec;
       return [a.overlays, b.overlays];
     };
-    expect(await draws()).toEqual([[], ['boundaries', 'placenames', 'roads']]);
+    expect(await draws()).toEqual([[], ['boundaries', 'roads']]);
 
     // an eye switched on B is on the list, so AB then draws it on both
     target.querySelector('.layer-menu > button').click();
@@ -873,7 +873,7 @@ describe('Compare', () => {
     flushSync();
     button('AB', reopened.querySelector('[aria-label="Which map draws the layers"]')).click();
     flushSync();
-    const all = ['boundaries', 'placenames', 'roads', 'seamarks'];
+    const all = ['boundaries', 'roads', 'seamarks'];
     expect(await draws()).toEqual([all, all]);
   });
 

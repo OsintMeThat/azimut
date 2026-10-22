@@ -52,7 +52,7 @@ export function boxWithin(t, p) {
  * @param {(bitmap: ImageBitmap) => { texture: any, bytes: number }} o.upload
  * @param {(handle: { texture: any }) => void} o.release
  * @param {(provider: string) => void} [o.onMetered] a billed picture came, which the meter counts
- * @param {(provider: string, error: Error) => void} [o.onFailed]
+ * @param {(provider: string, error: Error) => void} [o.onFailed] a picture of the chosen imagery was refused
  */
 export function createPictures({ fetch, upload, release, onMetered = () => {}, onFailed = () => {}, budget = 192 * 1024 * 1024 }) {
   const held = new Map();
@@ -70,6 +70,8 @@ export function createPictures({ fetch, upload, release, onMetered = () => {}, o
   /** The provider a picture tile is asked of: the chosen one, or the free one past a billed provider's reach. */
   function providerOf(t) {
     if (!imagery) return null;
+    // ground coarser than the provider can render at all comes from the free one
+    if (t.z < (imagery.shallowest ?? 0)) return FREE_FAR_PROVIDER;
     if (imagery.metered && imagery.view && farTile(t, imagery.view)) return FREE_FAR_PROVIDER;
     return imagery.provider;
   }
@@ -142,9 +144,10 @@ export function createPictures({ fetch, upload, release, onMetered = () => {}, o
           flying -= 1;
           e.controller = null;
           if (e.state !== 'loading') return;
-          // a picture nobody wants any more goes back to waiting; a refusal is said
+          // a picture nobody wants any more goes back to waiting; a refusal of the
+          // chosen imagery is said, while the free ground under it keeps its coarser picture
           e.state = error?.name === 'AbortError' ? 'idle' : 'failed';
-          if (e.state === 'failed') onFailed(provider, error);
+          if (e.state === 'failed' && provider === imagery?.provider) onFailed(provider, error);
         }
       );
     }
@@ -212,7 +215,7 @@ export function createPictures({ fetch, upload, release, onMetered = () => {}, o
       return laid > 0 || arrivals.length > 0;
     },
     /**
-     * The imagery to draw: `{ provider, metered, shift, deepest, view }`, the
+     * The imagery to draw: `{ provider, metered, shift, deepest, shallowest, view }`, the
      * view (`farTile`'s) saying where billed pictures stop. Null draws none.
      */
     setImagery(next) {

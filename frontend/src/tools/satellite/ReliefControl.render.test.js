@@ -37,20 +37,19 @@ it('levels a tilted view and leans a flat one from the Tilt button', () => {
   expect(ontilt).toHaveBeenLastCalledWith(0);
 });
 
-it('offers the previous 3D view one press away while 3D is on, to compare it with the globe', () => {
+it('keeps no other 3D view: the globe is the only one', () => {
   show({ on: true, pitch: 20 });
-  const classic = () => document.querySelector('.classic');
-  expect(classic().getAttribute('aria-pressed')).toBe('false');
-  press('Use the previous 3D view, to compare');
-  expect(classic().getAttribute('aria-pressed')).toBe('true');
-  press('Back to the new 3D view');
-  expect(classic().getAttribute('aria-pressed')).toBe('false');
+  expect(document.querySelector('.classic')).toBeNull();
+  expect([...document.querySelectorAll('button')].map((b) => b.textContent.trim())).not.toContain('Classic');
 });
 
-it('offers no previous view on a flat map, nor where the globe cannot run at all', () => {
-  show({ on: false });
-  expect(document.querySelector('.classic')).toBeNull();
-  unmount(held);
-  show({ on: true, classicOffered: false });
-  expect(document.querySelector('.classic')).toBeNull();
+it('greys the switch and says why in a browser that cannot draw the 3D view', () => {
+  const ontilt = vi.fn();
+  show({ refused: true, ontilt });
+  const toggle = document.querySelector('.toggle');
+  expect(toggle.disabled).toBe(true);
+  expect(toggle.title).toBe('This browser cannot draw the 3D view: it needs WebGL2');
+  toggle.click();
+  flushSync();
+  expect(ontilt).not.toHaveBeenCalled();
 });

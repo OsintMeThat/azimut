@@ -49,20 +49,11 @@ export const MAP_MODES = [
     rail: false,
   },
   {
+    // Lines and areas, a line of two points used as rings, a cone, a shadow or
+    // a viewshed, and the ground under a line once the analyst asks for it.
     id: 'measure',
-    label: 'Measure tools',
+    label: 'Measure',
     icon: 'ruler',
-    group: 'work',
-    cursor: 'measuring',
-    panel: true,
-  },
-  {
-    // A line drawn for its ground: heights along it and whether its end is in
-    // sight. Apart from Measure because it asks the terrain server something,
-    // and drawing a distance never should.
-    id: 'profile',
-    label: 'Elevation profile',
-    icon: 'profile',
     group: 'work',
     cursor: 'measuring',
     panel: true,

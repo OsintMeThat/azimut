@@ -567,13 +567,49 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
   const held = HANDLERS.filter((name) => map[name]?.isEnabled?.());
   for (const name of held) map[name].disable();
 
+  // The flat map's markers stand over the globe, and its own wheel is held
+  // still: a wheel over a measure's point or a place's pin is the globe's.
+  const container = map.getContainer?.();
+  const onWheel = (event) => {
+    if (!destroyed && !globe.onSurface(event.target)) globe.wheel(event);
+  };
+  container?.addEventListener('wheel', onWheel, { passive: false });
+
   const offPointer = globe.on('pointer', ({ type, event }) => {
     if (!event || destroyed) return;
     map.fire(new MapMouseEvent(type, map, event));
     globe.setCursor(map.getCanvas?.().style.cursor);
   });
 
-  globe.setLaid({ compose, frame });
+  /**
+   * What stands on the ground, drawn onto a capture of the globe at `ratio`
+   * device pixels per CSS pixel: placed as the screen shows it, its names
+   * written afresh at that ratio, all of them at once, so a print is sharp.
+   */
+  function paintMarks(ctx, ratio) {
+    if (destroyed) return;
+    const { width, height } = globe.size();
+    const sharp = createGlyphs({
+      image: (name) => map.getImage?.(name) ?? null,
+      canvas: makeCanvas,
+      ratio: () => ratio,
+      sharpest: Math.min(4, ratio),
+      perFrame: Infinity,
+      size: 4096,
+    });
+    sharp.begin();
+    const marks = placeStanding(
+      candidates(),
+      { project, zoomAt: (lat, d) => globe.zoomAt(lat, d), width, height, bearing: globe.heading() },
+      sharp
+    );
+    ctx.save();
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    drawStanding(ctx, marks);
+    ctx.restore();
+  }
+
+  globe.setLaid({ compose, frame, paintMarks });
   sync();
   // placed again once the flat map's markers are where the globe shows them
   map.fire('move');
@@ -587,10 +623,12 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       return placed;
     },
     query,
+    paintMarks,
     destroy() {
       destroyed = true;
       clearTimeout(placeLater);
       offPointer();
+      container?.removeEventListener('wheel', onWheel);
       map.off('styledata', onStyle);
       map.off('sourcedata', onSource);
       globe.setLaid(null);

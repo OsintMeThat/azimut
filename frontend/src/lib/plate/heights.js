@@ -36,7 +36,7 @@ export function gridLevel(bounds, zoom, maxZoom = 12) {
 /**
  * The heights over `bounds`, read at `level`: `{ width, height, heights, lonLat(x, y) }`,
  * `heights` row by row from the north-west corner, `lonLat` the ground under a point
- * of the grid. `load(z, x, y)` gives a tile's heights (`eyeGuard.browserHeights`),
+ * of the grid. `load(z, x, y)` gives a tile's heights (`reliefHeights.browserHeights`),
  * `tile` of them a side, or null where there are none, which the grid reads as the sea.
  */
 export async function heightGrid(bounds, level, load, tile = 512) {

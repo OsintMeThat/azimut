@@ -23,7 +23,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Case** (rail, under the stages) | Timeline, Board, Graph, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect, Collage | Edit Provenance, OCR, Image Compare, Hints, Sky Clock, audio |
-| **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
+| **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
 **Case sits on the rail, under the four stages and a rule apart from them.** The
@@ -1729,8 +1729,7 @@ cards float over the maps they describe, one per pane, so no bar takes the maps'
 height; the place search and the camera sit in B's corner.
 
 **Layers** is one menu for both maps, in the row above them, and one list. A new
-pair starts on the layers last switched in Compare in this case, else Borders and
-Place names. A switcher heads the list, **A | B | AB**,
+pair starts on the layers last switched in Compare in this case, else Borders. A switcher heads the list, **A | B | AB**,
 on AB, and says which map draws it: on B, every layer that is on, the case's own
 included, is drawn on B and none on A. The fires and the night lights follow each
 side's picture, so A shows the fires of its day and B those of its own; their
@@ -1749,7 +1748,8 @@ either side. **Difference** sits beside them as a switch, offered only when the
 two sides are a matched pair, and lays its highlights over whichever view is on.
 Sweeping an area over time is the Detect tab's job, not Compare's. Keys 1–4
 switch views, 5 toggles Difference, and Space pauses blink. Dragging, zooming or rotating either
-map moves the other in the same frame. Both stop at the lower provider zoom
+map moves the other in the same frame. Side by side, the pointer over one map
+shows as a small cross on the same ground in the other. Both stop at the lower provider zoom
 ceiling. **Swap A and B** exchanges the complete source stacks and annotation
 sides. One compass over the stage reads the shared turn, resets it to north and takes
 an exact angle. **Full screen** ends the header row and gives the whole tool the
@@ -2443,9 +2443,9 @@ and dots stand upright at their ground, the size they are on the flat map,
 hidden past a ridge once the view stops. A click, a right-click or a card works
 on them as it does flat, and a dropped pin drags along the slopes. Active fires
 are drawn flat only, since a view to the horizon would spend their allowance:
-their switch rests while 3D is on, and comes back with it. **Classic** swaps in
-the map's former 3D view, kept in this browser. A browser without WebGL2 gets
-that view alone.
+their switch rests while 3D is on, and comes back with it. The globe is the only
+3D view: a browser without WebGL2, or one that loses it, has none, and the 3D
+switch greys and says why.
 
 A tilted capture is the picture the map draws, imagery on relief and nothing laid
 over it, filed with its tilt, bearing, exact zoom and, for a frame centred on
@@ -2478,8 +2478,50 @@ one comes from. Every panel is the same acquisition by design: panels of differe
 dates compare two things at once, which is what Compare is for, so an undated
 map says to pick a date first.
 
-Underneath, the **status line** reads where you are (coordinates, zoom, and the
-armed tool's own measurement) on the left, and carries the two acts that take
+**Measure** is one rail seat with no modes. A click starts a measure and each
+click adds a point; a double click or Enter ends a line, and a click on its first
+point closes it into an area. Each leg writes its length and bearing along it, a
+line of several legs its total past its end and the angle at each corner, an area
+its size in its middle. A click within a few pixels of a place, a pin or another
+measure's corner lands on it, unless Alt is held. Backspace takes back the last
+point while a measure is drawn, Escape ends it, Delete removes the selected one.
+A finished measure stays, so a second can be drawn, and two lines that cross are
+marked where they meet, the point copied with a click. A finished measure's
+corners drag, taken a few pixels round the dot as well, the dot halfway along a
+leg bends it there, and a right-click takes a corner out. A corner pressed
+without moving, or let go, starts no measure. The tool keeps its own units (the app's, metric, imperial or
+nautical), and its measures wait, hidden, while it is closed.
+
+The panel shows the selected measure in large. A line of two points takes an
+exact length or bearing typed in place, in any unit or as a wind, and can be used
+as **Ring** (up to five circles round A, each as wide as the line), **Cone** (what
+a camera at A facing B takes in, its opening set), **Shadow** or **Viewshed**. A
+shadow is drawn from an object's foot to the tip of its shadow: its direction
+names the hour the sun stood opposite on the picture's day, and its length the
+object's height at that sun, for level ground seen from overhead. A picture with
+no day asks for one. A viewshed fills the ground in sight from A out to B, 30 km
+at most, on bare earth without buildings or trees. **Keep** puts the measure in
+one of the case's layers, named by what it reads, its points in the notes, and
+**Copy** puts the same text on the clipboard. The panel folds to one line, what
+the measure in hand reads, and stays folded until it is unfolded.
+
+**Ground** reads the heights under a line. The flat map asks the relief server
+only once the switch is on, and remembers it; in 3D the relief is read anyway, so
+the ground comes with the line. A window shows the profile and reads both ways
+with the map: the pointer over the chart marks its point on the line, the pointer
+over the line marks it on the chart, the arrows walk the crest, and a click or
+Enter brings the point to the middle of the map. For a line of two points the eye
+at A and the target at B stand at heights typed or picked from the usual ones,
+the crest is coloured by what the eye sees with the hidden ground shaded, or by
+slope, and the title says whether B is in sight, the angle the eye looks at it
+and the rise from A. On the globe the line of sight stands in the air between
+them. **Look from A** opens Horizon there, facing B. The window folds to its
+title bar, by its chevron or a double click, the verdict still read there. It
+opens over the rail and its panel, and **Chart** beside the switch puts it away
+or brings it back.
+
+Underneath, the **status line** reads where you are (coordinates, the ground's
+height in 3D, zoom) on the left, and carries the two acts that take
 something off the map — Save place and Capture — on the right. What marks the
 point, and whether that point is the map's centre or a pin dropped somewhere,
 is one small menu beside them: both are set once and the two acts are pressed
@@ -2517,10 +2559,9 @@ drawn as lines from OpenStreetMap through OpenFreeMap (country, region and
 district, each in its own weight, with the names of countries, regions and
 cities), Esri's roads, OpenStreetMap's town, village and hamlet names, Open Infrastructure Map's power
 lines, OpenSeaMap's buoys and harbours, and the raw GPS traces people uploaded to
-OSM, which show tracks nobody has mapped yet. Borders and place names start on —
-reading imagery starts with which side of a line the ground is on and what the
-place is called — and none of the others fetches a tile before its switch is
-pressed. The place names fill in
+OSM, which show tracks nobody has mapped yet. Borders start on, since reading
+imagery starts with which side of a line the ground is on, and none of the others
+fetches a tile before its switch is pressed. The place names fill in
 under the borders' cities. They are written in Latin script, and where
 two would overlap the larger place is kept. The roads and the place names are
 greyed over a street map, since it already draws them. Power lines are drawn
@@ -2891,12 +2932,15 @@ stroke lying under another one is read as a ridge, as is a trace saved before
 ridges had a pen. Fit lays the skyline strokes alone on the terrain, and Find
 also reads the ridges against the terrain's inner silhouettes and the pairs'
 order. Both let each piece of a cut collage turn, tilt and roll by a degree or
-so, and the view then reads each piece through its own camera. A place where
-land stands over a line with only sky above loses its score as that share of
-the line grows, read as far as **Sees as far as** says, past where the line is
-searched if need be; left to Auto, as far as the place's own reach, since haze
-may hide a farther range. A place keeps its score up to a fiftieth of the line
-under land, and says the share under it.
+so, and the view then reads each piece through its own camera. A line with
+only sky above is laid on the top of the land the photo would show over it, and
+a place where land still stands over it loses its score as that share of the
+line grows, read as far as **Sees as far as** says, past where the line is
+searched if need be. Left to Auto, land counts in full out to three times as
+far as the ground the line lies on, then less and less out to six times as far,
+since haze grows likelier to hide it. A place keeps its score up to a fiftieth
+of the line under land and is ruled out past a tenth; it says the share and how
+far out that land stands, on its point of the map too.
 
 Find's side has two faces. **Prepare** numbers the three steps a search
 needs (Skyline, Area, Search), each lit once done; the warnings about the lens
@@ -2957,10 +3001,13 @@ trace from a place clicked on the map, as a search scores its best places, and
 offers to look from there. **Speed** under More settings searches a large grid
 on several cores (Fast, the default) or on one (Gentle), and **Grid** lays a
 point every 20 m to 1 km, or Auto, as fine as about ten minutes of search
-allows: 20 m over a square kilometre, 50 m over a few. A grid picked is laid as
-picked, the map showing it before the search and the estimate saying the hours
-it takes, up to 100,000 points; past that it is laid wider, and Find says how
-wide.
+allows: 20 m over a square kilometre, 50 m over a few. The points stand in a
+hex lattice, as close to every spot as a square grid that fine with a quarter
+fewer of them. A grid picked is laid as picked, the map showing it before the
+search and the estimate saying the hours it takes, up to 100,000 points; past
+that it is laid wider, and Find says how wide. A search run again over the same
+ground reads back the skylines it swept (kept beside the terrain, a quarter of
+a gigabyte at most) and only matches the trace again.
 
 Find's map has the small map's **Layers** button at its top right: the base
 map, then the same switches, so a layer turned on in Find stays on in Horizon.
@@ -3086,7 +3133,7 @@ the key, which brings its layers with it, and the Sentinel-1 layer added to it b
 hand for the radar analyzers, field by field — and one press opens the Copernicus
 card in Settings. The panel still opens on what the case already holds.
 
-Detect opens on Esri World Imagery, with Borders, Place names and saved detections
+Detect opens on Esri World Imagery, with Borders and saved detections
 visible, framed on the areas this case watches — once, after which the camera is yours. That
 framing waits for the tab to show. Arriving from another map tab while they share
 one view, Detect opens where that map was instead, since that is the ground in hand.
@@ -4979,6 +5026,8 @@ name the summits with theirs; each of the three can be left off.
 
 **3D** stands a map on its heights, tilted (from the bar, or to the degree in the
 inspector), the heights drawn as they are or up to three times as tall, said under it.
+It is drawn on Satellite's globe, its ground, tints, contour lines, names and the
+case's layers laid on the relief; a browser without WebGL2 draws it flat and says so.
 **Ridge lines** traces the crests over it. A tilted map has no scale bar and no grid;
 labels, numbers, arrows and zones stay on their ground, its legend lists what its
 camera shows, and its inset outlines the ground it looks at, from its foot to short of

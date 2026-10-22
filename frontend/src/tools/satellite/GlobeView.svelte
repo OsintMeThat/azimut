@@ -17,7 +17,7 @@
    */
   import { onMount } from 'svelte';
   import { createGlobe } from '../../lib/globe/globe.js';
-  import { sourceMaxZoom } from '../../lib/map/basemap.js';
+  import { sourceMaxZoom, sourceMinZoom } from '../../lib/map/basemap.js';
   import { api } from '../../lib/api.js';
 
   let {
@@ -28,7 +28,7 @@
     /** The globe is drawn and placed, and takes the screen from the flat map. */
     onvisible = () => {},
     onteardown = () => {},
-    /** The browser has no WebGL2, or lost the globe's: the surface falls back to the flat engine's 3D. */
+    /** The browser has no WebGL2, or lost the globe's: the surface has no 3D view, and says why. */
     onrefused = () => {},
     /** Billed tiles went out, which the meter counts. */
     onusage = () => {},
@@ -93,7 +93,7 @@
       return;
     }
     const cell = shown.cell ?? 256;
-    globe.setImagery({ id: shown.id, metered: Boolean(provider.meter), cell, deepest: sourceMaxZoom(provider, cell) });
+    globe.setImagery({ id: shown.id, metered: Boolean(provider.meter), cell, deepest: sourceMaxZoom(provider, cell), shallowest: sourceMinZoom(provider, cell) });
   });
 
   $effect(() => {
@@ -132,6 +132,7 @@
     width: 100%;
     height: 100%;
     touch-action: none;
+    user-select: none;
     cursor: grab;
   }
   canvas:active {

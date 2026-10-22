@@ -23,20 +23,28 @@ const IMAGE_TYPE = /^image\//i;
  * surface that answers a paste outside any field would take every turn for a
  * Ctrl+V. The press is watched on the window in the capture phase, before the map
  * engine can stop it, and the paste that follows its release is refused.
+ *
+ * Both the pointer and the mouse events are watched: the 3D globe takes its
+ * presses as pointer events and cancels them, which keeps the browser from
+ * sending the mouse ones at all, and the flat map hears only the mouse ones.
  */
 const MIDDLE_PASTE_MS = 600;
 let middleDown = false;
 let middleUpAt = -Infinity;
 
+function pressed(event) {
+  if (event.button === 1) middleDown = true;
+}
+
+function released(event) {
+  if (event.button !== 1) return;
+  middleDown = false;
+  middleUpAt = performance.now();
+}
+
 if (typeof window !== 'undefined') {
-  window.addEventListener('mousedown', (event) => {
-    if (event.button === 1) middleDown = true;
-  }, true);
-  window.addEventListener('mouseup', (event) => {
-    if (event.button !== 1) return;
-    middleDown = false;
-    middleUpAt = performance.now();
-  }, true);
+  for (const type of ['pointerdown', 'mousedown']) window.addEventListener(type, pressed, true);
+  for (const type of ['pointerup', 'mouseup']) window.addEventListener(type, released, true);
 }
 
 /** Whether this paste is the middle button's, not a Ctrl+V. */

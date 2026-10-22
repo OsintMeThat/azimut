@@ -125,6 +125,7 @@
   import Icon from '../components/Icon.svelte';
   import Compass from '../components/Compass.svelte';
   import TurnGuide from '../components/TurnGuide.svelte';
+  import LinkedCursor from './compare/LinkedCursor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import Modal from '../components/Modal.svelte';
@@ -170,6 +171,8 @@
   const fireKey = createFireKey({ api });
   let picking = $state(null); // 'a' | 'b' | null
   let mode = $state('side');
+  /** The mouse over one pane, echoed on the other side by side: `{ from, x, y }` in viewport px. */
+  let pointer = $state(null);
   let divider = $state(DEFAULT_DIVIDER);
   let opacity = $state(DEFAULT_OPACITY);
   let blinkB = $state(false);
@@ -932,6 +935,11 @@
   function setMode(next) {
     mode = next;
     blinkPaused = false;
+  }
+
+  // A finger has no hover, so a touch leaves nothing to echo.
+  function trackPointer(from, event) {
+    pointer = event.pointerType === 'touch' ? null : { from, x: event.clientX, y: event.clientY };
   }
 
   function setDifference(on) {
@@ -2628,7 +2636,8 @@
     {/if}
     {#if a.present && home}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="surface-shell primary" oncontextmenu={(event) => onOverlayMenu('a', event)}>
+      <div class="surface-shell primary" oncontextmenu={(event) => onOverlayMenu('a', event)}
+        onpointermove={(event) => trackPointer('a', event)} onpointerleave={() => (pointer = null)}>
         <MapSurface
           bind:this={a.surface}
           bind:engine={a.engine}
@@ -2710,6 +2719,9 @@
         {#if rotating?.which === 'a'}
           <TurnGuide x={rotating.x} y={rotating.y} />
         {/if}
+        {#if both && !grabbing && mode === 'side' && pointer?.from === 'b'}
+          <LinkedCursor source={b.engine} engine={a.engine} client={pointer} />
+        {/if}
       </div>
     {:else}
       <button class="empty-slot" onclick={() => (picking = 'a')} disabled={!home}>
@@ -2726,6 +2738,8 @@
         class="surface-shell secondary"
         class:blink-hidden={mode === 'blink' && !blinkB}
         oncontextmenu={(event) => onOverlayMenu('b', event)}
+        onpointermove={(event) => trackPointer('b', event)}
+        onpointerleave={() => (pointer = null)}
       >
         <MapSurface
           bind:this={b.surface}
@@ -2801,6 +2815,9 @@
         {/if}
         {#if rotating?.which === 'b'}
           <TurnGuide x={rotating.x} y={rotating.y} />
+        {/if}
+        {#if both && !grabbing && mode === 'side' && pointer?.from === 'a'}
+          <LinkedCursor source={a.engine} engine={b.engine} client={pointer} />
         {/if}
       </div>
     {:else}

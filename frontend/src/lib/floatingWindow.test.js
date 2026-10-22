@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest';
-import { dragWindow, fitWindow, MARGIN, resizeWindow, savedWindow, saveWindow } from './floatingWindow.js';
+import { dragWindow, fitWindow, MARGIN, resizeWindow, savedWindow, saveWindow, savedFold, saveFold } from './floatingWindow.js';
 
 const BOUNDS = { w: 1000, h: 700 };
 const MIN = { w: 300, h: 150 };
@@ -51,5 +51,16 @@ describe('where a window was left', () => {
     expect(savedWindow('other')).toBeNull();
     localStorage.setItem('azimut.window.profile', '{"x":"left"}');
     expect(savedWindow('profile')).toBeNull();
+  });
+
+  it('remembers a window folded to its title bar, per window, apart from where it stands', () => {
+    expect(savedFold('ground')).toBe(false);
+    saveWindow('ground', WINDOW);
+    saveFold('ground', true);
+    expect(savedFold('ground')).toBe(true);
+    expect(savedFold('other')).toBe(false);
+    expect(savedWindow('ground')).toEqual(WINDOW);
+    saveFold('ground', false);
+    expect(savedFold('ground')).toBe(false);
   });
 });

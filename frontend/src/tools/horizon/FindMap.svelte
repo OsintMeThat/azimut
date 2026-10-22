@@ -216,7 +216,7 @@
       size: [12, 12],
       title: index === 0 && drawingArea && area.length >= 3 ? 'Close the area here' : 'Drag to move this corner, right-click to take it away',
       draggable: true,
-      zIndex: 700,
+      zIndex: 540,
       onClick: index === 0 && drawingArea && area.length >= 3 ? () => find.closeArea() : undefined,
       // the outline follows the hand; the corner is moved once it is let go
       onDrag: (at) => {
@@ -236,7 +236,7 @@
         size: [18, 18],
         title: 'The near point of this alignment: drag it where the click missed',
         draggable: true,
-        zIndex: 720,
+        zIndex: 550,
         onDrag: (at) => (dragged = { id: one.id, end: 'near', at }),
         onDragEnd: letGo,
       });
@@ -249,7 +249,7 @@
         size: [14, 14],
         title: 'The far point of this alignment: drag it where the click missed',
         draggable: true,
-        zIndex: 710,
+        zIndex: 545,
         onDrag: (at) => (dragged = { id: one.id, end: 'far', at }),
         onDragEnd: letGo,
       });
@@ -263,7 +263,7 @@
           html: `<span style="border-color:${one.colour}"></span>`,
           size: [14, 14],
           tip: `Eye at ${fit.at.eye} m over the ground: a click stands here`,
-          zIndex: 730,
+          zIndex: 555,
           onClick: () => onstand(fit.at),
         });
       }
@@ -279,7 +279,7 @@
         className: 'find-end',
         html: `<span style="background:${colour}">${find.alignments.length + 1}</span>`,
         size: [18, 18],
-        zIndex: 740,
+        zIndex: 560,
       });
     }
     // how far each ring of the fan stands, on its middle
@@ -293,7 +293,7 @@
           className: 'find-ring',
           html: `<span>${Math.round(ring.metres / 1000)} km</span>`,
           size: [44, 16],
-          zIndex: 600,
+          zIndex: 500,
         });
       }
     }
@@ -307,7 +307,7 @@
         className: `find-zone${zone.out ? ' out' : ''}`,
         html: `<span>${zone.out ? 'Left out' : zone.spacing === 'auto' ? 'Finer' : `${zone.spacing} m`}</span>`,
         size: [64, 18],
-        zIndex: 610,
+        zIndex: 505,
       });
     }
     const drawn = find.zoneDrawn;
@@ -320,7 +320,7 @@
         html: `<span${index === 0 && drawn.points.length >= 3 ? ' class="closes"' : ''}></span>`,
         size: [12, 12],
         title: index === 0 && drawn.points.length >= 3 ? 'Close the zone here' : '',
-        zIndex: 700,
+        zIndex: 540,
         onClick: index === 0 && drawn.points.length >= 3 ? () => find.closeArea() : undefined,
       });
     }
@@ -334,7 +334,7 @@
         html: '<span></span>',
         size: [16, 16],
         tip: tried.place ? `Tried here: explains ${Math.round(Math.max(0, tried.place.explained) * 100)}%` : 'Trying here…',
-        zIndex: 770,
+        zIndex: 575,
       });
     }
     for (const [index, place] of (result?.places ?? []).entries()) {
@@ -346,7 +346,7 @@
         html: `<span>${index + 1}</span>`,
         size: [22, 22],
         tip: `Explains ${Math.round(Math.max(0, place.explained) * 100)}%: a click looks from here`,
-        zIndex: 760 - index,
+        zIndex: 570 - index,
         onClick: () => onplace(place),
         onOver: () => (lit = index),
         onOut: () => (lit = -1),
@@ -362,7 +362,7 @@
         html: '<span></span>',
         size: [22, 22],
         tip: `The lines meet here, within ${Math.round(met.spread)} m: a click stands here`,
-        zIndex: 750,
+        zIndex: 565,
         onClick: () => onstand(met.at),
       });
     }

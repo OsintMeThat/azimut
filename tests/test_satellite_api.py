@@ -11,7 +11,7 @@ from PIL import Image
 
 from azimut import layout
 from azimut.api import satellite as satellite_api
-from azimut.engine import geo, tiles
+from azimut.engine import geo, tilecache, tiles
 from azimut.workspace import Case
 
 
@@ -1571,3 +1571,12 @@ def test_opening_the_workspace_sweeps_the_tile_cache(tmp_workspace, monkeypatch)
     workspace.open_workspace()
 
     assert swept.wait(5)
+
+
+def test_the_tile_cache_answers_whether_it_holds_a_tile_without_reading_it():
+    # what Horizon asks before it lays imagery over a view (api/horizon.py)
+    buffer = io.BytesIO()
+    Image.new("RGB", (256, 256), (40, 90, 40)).save(buffer, format="PNG")
+    assert not tilecache.has("esri-world-imagery", 3, 1, 1)
+    tilecache.put("esri-world-imagery", 3, 1, 1, buffer.getvalue(), "image/png")
+    assert tilecache.has("esri-world-imagery", 3, 1, 1)

@@ -180,7 +180,7 @@ export function createGridState({
       ...HANDLE,
       draggable: true,
       keyboard: false,
-      zIndex: 1200,
+      zIndex: 575,
       onDragStart,
       onDrag,
       onDragEnd: () => (grid.aoi.type === 'rect' ? commitResize() : commitVertEdit()),
@@ -241,7 +241,7 @@ export function createGridState({
         ...HANDLE,
         draggable: true,
         keyboard: false,
-        zIndex: 1200,
+        zIndex: 575,
         onDrag: (at) => {
           draft[k] = at;
           draftLayer.patch(DRAFT_RING, { points: draftRing() });

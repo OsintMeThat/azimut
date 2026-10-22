@@ -21,7 +21,6 @@ vi.mock('maplibre-gl', () => {
     on(name, handler) { (this.handlers[name] ??= []).push(handler); }
     fire(name) { for (const handler of this.handlers[name] ?? []) handler(); }
     getPitch() { return this.pitch; }
-    getTerrain() { return null; }
     addControl() {}
     getCanvas() { return null; }
   }
@@ -37,14 +36,7 @@ vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 vi.mock('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url', () => ({ default: '' }));
 vi.mock('./engine.css', () => ({}));
 vi.mock('./facade.js', () => ({ mapFacade: (map, container, mapId) => ({ mapId }), engineZoom: (zoom) => zoom }));
-/** What the app answers the next tile with. */
-let answer = { data: new ArrayBuffer(0) };
-vi.mock('./tileBatch.js', () => ({
-  BATCH_PROTOCOL: 'batch',
-  appTile: async () => answer,
-  createTileBatcher: () => ({}),
-  readBatched: (url) => JSON.parse(url),
-}));
+vi.mock('./tileBatch.js', () => ({ appTile: async () => ({ data: new ArrayBuffer(0) }) }));
 
 const { createMapEngine, dropDraggedClicks } = await import('./engine.js');
 
@@ -79,19 +71,6 @@ describe('a map engine', () => {
     map.pitch = 0;
     map.fire('pitch');
     expect(container.classList.contains('tilted')).toBe(false);
-  });
-
-  it('remembers a map some of whose relief the fallback drew, and only relief', async () => {
-    const facade = await createMapEngine(box(), { view: { lat: 0, lon: 0, zoom: 4 } });
-    const tile = (kind) => protocols.get('batch')({ url: JSON.stringify({ kind, mapId: facade.mapId }) }, new AbortController());
-    answer = { data: new ArrayBuffer(0), fallback: false };
-    await tile('terrain');
-    expect(facade.drewReliefFallback()).toBe(false);
-    answer = { data: new ArrayBuffer(0), fallback: true };
-    await tile('imagery');
-    expect(facade.drewReliefFallback()).toBe(false);
-    await tile('terrain');
-    expect(facade.drewReliefFallback()).toBe(true);
   });
 
   it('fades names and marks in as they are placed, unless a plate asks them put down at once', async () => {

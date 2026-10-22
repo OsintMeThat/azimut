@@ -24,7 +24,6 @@ import { INFRASTRUCTURE } from './infrastructure.js';
 import { tileTemplate as nightTemplate } from './nightlights.js';
 import { PLACE_NAMES } from './placeNames.js';
 import { guardedTemplate } from './quotaGuard.js';
-import { batchedTemplate } from './tileBatch.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
@@ -276,6 +275,14 @@ export function sourceMaxZoom(provider, cell) {
 }
 
 /**
+ * The shallowest tile this provider can render, counted the way the engine
+ * counts tiles. Shallower ground is drawn from the free basemap (the 3D view).
+ */
+export function sourceMinZoom(provider, cell) {
+  return Math.max(0, (provider.min_zoom ?? 0) - Math.log2(cell / 256));
+}
+
+/**
  * The raster source one provider is served from, at a given cell size.
  *
  * @param {object} provider as `/api/satellite/providers` describes it
@@ -286,15 +293,12 @@ export function sourceMaxZoom(provider, cell) {
 export function rasterSource(provider, providerId, cell, guardId = '') {
   // On a map of the app's (`guardId` names it), a billed provider is asked
   // through the guard, which sends the far ground of a tilted map to the free
-  // one (`quotaGuard.js`), and any other provider the app proxies through the
-  // batches a tilted map asks in (`tileBatch.js`); a flat map still asks each
-  // tile at its own address. Direct `{s}` templates never pass through the app.
-  const proxied = guardId && !provider.url.includes('{s}');
+  // one (`quotaGuard.js`); any other tile is asked at its own address. Direct
+  // `{s}` templates never pass through the app.
+  const guarded = guardId && provider.meter && !provider.url.includes('{s}');
   return {
     type: 'raster',
-    tiles: proxied
-      ? [provider.meter ? guardedTemplate(guardId, providerId) : batchedTemplate(guardId, providerId)]
-      : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
+    tiles: guarded ? [guardedTemplate(guardId, providerId)] : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
     // Bigger tiles shift the URL zoom down (512 → -1, 1024 → -2); an oversample
     // halves the cell so each tile is shown downscaled — deeper zoom on screen.
     // Google's mid-zoom mosaics are genuinely softer than its deep ones

@@ -1,6 +1,7 @@
 """Find where a photo was taken: its traced skyline searched over an area of the map.
 
-Each point of a grid laid over the area gets the skyline seen from it
+Each point of a grid laid over the area (a hex lattice: as close to every spot as a square grid
+`spacing` apart, with 23% fewer points) gets the skyline seen from it
 (`horizon.sweep`, the skyline alone, cut where haze would stop it) and the trace
 is looked for on it (`skymatch.match`, Fit's own search): a point's score is how
 much of the trace's shape the best place there explains.
@@ -99,7 +100,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from . import horizon, landform, skymatch, terrain
+from . import horizon, landform, skymatch, terrain, turncache
 
 # Searched when the analyst left the reach to Auto: these cuts and the turn out to the last.
 AUTO_FAR = 50_000.0
@@ -145,6 +146,11 @@ PICKED_MAX = 100_000
 # A zone searched with no spacing of its own is laid this many times finer than the area, no finer than
 # the terrain's detail is worth.
 ZONE_SHARE = 1 / 3
+# A grid `spacing` apart is laid as a hex lattice leaving no spot farther from a point than a square one that
+# dense would (spacing/√2), with 23% fewer points: its points HEX_ACROSS times the spacing apart along a row,
+# its rows HEX_ROWS times apart, every other row shifted by half (FIND_SMART_PLAN §5.3).
+HEX_ACROSS = math.sqrt(1.5)
+HEX_ROWS = HEX_ACROSS * math.sqrt(3) / 2
 # Columns a thirtieth of the narrowest lens, within these bounds (degrees).
 STEP_MIN = 0.1
 STEP_MAX = 0.5
@@ -343,7 +349,8 @@ def area_m2(area: Sequence[tuple[float, float]]) -> float:
 
 
 def auto_spacing(area: Sequence[tuple[float, float]]) -> float:
-    """The coarse spacing that lays about `AUTO_POINTS` points over the area, rounded to a plain number."""
+    """The coarse spacing a square grid would lay about `AUTO_POINTS` points over the area at, rounded to a plain
+    number: the hex lattice lays a quarter fewer, as close to every spot."""
     wanted = math.sqrt(max(area_m2(area), 1.0) / AUTO_POINTS)
     return next((s for s in NICE_SPACINGS if s >= wanted), NICE_SPACINGS[-1])
 
@@ -486,15 +493,24 @@ def spaced_grid(plan: Plan, spacing: float) -> tuple[np.ndarray, np.ndarray, np.
 
 
 def _polygon_grid(area: Sequence[tuple[float, float]], spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    """Points `spacing` metres apart over a polygon."""
+    """Points over a polygon as close to every spot as a square grid `spacing` metres apart: a hex lattice
+    (`HEX_ACROSS`, `HEX_ROWS`)."""
     lat0, lon0 = area[0]
     lats = np.array([p[0] for p in area])
     lons = np.array([p[1] for p in area])
     x, y = _local(lat0, lon0, lats, lons)
-    xs = np.arange(x.min() + spacing / 2, x.max(), spacing)
-    ys = np.arange(y.min() + spacing / 2, y.max(), spacing)
-    gx, gy = np.meshgrid(xs, ys)
-    lat, lon = _from_local(lat0, lon0, gx.ravel(), gy.ravel())
+    across = spacing * HEX_ACROSS
+    gxs: list[np.ndarray] = []
+    gys: list[np.ndarray] = []
+    for i, row in enumerate(np.arange(y.min() + spacing * HEX_ROWS / 2, y.max() + spacing * HEX_ROWS / 2,
+                                      spacing * HEX_ROWS)):
+        # every other row shifted by half, its first point on the polygon's edge
+        xs = np.arange(x.min(), x.max() + across / 2, across) if i % 2 else np.arange(x.min() + across / 2, x.max(), across)
+        gxs.append(xs)
+        gys.append(np.full(xs.size, row))
+    if not gxs:
+        return np.empty(0), np.empty(0)
+    lat, lon = _from_local(lat0, lon0, np.concatenate(gxs), np.concatenate(gys))
     keep = inside(area, lat, lon)
     return lat[keep], lon[keep]
 
@@ -551,8 +567,9 @@ def coarse_spacing(plan: Plan) -> float:
     spacing = asked_spacing(plan)
     most = PICKED_MAX if plan.spacing else COARSE_MAX
     if not plan.alignments:
-        # a fine grid over a large area starts about as wide as it must end, not by laying millions of points
-        spacing = max(spacing, math.sqrt(area_m2(plan.area) / most))
+        # a fine grid over a large area starts about as wide as it must end, not by laying millions of points:
+        # the hex lattice lays one point every HEX_ACROSS·HEX_ROWS square spacings
+        spacing = max(spacing, math.sqrt(area_m2(plan.area) / (most * HEX_ACROSS * HEX_ROWS)))
     while grid(plan, spacing)[0].size > most:
         spacing *= 1.05
     return spacing
@@ -842,11 +859,15 @@ def score_point(
                 marks = _at_sea(marks, altitude)
                 reach = max(far, SEA_FAR * skymatch.BAND_SLACK * sea_horizon(altitude))
             # a line said to have only sky above is read as far as the analyst says the photo sees, past
-            # where the trace is searched if need be: a range there would have shown over it
+            # where the trace is searched if need be: a range there would have shown over it. Left to Auto,
+            # it is read on as far as land standing over it may still count (skymatch.CLEAR_FAR times as far
+            # as the farthest line may stand), however near the lines are said to stand
             sees = plan.reach if marks is not None and marks.clear and plan.reach else None
-            read = max(reach, sees) if sees is not None else reach
+            on = min(AUTO_FAR, skymatch.CLEAR_FAR * reach) if marks is not None and marks.clear and not sees else None
+            read = max(reach, sees) if sees is not None else max(reach, on) if on is not None else reach
             extra = [reach] if read > reach else [sees] if sees is not None and sees < reach and sees not in cuts else []
-            swept = horizon.sweep(
+            # a turn swept by an earlier search over the same ground is read back (engine/turncache.py)
+            swept = turncache.swept(
                 observer, azimuths=columns[marching], far=read, cuts=[*cuts, *extra], sampler=sampler,
                 workers=WORKERS, near_step=near_step,
             )
@@ -865,10 +886,15 @@ def score_point(
         full = skymatch.Turn(0.0, step, whole(swept.skyline), reach=read, distance=whole(swept.skyline_distance))
         turns = rows[:len(cuts)]
         clear = None
+        beyond: list[skymatch.Turn] = []
         if read > reach:
-            # the trace is searched out to the reach, its lines with only sky above read on to the full sweep
+            # the trace is searched out to the reach, its lines with only sky above read on to the full sweep:
+            # in full as far as the analyst says the photo sees, else as Auto reads them (skymatch._over)
             turns.append(replace(rows[-1], reach=reach))
-            clear = full
+            if sees is not None:
+                clear = full
+            else:
+                beyond.append(full)
         else:
             turns.append(full)
             if sees is not None:
@@ -887,7 +913,7 @@ def score_point(
                 x, trace.y, turns, half_width=trace.half_width, fov=trace.fov, known=trace.known,
                 within=trace.within, facing=facing, projection=trace.projection, quick=quick, rough=rough,
                 marks=marks, ridges=ridges, floor=trace.floor, tilts=trace.tilts, rounding=trace.rounding,
-                clear=clear,
+                clear=clear, beyond=beyond,
             )
             if not found.fits or found.fits[0].explained <= best["explained"]:
                 continue
@@ -911,6 +937,8 @@ def score_point(
                 best["pieces"] = skymatch.pieces_of(fit)
             if fit.over is not None:
                 best["over"] = round(fit.over, 4)
+            if fit.over_far is not None:
+                best["over_far"] = round(fit.over_far)
     return best
 
 
@@ -1118,10 +1146,11 @@ def _search(
         "standout": None if rise is None else round(rise, 3),
         "places": places,
         # each point with how far off the terrain the trace lies there, degrees: where nothing explains the
-        # trace, the map still shows where it lies nearest
+        # trace, the map still shows where it lies nearest; a point ruled out by land over a line with only
+        # sky above says so, and how far out that land stands
         "points": [
             {"lat": p["lat"], "lon": p["lon"], "explained": p["explained"], "spacing": round(p["spacing"], 1),
-             "gap": round(p["gap"], 2)}
+             "gap": round(p["gap"], 2), **_ruled(p)}
             for p in scored if p["explained"] >= 0
         ],
         "spacing": round(spacing, 1),
@@ -1131,12 +1160,20 @@ def _search(
     }
 
 
+def _ruled(point: dict[str, Any]) -> dict[str, Any]:
+    """Why a point is no place, when land stands over a line with only sky above past `CLEAR_HARD` of it."""
+    if point.get("over", 0.0) < skymatch.CLEAR_HARD:
+        return {}
+    return {"over": point["over"], "over_far": point.get("over_far")}
+
+
 def filled(
     plan: Plan, coarse: list[dict[str, Any]], spacing: float, fine: float, seen: set[tuple[float, float]],
 ) -> list[tuple[float, float, float]]:
     """Points filling in the cells of the coarse grid whose relief stands near: (lat, lon, spacing).
 
-    Each cell, as wide as its point's own spacing (`spacing` where it says none), is filled in at `NEAR_SHARE` of
+    Each cell, a square holding as much ground as its point's lattice gives it (√(HEX_ACROSS·HEX_ROWS) times its
+    spacing, `spacing` where it says none), is filled in at `NEAR_SHARE` of
     the distance to the ridges its point sees, no finer than `fine`. The cells
     nearest their relief come first; past `DENSE_MAX` times the grid's points,
     the rest are filled two by two, and none once even that does not fit.
@@ -1149,7 +1186,9 @@ def filled(
         near = point.get("relief", math.inf)
         if not math.isfinite(near):
             break
-        cell = float(point.get("spacing") or spacing)
+        # a square as large as the ground each point of the hex lattice stands for: wider ones overlap and would
+        # spend the filling-in's budget twice on the same ground
+        cell = float(point.get("spacing") or spacing) * math.sqrt(HEX_ACROSS * HEX_ROWS)
         count = int(round(cell / max(fine, NEAR_SHARE * near)))
         if count < 2:
             continue

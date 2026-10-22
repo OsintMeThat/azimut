@@ -27,10 +27,9 @@
   import { createMapEngine } from '../../lib/map/engine.js';
   import { createDualEngine } from '../../lib/globe/dualEngine.js';
   import { createMirror } from '../../lib/globe/mirror.js';
-  import { createRelief, steadyZoom } from '../../lib/map/relief.js';
-  import { api } from '../../lib/api.js';
+  import { steadyZoom } from '../../lib/map/relief.js';
   import { toast } from '../../lib/state.svelte.js';
-  import { createBasemaps, imageryError, isGround, IMAGERY_SOURCE, OVERLAY_IDS } from '../../lib/map/basemap.js';
+  import { createBasemaps, imageryError, isGround, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import { RADAR_ID, orbitMark } from '../../lib/radar.js';
   import { pictureDate } from '../../lib/map/pictureDate.js';
@@ -132,7 +131,6 @@
   /** The flat map's own façade; `engine` is the one the tool holds, which a globe takes over in 3D. */
   let flat = null;
   let basemaps = null;
-  let relief = null;
   let tileFailure = $state(null);
   let failureProvider = '';
   // Acquisition date of the imagery under the crosshair — Esri only.
@@ -257,21 +255,6 @@
     basemaps.setZoomCeiling(zoomCeiling);
     showBasemap();
     showOverlays();
-    // Only a surface that offers relief has one: Compare and Detect stay flat.
-    // Built before anything listens for a settled view, so a move over relief is
-    // reported once its centre sits on the ground (lib/map/groundHold.js).
-    relief = reliefOffered
-      ? createRelief(
-          flat.impl,
-          () => api.get('/api/terrain/sources'),
-          {
-            imagery: IMAGERY_SOURCE,
-            // a tilted view's turn is fetched ahead into the app's caches (lib/map/warmTurn.js)
-            send: (body) => api.post('/api/tiles/warm', body),
-          },
-          { mapId: flat.mapId }
-        )
-      : null;
     // the façade wraps the centre back inside ±180 for us, which is what every
     // route a capture reaches enforces
     const offSettled = engine.on('view-settled', (settled) => {
@@ -291,8 +274,6 @@
       offSettled();
       offRotate();
       offPitch();
-      relief?.dispose();
-      relief = null;
       reliefReady = false;
       offClick();
       offMenu();
@@ -336,32 +317,20 @@
   const reliefPossible = $derived(reliefOffered && !shown.provider?.widget);
 
   /**
-   * The 3D view is the globe (lib/globe), drawn by the app. The flat engine's
-   * own 3D stays one press away while the globe is new, to compare the two
-   * (`classic`, kept in this browser), and is what a browser without WebGL2
-   * gets.
+   * The 3D view is the globe (lib/globe), drawn by the app. A browser that
+   * cannot draw it (no WebGL2, or its context lost) has no 3D view: the switch
+   * goes off and says why.
    */
-  const CLASSIC = 'azimut.relief.classic';
-  let classic = $state(readClassic());
   let globeRefused = $state(false);
   // the globe has taken the screen (GlobeView `onvisible`); until then the flat map shows
   let globeVisible = $state(false);
-  function readClassic() {
-    try {
-      return localStorage.getItem(CLASSIC) === '1';
-    } catch {
-      return false;
-    }
+  const globeOn = $derived(ready && reliefPossible && reliefOn && !globeRefused);
+
+  function refuseGlobe() {
+    globeRefused = true;
+    reliefOn = false;
+    toast('This browser cannot draw the 3D view: it needs WebGL2', 'warn', 8000);
   }
-  $effect(() => {
-    const value = classic;
-    try {
-      localStorage.setItem(CLASSIC, value ? '1' : '0');
-    } catch {
-      // a private window keeps the choice for this visit only
-    }
-  });
-  const globeOn = $derived(ready && reliefPossible && reliefOn && !classic && !globeRefused);
 
   /**
    * The globe is up: it takes the camera where the flat map holds it, and the
@@ -417,25 +386,6 @@
     leanWhenReady = null;
     // once the relief under the centre is in, or the centre is seated at sea level
     engine.idle().then(() => engine?.setPitch(deg));
-  });
-
-  // Relief asks for its sources and tiles only once it is switched on, and the
-  // flat engine's only for its own 3D: the globe reads its relief itself.
-  $effect(() => {
-    const on = reliefPossible && reliefOn && !globeOn;
-    const scale = exaggeration;
-    if (!ready || !relief) return;
-    const shown = relief;
-    shown
-      .show(on, { exaggeration: scale })
-      .then(() => {
-        if (!untrack(() => globeOn)) reliefReady = shown.on;
-      })
-      .catch((error) => {
-        console.error(error);
-        reliefOn = false;
-        reliefReady = false;
-      });
   });
 
   // Only a tool that lays a second picture pays for one: the rest never ask.
@@ -518,7 +468,7 @@
   class:grabbing
   style:--map-controls-top={`${controlsTop}px`}
 >
-  <div class="map" class:hazed={reliefPossible && reliefOn} class:under-globe={globeOn && globeVisible} bind:this={mapEl}></div>
+  <div class="map" class:under-globe={globeOn && globeVisible} bind:this={mapEl}></div>
 
   {#if globeOn}
     <GlobeView
@@ -527,7 +477,7 @@
       onready={globeReady}
       onvisible={() => (globeVisible = true)}
       onteardown={globeGone}
-      onrefused={() => (globeRefused = true)}
+      onrefused={refuseGlobe}
       {onusage}
       ontrouble={globeTrouble}
     />
@@ -635,8 +585,8 @@
     <!-- Which way is up. Middle-dragging the map is what turns it. -->
     <Compass {bearing} onbearing={setBearing} />
     {#if reliefPossible}
-      <ReliefControl bind:on={reliefOn} bind:exaggeration bind:classic {pitch} ontilt={lean}
-        classicOffered={!globeRefused} onhint={(text) => toast(text, 'info', 6000)} />
+      <ReliefControl bind:on={reliefOn} bind:exaggeration {pitch} ontilt={lean}
+        refused={globeRefused} onhint={(text) => toast(text, 'info', 6000)} />
       {#if reliefOn && pitch > 0 && shown.provider?.meter}
         <!-- lib/map/quotaGuard.js: past a flat view's reach the ground is Esri's -->
         <span
@@ -693,12 +643,6 @@
     inset: 0;
     isolation: auto;
     background: transparent;
-  }
-  /* Over relief, ground the engine has not drawn yet (far tiles still on their
-     way toward the horizon) shows through the canvas: in the haze of the sky's
-     horizon (lib/map/relief.js SKY) it reads as distance, in black as a hole. */
-  .map.hazed {
-    background: #c9d6e3;
   }
   /* Under the globe the flat map keeps its size and its state, the box
      everything is measured against, and lies over the globe see-through: its

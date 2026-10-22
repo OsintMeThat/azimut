@@ -11,7 +11,7 @@
  * every point is reached from the highest neighbour that reaches the edge, and a
  * small top is crossed on to the crest it belongs to, over its highest pass.
  */
-import { thinned } from './contours.js';
+import { smoothed, thinned } from './contours.js';
 
 const NEIGHBOURS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
@@ -137,7 +137,8 @@ export function ridgeLines(grid, { share = 1 / 900, shortest = 5, tolerance = 0.
     if (line.length < shortest) continue;
     const strength = Math.max(0, Math.min(1, (Math.log(held[start]) - Math.log(least)) / Math.max(1e-6, most - Math.log(least))));
     features.push({ type: 'Feature', properties: { strength: Math.round(strength * 100) / 100 },
-      geometry: { type: 'LineString', coordinates: thinned(line, tolerance).map(([x, y]) => grid.lonLat(x, y).map((value) => Math.round(value * 1e6) / 1e6)) } });
+      // rounded as the contour lines are: a crest walks the grid in steps, the ground does not
+      geometry: { type: 'LineString', coordinates: smoothed(thinned(line, tolerance), 2).map(([x, y]) => grid.lonLat(x, y).map((value) => Math.round(value * 1e6) / 1e6)) } });
   }
   return { type: 'FeatureCollection', features };
 }

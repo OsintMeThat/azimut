@@ -34,7 +34,7 @@
  * the search read the same lines.
  */
 import { bearingBetween } from './geometry.js';
-import { cleanHints } from './hints.js';
+import { cleanHints, reachText } from './hints.js';
 import { containsPoint, destination, haversine, polygonArea } from '../measure.js';
 
 /** Degrees either side of an alignment's line the camera may stand, by default. */
@@ -265,10 +265,18 @@ export function heatStyle(explained, best, low = 0) {
   return { fill: step, opacity: Math.round((0.12 + 0.6 * t * t) * 100) / 100 };
 }
 
+/** Land standing over the lines said to have only sky above: on what share of them, and how far out (metres). */
+export function overText(over, far) {
+  return `land rises over the sky-only lines on ${Math.round(over * 100)}%${Number.isFinite(far) ? `, ${reachText(far)} out` : ''}`;
+}
+
+/** Why the search ruled a point out, when it did: land over a sky-only line (`over`, `over_far`). */
+const ruledTip = (p) => (Number.isFinite(p.over) ? `Ruled out: ${overText(p.over, p.over_far)}` : null);
+
 /**
  * Each scored point's heat on the map, `{ fill, opacity, tip }`: by what it explains, or, where no point
  * explains anything, by how far off the terrain the trace lies there (`gap`, degrees), so the places it lies
- * nearest still show.
+ * nearest still show. A point ruled out says why.
  */
 export function heatOf(points, best = Math.max(-1, ...points.map((p) => p.explained))) {
   const gaps = points.map((p) => p.gap).filter(Number.isFinite);
@@ -277,11 +285,14 @@ export function heatOf(points, best = Math.max(-1, ...points.map((p) => p.explai
     const off = Math.max(...gaps);
     return points.map((p) => ({
       ...heatStyle(Number.isFinite(p.gap) ? -p.gap : -off, -near, -off),
-      tip: Number.isFinite(p.gap) ? `Explains 0%: the trace lies ${p.gap.toFixed(1)}° off the terrain` : 'Explains 0%',
+      tip: ruledTip(p) ?? (Number.isFinite(p.gap) ? `Explains 0%: the trace lies ${p.gap.toFixed(1)}° off the terrain` : 'Explains 0%'),
     }));
   }
   const low = Math.max(0, Math.min(...points.map((p) => p.explained)));
-  return points.map((p) => ({ ...heatStyle(p.explained, best, low), tip: `Explains ${Math.round(Math.max(0, p.explained) * 100)}% of the trace` }));
+  return points.map((p) => ({
+    ...heatStyle(p.explained, best, low),
+    tip: ruledTip(p) ?? `Explains ${Math.round(Math.max(0, p.explained) * 100)}% of the trace`,
+  }));
 }
 
 /** A search's verdict in the panel's words. */

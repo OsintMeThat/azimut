@@ -195,13 +195,16 @@ proof for publication.
 | ✅ **Find: zones, sun and speed** | Searches finer zones and leaves zones out, over areas up to 10,000 km², tries a point clicked on the map, turns where the sun stood on a day into headings, and searches large grids on several cores. |
 | ✅ **Find: sea, lens and decoys** | Traces the sea's horizon with its own pen, measures a video's lens on its pan, and checks a search's places against decoys of its trace. |
 | ✅ **Find: as searched** | Levels a collage as it is laid, lets one stretch of the trace miss, rounds near lines on coarse relief when asked, searches grids down to 20 m, and lays a photo looked from a place as the search read it. |
-| ✅ **Find: sky only** | A line marked with only sky above drops the places where land stands over it, as far as the photo is said to see (now from 2 km); a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
+| ✅ **Find: sky only** | A line marked with only sky above lies on the top of the land and rules out the places where land stands over it, saying how far out, read past the place's own reach on Auto; a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
+| ✅ **Find: lattice and kept skylines** | Lays the search's points in a hex lattice, a quarter fewer for the same reach, and reads the skylines an earlier search swept back from a bounded cache. |
 | ✅ **3D map** | Stands Satellite's imagery on public relief, tilted by hand or key, and files a tilted view as a credited capture that reopens as it was taken. |
-| ✅ **Globe 3D view** | Draws Satellite's 3D on a globe of the app's own whose eye only the hand moves, so the view never jumps as the ground loads, with the former 3D view one press away to compare. |
+| ✅ **Globe 3D view** | Draws Satellite's 3D and a plate's 3D maps on a globe of the app's own whose eye only the hand moves, so the view never jumps as the ground loads; the map engine's former 3D view and its code are gone. |
 | ✅ **Globe layers** | Draws what the flat map holds on the globe: borders, names and the analyst's layers, the case's places, measures and the sun's path, with clicks and cards as flat; active fires stay flat. |
+| ✅ **Measure** | One tool for lines and areas, their legs, bearings and angles written on the map, where lines cross, and a line used as range rings, a view cone, a shadow's height and hour, or a viewshed; flat and on the globe. |
+| ✅ **Ground & line of sight** | Reads the ground under a measured line on a press (at once in 3D), both ways with the map, coloured by what the eye at A sees or by slope, the sight stood in the air on the globe. |
 | ✅ **Vector borders** | Draws Borders as OpenStreetMap lines from OpenFreeMap on every map, regions and districts in their own weight. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
-| ✅ **Satellite Compare** | Aligns and annotates dated imagery, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
+| ✅ **Satellite Compare** | Aligns and annotates dated imagery, echoes the pointer on the other side, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
@@ -229,7 +232,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | Tool | What it does |
 |------|--------------|
 | **Horizon buildings** | Buildings stand in Horizon round the eye, from open sources merged by a stated rule (national surveys, OpenStreetMap, Overture, 3D-GloBFP, Google's 2.5D heights), each saying where its height comes from; a saved view keeps them. |
-| **Globe only** | Retires the map engine's former 3D view (Classic) and its 3D code once the globe has been used on real cases, and draws active fires there within their allowance. |
+| **Fires on the globe** | Draws active fires on the globe within their allowance. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
@@ -292,10 +295,9 @@ search; optional quota-aware X publishing.
 |------|--------------|
 | **Search Orchestrator** | Run username/alias/email across services, analyst selects → entities. Integrations, not clones. |
 | **OSM Query (Overpass)** | Feature search from a form, and a described pattern ("filling station, roundabout, railway within 300 m") turned into candidates on the map; clicking a point looks it up in OSM, Wikidata and geolocated Commons photos. No Overpass QL. |
-| **Viewshed / Line of Sight** | What terrain is visible from a point (public DEM tiles). |
 | **Camera Track (video SfM)** | Solves a moving camera's path from a video: frames sampled from a window, position and viewing azimuth per keyframe, and a sparse point cloud. Reports insufficient parallax instead of guessing. Bundles a native SfM binary (COLMAP/GLOMAP), CPU-capable. |
 | **Vessel and Aircraft Tracks** | Historic ADS-B and AIS tracks on the map for a date, plus a watchlist that follows chosen callsigns or MMSIs. |
-| **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery, and its bearing layer absorbs the v2 sun/moon arcs. |
+| **Map Measures** | Measure on a resected photo's imagery, and a bearing layer that absorbs the v2 sun/moon arcs. |
 | **Déjà Vu** | Perceptual-hash index flags recycled footage (local first; community index later). |
 | **Manipulation Hints** | Add JPEG quantization, noise and AI-media hints alongside Inspect's ELA. |
 | **Channel Monitor** | Watch Telegram channels, auto-archive media, queue for geolocation (rate limits, ToS care). |
@@ -369,7 +371,7 @@ stops making sense.
   speak points, positions and view events and never the engine. Satellite's 3D
   view is a WebGL2 globe of the app's own (`lib/globe`) answering the same
   façade while it is on, and drawing the flat map's own layers by reading its
-  style (`lib/globe/mirror.js`). Rail =
+  style (`lib/globe/mirror.js`); a plate's 3D map stands on the same globe. Rail =
   workspaces in pipeline order, tools are tabs inside them (see
   [UI.md](UI.md)).
 - **Settings and secrets:** in-app tabs group general preferences, publishing,

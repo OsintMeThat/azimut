@@ -117,6 +117,8 @@ describe('the globe draws what the flat map holds', () => {
     const y = Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n);
     expect(await globe.laid.compose({ z: 12, x, y })).toEqual({ painted: 1 });
     expect(await globe.laid.compose({ z: 12, x: 0, y: 0 })).toBeNull();
+    // a capture of the globe paints what stands on the ground through the same hand
+    expect(globe.laid.paintMarks).toBe(mirror.paintMarks);
     mirror.destroy();
   });
 
@@ -165,6 +167,23 @@ describe('the globe draws what the flat map holds', () => {
     expect(map.fired).toContain('click');
     expect(globe.setCursor).toHaveBeenCalled();
     mirror.destroy();
+  });
+
+  it('zooms the globe on a wheel over one of the flat map’s markers, held still meanwhile', () => {
+    const map = stubMap();
+    const container = document.createElement('div');
+    const marker = document.createElement('div');
+    container.append(marker);
+    map.getContainer = () => container;
+    const globe = { ...stubGlobe(), wheel: vi.fn(), onSurface: () => false };
+    const mirror = createMirror(map, globe, { canvas: document.createElement('canvas'), makeCanvas });
+    expect(map.scrollZoom.isEnabled()).toBe(false);
+    marker.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: 70, clientY: 460, bubbles: true, cancelable: true }));
+    expect(globe.wheel).toHaveBeenCalledTimes(1);
+    expect(globe.wheel.mock.calls[0][0]).toMatchObject({ deltaY: -100 });
+    mirror.destroy();
+    marker.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    expect(globe.wheel).toHaveBeenCalledTimes(1);
   });
 
   it('finds the line and the dot under a click, top first, as the flat map’s hit test would', async () => {

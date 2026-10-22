@@ -8,12 +8,23 @@ describe('Files bounded loading', () => {
     expect(source).toContain('createPagedList');
     expect(source).toContain("status: 'confirmed'");
     expect(source).toContain('limit: PAGE');
-    // the complete-folder fetch is opt-in to List view, not part of case open
-    expect(source).toContain("view === 'list'");
+    // the complete-folder fetch is for an open folder (or a List search), not case open
+    expect(source).toContain("searching ? view === 'list' : Boolean(cwd) || showUnfiled");
+  });
+
+  it('opens a folder on all its files in every view, not its share of the first page', () => {
+    // A folder of six whose rows sat past the case's first 200 opened in the grid
+    // on two, under a case-wide "Show more". The grids load the folder too, wait
+    // for it before saying "empty", and drop the case-wide Show more meanwhile.
+    expect(source).not.toContain("view === 'list' && !filtering");
+    expect(source).toContain('{#each completeFolderLoading ? [] : curEntities as e (e.id)}\n            <div\n              class="tile entity"');
+    expect(source).toContain('class="list-status grid-status" role="status">Loading all files in this folder');
+    expect(source.match(/\{#if !completeFolderLoading && !curFolders\.length/g)).toHaveLength(2);
+    expect(source).toContain('pl.hasMore && completeFolderEntities === null && !completeFolderLoading}');
   });
 
   it('offers Show more with an honest filtered total', () => {
-    expect(source).toContain('{:else if !showTrash && !filtering && pl.hasMore}');
+    expect(source).toContain('{:else if !showTrash && !filtering && pl.hasMore');
     expect(source).toContain('pl.loadMore()');
     expect(source).toContain('Showing {confirmed.length} of {total}');
     expect(source).toContain('/catalog/summary');

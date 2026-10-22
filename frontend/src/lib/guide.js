@@ -213,7 +213,7 @@ export const GUIDE = [
       },
       {
         label: 'Layers cost nothing until they are on',
-        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Layers tab of the side panel, and none of them is fetched before its switch is pressed. Borders and place names are the layers the map opens with.',
+        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Layers tab of the side panel, and none of them is fetched before its switch is pressed. Borders are the layer the map opens with.',
       },
       {
         label: 'Somebody else’s map over yours',
@@ -261,7 +261,11 @@ export const GUIDE = [
       },
       {
         label: '3D is a switch on Satellite',
-        text: 'It lifts the imagery onto the relief, at real scale unless you pick a taller one, and the middle button then tilts as well as turns. Elevation profile reads the ground along a line and says whether its end is in sight.',
+        text: 'It lifts the imagery onto the relief, at real scale unless you pick a taller one, and the middle button then tilts as well as turns. A measured line then reads its ground at once and stands its line of sight in the air.',
+      },
+      {
+        label: 'Measure is clicks, then a choice',
+        text: 'Click points, double-click to end, click the first point for an area. A line of two points can then be a range ring, a view cone, a shadow that gives a height and the hour, or a viewshed. Ground reads the profile and says whether B is in sight from A.',
       },
       {
         label: 'Horizon stands you on the ground',
@@ -404,6 +408,9 @@ export const GUIDE = [
         where: 'Satellite',
         keys: [
           { combo: 'Page Up / Down', does: 'tilts the map in 3D toward the horizon and back' },
+          { combo: 'Double-click or Enter', does: 'ends the measure being drawn' },
+          { combo: 'Backspace', does: 'takes back the last point of a measure, or removes the selected one' },
+          { combo: 'Alt (measuring)', does: 'keeps a click off the place or pin under it' },
           { combo: 'C or Space', does: 'clears the grid cell under review and flies to the next' },
           { combo: 'F', does: 'flags the cell under review' },
           { combo: 'S', does: 'skips to the next unchecked cell' },

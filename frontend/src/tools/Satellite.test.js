@@ -30,7 +30,7 @@ function satelliteSources() {
 describe('the map rail', () => {
   it('says which of its tools is on, every one of them', async () => {
     // a tool armed with its icon left plain reads as nothing being on: the
-    // Elevation profile was, until this was checked
+    // old Elevation profile seat was, until this was checked
     const { railEntries } = await import('../lib/map/tools.js');
     const block = source.slice(source.indexOf('<MapRail'), source.indexOf('onpick={pickTool}'));
     for (const entry of railEntries()) {
@@ -343,8 +343,8 @@ describe('the capture button', () => {
     expect(source).toContain("onArm: () => closeOthers(modes, 'capture')");
     expect(source).toContain('capture: {');
     expect(source).toContain('close: () => capture.disarm(),');
-    // …and a measure sub-mode still puts the marquee away
-    expect(source).toContain('if (measure.setMode(mode)) capture.disarm()');
+    // …and the Measure tool, armed as a mode like the others, puts it away too
+    expect(source).toContain('open: () => measure.open(),');
   });
 
   it('offers a figure on Sentinel-2 only, with the layers it is made of read first', () => {
@@ -750,7 +750,7 @@ describe('a map in more than one window', () => {
     expect(bar).toContain('<PlaceSearch');
     // the rail starts under the search, however tall it renders
     expect(source).toContain('const railTop = $derived(12 + searchHeight + 8);');
-    expect(source).toContain('<div class="map-tools" style:top={`${railTop}px`}>');
+    expect(source).toContain('<div class="map-tools" style:top={`${railTop}px`}');
     const beside = source.slice(source.indexOf('{#snippet beside()}'), source.indexOf('{/snippet}', source.indexOf('{#snippet beside()}')));
     for (const label of ['Link the view to the other maps', 'Open in a new tab', 'Toggle fullscreen']) {
       expect(beside).toContain(`aria-label="${label}"`);
@@ -837,17 +837,17 @@ describe('one camera for the map tabs', () => {
 });
 
 describe('the key-less reference layers', () => {
-  it('fetches no tile from any of them until its switch is pressed, borders and place names apart', () => {
+  it('fetches no tile from any of them until its switch is pressed, borders apart', () => {
     // local-first: a map not showing power lines asks nobody about power lines.
-    // Borders and place names are the exception and are on from the start —
-    // they are map tiles, which is the network a map is opened to use.
+    // Borders are the exception and are on from the start: they are map tiles,
+    // which is the network a map is opened to use.
     const state = source.slice(
       source.indexOf('const refLayers = $state({'),
       source.indexOf('const night = $state(')
     );
     expect(state).toContain('boundaries: true');
-    expect(state).toContain('placenames: true');
-    expect(state.replace('boundaries: true', '').replace('placenames: true', '')).not.toContain('true');
+    expect(state).toContain('placenames: false');
+    expect(state.replace('boundaries: true', '')).not.toContain('true');
     expect(source).toContain("const night = $state({ on: false, source: 'noaa20', day: lastNight() });");
   });
 
@@ -946,5 +946,33 @@ describe('Satellite offers what is open to the Add event bar', () => {
   it('publishes under its own tool id and withdraws on unmount', () => {
     expect(source).toMatch(/offerNote\(\s*'satellite',/);
     expect(source).toContain("onDestroy(() => withdrawNote('satellite'))");
+  });
+});
+
+describe('the Measure tool on the map', () => {
+  it('puts a click on what is there, unless Alt is held', () => {
+    expect(source).toContain('if (measure.on) measure.addPoint(measure.snap(at, { free: altHeld }).point);');
+    expect(source).toContain("if (e.key === 'Alt') altHeld = true;");
+    expect(source).toContain("if (e.type === 'blur' || e.key === 'Alt') altHeld = false;");
+  });
+
+  it('takes a point back on Backspace and the measure off on Delete, never while typing', () => {
+    expect(source).toContain("if (!typing && measure.on && (e.key === 'Backspace' || e.key === 'Delete')) {");
+    expect(source).toContain("(e.key === 'Backspace' && measure.undo()) || measure.removeSelected()");
+  });
+
+  it('finishes and lets go of a measure on Escape before the tool itself closes', () => {
+    const escape = source.slice(source.indexOf("if (e.key !== 'Escape') return;"));
+    expect(escape.indexOf('measure.escape()')).toBeGreaterThan(0);
+    expect(escape.indexOf('measure.escape()')).toBeLessThan(escape.indexOf('return disarm(modes)'));
+  });
+
+  it('keeps the flat map from zooming on the double click that ends a measure', () => {
+    expect(source).toContain("window.addEventListener('dblclick', swallow, true);");
+    expect(source).toContain('if (!measure.on || !mapEl) return;');
+  });
+
+  it('reads its ground in 3D, where the relief is read anyway, and on its own switch on the flat map', () => {
+    expect(source).toContain('relief: () => reliefOn,');
   });
 });

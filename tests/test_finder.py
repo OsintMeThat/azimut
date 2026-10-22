@@ -45,8 +45,13 @@ def test_the_grid_lies_over_the_area_and_on_the_lines():
     area = _square(CAMERA, 2_000.0)
     plan = finder.Plan(area=area)
     lat, lon = finder.grid(plan, 500.0)
-    assert lat.size == 64
+    # a hex lattice: a quarter fewer points than a square grid 500 m apart (64), no spot farther from one
+    assert 46 <= lat.size <= 52
     assert finder.inside(area, lat, lon).all()
+    rng = np.random.default_rng(1)
+    spots = [offset(*CAMERA, b, d) for b, d in zip(rng.uniform(0, 360, 200), np.sqrt(rng.uniform(0, 1, 200)) * 1_400.0)]
+    nearest = [min(terrain.distance(a, o, *spot) for a, o in zip(lat, lon)) for spot in spots]
+    assert max(nearest) <= 500.0 / 2**0.5 * 1.01
     # an alignment through the camera keeps only the points along its line
     near = offset(*CAMERA, 30.0, 1_500.0)
     lined = finder.Plan(area=area, alignments=(finder.Alignment(*near, bearing=210.0, tolerance=8.0),))
@@ -83,7 +88,8 @@ def test_the_camera_is_found_again_from_its_skyline():
     found = finder.search(plan, trace, progress=lambda done, total: seen.append((done, total)))
     best = found["places"][0]
     assert terrain.distance(best["lat"], best["lon"], *CAMERA) < 400.0
-    assert best["heading"] == pytest.approx(80.0, abs=1.5)
+    # a couple of hundred metres off, ridges 3 to 7 km out turn by a degree or two
+    assert best["heading"] == pytest.approx(80.0, abs=2.0)
     assert best["explained"] > 0.8
     assert found["verdict"] in ("match", "ambiguous")
     assert seen[-1][0] == seen[-1][1]
@@ -177,7 +183,7 @@ def test_lines_said_how_far_set_the_reach_and_the_grid():
     assert finder.asked_spacing(finder.Plan(area=area, near=1_000.0)) == pytest.approx(finder.SAID_SHARE * 1_000.0)
     assert finder.said_nearest([[0, 0.0, 1_000.0]]) == finder.SAID_NEAREST
     assert finder.said_nearest([[0, 3_000.0, 10_000.0], [1, 1_000.0, 3_000.0]]) == 1_000.0
-    # a spacing picked is kept for hours of search: 20 m over 25 km² is some 62,000 points
+    # a spacing picked is kept for hours of search: 20 m over 25 km² is some 48,000 points
     kept = finder.estimate(finder.Plan(area=_square(CAMERA, 2_500.0), spacing=20.0))
     assert kept["spacing"] == 20.0 and kept["asked"] is None and kept["coarse"] > finder.COARSE_MAX
     assert finder.estimate(finder.Plan(area=_square(CAMERA, 1_000.0)))["asked"] is None
@@ -229,8 +235,9 @@ def test_zones_lay_their_own_grid_and_zones_left_out_are_never_searched():
     lat, lon, steps = finder.spaced_grid(plan, 500.0)
     plain = finder.grid(finder.Plan(area=area, spacing=500.0), 500.0)[0].size
     in_finer = finder.inside(finer.area, lat, lon)
-    # the zone's own 100 m grid, its points saying their spacing
-    assert in_finer.sum() >= 80 and set(steps[in_finer].tolist()) == {100.0}
+    # the zone's own 100 m grid (a hex lattice: some 77 points over its square kilometre), its points saying
+    # their spacing
+    assert in_finer.sum() >= 70 and set(steps[in_finer].tolist()) == {100.0}
     assert set(steps[~in_finer].tolist()) == {500.0}
     # nothing in the zone left out, even where the area covers it
     assert not finder.inside(lake.area, lat, lon).any()
@@ -303,9 +310,9 @@ def test_the_sun_against_the_camera_gives_its_headings():
 
 
 def test_a_large_grid_is_scored_by_processes_and_finds_the_same_camera():
-    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 2_000.0), reach=REACH, spacing=250.0, fine=250.0)
+    plan = finder.Plan(area=_square(offset(*CAMERA, 60.0, 600.0), 2_000.0), reach=REACH, spacing=220.0, fine=220.0)
     trace = _photo()
-    assert finder.grid(plan, 250.0)[0].size >= finder.LANE_MIN_POINTS
+    assert finder.grid(plan, 220.0)[0].size >= finder.LANE_MIN_POINTS
     told = []
     alone = finder.search(plan, trace)
     shared = finder.search(plan, trace, lanes=2, progress=lambda done, total: told.append((done, total)))
@@ -361,34 +368,51 @@ def test_a_line_along_the_sea_lies_on_the_sea_s_horizon(monkeypatch):
 def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(monkeypatch):
     eye = (12.7, 43.5)
     hill = Peak(*offset(*eye, 90.0, 3_000.0), height=300.0, radius=1_000.0)
-    mountain = Peak(*offset(*eye, 100.0, 8_000.0), height=1_500.0, radius=1_500.0)
-    terrain.forget_decoded()
-    monkeypatch.setattr(terrain, "tile", Relief(peaks=(hill, mountain), plain=0.0))
-    # haze stops the air at 5 km: the hill is the skyline, the mountain behind it unseen
-    swept = horizon.sweep(horizon.Observer(*eye), azimuths=np.arange(0.0, 360.0, 0.1), far=20_000.0, cuts=[5_000.0])
-    x, y = trace_on(skymatch.Turn(0.0, 0.1, swept.skyline_cuts[0]), heading=95.0, fov=40.0)
+
+    def photo(mountain):
+        terrain.forget_decoded()
+        monkeypatch.setattr(terrain, "tile", Relief(peaks=(hill, mountain), plain=0.0))
+        # haze stops the air at 5 km: the hill is the skyline, the mountain behind it unseen
+        swept = horizon.sweep(horizon.Observer(*eye), azimuths=np.arange(0.0, 360.0, 0.1), far=20_000.0,
+                              cuts=[5_000.0])
+        x, y = trace_on(skymatch.Turn(0.0, 0.1, swept.skyline_cuts[0]), heading=95.0, fov=40.0)
+        # a reader of its own: one holds the tiles it decoded, the relief they were cut from included
+        return finder.Trace(x=x, y=y, half_width=HALF, fov=40.0, known=True), terrain.Sampler()
+
+    trace, sampler = photo(Peak(*offset(*eye, 100.0, 8_000.0), height=1_500.0, radius=1_500.0))
+    line = np.zeros(trace.x.size, dtype=np.int64)
     # the line said to stand 1 to 3 km off: the turn is searched no farther than that, whatever the reach
-    line = np.zeros(x.size, dtype=np.int64)
     said = skymatch.Marks(line=line, far=((0, 1_000.0, 3_000.0),))
     sure = replace(said, clear=(0,))
-    trace = finder.Trace(x=x, y=y, half_width=HALF, fov=40.0, known=True)
-    sampler = terrain.Sampler()
 
-    def scored(reach, marks):
+    def scored(reach, marks, traced=trace, reader=sampler):
         plan = finder.Plan(area=[eye] * 3, reach=reach)
-        return finder.score_point(*eye, replace(trace, marks=marks), plan, sampler=sampler, quick=False)
+        return finder.score_point(*eye, replace(traced, marks=marks), plan, sampler=reader, quick=False)
 
     found = scored(10_000.0, said)
     assert found["explained"] > 0.5 and "over" not in found
-    # left to Auto or said to see 5 km, the line has only sky above it as far as that: the mountain is haze's
-    for reach in (None, 5_000.0):
-        kept = scored(reach, sure)
-        assert kept["over"] == 0.0 and kept["explained"] == pytest.approx(found["explained"], abs=1e-3)
+    # said to see 5 km, the line has only sky above it as far as that: the mountain is haze's
+    kept = scored(5_000.0, sure)
+    assert kept["over"] == 0.0 and kept["explained"] == pytest.approx(found["explained"], abs=1e-3)
     # said to see 10 km, the mountain stands over the line, read past where the line is searched: no place
     lost = scored(10_000.0, sure)
     assert lost["over"] > 0.2 and lost["explained"] == 0.0 and lost["reach"] == found["reach"]
+    # left to Auto, the line is read on past the 3 km it is said to stand at, and a mountain under three times as
+    # far still stands over it (owner, 2026-10-22): no place, and the place says how far out it stands
+    for marks in (sure, skymatch.Marks(line=line, clear=(0,))):
+        auto = scored(None, marks)
+        assert auto["over"] > 0.2 and auto["explained"] == 0.0
+        assert auto["over_far"] == pytest.approx(8_000.0, rel=0.2)
+    # a range seven times as far haze may well hide: left to Auto the place keeps its score
+    far, reader = photo(Peak(*offset(*eye, 100.0, 20_000.0), height=3_000.0, radius=2_500.0))
+    plain = scored(None, skymatch.Marks(line=line), far, reader)
+    hazy = scored(None, skymatch.Marks(line=line, clear=(0,)), far, reader)
+    assert hazy["over"] == 0.0 and hazy["explained"] == pytest.approx(plain["explained"], abs=1e-3)
     # a saved trace carries the lines it says have only sky above
     assert finder.marks_of({"line": [0, 0, 1], "clear": [1]}).clear == (1,)
+    # a point ruled out says why on the map, one that keeps its score says nothing
+    assert finder._ruled(auto) == {"over": auto["over"], "over_far": auto["over_far"]}
+    assert finder._ruled(hazy) == {} and finder._ruled(found) == {}
     terrain.forget_decoded()
 
 
@@ -443,19 +467,21 @@ def test_cells_near_relief_are_filled_in_within_the_budget():
     lat, lon = finder.grid(plan, 500.0)
     seen = {(round(float(a), 6), round(float(o), 6)) for a, o in zip(lat, lon)}
     coarse = [{"lat": float(a), "lon": float(o), "explained": 0.1, "relief": 1_500.0} for a, o in zip(lat, lon)]
-    # ridges 1.5 km out: a tenth of that is 150 m, three points a side in a 500 m cell (its middle scored)
+    # ridges 1.5 km out: a tenth of that is 150 m, four points a side in the 570 m square of ground each point
+    # of a hex lattice 500 m dense stands for
+    cell = 500.0 * (finder.HEX_ACROSS * finder.HEX_ROWS) ** 0.5
     one = finder.filled(plan, coarse[27:28], 500.0, 60.0, set(seen))
-    assert len(one) == 0  # a single cell's eight would pass its budget of three: two a side instead
+    assert len(one) == 0  # a single cell's sixteen would pass its budget of three: two a side instead
     extra = finder.filled(plan, coarse, 500.0, 60.0, set(seen))
-    assert extra[0][2] == pytest.approx(500.0 / 3)
+    assert extra[0][2] == pytest.approx(cell / 4)
     assert len(extra) <= finder.DENSE_MAX * len(coarse)
     assert finder.inside(area, np.array([e[0] for e in extra]), np.array([e[1] for e in extra])).all()
     # past the budget the nearest relief comes first, the rest two by two, then none
-    nearest = [{**p, "relief": 1_500.0 if i else 400.0} for i, p in enumerate(coarse)]
+    nearest = [{**p, "relief": 1_500.0 if i else 600.0} for i, p in enumerate(coarse)]
     many = finder.filled(plan, nearest, 500.0, 25.0, set(seen))
     assert len(many) <= finder.DENSE_MAX * len(coarse)
-    assert many[0][2] == pytest.approx(500.0 / 12)  # the nearest relief's cell (40 m), filled first and finest
-    assert {round(own, 3) for _, _, own in many[144:]} <= {round(500.0 / 3, 3), 250.0}
+    assert many[0][2] == pytest.approx(cell / 9)  # the nearest relief's cell (63 m), filled first and finest
+    assert {round(own, 3) for _, _, own in many[100:]} <= {round(cell / 4, 3), round(cell / 2, 3)}
     # a plain seeing no relief, or relief far enough for the grid, is left as it is
     assert finder.filled(plan, [{**p, "relief": float("inf")} for p in coarse], 500.0, 60.0, set(seen)) == []
     assert finder.filled(plan, [{**p, "relief": 9_000.0} for p in coarse], 500.0, 60.0, set(seen)) == []

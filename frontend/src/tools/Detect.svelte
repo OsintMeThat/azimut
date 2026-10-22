@@ -103,7 +103,7 @@
   /** Whether the fire layer can be used, read from our own backend. */
   const fireKey = createFireKey({ api });
   /** What a case that never said otherwise opens Detect's map on. */
-  const DETECT_LAYERS = ['boundaries', 'placenames'];
+  const DETECT_LAYERS = ['boundaries'];
   /**
    * The map's layers, every one the catalogue offers (lib/map/layerSet). The
    * fires and the night lights start on the day of the picture on screen, which

@@ -1517,7 +1517,7 @@ def open_workspace() -> None:
     Imports are local because the modules below sit above this one; calling them
     at import time would close the circle.
     """
-    from .engine import bundles, scrapers, terrain, tilecache, workqueue
+    from .engine import bundles, scrapers, terrain, tilecache, turncache, workqueue
     from .engine.buildings import service as buildings_service
 
     config.ensure_workspace()
@@ -1533,6 +1533,7 @@ def open_workspace() -> None:
     # Off the startup path: a cache months of Detect sweeps filled is a long walk.
     threading.Thread(target=tilecache.sweep, name="tile-cache-sweep", daemon=True).start()
     threading.Thread(target=terrain.sweep, name="terrain-cache-sweep", daemon=True).start()
+    threading.Thread(target=turncache.sweep, name="turn-cache-sweep", daemon=True).start()
     threading.Thread(target=buildings_service.sweep, name="buildings-cache-sweep", daemon=True).start()
 
 

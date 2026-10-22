@@ -7,6 +7,7 @@ import {
   rasterSource,
   readableReason,
   sourceMaxZoom,
+  sourceMinZoom,
   tileTemplate,
   tileUrls,
 } from './basemap.js';
@@ -40,6 +41,7 @@ const SENTINEL = {
   attribution: '© Copernicus Sentinel data',
   max_zoom: 18,
   max_native_zoom: 14,
+  min_zoom: 7,
   tile_size: 512,
   meter: 'sentinelhub',
 };
@@ -149,6 +151,14 @@ describe('the deepest tile a provider is asked for', () => {
     expect(sourceMaxZoom(GOOGLE_TILES, 512)).toBe(21);
     // and the z17 detail boost, a 256 px cell for a 1024 px tile
     expect(sourceMaxZoom(GOOGLE_TILES, 256)).toBe(22);
+  });
+});
+
+describe('the shallowest tile a provider is asked for', () => {
+  it('is its floor, shifted down like the ceiling for a bigger cell', () => {
+    expect(sourceMinZoom(ESRI, 256)).toBe(0);
+    // Sentinel Hub renders no pixel over 1500 m: view z7, grid level 6 of its 512 px tiles
+    expect(sourceMinZoom(SENTINEL, 512)).toBe(6);
   });
 });
 
@@ -873,13 +883,11 @@ describe('the layers on a map', () => {
 
 
 describe('billed tiles on a map that can tilt', () => {
-  it('asks a billed provider through the guard, and a free one in the batches a tilted map asks in', () => {
+  it('asks a billed provider through the guard, and a free one at its own address', () => {
     expect(rasterSource(SENTINEL, 'sentinel2', 512, 'm4').tiles).toEqual([
       'azimut-billed://m4/sentinel2/{z}/{x}/{y}',
     ]);
-    expect(rasterSource(ESRI, 'esri-world-imagery', 256, 'm4').tiles).toEqual([
-      'azimut-tiles://m4/imagery/esri-world-imagery/{z}/{x}/{y}',
-    ]);
+    expect(rasterSource(ESRI, 'esri-world-imagery', 256, 'm4').tiles).toEqual(['/api/tiles/esri-world-imagery/{z}/{x}/{y}']);
     // a direct {s} template is never billed and never passes through the app
     expect(rasterSource({ ...CUSTOM_XYZ, meter: 'x' }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');
     // without a map to read the view from, the plain proxy address

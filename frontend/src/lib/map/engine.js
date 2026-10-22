@@ -1,9 +1,9 @@
 /**
  * Builds the map MapLibre renders, and hands back the neutral façade.
  *
- * The only file in the tools' reach that imports MapLibre — the pitch and
- * terrain of the 3D map (SPEC v3) are options on this map object, and the tools
- * above the façade never learn about either. What the map opens on, and the two
+ * The only file in the tools' reach that imports MapLibre — a plate map's lean
+ * is an option on this map object, and the tools above the façade never learn
+ * about it; the 3D view is the app's own globe (`lib/globe`). What the map opens on, and the two
  * controls it always carries, are settled here rather than at the call site: a
  * second map surface must not be able to ship without a scale bar.
  *
@@ -24,19 +24,17 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import './engine.css';
 import { mapFacade, engineZoom } from './facade.js';
 import { GUARD_PROTOCOL, readGuarded, tileSource } from './quotaGuard.js';
-import { appTile, BATCH_PROTOCOL, createTileBatcher, readBatched } from './tileBatch.js';
+import { appTile } from './tileBatch.js';
 import { WHEEL_ZOOM_RATE } from './wheel.js';
 
 setWorkerUrl(workerUrl);
 
 /**
- * The maps a tile may be asked for, by the id its address carries, so a
- * protocol of ours can read the view the tile is for: the billed guard
- * (`quotaGuard.js`) and the batches of a tilted map (`tileBatch.js`).
+ * The maps a tile may be asked for, by the id its address carries, so the
+ * billed guard (`quotaGuard.js`) can read the view the tile is for.
  */
 const maps = new Map();
 let mapsMade = 0;
-const batcher = createTileBatcher();
 
 /** What the guard needs of a view: where it looks, how deep, how big, how tilted. */
 function guardView(map) {
@@ -52,16 +50,6 @@ function guardView(map) {
   };
 }
 
-/** The maps some of whose relief the fallback source drew, by id, so a capture credits it. */
-const reliefFallback = new Set();
-
-/** A tile through the app, in a batch while this map stands on relief (`tileBatch.js`). */
-async function throughApp(map, asked, signal) {
-  const tile = await appTile(asked, { batcher, signal, batched: asked.kind === 'terrain' || Boolean(map?.getTerrain?.()) });
-  if (tile.fallback && asked.kind === 'terrain') reliefFallback.add(asked.mapId);
-  return tile;
-}
-
 /**
  * A billed tile, from its provider or, past a flat view's reach on a tilted
  * map, from the free one.
@@ -71,14 +59,7 @@ addProtocol(GUARD_PROTOCOL, async (params, abort) => {
   if (!asked) throw new Error('not a billed tile address');
   const map = maps.get(asked.mapId);
   const providerId = map ? tileSource(asked, guardView(map)).provider : asked.providerId;
-  return throughApp(map, { ...asked, kind: 'imagery', providerId }, abort.signal);
-});
-
-/** A free provider's tile or a relief tile, through the app (`tileBatch.js`). */
-addProtocol(BATCH_PROTOCOL, async (params, abort) => {
-  const asked = readBatched(params.url);
-  if (!asked) throw new Error('not a tile address');
-  return throughApp(maps.get(asked.mapId), asked, abort.signal);
+  return appTile({ ...asked, providerId }, { signal: abort.signal });
 });
 
 /**
@@ -168,12 +149,6 @@ function settleOnLevel(map, following) {
       settling = false;
       return;
     }
-    // Over relief the engine re-seats the centre on the ground after a gesture
-    // and moves the zoom to keep the camera where it was, so the level it lands
-    // on is fractional by design. Snapping it would slide the ground out from
-    // under the hand that just let go, and a tilted view is captured as drawn,
-    // not stitched from whole levels.
-    if (map.getTerrain()) return;
     const zoom = map.getZoom();
     const level = Math.round(zoom);
     const off = Math.abs(zoom - level);
@@ -230,7 +205,6 @@ export async function createMapEngine(container, { view, imperial = false, settl
   const gone = new AbortController();
   map.once('remove', () => {
     maps.delete(mapId);
-    reliefFallback.delete(mapId);
     gone.abort();
   });
   dropDraggedClicks(container, map.getCanvas(), gone.signal);
@@ -257,9 +231,6 @@ export async function createMapEngine(container, { view, imperial = false, settl
   // as soon as this returns.
   await map.once('load');
   const facade = mapFacade(map, container, mapId);
-  // Whether the fallback relief drew some of this map's ground, for a capture
-  // that credits it: only the tile loader above ever learns it.
-  facade.drewReliefFallback = () => reliefFallback.has(mapId);
   if (settle) settleOnLevel(map, facade.following);
   // A tilted view has no one scale: the bar reads true along one line of it and
   // wrong everywhere else, so it steps aside while the camera leans, as a map

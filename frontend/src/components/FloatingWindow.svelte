@@ -7,10 +7,14 @@
    * It floats in its parent element, which has to be positioned (the map's own
    * wrapper is). Map captures hide everything painted over the map, so a window
    * never ends up in one.
+   *
+   * A `foldable` window folds down to its title bar, by its chevron or a double
+   * click on the bar, and opens folded again if it was left so: what the title
+   * bar says stays in sight while the map gets its room back.
    */
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Icon from './Icon.svelte';
-  import { dragWindow, fitWindow, resizeWindow, savedWindow, saveWindow } from '../lib/floatingWindow.js';
+  import { dragWindow, fitWindow, resizeWindow, savedFold, saveFold, savedWindow, saveWindow } from '../lib/floatingWindow.js';
 
   let {
     /** Names the window to the browser's memory of where it was left. */
@@ -20,6 +24,8 @@
     /** Where it opens the first time, from the map's `{ w, h }`. */
     placement = (bounds) => ({ x: 12, y: bounds.h - 300, w: Math.min(820, bounds.w - 24), h: 240 }),
     min = { w: 360, h: 180 },
+    /** Whether it folds down to its title bar. */
+    foldable = false,
     onclose = () => {},
     /** What sits in the title bar beside the title. */
     header,
@@ -29,6 +35,18 @@
   let element = $state();
   let rect = $state({ x: 12, y: 12, w: 400, h: 220 });
   let placed = $state(false);
+  // the id names the window for good: read once, as the rectangle is
+  let folded = $state(untrack(() => foldable && savedFold(id)));
+
+  function fold() {
+    folded = !folded;
+    saveFold(id, folded);
+  }
+
+  function foldFromBar(event) {
+    if (!foldable || event.target.closest('button, input, select, a')) return;
+    fold();
+  }
 
   function bounds() {
     const box = element?.parentElement?.getBoundingClientRect();
@@ -77,27 +95,41 @@
   bind:this={element}
   class="floating card"
   class:placed
+  class:folded
   style:left={`${rect.x}px`}
   style:top={`${rect.y}px`}
   style:width={`${rect.w}px`}
-  style:height={`${rect.h}px`}
+  style:height={folded ? 'auto' : `${rect.h}px`}
   aria-label={title}
 >
   <!-- a drag handle for the pointer; the window's acts are its own buttons -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <header onpointerdown={startMove} title="Drag to move">
+  <header onpointerdown={startMove} ondblclick={foldFromBar} title={foldable ? 'Drag to move, double-click to fold' : 'Drag to move'}>
     <h3>
       {#if icon}<Icon name={icon} size={13} />{/if}
       {title}
     </h3>
     {@render header?.()}
+    {#if foldable}
+      <button
+        class="btn btn-ghost btn-icon fold"
+        onclick={fold}
+        title={folded ? 'Unfold' : 'Fold to the title bar'}
+        aria-label={folded ? `Unfold ${title}` : `Fold ${title}`}
+        aria-expanded={!folded}
+      >
+        <Icon name={folded ? 'chevronDown' : 'chevronUp'} size={14} />
+      </button>
+    {/if}
     <button class="btn btn-ghost btn-icon close" onclick={onclose} title="Close" aria-label={`Close ${title}`}>
       <Icon name="x" size={14} />
     </button>
   </header>
-  <div class="body">
-    {@render children?.()}
-  </div>
+  {#if !folded}
+    <div class="body">
+      {@render children?.()}
+    </div>
+  {/if}
   <span class="edge e" onpointerdown={(event) => startResize(event, 'e')} aria-hidden="true"></span>
   <span class="edge s" onpointerdown={(event) => startResize(event, 's')} aria-hidden="true"></span>
   <span class="edge w" onpointerdown={(event) => startResize(event, 'w')} aria-hidden="true"></span>
@@ -108,7 +140,8 @@
 <style>
   .floating {
     position: absolute;
-    z-index: 620;
+    /* over the rail and its tool panel (1100), under the search's suggestions (1150) */
+    z-index: 1120;
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -147,9 +180,24 @@
     color: var(--text-1);
     white-space: nowrap;
   }
+  .fold {
+    margin-left: auto;
+    cursor: pointer;
+  }
+  .fold + .close {
+    margin-left: 0;
+  }
   .close {
     margin-left: auto;
     cursor: pointer;
+  }
+  /* folded to its title bar: nothing to resize */
+  .folded header {
+    border-bottom: 0;
+  }
+  .folded .edge,
+  .folded .corner {
+    display: none;
   }
   .body {
     flex: 1;
