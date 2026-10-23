@@ -150,6 +150,8 @@ test('on the map a pin drags without the map moving, a loop picks two lines that
   const pin = at(.4, .45); await page.mouse.click(pin.x, pin.y); await page.keyboard.press('Escape');
   await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
   const before = [...features[0].geometry.coordinates];
+  // only what is picked drags: a click first, then the drag
+  await page.mouse.click(pin.x, pin.y - 18);
   await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
   await page.mouse.move(pin.x + 60, pin.y - 18, { steps: 8 }); await page.mouse.up();
   // sixty pixels east at zoom 16: had the map panned with the pointer, the pin would not have moved
@@ -215,6 +217,7 @@ test('a pin let go is drawn where it lands at once, before the layer has saved i
   let release;
   const held = new Promise((resolve) => { release = resolve; });
   await page.route('**/selection', async (route) => { await held; await route.fallback(); });
+  await page.mouse.click(pin.x, pin.y - 18);
   await page.mouse.move(pin.x, pin.y - 18); await page.mouse.down();
   await page.mouse.move(pin.x + 120, pin.y - 18, { steps: 8 }); await page.mouse.up();
   // the dragged copy goes once the map has drawn the pin where it landed

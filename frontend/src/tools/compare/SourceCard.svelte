@@ -29,7 +29,7 @@
   );
 </script>
 
-<div class="source-card cmp-glass" class:right={align === 'right'} aria-label={`Imagery ${letter}`} data-bar-obstacle>
+<div class="source-card cmp-glass" data-guide="compare.source" class:right={align === 'right'} aria-label={`Imagery ${letter}`} data-bar-obstacle>
   <span class="cmp-letter {lower}">{letter}</span>
   <div class="chips">
     <ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />

@@ -19,7 +19,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
-| **Home** (the mark) | Overview, Guide | |
+| **Home** (the mark) | Overview | |
 | **Case** (rail, under the stages) | Timeline, Board, Graph, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect, Collage | Edit Provenance, OCR, Image Compare, Hints, Sky Clock, audio |
@@ -62,8 +62,8 @@ switch cases.
 
 ## Home
 
-Two tabs, chosen by who is looking. **Overview** is for somebody who has been here
-before; **Guide** is for somebody who has not.
+One tab, **Overview**, for somebody who has been here before. Somebody who has not
+presses *Read the guide* on it, which opens the guide on its start page.
 
 - **To-do** appears whenever a case is open, including an empty case. Each named
   list has its own tab and completed/total count. The block occupies one grid
@@ -136,29 +136,47 @@ before; **Guide** is for somebody who has not.
   workspace, where there is nothing to summarise and nothing on screen that says what
   the rail means: what Azimut is, the rail drawn as the sequence it is, a field that
   names the first case, and the cases already in the workspace when there are any.
-- **The Guide is one section per workspace**, between two that set up and two that
-  close. Setting up: what a case is, and the capture extension that feeds it —
-  installing it is the first thing the first section says, because it is the one setup
-  step that changes what the app can do. Then **three worked examples**, whole jobs
-  walked tab by tab, because the sections describe tools and somebody arriving has a
-  goal; each step names the tool it happens in and opens it. Closing: **every keystroke
-  the app listens for**, grouped by where it is pressed, and **what to do when something
-  does not work**, symptom by symptom. Static text rather than a tour, and no
-  screenshots: a tour breaks on the first layout change, a screenshot is stale the
-  release after it was taken, and both fail silently. `guide.test.js` fails when a tool
-  joins a workspace and nobody wrote down what it is for, when a recipe sends the reader
-  to a tool that does not exist, and when a key is filed under a tab the app no longer
-  has.
-- **The `?` in the topbar is the way in.** It sits beside the settings gear rather than
-  in each toolbar, so there is one of it, and it opens the Guide on the section written
-  about the tool being stood in (`guideFor`). A tool no section covers opens the guide
-  at the top. It is absent on the Guide itself, which is the answer.
-- **The contents list follows the reading.** It marks whichever section is under the
-  eye as the column scrolls, measured against a line just below the top edge so a
-  heading that has only just passed is the one being read, and the last section takes
-  the foot of the page since a short final section can never reach that line. A press
-  on the list owns the mark until its scroll lands, or the one control that says *go
-  here* would point somewhere else three times on the way.
+- **The guide opens over the tools** (`components/GuideDialog.svelte`, data in
+  `lib/guide.js`), from the `?` in the topbar on the tool being stood in, from Home on
+  its start, from Settings on its own page. The tool underneath does not move, and
+  Escape closes it. A menu on the left reads in the order somebody arriving needs it:
+  **Start here** and the **Capture extension**, then **journeys** (a goal walked across
+  the tools; one for now, a photo geolocated from its import to the published thread),
+  then the **workspaces** with their tools as tabs, then the
+  **reference**: every key by where it is pressed, Settings, and what to do when
+  something does not work, symptom by symptom.
+- **A tool's page is a picture of it.** A number stands by each control it explains,
+  on a panel's corner or just off a button's so it hides none of it, and a line per
+  number stands beside the picture. At rest the picture carries its numbers and nothing
+  else; reading a line, or pointing at its number, dims the rest, rings that control and
+  names it by its number.
+  Under the picture, the subtleties the controls do not say. A column names the
+  journeys the tool takes part in, at their step, and *Open* goes to the tool.
+- **A number can lead to the next screen.** A control that opens something (a menu,
+  the right-click menu of the map, Details beside a row, the Go to palette) carries a
+  chevron on its number; pressing it shows the picture of what opens, with its own numbers
+  and a trail back. A journey's step shows only that step's frames, on the picture of
+  the tool it happens in.
+- **The pictures are made, not taken.** `npm run guide:shots` (`frontend/guide/`)
+  builds the app into a scratch folder, starts a private Azimut on a throwaway
+  workspace, files a demo case into it (drawn pictures, a port in public-domain USGS
+  imagery, Horizon on a mountain), stages each picture with the clicks an analyst would
+  make (`stages.mjs`) and writes `src/assets/guide/<shot>.webp` with the rectangle of
+  every `data-guide` anchor drawn on it. A picture keeps the part of the window its
+  frames are in, and a panel a page does not explain is folded first. A control that
+  moved is followed; one that went fails the run, and `guide.test.js` fails when a
+  frame points at an anchor no component carries, when a tool has no page, or when a
+  picture ships that the guide no longer shows. Rerun it before a release, look at the
+  pictures it changed, and commit them with the release.
+- **No tour.** Nothing points at the live screen: a tour breaks on the first layout
+  change and fails silently, where a stale picture fails a test.
+- **A version opens with its welcome** (`components/Welcome.svelte`, `lib/welcome.js`):
+  its number in a card in the middle, and the `?` lit through a veil with a dotted line
+  drawn from the card to it, since that is where the guide is. Closed, the card shrinks
+  into the `?`. It shows at every start of that version until *Don't show this
+  again* is ticked, which holds until the next version; a reload is not a start. Both
+  are kept in the browser's storage, a map window never shows it, and the update notice
+  waits behind it.
 
 Rules:
 
@@ -1975,7 +1993,10 @@ line or area), **Merge**, **Split** and the trash once something is selected,
 says what a press on the map does now; **Tips** hides it, and it steps aside while
 the style palette is open. Saves queue behind each other, so the bar never greys
 out while one is written. The same bar appears in Map, Detect, Compare and
-Horizon; Compare puts it on one of its two maps.
+Horizon; Compare puts it on one of its two maps. On the 3D globe every press,
+drag, double click and right-click below works as on the flat map, and a feature
+of the layer being edited never opens its card: a click picks it. While a layer is
+edited the globe reads a double click as two clicks, not a zoom.
 
 The bar moves by its grip. Let go near an edge, it docks there, upright on the
 left or the right; anywhere else it stays where it was dropped. It keeps clear of
@@ -1985,9 +2006,9 @@ them, remembers its place in this browser, and a double-click on the grip puts i
 back at the top.
 
 With **Select**, a click on a feature picks it and opens its sheet in the panel,
-Shift-click adds to the selection, and a click on bare ground lets it go. A marker
-drags at once; a line or an area drags once it is picked, so a drag across one
-that is not pans the map. Dragging moves the whole selection with it, the map does
+Shift-click adds to the selection, and a click on bare ground lets it go. Only what
+is picked drags, and an area only by its edge. A drag that starts anywhere else
+pans the map, so a pan never carries a feature off. Dragging moves the whole selection with it, the map does
 not pan under the drag, and the toast offers **Undo**. What is let go is drawn where
 it landed at once and saves behind; a move the layer refuses goes back. Ctrl+Z takes back any edit
 of the session, one step at a time (an added marker, a restyle, a status, a reshape, a
@@ -1998,14 +2019,24 @@ free loop round what to pick; Shift adds. Delete removes the selection, with
 **Undo**, after a press on the map only: a Delete after a click on a button of the
 panel removes nothing.
 Double-clicking a line or an area opens its corners. A right-click on a feature
-opens its menu: style, status, **Clear the direction**, **Reshape**, **Save as
-case place** and removal, for the selection it is part of. **Add markers** accepts
+opens its menu: style, status, the point's coordinates (a marker's own, else
+the spot pressed), copied in one press, **More for this point…**, which opens the
+map's own point menu there (other formats, **Open in…**, **What is here?**),
+**Clear the direction**, **Reshape**, **Save as case place** and removal, for the
+selection it is part of. The map's menu leaves out the acts that arm a tool of the
+rail, put away while a layer is edited. **Add markers** accepts
 repeated map clicks, each new marker picked so its sheet opens; Escape stops adding. **Draw line** and **Draw area** collect
 map clicks; Enter or **Save** saves, Esc cancels, and **Undo last point** takes a
 corner back. A corner placed within ten pixels of one already in the layer lands on
 it, so a line drawn to meet another meets it exactly; a white ring shows where, and
 Alt lets it go free. **Freehand**, while a line or an area is drawn, lays a stroke
-of the pointer instead of a corner per click. A line being reshaped grows by a click
+of the pointer instead of a corner per click. While a new line or area is drawn, a
+dashed leg runs from its last corner to the pointer and a label beside the pointer
+says the length or the surface it would have; a circle says its radius and a box its
+two sides. Once a circle's centre is down, the bar holds a **Radius** field: a reach
+typed there (`800 m`, `2.5 km`, a bare number in the unit shown) draws it, and Enter
+saves it. A new line is named **Line 1**, **Line 2**, an area **Area 1**, each
+counted apart; a new layer's first group is **Features**. A line being reshaped grows by a click
 on the map, from its end or, with the bar's other arrow, from its start. An area
 being reshaped takes no click: its corners are dragged, and **+** puts one in. A corner
 of a line being reshaped can be pressed, then **Cut the line here** splits it there.
@@ -2069,7 +2100,10 @@ layer's time strip and the Timeline read; which way it faces; its sources, each 
 chip that opens in a tab of its own; **Geolocated by** **Me** or **Others**, the
 second giving the marker a dashed rim; the **Credit** a feature copied from somebody
 else's layer keeps, which a plate that draws it prints; and a note. A line states
-its length and an area its surface. How it is drawn folds under **Look**, which
+its length and an area its surface. A marker states its **Position** in the
+analyst's coordinate format, with a copy button; a position typed or pasted over it
+(decimal, DMS, MGRS or a plus code) moves the marker there as one edit Ctrl+Z takes
+back. A marker that follows a case item, or that a date holds, stays and says why. How it is drawn folds under **Look**, which
 names what the feature sets of its own while folded and stays as it was left from
 one feature to the next: a marker's **Size**, a line's **Width**, **Dash** (solid,
 dashed, dotted) and **Arrow** at its end or both, an area's **Fill** (filled,
@@ -3082,7 +3116,8 @@ come back to the same ground and a view worth keeping as a link. An address is
 something a person can type, so a coordinate or a zoom it cannot vouch for
 leaves the map where it was rather than flying it nowhere. Panning rewrites the
 address in place: a back button holding four hundred camera positions would be
-worse than none. Everything else — the case, its saved points, a sweep in
+worse than none. It is written once a move ends, a turn or a tilt included, not
+at each step of it. Everything else — the case, its saved points, a sweep in
 progress — is shared already, below.
 
 A detached tab carries its number in its title and beside its search, because two

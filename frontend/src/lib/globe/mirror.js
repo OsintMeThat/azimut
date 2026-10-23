@@ -30,8 +30,8 @@ import { featureFilter } from '@maplibre/maplibre-gl-style-spec';
 import { DRAPE_SIZE, paintTile } from './drape.js';
 import { tileBounds, overlaps } from './drapes.js';
 import { createGlyphs } from './glyphs.js';
-import { coveringTile, createTileSources, describeSource } from './sources.js';
-import { drawStanding, markedAt, placeStanding, shiftStanding } from './standing.js';
+import { coveringTile, createTileSources, describeSource, readOnce } from './sources.js';
+import { drawStanding, markedAt, placeStanding, shiftMark, shiftStanding } from './standing.js';
 import { DRAPED, STANDING, compileLayer, evaluable } from './style.js';
 
 /** Of a tile's span, the margin a line just outside it may still paint into. */
@@ -42,6 +42,12 @@ const DIFFED = 3000;
 const PLACE_MS = 250;
 /** Pixels round a press a line is still under it. */
 const LINE_REACH = 4;
+/**
+ * Vector tiles whose features are kept read (`readOnce`): enough for the finer
+ * tiles a view paints out of each, few enough that a dense road tile, about a
+ * megabyte read, never adds up to much.
+ */
+const READ_KEPT = 24;
 /** The flat map's own handlers, held still while the globe draws so a press on a marker moves nothing under it. */
 const HANDLERS = ['dragPan', 'scrollZoom', 'boxZoom', 'dragRotate', 'keyboard', 'doubleClickZoom', 'touchZoomRotate', 'touchPitch'];
 
@@ -163,7 +169,11 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
   const descriptions = new Map(); // tiled source id → describeSource
   const pointsCache = new Map(); // `${entryId}|${tileKey}` → candidates read off a vector tile
   const sourceCandidates = new Map(); // `${entryId}` → candidates of a GeoJSON source
+  const sourcePoints = new Map(); // geojson source id → { version, points } its standing layers share
+  const readTiles = new Map(); // vector tile → its features read once, the most recently used last
   let placed = [];
+  // the unseen dots (click targets) left where they were placed while the view moved
+  let unseenBehind = false;
   let dirty = true;
   // a number per compiled layer, which the points read off its tiles are kept under
   let stamps = 0;
@@ -298,6 +308,16 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
     return patterns.get(key);
   }
 
+  /** A vector tile read once for the ground it is painted on and the names it holds. */
+  function readOf(vector) {
+    let read = readTiles.get(vector);
+    if (read) readTiles.delete(vector);
+    else read = readOnce(vector);
+    readTiles.set(vector, read);
+    if (readTiles.size > READ_KEPT) readTiles.delete(readTiles.keys().next().value);
+    return read;
+  }
+
   /** One tile's picture of what lies on its ground, or null when nothing does. */
   async function compose(tile, signal) {
     const zoom = tile.z - 1;
@@ -320,7 +340,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       const value = await fetched.get(layer.source);
       if (signal?.aborted) throw new DOMException('dropped', 'AbortError');
       if (!value) continue;
-      prepared.push(layer.type === 'raster' ? { layer, image: value, from: cover } : { layer, vector: value, from: cover });
+      prepared.push(layer.type === 'raster' ? { layer, image: value, from: cover } : { layer, vector: readOf(value), from: cover });
     }
     if (!prepared.length || destroyed) return null;
     painter ??= makeCanvas(DRAPE_SIZE, DRAPE_SIZE);
@@ -333,16 +353,37 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
 
   // -- what stands, placed -------------------------------------------------------------
 
+  /**
+   * A GeoJSON source's points, read once a version. Each carries the spot its
+   * marks share: a layer's dot, its icon and its click target stand on one
+   * point, which is projected once a frame for all of them (`project`).
+   */
+  function pointsOf(sourceId) {
+    const data = bySource.get(sourceId);
+    if (!data) return [];
+    const held = sourcePoints.get(sourceId);
+    if (held?.version === data.version) return held.points;
+    const points = [];
+    for (const f of data.features) {
+      const coordinates = f.type === 'Point' ? [f.geometry.coordinates] : f.type === 'MultiPoint' ? f.geometry.coordinates : [];
+      if (!coordinates.length) continue;
+      const read = evaluable(f.type, f.properties, f.id);
+      for (const [lon, lat] of coordinates) points.push({ f, lon, lat, read, spot: {} });
+    }
+    sourcePoints.set(sourceId, { version: data.version, points });
+    return points;
+  }
+
   /** The points of a GeoJSON source a standing layer draws. */
   function geojsonCandidates(entry) {
     let list = sourceCandidates.get(entry.id);
     if (list) return list;
     list = [];
-    for (const f of bySource.get(entry.layer.source)?.features ?? []) {
-      const points = f.type === 'Point' ? [f.geometry.coordinates] : f.type === 'MultiPoint' ? f.geometry.coordinates : [];
-      for (const [lon, lat] of points) {
-        list.push({ layer: entry.layer, order: entry.order, lat, lon, type: f.type, properties: f.properties, id: f.id, geometry: f.geometry });
-      }
+    const { layer } = entry;
+    for (const { f, lon, lat, read, spot } of pointsOf(layer.source)) {
+      // one the filter refuses at every zoom is never weighed
+      if (layer.zoomFree && !layer.accepts(0, read)) continue;
+      list.push({ layer, order: entry.order, lat, lon, type: f.type, properties: f.properties, id: f.id, geometry: f.geometry, read, spot });
     }
     sourceCandidates.set(entry.id, list);
     return list;
@@ -364,19 +405,21 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       });
       return [];
     }
-    const layer = vector?.layers?.[entry.layer.sourceLayer];
+    const layer = vector ? readOf(vector).layers[entry.layer.sourceLayer] : null;
     const list = [];
     if (layer) {
       const b = tileBounds(tile);
       for (let i = 0; i < layer.length; i += 1) {
         const feature = layer.feature(i);
         if (feature.type !== 1) continue;
+        const read = evaluable('Point', feature.properties, feature.id);
+        if (entry.layer.zoomFree && !entry.layer.accepts(0, read)) continue;
         for (const ring of feature.loadGeometry()) {
           for (const p of ring) {
             const at = vectorPoint(p, layer.extent, cover);
             // each globe tile keeps its own ground's points, so a point in two tiles' margins is drawn once
             if (at.lon < b.west || at.lon >= b.east || at.lat <= b.south || at.lat > b.north) continue;
-            list.push({ layer: entry.layer, order: entry.order, ...at, type: 'Point', properties: feature.properties, id: feature.id });
+            list.push({ layer: entry.layer, order: entry.order, ...at, type: 'Point', properties: feature.properties, id: feature.id, read });
           }
         }
       }
@@ -420,9 +463,36 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
     return { width, height, ratio };
   }
 
-  const project = (lat, lon, memo) => globe.standingAt(lat, lon, memo);
+  // a number a frame: a point's projection is kept on its spot for the frame it was made in
+  let pass = 0;
+  const project = (lat, lon, memo) => {
+    const spot = memo?.spot;
+    if (!spot) return globe.standingAt(lat, lon, memo);
+    if (spot.pass !== pass) {
+      spot.pass = pass;
+      spot.at = globe.standingAt(lat, lon, spot);
+    }
+    return spot.at;
+  };
   let placedAt = -Infinity;
   let placeLater = null;
+
+  /**
+   * The flat map's markers and cards placed again, through `project`. The flat
+   * map answers a `move` by drawing itself again, under the globe where none of
+   * it shows, so that repaint is held off for this one.
+   */
+  function moveMarkers() {
+    const own = Object.prototype.hasOwnProperty.call(map, '_update');
+    const update = map._update;
+    if (typeof update === 'function') map._update = () => map;
+    try {
+      map.fire('move');
+    } finally {
+      if (own) map._update = update;
+      else delete map._update;
+    }
+  }
 
   /**
    * A frame of the globe was drawn: the marks placed again if it moved, and
@@ -433,6 +503,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
    */
   function frame({ moved }) {
     if (destroyed || (!moved && !dirty)) return;
+    pass += 1;
     const { width, height, ratio } = fit();
     const now = performance.now();
     if (dirty || now - placedAt >= PLACE_MS) {
@@ -446,6 +517,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
         { project, zoomAt: (lat, d) => globe.zoomAt(lat, d), width, height, bearing: globe.heading() },
         glyphs
       );
+      unseenBehind = false;
       // names still to be written are placed again next frame, a share each frame
       if (placed.waiting) {
         dirty = true;
@@ -453,6 +525,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       }
     } else {
       placed = shiftStanding(placed, project);
+      unseenBehind = true;
       placeLater ??= setTimeout(() => {
         placeLater = null;
         dirty = true;
@@ -463,8 +536,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
     drawStanding(ctx, placed);
-    // the flat map's markers and cards place themselves again, through `project`
-    if (moved) map.fire('move');
+    if (moved) moveMarkers();
   }
 
   // -- the flat map's questions, answered from the globe ------------------------------
@@ -503,6 +575,13 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
         },
       });
     };
+    // a click finds the unseen dots where their ground is now, not where the view left them
+    if (unseenBehind) {
+      const caught = placed.map((mark) => (mark.unseen ? shiftMark(mark, project) : mark)).filter(Boolean);
+      caught.waiting = placed.waiting;
+      placed = caught;
+      unseenBehind = false;
+    }
     for (const mark of markedAt(placed, box, layers)) {
       const c = mark.candidate;
       take(c.layer, c, { type: 'Point', coordinates: [c.lon, c.lat] }, c.order + 0.5);
@@ -595,9 +674,12 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       ratio: () => ratio,
       sharpest: Math.min(4, ratio),
       perFrame: Infinity,
+      measuredPerFrame: Infinity,
       size: 4096,
     });
     sharp.begin();
+    // the capture's own projections: the camera may have moved since the last frame
+    pass += 1;
     const marks = placeStanding(
       candidates(),
       { project, zoomAt: (lat, d) => globe.zoomAt(lat, d), width, height, bearing: globe.heading() },
@@ -639,6 +721,7 @@ export function createMirror(map, globe, { canvas, exclude = () => false, tiles 
       for (const name of held) map[name]?.enable?.();
       canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       tiles.dispose();
+      readTiles.clear();
       // the flat map's markers go back where the flat map shows them
       map.fire('move');
     },

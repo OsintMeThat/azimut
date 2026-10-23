@@ -13,13 +13,13 @@ function surface() {
   box.append(canvas); document.body.append(box);
   return { box, canvas };
 }
-async function setup(type = 'Polygon', features = []) {
+async function setup(type = 'Polygon', features = [], props = {}) {
   const callbacks = new Map(), removed = vi.fn();
   const { box, canvas } = surface();
   const engine = { container: box,
     latLngToContainerPoint: ({ lon, lat }) => ({ x: lon * 10, y: lat * 10 }),
     containerPointToLatLng: ({ x, y }) => ({ lon: x / 10, lat: y / 10 }),
-    on: (name, run) => { callbacks.set(name, run); return removed; } };
+    on: (name, run) => { callbacks.set(name, run); return removed; }, readClicks: vi.fn() };
   const row = { editable: true, name: 'work', title: 'Working' };
   const api = { post: vi.fn(async () => ({ layer: row, document: { features },
     groups: [{ id: 'g', name: 'Markers', mode: 'individual', size: 1 }] })) };
@@ -27,7 +27,7 @@ async function setup(type = 'Polygon', features = []) {
   const controller = createMyLayersState({ api, layers: { rows: [], edited: vi.fn() },
     caseId: () => 'case', notify, reloadCase: vi.fn() });
   await controller.open(row); if (type) controller.startShape(type);
-  held = mount(LayerGeometry, { target: box, props: { engine, controller } }); flushSync();
+  held = mount(LayerGeometry, { target: box, props: { engine, controller, ...props } }); flushSync();
   return { controller, engine, callbacks, removed, api, canvas, notify };
 }
 const point = (key, lon, lat, extra = {}) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] },
@@ -97,11 +97,13 @@ describe('layer geometry handles', () => {
     expect(controller.sketch).toBeNull();
   });
 
-  it('picks a feature on a press, and a drag moves it as one edit the toast can undo', async () => {
+  it('picks a feature on a click, and a drag of it picked moves it as one edit the toast can undo', async () => {
     const { controller, api, canvas, notify } = await setup(null, [point('a', 2, 4), point('b', 30, 30)]);
     api.post.mockClear();
     api.post.mockResolvedValueOnce({ layer: { name: 'work' }, document: { features: [point('a', 3, 4)] }, batch: 'undo-1', kept: 0 });
     // the badge is drawn round (20, 40) on screen; the container sits at (10, 20)
+    press(canvas, 30, 60); window.dispatchEvent(new PointerEvent('pointerup', { clientX: 30, clientY: 60 }));
+    expect(controller.selection).toEqual(['a']);
     press(canvas, 30, 60);
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 40, clientY: 60 }));
     flushSync();
@@ -112,6 +114,41 @@ describe('layer geometry handles', () => {
     expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/selection', { keys: ['a'], offset: [1, 0] });
     expect(notify).toHaveBeenCalledWith('Moved', 'info', 7000, expect.objectContaining({ label: 'Undo' }));
     expect(controller.dragging).toBeNull();
+  });
+
+  it('pans the map on a drag that starts on a marker not picked, moving nothing', async () => {
+    const { controller, api, canvas } = await setup(null, [point('a', 2, 4)]);
+    api.post.mockClear();
+    const down = new PointerEvent('pointerdown', { button: 0, clientX: 30, clientY: 60, bubbles: true, cancelable: true });
+    canvas.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(false);
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 90, clientY: 60 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 90, clientY: 60 })); flushSync();
+    expect(controller.dragging).toBeNull();
+    expect(controller.selection).toEqual([]);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('moves a picked area by its edge, and pans the map on a drag from inside it', async () => {
+    const zone = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }, properties: { key: 'zone', group: 'g' } };
+    const { controller, api, canvas } = await setup(null, [zone]);
+    controller.chooseKeys(['zone']); api.post.mockClear();
+    // inside, on screen (70, 30): far from every side of the triangle
+    const inside = new PointerEvent('pointerdown', { button: 0, clientX: 80, clientY: 50, bubbles: true, cancelable: true });
+    canvas.dispatchEvent(inside);
+    expect(inside.defaultPrevented).toBe(false);
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 140, clientY: 50 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 140, clientY: 50 })); flushSync();
+    expect(controller.dragging).toBeNull();
+    expect(api.post).not.toHaveBeenCalled();
+    // on its top edge, on screen (50, 0)
+    api.post.mockResolvedValueOnce({ layer: { name: 'work' }, document: { features: [zone] }, kept: 0 });
+    press(canvas, 60, 20);
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 70, clientY: 20 })); flushSync();
+    expect(controller.dragging).toMatchObject({ keys: ['zone'], offset: [1, 0] });
+    window.dispatchEvent(new PointerEvent('pointerup'));
+    await controller.whenSaved();
+    expect(api.post).toHaveBeenCalledWith('/api/cases/case/map-layers/work/selection', { keys: ['zone'], offset: [1, 0] });
   });
 
   it('leaves a press on bare ground to the map, and lets the selection go on its click', async () => {
@@ -126,7 +163,7 @@ describe('layer geometry handles', () => {
 
   it('adds to the selection on a shift press and removes it with Delete', async () => {
     const { controller, api, canvas } = await setup(null, [point('a', 2, 4), point('b', 30, 30)]);
-    press(canvas, 30, 60); window.dispatchEvent(new PointerEvent('pointerup'));
+    press(canvas, 30, 60); window.dispatchEvent(new PointerEvent('pointerup', { clientX: 30, clientY: 60 }));
     press(canvas, 310, 320, { shiftKey: true }); flushSync();
     expect(controller.selection).toEqual(['a', 'b']);
     api.post.mockClear();
@@ -148,6 +185,7 @@ describe('layer geometry handles', () => {
 
   it('keeps linked markers where their case item stands when a selection is dragged', async () => {
     const { controller, canvas } = await setup(null, [point('a', 2, 4, { entity_id: 'place-1' })]);
+    controller.chooseKeys(['a']);
     press(canvas, 30, 60);
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 60, clientY: 60 })); flushSync();
     expect(controller.dragging).toBeNull();
@@ -202,6 +240,7 @@ describe('layer geometry handles', () => {
       const { controller, api, canvas } = await setup(null, [point('a', 2, 4), point('b', 30, 30)]);
       let answer;
       api.post.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+      controller.chooseKeys(['a']);
       press(canvas, 30, 60);
       window.dispatchEvent(new PointerEvent('pointermove', { clientX: 40, clientY: 60 }));
       window.dispatchEvent(new PointerEvent('pointerup')); flushSync();
@@ -226,5 +265,83 @@ describe('layer geometry handles', () => {
       expect(controller.features[0].properties.bearing).toBe(90);
       expect(document.querySelector('.turn-knob').getAttribute('aria-label')).toBe('Direction 90° E');
     });
+  });
+});
+
+describe('layer geometry on the globe and while drawing', () => {
+  /** The globe's canvas, which stands beside the flat map's box rather than in it. */
+  function globe(engine) {
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    engine.onSurface = (target) => target === canvas;
+    engine.readClicks = vi.fn();
+    return canvas;
+  }
+
+  it('picks a feature pressed on the globe, and the click the globe hands on keeps it picked', async () => {
+    const { controller, engine, callbacks } = await setup(null, [point('a', 2, 4)]);
+    const sphere = globe(engine);
+    press(sphere, 30, 60); window.dispatchEvent(new PointerEvent('pointerup', { clientX: 30, clientY: 60 }));
+    expect(controller.selection).toEqual(['a']);
+    // the globe relays its click to the flat map, where the tools hear it: not a click on bare ground
+    callbacks.get('click')({ lon: 2, lat: 4 });
+    expect(controller.selection).toEqual(['a']);
+    // the next click on bare ground lets it go
+    press(sphere, 600, 500); callbacks.get('click')({ lon: 59, lat: 48 });
+    expect(controller.selection).toEqual([]);
+  });
+
+  it('stops a press on a picked feature before the globe turns under the drag', async () => {
+    const { controller, engine } = await setup(null, [point('a', 2, 4)]);
+    const sphere = globe(engine);
+    controller.chooseKeys(['a']);
+    let reached = false;
+    sphere.addEventListener('pointerdown', () => { reached = true; });
+    press(sphere, 30, 60);
+    expect(reached).toBe(false);
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 40, clientY: 60 })); flushSync();
+    expect(controller.dragging).toMatchObject({ keys: ['a'], offset: [1, 0] });
+    window.dispatchEvent(new PointerEvent('pointercancel'));
+  });
+
+  it('has the globe read a double click as two clicks while a layer is edited, and gives the zoom back after', async () => {
+    const { engine } = await setup(null);
+    expect(engine.readClicks).toHaveBeenLastCalledWith(true);
+    unmount(held); held = null;
+    expect(engine.readClicks).toHaveBeenLastCalledWith(false);
+  });
+
+  it('opens a shape on a double click on the globe', async () => {
+    const zone = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }, properties: { key: 'zone', group: 'g' } };
+    const { controller, engine } = await setup(null, [zone]);
+    const sphere = globe(engine);
+    sphere.dispatchEvent(new MouseEvent('dblclick', { clientX: 60, clientY: 20, bubbles: true }));
+    expect(controller.sketch).toMatchObject({ key: 'zone', type: 'Polygon' });
+  });
+
+  it('draws the leg to the pointer and says the length a line would have', async () => {
+    const { callbacks, canvas } = await setup('LineString');
+    callbacks.get('click')({ lon: 0, lat: 0 }); callbacks.get('click')({ lon: 0, lat: 0.01 }); flushSync();
+    // the pointer at (0.02, 0.01): a leg twice as long, east
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 10.2, clientY: 20.1, bubbles: true })); flushSync();
+    expect(document.querySelector('.geometry path.pending')).not.toBeNull();
+    expect(document.querySelector('.reading').textContent).toBe('3.34 km');
+    // off the map, the leg goes and the length stays with the corners laid
+    document.body.dispatchEvent(new PointerEvent('pointermove', { clientX: 900, clientY: 900, bubbles: true }));
+    await new Promise((done) => requestAnimationFrame(done));
+    document.body.dispatchEvent(new PointerEvent('pointermove', { clientX: 900, clientY: 900, bubbles: true })); flushSync();
+    expect(document.querySelector('.geometry path.pending')).toBeNull();
+    expect(document.querySelector('.reading').textContent).toBe('1.11 km');
+  });
+
+  it('copies a marker\'s point from its right-click menu, and hands it to the map\'s own menu', async () => {
+    const onmenu = vi.fn();
+    const { canvas } = await setup(null, [point('a', 2, 4, { name: 'Bridge' })], { onmenu });
+    canvas.dispatchEvent(new MouseEvent('contextmenu', { clientX: 30, clientY: 60, bubbles: true, cancelable: true })); flushSync();
+    const rows = [...document.querySelectorAll('.float-menu .fm-item')].map((row) => row.textContent.trim());
+    expect(rows[0]).toBe('4.000000, 2.000000');
+    [...document.querySelectorAll('.float-menu .fm-item')].find((row) => row.textContent.includes('More for this point')).click(); flushSync();
+    expect(onmenu).toHaveBeenCalledWith({ lat: 4, lon: 2, x: 20, y: 40, feature: 'Bridge', layer: 'Working' });
+    expect(document.querySelector('.float-menu')).toBeNull();
   });
 });

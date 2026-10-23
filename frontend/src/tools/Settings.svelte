@@ -859,7 +859,7 @@
   </div>
 
   <div class="split">
-    <nav class="rail" aria-label="Settings sections">
+    <nav class="rail" aria-label="Settings sections" data-guide="settings.nav">
       {#each TABS as t (t.id)}
         <button
           class="rail-tab dotted"

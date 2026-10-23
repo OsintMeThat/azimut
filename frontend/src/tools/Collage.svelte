@@ -765,11 +765,11 @@
     </div>
   {:else}
     <div class="workspace">
-      <div class="viewer">
+      <div class="viewer" data-guide="collage.canvas">
         <CollageCanvas collage={doc} bind:selectedIds {requestCrop} />
       </div>
       <aside class="panel">
-        <div class="section first">
+        <div class="section first" data-guide="collage.add">
           <div class="section-head"><span><Icon name="plus" size={14} /> Add pieces</span></div>
           <PiecePicker
             caseId={doc.caseId}
@@ -781,10 +781,10 @@
             onadd={addPiece}
           />
         </div>
-        <div class="section">
+        <div class="section" data-guide="collage.arrange">
           <CollageMenu collage={doc} bind:selectedIds {requestCrop} {renderPiece} {fileTitles} />
         </div>
-        <div class="section">
+        <div class="section" data-guide="collage.save">
           <SaveToCase
             defaultName={doc.title}
             filedPath={exportedPath}

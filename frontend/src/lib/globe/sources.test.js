@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { coveringTile, createTileSources, describeSource, tileUrl } from './sources.js';
+import { coveringTile, createTileSources, describeSource, readOnce, tileUrl } from './sources.js';
 
 const RAILWAY = describeSource({ type: 'raster', tiles: ['https://a/{z}/{x}/{y}.png', 'https://b/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19 });
 const BORDERS = describeSource({ type: 'vector', tiles: ['https://t/{z}/{x}/{y}.pbf'], maxzoom: 14 });
@@ -47,6 +47,30 @@ describe('the flat map’s sources, fetched for the globe', () => {
     now = 60000;
     await sources.get(BORDERS, { z: 1, x: 0, y: 0 });
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('reads a vector tile’s features and their geometry once, whoever asks', () => {
+    const reads = { feature: 0, geometry: 0 };
+    const raw = {
+      layers: {
+        place: {
+          extent: 4096,
+          length: 2,
+          feature: (i) => {
+            reads.feature += 1;
+            return { type: 1, id: i, properties: { name: `p${i}` }, extent: 4096, loadGeometry: () => (reads.geometry += 1, [[{ x: i, y: i }]]) };
+          },
+        },
+      },
+    };
+    const tile = readOnce(raw);
+    expect(tile.layers.place).toMatchObject({ name: 'place', extent: 4096, length: 2 });
+    const first = tile.layers.place.feature(1);
+    expect(first).toMatchObject({ type: 1, id: 1, properties: { name: 'p1' } });
+    expect(first.loadGeometry()).toEqual([[{ x: 1, y: 1 }]]);
+    expect(tile.layers.place.feature(1).loadGeometry()).toBe(first.loadGeometry());
+    expect(reads).toEqual({ feature: 1, geometry: 1 });
+    expect(readOnce(null)).toEqual({ layers: {} });
   });
 
   it('keeps only so many tiles, the least recently read let go', async () => {

@@ -71,7 +71,7 @@
   });
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.providers">
   <h3>Providers</h3>
   <p class="intro">
     Add provider keys to unlock more Satellite basemaps and layers; usage appears on
@@ -295,7 +295,7 @@
   </div>
 </section>
 
-<section class="group">
+<section class="group" data-guide="settings.eco">
   <h3>Eco mode</h3>
   <label
     class="toggle eco"

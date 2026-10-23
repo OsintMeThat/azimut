@@ -461,6 +461,7 @@
 
 <div
   class="map-wrap dark-surface"
+  data-guide="map.ground"
   class:measuring={armed === 'measuring'}
   class:selecting={armed === 'selecting'}
   class:grid-drawing={armed === 'grid-drawing'}

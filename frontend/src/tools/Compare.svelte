@@ -1765,7 +1765,8 @@
   let canvasA = $state(null);
   let canvasB = $state(null);
   const pointActions = $derived(
-    actionsFor(both ? ['lookup', 'place', 'measure', 'horizon'] : ['lookup', 'place', 'horizon'])
+    // a layer being edited owns the clicks on the map, so no measure is armed under it
+    actionsFor(both && !personalLayers.editor ? ['lookup', 'place', 'measure', 'horizon'] : ['lookup', 'place', 'horizon'])
   );
   const pointTools = otherMapTools('compare');
 
@@ -2431,7 +2432,7 @@
     {#if both}
       <ModeDock {mode} {difference} differenceable={difference || changeStatus.ok}
         onmode={setMode} ondifference={setDifference} onswap={swapSides} />
-      <button class="btn btn-sm" class:active={stripOpen} disabled={!archive} aria-pressed={stripOpen}
+      <button class="btn btn-sm" class:active={stripOpen} disabled={!archive} aria-pressed={stripOpen} data-guide="compare.dates"
         onclick={() => (stripOpen = !stripOpen)}
         title={archive ? 'Every dated picture of this point'
           : 'Show the same dated archive on A and B to list its pictures'}>
@@ -2484,7 +2485,7 @@
         onkeydown={(event) => event.key === 'Enter' && requestSaveSession()}
       />
     {/if}
-    <button class="btn btn-sm" onclick={openSessionList} disabled={!caseState.current || sessionBusy} title="Open a saved comparison">
+    <button class="btn btn-sm" data-guide="compare.session" onclick={openSessionList} disabled={!caseState.current || sessionBusy} title="Open a saved comparison">
       <Icon name="folderOpen" size={13} /> Open
     </button>
     {#if openedSession && discardable}
@@ -2494,12 +2495,12 @@
     {/if}
     {#if a.present || b.present}
       <div class="new-wrap" bind:this={newMenuEl}>
-        <button class="btn btn-sm" onclick={() => (newMenu = !newMenu)} title="Start a new comparison"
+        <button class="btn btn-sm" data-guide="compare.new" onclick={() => (newMenu = !newMenu)} title="Start a new comparison"
           aria-expanded={newMenu} aria-haspopup="menu">
           <Icon name="plus" size={13} /> New <Icon name="chevronDown" size={11} />
         </button>
         {#if newMenu}
-          <div class="new-menu card" role="menu">
+          <div class="new-menu card" role="menu" data-guide="compare.new-menu">
             {#each availablePresets(imagery.providers) as preset}
               <button class="new-row" role="menuitem" onclick={() => requestNewComparison(preset)}>
                 <strong>{preset.label}</strong><span>{preset.hint}</span>
@@ -2521,6 +2522,7 @@
     {/if}
     <button
       class="btn btn-primary btn-sm"
+      data-guide="compare.session"
       onclick={requestSaveSession}
       disabled={!both || sessionBusy || !sessionDirty}
       title="Keep this editable comparison in the case"
@@ -2669,7 +2671,8 @@
           onbearingchange={(next) => onSurfaceBearing('a', next)}
           oncontextmenu={(at) => onMapContextMenu('a', at)}
         >
-          <LayerGeometry engine={a.ready ? a.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === a.engine} />
+          <LayerGeometry engine={a.ready ? a.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === a.engine}
+            onmenu={(at) => onMapContextMenu('a', at)} />
           <AddedLayersOverlay
             engine={a.ready ? a.engine : null}
             caseId={caseState.current?.id ?? ''}
@@ -2772,7 +2775,8 @@
           onbearingchange={(next) => onSurfaceBearing('b', next)}
           oncontextmenu={(at) => onMapContextMenu('b', at)}
         >
-          <LayerGeometry engine={b.ready ? b.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === b.engine} />
+          <LayerGeometry engine={b.ready ? b.engine : null} controller={personalLayers} active={uiState.tool === 'compare'} bar={primeEngine === b.engine}
+            onmenu={(at) => onMapContextMenu('b', at)} />
           <AddedLayersOverlay
             engine={b.ready ? b.engine : null}
             caseId={caseState.current?.id ?? ''}
@@ -2925,7 +2929,7 @@
   </div>
 
   {#if both && (mode !== 'side' || difference)}
-    <div class="mode-footer">
+    <div class="mode-footer" data-guide="compare.mix">
       <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
       {#if difference}
         <DifferenceBar bind:settings={changeOptions} bind:open={differenceOpen} status={changeStatus}

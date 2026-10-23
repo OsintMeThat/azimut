@@ -319,7 +319,7 @@
         <span class="name" title={selected.path}>{nameOf(selected)}</span>
       </span>
       <div class="spacer"></div>
-      <button class="btn btn-sm" onclick={() => (pickerOpen = true)} title="Pick another image or video">
+      <button class="btn btn-sm" data-guide="reverse.change" onclick={() => (pickerOpen = true)} title="Pick another image or video">
         <Icon name="folderOpen" size={14} /> Change file
       </button>
     </div>
@@ -359,7 +359,7 @@
     <div class="tool-body">
       <div class="work">
         <div class="preview-col">
-          <div class="preview card">
+          <div class="preview card" data-guide="reverse.picture">
             {#if selected.kind === 'video'}
               <!-- svelte-ignore a11y_media_has_caption -->
               <video
@@ -382,7 +382,7 @@
         </div>
 
         <div class="controls-col">
-          <div class="adjust">
+          <div class="adjust" data-guide="reverse.adjust">
             <button
               class="adjust-toggle"
               class:on={adjustOpen}
@@ -407,7 +407,7 @@
             {/if}
           </div>
 
-          <div class="engines">
+          <div class="engines" data-guide="reverse.engines">
             {#if filled.length}
               <div class="eg-group">
                 <span class="eg-head">Opens with the {frameLabel} in it</span>

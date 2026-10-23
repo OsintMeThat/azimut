@@ -35,7 +35,7 @@
   } = $props();
 </script>
 
-<div class="capture-split" role="group">
+<div class="capture-split" role="group" data-guide="sat.capture">
   <button
     class="btn btn-primary capture-main"
     class:on={mode === 'select' && selectArmed}
@@ -71,7 +71,7 @@
       <Icon name="chevronDown" size={13} />
     </button>
     {#if menuOpen}
-      <div class="size-menu card">
+      <div class="size-menu card" data-guide="sat.capture-menu">
         <div class="menu-row">
           <span class="menu-label">Mode</span>
           <div class="chips">

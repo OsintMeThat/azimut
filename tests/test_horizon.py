@@ -193,6 +193,17 @@ def test_a_full_turn_reads_a_bounded_number_of_tiles(relief):
     assert found.sources == {"mapterhorn"}
 
 
+def test_one_bounded_reader_shared_by_many_threads_reads_the_same_turn(relief):
+    """A sweep reads with several threads through one reader: a reader holding few tiles lets tiles go while
+    another thread adds its own, which once broke a search ("OrderedDict mutated during iteration")."""
+    alone = horizon.sweep(horizon.Observer(*EYE), azimuths=np.arange(0.0, 360.0, 2.0), far=40_000.0,
+                          sampler=_sampler(relief), workers=1)
+    for _ in range(3):
+        shared = horizon.sweep(horizon.Observer(*EYE), azimuths=np.arange(0.0, 360.0, 2.0), far=40_000.0,
+                               sampler=terrain.Sampler(fetch=relief, keep=4), workers=8)
+        assert np.allclose(shared.skyline, alone.skyline, equal_nan=True)
+
+
 def test_bands_cover_every_sample_once():
     zooms = horizon.lod_zooms(horizon.ray_distances(150_000.0), 45.0)
     assert np.all(np.diff(zooms) <= 0)  # coarser with distance

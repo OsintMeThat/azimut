@@ -53,7 +53,7 @@
 
 <svelte:window {onkeydown} {onpointerdown} />
 
-<div class="layer-menu" bind:this={root}>
+<div class="layer-menu" bind:this={root} data-guide="map.layers">
   <button
     type="button"
     class={buttonClass}

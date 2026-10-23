@@ -3,26 +3,32 @@
    * Where a personal layer is edited on the map: its tool bar, the selection
    * drawn round what is picked, features dragged where they go, a loop drawn
    * round what to pick, the corners of a shape being drawn or reshaped, the
-   * ring that turns a selected marker, and the menu a right-click opens.
+   * ring that turns a selected marker, and the menu a right-click opens. A new
+   * shape says its size beside the pointer as it is drawn.
    *
    * Mounted by every map that edits (Map, Detect, Compare, Horizon), so the bar
    * and the gestures are the same whichever one the analyst is on. A press on
-   * one of the layer's features is taken before the map sees it, so it moves
-   * the feature rather than the map; a press anywhere else is the map's.
+   * a picked feature (an area by its edge) is taken before the map sees it, so
+   * it moves the feature rather than the map; a drag anywhere else pans.
    */
   import LayerEditBar from './LayerEditBar.svelte';
   import LayerFeatureMenu from './LayerFeatureMenu.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
   import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
-  import { featuresInLoop, hitFeature, linesOf, markerDisc } from '../../lib/map/layerHit.js';
+  import { featuresInLoop, hitFeature, hitPart, linesOf, markerDisc } from '../../lib/map/layerHit.js';
   import { isBadge } from '../../lib/map/markerGlyphs.js';
   import { SOURCE_ICON_SCALE } from '../../lib/map/addedLayer.js';
   import { middleClickPaste } from '../../lib/clipboardPaste.js';
+  import { sketchReading } from '../../lib/map/sketchMeasure.js';
+  import { prefs } from '../../lib/state.svelte.js';
   import { layerIconUrl, readyPicture } from '../../lib/map/ownIcons.js';
   import { bearingToward, facingLabel, knobAt, screenNorth } from '../../lib/map/turnRing.js';
 
-  /** `bar`: whether this map carries the tool bar, false on the second of two side-by-side maps. */
-  let { engine, controller, active = true, ondone = null, bar = true } = $props();
+  /**
+   * `bar`: whether this map carries the tool bar, false on the second of two side-by-side maps.
+   * `onmenu`: the map's own point menu, opened from a feature's on its point (`{ lat, lon, x, y, feature, layer }`).
+   */
+  let { engine, controller, active = true, ondone = null, bar = true, onmenu = null } = $props();
   let frame = $state(0);
   /** The corner last pressed while a line is reshaped, which is where it can be cut. */
   let vertex = $state(null);
@@ -30,8 +36,10 @@
   let loop = $state(null);
   /** A marker's direction while its ring is turned, until it is let go. */
   let turning = $state(null);
-  /** Where a right-click on a feature opened its menu, in window pixels. */
+  /** Where a right-click on a feature opened its menu, in window pixels, and the point it was on (`point`). */
   let featureMenu = $state(null);
+  /** Where the pointer is while a new shape is drawn, as `[lon, lat]`: the corner a click would lay. */
+  let pointer = $state(null);
   let dragCleanup = null;
   /** Past this many pixels a press on a feature is a drag, short of it a click. */
   const DRAG_PIXELS = 4;
@@ -68,6 +76,23 @@
   });
   const closed = $derived(['Polygon', 'MultiPolygon'].includes(sketch?.type));
   const path = $derived(rings.map((ring) => ring.length ? `M${ring.map((point) => `${point.x},${point.y}`).join(' L')}${closed ? ' Z' : ''}` : '').join(' '));
+  /** The leg from the last corner to the pointer, closing back to the first on an area: the click not yet made. */
+  const pending = $derived.by(() => {
+    frame;
+    const ring = sketch?.rings?.[0];
+    if (!pointer || !engine || !ring?.length || sketch.key || sketch.shape || controller.freehand || !['LineString', 'Polygon'].includes(sketch.type)) return '';
+    const at = ([lon, lat]) => { const p = engine.latLngToContainerPoint({ lat, lon }); return `${p.x},${p.y}`; };
+    return `M${at(ring.at(-1))} L${at(pointer)}${sketch.type === 'Polygon' && ring.length > 1 ? ` L${at(ring[0])}` : ''}`;
+  });
+  /** What the new shape measures with that leg, said beside the pointer (or its last corner once the pointer has left). */
+  const reading = $derived.by(() => {
+    frame;
+    const text = sketchReading(sketch, controller.freehand ? null : pointer, prefs.units);
+    const spot = pointer ?? sketch?.rings?.[0]?.at(-1);
+    if (!text || !spot || !engine) return null;
+    const at = engine.latLngToContainerPoint({ lat: spot[1], lon: spot[0] });
+    return { text, x: at.x, y: at.y };
+  });
   const selectionPreview = $derived.by(() => {
     frame;
     if (!engine || sketch?.type !== 'Selection') return { path: '', points: [] };
@@ -192,16 +217,25 @@
     return best ? { lon: best.lon, lat: best.lat, $snap: { x: best.x, y: best.y } } : point;
   }
   const drawing = () => !!controller.sketch && !['Point', 'Selection'].includes(controller.sketch.type);
+  /**
+   * Whether a press landed on the drawn map: the flat map's canvas, or the globe's
+   * while the 3D view is on, which stands beside the flat map rather than in it.
+   * A card, a control or a handle over either keeps its own.
+   */
+  const onMap = (target) => target?.tagName === 'CANVAS' && (!!engine?.container?.contains?.(target) || !!engine?.onSurface?.(target));
+  /** A press just picked a feature: the click the globe hands on after it is not a click on bare ground. */
+  let justPicked = false;
 
   $effect(() => {
     if (!active || !engine) return;
     // A click on bare ground lets the selection go; a feature's own click never gets here.
     const off = [engine.on('view-move', () => frame += 1), engine.on('click', (point) => {
+      if (justPicked) { justPicked = false; return; }
       const placed = drawing() ? snapped(point, controller.sketch?.key) : point;
       if (!controller.addPoint({ lat: placed.lat, lon: placed.lon }) && controller.editor && !controller.armed && controller.selection?.length) controller.select(null);
     })];
     const keys = (event) => { altHeld = event.altKey; };
-    const pressed = (event) => { pressedOnMap = !!engine.container?.contains?.(event.target); };
+    const pressed = (event) => { pressedOnMap = onMap(event.target) || !!engine.container?.contains?.(event.target); };
     window.addEventListener('keydown', keys); window.addEventListener('keyup', keys);
     window.addEventListener('pointerdown', pressed, true);
     return () => {
@@ -270,10 +304,11 @@
     const box = engine.container;
     let swallow = false;
     const local = (event) => { const rect = box.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; };
-    // Only a press on the drawn map itself: a card, a control or a handle over it keeps its own.
-    const ours = (event) => event.target?.tagName !== 'CANVAS';
+    // Only a press on the drawn map itself, flat or the globe: a card, a control or a handle over it keeps its own.
+    const ours = (event) => !onMap(event.target);
     function down(event) {
       swallow = false;
+      if (onMap(event.target)) justPicked = false;
       // a freehand stroke: every point the pointer passes, thinned, until it is let go
       const sketch = controller.sketch;
       if (event.button === 0 && !ours(event) && controller.freehand && sketch && !sketch.key && !sketch.shape
@@ -294,18 +329,18 @@
         drawLoop(event, at, local);
         return;
       }
-      const key = hitFeature(shown, project, at, ownReach);
-      if (!key) return;
-      const feature = shown.find((one) => one.properties.key === key);
+      const hit = hitPart(shown, project, at, ownReach);
+      if (!hit) return;
+      const { key } = hit;
       const add = event.shiftKey || event.ctrlKey || event.metaKey;
-      if (feature?.geometry?.type !== 'Point' && !add && !(controller.selection ?? []).includes(key)) {
-        // A line or an area not picked yet: a press picks it, a drag across it pans the
-        // map, which a big area would otherwise never let go of.
+      if (!add && (!(controller.selection ?? []).includes(key) || hit.part === 'inside')) {
+        // Only what is picked moves, and an area by its edge: a press picks, a drag pans
+        // the map, so a pan that starts on a feature never carries it off.
         const up = (next) => {
           window.removeEventListener('pointerup', up, true);
           const end = local(next);
           if (Math.hypot(end.x - at.x, end.y - at.y) >= DRAG_PIXELS) return;
-          swallow = true;
+          swallow = true; justPicked = true;
           controller.chooseKeys([key]);
         };
         window.addEventListener('pointerup', up, true);
@@ -314,8 +349,8 @@
       swallow = true; event.preventDefault(); event.stopPropagation();
       press(event, key, at, local);
     }
-    const block = (event) => { if (swallow) { event.stopPropagation(); if (event.cancelable && event.type !== 'touchstart') event.preventDefault(); } };
-    const click = (event) => { if (swallow) { event.stopPropagation(); event.preventDefault(); swallow = false; } };
+    const block = (event) => { if (swallow && onMap(event.target)) { event.stopPropagation(); if (event.cancelable && event.type !== 'touchstart') event.preventDefault(); } };
+    const click = (event) => { if (swallow && onMap(event.target)) { event.stopPropagation(); event.preventDefault(); swallow = false; } };
     function dblclick(event) {
       // a double click ends a line or an area being drawn, its second click not a corner of its own
       const sketch = controller.sketch;
@@ -342,7 +377,11 @@
       if (!key) return;
       event.preventDefault(); event.stopPropagation();
       if (!(controller.selection ?? []).includes(key)) controller.chooseKeys([key]);
-      featureMenu = { x: event.clientX, y: event.clientY };
+      // the point the menu speaks of: a marker's own, else the spot pressed on the line or the area
+      const at = local(event), feature = controller.features.find((one) => one.properties.key === key);
+      const ground = feature?.geometry.type === 'Point' ? { lon: feature.geometry.coordinates[0], lat: feature.geometry.coordinates[1] } : engine.containerPointToLatLng(at);
+      featureMenu = { x: event.clientX, y: event.clientY,
+        point: ground && { lat: ground.lat, lon: ground.lon, x: at.x, y: at.y, feature: feature?.properties.name || 'Unnamed feature', layer: controller.editor?.title ?? '' } };
     }
     /** While a circle or a box is drawn, it follows the pointer; while a shape is drawn, the corner it would snap to shows. */
     let hovering = 0;
@@ -351,35 +390,31 @@
       if (hovering) return;
       hovering = requestAnimationFrame(() => { hovering = 0; });
       const sketch = controller.sketch;
-      if (!sketch || ['Point', 'Selection'].includes(sketch.type)) { snapTarget = null; return; }
+      if (!onMap(event.target)) { if (!event.target?.closest?.('.vertex, .midpoint')) pointer = null; return; }
+      if (!sketch || ['Point', 'Selection'].includes(sketch.type)) { snapTarget = null; pointer = null; return; }
       // an area being reshaped takes no click, so only a corner being dragged shows where it would land
-      if (sketch.key && sketch.type !== 'LineString') { if (!dragCleanup) snapTarget = null; return; }
+      if (sketch.key && sketch.type !== 'LineString') { if (!dragCleanup) snapTarget = null; pointer = null; return; }
       const point = engine.containerPointToLatLng(local(event));
+      // on the globe, the sky holds no ground to draw to
+      if (!point) { pointer = null; return; }
       if (sketch.shape) controller.preview(point);
       const near = snapped(point, sketch.key);
       snapTarget = near.$snap ?? null;
+      pointer = sketch.key ? null : [near.lon, near.lat];
     }
-    box.addEventListener('pointermove', hover);
-    box.addEventListener('pointerdown', down, true);
-    box.addEventListener('mousedown', block, true);
-    box.addEventListener('touchstart', block, true);
-    box.addEventListener('click', click, true);
-    box.addEventListener('dblclick', dblclick, true);
-    box.addEventListener('contextmenu', menu, true);
+    // Heard on the window, ahead of both maps: the globe's canvas is not inside the flat map's
+    // box, and a press stopped here never reaches either, so the globe neither turns nor clicks.
+    const listening = [['pointermove', hover], ['pointerdown', down], ['mousedown', block], ['touchstart', block],
+      ['click', click], ['dblclick', dblclick], ['contextmenu', menu]];
+    for (const [type, run] of listening) window.addEventListener(type, run, true);
     return () => {
-      box.removeEventListener('pointermove', hover);
-      snapTarget = null;
-      box.removeEventListener('pointerdown', down, true);
-      box.removeEventListener('mousedown', block, true);
-      box.removeEventListener('touchstart', block, true);
-      box.removeEventListener('click', click, true);
-      box.removeEventListener('dblclick', dblclick, true);
-      box.removeEventListener('contextmenu', menu, true);
+      for (const [type, run] of listening) window.removeEventListener(type, run, true);
+      snapTarget = null; pointer = null;
       dragCleanup?.();
     };
   });
 
-  /** A press on a feature: a click picks it, a drag moves what is picked with it. */
+  /** A press on a picked feature: a click picks it alone, a drag moves the whole selection with it. */
   function press(event, key, start, local) {
     const add = event.shiftKey || event.ctrlKey || event.metaKey;
     if (add) {
@@ -387,7 +422,7 @@
       controller.chooseKeys(keys.includes(key) ? keys.filter((one) => one !== key) : [...keys, key]);
       return;
     }
-    const keys = (controller.selection ?? []).includes(key) ? [...controller.selection] : [key];
+    const keys = [...controller.selection];
     const linked = new Set(controller.features.filter((one) => one.properties.entity_id).map((one) => one.properties.key));
     // a marker following a case item stays on it; so, while edits carry no date, does a feature moved on a day
     const movable = keys.filter((one) => !linked.has(one) && !controller.dateHolds?.(one));
@@ -400,14 +435,14 @@
       if (!offset && Math.hypot(at.x - start.x, at.y - start.y) < DRAG_PIXELS) return;
       if (!movable.length) { if (!told) { told = true; controller.heldBack?.(keys); } return; }
       const here = engine.containerPointToLatLng(at);
+      if (!here || !origin) return;
       offset = [here.lon - origin.lon, here.lat - origin.lat];
-      if (!(controller.selection ?? []).includes(key)) controller.chooseKeys(keys);
       controller.drag(movable, offset);
     };
     const end = () => {
       cleanup();
       if (offset) controller.moveFeatures(movable, offset);
-      else if (!(controller.selection ?? []).includes(key) || (controller.selection ?? []).length > 1) controller.chooseKeys([key]);
+      else if (keys.length > 1) controller.chooseKeys([key]);
     };
     const cleanup = () => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
@@ -433,7 +468,7 @@
     const end = () => {
       cleanup();
       loop = null;
-      if (points.length > 1) controller.addStroke(points.map((point) => engine.containerPointToLatLng(point)));
+      if (points.length > 1) controller.addStroke(points.map((point) => engine.containerPointToLatLng(point)).filter(Boolean));
     };
     const cleanup = () => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
@@ -465,7 +500,13 @@
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel);
   }
 
-  $effect(() => { if (!sketch) { dragCleanup?.(); vertex = null; } });
+  $effect(() => { if (!sketch) { dragCleanup?.(); vertex = null; pointer = null; } });
+  // On the globe a double click is two clicks while a layer is edited: corners, and a shape opened, not a zoom.
+  $effect(() => {
+    if (!editing) return;
+    engine.readClicks?.(true);
+    return () => engine.readClicks?.(false);
+  });
   $effect(() => { if (!editing) featureMenu = null; });
 
   /** The ring's knob, dragged: the marker turns toward the pointer, and is saved on release. */
@@ -514,9 +555,10 @@
     dragCleanup?.();
     let stepped = false;
     const move = (event) => {
-      if (!controller.sketch) return;
+      const ground = pointAt(event);
+      if (!controller.sketch || !ground) return;
       if (!stepped) { stepped = true; controller.beginVertexMove(); }
-      const near = snapped(pointAt(event), controller.sketch.key);
+      const near = snapped(ground, controller.sketch.key);
       snapTarget = near.$snap ?? null;
       controller.moveVertex(ring, index, { lat: near.lat, lon: near.lon });
     };
@@ -576,13 +618,16 @@
   </div>
 {/if}
 
-{#if featureMenu}<LayerFeatureMenu {controller} at={featureMenu} onclose={() => (featureMenu = null)} />{/if}
+{#if featureMenu}<LayerFeatureMenu {controller} at={featureMenu} point={featureMenu.point} onclose={() => (featureMenu = null)}
+  onmore={onmenu ? () => { const point = featureMenu?.point; featureMenu = null; if (point) onmenu(point); } : null} />{/if}
 
 {#if sketch && engine}
   <div class="geometry" aria-label="Layer geometry handles">
     <svg aria-hidden="true"><path d={sketch.type === 'Selection' ? selectionPreview.path : path} fill={['Polygon', 'MultiPolygon'].includes(sketch.type) ? '#f5a62325' : 'none'} fill-rule="evenodd" stroke="#f5a623" stroke-width="2" />
       {#each selectionPreview.points as point}<circle cx={point.x} cy={point.y} r="5" fill="#f5a62355" stroke="#f5a623" />{/each}
+      {#if pending}<path class="pending" d={pending} />{/if}
     </svg>
+    {#if reading}<span class="reading" style:left={`${reading.x}px`} style:top={`${reading.y}px`}>{reading.text}</span>{/if}
     <!-- a circle or a box being drawn follows the pointer: a handle under it would take the press that closes it -->
     {#each sketch.shape ? [] : rings as ring, ri}
       {#each ring as point, index}
@@ -620,6 +665,9 @@
   .loop { fill: #f5a62318; stroke: #f5a623; stroke-width: 1.5; stroke-dasharray: 4 3; }
   .loop.stroke { fill: none; stroke-width: 2.5; stroke-dasharray: none; }
   .snap { fill: none; stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 1px #000c); }
+  .pending { fill: none; stroke: #f5a623; stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .8; }
+  .reading { position: absolute; transform: translate(14px, -150%); padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .72); color: #fff;
+    font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
   .ghost-mark { position: absolute; transform: translate(-50%, -100%); opacity: .9; }
   .ghost-mark.badge { transform: translate(-50%, -50%); }
   .vertex, .midpoint { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; border: 1px solid #fff; border-radius: 50%; background: #f5a623; width: 11px; height: 11px; padding: 0; box-shadow: 0 0 0 1px #222; cursor: grab; touch-action: none; }

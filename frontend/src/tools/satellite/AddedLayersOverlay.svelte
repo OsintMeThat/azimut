@@ -280,7 +280,7 @@
         menu: (at, properties) =>
           onmenu?.(properties ? { ...at, feature: properties.name || UNNAMED, layer: row.title } : at),
       });
-      layer.interactive(untrack(() => interactive));
+      layer.interactive(untrack(() => interactive && row.name !== personalLayers.editor?.name));
       const entry = { layer, sha: row.sha256, read: null, moment: momentKey(row), collection: null, settled: false, shape: shapeOf(row), landed: [] };
       live.set(row.name, entry);
       watch?.start(row.name);
@@ -308,9 +308,10 @@
     restack();
   });
 
+  // The layer being edited answers its clicks in the editor, which picks what is pressed: never a card.
   $effect(() => {
-    const enabled = interactive;
-    for (const { layer } of live.values()) layer.interactive(enabled);
+    const enabled = interactive, edited = personalLayers.editor?.name;
+    for (const [name, { layer }] of live) layer.interactive(enabled && name !== edited);
   });
 
   // The features being dragged in the editor leave the map while their copies move.

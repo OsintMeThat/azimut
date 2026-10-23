@@ -24,7 +24,10 @@
   import { linesOf } from '../../lib/map/layerHit.js';
   import { facingLabel } from '../../lib/map/turnRing.js';
   import { formatArea, formatDistance, pathLength, polygonArea } from '../../lib/measure.js';
-  import { caseState, prefs } from '../../lib/state.svelte.js';
+  import { caseState, fmtCoords, prefs } from '../../lib/state.svelte.js';
+  import { api } from '../../lib/api.js';
+  import { copyText } from '../../lib/clipboard.js';
+  import { parseLatLon } from '../../lib/sheetRoles.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { hasHistory, momentLabel, spanLabel, spanOf } from '../../lib/map/layerHistory.js';
   import { CONFIDENCE_CHOICES, LAYER_HELP as HELP, ORIGIN_CHOICES, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
@@ -65,7 +68,7 @@
   const oneKey = $derived(one?.properties.key ?? '');
   /** The pictures that failed to load, for this feature: the thumbnail cache let them go. */
   let gone = $state(new Set());
-  $effect(() => { void oneKey; adding = false; address = ''; refused = ''; menu = false; gone = new Set(); });
+  $effect(() => { void oneKey; adding = false; address = ''; refused = ''; menu = false; gone = new Set(); typedAt = null; unread = ''; });
 
   /** The one value several features share, or null when they differ. */
   function shared(field, fallback = '') {
@@ -125,6 +128,26 @@
   /** Several picked, all events: their one day is said as an event's. */
   const allEvents = $derived(chosen.every((feature) => !!groups.find((option) => option.id === feature.properties.group)?.events));
   const blur = (event) => { if (event.key === 'Enter') event.currentTarget.blur(); };
+
+  /** A marker's position as the analyst writes coordinates, and what is typed over it until it is left. */
+  const position = $derived(point && one.geometry.coordinates ? fmtCoords(one.geometry.coordinates[1], one.geometry.coordinates[0]) : '');
+  let typedAt = $state(null);
+  let unread = $state('');
+  /** A position typed or pasted into the row moves the marker there, read as the place search reads it. */
+  async function placeTyped(event) {
+    const text = event.currentTarget.value.trim(), key = oneKey;
+    typedAt = null;
+    if (!text || text === position) { unread = ''; return; }
+    const read = parseLatLon(text) ?? await api.post('/api/geo/parse', { text }).catch(() => null);
+    if (key !== oneKey) return;
+    if (!read || !(Math.abs(read.lat) <= 90 && Math.abs(read.lon) <= 180)) { unread = 'No position could be read from that'; return; }
+    unread = '';
+    controller.placeAt(key, { lat: read.lat, lon: read.lon });
+  }
+  function positionKey(event) {
+    if (event.key === 'Enter') event.currentTarget.blur();
+    else if (event.key === 'Escape') { event.stopPropagation(); typedAt = null; unread = ''; event.currentTarget.value = position; event.currentTarget.blur(); }
+  }
 </script>
 
 <!-- a slider shows its value, quieter while its group sets it, and goes back to the group's with Reset -->
@@ -279,6 +302,17 @@
       {/if}
 
       {#if measured}<span class="key">{measured[0]}</span><span class="value">{measured[1]}</span>{/if}
+      {#if position}
+        {@const followed = !!one.properties.entity_id}
+        <span class="key" title={HELP.position}>Position</span>
+        <span class="value">
+          <input class="position" aria-label="Feature position" value={typedAt ?? position} readonly={followed} spellcheck="false"
+            title={followed ? `${position}. It stands where its case item does` : `${position}. ${HELP.position}`}
+            oninput={(event) => (typedAt = event.currentTarget.value)} onkeydown={positionKey} onchange={placeTyped} />
+          <button type="button" class="icon-act" aria-label="Copy the position" title="Copy" onclick={() => copyText(position)}><Icon name="copy" size={12} /></button>
+        </span>
+        {#if unread}<p class="refused position-refused" role="alert">{unread}</p>{/if}
+      {/if}
     </div>
 
     <!-- how it is drawn comes after what it says, folded until asked for -->
@@ -402,6 +436,13 @@
   .add-source { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: 1px dashed var(--border); border-radius: 999px; color: var(--text-3); font-size: 11px; cursor: pointer; }
   .add-source:hover { border-color: var(--text-3); color: var(--text-1); }
   .refused { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 10px; }
+  .position-refused { grid-column: 2; }
+  /* a decimal pair fits its row whole, the copy button beside it */
+  .position { flex: 1; min-width: 0; height: 24px; padding: 2px 3px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent;
+    color: var(--text-1); font-family: var(--font-mono); font-size: 10px; letter-spacing: -.02em; }
+  .position + .icon-act { width: 20px; }
+  .position:hover:not([readonly]) { border-color: var(--border); }
+  .position:focus:not([readonly]) { border-color: var(--accent); background: var(--bg-1); }
   .follows { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding-bottom: 7px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: 10px; }
   .follow-pictures { display: flex; gap: 6px; }
   .follow-picture { position: relative; flex: 1; min-width: 0; max-width: 50%; height: 72px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: #000; overflow: hidden; cursor: pointer; }

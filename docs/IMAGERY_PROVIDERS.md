@@ -711,7 +711,7 @@ days (one request, `/api/satellite/sentinel/dates`), again only when the eye
 moves farther than 10 km. The meter counts every tile, and a paused quota
 refuses the batch.
 
-**The 3D view's tiles come in batches** (`/api/tiles/batch/{provider}`,
+**Map tiles come in batches** (`/api/tiles/batch/{provider}`,
 `/api/terrain/batch`, `api/tile_batch.py`; `lib/map/tileBatch.js`). A browser
 keeps six connections to the app, and a view tilted toward the horizon asks for a
 hundred tiles at once. The tiles the globe (Satellite's 3D, a plate's 3D map) asks
@@ -719,8 +719,12 @@ for in one go travel as one request per source, up to 32 of them, at most four
 requests at a time so the app's other calls keep a connection. The app fetches
 them side by side and writes each as it is done, so a slow tile holds up none of
 the others. Each tile is served exactly as its own route serves it: same cache,
-same meter, same overzoom, same status when it fails. A flat map asks each tile
-at its own address.
+same meter, same overzoom, same status when it fails. A flat map asks a free
+provider the app keeps on disk (Esri, Wayback, OpenStreetMap, OpenTopoMap) the
+same way: asked one by one, its tiles waited two to three times longer for a
+connection than the app took to answer them. A billed provider's tile, and one the
+app does not keep, is asked at its own address, so the browser's own cache still
+spares it a second request.
 
 ## GeoConfirmed is a query, not a feed
 

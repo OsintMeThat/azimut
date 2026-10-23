@@ -74,15 +74,22 @@ export function markerDisc(feature, project, own = null) {
     : { x: at.x, y: at.y - PIN_HEAD * scale, r: PIN_REACH * scale, tip: at };
 }
 
+/** The key of the feature under `at`, or null (`hitPart`). */
+export function hitFeature(features, project, at, own = null) {
+  return hitPart(features, project, at, own)?.key ?? null;
+}
+
 /**
- * The key of the feature under `at`, or null.
+ * The feature under `at` and the part of it pressed, `{ key, part }` with part
+ * 'mark', 'stroke' (a line, or the edge of an area) or 'inside' (an area's fill),
+ * or null.
  *
  * A mark beats a stroke and a stroke beats an area, since the smaller target
  * is the one aimed at. Among marks, the one drawn on top: `features` come in
  * drawing order, and the last one under the pointer is the one the eye sees
  * there. Among strokes, the nearest; among areas, the smallest.
  */
-export function hitFeature(features, project, at, own = null) {
+export function hitPart(features, project, at, own = null) {
   let point = null, line = null, area = null;
   for (const feature of features) {
     const geometry = feature.geometry;
@@ -110,7 +117,9 @@ export function hitFeature(features, project, at, own = null) {
       if (!area || size < area.size) area = { key: feature.properties.key, size };
     }
   }
-  return (point ?? line ?? area)?.key ?? null;
+  if (point) return { key: point.key, part: 'mark' };
+  if (line) return { key: line.key, part: 'stroke' };
+  return area ? { key: area.key, part: 'inside' } : null;
 }
 
 /**

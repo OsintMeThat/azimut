@@ -166,6 +166,60 @@ test('a drag on the globe turns the Earth under the hand, and nothing moves once
   expect(address(page).get('t')).toBe('40');
 });
 
+test('a turn of the globe leaves the flat map under it undrawn', async ({ page }) => {
+  // each canvas's frames, counted by the clear that starts every one of them
+  await page.addInitScript(() => {
+    globalThis.__frames = { flat: 0, globe: 0 };
+    for (const proto of [WebGLRenderingContext.prototype, WebGL2RenderingContext.prototype]) {
+      const own = proto.clear;
+      proto.clear = function (...args) {
+        if (this.canvas?.classList?.contains('maplibregl-canvas')) globalThis.__frames.flat += 1;
+        else globalThis.__frames.globe += 1;
+        return own.apply(this, args);
+      };
+    }
+  });
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&t=40&e=200&p=esri-world-imagery');
+  await expect(tilt(page)).toHaveText(/Tilt 40°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  await page.waitForTimeout(1000);
+  const before = await page.evaluate(() => ({ ...globalThis.__frames }));
+  const box = await globe(page).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 240, y, { steps: 24 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => ({ ...globalThis.__frames }));
+  // the globe drew the turn; the flat map's markers followed it without the map drawing itself again
+  expect(after.globe - before.globe).toBeGreaterThan(10);
+  expect(after.flat - before.flat).toBeLessThanOrEqual(2);
+});
+
+test('turning the flat map writes its address once, as the turn ends, not once a degree', async ({ page }) => {
+  await page.addInitScript(() => {
+    globalThis.__written = 0;
+    const own = history.replaceState.bind(history);
+    history.replaceState = (...args) => ((globalThis.__written += 1), own(...args));
+  });
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+  await page.waitForTimeout(500);
+  const before = await page.evaluate(() => globalThis.__written);
+  // a middle drag round the point pressed turns the map like a wheel, half a turn here
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'middle' });
+  for (let i = 0; i <= 40; i += 1) {
+    const a = (i / 40) * Math.PI;
+    await page.mouse.move(x + 150 * Math.cos(a), y + 150 * Math.sin(a));
+  }
+  await page.mouse.up({ button: 'middle' });
+  await expect.poll(() => Math.abs(Number(address(page).get('b') ?? 0))).toBeGreaterThan(90);
+  expect(await page.evaluate((from) => globalThis.__written - from, before)).toBeLessThanOrEqual(2);
+});
+
 test('a double click held turns the map, flat and in 3D, and one that stays put still zooms in', async ({ page }) => {
   await openMap(page, '#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
   const map = await page.locator('.map').boundingBox();
@@ -349,6 +403,39 @@ test('a pan over relief across a layer\'s area opens no card, and a click on it 
   await page.mouse.click(x, y);
   await expect(card).toBeVisible();
   await expect(card).toContainText('Front line area');
+});
+
+test('on the globe, a click on the layer being edited picks it rather than opening its card, and a double click opens its corners', async ({ page }) => {
+  const area = { type: 'Feature', id: 0, geometry: { type: 'Polygon',
+    coordinates: [[[-170, -80], [170, -80], [170, 80], [-170, 80], [-170, -80]]] },
+    properties: { key: 'front', group: 'g', name: 'Front line area', colour: '#d55e00', category: 'Areas', index: 0 } };
+  const row = { name: 'areas', title: 'Areas map', editable: true, source: { kind: 'file', name: 'areas.kmz' },
+    features: 1, categories: [], icons: 0, sha256: 'b'.repeat(64), refresh: {}, hidden: [] };
+  await installAppFixture(page);
+  await serveRelief(page);
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [row] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/data**`,
+    (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [area] } }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/edit`, (route) => route.fulfill({ json: {
+    layer: row, document: { type: 'FeatureCollection', features: [area] }, checkpoint: 'c'.repeat(32),
+    groups: [{ id: 'g', name: 'Areas', mode: 'individual', colour: '#d55e00', symbol: 'pin', size: 1, stroke: 2 }] } }));
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+  await page.getByRole('button', { name: 'Edit Areas map', exact: true }).click();
+  await expect(page.getByRole('toolbar', { name: 'Layer tools', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+
+  await page.mouse.click(x, y);
+  await expect(page.getByRole('textbox', { name: 'Feature name', exact: true })).toHaveValue('Front line area');
+  await expect(page.locator('.layer-card')).toHaveCount(0);
+
+  await page.mouse.dblclick(x, y);
+  await expect(page.getByRole('button', { name: 'Save geometry', exact: true })).toBeVisible();
+  await expect(page.locator('.layer-card')).toHaveCount(0);
 });
 
 test('the orbit stops at a massif behind the eye rather than climbing over it', async ({ page }) => {

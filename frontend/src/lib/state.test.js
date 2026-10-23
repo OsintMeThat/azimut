@@ -189,6 +189,16 @@ describe('applyPrefs', () => {
     applyPrefs({ map_sync: false });
     expect(prefs.mapSync).toBe(false);
   });
+
+  it('keeps the version the full payload names, and keeps it through a partial one', async () => {
+    // the welcome names it, and PUT /api/settings/prefs answers without it
+    const { applyPrefs, appInfo } = await freshState();
+    expect(appInfo.version).toBe('');
+    applyPrefs({ version: '0.3.3', units: 'metric' });
+    expect(appInfo.version).toBe('0.3.3');
+    applyPrefs({ units: 'imperial' });
+    expect(appInfo.version).toBe('0.3.3');
+  });
 });
 
 describe('startup update check', () => {

@@ -31,7 +31,7 @@
 </script>
 
 <div class="status">
-  <div class="readouts card">
+  <div class="readouts card" data-guide="map.readout">
     <button class="hud-coords mono" onclick={copy} title="Copy coordinates">
       {coords}
       {#if height}<span class="height" title="Ground height here, from the relief">{height}</span>{/if}

@@ -48,7 +48,7 @@
   }
 </script>
 
-<div class="relief-ctl" class:on data-bar-obstacle>
+<div class="relief-ctl" class:on data-bar-obstacle data-guide="map.3d">
   <button
     class="toggle"
     aria-pressed={on}

@@ -11,9 +11,10 @@
  * as it is done, and each is handed over as it arrives: a slow tile holds up
  * none of the others.
  *
- * The flat map asks one tile at a time, at the address it always had; a billed
- * provider's goes through the guard (`quotaGuard.js`), which hands it here
- * (`appTile`).
+ * The flat map asks a free provider the app keeps on disk the same way, at an
+ * address of its own the engine hands here (`batchedTemplate`, `batchedTile`).
+ * A billed provider's tile goes through the guard (`quotaGuard.js`), one at a
+ * time (`appTile`), and any other at the address it always had.
  */
 
 /** Tiles one request carries (api/tile_batch.py allows 64). */
@@ -76,6 +77,35 @@ function tileError(status, body, statusText = '') {
   error.status = status;
   error.body = body;
   return error;
+}
+
+/** The engine's protocol for a flat map's tile asked in batches. */
+export const BATCH_PROTOCOL = 'azimut-tiles';
+
+/** Where a flat map asks a provider's tiles to come in batches. */
+export function batchedTemplate(providerId) {
+  return `${BATCH_PROTOCOL}://${providerId}/{z}/{x}/{y}`;
+}
+
+/** The tile a batched address names, or null for an address that is not one. */
+export function readBatched(url) {
+  const found = new RegExp(`^${BATCH_PROTOCOL}://([^/]+)/(\\d+)/(\\d+)/(\\d+)$`).exec(url);
+  return found ? { providerId: found[1], z: Number(found[2]), x: Number(found[3]), y: Number(found[4]) } : null;
+}
+
+/**
+ * One tile of a flat map through the batches, as the engine wants it back:
+ * `{ data }`, or the error its own address would have given (`appTile`).
+ *
+ * @param {{ providerId: string, z: number, x: number, y: number }} asked
+ * @param {object} opts
+ * @param {{ get: Function }} opts.batcher `createTileBatcher()`
+ * @param {AbortSignal} [opts.signal]
+ */
+export async function batchedTile({ providerId, z, x, y }, { batcher, signal }) {
+  const { status, data } = await batcher.get(`/api/tiles/batch/${providerId}`, z, x, y, signal);
+  if (status === 200) return { data };
+  throw tileError(status, new Blob([data], { type: 'text/plain; charset=utf-8' }));
 }
 
 /**

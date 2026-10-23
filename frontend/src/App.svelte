@@ -11,6 +11,8 @@
     prefs,
     checkForUpdatesOnStart,
     toggleTheme,
+    appInfo,
+    prefsReady,
   } from './lib/state.svelte.js';
   import { api } from './lib/api.js';
   import { updateBadges } from './lib/staleness.js';
@@ -26,7 +28,7 @@
   } from './lib/workspaces.js';
   import { readSolo, splitHash } from './lib/hash.js';
   import { caseShown, installBackButton, showTool } from './lib/backButton.js';
-  import { guideFor } from './lib/guide.js';
+  import { landingFor } from './lib/guide.js';
   import { openGuide } from './lib/navigate.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
   import { createToolLoader } from './lib/toolLoader.js';
@@ -43,6 +45,9 @@
   import NoteBar from './components/NoteBar.svelte';
   import MoveDialog from './components/MoveDialog.svelte';
   import CommandPalette from './components/CommandPalette.svelte';
+  import GuideDialog from './components/GuideDialog.svelte';
+  import Welcome from './components/Welcome.svelte';
+  import { closeWelcome, shouldWelcome } from './lib/welcome.js';
   import CaseChangeGuard from './components/CaseChangeGuard.svelte';
   import { isPaletteKey } from './lib/commandPalette.js';
   import { filedToast, workFolder } from './lib/folders.js';
@@ -57,7 +62,6 @@
   // of the working flow at all.
   const TOOLS = [
     { id: 'overview', label: TOOL_LABELS.overview, load: () => import('./tools/Overview.svelte') },
-    { id: 'guide', label: TOOL_LABELS.guide, load: () => import('./tools/Guide.svelte') },
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
     { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
     { id: 'timeline', label: TOOL_LABELS.timeline, load: () => import('./tools/Timeline.svelte') },
@@ -92,7 +96,7 @@
   const toolLabel = (id) => ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
   // Name the tab the `?` will answer about, so the press is not a leap into a document.
   const guideTitle = $derived(
-    guideFor(uiState.tool) ? `Guide: ${toolLabel(uiState.tool)}` : 'Read the guide'
+    landingFor(uiState.tool).tool ? `Guide: ${toolLabel(uiState.tool)}` : 'Read the guide'
   );
 
   // deep links: tool ids (#media, #proof, …) plus workspace aliases
@@ -240,6 +244,21 @@
   // another Azimut holds. The backend refuses case work in both states and
   // touches neither folder, so what is left to do is explain and offer the way
   // out.
+  // A version opens with its welcome, which points at the `?` (lib/welcome.js). A map
+  // window opened on its own is part of a session already under way, so it never does.
+  let guideButton = $state(null);
+  let welcome = $state('');
+  if (!solo) {
+    prefsReady.then(() => {
+      if (shouldWelcome(appInfo.version)) welcome = appInfo.version;
+    });
+  }
+  function welcomed({ mute, guide }) {
+    closeWelcome(welcome, mute);
+    welcome = '';
+    if (guide) openGuide(uiState.tool);
+  }
+
   let workspaceStopped = $state(null);
   readStatus()
     .then((status) => {
@@ -312,6 +331,7 @@
          an overview is not one of them, exactly as the case is not. -->
     <button
       class="brand"
+      data-guide="start.home"
       class:topbar-active={activeWs?.id === HOME_WORKSPACE.id}
       title="Home"
       aria-label="Home"
@@ -320,24 +340,24 @@
       <Logo size={27} />
       <span class="brand-name"><Wordmark height={13} /></span>
     </button>
-    <div class="case-group">
+    <div class="case-group" data-guide="start.case">
       <CaseSwitcher />
     </div>
     <div class="spacer"></div>
     <DetectActivity />
-    <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to"
+    <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to" data-guide="start.goto"
             aria-keyshortcuts="Control+k Meta+k" onclick={() => (paletteOpen = true)}>
       <Icon name="search" size={16} />
     </button>
     <!-- The one mark that answers "what is this tab I am standing in". It sits beside
          the gear rather than in each toolbar so there is one of it, and it opens the
-         Guide on the section written about the current tool. Silent on the Guide
-         itself, which is the answer. -->
+         guide over the tool on that tool's page. -->
     <!-- The one way into Add event from every tool: quiet like the marks beside it,
          since amber is kept for the main action and the selection. -->
     {#if caseState.current && !solo}
       <button
         class="btn btn-ghost btn-sm note-btn"
+        data-guide="start.event"
         class:on={uiState.noting}
         title={noteTitle}
         aria-label="Add an event"
@@ -348,18 +368,18 @@
         <Icon name="eventAdd" size={16} />
       </button>
     {/if}
-    {#if uiState.tool !== 'guide'}
-      <button
-        class="btn btn-ghost btn-sm"
-        title={guideTitle}
-        aria-label={guideTitle}
-        onclick={() => openGuide(uiState.tool)}
-      >
-        <Icon name="help" size={16} />
-      </button>
-    {/if}
+    <button
+      class="btn btn-ghost btn-sm"
+      title={guideTitle}
+      aria-label={guideTitle}
+      bind:this={guideButton}
+      onclick={() => openGuide(uiState.tool)}
+    >
+      <Icon name="help" size={16} />
+    </button>
     <button
       class="btn btn-ghost btn-sm dotted"
+      data-guide="start.settings"
       class:topbar-active={uiState.tool === 'settings'}
       title={badges.any ? 'Settings · something to install or update' : 'Settings'}
       onclick={() => (uiState.tool = 'settings')}
@@ -385,6 +405,7 @@
       {#each WORKSPACES as ws (ws.id)}
         <button
           class="rail-btn"
+          data-guide="start.stages"
           class:active={activeWs?.id === ws.id}
           onclick={() => openWorkspace(ws)}
           title={ws.label}
@@ -399,6 +420,7 @@
       <span class="rail-rule" role="presentation"></span>
       <button
         class="rail-btn case-rail"
+        data-guide="start.case-rail"
         class:active={activeWs?.id === CASE_WORKSPACE.id}
         onclick={() => openWorkspace(CASE_WORKSPACE)}
         title="The case: its Timeline, Board, Graph and Sheet"
@@ -419,7 +441,7 @@
 
     <main class="canvas">
       {#if !bare && activeWs && activeWs.tools.length > 1}
-        <div class="tabstrip">
+        <div class="tabstrip" data-guide="start.tabs">
           {#each activeWs.tools as toolId (toolId)}
             <button
               class="tab-btn"
@@ -464,6 +486,9 @@
 <NoteBar />
 <MoveDialog />
 <CommandPalette bind:open={paletteOpen} tools={ALL_TOOLS} />
+{#if uiState.guide}
+  <GuideDialog at={uiState.guide.at} onclose={() => (uiState.guide = null)} />
+{/if}
 <CaseChangeGuard />
 <Toasts />
 
@@ -471,7 +496,12 @@
   <WorkspaceStopped {...workspaceStopped} />
 {/if}
 
-{#if updateState.show}
+{#if welcome && !workspaceStopped}
+  <Welcome version={welcome} anchor={guideButton} onclose={welcomed} />
+{/if}
+
+<!-- after the welcome, rather than over it -->
+{#if updateState.show && !welcome}
   <UpdateModal />
 {/if}
 

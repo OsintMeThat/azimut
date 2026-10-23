@@ -36,7 +36,7 @@ vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 vi.mock('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url', () => ({ default: '' }));
 vi.mock('./engine.css', () => ({}));
 vi.mock('./facade.js', () => ({ mapFacade: (map, container, mapId) => ({ mapId }), engineZoom: (zoom) => zoom }));
-vi.mock('./tileBatch.js', () => ({ appTile: async () => ({ data: new ArrayBuffer(0) }) }));
+vi.mock('./tileBatch.js', async (importOriginal) => ({ ...(await importOriginal()), appTile: async () => ({ data: new ArrayBuffer(0) }) }));
 
 const { createMapEngine, dropDraggedClicks } = await import('./engine.js');
 
@@ -54,6 +54,31 @@ function box() {
     dataset: {},
   };
 }
+
+describe('the tiles a map asks the app for', () => {
+  it('asks a free provider’s tiles in batches, through a protocol of its own', async () => {
+    const asked = [];
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      asked.push(url);
+      const body = new TextEncoder().encode('png');
+      const head = new Uint8Array(8);
+      const view = new DataView(head.buffer);
+      view.setUint16(0, 0, true);
+      view.setUint16(2, 200, true);
+      view.setUint32(4, body.length, true);
+      return { ok: true, status: 200, body: new ReadableStream({ start: (c) => (c.enqueue(new Uint8Array([...head, ...body])), c.close()) }) };
+    }));
+    try {
+      const handler = protocols.get('azimut-tiles');
+      const tile = await handler({ url: 'azimut-tiles://esri-world-imagery/5/1/1' }, new AbortController());
+      expect(new TextDecoder().decode(tile.data)).toBe('png');
+      expect(asked).toEqual(['/api/tiles/batch/esri-world-imagery?t=5/1/1']);
+      await expect(handler({ url: '/api/tiles/esri-world-imagery/5/1/1' }, new AbortController())).rejects.toThrow('not a batched tile address');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe('a map engine', () => {
   beforeEach(() => {

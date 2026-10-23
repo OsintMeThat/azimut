@@ -300,6 +300,21 @@ uv run --no-sync python -m build --no-isolation
 uv run --no-sync pyinstaller packaging/azimut.spec
 ```
 
+### The guide's pictures
+
+The guide the `?` opens shows each tool photographed in a demo case. Before a
+release, remake the pictures and look at what changed:
+
+```bash
+cd frontend && npm run guide:shots && cd ..
+```
+
+It builds the UI into a scratch folder, runs a private Azimut on a throwaway
+workspace, and needs `uv`, ffmpeg and the network (the maps are drawn from public
+USGS imagery). It fails when a control the guide frames is gone; fix the page in
+`frontend/src/lib/guide.js` or its staging in `frontend/guide/stages.mjs`, then
+commit the pictures in `frontend/src/assets/guide/` with the release.
+
 ### Versions
 
 The app version lives in `src/azimut/__init__.py` alone; `pyproject.toml` reads

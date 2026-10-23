@@ -33,6 +33,7 @@ export const LAYER_HELP = {
   day: 'The day the time strip and the Timeline file it under',
   days: 'Its history is kept while Track over time is off',
   facing: 'Where it points, set by the ring round it on the map',
+  position: 'Type or paste another position to move it there',
   sources: 'The addresses it rests on, each opened in a tab of its own',
   origin: 'Who found where it stands',
   credit: 'Printed in the credits of a plate that draws it',
@@ -49,7 +50,7 @@ export const LAYER_HELP = {
   lines: 'How its lines are drawn when they say nothing of their own',
   areas: 'How its areas are filled when they say nothing of their own',
   // the layer's menu
-  track: 'Keeps each change as a dated state instead of overwriting it',
+  track: 'Keeps each change as a dated state instead of overwriting it. Off hides the history and keeps it',
   precision: 'Whether a state holds a day, or a day and a time',
   clock: 'The time zone its states are read in',
 };

@@ -18,6 +18,10 @@
   import { mergeable, splittable } from '../../lib/map/layerHit.js';
   import { DEFAULT_PLACE, barBox, loadPlace, loadTips, rowRoom, savePlace, saveTips, snapPlace, upright } from '../../lib/map/editBarPlace.js';
   import { momentLabel, momentNow } from '../../lib/map/layerHistory.js';
+  import { circleRadius } from '../../lib/map/sketchMeasure.js';
+  import { fieldUnit, parseDistance } from '../../lib/measures.js';
+  import { formatDistance } from '../../lib/measure.js';
+  import { prefs } from '../../lib/state.svelte.js';
 
   let { controller, vertex = null, ondone } = $props();
   const selection = $derived(controller.selection ?? []);
@@ -62,14 +66,36 @@
   const hint = $derived(controller.lassoing ? 'Draw round what to select. Shift adds to the selection.'
     : controller.placing ? 'Click the map to add markers in the style shown. Esc to stop.'
       : sketch?.type === 'Selection' ? 'Drag the handle to move the selection. Enter to save, Esc to cancel.'
-        : sketch?.shape ? (sketch.anchor ? 'Click again where it ends, or press Enter.' : sketch.shape === 'circle' ? 'Click the centre, then how far it reaches.' : 'Click one corner, then the opposite one.')
+        : sketch?.shape ? (sketch.anchor ? (sketch.shape === 'circle' ? 'Click where it reaches, or type its radius. Enter saves.' : 'Click again where it ends, or press Enter.')
+          : sketch.shape === 'circle' ? 'Click the centre, then how far it reaches.' : 'Click one corner, then the opposite one.')
           : sketch?.key && sketch.type === 'LineString' ? `Drag a corner, + to add one, a click on the map extends it from its ${sketch.extend === 'start' ? 'start' : 'end'}. Enter to save.`
             : sketch?.key ? 'Drag a corner to move it, + to add one. Ctrl+Z takes a step back. Enter to save, Esc to cancel.'
               : sketch && controller.freehand ? 'Drag to draw, as many strokes as it takes. Enter to save, Esc to cancel.'
                 : sketch ? 'Click to add points; a corner near another lands on it, Alt lets it go. Enter or a double click saves, Ctrl+Z steps back.'
                   : onePoint ? 'Drag to move. Turn the ring to set where it faces.'
-                    : selection.length ? 'Drag what is picked to move it. Shift-click adds. Ctrl+Z undoes, Ctrl+Shift+Z redoes.'
-                      : 'Click to pick. A marker drags at once, a line or an area once picked. Right-click for more.');
+                    : selection.length ? 'Drag what is picked to move it, an area by its edge. Shift-click adds. Ctrl+Z undoes, Ctrl+Shift+Z redoes.'
+                      : 'Click to pick, then drag to move. Right-click for more.');
+  /** A circle being drawn: how far it reaches now, and a reach typed instead (a bare number in the unit shown). */
+  const reach = $derived(circleRadius(sketch));
+  const reachUnit = $derived(fieldUnit(reach ?? 0, prefs.units));
+  let typedReach = $state('');
+  // the unit a bare number is in is the one shown when typing began, not one the growing circle reaches
+  let typedUnit = 'm';
+  $effect(() => { if (!sketch?.anchor) typedReach = ''; });
+  function typeReach(event) {
+    if (!typedReach) typedUnit = reachUnit;
+    typedReach = event.currentTarget.value;
+    const metres = parseDistance(typedReach, typedUnit);
+    if (metres) controller.radius(metres);
+  }
+  function reachKey(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const metres = parseDistance(typedReach, typedUnit);
+      if (metres) controller.radius(metres);
+      if (controller.complete) controller.saveGeometry();
+    } else if (event.key === 'Escape') { event.preventDefault(); controller.stop(); }
+  }
   /** The style palette is open over the map: the tips step aside rather than hide under it. */
   let styling = $state(false);
   /**
@@ -241,6 +267,10 @@
         <button type="button" aria-label="Draw freehand" title="Freehand: drag to draw" aria-pressed={controller.freehand}
           onclick={() => (controller.freehand = !controller.freehand)}><Icon name="freehand" size={15} /></button>
       {/if}
+      {#if sketch.shape === 'circle' && sketch.anchor}
+        <input class="reach" aria-label="Radius" title="How far it reaches, typed: 800 m, 2.5 km" spellcheck="false"
+          placeholder={reach ? formatDistance(reach, prefs.units) : `Radius (${reachUnit})`} value={typedReach} oninput={typeReach} onkeydown={reachKey} />
+      {/if}
       {#if sketch.key && sketch.type === 'LineString'}
         <button type="button" aria-label="Extend from its start" title="A click on the map extends it from its start" aria-pressed={sketch.extend === 'start'}
           onclick={() => controller.extendFrom('start')}><Icon name="chevronLeft" size={15} /></button>
@@ -319,6 +349,8 @@
   .mode { display: flex; gap: 5px; width: auto; min-width: 26px; height: 26px; padding: 0 8px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
     transition: background-color .12s, color .12s; }
   .vertical .mode { padding: 0; justify-content: center; }
+  .reach { flex: none; width: 74px; height: 26px; padding: 2px 6px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; border-radius: var(--r-sm); }
+  .vertical .reach { width: 30px; padding: 2px; }
   .rule { width: 1px; height: 20px; margin: 0 3px; background: var(--border); flex: none; }
   .vertical .rule { width: 20px; height: 1px; margin: 3px 0; }
   button { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }

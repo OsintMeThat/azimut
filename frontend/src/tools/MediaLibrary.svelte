@@ -903,6 +903,7 @@
       class="btn btn-ghost btn-sm"
       class:active={openIn?.item.path === item.path}
       title="Open in…"
+      data-guide="media.open-in"
       aria-haspopup="menu"
       aria-expanded={openIn?.item.path === item.path}
       onclick={(event) => toggleOpenIn(event, item)}
@@ -926,10 +927,12 @@
   }}
   ondrop={onDrop}
 >
+  <!-- `data-guide` marks a control the guide photographs and frames (lib/guide.js). -->
   <div class="tool-header">
     <div class="spacer"></div>
     <form
       class="dl-form"
+      data-guide="media.link"
       onsubmit={(e) => {
         e.preventDefault();
         download();
@@ -944,7 +947,7 @@
         <Icon name="download" size={15} /> Download
       </button>
     </form>
-    <button class="btn" onclick={() => fileInput.click()}>
+    <button class="btn" data-guide="media.import" onclick={() => fileInput.click()}>
       <Icon name="upload" size={15} /> Import
     </button>
     <!-- The pictures and videos brought in here, as the sheet they are worked down in. -->
@@ -1008,7 +1011,7 @@
 
   <!-- search + sort + category + folder filter bar -->
   {#if showBrowseBar}
-    <div class="folder-bar">
+    <div class="folder-bar" data-guide="media.browse">
       <SearchInput
         bind:value={query}
         placeholder="Search name, source…"
@@ -1271,6 +1274,7 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="media-card card"
+            data-guide="media.card"
             class:focused={item.path === focusedPath}
             class:dragging={item.path === draggingPath}
             data-path={item.path}
@@ -1412,6 +1416,7 @@
   <button class="open-in-backdrop" onclick={() => (openIn = null)} aria-label="Close the Open in menu"></button>
   <div
     class="open-in-menu card"
+    data-guide="media.open-in-menu"
     role="menu"
     aria-label={`Open ${openIn.item.title ?? openIn.item.filename} in`}
     style:left={openIn.left == null ? null : `${openIn.left}px`}

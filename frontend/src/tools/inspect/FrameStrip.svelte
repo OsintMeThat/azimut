@@ -36,7 +36,7 @@
   const label = (fr, i) => (fr.time != null ? `Frame ${i + 1} at ${stamp(fr.time)}` : `Frame ${i + 1}`);
 </script>
 
-<div class="strip" aria-label="Frames">
+<div class="strip" aria-label="Frames" data-guide="inspect.strip">
   {#if source.kind === 'video'}
     <button
       class="tile source"

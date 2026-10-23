@@ -417,12 +417,14 @@ export function createTree({ request, release, budget = 700, inFlight = 48, maxZ
     const s = Math.sin(lat * RAD);
     const Y = 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
     let best = null;
-    let z = ROOT_Z;
-    let n = nodes.get(keyOf(z, Math.floor(X * 2 ** z), Math.floor(Y * 2 ** z)));
+    // down through the children, which are the tree's own tiles in the order `kidsOf` made them:
+    // asked every frame for every mark, a key a level would be most of the cost
+    let n = nodes.get(keyOf(ROOT_Z, Math.floor(X * 2 ** ROOT_Z), Math.floor(Y * 2 ** ROOT_Z)));
     while (n && n.state === 'ready') {
       best = n;
-      z += 1;
-      n = n.kids ? nodes.get(keyOf(z, Math.floor(X * 2 ** z), Math.floor(Y * 2 ** z))) : null;
+      if (!n.kids) break;
+      const z = n.z + 1;
+      n = n.kids[Math.floor(X * 2 ** z) - 2 * n.x + 2 * (Math.floor(Y * 2 ** z) - 2 * n.y)];
     }
     if (!best?.heights) return null;
     const side = Math.round(Math.sqrt(best.heights.length));

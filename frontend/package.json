@@ -15,6 +15,7 @@
     "test:e2e:headed": "playwright test --headed",
     "calibrate:maps": "node calibration/record.mjs",
     "calibrate:earth": "node calibration/earth.mjs",
+    "guide:shots": "node guide/shots.mjs",
     "check": "svelte-check --output human --threshold warning"
   },
   "devDependencies": {

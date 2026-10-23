@@ -37,6 +37,9 @@ export const prefs = $state({
   updateDismissedVersion: '', // the release tag muted with "don't show again"
 });
 
+/** The app itself, as GET /api/settings describes it: the version the welcome names. */
+export const appInfo = $state({ version: '' });
+
 /**
  * The startup update pop-up (App.svelte). `show` is flipped on once a check
  * comes back with a newer, non-muted release; the modal reads the rest.
@@ -109,6 +112,7 @@ export function applyPrefs(s) {
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
   if (s.extension_version !== undefined) updatesState.extensionBundled = s.extension_version;
+  if (s.version) appInfo.version = s.version;
 }
 
 /**
@@ -241,9 +245,9 @@ export const uiState = $state({
   sidebarView: loadSidebarView(), // 'folders' | 'todo' | 'recent', remembered across reloads
   toasts: [],
   settingsTab: null, // settings section id to open when switching to Settings
-  // Guide section to land on when switching to the Guide, from the `?` in the
-  // topbar. Consumed by that tab, so scrolling away afterwards sticks.
-  guideSection: null,
+  // The guide open over the tools, and what it opened on: a tool, a page or a
+  // journey (`{ at }`, lib/guide.js `landingFor`). Null while it is closed.
+  guide: null,
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer

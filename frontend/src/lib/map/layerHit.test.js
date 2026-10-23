@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { featuresInLoop, hitFeature, markerDisc, mergeable, splittable } from './layerHit.js';
+import { featuresInLoop, hitFeature, hitPart, markerDisc, mergeable, splittable } from './layerHit.js';
 
 const project = (lon, lat) => ({ x: lon * 10, y: lat * 10 });
 const point = (key, lon, lat, symbol = 'badge-tank') => ({ geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { key, symbol } });
@@ -20,6 +20,15 @@ describe('what sits under the pointer', () => {
     expect(hitFeature(features, project, { x: 150, y: 103 })).toBe('road');
     expect(hitFeature(features, project, { x: 60, y: 60 })).toBe('small');
     expect(hitFeature(features, project, { x: 150, y: 150 })).toBe('big');
+  });
+
+  it('says whether an area was pressed on its edge or inside it', () => {
+    const features = [area('zone', [[0, 0], [20, 0], [20, 20], [0, 20], [0, 0]]), line('road', [[30, 0], [30, 20]]), point('mark', 50, 50)];
+    expect(hitPart(features, project, { x: 100, y: 3 })).toEqual({ key: 'zone', part: 'stroke' });
+    expect(hitPart(features, project, { x: 100, y: 100 })).toEqual({ key: 'zone', part: 'inside' });
+    expect(hitPart(features, project, { x: 302, y: 100 })).toEqual({ key: 'road', part: 'stroke' });
+    expect(hitPart(features, project, { x: 500, y: 500 })).toEqual({ key: 'mark', part: 'mark' });
+    expect(hitPart(features, project, { x: 900, y: 900 })).toBeNull();
   });
 
   it('picks whatever a loop encloses, a shape by any of its corners', () => {

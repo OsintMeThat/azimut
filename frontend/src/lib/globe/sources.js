@@ -57,6 +57,35 @@ export function tileUrl(description, { z, x, y }) {
 }
 
 /**
+ * A vector tile whose features are read once. One source tile covers many of
+ * the globe's finer tiles, and is painted into each and read for its names in
+ * each, while the library reads a feature and its geometry afresh on every ask.
+ * The geometry it hands back is shared: never changed by whoever reads it.
+ */
+export function readOnce(tile) {
+  const layers = {};
+  for (const [name, layer] of Object.entries(tile?.layers ?? {})) {
+    const features = new Array(layer.length);
+    layers[name] = {
+      name,
+      extent: layer.extent,
+      length: layer.length,
+      feature(i) {
+        let feature = features[i];
+        if (!feature) {
+          const raw = layer.feature(i);
+          let geometry = null;
+          feature = { type: raw.type, id: raw.id, properties: raw.properties, extent: raw.extent, loadGeometry: () => (geometry ??= raw.loadGeometry()) };
+          features[i] = feature;
+        }
+        return feature;
+      },
+    };
+  }
+  return { layers };
+}
+
+/**
  * @param {object} [o]
  * @param {(url: string, signal?: AbortSignal) => Promise<Response>} [o.fetch]
  * @param {(blob: Blob) => Promise<ImageBitmap>} [o.decodeImage]

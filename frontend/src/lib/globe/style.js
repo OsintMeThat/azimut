@@ -75,6 +75,12 @@ export function compileLayer(spec) {
     source: spec.source,
     sourceLayer: spec['source-layer'] ?? null,
     visible: (spec.layout?.visibility ?? 'visible') !== 'none',
+    /**
+     * Whether the filter reads no zoom, so a feature it refuses is refused at
+     * every distance and can be left out before it is placed. A property that
+     * happens to be named "zoom" counts as a zoom: slower, never wrong.
+     */
+    zoomFree: !JSON.stringify(spec.filter ?? null).includes('"zoom"'),
     /** Whether the layer is drawn at this zoom: from its least zoom up to, not at, its greatest. */
     inRange: (zoom) => zoom >= (spec.minzoom ?? 0) && zoom < (spec.maxzoom ?? 24),
     accepts(zoom, feature) {

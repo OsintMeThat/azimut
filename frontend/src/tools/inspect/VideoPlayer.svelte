@@ -223,7 +223,7 @@
     </div>
   </div>
 
-  <div class="player-bar">
+  <div class="player-bar" data-guide="inspect.player">
     <PlayerTrack
       duration={totalDuration}
       time={shown}

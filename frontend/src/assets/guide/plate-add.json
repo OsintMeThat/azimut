@@ -1,0 +1,12 @@
+{
+  "width": 620,
+  "height": 585,
+  "anchors": {
+    "plate.add-groups": {
+      "x": 46,
+      "y": 28,
+      "w": 528,
+      "h": 542.8
+    }
+  }
+}

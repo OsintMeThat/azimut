@@ -8,7 +8,10 @@
  * atlas, packed in shelves): a canvas a name would cost more to make than the
  * name itself. When the atlas is full it is wiped and filled again from what
  * the next frames ask, and the names written on the old one say so (`live`).
- * A frame writes a few new names at most; the rest wait for the next. An icon the flat map was given as
+ * A name is measured before it is written (`labelSize`), so the placing can
+ * weigh every name in view and write only those it keeps: far more names are
+ * in view than the pictures kept. A frame writes a few new names at most; the
+ * rest wait for the next. An icon the flat map was given as
  * a distance field (an SDF, the app's pin shapes) is coloured and outlined
  * here as the engine's shader would.
  */
@@ -25,6 +28,10 @@ const SDF_PX = 8;
 export const ATLAS = 2048;
 /** New names written in one frame, at most. */
 export const NEW_PER_FRAME = 40;
+/** New names measured in one frame, at most: far cheaper than writing one. */
+export const MEASURED_PER_FRAME = 600;
+/** Names' sizes kept, the oldest measured let go first: more than a view holds. */
+const SIZES_KEPT = 8000;
 
 /** A CSS font for a style's font stack and size. */
 export function cssFont(stack, size) {
@@ -81,6 +88,7 @@ export function colourField(alpha, fill, halo, haloWidth, size) {
  * @param {() => number} [o.ratio] device pixels per CSS pixel
  * @param {number} [o.sharpest] the most device pixels a name is written at per CSS pixel
  * @param {number} [o.perFrame] new names a frame may write; a capture writes them all at once
+ * @param {number} [o.measuredPerFrame] new names a frame may measure
  * @param {number} [o.size] the names' atlas, device pixels a side
  */
 export function createGlyphs({
@@ -89,15 +97,44 @@ export function createGlyphs({
   ratio = () => globalThis.devicePixelRatio || 1,
   sharpest = 2,
   perFrame = NEW_PER_FRAME,
+  measuredPerFrame = MEASURED_PER_FRAME,
   size: side = ATLAS,
 }) {
   const kept = new Map();
+  // a name's lines and its box in CSS pixels, by what decides them: its picture is written to that box
+  const sizes = new Map();
   let probe = null;
   // the names' atlas: its canvas, the shelf being filled, and the page the names on it belong to
   let atlas = null;
   let shelf = { x: 0, y: 0, height: 0 };
   let page = { live: true };
   let written = 0;
+  let measured = 0;
+
+  /** A name's lines and box, measured once; null when this frame has measured its share already, unless `now`. */
+  function layoutOf(spec, now = false) {
+    const key = JSON.stringify([spec.text, spec.size, spec.font, spec.spacing, spec.maxWidth, spec.haloWidth]);
+    const held = sizes.get(key);
+    if (held) return held;
+    if (!now && measured >= measuredPerFrame) return null;
+    measured += 1;
+    const font = cssFont(spec.font, spec.size);
+    const width = measure(font, spec.spacing);
+    const lines = wrapWords(spec.text, spec.maxWidth, width);
+    const halo = Math.max(0, spec.haloWidth);
+    const lineHeight = spec.size * 1.2;
+    const made = {
+      font,
+      lines,
+      halo,
+      lineHeight,
+      width: Math.ceil(Math.max(...lines.map(width), 1) + 2 * halo + 2),
+      height: Math.ceil(lines.length * lineHeight + 2 * halo),
+    };
+    sizes.set(key, made);
+    if (sizes.size > SIZES_KEPT) sizes.delete(sizes.keys().next().value);
+    return made;
+  }
 
   /** Room for a `w` by `h` picture on the atlas, wiping it when none is left. */
   function room(w, h) {
@@ -144,9 +181,18 @@ export function createGlyphs({
   }
 
   return {
-    /** A new frame: it may write its share of new names. */
+    /** A new frame: it may measure and write its share of new names. */
     begin() {
       written = 0;
+      measured = 0;
+    },
+    /**
+     * The box a name's picture will have, in CSS pixels: `{ width, height }`,
+     * without writing it; null when this frame has measured its share of new
+     * names already.
+     */
+    labelSize(spec) {
+      return layoutOf(spec);
     },
     /**
      * A name's picture: `{ image, sx, sy, sw, sh, width, height, page }`, the
@@ -161,13 +207,7 @@ export function createGlyphs({
       written += 1;
       return keep(key, () => {
         const scale = Math.min(sharpest, ratio());
-        const font = cssFont(spec.font, spec.size);
-        const width = measure(font, spec.spacing);
-        const lines = wrapWords(spec.text, spec.maxWidth, width);
-        const halo = Math.max(0, spec.haloWidth);
-        const lineHeight = spec.size * 1.2;
-        const w = Math.ceil(Math.max(...lines.map(width), 1) + 2 * halo + 2);
-        const h = Math.ceil(lines.length * lineHeight + 2 * halo);
+        const { font, lines, halo, lineHeight, width: w, height: h } = layoutOf(spec, true);
         const sw = Math.min(side, Math.ceil(w * scale));
         const sh = Math.min(side, Math.ceil(h * scale));
         const at = room(sw, sh);

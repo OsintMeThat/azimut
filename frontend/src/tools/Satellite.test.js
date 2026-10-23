@@ -721,9 +721,21 @@ describe('a map in more than one window', () => {
   });
 
   it('writes nothing while another tool is open, nor while a tilted view waits for its relief', () => {
-    const guard = "if (uiState.tool !== 'satellite' || !mapReady || pendingCamera) return;";
+    const guard = "if (uiState.tool !== 'satellite' || !mapReady || pendingCamera || rotating) return;";
     expect(source).toContain(guard);
     expect(source.slice(source.indexOf(guard)).slice(0, 400)).toContain('viewParams({');
+  });
+
+  it('writes the address once a move, not once a degree of a turn or a tilt', () => {
+    const guard = "if (uiState.tool !== 'satellite' || !mapReady || pendingCamera || rotating) return;";
+    const effect = source.slice(source.indexOf(guard)).slice(0, 600);
+    // the turn and the tilt as they stand when the view settles (`center`), never followed step by step
+    expect(effect).toContain('const [turn, lean] = untrack(() => [bearing, pitch]);');
+    expect(effect).toContain('bearing: turn,');
+    expect(effect).toContain('pitch: reliefOn ? lean : null,');
+    expect(effect).toContain('lat: center.lat,');
+    // a dragged turn says when it ends, which writes it
+    expect(source).toContain('onEnd: () => (rotating = false),');
   });
 
   it('opens a peer tab on the view it is showing, and says when refused', () => {
@@ -926,7 +938,8 @@ describe('the right-click menu', () => {
   });
 
   it('offers its own subset of acts, and opens the point in Compare or Detect', () => {
-    expect(source).toContain("actionsFor(['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre'])");
+    // while a layer is edited the rail is put away, and with it the acts that arm one of its tools
+    expect(source).toContain("actionsFor(myLayers.editor ? ['lookup', 'place', 'horizon', 'history', 'centre']\n    : ['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre'])");
     expect(source).toContain("otherMapTools('satellite')");
     expect(source).toContain('tools={pointTools}');
     const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));

@@ -2,14 +2,19 @@
   /**
    * The right-click menu on a feature of the layer being edited: what is
    * done to it most, where the pointer already is. It acts on the selection,
-   * which the right-click has made sure holds the feature.
+   * which the right-click has made sure holds the feature. `point` is where it
+   * was opened (a marker's own position, else the spot pressed): its coordinates
+   * copy in one press, and `onmore` opens the map's own menu there.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
   import { LAYER_HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
+  import { copyText } from '../../lib/clipboard.js';
+  import { fmtCoords } from '../../lib/state.svelte.js';
 
-  let { controller, at, onclose } = $props();
+  let { controller, at, point = null, onmore = null, onclose } = $props();
+  const coords = $derived(point ? fmtCoords(point.lat, point.lon) : '');
   const selection = $derived(controller.selection ?? []);
   const chosen = $derived(controller.features.filter((feature) => selection.includes(feature.properties.key)));
   const only = $derived(chosen.length === 1 ? chosen[0] : null);
@@ -34,6 +39,15 @@
       {/each}
     </div>
     <div class="fm-sep"></div>
+    {#if coords}
+      <button type="button" class="fm-item" title="Copy the position" onclick={() => act(() => copyText(coords))}>
+        <Icon name="copy" size={14} /><span class="fm-grow mono">{coords}</span></button>
+    {/if}
+    {#if onmore}
+      <button type="button" class="fm-item" title="Other coordinate formats, other maps, what is here" onclick={onmore}>
+        <Icon name="crosshair" size={14} /><span class="fm-grow">More for this point…</span></button>
+    {/if}
+    {#if coords || onmore}<div class="fm-sep"></div>{/if}
     {#if turned}
       <button type="button" class="fm-item" disabled={busy} onclick={() => act(() => controller.updateSelection({ bearing: null }))}>
         <Icon name="compass" size={14} /><span class="fm-grow">Clear the direction</span></button>

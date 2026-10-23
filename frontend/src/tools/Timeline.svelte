@@ -2008,7 +2008,7 @@
          rarely and checked constantly, so the reading is what stays out and the rest
          opens under it. Panning keeps its arrows: stepping through a chronology is the
          frequent move. -->
-    <div class="range" bind:this={rangeElement}>
+    <div class="range" bind:this={rangeElement} data-guide="timeline.range">
       <button class="range-step" title="Earlier" aria-label="Earlier" onclick={() => pan(-.7)} disabled={!axisWindow}>
         <Icon name="chevronLeft" size={15} />
       </button>
@@ -2132,7 +2132,7 @@
       <!-- The entry line, under the axis. None in a snapshot, which takes no writes. -->
       {#snippet line()}
         {#if caseState.current && !snapshotReading}
-          <section class="entry-host" aria-label="Add an event">
+          <section class="entry-host" aria-label="Add an event" data-guide="timeline.entry">
             {#key `${caseState.current.id}:${lineEntity?.id ?? ''}`}
               <EntryLine
                 bind:this={entryLine}
@@ -2195,7 +2195,7 @@
         </div>
         {@render holdings()}
       {:else}
-          <section class="axis-card" aria-label="Timeline axis" bind:this={axisCardElement} style:max-height={`${axisMax}px`}>
+          <section class="axis-card" aria-label="Timeline axis" data-guide="timeline.axis" bind:this={axisCardElement} style:max-height={`${axisMax}px`}>
             <div class="axis-row">
               <!-- Which clock the ruler is in, in words. The window's two boundaries in
                    ISO sat here too, a second spelling of what the bar already says. -->
@@ -2526,7 +2526,7 @@
           {@render line()}
 
           <div class="reading-pane" bind:this={listPane}>
-            <section class="timeline-list" aria-label="Timeline list">
+            <section class="timeline-list" aria-label="Timeline list" data-guide="timeline.list">
               <header class="list-head">
                 <strong>{windowItems.length} {windowItems.length === 1 ? 'entry' : 'entries'} in this window</strong>
                 {#if cursor}<small>More below the ones loaded</small>{/if}

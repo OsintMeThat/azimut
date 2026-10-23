@@ -1,0 +1,12 @@
+{
+  "width": 620,
+  "height": 360,
+  "anchors": {
+    "media.open-in-menu": {
+      "x": 220,
+      "y": 169.6,
+      "w": 180,
+      "h": 111.6
+    }
+  }
+}

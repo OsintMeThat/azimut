@@ -6123,10 +6123,10 @@
         </div>
       {/if}
     </div>
-    <button class="btn btn-ok btn-sm" onclick={() => save()} disabled={!proofHasContent || saving}>
+    <button class="btn btn-ok btn-sm" data-guide="proof.save" onclick={() => save()} disabled={!proofHasContent || saving}>
       <Icon name="save" size={14} /> {saving ? 'Saving…' : 'Save proof'}
     </button>
-    <button class="btn btn-info btn-sm" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
+    <button class="btn btn-info btn-sm" data-guide="proof.save" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
       <Icon name="post" size={14} /> To Post
     </button>
   </div>
@@ -6277,7 +6277,7 @@
 
         <!-- Proof context: coordinates + source, auto-filled from the panels,
              overridable. A ! flags a value the analyst still needs to supply. -->
-        <div class="meta-field">
+        <div class="meta-field" data-guide="proof.coords">
           <div class="meta-head">
             <Icon name="crosshair" size={13} />
             <span>Coordinates</span>

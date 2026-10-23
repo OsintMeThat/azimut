@@ -617,7 +617,7 @@ def test_back_restores_groups_points_visibility_and_removals_but_keeps_explicit_
     saved = client.post(f"{url}/markers/{added['properties']['key']}/place").json()["place"]
     group = client.post(f"{url}/groups", json={"name": "New group"}).json()["group"]
     client.patch(f"{url}/groups/{group['id']}", json={"size": 3})
-    client.patch(url, json={"hidden": ["Markers"]})
+    client.patch(url, json={"hidden": ["Features"]})
     assert read(client, owner, row)["layer"]["edit_changed"]
     restored = finish_edit(client, url, discard=True)
     assert restored.status_code == 200, restored.text
@@ -739,6 +739,21 @@ def test_geometry_limits_and_type_changes_are_refused(client, owner):
     point = marker(client, owner, row)
     assert client.patch(f"{url}/markers/{point['properties']['key']}", json={"geometry": LINE}).status_code == 422
     assert client.post(f"{url}/shapes", json={"geometry": {"type": "LineString", "coordinates": [[2, 48]] * 4097}}).status_code == 422
+
+
+def test_lines_and_areas_are_numbered_apart_in_a_first_group_named_for_both(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+
+    def named(geometry, **extra):
+        answer = client.post(f"{url}/shapes", json={"geometry": geometry, **extra}).json()
+        return next(one["properties"]["name"] for one in answer["document"]["features"] if one["properties"]["key"] == answer["key"])
+
+    assert [named(LINE), named(AREA), named(LINE)] == ["Line 1", "Area 1", "Line 2"]
+    # a name given by hand that reads like the next one is not given twice
+    assert named(AREA, name="Area 4") == "Area 4"
+    assert named(AREA) == "Area 5"
+    assert [group["name"] for group in read(client, owner, row)["groups"]] == ["Features"]
 
 
 def test_active_edit_checkpoint_survives_a_case_bundle(client, owner, monkeypatch):
@@ -884,14 +899,14 @@ def test_revert_brings_back_a_group_an_edit_took_out_and_takes_out_one_it_made(c
     answer = client.post(f"{url}/revert", json={"put": [feature], "drop": [], "groups": [{**group, "at": 1}], "drop_groups": []})
     assert answer.status_code == 200, answer.text
     after = read(client, owner, row)
-    assert [one["name"] for one in after["groups"]] == ["Markers", "Strikes", "Later"]
+    assert [one["name"] for one in after["groups"]] == ["Features", "Strikes", "Later"]
     back = after["groups"][1]
     assert (back["id"], back["colour"], back["labels"], back["events"], back["line_dash"]) == (made["id"], "#d55e00", True, True, "dotted")
     assert after["document"]["features"][0]["properties"]["group"] == made["id"]
     # its redo takes it out again; a group of the same name meanwhile is refused rather than doubled
     assert client.post(f"{url}/revert", json={"put": [], "drop": [], "drop_groups": [made["id"]]}).status_code == 200
     after = read(client, owner, row)
-    assert [one["name"] for one in after["groups"]] == ["Markers", "Later"]
+    assert [one["name"] for one in after["groups"]] == ["Features", "Later"]
     assert after["document"]["features"][0]["properties"]["group"] == after["groups"][0]["id"]
     client.post(f"{url}/groups", json={"name": "Strikes"})
     refused = client.post(f"{url}/revert", json={"put": [], "drop": [], "groups": [{**group, "at": 1}]})

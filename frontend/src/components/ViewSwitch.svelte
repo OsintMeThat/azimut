@@ -25,10 +25,10 @@
    *   onpick: (id: string) => void,
    * }}
    */
-  let { options = [], value, label = 'View', onpick } = $props();
+  let { options = [], value, label = 'View', onpick, guide } = $props();
 </script>
 
-<div class="view-switch" role="group" aria-label={label}>
+<div class="view-switch" role="group" aria-label={label} data-guide={guide}>
   {#each options as option (option.id)}
     <button
       class="view-btn"

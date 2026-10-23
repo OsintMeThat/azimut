@@ -699,6 +699,36 @@ describe('what the sheet says on hover', () => {
     expect(setStatus).toHaveBeenCalledWith('destroyed');
   });
 
+  it('shows a marker\'s position, copies it, and moves the marker to one typed or pasted there', async () => {
+    const marker = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    const placeAt = vi.fn(() => true);
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    show(LayerFeatureSheet, { controller: picked(marker, { groups: [{ id: 'g', name: 'Markers' }], placeAt }) });
+    const field = document.querySelector('[aria-label="Feature position"]');
+    expect(field.value).toBe('48.000000, 2.000000');
+    document.querySelector('[aria-label="Copy the position"]').click();
+    expect(writeText).toHaveBeenCalledWith('48.000000, 2.000000');
+    // the same text left as it was moves nothing; another position moves it there
+    leave(field);
+    expect(placeAt).not.toHaveBeenCalled();
+    type(field, '48.5, 2.25'); leave(field); await settle();
+    expect(placeAt).toHaveBeenCalledWith('m1', { lat: 48.5, lon: 2.25 });
+    // what reads as no position says so and moves nothing
+    const { api } = await import('../../lib/api.js');
+    api.post.mockRejectedValueOnce(new Error('could not parse coordinates'));
+    type(field, 'somewhere'); leave(field); await settle(); flushSync();
+    expect(placeAt).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.position-refused').textContent).toBe('No position could be read from that');
+  });
+
+  it('keeps a marker that follows a case item where it stands, its position still copied', () => {
+    const marker = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g', entity_id: 'place-1', entity_type: 'place' }, geometry: { type: 'Point', coordinates: [2, 48] } };
+    show(LayerFeatureSheet, { controller: picked(marker, { groups: [{ id: 'g', name: 'Markers' }], placeAt: vi.fn() }) });
+    expect(document.querySelector('[aria-label="Feature position"]').readOnly).toBe(true);
+    expect(document.querySelector('[aria-label="Copy the position"]')).not.toBeNull();
+  });
+
   it('says a feature is not on the map on the day shown, and keeps its status there', () => {
     const away = { type: 'Feature', properties: { key: 's', name: 'Store', group: 'g', $absent: true,
       states: [{ at: '2026-10-10', geometry: { type: 'Point', coordinates: [2, 48] } }] }, geometry: { type: 'Point', coordinates: [2, 48] } };

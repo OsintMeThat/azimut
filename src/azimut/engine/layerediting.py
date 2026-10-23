@@ -21,7 +21,9 @@ from ..workspace import Case
 from . import iconlibrary, layerlinks, maplayers, satellite
 
 EDITABLE = "editable"
-WORK_FIELDS = ("title", "description", "document", "groups", "hidden", "marker_serial", "shape_serial",
+# A layer's first group holds lines and areas as well as markers.
+DEFAULT_GROUP = "Features"
+WORK_FIELDS = ("title", "description", "document", "groups", "hidden", "marker_serial", "line_serial", "area_serial",
                "removed_features", "removed_batch", "track", "mymaps")
 SYMBOLS = ("pin", "circle", "star", "flag") + tuple(f"badge-{icon}" for icon in (
     "image", "video", "audio", "user", "building", "car", "plane", "ship", "note", "alert",
@@ -136,7 +138,7 @@ def _groups(spec: dict[str, Any]) -> list[dict[str, Any]]:
         properties = feature["properties"]
         if properties.get("group") in by_id:
             continue
-        name = properties.get("category") or "Markers"
+        name = properties.get("category") or DEFAULT_GROUP
         if name not in by_name:
             group = {"id": maplayers.digest(name.encode())[:16], "name": name,
                      "mode": "individual", "colour": "#0072b2", "symbol": "pin",
@@ -146,7 +148,7 @@ def _groups(spec: dict[str, Any]) -> list[dict[str, Any]]:
             by_id[group["id"]] = group
         properties["group"] = by_name[name]["id"]
     if not groups:
-        groups.append({"id": "markers", "name": "Markers", "mode": "individual",
+        groups.append({"id": "markers", "name": DEFAULT_GROUP, "mode": "individual",
                        "colour": "#0072b2", "symbol": "pin"})
     for group in groups:
         group.setdefault("size", 1.0)
@@ -1688,9 +1690,14 @@ def add_shape(case: Case, layer: str, *, geometry: dict[str, Any], name: str,
         features = spec["document"]["features"]
         if len(features) >= maplayers.MAX_FEATURES:
             raise maplayers.LayerError("this layer has reached its feature limit")
-        sequence = int(spec.get("shape_serial", 0)) + 1
-        spec["shape_serial"] = sequence
-        properties = maplayers._properties(name=name.strip() or f'{"Line" if _kind(geometry) == "line" else "Area"} {sequence}',
+        # lines and areas count apart, so the first area is "Area 1" whatever lines came before
+        word = "Line" if _kind(geometry) == "line" else "Area"
+        serial = f"{word.lower()}_serial"
+        numbered = [label[len(word) + 1:] for f in features
+                    if (label := str(f["properties"].get("name", ""))).startswith(f"{word} ")]
+        sequence = max([int(spec.get(serial, 0)), *(int(value) for value in numbered if value.isdecimal())]) + 1
+        spec[serial] = sequence
+        properties = maplayers._properties(name=name.strip() or f"{word} {sequence}",
                                            description=description, colour=colour, category=target["name"])
         properties.update(key=uuid.uuid4().hex, group=target["id"], symbol="pin")
         apply_fields(properties, fields)

@@ -223,7 +223,7 @@ def test_layer_targets_list_each_layer_its_groups_and_the_markers_following_an_i
     # the styles each layer shows, as drawn: a marker of its own, and the proof's in its group's
     assert bare["Front"]["styles"] == [{"symbol": "pin", "colour": "#0072b2"}]
     assert bare["Strikes"]["styles"] == [{"symbol": group["symbol"], "colour": group["colour"].lower()}]
-    assert [one["name"] for one in bare["Strikes"]["groups"]] == ["Markers", "Craters"]
+    assert [one["name"] for one in bare["Strikes"]["groups"]] == ["Features", "Craters"]
     assert set(bare["Strikes"]["groups"][0]) == {"id", "name", "mode", "colour", "symbol"}
 
     rows = {row["title"]: row for row in client.get(f"/api/cases/{owner}/layer-targets", params={"entity": proof["id"]}).json()}

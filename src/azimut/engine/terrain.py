@@ -470,6 +470,9 @@ class Sampler:
     zooms: set[int] = field(default_factory=set)
     keep: int | None = None
     _held: OrderedDict[Key, np.ndarray | None] = field(default_factory=OrderedDict)
+    # one sweep reads with several threads: what is held changes under one of them at a time (unlocked, a read
+    # listing the tiles to let go met another's new tile: "OrderedDict mutated during iteration")
+    _held_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def heights(
         self, lat: np.ndarray | float, lon: np.ndarray | float, zoom: int
@@ -616,17 +619,18 @@ class Sampler:
         """The tiles asked for, loaded where they were not held: a mapping of its own, so another
         thread letting a tile go meanwhile takes nothing from this read."""
         wanted = [(zoom, int(k) // tiles_across, int(k) % tiles_across) for k in keys]
-        before = {key: self._held[key] for key in wanted if key in self._held}
-        missing = [key for key in wanted if key not in before]
-        if self.keep is not None:
-            for key in wanted:
-                if key in self._held:
-                    self._held.move_to_end(key)
-            # room for what this read needs, the oldest let go and never one it needs
-            needed = set(wanted)
-            spare = [key for key in self._held if key not in needed]
-            for key in spare[: max(0, len(self._held) + len(missing) - self.keep)]:
-                self._held.pop(key, None)
+        with self._held_lock:
+            before = {key: self._held[key] for key in wanted if key in self._held}
+            missing = [key for key in wanted if key not in before]
+            if self.keep is not None:
+                for key in wanted:
+                    if key in self._held:
+                        self._held.move_to_end(key)
+                # room for what this read needs, the oldest let go and never one it needs
+                needed = set(wanted)
+                spare = [key for key in self._held if key not in needed]
+                for key in spare[: max(0, len(self._held) + len(missing) - self.keep)]:
+                    self._held.pop(key, None)
         if not missing:
             return before
         shared = self.fetch is None
@@ -636,7 +640,8 @@ class Sampler:
             if remembered is None:
                 to_fetch.append(key)
             else:
-                self._held[key] = before[key] = remembered[0]
+                with self._held_lock:
+                    self._held[key] = before[key] = remembered[0]
                 if remembered[0] is not None:
                     self.sources.add(remembered[1])
         if not to_fetch:
@@ -668,7 +673,8 @@ class Sampler:
             with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
                 results = list(pool.map(one, to_fetch))
         for key, heights, source in results:
-            self._held[key] = before[key] = heights
+            with self._held_lock:
+                self._held[key] = before[key] = heights
             if heights is not None:
                 self.sources.add(source)
             if shared:

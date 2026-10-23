@@ -824,6 +824,20 @@ These are interaction budgets, not release claims. Shared CI hardware varies,
 so the automated suites enforce bounded queries, result sizes, and mounted-row
 limits instead of machine-specific timings.
 
+The map keeps to work counts the same way, each one a lag that was measured and
+removed (2026-10-23):
+
+| On the map | Held to |
+|---|---|
+| A point of a layer on the 3D view | one projection a frame, whatever layers stand on it |
+| A feature a layer's filter refuses at every zoom | never weighed |
+| A dot that paints nothing (a click target) | placed for clicks, never drawn |
+| Names in view | measured all, written only once placed; placed a few times a second, not every frame |
+| The flat map under the 3D view | not drawn again while the globe moves |
+| A personal layer read back unchanged | not handed to the engine again |
+| A free provider's imagery on a flat map | asked in batches, a handful of requests a screen |
+| Turning the map | its address written once the turn ends |
+
 ## How it is verified
 
 - **Graph contract** (`tests/test_repository.py`): entity/link/folder CRUD,
@@ -859,6 +873,13 @@ limits instead of machine-specific timings.
 - **Frontend** (vitest + svelte-check + the production build): first-page paging,
   complete server search, full-result media facets, request cancellation on case
   switch, scoped metadata loading and thumbnail placeholder/failure/retry markup.
+- **Map smoothness**: the counts above, at a few thousand features and names
+  (`frontend/src/lib/globe/smoothness.test.js`, `mirror.test.js`,
+  `standing.test.js`, `glyphs.test.js`, `lib/map/addedLayer.test.js`,
+  `basemap.test.js`, `tileBatch.test.js`), and in a real browser the flat map
+  left undrawn under a turning globe, the address written once a turn and the
+  imagery asked in batches (`e2e/satellite-3d.spec.js`,
+  `e2e/satellite-overlays.spec.js`).
 
 The backend suite runs on Python 3.11 and the three release operating systems.
 

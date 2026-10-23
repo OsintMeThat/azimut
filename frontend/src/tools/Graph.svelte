@@ -4833,7 +4833,7 @@
       </label>
     {/if}
 
-    <label class="control">
+    <label class="control" data-guide="graph.lens">
       Lens
       <select class="select pick" bind:value={lens} title={lensHint}>
         {#each lenses as entry (entry.id)}
@@ -4855,6 +4855,7 @@
         class="input"
         type="search"
         placeholder="Find a node"
+        data-guide="graph.find"
         aria-label="Find a node"
         bind:value={find}
         oninput={() => (listing = true)}
@@ -5121,7 +5122,7 @@
       </button>
     {/if}
 
-    <span class="zoom">
+    <span class="zoom" data-guide="graph.zoom">
       <button class="icon-btn" onclick={() => zoomBy(1 / 1.2)} title="Zoom out (-)">
         <Icon name="minus" size={15} />
       </button>
@@ -5199,6 +5200,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="canvas"
+      data-guide="graph.canvas"
       class:panning
       class:on-node={Boolean(hovered)}
       class:arrangeable={canArrange}
@@ -5379,7 +5381,7 @@
     {/if}
 
     {#if legend.length}
-      <div class="legend">
+      <div class="legend" data-guide="graph.legend">
         <!-- The legend is the control. A lens decides the reading and takes a whole
              role out of it; switching a family off is the budget decision, which on a
              case larger than the budget is the difference between spending it on media

@@ -38,6 +38,14 @@ describe('the flat map’s style, read for the globe', () => {
     expect(hidden.inRange(10)).toBe(false);
   });
 
+  it('says whether a filter reads the zoom, so a refused feature can be left out once', () => {
+    expect(layerOf('country').zoomFree).toBe(true);
+    expect(compileLayer({ id: 'x', type: 'circle', source: 's' }).zoomFree).toBe(true);
+    const ramp = compileLayer({ id: 'y', type: 'circle', source: 's', filter: ['>=', ['zoom'], 8] });
+    expect(ramp.zoomFree).toBe(false);
+    expect(ramp.accepts(9, evaluable('Point', {}))).toBe(true);
+  });
+
   it('draws a value it cannot read as unset rather than failing the frame', () => {
     const odd = compileLayer({ id: 'x', type: 'line', source: 's', paint: { 'line-width': ['get'] } });
     expect(odd.paint('line-width', 3, evaluable('LineString', {}))).toBeUndefined();

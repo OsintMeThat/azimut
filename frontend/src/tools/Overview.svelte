@@ -22,7 +22,7 @@
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { markdownHtml } from '../lib/markdown.js';
-  import { openEntity } from '../lib/navigate.js';
+  import { openEntity, openGuide } from '../lib/navigate.js';
   import { updateBadges } from '../lib/staleness.js';
   import {
     familyBars,
@@ -356,7 +356,7 @@
         </div>
 
         <footer class="foot">
-          <button class="aside" onclick={() => (uiState.tool = 'guide')}>
+          <button class="aside" onclick={() => openGuide('start')}>
             New here? Read the guide
             <Icon name="arrowRight" size={13} />
           </button>
@@ -418,7 +418,7 @@
           {/if}
 
           <div class="door-foot">
-            <button class="btn btn-ghost btn-sm" onclick={() => (uiState.tool = 'guide')}>
+            <button class="btn btn-ghost btn-sm" onclick={() => openGuide('start')}>
               Read the guide
               <Icon name="arrowRight" size={13} />
             </button>

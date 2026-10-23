@@ -171,6 +171,7 @@
 
 <div
   class="ctx card"
+  data-guide="map.menu"
   role="menu"
   tabindex="-1"
   aria-label="This point"

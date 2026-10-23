@@ -41,7 +41,7 @@ export const HOME_WORKSPACE = {
   id: 'home',
   label: 'Home',
   icon: 'compass',
-  tools: ['overview', 'guide'],
+  tools: ['overview'],
 };
 
 /** The rail, in investigation order. */
@@ -57,7 +57,6 @@ export const ALL_WORKSPACES = [HOME_WORKSPACE, CASE_WORKSPACE, ...WORKSPACES];
 
 export const TOOL_LABELS = {
   overview: 'Overview',
-  guide: 'Guide',
   board: 'Board',
   graph: 'Graph',
   timeline: 'Timeline',

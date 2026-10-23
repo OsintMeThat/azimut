@@ -98,7 +98,7 @@ const leaveAnalysisView = vi.fn();
 vi.mock('../lib/analysisSearch.svelte.js', () => ({ setAnalysisFilter, leaveAnalysisView }));
 
 const openEntity = vi.fn();
-vi.mock('../lib/navigate.js', () => ({ openEntity }));
+vi.mock('../lib/navigate.js', () => ({ openEntity, openGuide: vi.fn() }));
 
 // The registry is served by the backend and never loaded here, so the families it
 // would answer with are stated instead: without them every type falls into "other"

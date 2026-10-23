@@ -234,6 +234,22 @@ test('carries the coordinates on a dragged pin, and drops it on exit', async ({ 
   await expect(pin).toHaveCount(0);
 });
 
+test('asks the free imagery’s tiles many at a time, a handful of requests for a screen', async ({ page }) => {
+  // one at a time, each tile waited for one of the six connections the browser keeps to the app
+  await installAppFixture(page);
+  const asked = [];
+  page.on('request', (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith('/api/tiles/')) asked.push(pathname);
+  });
+  await page.goto('/#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  await awaitMapReady(page);
+  await expect.poll(() => asked.length).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(asked.every((path) => path === '/api/tiles/batch/esri-world-imagery')).toBe(true);
+  expect(asked.length).toBeLessThanOrEqual(8);
+});
+
 test('lays the railways over the imagery, and lifts them off again', async ({ page }) => {
   // The toggle sat on the tool while the layer never heard about it: the effect
   // that carries it down read the map first, and while the map was still being

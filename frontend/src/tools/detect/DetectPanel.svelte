@@ -667,7 +667,7 @@
         <Icon name={collapsed ? 'chevronLeft' : 'chevronRight'} size={16} />
       </button>
       {#if !collapsed}
-        <button class="cmp-icon" aria-label="Analyzers" title="Edit analyzers"
+        <button class="cmp-icon" aria-label="Analyzers" title="Edit analyzers" data-guide="detect.analyzers"
           onclick={openLibrary}><Icon name="sliders" size={15} /></button>
         <button class="cmp-icon" class:on={fullscreen} aria-pressed={fullscreen}
           aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
@@ -675,7 +675,7 @@
           onclick={onfullscreen}><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
       {/if}
     </header>
-    <nav class="dock-tabs" class:rail={collapsed} aria-label="Detect sections">
+    <nav class="dock-tabs" class:rail={collapsed} aria-label="Detect sections" data-guide="detect.tabs">
       {#each [['routines', 'Routines', 'clock'], ['saved', 'Saved', 'bookmark'], ['areas', 'Areas', 'polygon']] as [id, label, icon]}
         <button class="section-tab" class:on={tab === id && view === 'home'} aria-label={label} aria-pressed={tab === id && view === 'home'}
           title={label} onclick={() => openTab(id)}><Icon name={icon} size={15} />{#if !collapsed}{label}{/if}</button>
@@ -693,7 +693,7 @@
     {/if}
   </div>
   <div class="dock-content" hidden={collapsed}>
-  <div class="new-action" class:quiet={view !== 'home' || !!launch} bind:this={newActionEl}>
+  <div class="new-action" data-guide="detect.new" class:quiet={view !== 'home' || !!launch} bind:this={newActionEl}>
     <button class="btn btn-primary create-trigger" aria-expanded={picking}
       onclick={() => (picking = !picking)}>
       <Icon name="plus" size={15} /> <span>New detection</span>
@@ -702,7 +702,7 @@
     {#if picking}
       <!-- The kind is the first question because it changes every one after
            it, so each says in a line what it commits you to. -->
-      <div class="new-menu cmp-glass" role="group" aria-label="New detection">
+      <div class="new-menu cmp-glass" role="group" aria-label="New detection" data-guide="detect.new-menu">
         <button class="kind" aria-label="New one pass" onclick={() => newDetection('once')}>
           <span class="kind-copy"><strong>One pass</strong><small>Choose dates for one sweep.</small></span>
         </button>

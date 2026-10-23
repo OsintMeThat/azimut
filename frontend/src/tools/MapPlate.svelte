@@ -1415,7 +1415,7 @@
       {/if}
       <div class="spacer"></div>
       <button class="btn btn-sm add-btn" class:on={!!adding} bind:this={addButton} aria-haspopup="dialog" aria-expanded={!!adding}
-        title="Add to the page (A)" onclick={() => toggleAdd(addButton)}><Icon name="plus" size={14} /> Add</button>
+        title="Add to the page (A)" data-guide="plate.add" onclick={() => toggleAdd(addButton)}><Icon name="plus" size={14} /> Add</button>
       <span class="rule" role="presentation"></span>
       <button class="btn btn-ghost btn-sm" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}><Icon name="undo" size={15} /></button>
       <button class="btn btn-ghost btn-sm" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}><Icon name="redo" size={15} /></button>
@@ -1432,7 +1432,7 @@
       {#if !plate.template}
         <button class="btn btn-sm" onclick={() => (naming = { value: plate.title })} title="Keep this layout, without its data, to start other plates from">
           <Icon name="save" size={14} /> Keep as template</button>
-        <button class="btn btn-primary btn-sm" onclick={openExport}><Icon name="download" size={14} /> Export</button>
+        <button class="btn btn-primary btn-sm" data-guide="plate.export" onclick={openExport}><Icon name="download" size={14} /> Export</button>
       {:else}
         <button class="btn btn-primary btn-sm" title={plate.template.from === 'settings' ? 'Keep the template and go back to Settings' : 'Keep the template and go back to the plates'}
           onclick={leaveTemplate}><Icon name="check" size={14} /> Done</button>
@@ -1442,7 +1442,7 @@
 
     <div class="work" class:focus style:--below="{barShown ? barHeight : 0}px">
       {#if listShown}
-        <div class="dock left" style:width="{layout.listW}px">
+        <div class="dock left" style:width="{layout.listW}px" data-guide="plate.list">
           <PlateElements spec={plate.spec} bind:selection {at} {place} {playable} bind:ghosts {tokens} onrestack={restack} onhide={() => panel('list')} />
           <PanelEdge bind:width={layout.listW} helpers={listWidth} side="right" label="Resize the list" />
         </div>
@@ -1507,7 +1507,7 @@
       </div>
 
       {#if inspectorShown}
-        <div class="dock right" style:width="{layout.inspectorW}px">
+        <div class="dock right" style:width="{layout.inspectorW}px" data-guide="plate.inspector">
           <PanelEdge bind:width={layout.inspectorW} helpers={inspectorWidth} side="left" label="Resize the inspector" />
           <PlateInspector spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {legend} {framing} {at} moments={playable ? moments : []}
             {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}

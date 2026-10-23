@@ -609,7 +609,7 @@
   });
 </script>
 
-<aside class="sidebar" class:resizing style="width: {uiState.sidebarW}px">
+<aside class="sidebar" data-guide="start.sidebar" class:resizing style="width: {uiState.sidebarW}px">
   <!-- a <button> rather than a bare div: the handle must be focusable and
        keyboard-driven (arrows resize), and the element carries that for free -->
   <button

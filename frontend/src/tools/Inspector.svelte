@@ -1144,21 +1144,21 @@
         {/if}
       </div>
 
-      <aside class="panel" style:width={`${panelW}px`}>
+      <aside class="panel" style:width={`${panelW}px`} data-guide="inspect.panel">
         <PanelEdge bind:width={panelW} helpers={panelHelpers} side="left" label={INSPECT_HELP.resize} />
         {#if opening}
           <p class="hint">Opening…</p>
         {:else if selected === 'video' || activeFrame}
           <div class="pinned">
             {#if selected === 'video'}
-              <button class="btn btn-primary capture" onclick={captureNow} title={INSPECT_HELP.capture}>
+              <button class="btn btn-primary capture" data-guide="inspect.capture" onclick={captureNow} title={INSPECT_HELP.capture}>
                 <Icon name="camera" size={16} />
                 <span>Capture frame</span>
                 <span class="at mono">{preciseClock(shownFrameTime(shared.currentTime, probeInfo?.fps, shared.frameTime))}</span>
                 <kbd>C</kbd>
               </button>
               {#if unfiledCount}
-                <button class="btn btn-sm save-frames" disabled={saving === 'all'} onclick={saveAllFrames} title={INSPECT_HELP.saveAll}>
+                <button class="btn btn-sm save-frames" data-guide="inspect.save" disabled={saving === 'all'} onclick={saveAllFrames} title={INSPECT_HELP.saveAll}>
                   <Icon name="save" size={13} />
                   {saving === 'all' ? 'Saving…' : unfiledCount === 1 ? 'Save the frame to the case' : `Save ${unfiledCount} frames to the case`}
                 </button>
@@ -1177,7 +1177,7 @@
             {/if}
           </div>
 
-          <div class="ptabs" role="tablist" aria-label="Panel">
+          <div class="ptabs" role="tablist" aria-label="Panel" data-guide="inspect.tabs">
             {#each panelTabs as t (t.id)}
               <button
                 class="ptab"

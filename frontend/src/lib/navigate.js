@@ -7,7 +7,6 @@
 import { caseState, toast, uiState } from './state.svelte.js';
 import { api } from './api.js';
 import { mediaKindOf } from './entityIcon.js';
-import { GUIDE, guideFor } from './guide.js';
 import { revealMediaFolder } from './reveal.js';
 import { normalizeReverseTarget } from './reverseSearch.js';
 
@@ -348,16 +347,14 @@ export function openInHorizon({ path, kind, title, time }) {
 }
 
 /**
- * Open the Guide on whatever covers a tool.
+ * Open the guide over the tools, on whatever asked.
  *
- * The press means "what is this tab", so it lands on the section written about that
- * tab. A tool no section covers — Settings, and the two home tabs themselves — opens
- * the guide at the top, which is where somebody with a general question belongs
- * anyway.
+ * From the `?` that is the tool being stood in, since the press means "what is this
+ * tab". A tool with no page of its own opens it at the start, which is where somebody
+ * with a general question belongs anyway. The tool underneath stays where it is.
  */
-export function openGuide(tool) {
-  uiState.guideSection = guideFor(tool)?.id ?? GUIDE[0].id;
-  uiState.tool = 'guide';
+export function openGuide(at) {
+  uiState.guide = { at };
 }
 
 /**

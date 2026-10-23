@@ -110,7 +110,7 @@
   }
 </script>
 
-<div class="sky" class:loading>
+<div class="sky" class:loading data-guide="coords.sky">
   <div class="sky-head">
     <h3>Sun &amp; moon</h3>
     <div class="day-field">

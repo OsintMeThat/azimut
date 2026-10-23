@@ -246,7 +246,7 @@
   });
 </script>
 
-<div class="toolbar">
+<div class="toolbar" data-guide="proof.tools">
   <button class="tb-btn" title={shortcut('Undo (Ctrl+Z)')} disabled={!canUndo} onclick={undo}>
     <Icon name="undo" size={18} />
   </button>

@@ -1150,7 +1150,7 @@
         {/each}
       </div>
       <span class="bar-sep"></span>
-      <form class="new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
+      <form class="new-folder" data-guide="files.new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
         <input class="input" placeholder="New folder…" bind:value={newFolder} />
         <button class="btn" type="submit" disabled={!newFolder.trim()}>
           <Icon name="folder" size={14} /> Add
@@ -1164,7 +1164,7 @@
   {:else}
     <div class="workbench">
       <!-- left: folder tree (navigation + drop targets) -->
-      <aside class="tree-rail">
+      <aside class="tree-rail" data-guide="files.tree">
         <div
           class="trow"
           class:active={cwd === '' && !showUnfiled && !showTrash}
@@ -1243,6 +1243,7 @@
           {#if cwd && !showUnfiled && !showTrash}
             <button
               class="work-toggle"
+              data-guide="files.work"
               class:on={working === cwd}
               aria-pressed={working === cwd}
               title={working === cwd
@@ -1260,7 +1261,7 @@
         </div>
 
         {#if !showTrash && chips.length > 1}
-          <div class="filters" role="group" aria-label="Filters">
+          <div class="filters" role="group" aria-label="Filters" data-guide="files.filters">
             <button class="chip" class:active={!typeFilter} onclick={() => (typeFilter = null)}>All</button>
             {#each chips as chip (chip.type)}
               <button
@@ -1511,6 +1512,7 @@
           {#each completeFolderLoading ? [] : curEntities as e (e.id)}
             <div
               class="tile entity"
+              data-guide="files.tile"
               class:selected={selected.includes(e.id)}
               data-id={e.id}
               draggable="true"
@@ -1660,7 +1662,7 @@
     oncontextmenu={(e) => e.preventDefault()}
   ></div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ctx-menu" role="menu" tabindex="-1" style="left:{ctx.x}px; top:{ctx.y}px" onpointerdown={(e) => e.stopPropagation()}>
+  <div class="ctx-menu" role="menu" tabindex="-1" data-guide="files.menu" style="left:{ctx.x}px; top:{ctx.y}px" onpointerdown={(e) => e.stopPropagation()}>
     {#if ctx.kind === 'entity'}
       <div class="ctx-head">{ctxOne ? ctxOne.label : `${ctxEntities.length} items`}</div>
       {#if ctxOne}

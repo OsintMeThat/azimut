@@ -21,6 +21,17 @@ const TILE_PNG = Buffer.from(
   'base64'
 );
 
+/** A batch of tiles as api/tile_batch.py writes it: each one its place asked, its status, its length, itself. */
+function tileBatch(keys, tile) {
+  return Buffer.concat(keys.map((_, index) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt16LE(index, 0);
+    head.writeUInt16LE(200, 2);
+    head.writeUInt32LE(tile.length, 4);
+    return Buffer.concat([head, tile]);
+  }));
+}
+
 // A reference overlay is transparent but for the lines it draws. The fixture
 // answers with nothing drawn at all, so a layer that is on never paints over
 // what a spec is looking at underneath it.
@@ -593,6 +604,8 @@ const providers = [{
   oversample: 1,
   imagery: true,
   capturable: true,
+  // the app keeps its tiles on disk, so a flat map asks them in batches, as for the real Esri
+  cacheable: true,
 }];
 
 /**
@@ -1013,10 +1026,15 @@ export async function installAppFixture(page, options = {}) {
     };
   };
 
-  await page.addInitScript((caseId) => {
+  await page.addInitScript(({ caseId, muted }) => {
     if (caseId) localStorage.setItem('azimut:lastCase', caseId);
     localStorage.setItem('azimut:theme', 'dark');
-  }, options.lastCase === undefined ? CASE_ID : options.lastCase);
+    // the welcome a version opens with (lib/welcome.js) stays out of every spec but its own
+    if (muted) localStorage.setItem('azimut:welcomeMuted', muted);
+  }, {
+    caseId: options.lastCase === undefined ? CASE_ID : options.lastCase,
+    muted: options.welcome ? '' : fixtureSettings.version,
+  });
 
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -1068,6 +1086,10 @@ export async function installAppFixture(page, options = {}) {
     }
     if (path === `/files/${CASE_ID}/${GRAPH_THUMB}`) {
       return route.fulfill({ contentType: 'image/svg+xml', body: PANEL_SVG });
+    }
+    if (path.startsWith('/api/tiles/batch/')) {
+      const keys = (url.searchParams.get('t') ?? '').split(',').filter(Boolean);
+      return route.fulfill({ contentType: 'application/octet-stream', body: tileBatch(keys, TILE_PNG) });
     }
     if (path.startsWith('/api/tiles/')) {
       return route.fulfill({ contentType: 'image/png', body: TILE_PNG });

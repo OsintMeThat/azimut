@@ -18,12 +18,13 @@ import AddedLayersOverlay from './AddedLayersOverlay.svelte';
 
 let landings = $state.raw([]);
 let dragging = $state.raw(null);
-Object.defineProperties(editor, { landings: { get: () => landings }, dragging: { get: () => dragging } });
+let edited = $state.raw(null);
+Object.defineProperties(editor, { landings: { get: () => landings }, dragging: { get: () => dragging }, editor: { get: () => edited } });
 editor.claim = vi.fn((landing) => { landing.claimed = true; });
 editor.landed = vi.fn();
 
 let held = null;
-afterEach(() => { if (held) unmount(held); held = null; made.length = 0; landings = []; dragging = null; vi.clearAllMocks(); });
+afterEach(() => { if (held) unmount(held); held = null; made.length = 0; landings = []; dragging = null; edited = null; vi.clearAllMocks(); });
 const settle = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); flushSync(); };
 
 describe('the layers drawn on a map', () => {
@@ -49,6 +50,21 @@ describe('the layers drawn on a map', () => {
     expect(made).toHaveLength(2);
     expect(made[0].destroy).toHaveBeenCalled();
     expect(made[1].options.history).toBe(true);
+  });
+
+  it('opens no card on the layer being edited, whose clicks pick in the editor, and gives them back after', async () => {
+    const rows = [{ name: 'front', title: 'Front', editable: true, sha256: 'a', hidden: [], categories: [] },
+      { name: 'other', title: 'Other', editable: true, sha256: 'b', hidden: [], categories: [] }];
+    held = mount(AddedLayersOverlay, { target: document.body, props: {
+      engine: { impl: { once: (event, run) => run() } }, caseId: 'case', drawing: vi.fn(async () => ({ type: 'FeatureCollection', features: [] })), layers: rows } });
+    await settle();
+    const [front, other] = made;
+    expect(front.interactive).toHaveBeenLastCalledWith(true);
+    edited = { name: 'front' }; await settle();
+    expect(front.interactive).toHaveBeenLastCalledWith(false);
+    expect(other.interactive).toHaveBeenLastCalledWith(true);
+    edited = null; await settle();
+    expect(front.interactive).toHaveBeenLastCalledWith(true);
   });
 
   describe('an edit let go on the map', () => {

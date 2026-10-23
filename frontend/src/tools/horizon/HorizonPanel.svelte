@@ -255,7 +255,7 @@
 </script>
 
 {#snippet group(id, title, gist, body, frozen = false, sheet = true)}
-  <details class="hz-group" bind:open={opened[id]}>
+  <details class="hz-group" bind:open={opened[id]} data-guide={id === 'viewpoint' ? 'horizon.viewpoint' : undefined}>
     <summary>
       <span class="group-title">{title}</span>
       {#if !opened[id] && gist}<span class="gist">{gist}</span>{/if}

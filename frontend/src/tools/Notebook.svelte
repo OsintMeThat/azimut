@@ -689,7 +689,7 @@
 {:else}
   <section bind:this={notebookEl} class="notebook">
     <header class="notebook-bar">
-      <div class="notes-menu-wrap">
+      <div class="notes-menu-wrap" data-guide="notebook.notes">
         <button class="menu-toggle" class:active={menuOpen} onclick={toggleNotesMenu} aria-expanded={menuOpen}>
           <Icon name="note" size={15} /> Notes <Icon name="chevronDown" size={13} />
         </button>
@@ -860,12 +860,12 @@ flowchart LR
     </header>
 
     <div bind:this={panesEl} class="panes" class:preview-only={previewOnly} class:resizing style={`grid-template-columns: calc(${split}% - 4px) 8px calc(${100 - split}% - 4px);`}>
-      <section class="pane writer">
+      <section class="pane writer" data-guide="notebook.write">
         <div class="pane-title">
           <span>Write</span>
           <div class="writer-actions">
-            <button class="btn btn-ghost btn-sm" class:active={referenceOpen} title="Insert case reference" onclick={() => (referenceOpen = !referenceOpen)}><Icon name="link" size={14} /></button>
-            <button class="btn btn-ghost btn-sm" class:active={mediaOpen} title="Insert case media" onclick={() => (mediaOpen = !mediaOpen)}><Icon name="media" size={14} /></button>
+            <button class="btn btn-ghost btn-sm" class:active={referenceOpen} data-guide="notebook.insert" title="Insert case reference" onclick={() => (referenceOpen = !referenceOpen)}><Icon name="link" size={14} /></button>
+            <button class="btn btn-ghost btn-sm" class:active={mediaOpen} data-guide="notebook.insert" title="Insert case media" onclick={() => (mediaOpen = !mediaOpen)}><Icon name="media" size={14} /></button>
             <button
               class="btn btn-ghost btn-sm"
               title={noteId ? 'Delete note' : 'Reset note content'}
@@ -900,8 +900,8 @@ flowchart LR
         {/if}
       </section>
       <button class="splitter" aria-label="Resize writer and preview" title="Drag to resize · double-click to reset" onpointerdown={startResize} ondblclick={resetSplit} onkeydown={onSplitterKey}></button>
-      <article class="pane reader">
-        <div class="pane-title"><span>Preview</span><div class="preview-actions"><button class="btn btn-ghost btn-sm" title="Export this note as PDF" aria-label="Export this note as PDF" disabled={exportBusy} onclick={openCurrentExportDialog}><Icon name="download" size={14} /></button><button class="btn btn-ghost btn-sm preview-toggle" title={previewOnly ? 'Show writer' : 'Preview only'} onclick={() => (previewOnly = !previewOnly)}><Icon name={previewOnly ? 'minimize' : 'maximize'} size={14} /></button></div></div>
+      <article class="pane reader" data-guide="notebook.preview">
+        <div class="pane-title"><span>Preview</span><div class="preview-actions"><button class="btn btn-ghost btn-sm" data-guide="notebook.pdf" title="Export this note as PDF" aria-label="Export this note as PDF" disabled={exportBusy} onclick={openCurrentExportDialog}><Icon name="download" size={14} /></button><button class="btn btn-ghost btn-sm preview-toggle" title={previewOnly ? 'Show writer' : 'Preview only'} onclick={() => (previewOnly = !previewOnly)}><Icon name={previewOnly ? 'minimize' : 'maximize'} size={14} /></button></div></div>
         <div bind:this={previewEl} class="markdown" aria-label="Markdown preview" use:bindEntityLinks>{@html preview}</div>
       </article>
     </div>

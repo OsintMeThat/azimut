@@ -2,164 +2,278 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { GUIDE, guideFor, guideSection, readingSection } from './guide.js';
+import {
+  FIXES,
+  JOURNEYS,
+  KEYMAP,
+  MENU,
+  MENU_ITEMS,
+  PAGES,
+  WORKSPACE_LEADS,
+  allShots,
+  journeysThrough,
+  landingFor,
+  pinSpots,
+  shotOf,
+  stepMarks,
+} from './guide.js';
 import { CASE_WORKSPACE, TOOL_LABELS, WORKSPACES } from './workspaces.js';
 
 const RAIL_AND_CASE = [...WORKSPACES, CASE_WORKSPACE];
+const TOOLS = RAIL_AND_CASE.flatMap((ws) => ws.tools);
 
-/** Every sentence the guide puts on screen, whichever shape holds it. */
-const prose = () =>
-  GUIDE.flatMap((section) => [
-    section.lead,
-    ...(section.points ?? []).flatMap((point) => [point.label, point.text]),
-    ...(section.recipes ?? []).flatMap((recipe) => [
-      recipe.title,
-      recipe.lead,
-      ...recipe.steps.map((step) => step.text),
-    ]),
-    ...(section.keymap ?? []).flatMap((group) => group.keys.map((key) => key.does)),
-    ...(section.fixes ?? []).flatMap((fix) => [fix.symptom, fix.fix]),
-  ]);
+/** Every component of the app, as written: where an anchor the guide frames must stand. */
+const COMPONENTS = Object.values(
+  import.meta.glob('../**/*.svelte', { query: '?raw', import: 'default', eager: true })
+).join('\n');
+
+/** Every sentence the guide puts in front of a reader. */
+function prose() {
+  const lines = [...Object.values(WORKSPACE_LEADS)];
+  const marks = (list) => {
+    for (const mark of list ?? []) {
+      lines.push(mark.title, mark.text);
+      if (mark.opens) {
+        lines.push(mark.opens.lead);
+        marks(mark.opens.marks);
+      }
+    }
+  };
+  for (const page of Object.values(PAGES)) {
+    lines.push(page.lead);
+    marks(page.marks);
+    for (const tip of page.tips ?? []) lines.push(tip.title, tip.text);
+  }
+  for (const journey of JOURNEYS) lines.push(journey.title, journey.lead, ...journey.steps.map((step) => step.text));
+  return lines;
+}
 
 describe('the guide tracks the app rather than falling behind it', () => {
-  it('has a section for every workspace an analyst can stand in', () => {
-    for (const ws of RAIL_AND_CASE) {
-      expect(guideSection(ws.id), `no guide section for the ${ws.id} workspace`).toBeTruthy();
+  it('lists every workspace with its tools, in the order of the rail and the case after it', () => {
+    const tools = MENU.find((group) => group.title === 'Tools').items;
+    expect(tools.map((item) => item.id)).toEqual(RAIL_AND_CASE.map((ws) => ws.id));
+    for (const item of tools) {
+      expect(item.tools).toEqual(RAIL_AND_CASE.find((ws) => ws.id === item.id).tools);
+      expect(item.lead, `${item.id} says nothing about itself`).toBeTruthy();
     }
   });
 
-  it('names every tool of those workspaces', () => {
-    // the gate that matters: adding a tab to a workspace fails here until somebody
-    // writes down what it is for, which is the only thing keeping this page true
-    const documented = new Set(GUIDE.flatMap((section) => section.tools));
-    for (const ws of RAIL_AND_CASE) {
-      for (const tool of ws.tools) {
-        expect(documented.has(tool), `${tool} is in the rail and not in the guide`).toBe(true);
+  it('has a page for every tool an analyst can stand in', () => {
+    // a tool that joins a workspace and has no page opens the guide on an empty tab
+    for (const tool of TOOLS) expect(PAGES[tool], `no guide page for ${tool}`).toBeTruthy();
+  });
+
+  it('pages nothing the app does not have', () => {
+    const own = new Set(['start', 'extension', 'settings']);
+    for (const id of Object.keys(PAGES)) expect(own.has(id) || TOOLS.includes(id), id).toBe(true);
+  });
+
+  it('opens on the start and the extension, before any journey or workspace', () => {
+    expect(MENU_ITEMS.slice(0, 2).map((item) => item.id)).toEqual(['start', 'extension']);
+    const ids = MENU_ITEMS.map((item) => item.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('says to install the extension on the page somebody reads first', () => {
+    expect(PAGES.start.tips.some((tip) => /extension/i.test(tip.title))).toBe(true);
+  });
+
+  it('names both hosts wherever it describes the update check', () => {
+    const lines = prose().filter((line) => /new versions/i.test(line));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).toMatch(/GitHub[\s\S]*PyPI/);
+  });
+});
+
+describe('a page and its pictures', () => {
+  const shots = allShots();
+
+  it('takes every picture it shows, and names each one once', () => {
+    const names = shots.map((one) => one.shot);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  for (const { shot, anchors } of shots) {
+    it(`${shot}: was made, and every frame has a rectangle inside it`, () => {
+      const picture = shotOf(shot);
+      expect(picture, `run npm run guide:shots to make ${shot}.webp`).not.toBeNull();
+      for (const anchor of anchors) {
+        const rect = picture.anchors[anchor];
+        expect(rect, `${anchor} was not measured on ${shot}; run npm run guide:shots`).toBeTruthy();
+        expect(rect.x).toBeGreaterThanOrEqual(0);
+        expect(rect.y).toBeGreaterThanOrEqual(0);
+        expect(rect.x + rect.w).toBeLessThanOrEqual(picture.width + 1);
+        expect(rect.y + rect.h).toBeLessThanOrEqual(picture.height + 1);
       }
-    }
-  });
+    });
 
-  it('claims no tool that is not in a workspace', () => {
-    const real = new Set(RAIL_AND_CASE.flatMap((ws) => ws.tools));
-    for (const section of GUIDE) {
-      for (const tool of section.tools) {
-        expect(real.has(tool), `the guide covers ${tool}, which no workspace holds`).toBe(true);
+    it(`${shot}: frames controls the app still has`, () => {
+      // the control a frame points at went away or was renamed: the picture is stale
+      // even if nobody has looked at it yet
+      for (const anchor of anchors) {
+        expect(COMPONENTS, `no component carries data-guide "${anchor}"`).toMatch(
+          new RegExp(`["']${anchor.replace('.', '\\.')}["']`)
+        );
       }
+    });
+  }
+
+  it('ships no picture the guide no longer shows', () => {
+    const dir = fileURLToPath(new URL('../assets/guide/', import.meta.url));
+    const wanted = new Set(shots.map((one) => one.shot));
+    for (const file of readdirSync(dir)) {
+      expect(wanted.has(file.replace(/\.(webp|json)$/, '')), `${file} is no longer shown`).toBe(true);
     }
   });
 
-  it('files each tool under one section, so the per-tool mark has one answer', () => {
-    const seen = new Set();
-    for (const section of GUIDE) {
-      for (const tool of section.tools) {
-        expect(seen.has(tool), `${tool} is covered twice`).toBe(false);
-        seen.add(tool);
-      }
-    }
-  });
-
-  it('opens on the two sections that set up, before any workspace', () => {
-    // orient, then install the one thing worth installing, then the pipeline
-    expect(GUIDE.map((section) => section.id).slice(0, 2)).toEqual(['start', 'extension']);
-    expect(GUIDE[0].tools).toEqual([]);
-    expect(GUIDE[1].tools).toEqual([]);
-  });
-
-  it('carries its own mark where its id names no workspace', () => {
-    // the contents list reads a workspace icon where there is one, so the two cannot
-    // drift; a section standing alone has to bring one
-    const ids = new Set(RAIL_AND_CASE.map((ws) => ws.id));
-    for (const section of GUIDE.filter((entry) => !ids.has(entry.id))) {
-      expect(section.icon, `${section.id} has no mark`).toBeTruthy();
-    }
-  });
-
-  it('says to install the extension in the section somebody reads first', () => {
-    // it is the one setup step that changes what the app can do, so it leads
-    expect(GUIDE[0].points[0].label).toContain('extension');
-  });
-
-  it('distinguishes browser installation and names both third-party actions', () => {
-    const extension = GUIDE.find((section) => section.id === 'extension');
-    const copy = extension.points.map((point) => `${point.label} ${point.text}`).join(' ');
-    expect(copy).toContain('Chromium');
-    expect(copy).toContain('Firefox');
-    expect(copy).toContain('reverse-search engine');
-    expect(copy).not.toContain('exactly one place');
-  });
-
-  it('reaches a section from a tool, which is how a toolbar mark will ask', () => {
-    expect(guideFor('satellite')?.id).toBe('map');
-    expect(guideFor('graph')?.id).toBe('case');
-    expect(guideFor('settings')).toBe(null);
-  });
-
-  it('is a labelled tool everywhere it is named', () => {
-    for (const section of GUIDE) {
-      for (const tool of section.tools) {
-        expect(TOOL_LABELS[tool], `${tool} has no label`).toBeTruthy();
-      }
+  it('keeps every page to a handful of frames, and a picture behind each number that leads on', () => {
+    for (const [id, page] of Object.entries(PAGES)) {
+      expect(page.marks.length, `${id} frames nothing`).toBeGreaterThan(0);
+      expect(page.marks.length, `${id} frames too much to read`).toBeLessThanOrEqual(9);
+      for (const mark of page.marks) if (mark.opens) expect(mark.opens.shot).toBeTruthy();
     }
   });
 });
 
-describe('the register the guide is written in', () => {
-  it('leads every section with one sentence', () => {
-    for (const section of GUIDE) {
-      expect(section.lead.split('. ').length, `${section.id} leads with a paragraph`).toBeLessThan(3);
-      expect(section.lead.endsWith('.')).toBe(true);
-    }
-  });
-
-  it('gives every point a label and a body', () => {
-    for (const section of GUIDE) {
-      for (const point of section.points ?? []) {
-        expect(point.label.trim()).toBeTruthy();
-        expect(point.text.trim().endsWith('.')).toBe(true);
+describe('journeys', () => {
+  it('walk through tools that exist, each step on a frame its tool’s page draws', () => {
+    for (const journey of JOURNEYS) {
+      expect(journey.steps.length, `${journey.title} is not a walk`).toBeGreaterThan(2);
+      for (const step of journey.steps) {
+        expect(TOOLS).toContain(step.tool);
+        expect(TOOL_LABELS[step.tool]).toBeTruthy();
+        expect(step.text.trim().endsWith('.')).toBe(true);
+        expect(stepMarks(step).map((mark) => mark.anchor)).toEqual(step.marks);
       }
     }
   });
 
-  it('says something in every section, in one form or another', () => {
-    // a section is points, or recipes, or keys, or fixes — never a heading and a lead
-    for (const section of GUIDE) {
-      const body =
-        (section.points?.length ?? 0) +
-        (section.recipes?.length ?? 0) +
-        (section.keymap?.length ?? 0) +
-        (section.fixes?.length ?? 0);
-      expect(body, `${section.id} says nothing`).toBeGreaterThan(2);
+  it('name the journeys a tool takes part in, at their step', () => {
+    expect(journeysThrough('media')).toEqual([{ id: 'geolocate-a-photo', title: 'Geolocate a photo', step: 1 }]);
+    expect(journeysThrough('post')).toEqual([{ id: 'geolocate-a-photo', title: 'Geolocate a photo', step: 6 }]);
+    expect(journeysThrough('settings')).toEqual([]);
+  });
+
+  it('take a geolocation as far as the published thread', () => {
+    const geolocate = JOURNEYS.find((journey) => journey.id === 'geolocate-a-photo');
+    expect(geolocate.steps.at(-1)).toMatchObject({ tool: 'post', marks: ['post.first', 'post.publish'] });
+  });
+});
+
+describe('where the numbers sit', () => {
+  const shot = { width: 1000, height: 600 };
+  const far = (spots, apart) =>
+    spots.every(({ pin }, i) => spots.slice(i + 1).every((other) => Math.hypot(other.pin.x - pin.x, other.pin.y - pin.y) >= apart));
+
+
+
+  it('keeps every number inside the picture, and checks it where it is drawn', () => {
+    // three controls in the top left corner: the numbers pushed in from the edge must
+    // not land on each other there
+    const frames = [
+      { x: 0, y: 0, w: 70, h: 30 },
+      { x: 0, y: 30, w: 30, h: 500 },
+      { x: 25, y: 40, w: 180, h: 30 },
+    ];
+    const spots = pinSpots(frames, shot, 30);
+    for (const { pin } of spots) {
+      expect(pin.x).toBeGreaterThanOrEqual(15);
+      expect(pin.y).toBeGreaterThanOrEqual(15);
+      expect(pin.x).toBeLessThanOrEqual(985);
+      expect(pin.y).toBeLessThanOrEqual(585);
     }
+    expect(far(spots, 30)).toBe(true);
+  });
+
+  it('tries the middle of an edge once the corners are taken', () => {
+    // four small controls at the corners of a panel, then the panel itself
+    const frames = [
+      { x: 100, y: 100, w: 10, h: 10 },
+      { x: 300, y: 100, w: 10, h: 10 },
+      { x: 100, y: 400, w: 10, h: 10 },
+      { x: 300, y: 400, w: 10, h: 10 },
+      { x: 100, y: 100, w: 200, h: 300 },
+    ];
+    const spots = pinSpots(frames, shot, 30);
+    expect(far(spots, 30)).toBe(true);
+    expect(spots[4].pin).toEqual({ x: 200, y: 100 });
+  });
+
+  it('puts the number of a frame covering most of the picture in its middle', () => {
+    const [map] = pinSpots([{ x: 60, y: 40, w: 940, h: 560 }], shot);
+    expect(map.pin).toEqual({ x: 530, y: 320 });
+  });
+
+
+  it('stands just off the corner of a small control, so it hides none of it', () => {
+    const [button] = pinSpots([{ x: 200, y: 200, w: 60, h: 24 }], shot, 30);
+    expect(button.pin).toEqual({ x: 194, y: 194 });
+  });
+
+  it('sits on the corner of a panel, which is padding', () => {
+    const [panel] = pinSpots([{ x: 100, y: 100, w: 300, h: 200 }], shot, 30);
+    expect(panel.pin).toEqual({ x: 100, y: 100 });
+  });
+
+  it('moves under its control rather than stacking on the number of the one beside it', () => {
+    const [, second] = pinSpots([{ x: 100, y: 100, w: 40, h: 20 }, { x: 120, y: 100, w: 40, h: 20 }], shot, 30);
+    expect(second.pin).toEqual({ x: 114, y: 126 });
+  });
+
+  it('keeps off another numbered control, though the seam between two is fine', () => {
+    const frames = [
+      { x: 0, y: 0, w: 400, h: 90 },
+      { x: 200, y: 85, w: 40, h: 20 },
+    ];
+    expect(pinSpots(frames, shot, 30)[1].pin).toEqual({ x: 194, y: 111 });
+  });
+
+  it('never lets the picture’s edge push a small control’s number back onto it', () => {
+    const [corner] = pinSpots([{ x: 0, y: 0, w: 40, h: 20 }], shot, 30);
+    expect(corner.pin).toEqual({ x: 46, y: 26 });
+  });
+
+  it('asks for more room in the picture’s pixels when it is shown smaller', () => {
+    // two buttons 40 pixels apart: clear at full size, too close once halved on screen
+    const frames = [{ x: 100, y: 100, w: 40, h: 20 }, { x: 140, y: 100, w: 40, h: 20 }];
+    expect(pinSpots(frames, shot, 30)[1].pin).toEqual({ x: 134, y: 94 });
+    expect(pinSpots(frames, shot, 60)[1].pin).not.toEqual({ x: 128, y: 88 });
+  });
+});
+
+describe('where the guide opens', () => {
+  it('on the tab of the tool it was asked from', () => {
+    expect(landingFor('media')).toEqual({ item: 'collect', tool: 'media' });
+    expect(landingFor('timeline')).toEqual({ item: 'case', tool: 'timeline' });
+  });
+
+  it('on a page asked by its id, Settings included', () => {
+    expect(landingFor('settings')).toEqual({ item: 'settings', tool: null });
+    expect(landingFor('journey:geolocate-a-photo')).toEqual({ item: 'journey:geolocate-a-photo', tool: null });
+  });
+
+  it('at the start for anything else', () => {
+    expect(landingFor('overview')).toEqual({ item: 'start', tool: null });
+    expect(landingFor(undefined)).toEqual({ item: 'start', tool: null });
+  });
+});
+
+describe('the register the guide is written in', () => {
+  it('leads with one sentence, or two at most', () => {
+    for (const page of Object.values(PAGES)) expect(page.lead.split('. ').length, page.lead).toBeLessThan(3);
   });
 
   it('uses no em-dash appositive, which the house copy rules refuse', () => {
-    for (const line of prose()) {
-      expect(line, 'em-dash in UI copy').not.toMatch(/—/);
-    }
+    for (const line of prose()) expect(line, 'em-dash in UI copy').not.toMatch(/—/);
   });
 
-  it('says what a key does wherever it lists one', () => {
-    for (const section of GUIDE) {
-      for (const group of section.keymap ?? []) {
-        expect(group.where.trim()).toBeTruthy();
-        expect(group.keys.length).toBeGreaterThan(0);
-        for (const key of group.keys) {
-          expect(key.combo.trim()).toBeTruthy();
-          expect(key.does.trim()).toBeTruthy();
-        }
+  it('ends every line of text with a full stop, and every title without one', () => {
+    for (const page of Object.values(PAGES)) {
+      for (const mark of page.marks) {
+        expect(mark.text.trim().endsWith('.'), mark.text).toBe(true);
+        expect(mark.title.trim().endsWith('.'), mark.title).toBe(false);
       }
-    }
-  });
-
-  it('lists keys under a tool the app actually has, or under everywhere', () => {
-    // the one gate that keeps this page from naming a tab that was renamed or removed
-    const labels = new Set(Object.values(TOOL_LABELS));
-    for (const section of GUIDE) {
-      for (const group of section.keymap ?? []) {
-        // a group can name several tools that share the keys, comma-separated
-        const tools = group.where.split(', ');
-        expect(group.where === 'Anywhere' || tools.every((tool) => labels.has(tool)), group.where).toBe(true);
-      }
+      for (const tip of page.tips ?? []) expect(tip.text.trim().endsWith('.'), tip.text).toBe(true);
     }
   });
 
@@ -172,7 +286,7 @@ describe('the register the guide is written in', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const at = join(dir, entry.name);
         if (entry.isDirectory()) {
-          if (entry.name !== 'node_modules') walk(at);
+          if (entry.name !== 'node_modules' && entry.name !== 'assets') walk(at);
         } else if (/\.(svelte|js)$/.test(entry.name) && !entry.name.endsWith('.test.js') && entry.name !== 'guide.js') {
           sources.push(readFileSync(at, 'utf8'));
         }
@@ -182,73 +296,26 @@ describe('the register the guide is written in', () => {
     const app = sources.join('\n');
     const quoted = prose().flatMap((line) => [...line.matchAll(/"([^"]+)"/g)].map((match) => match[1]));
     expect(quoted.length).toBeGreaterThan(0);
-    for (const label of quoted) {
-      expect(app.includes(label), `the guide quotes "${label}", which no screen shows`).toBe(true);
-    }
+    for (const label of quoted) expect(app.includes(label), `the guide quotes "${label}", which no screen shows`).toBe(true);
   });
 
-  it('walks a recipe through tools that exist, in the words the tabs use', () => {
-    const real = new Set([...RAIL_AND_CASE.flatMap((ws) => ws.tools)]);
-    for (const section of GUIDE) {
-      for (const recipe of section.recipes ?? []) {
-        expect(recipe.steps.length, `${recipe.title} is not a walk`).toBeGreaterThan(2);
-        for (const step of recipe.steps) {
-          expect(real.has(step.tool), `${recipe.title} sends the reader to ${step.tool}`).toBe(true);
-          expect(TOOL_LABELS[step.tool], `${step.tool} has no label`).toBeTruthy();
-          expect(step.text.trim().endsWith('.')).toBe(true);
-        }
+  it('says what a key does wherever it lists one, under a tool the app has', () => {
+    const labels = new Set(Object.values(TOOL_LABELS));
+    for (const group of KEYMAP) {
+      expect(group.keys.length).toBeGreaterThan(0);
+      const tools = group.where.split(', ');
+      expect(group.where === 'Anywhere' || tools.every((tool) => labels.has(tool)), group.where).toBe(true);
+      for (const key of group.keys) {
+        expect(key.combo.trim()).toBeTruthy();
+        expect(key.does.trim()).toBeTruthy();
       }
     }
   });
 
   it('answers every symptom it raises', () => {
-    for (const section of GUIDE) {
-      for (const fix of section.fixes ?? []) {
-        expect(fix.symptom.trim()).toBeTruthy();
-        expect(fix.fix.trim().endsWith('.')).toBe(true);
-      }
-    }
-  });
-});
-
-describe('which section the reader is in', () => {
-  // one column, four headings, the line 120px below the top of it
-  const marks = [
-    { id: 'start', top: -900 },
-    { id: 'extension', top: -40 },
-    { id: 'collect', top: 620 },
-    { id: 'map', top: 1400 },
-  ];
-  const line = 120;
-
-  it('is the last heading at or above the line, not the first one on screen', () => {
-    // `collect` is visible and `extension` is the one being read
-    expect(readingSection(marks, { line })).toBe('extension');
-  });
-
-  it('counts a heading exactly on the line as reached', () => {
-    expect(readingSection([{ id: 'a', top: 0 }, { id: 'b', top: 120 }], { line })).toBe('b');
-  });
-
-  it('holds the first section while the column is still at the top', () => {
-    expect(readingSection([{ id: 'a', top: 0 }, { id: 'b', top: 900 }], { line })).toBe('a');
-  });
-
-  it('gives the last section the bottom of the page', () => {
-    // a short final section can never reach the line however far down you scroll, so
-    // without this the list sticks one entry short at the end
-    expect(readingSection(marks, { line, atBottom: true })).toBe('map');
-  });
-
-  it('answers nothing when there is nothing to measure', () => {
-    expect(readingSection([], { line })).toBe(null);
-    expect(readingSection(undefined)).toBe(null);
-  });
-
-  it('never answers with a section it was not given', () => {
-    const ids = new Set(marks.map((mark) => mark.id));
-    for (const spot of [-5000, -100, 0, 120, 5000]) {
-      expect(ids.has(readingSection(marks, { line: spot }))).toBe(true);
+    for (const fix of FIXES) {
+      expect(fix.symptom.trim()).toBeTruthy();
+      expect(fix.fix.trim().endsWith('.')).toBe(true);
     }
   });
 });

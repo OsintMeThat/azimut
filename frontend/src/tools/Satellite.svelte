@@ -1053,15 +1053,19 @@
    * Settled, never navigated to: panning a map is not going somewhere, and a
    * back button holding four hundred camera positions is worse than useless.
    * Not while a tilted camera waits for its relief: the address still holds it.
+   * Nor while a turn is dragged, and the turn and the tilt are read as the view
+   * settles rather than at each step: every move ends settled, so the address
+   * is written once a move, not once a degree.
    */
   $effect(() => {
-    if (uiState.tool !== 'satellite' || !mapReady || pendingCamera) return;
+    if (uiState.tool !== 'satellite' || !mapReady || pendingCamera || rotating) return;
+    const [turn, lean] = untrack(() => [bearing, pitch]);
     const params = viewParams({
       lat: center.lat,
       lon: center.lon,
       zoom: zoomNow(center),
-      bearing,
-      pitch: reliefOn ? pitch : null,
+      bearing: turn,
+      pitch: reliefOn ? lean : null,
       elevation: reliefOn ? engine?.centreElevation() : null,
       provider: providerId,
     });
@@ -1178,7 +1182,9 @@
   // chrome, never part of a capture.
   let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup, feature?, layer? }
   let pointLookupSeq = 0;
-  const pointActions = actionsFor(['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre']);
+  // while a layer is edited the rail is put away, so the acts that arm one of its tools are left out
+  const pointActions = $derived(actionsFor(myLayers.editor ? ['lookup', 'place', 'horizon', 'history', 'centre']
+    : ['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre']));
   const pointTools = otherMapTools('satellite');
 
   function onMapContextMenu(at) {
@@ -2526,7 +2532,7 @@
            thousands of features, which is an order of magnitude past what a
            `div` each can carry. Drawn only while this tab is on screen, so a
            hidden map holds no copy of them; the features stay in the store. -->
-      <LayerGeometry engine={mapReady ? engine : null} controller={myLayers} active={uiState.tool === 'satellite'} />
+      <LayerGeometry engine={mapReady ? engine : null} controller={myLayers} active={uiState.tool === 'satellite'} onmenu={onMapContextMenu} />
       <AddedLayersOverlay
         engine={mapReady ? engine : null}
         caseId={caseState.current?.id ?? ''}
@@ -2564,7 +2570,7 @@
 
       <!-- What the window does with the tool, beside the imagery it shows. -->
       {#snippet beside()}
-        <div class="window-ctl">
+        <div class="window-ctl" data-guide="sat.window">
           <button
             class="btn btn-icon"
             class:on={linked}
@@ -2595,7 +2601,7 @@
 
       <!-- The search floats over the map as Detect's does, above the rail: the
            tab strip already says which tool this is. -->
-      <div class="map-bar" bind:clientHeight={searchHeight} bind:clientWidth={searchWidth} data-bar-obstacle>
+      <div class="map-bar" bind:clientHeight={searchHeight} bind:clientWidth={searchWidth} data-bar-obstacle data-guide="sat.search">
         <!-- Two identical windows on a second screen are otherwise impossible to
              tell apart; the first one needs no number and says nothing. -->
         {#if windowNumber}<span class="window-no mono" title="This map's window">Map {windowNumber}</span>{/if}
@@ -2614,7 +2620,7 @@
            in. Only verbs live here; what is *drawn* over the imagery is a layer
            and is listed in the panel on the right. -->
       {#if !myLayers.editor}
-      <div class="map-tools" style:top={`${railTop}px`} bind:clientWidth={toolsWidth}>
+      <div class="map-tools" style:top={`${railTop}px`} bind:clientWidth={toolsWidth} data-guide="sat.tools">
         <MapRail
           sections={RAIL}
           bind:height={railHeight}
@@ -2824,7 +2830,7 @@
              once, beside the two acts that are pressed all day. -->
         {#if !myLayers.editor}
         <MarkerMenu bind:style={markerStyle} free={moveMode} toggleFree={toggleMoveMode} />
-        <div class="place-save">
+        <div class="place-save" data-guide="sat.place">
           <button
             class="btn place-save-main"
             onclick={savePlace}
@@ -2923,6 +2929,7 @@
 
     <aside
       class="captures"
+      data-guide="sat.panel"
       class:collapsed={capturesCollapsed}
       class:resizing={savedResizing}
       style={capturesCollapsed ? undefined : `width: ${savedW}px`}

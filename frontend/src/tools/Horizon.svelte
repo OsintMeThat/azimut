@@ -1571,7 +1571,7 @@
   <!-- Find covers the tab: what lies under it takes no focus and no click -->
   <div class="hz-main" inert={mode === 'find'}>
     <header class="tool-header hz-head">
-      <ViewSwitch options={MODES} value={mode} label="Horizon mode" onpick={pickMode} />
+      <ViewSwitch options={MODES} value={mode} label="Horizon mode" onpick={pickMode} guide="horizon.modes" />
       {#if layout === 'looking'}
         <!-- the view's name, read as a title until it is clicked; where the eye stands is in its tooltip -->
         <div class="hz-title">
@@ -1681,6 +1681,7 @@
             mapLarge = false;
           }}
           aria-expanded={!folded}
+          data-guide="horizon.side"
           title={folded ? 'Show the map and settings' : 'Hide the map and settings'}
           aria-label={folded ? 'Show the map and settings' : 'Hide the map and settings'}
         >
@@ -1821,7 +1822,7 @@
     </div>
   </aside>
 
-  <div class="hz-map" bind:this={mapBox} inert={mode === 'find'}>
+  <div class="hz-map" bind:this={mapBox} inert={mode === 'find'} data-guide="horizon.map">
     {#if mapView}
       <MapSurface
         bind:this={surface}
@@ -1858,7 +1859,7 @@
           />
         {/if}
         <!-- inert: a click on this map stands the eye or turns it, never a card -->
-        <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'horizon'} />
+        <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'horizon'} onmenu={onMapContextMenu} />
         <AddedLayersOverlay
           engine={ready ? engine : null}
           caseId={caseState.current?.id ?? ''}

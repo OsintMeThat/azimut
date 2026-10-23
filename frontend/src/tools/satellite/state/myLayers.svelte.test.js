@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMyLayersState, difference, shapeRing } from './myLayers.svelte.js';
+import { circleRadius } from '../../../lib/map/sketchMeasure.js';
 
 const ROW = { name: 'working', title: 'Working map', editable: true, features: 0 };
 const feature = (key, properties = {}) => ({ type: 'Feature',
@@ -372,6 +373,44 @@ describe('personal layer editing', () => {
     await editor.moveFeatures(['a'], [1, 0]);
     expect(notify).toHaveBeenCalledWith('Linked markers stay on the case item they follow', 'info', 4000);
     expect(editor.dragging).toBeNull();
+  });
+
+  it('puts a marker on a typed position as one move, and leaves what cannot move there where it is', async () => {
+    const line = { type: 'Feature', geometry: { type: 'LineString', coordinates: [[2, 48], [2.1, 48.1]] }, properties: { key: 'line' } };
+    const held = [feature('a'), feature('linked', { entity_id: 'place-1' }), line];
+    api.get.mockResolvedValue({ layer: ROW, document: { features: held } });
+    const editor = store(); await editor.open(ROW);
+    const moved = { ...held[0], geometry: { type: 'Point', coordinates: [2.37, 48.86] } };
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [moved, ...held.slice(1)] }, kept: 0 });
+    expect(editor.placeAt('a', { lat: 48.86, lon: 2.37 })).toBe(true);
+    await editor.whenSaved();
+    const [path, body] = api.post.mock.calls.at(-1);
+    expect(path).toBe('/api/cases/first/map-layers/working/selection');
+    expect(body.keys).toEqual(['a']);
+    expect(body.offset[0]).toBeCloseTo(0.02, 9); expect(body.offset[1]).toBeCloseTo(0.01, 9);
+    expect(notify).toHaveBeenLastCalledWith('Moved', 'info', 7000, expect.objectContaining({ label: 'Undo' }));
+    api.post.mockClear();
+    // where it already stands, a marker that follows a case item, and a line: nothing is sent
+    expect(editor.placeAt('a', { lat: 48.86, lon: 2.37 })).toBe(false);
+    expect(editor.placeAt('linked', { lat: 48.86, lon: 2.37 })).toBe(false);
+    expect(notify).toHaveBeenLastCalledWith('It follows its case item: Unlink it to move it', 'info', 4000);
+    expect(editor.placeAt('line', { lat: 48.86, lon: 2.37 })).toBe(false);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('gives a circle drawn from its centre the radius typed, and nothing before its centre is down', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.startShape('Circle');
+    editor.radius(500);
+    expect(editor.sketch.rings).toEqual([[]]);
+    editor.addPoint({ lon: 2, lat: 48 });
+    editor.radius(500);
+    expect(circleRadius(editor.sketch)).toBeCloseTo(500, 1);
+    expect(editor.complete).toBe(true);
+    editor.radius(0);
+    expect(circleRadius(editor.sketch)).toBeCloseTo(500, 1);
+    await editor.saveGeometry();
+    expect(api.post.mock.calls.at(-1)[1].geometry.coordinates[0]).toHaveLength(65);
   });
 
   it('saves only what the sheet changed, and clears a field with nothing', async () => {

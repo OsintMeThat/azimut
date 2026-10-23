@@ -186,6 +186,71 @@ describe('the globe draws what the flat map holds', () => {
     expect(globe.wheel).toHaveBeenCalledTimes(1);
   });
 
+  it('projects a point once a frame whatever layers stand on it, and never weighs what a filter refuses', async () => {
+    const map = stubMap();
+    const pin = (lon, lat, own = false) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { own } });
+    map.sources.set('pins', { type: 'geojson', getData: async () => ({ type: 'FeatureCollection', features: [pin(10, 10), pin(20, 20), pin(30, 30, true)] }) });
+    map.addLayer({ id: 'dot', type: 'circle', source: 'pins', paint: { 'circle-radius': 4 } });
+    map.addLayer({ id: 'hit', type: 'circle', source: 'pins', paint: { 'circle-radius': 12, 'circle-opacity': 0 } });
+    map.addLayer({ id: 'own', type: 'circle', source: 'pins', filter: ['==', ['get', 'own'], true], paint: { 'circle-radius': 6 } });
+    const globe = stubGlobe();
+    const asked = [];
+    globe.standingAt = (lat, lon) => (asked.push(lon), { x: lon * 10, y: lat * 10, distance: 1000 });
+    const mirror = createMirror(map, globe, { canvas: makeCanvas(), makeCanvas });
+    await settle();
+    asked.length = 0;
+    globe.laid.frame({ moved: true });
+    // three points, each projected once for its two or three layers
+    expect(asked.sort((a, b) => a - b)).toEqual([10, 20, 30]);
+    expect(mirror.placed.map((m) => m.candidate.layer.id).sort()).toEqual(['dot', 'dot', 'dot', 'hit', 'hit', 'hit', 'own']);
+    expect(mirror.placed.filter((m) => m.unseen).map((m) => m.candidate.layer.id)).toEqual(['hit', 'hit', 'hit']);
+    mirror.destroy();
+  });
+
+  it('tells the flat map’s markers to move without drawing the flat map again under the globe', () => {
+    const map = stubMap();
+    const listeners = [];
+    const repaints = [];
+    // the engine answers its own `move` with a repaint; its markers answer it by placing themselves again
+    Object.setPrototypeOf(map, { _update: () => repaints.push('flat') });
+    map.on = (name, fn) => name === 'move' && listeners.push(fn);
+    map.fire = (event) => (event === 'move' ? listeners.forEach((fn) => fn()) : null);
+    map.on('move', () => map._update());
+    const marker = vi.fn();
+    map.on('move', marker);
+    const globe = stubGlobe();
+    const mirror = createMirror(map, globe, { canvas: makeCanvas(), makeCanvas });
+    repaints.length = 0;
+    marker.mockClear();
+    globe.laid.frame({ moved: true });
+    expect(marker).toHaveBeenCalledTimes(1);
+    expect(repaints).toEqual([]);
+    // the engine's own method is back for every other `move`
+    expect(Object.prototype.hasOwnProperty.call(map, '_update')).toBe(false);
+    map._update();
+    expect(repaints).toEqual(['flat']);
+    mirror.destroy();
+  });
+
+  it('finds a click target that paints nothing where its ground is now, though the view moved since it was placed', async () => {
+    const map = stubMap();
+    map.sources.set('pins', { type: 'geojson', getData: async () => ({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [20, 20] }, properties: { name: 'pin' } }] }) });
+    map.addLayer({ id: 'hit', type: 'circle', source: 'pins', paint: { 'circle-radius': 12, 'circle-opacity': 0 } });
+    const globe = stubGlobe();
+    let shift = 0;
+    globe.standingAt = (lat, lon) => ({ x: lon * 10 + shift, y: lat * 10, distance: 1000 });
+    const mirror = createMirror(map, globe, { canvas: makeCanvas(), makeCanvas });
+    await settle();
+    globe.laid.frame({ moved: true });
+    shift = 100;
+    // the next frame comes before the next placement: the view moved, the unseen target waited
+    globe.laid.frame({ moved: true });
+    expect(mirror.placed[0].x).toBe(200);
+    expect(map.queryRenderedFeatures([300, 200]).map((f) => f.properties.name)).toEqual(['pin']);
+    expect(map.queryRenderedFeatures([200, 200])).toEqual([]);
+    mirror.destroy();
+  });
+
   it('finds the line and the dot under a click, top first, as the flat map’s hit test would', async () => {
     const map = stubMap();
     map.sources.set('shapes', {

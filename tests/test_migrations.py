@@ -610,7 +610,8 @@ def test_schema_seven_case_gets_a_readme_without_overwriting_one(tmp_workspace):
     assert readme.read_text(encoding="utf-8") == "My own instructions\n"
 
 
-def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client):
+@pytest.mark.parametrize("shipped", [7, 17, 18])
+def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client, shipped):
     """The upgrade people actually run: a case filed by the previous release,
     opened by this one.
 
@@ -621,8 +622,10 @@ def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client):
     database technically at the right version but unreadable by the app would pass
     every step-level test and fail here.
 
-    Schema 7 is what `v0.2.7` shipped, so this is the exact jump an installed copy
-    makes on its first open after the update.
+    Schema 7 is what `v0.2.7` shipped, 17 what `v0.2.9` and `v0.3.0` shipped and 18
+    what `v0.3.1` shipped, so these are the exact jumps an installed copy makes on
+    its first open after the update. A step that writes with today's code into a
+    table an older release shaped fails only from some of them.
     """
     import schema_rewind
 
@@ -632,7 +635,13 @@ def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client):
         entity["id"]: entity["label"] for entity in case.list_entities()
     }
     assert before, "the fixture planted nothing"
-    schema_rewind.rewind(case.db_path, 7)
+    held = (
+        case.list_analysis_views(),
+        case.graph_pins("all"),
+        case.entity_images(full.org_id),
+        case.entity_image_thumbs(list(before)),
+    )
+    schema_rewind.rewind(case.db_path, shipped)
 
     reopened = Case.open(full.case_id)
 
@@ -654,11 +663,14 @@ def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client):
     )[:5]
     assert reopened.catalog_summary()["total"] == len(before)
 
-    # The tables the chain created answer, rather than raising "no such table".
-    assert reopened.list_analysis_views() == []
-    assert reopened.graph_pins("all") == {}
-    assert reopened.entity_images(full.org_id) == []
-    assert reopened.entity_image_thumbs(list(before)) == {}
+    # The tables the chain created answer, rather than raising "no such table":
+    # empty from 7, which predates them, and as they were from a later release.
+    assert (
+        reopened.list_analysis_views(),
+        reopened.graph_pins("all"),
+        reopened.entity_images(full.org_id),
+        reopened.entity_image_thumbs(list(before)),
+    ) == (held if shipped > 7 else ([], {}, [], {}))
 
     # And the case draws, which is the read that touches most of them at once.
     drawn = client.get(f"/api/cases/{full.case_id}/graph")

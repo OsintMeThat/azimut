@@ -3825,11 +3825,11 @@
          and a delete: on a laptop the last of them ran off the edge. They are also asked
          once per sheet, where the grid's own controls are asked all day. -->
     <div class="anchor" bind:this={newAnchor}>
-      <button class="btn btn-sm" aria-expanded={newOpen} onclick={() => (newOpen = !newOpen)}>
+      <button class="btn btn-sm" data-guide="sheet.new" aria-expanded={newOpen} onclick={() => (newOpen = !newOpen)}>
         <Icon name="plus" size={13} /> New <Icon name="chevronDown" size={12} />
       </button>
       {#if newOpen}
-        <div class="new-menu">
+        <div class="new-menu" data-guide="sheet.new-menu">
           <button class="menu-row" onclick={() => { newOpen = false; creating = { title: '' }; }}>
             <Icon name="table" size={12} /><span>Blank sheet</span>
           </button>
@@ -3952,7 +3952,7 @@
           <Icon name="reset" size={13} /> {refreshing ? 'Refreshing' : 'Refresh'}
         </button>
       {/if}
-      <div class="search">
+      <div class="search" data-guide="sheet.search">
         <Icon name="search" size={13} />
         <!-- Written by hand rather than bound: the box echoes the keystroke and the grid
              narrows a moment later, and one binding cannot hold both clocks. -->
@@ -4003,7 +4003,7 @@
         </div>
       {/if}
       <div class="anchor" bind:this={columnsAnchor}>
-        <button class="btn btn-ghost btn-sm" class:active={columnsOpen}
+        <button class="btn btn-ghost btn-sm" class:active={columnsOpen} data-guide="sheet.columns"
                 aria-expanded={columnsOpen} onclick={() => (columnsOpen = !columnsOpen)}>
           <Icon name="layers" size={13} /> Columns
         </button>
@@ -4274,7 +4274,7 @@
     <!-- The grid takes the focus itself and says which cell the cursor is on, because the
          keyboard is answered on `window` and the cells are never focused: without this a
          screen reader followed none of it. -->
-    <div class="grid" class:tall={meta.tall} id="sheet-grid" role="grid" aria-label="Sheet rows"
+    <div class="grid" class:tall={meta.tall} id="sheet-grid" role="grid" aria-label="Sheet rows" data-guide="sheet.grid"
          tabindex="0"
          aria-activedescendant={cursor.row === -1
            ? undefined
@@ -4772,7 +4772,7 @@
         </span>
       {/each}
       {#if progress}
-        <span class="progress">
+        <span class="progress" data-guide="sheet.progress">
           <span class="progress-key">{meta.progress}</span>
           {#if progress.kind === 'fill'}
             <strong>{progress.filled}</strong> filled ·

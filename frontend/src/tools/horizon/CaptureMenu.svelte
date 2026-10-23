@@ -35,7 +35,7 @@
 
 <svelte:window onpointerdown={close} onkeydown={onKey} />
 
-<div class="cm" bind:this={root}>
+<div class="cm" bind:this={root} data-guide="horizon.capture">
   <button
     type="button"
     class="btn btn-sm cm-open"

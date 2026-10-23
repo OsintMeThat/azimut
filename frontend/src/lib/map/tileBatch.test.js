@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { appTile, createTileBatcher, readFrames } from './tileBatch.js';
+import { appTile, batchedTemplate, batchedTile, createTileBatcher, readBatched, readFrames } from './tileBatch.js';
 
 /** One tile of a batch answer, as api/tile_batch.py writes it. */
 function frame(index, status, text) {
@@ -194,5 +194,40 @@ describe('a tile through the app', () => {
     const failure = await appTile(asked, { fetch: single(429, 'paused') }).catch((e) => e);
     expect(failure.status).toBe(429);
     expect(await failure.body.text()).toBe('paused');
+  });
+});
+
+describe('a flat map’s free imagery, asked in batches', () => {
+  it('names a tile at an address of its own, and reads it back', () => {
+    expect(batchedTemplate('esri-world-imagery')).toBe('azimut-tiles://esri-world-imagery/{z}/{x}/{y}');
+    expect(readBatched('azimut-tiles://esri-wayback~20/14/8712/6153')).toEqual({ providerId: 'esri-wayback~20', z: 14, x: 8712, y: 6153 });
+    expect(readBatched('/api/tiles/esri-world-imagery/1/2/3')).toBeNull();
+    expect(readBatched('azimut-billed://m1/sentinel2/1/2/3')).toBeNull();
+  });
+
+  it('hands the engine the tile, or the failure its own address would have given', async () => {
+    const answers = { '5/1/1': { status: 200, data: new TextEncoder().encode('png').buffer }, '5/2/1': { status: 404, data: new TextEncoder().encode('no imagery at this location/zoom').buffer } };
+    const batcher = { get: vi.fn(async (path, z, x, y) => answers[`${z}/${x}/${y}`]) };
+    const signal = new AbortController().signal;
+    const tile = await batchedTile({ providerId: 'esri-world-imagery', z: 5, x: 1, y: 1 }, { batcher, signal });
+    expect(text(tile.data)).toBe('png');
+    expect(batcher.get).toHaveBeenCalledWith('/api/tiles/batch/esri-world-imagery', 5, 1, 1, signal);
+    const failure = await batchedTile({ providerId: 'esri-world-imagery', z: 5, x: 2, y: 1 }, { batcher }).catch((error) => error);
+    expect(failure.status).toBe(404);
+    expect(await failure.body.text()).toBe('no imagery at this location/zoom');
+  });
+
+  it('shares one request between the tiles asked in the same moment', async () => {
+    const app = fakeApp();
+    const batcher = createTileBatcher({ fetch: app.fetch, wait: 0 });
+    const tiles = [batchedTile({ providerId: 'esri', z: 5, x: 1, y: 1 }, { batcher }), batchedTile({ providerId: 'esri', z: 5, x: 2, y: 1 }, { batcher })];
+    await settled();
+    expect(app.requests).toHaveLength(1);
+    const [request] = app.requests;
+    expect(app.keys(request)).toEqual(['5/1/1', '5/2/1']);
+    request.answer();
+    request.write(frame(1, 200, 'b'), frame(0, 200, 'a'));
+    request.end();
+    expect((await Promise.all(tiles)).map((tile) => text(tile.data))).toEqual(['a', 'b']);
   });
 });

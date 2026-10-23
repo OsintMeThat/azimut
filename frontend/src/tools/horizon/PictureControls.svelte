@@ -91,7 +91,7 @@
 
 <svelte:window onpointerdown={onWindowPointer} onkeydown={onWindowKey} />
 
-<div class="picture hz-control" bind:clientWidth={width} bind:clientHeight={height}>
+<div class="picture hz-control" data-guide="horizon.picture" bind:clientWidth={width} bind:clientHeight={height}>
   <div class="row">
     <div class="seg" role="group" aria-label="Ground drawn as">
       {#each GROUNDS as ground (ground.id)}

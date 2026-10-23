@@ -70,6 +70,7 @@
 
 <section
   class="group"
+  data-guide="board.group"
   class:subject
   class:folded={!open}
   style="--tone: {tone}"

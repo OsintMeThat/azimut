@@ -24,6 +24,7 @@ import { INFRASTRUCTURE } from './infrastructure.js';
 import { tileTemplate as nightTemplate } from './nightlights.js';
 import { PLACE_NAMES } from './placeNames.js';
 import { guardedTemplate } from './quotaGuard.js';
+import { batchedTemplate } from './tileBatch.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
@@ -293,12 +294,22 @@ export function sourceMinZoom(provider, cell) {
 export function rasterSource(provider, providerId, cell, guardId = '') {
   // On a map of the app's (`guardId` names it), a billed provider is asked
   // through the guard, which sends the far ground of a tilted map to the free
-  // one (`quotaGuard.js`); any other tile is asked at its own address. Direct
+  // one (`quotaGuard.js`). A free provider the app keeps on disk is asked in
+  // batches (`tileBatch.js`): one at a time, its tiles waited for the six
+  // connections the browser keeps to the app, two to three times as long as
+  // the app took to answer. Any other tile is asked at its own address, so the
+  // browser's own cache still spares a provider the app does not keep. Direct
   // `{s}` templates never pass through the app.
-  const guarded = guardId && provider.meter && !provider.url.includes('{s}');
+  const proxied = !provider.url.includes('{s}');
+  const guarded = guardId && provider.meter && proxied;
+  const batched = guardId && proxied && !provider.meter && !provider.widget && provider.cacheable === true;
   return {
     type: 'raster',
-    tiles: guarded ? [guardedTemplate(guardId, providerId)] : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
+    tiles: guarded
+      ? [guardedTemplate(guardId, providerId)]
+      : batched
+        ? [batchedTemplate(providerId)]
+        : tileUrls(tileTemplate(provider, providerId), provider.subdomains),
     // Bigger tiles shift the URL zoom down (512 → -1, 1024 → -2); an oversample
     // halves the cell so each tile is shown downscaled — deeper zoom on screen.
     // Google's mid-zoom mosaics are genuinely softer than its deep ones

@@ -63,7 +63,7 @@
     <Icon name="search" size={14} />
     <input bind:this={field} bind:value={query} placeholder="Find an element" aria-label="Find an element" onkeydown={fieldKey} />
   </div>
-  <div class="groups" class:found={!!query.trim()} bind:this={grid}>
+  <div class="groups" class:found={!!query.trim()} bind:this={grid} data-guide="plate.add-groups">
     {#each groups as group (group.title)}
       <section class="group">
       <div class="group-head"><span>{group.title}</span>{#if group.note}<span class="hint">{group.note}</span>{/if}</div>

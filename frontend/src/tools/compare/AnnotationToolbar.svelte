@@ -95,7 +95,7 @@
   });
 </script>
 
-<div class="annotation-rail" class:folded={collapsed}>
+<div class="annotation-rail" class:folded={collapsed} data-guide="compare.notes">
 {#if collapsed}
   <!-- Folded, the rail gives its width to the maps and keeps a strip that says
        what it holds, and the tool still in hand, which a press puts down. -->

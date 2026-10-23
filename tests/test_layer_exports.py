@@ -114,7 +114,7 @@ def test_group_order_survives_download_and_reimport(client, work, fmt):
                            files={"file": (f"groups.{fmt}", exported.content)})
     assert imported.status_code == 200, imported.text
     groups = client.get(f"/api/cases/{owner}/map-layers/{imported.json()['name']}/edit").json()["groups"]
-    assert [group["name"] for group in groups] == ["Upper", "Lower", "Markers"]
+    assert [group["name"] for group in groups] == ["Upper", "Lower", "Features"]
 
 
 @pytest.mark.parametrize("fmt", ["geojson", "kml"])
@@ -133,7 +133,7 @@ def test_an_unknown_end_survives_download_and_reimport(client, work, fmt):
 
 def test_hidden_group_is_exported_with_its_visibility(client, work):
     _, _, url, _ = work
-    client.patch(url, json={"hidden": ["Markers"]})
+    client.patch(url, json={"hidden": ["Features"]})
     response = client.post(f"{url}/export/kml", json={})
     root = ET.fromstring(response.content)
     assert root.find(".//{*}Folder/{*}visibility").text == "0"

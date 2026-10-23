@@ -165,7 +165,7 @@
   </div>
 {/snippet}
 
-<div class="side-title-row" style="margin-top: 14px">
+<div class="side-title-row" style="margin-top: 14px" data-guide="proof.panels">
   <button class="side-title collapsible" onclick={() => (collapsed.panels = !collapsed.panels)}>
     <span>
       <Icon name={collapsed.panels ? 'chevronRight' : 'chevronDown'} size={13} />

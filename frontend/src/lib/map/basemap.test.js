@@ -893,6 +893,19 @@ describe('billed tiles on a map that can tilt', () => {
     // without a map to read the view from, the plain proxy address
     expect(rasterSource(SENTINEL, 'sentinel2', 512).tiles).toEqual(['/api/tiles/sentinel2/{z}/{x}/{y}']);
   });
+
+  it('asks a free provider the app keeps in batches, and leaves every other at its own address', () => {
+    const kept = { ...ESRI, cacheable: true };
+    expect(rasterSource(kept, 'esri-wayback~20', 256, 'm4').tiles).toEqual(['azimut-tiles://esri-wayback~20/{z}/{x}/{y}']);
+    // the browser's own cache spares a provider the app does not keep a second request
+    expect(rasterSource({ ...ESRI, cacheable: false }, 'esri-world-imagery', 256, 'm4').tiles).toEqual(['/api/tiles/esri-world-imagery/{z}/{x}/{y}']);
+    // billed tiles keep the guard, which counts each one; widgets and direct templates never pass through here
+    expect(rasterSource({ ...SENTINEL, cacheable: true }, 'sentinel2', 512, 'm4').tiles).toEqual(['azimut-billed://m4/sentinel2/{z}/{x}/{y}']);
+    expect(rasterSource({ ...kept, widget: 'google_js' }, 'g', 256, 'm4').tiles).toEqual(['/api/tiles/g/{z}/{x}/{y}']);
+    expect(rasterSource({ ...CUSTOM_XYZ, cacheable: true }, 'custom-1', 256, 'm4').tiles[0]).toContain('tiles.example.org');
+    // a source outside the app's maps keeps the plain address
+    expect(rasterSource(kept, 'esri-world-imagery', 256).tiles).toEqual(['/api/tiles/esri-world-imagery/{z}/{x}/{y}']);
+  });
 });
 
 describe('the picture itself, apart from what is laid over it', () => {

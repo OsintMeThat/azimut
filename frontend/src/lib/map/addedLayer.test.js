@@ -585,6 +585,35 @@ describe('an added layer on the map', () => {
     expect(source.data.features).toHaveLength(COLLECTION.features.length);
   });
 
+  it('hands the engine the same features once: a layer read back after its own save is not cut again', async () => {
+    const engine = stubEngine();
+    engine.map.triggerRepaint = vi.fn();
+    const layer = createAddedLayer(engine, { editable: true });
+    await layer.set(COLLECTION, { categories: CATEGORIES });
+    const [main, arrows] = [...engine.map.sources.values()];
+    const first = main.data;
+    const empty = arrows.data;
+    // new objects, the same features: nothing handed again, a frame asked for whoever waits on one
+    await layer.set(structuredClone(COLLECTION), { categories: CATEGORIES });
+    const [mainAfter, arrowsAfter] = [...engine.map.sources.values()];
+    expect(mainAfter.data).toBe(first);
+    expect(arrowsAfter.data).toBe(empty);
+    expect(engine.map.triggerRepaint).toHaveBeenCalledTimes(1);
+    // one feature moved: the whole layer is handed again, in its order
+    const moved = structuredClone(COLLECTION);
+    moved.features[0].geometry.coordinates = [9, 9];
+    await layer.set(moved, { categories: CATEGORIES });
+    const handed = [...engine.map.sources.values()][0].data;
+    expect(handed).not.toBe(first);
+    expect(handed.features.map((f) => f.properties.name)).toEqual(COLLECTION.features.map((f) => f.properties.name));
+    expect(handed.features[0].geometry.coordinates).toEqual([9, 9]);
+    // the same features in other groups are drawn again in their new colours
+    await layer.set(moved, { categories: [...CATEGORIES].reverse() });
+    expect([...engine.map.sources.values()][0].data).not.toBe(handed);
+    // the arrow heads' source was never emptied again, having nothing in it
+    expect([...engine.map.sources.values()][1].data).toBe(empty);
+  });
+
   it('declutters by collision rather than by a cap taken in file order', async () => {
     // a KML is ordered by folder or by creation, never by geography, so a cap
     // would clump; MapLibre dropping an overlapping symbol spreads evenly

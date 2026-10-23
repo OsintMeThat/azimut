@@ -17,7 +17,7 @@ export const caseState = $state({
   rev: 0,
 });
 
-export const uiState = $state({ tool: 'overview', settingsTab: null, guideSection: null });
+export const uiState = $state({ tool: 'overview', settingsTab: null });
 
 export const prefs = $state({ updateDismissedVersion: '', units: 'metric' });
 
@@ -36,7 +36,6 @@ export function resetOverviewFixture() {
   caseState.rev = 0;
   uiState.tool = 'overview';
   uiState.settingsTab = null;
-  uiState.guideSection = null;
   prefs.updateDismissedVersion = '';
   prefs.units = 'metric';
   updatesState.app = null;

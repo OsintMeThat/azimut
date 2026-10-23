@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import LayerEditBar from './LayerEditBar.svelte';
 import LayerGeometry from './LayerGeometry.svelte';
+import { shapeRing } from './state/myLayers.svelte.js';
+import { destination } from '../../lib/measure.js';
 
 vi.mock('../../lib/api.js', () => ({ api: { get: vi.fn(async () => ({ colours: [] })), put: vi.fn() } }));
 
@@ -33,6 +35,30 @@ describe('the layer edit bar', () => {
     button('Undo the last edit').click();
     expect(controller.undo).toHaveBeenCalledOnce();
     expect(button('Redo the last edit').disabled).toBe(true);
+  });
+
+  it('takes a circle\'s radius typed in the bar, in the unit it shows, and saves it on Enter', () => {
+    const edge = destination({ lat: 48, lon: 2 }, 90, 250);
+    const sketch = { type: 'Polygon', key: null, shape: 'circle', anchor: [2, 48], rings: [shapeRing('circle', [2, 48], [edge.lon, edge.lat])] };
+    const controller = editor({ sketch, complete: true, radius: vi.fn(), saveGeometry: vi.fn(), canUndoSketch: false, canRedoSketch: false });
+    show(LayerEditBar, { controller, ondone: vi.fn() });
+    const field = button('Radius');
+    expect(field.placeholder).toBe('250 m');
+    const type = (value) => { field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); };
+    // a bare number is in the unit shown when typing began, however far the circle grows meanwhile
+    type('1'); type('15'); type('1500');
+    expect(controller.radius.mock.calls.map(([metres]) => metres)).toEqual([1, 15, 1500]);
+    type('2.5 km');
+    expect(controller.radius).toHaveBeenLastCalledWith(2500);
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(controller.saveGeometry).toHaveBeenCalledOnce();
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(controller.stop).toHaveBeenCalledOnce();
+  });
+
+  it('asks for no radius before a circle\'s centre is down, nor for a box', () => {
+    show(LayerEditBar, { controller: editor({ sketch: { type: 'Polygon', key: null, shape: 'circle', anchor: null, rings: [[]] }, complete: false }), ondone: vi.fn() });
+    expect(button('Radius')).toBeNull();
   });
 
   it('extends a line being reshaped from either end, and draws freehand while a new one is drawn', () => {

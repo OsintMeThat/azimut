@@ -139,6 +139,32 @@ describe('the tiles of the globe', () => {
     expect(tree.groundAt(89, 0)).toBe(null);
   });
 
+  it('finds through the children the same tile its address names', () => {
+    const { tree, settle } = harness();
+    settle(cameraFor({ lat: 46.56, lon: 7.91, zoom: 14, pitch: 60, elevation: 100 }, SIZE));
+    const tileOf = (lat, lon, z) => {
+      const s = Math.sin(lat * (Math.PI / 180));
+      return `${z}/${Math.floor(((lon + 180) / 360) * 2 ** z)}/${Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 2 ** z)}`;
+    };
+    // the finest held tile over a point, read down by address as it used to be
+    const byAddress = (lat, lon) => {
+      let best = null;
+      for (let z = ROOT_Z; ; z += 1) {
+        const n = tree.node(tileOf(lat, lon, z));
+        if (n?.state !== 'ready') return best;
+        best = z;
+      }
+    };
+    let deep = 0;
+    for (let i = 0; i < 400; i += 1) {
+      const lat = 46.3 + (i % 20) * 0.03;
+      const lon = 7.6 + Math.floor(i / 20) * 0.03;
+      expect(tree.groundAt(lat, lon)?.z ?? null).toBe(byAddress(lat, lon));
+      deep = Math.max(deep, tree.groundAt(lat, lon)?.z ?? 0);
+    }
+    expect(deep).toBeGreaterThanOrEqual(13);
+  });
+
   it('leaves a tile drawn under its children where one of them could not be built, never a hole', () => {
     const { tree, asked } = harness();
     const camera = cameraFor({ lat: 46.56, lon: 7.91, zoom: 4 }, SIZE);

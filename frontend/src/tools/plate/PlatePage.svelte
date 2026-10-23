@@ -685,7 +685,7 @@
 
 <svelte:window onkeydown={keydown} />
 
-<div class="viewport" class:panning bind:this={viewportEl} bind:clientWidth={viewportWidth} bind:clientHeight={viewportHeight}
+<div class="viewport" data-guide="plate.page" class:panning bind:this={viewportEl} bind:clientWidth={viewportWidth} bind:clientHeight={viewportHeight}
   onpointerdown={pressViewport} onmousedown={(event) => { if (event.button === 1) event.preventDefault(); }} role="presentation">
   <div class="page" bind:this={pageEl} style:width="{width}px" style:height="{height}px"
     style:transform="translate({shown.x}px, {shown.y}px) scale({scale})"

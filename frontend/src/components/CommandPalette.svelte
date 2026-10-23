@@ -158,7 +158,7 @@
 
 {#if open}
   <Modal title="Go to" width="640px" align="top" bare onclose={close}>
-    <div class="search" class:busy={loading}>
+    <div class="search" class:busy={loading} data-guide="palette.search">
       <Icon name="search" size={18} />
       <input
         use:focus bind:value={query} onkeydown={onKeydown}

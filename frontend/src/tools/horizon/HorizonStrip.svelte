@@ -147,6 +147,7 @@
 
 <div
   class="hz-strip"
+  data-guide="horizon.strip"
   class:locked
   class:on-place={Boolean(hoverMark) && !locked}
   title={locked ? 'Photo and terrain move together: move one alone to turn' : undefined}

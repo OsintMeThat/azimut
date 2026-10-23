@@ -208,6 +208,7 @@ proof for publication.
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
+| ✅ **Pictured guide** | Opens over any tool from the `?`: every tool photographed and numbered, numbers that open the next screen, a geolocation walked to its published thread, pictures remade by `npm run guide:shots`, and a welcome at each new version pointing at the `?`. |
 | ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
 | ✅ **Inspect player & panel** | Captures the very frame on screen, lays frames, marks, shots and sound along the bar, and keeps Capture and Save above Info, Adjust, Moments and Analyze tabs. |
 | ✅ **Proof annotations & publishing** | Adds numbered markers, blur boxes, box tags, callouts, zoom insets, view cones and line styles, puts marks free on the page or tied by their ends across panels, sets the proof in shipped fonts, keeps line widths and sizes the same on every panel, verifies proof points and carries proof dates into previewed post templates. |

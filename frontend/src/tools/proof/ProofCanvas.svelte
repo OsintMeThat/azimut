@@ -14,7 +14,7 @@
   } = $props();
 </script>
 
-<div class="canvas-wrap" class:drawing={tool !== 'select'}>
+<div class="canvas-wrap" class:drawing={tool !== 'select'} data-guide="proof.canvas">
   <div class="konva" bind:this={containerEl}></div>
   {#if textEdit}
     <!-- A textarea, because a label can be two lines: Konva draws the newline,

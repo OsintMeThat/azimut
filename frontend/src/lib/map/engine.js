@@ -24,7 +24,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import './engine.css';
 import { mapFacade, engineZoom } from './facade.js';
 import { GUARD_PROTOCOL, readGuarded, tileSource } from './quotaGuard.js';
-import { appTile } from './tileBatch.js';
+import { BATCH_PROTOCOL, appTile, batchedTile, createTileBatcher, readBatched } from './tileBatch.js';
 import { WHEEL_ZOOM_RATE } from './wheel.js';
 
 setWorkerUrl(workerUrl);
@@ -60,6 +60,17 @@ addProtocol(GUARD_PROTOCOL, async (params, abort) => {
   const map = maps.get(asked.mapId);
   const providerId = map ? tileSource(asked, guardView(map)).provider : asked.providerId;
   return appTile({ ...asked, providerId }, { signal: abort.signal });
+});
+
+/**
+ * A free provider's tile, asked with the others the flat maps of the page want
+ * at that moment in one request (`basemap.js` `rasterSource`).
+ */
+const batcher = createTileBatcher();
+addProtocol(BATCH_PROTOCOL, async (params, abort) => {
+  const asked = readBatched(params.url);
+  if (!asked) throw new Error('not a batched tile address');
+  return batchedTile(asked, { batcher, signal: abort.signal });
 });
 
 /**

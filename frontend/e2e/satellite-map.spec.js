@@ -18,8 +18,13 @@ async function openMap(page) {
   const fixture = await installAppFixture(page);
   const asked = [];
   page.on('request', (request) => {
-    const at = /\/api\/tiles\/[^/]+\/(\d+)\//.exec(request.url());
+    const url = new URL(request.url());
+    const at = /^\/api\/tiles\/[^/]+\/(\d+)\//.exec(url.pathname);
     if (at) asked.push(Number(at[1]));
+    // a free provider's tiles come many at a time, each one's z/x/y in the request
+    else if (url.pathname.startsWith('/api/tiles/batch/')) {
+      for (const key of (url.searchParams.get('t') ?? '').split(',')) asked.push(Number(key.split('/')[0]));
+    }
   });
   await page.goto('/#satellite');
   await awaitMapReady(page);

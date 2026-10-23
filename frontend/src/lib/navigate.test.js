@@ -55,17 +55,16 @@ describe('openInTimeline', () => {
 });
 
 describe('openGuide', () => {
-  it('lands on the section written about the tab the mark was pressed from', () => {
+  it('opens the guide over the tool on whatever asked, and leaves the tool alone', () => {
+    uiState.tool = 'satellite';
     openGuide('satellite');
-    expect(uiState.tool).toBe('guide');
-    expect(uiState.guideSection).toBe('map');
+    expect(uiState.guide).toEqual({ at: 'satellite' });
+    expect(uiState.tool).toBe('satellite');
   });
 
-  it('opens at the top for a tool no section covers', () => {
-    // Settings is app plumbing rather than a stage, so nothing is written about it;
-    // somebody pressing there has a general question
-    openGuide('settings');
-    expect(uiState.guideSection).toBe('start');
+  it('opens on a page by its id, as Home asks for the start', () => {
+    openGuide('start');
+    expect(uiState.guide).toEqual({ at: 'start' });
   });
 });
 

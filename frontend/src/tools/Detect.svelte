@@ -453,7 +453,9 @@
     COMPARE_SOURCES.filter((source) => !source.provider || imagery.find(source.provider))
   );
   const pointActions = $derived(
-    actionsFor(pointMenu?.areaId ? ['lookup', 'candidate', 'measure', 'horizon', 'centre'] : ['lookup', 'measure', 'horizon', 'centre'])
+    // a layer being edited owns the clicks on the map, so no measure is armed under it
+    actionsFor((pointMenu?.areaId ? ['lookup', 'candidate', 'measure', 'horizon', 'centre'] : ['lookup', 'measure', 'horizon', 'centre'])
+      .filter((id) => !personalLayers.editor || id !== 'measure'))
   );
   const pointTools = otherMapTools('detect');
 
@@ -800,7 +802,7 @@
         <!-- The case's own layers, under Detect's findings. Drawn only while this
              tab is on screen, and inert while a tool holds the pointer, so a pin
              or an area is never a card opened instead. -->
-        <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'detect'} />
+        <LayerGeometry engine={ready ? engine : null} controller={personalLayers} active={uiState.tool === 'detect'} onmenu={onMapContextMenu} />
         <AddedLayersOverlay
           engine={ready ? engine : null}
           caseId={caseState.current?.id ?? ''}

@@ -54,6 +54,26 @@ describe('Add event, from every tool', () => {
   });
 });
 
+describe('the ? in the topbar', () => {
+  it('opens the guide over the tool it was pressed from, on every tool', () => {
+    expect(markup).toContain('onclick={() => openGuide(uiState.tool)}');
+    expect(markup).toMatch(/\{#if uiState\.guide\}\s*<GuideDialog at=\{uiState\.guide\.at\} onclose=\{\(\) => \(uiState\.guide = null\)\} \/>/);
+    // no Guide tab any more, so nothing hides the mark
+    expect(markup).not.toContain("uiState.tool !== 'guide'");
+    expect(source).not.toContain("tools/Guide.svelte");
+  });
+
+  it('is what the welcome of a new version points at, and the update notice waits behind it', () => {
+    expect(markup).toContain('bind:this={guideButton}');
+    expect(markup).toContain('<Welcome version={welcome} anchor={guideButton} onclose={welcomed} />');
+    expect(markup).toContain('{#if updateState.show && !welcome}');
+    // read once the settings have said which version this is, and never in a map window
+    expect(source).toMatch(/if \(!solo\) \{\s*prefsReady\.then\(\(\) => \{\s*if \(shouldWelcome\(appInfo\.version\)\)/);
+    // asking for the guide from it opens it where the `?` would
+    expect(source).toMatch(/function welcomed\(\{ mute, guide \}\) \{[\s\S]*?if \(guide\) openGuide\(uiState\.tool\);/);
+  });
+});
+
 describe('the tab strip', () => {
   it('names the open tool on its tab, since Geo Proof and Geo Report carry no title of their own', () => {
     expect(markup).toContain("aria-current={uiState.tool === toolId ? 'page' : undefined}");

@@ -1,6 +1,7 @@
 import { changedBy, momentLabel, momentNow, moments as momentsOf, seenAt } from '../../../lib/map/layerHistory.js';
 import { landAt } from '../../../lib/map/landings.js';
 import { attribution } from '../../../lib/map/addedLayers.js';
+import { destination } from '../../../lib/measure.js';
 
 /** How many edits the editor can take back, per layer session. */
 export const HISTORY = 100;
@@ -820,6 +821,28 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
         if (!answer && sheet !== undefined && form && selected?.properties.key === key && form.bearing === (facing ?? '')) form = { ...form, bearing: sheet };
         return answer;
       });
+    },
+    /**
+     * Put one marker on a typed position, as a drag there would: shown at once, one
+     * edit Ctrl+Z takes back. A marker that follows a case item, or that a date or the
+     * day shown holds, says why it stays. False when it stays.
+     */
+    placeAt(key, { lat, lon }) {
+      const feature = features.find((one) => one.properties.key === key);
+      if (!editor || feature?.geometry.type !== 'Point') return false;
+      if (feature.properties.entity_id) { notify('It follows its case item: Unlink it to move it', 'info', 4000); return false; }
+      if (heldBy(key)) { heldBack([key]); return false; }
+      if (awayBack([key])) return false;
+      const [from, to] = [feature.geometry.coordinates, [lon, lat]];
+      if (from[0] === to[0] && from[1] === to[1]) return false;
+      this.moveFeatures([key], [to[0] - from[0], to[1] - from[1]]);
+      return true;
+    },
+    /** While a circle is drawn from its centre, the ring it takes `metres` out, as if the pointer had gone there. */
+    radius(metres) {
+      if (sketch?.shape !== 'circle' || !sketch.anchor || !(metres > 0)) return;
+      const [lon, lat] = sketch.anchor, edge = destination({ lat, lon }, 90, metres);
+      sketch.rings = [shapeRing('circle', sketch.anchor, [edge.lon, edge.lat])];
     },
     /** Edits drawn where they landed before they are saved, for the maps to draw them too. */
     get landings() { return landings; },

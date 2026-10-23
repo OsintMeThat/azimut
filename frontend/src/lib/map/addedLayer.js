@@ -427,6 +427,19 @@ export function periodFilter(period = null) {
 }
 
 /**
+ * Whether two lists of features say the same, in the same order: each the same
+ * object, or one written the same. A layer read back holds new objects for the
+ * features it already drew.
+ */
+export function sameFeatures(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i] && JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false;
+  }
+  return true;
+}
+
+/**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
  * @param {(properties: object, point: { lat: number, lon: number } | null) => HTMLElement} [opts.card]
@@ -519,6 +532,10 @@ export function createAddedLayer(
   let lastFilter = [[], null];
 
   let built = false;
+  // what the source was last handed (`set`): the features as given and the style they were built with
+  let sent = null;
+  // whether the arrow heads' source holds any
+  let arrowsSent = false;
   let shown = true;
   let filtered = ''; // the filter last applied, so the same one is not re-applied
   let categories = [];
@@ -536,6 +553,8 @@ export function createAddedLayer(
   function build(attribution) {
     if (built) return;
     built = true;
+    sent = null;
+    arrowsSent = false;
     registerIcons(map);
     map.addSource(SOURCE, {
       type: 'geojson',
@@ -903,8 +922,8 @@ export function createAddedLayer(
 
   return {
     /**
-     * Put a parsed collection on the map. Every feature, every time: the source
-     * is the whole layer and the engine culls what is off screen.
+     * Put a parsed collection on the map. Every feature, whenever any changed: the
+     * source is the whole layer and the engine culls what is off screen.
      *
      * `held`, when given, is what `hide` holds off the map from now on, changed
      * with the data rather than before it: features the editor dragged come back
@@ -922,7 +941,14 @@ export function createAddedLayer(
       if (mine !== generation || !built) return;
 
       const colour = colourExpression(groups);
-      const features = (data?.features ?? []).map((feature) => {
+      // The same features handed again, as a layer read back after its own save is,
+      // are not cut again: the engine would tile the whole layer anew to draw the same.
+      const style = JSON.stringify([groups, [...ready].sort()]);
+      const unchanged = sent?.style === style && sameFeatures(sent.features, data?.features ?? []);
+      sent = { style, features: [...(data?.features ?? [])] };
+      // nothing to cut, but a frame still comes for whoever waits for the map to settle
+      if (unchanged) map.triggerRepaint?.();
+      const features = unchanged ? [] : (data?.features ?? []).map((feature) => {
         const symbol = feature.properties?.symbol || 'pin';
         const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
         const colour = feature.properties?.colour || categoryColour(groups[groupAt], groupAt);
@@ -975,18 +1001,25 @@ export function createAddedLayer(
             : null),
         },
       }; });
-      if (editable) map.getSource(ARROW_SOURCE)?.setData({ type: 'FeatureCollection', features: features.flatMap((feature) => {
+      const arrows = editable && !unchanged ? features.flatMap((feature) => {
         const heads = arrowHeads(feature);
         if (!heads.length) return [];
         const groupAt = Math.max(0, groups.findIndex((group) => group.name === feature.properties?.category));
         const icon = arrowIcon(feature.properties?.colour || categoryColour(groups[groupAt], groupAt));
         return heads.map(({ at, angle }) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: at },
           properties: { ...feature.properties, $angle: angle, $arrowicon: icon } }));
-      }) });
-      const symbols = [...new Set(features.map((feature) => feature.properties.symbol))]
-        .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
-      registerIcons(map, iconImage, symbols);
-      map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
+      }) : [];
+      // a layer with no arrow heads leaves their source empty rather than emptying it again
+      if (editable && !unchanged && (arrows.length || arrowsSent)) {
+        map.getSource(ARROW_SOURCE)?.setData({ type: 'FeatureCollection', features: arrows });
+        arrowsSent = arrows.length > 0;
+      }
+      if (!unchanged) {
+        const symbols = [...new Set(features.map((feature) => feature.properties.symbol))]
+          .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
+        registerIcons(map, iconImage, symbols);
+        map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
+      }
       for (const layer of DRAWN) {
         if ([OWN, HIT, HIT_OWN, BEARING, LABEL, CHANGE_FILL, NEW_LINE, NEW_RING, FILL_HATCH, ARROW].includes(layer) || !map.getLayer(layer)) continue;
         const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color'
