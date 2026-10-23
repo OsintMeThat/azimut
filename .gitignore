@@ -75,3 +75,16 @@ dist-xpi/
 # Local-only design/brainstorming notes, never pushed
 docs/superpowers/
 docs/.ideas/
+
+# Empty shell/editor stubs a sandboxed tool leaves at the repo root
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.gitmodules
+/.idea
+/.mcp.json
+/.profile
+/.ripgreprc
+/.vscode
+/.zprofile
+/.zshrc
