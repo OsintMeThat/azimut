@@ -145,6 +145,62 @@ describe('personal layer editing', () => {
     expect(editor.selected.properties.entity_id).toBe('e1');
   });
 
+  it('draws a pin put down at once, in the style it is given, and the editor names it once saved', async () => {
+    const groups = [{ id: 'g', name: 'Sides', mode: 'colour', colour: '#cc79a7', symbol: 'pin', size: 1.5, stroke: 2 }];
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [] }, groups });
+    const gate = deferred();
+    api.post.mockImplementationOnce(() => gate.promise);
+    const editor = store(); await editor.open(ROW);
+    editor.start(); editor.draft.symbol = 'star';
+    editor.addPoint({ lat: 48, lon: 2 });
+    const [landing] = editor.landings;
+    // drawn on the maps before any answer, as the layer will draw it: its group's colour, its size
+    expect(landing.feature.geometry.coordinates).toEqual([2, 48]);
+    expect(landing.feature.properties).toMatchObject({ symbol: 'star', colour: '#cc79a7', category: 'Sides', icon_scale: 1.5, group: 'g' });
+    // the editor waits for the save to give it a key of its own
+    expect(editor.features).toEqual([]);
+    gate.resolve({ layer: ROW, marker: feature('m1', { group: 'g' }) });
+    await editor.whenSaved();
+    expect(editor.landings).toEqual([]);
+    expect(landing.saved).toBe(true);
+    expect(editor.features.map((one) => one.properties.key)).toEqual(['m1']);
+    expect(editor.selection).toEqual(['m1']);
+  });
+
+  it('ends a new shape at once on Enter, and gives it back to finish when the save is refused', async () => {
+    const gate = deferred();
+    api.post.mockImplementationOnce(() => gate.promise);
+    const editor = store(); await editor.open(ROW);
+    editor.startShape('LineString'); editor.addPoint({ lon: 2, lat: 48 }); editor.addPoint({ lon: 3, lat: 49 });
+    const saving = editor.saveGeometry();
+    expect(editor.sketch).toBeNull();
+    expect(editor.landings[0].feature.geometry).toEqual({ type: 'LineString', coordinates: [[2, 48], [3, 49]] });
+    gate.reject(new Error('Refused'));
+    expect(await saving).toBeNull();
+    expect(editor.landings).toEqual([]);
+    expect(editor.sketch.rings[0]).toEqual([[2, 48], [3, 49]]);
+  });
+
+  it('keeps an area reshaped off the maps until they draw it where it landed', async () => {
+    const area = { ...feature('area'), geometry: { type: 'Polygon', coordinates: [[[0, 0], [5, 0], [5, 5], [0, 0]]] } };
+    api.get.mockResolvedValueOnce({ layer: ROW, document: { features: [area] } });
+    const gate = deferred();
+    api.patch.mockImplementationOnce(() => gate.promise);
+    const editor = store(); await editor.open(ROW); editor.select('area'); editor.editGeometry();
+    editor.moveVertex(0, 1, { lon: 6, lat: 0 });
+    const saving = editor.saveGeometry();
+    expect(editor.sketch).toBeNull();
+    const [landing] = editor.landings;
+    expect(editor.dragging).toEqual({ name: 'working', keys: ['area'], offset: null, landing });
+    editor.claim(landing);
+    gate.resolve({ layer: ROW, marker: area });
+    await saving;
+    // a map drew it: the shape it stands for can come back
+    expect(editor.dragging).not.toBeNull();
+    editor.landed(landing);
+    expect(editor.dragging).toBeNull();
+  });
+
   it('keeps polygon holes while moving, inserting and removing vertices', async () => {
     const polygon = { ...feature('area'), geometry: { type: 'Polygon', coordinates: [
       [[0, 0], [5, 0], [5, 5], [0, 0]], [[1, 1], [2, 1], [2, 2], [1, 1]],
@@ -671,6 +727,19 @@ describe('Ctrl+Z in the layer editor', () => {
     expect(editor.undo()).toBe(true);
     await editor.whenSaved(); await editor.whenSaved();
     expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [], drop: ['two'] });
+  });
+
+  it('says how many features a group with one colour recolours, and nothing for an icon it leaves to them', async () => {
+    const groups = [{ id: 'g', name: 'Posts', mode: 'colour', colour: '#0072b2', symbol: 'pin' }];
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [feature('a'), feature('b')].map((one) => ({ ...one, properties: { ...one.properties, group: 'g' } })) }, groups });
+    const editor = store(); await editor.open(ROW);
+    api.patch.mockResolvedValueOnce({ layer: ROW, groups });
+    notify.mockClear();
+    await editor.updateGroup('g', { symbol: 'flag' });
+    expect(notify.mock.calls.some(([text]) => String(text).startsWith('Restyled'))).toBe(false);
+    api.patch.mockResolvedValueOnce({ layer: ROW, groups: [{ ...groups[0], colour: '#d55e00' }] });
+    await editor.updateGroup('g', { colour: '#d55e00' });
+    expect(notify.mock.calls.at(-1)[0]).toBe('Restyled the 2 features of Posts');
   });
 
   it('says how many features a group with one style restyles, and takes the style back', async () => {

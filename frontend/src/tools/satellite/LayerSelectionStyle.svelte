@@ -5,7 +5,7 @@
    * and the feature sheet both carry it.
    */
   import LayerStyleButton from './LayerStyleButton.svelte';
-  import { styleTarget, usedStyles } from '../../lib/map/layerStyle.js';
+  import { splitPick, styleTarget, usedStyles } from '../../lib/map/layerStyle.js';
 
   /** `regroup`: whether the picker also moves features between groups, off where a Group row sits beside it. */
   let { controller, label = 'Style', size = 20, disabled = false, regroup = true, onopen = null } = $props();
@@ -17,8 +17,12 @@
 
   function pick(changes) {
     if (target.uniform) return controller.updateGroup(target.uniform.id, changes);
-    if (chosen.length) return controller.updateSelection(changes);
-    Object.assign(controller.draft, changes);
+    // a group in one colour takes the colour, its features the icon
+    const { group, own } = target.tinted ? splitPick(changes) : { group: {}, own: changes };
+    if (Object.keys(group).length) controller.updateGroup(target.tinted.id, group);
+    if (!Object.keys(own).length) return;
+    if (chosen.length) return controller.updateSelection(own);
+    Object.assign(controller.draft, own);
   }
   function move(id) {
     if (chosen.length) controller.updateSelection({ group: id });

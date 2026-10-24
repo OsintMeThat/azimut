@@ -15,9 +15,10 @@
    */
   import { untrack } from 'svelte';
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
+  import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { attribution, UNNAMED } from '../../lib/map/addedLayers.js';
   import { layerCard } from '../../lib/map/layerCard.js';
-  import { fmtCoords, toast } from '../../lib/state.svelte.js';
+  import { fmtCoords, prefs, toast } from '../../lib/state.svelte.js';
   import { copyText } from '../../lib/clipboard.js';
   import { paths } from '../../components/Icon.svelte';
   import { personalLayers } from '../../lib/map/personalLayers.svelte.js';
@@ -100,10 +101,17 @@
     return asOf(collection, time.at ?? null, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? null });
   }
 
-  /** What the editor holds off a layer while the analyst drags it; nothing once it is let go. */
+  /**
+   * What the editor holds off a layer while the analyst drags it, or the line or
+   * area being reshaped, which its outline in the editor stands for; nothing once
+   * it is let go.
+   */
   function heldOff(name) {
     const drag = untrack(() => personalLayers.dragging);
-    return drag?.offset && !drag.landing && drag.name === name ? drag.keys : [];
+    if (drag?.landing && drag.name === name) return [];
+    const sketch = untrack(() => personalLayers.sketch);
+    const reshaped = sketch?.key && !['Point', 'Selection'].includes(sketch.type) && untrack(() => personalLayers.editor?.name) === name ? [sketch.key] : [];
+    return drag?.offset && drag.name === name ? [...drag.keys, ...reshaped] : reshaped;
   }
 
   function paint(row, entry) {
@@ -121,14 +129,13 @@
    * Where this layer's own icons are, or nothing when it has none.
    *
    * Always a path on this server. The source's addresses were followed once, by
-   * the backend, at the moment the analyst ticked the box; what is left of them
-   * here is a content hash per image, so the browser asks localhost for a
-   * picture rather than Google for the one a My Maps pointed at.
+   * the backend, at the moment the analyst ticked the box, so the browser asks
+   * localhost for a picture rather than Google for the one a My Maps pointed at.
+   * Versioned by the row as it is now, so a refresh drawn in place reads its new pictures.
    */
   function iconUrlFor(row) {
     if (!row.icons) return null;
-    const base = `/api/cases/${caseId}/map-layers/${encodeURIComponent(row.name)}/icons`;
-    return (key) => `${base}/${key}`;
+    return (key) => layerIconUrl(caseId, row.name, key, iconVersion(layers.find((item) => item.name === row.name) ?? row));
   }
 
   /**
@@ -214,8 +221,8 @@
       const layer = createAddedLayer(engine, {
         editable: !!row.editable,
         history: isTracked(row),
-        card: (properties, point) => {
-          const card = layerCard(row.title, { coords: fmtCoords, copy, pictures: followedPictures })(properties, point);
+        card: (properties, point, geometry) => {
+          const card = layerCard(row.title, { coords: fmtCoords, copy, pictures: followedPictures, units: () => prefs.units })(properties, point, geometry);
           const own = row.editable && properties.key;
           if (own || oncopyfeature) {
             const actions = document.createElement('div');
@@ -314,10 +321,12 @@
     for (const [name, { layer }] of live) layer.interactive(enabled && name !== edited);
   });
 
-  // The features being dragged in the editor leave the map while their copies move.
-  // Once let go, the drawing that puts them where they landed brings them back.
+  // The features being dragged in the editor leave the map while their copies move,
+  // and a shape being reshaped while its outline does. Once let go, the drawing that
+  // puts them where they landed brings them back.
   $effect(() => {
     const drag = personalLayers.dragging;
+    void personalLayers.sketch?.key;
     void layers;
     for (const [name, { layer }] of live) if (!(drag?.landing && drag.name === name)) layer.hide(heldOff(name));
   });
@@ -393,6 +402,12 @@
     margin: 4px 0 0;
     color: var(--text-2);
     font-size: var(--fs-xs);
+  }
+  :global(.layer-card-size) {
+    margin: 6px 0 0;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
   }
   /* What the marker follows, side by side: the footage, then the proof. */
   :global(.layer-card-pictures) { display: flex; gap: 6px; margin: 6px 0 0; }

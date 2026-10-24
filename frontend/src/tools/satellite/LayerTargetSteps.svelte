@@ -3,7 +3,8 @@
    * Choosing where a case item joins the analyst's layers, a step at a time
    * inside one menu: the layer, then its group when it has several, then, for a
    * group whose features each have their own style, the marker's icon and
-   * colour. A group with one style takes the item at once.
+   * colour; for a group in one colour, its icon alone. A group with one style
+   * takes the item at once.
    *
    * The menu around it owns `step` (null at the list of layers), so it can show
    * its own rows beside the list and drop them once a layer is open. `onadd`
@@ -48,6 +49,8 @@
   /** A pick in the palette replaces the point's own icon: what it holds is the library's or this layer's. */
   function pickStyle(changes) {
     const next = { ...style, ...changes };
+    // a group in one colour paints its markers itself
+    if (group?.mode === 'colour') next.colour = group.colour;
     if ('icon' in changes) delete next.icon_from;
     style = next;
   }
@@ -59,7 +62,8 @@
   }
   function chooseGroup(one, part) {
     if (!part || part.mode === 'uniform' || !point) { onadd({ layer: one, group: part ?? null, style: null, status }); return; }
-    style = { symbol: initial?.symbol || part.symbol || 'pin', colour: initial?.colour || part.colour || '#0072b2',
+    style = { symbol: initial?.symbol || part.symbol || 'pin',
+      colour: (part.mode === 'colour' ? part.colour : initial?.colour || part.colour) || '#0072b2',
       ...(ownIcon ? { icon: ownIcon.key, icon_from: ownIcon.from } : {}) };
     step = { layer: one.name, group: part.id };
   }
@@ -101,7 +105,7 @@
     </button>
   {/if}
   <LayerStylePalette label="Point icon" symbol={style.symbol} colour={style.colour} icon={wearsOwn ? '' : style.icon ?? ''}
-    used={layer.styles ?? []} {caseId} layer={layer.name} meta={layer.icons ?? null} onpick={pickStyle} />
+    used={layer.styles ?? []} {caseId} layer={layer.name} meta={layer.icons ?? null} colours={group.mode !== 'colour'} onpick={pickStyle} />
   <div class="add-row">
     <button type="button" class="btn btn-primary btn-sm" disabled={busy}
       onclick={() => onadd({ layer, group, style: { ...style }, status })}>

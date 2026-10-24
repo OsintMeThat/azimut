@@ -35,6 +35,7 @@
   import { createMirror } from '../../lib/globe/mirror.js';
   import { between, eased, globeCamera, globeGround, plateView } from '../../lib/plate/globeView.js';
   import { createAddedLayer } from '../../lib/map/addedLayer.js';
+  import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { asOf, isTracked } from '../../lib/map/layerHistory.js';
   import { groundPalette, setContours, showPlain, topographic } from '../../lib/plate/plainBasemap.js';
@@ -83,6 +84,8 @@
   let basemaps = null;
   /** name → { layer, key }: a layer is redrawn when what it draws changes. */
   const drawn = new Map();
+  /** name → the version its icons are read at (`iconVersion`). */
+  const iconVersions = new Map();
   let settingView = false;
   /** True while a transition borrows the map to draw its way (`sitting`): it reports and traces nothing. */
   let posing = false;
@@ -537,13 +540,15 @@
     for (const entry of wanted) {
       const row = available.find((item) => item.name === entry.name);
       if (!row) continue;
+      // read by the icon address, so a layer refreshed since it was built reads its new pictures
+      iconVersions.set(row.name, iconVersion(row));
       const tracked = isTracked(row);
       let held = drawn.get(entry.name);
       // a layer switched to tracked, or back, needs the engine layers its past is drawn on
       if (held && held.tracked !== tracked) { held.layer.destroy(); drawn.delete(entry.name); held = null; }
       if (!held) {
         const layer = createAddedLayer(engine, { editable: !!row.editable, history: tracked,
-          iconUrl: row.icons ? (icon) => `/api/cases/${caseId}/map-layers/${encodeURIComponent(row.name)}/icons/${icon}` : null });
+          iconUrl: row.icons ? (icon) => layerIconUrl(caseId, row.name, icon, iconVersions.get(row.name)) : null });
         layer.interactive(false);
         held = { layer, tracked, data: null, look: '' };
         drawn.set(entry.name, held);

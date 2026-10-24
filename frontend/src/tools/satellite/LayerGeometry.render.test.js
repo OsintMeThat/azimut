@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import LayerGeometry from './LayerGeometry.svelte';
 import { createMyLayersState } from './state/myLayers.svelte.js';
@@ -343,5 +343,82 @@ describe('layer geometry on the globe and while drawing', () => {
     [...document.querySelectorAll('.float-menu .fm-item')].find((row) => row.textContent.includes('More for this point')).click(); flushSync();
     expect(onmenu).toHaveBeenCalledWith({ lat: 4, lon: 2, x: 20, y: 40, feature: 'Bridge', layer: 'Working' });
     expect(document.querySelector('.float-menu')).toBeNull();
+  });
+});
+
+/**
+ * What keeps a long shape smooth to reshape, held as counts rather than frames
+ * per second (2026-10-24): an area of many corners dragged corner by corner
+ * lagged, since every step looked at every corner of the layer again.
+ */
+describe('a long shape reshaped', () => {
+  let frames;
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (run) => frames.push(run));
+    vi.stubGlobal('cancelAnimationFrame', (id) => { frames[id - 1] = null; });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const nextFrame = () => { const due = frames; frames = []; due.forEach((run) => run?.()); };
+  /** An area of `count` corners round (cx, cy) in degrees, which the test map draws ten pixels to the degree. */
+  const round = (key, count, cx, cy, radius) => ({ type: 'Feature', properties: { key, group: 'g' }, geometry: { type: 'Polygon',
+    coordinates: [[...Array.from({ length: count }, (_, i) => [cx + radius * Math.cos((2 * Math.PI * i) / count), cy + radius * Math.sin((2 * Math.PI * i) / count)]), [cx + radius, cy]]] } });
+
+  it('looks at the layer\'s corners once for a drag, and the shape takes the corner once let go', async () => {
+    const wall = { type: 'Feature', properties: { key: 'wall', group: 'g' },
+      geometry: { type: 'LineString', coordinates: Array.from({ length: 2000 }, (_, i) => [i / 40, 50]) } };
+    const { controller, engine } = await setup(null, [round('zone', 400, 30, 30, 10), wall]);
+    controller.select('zone'); controller.editGeometry(); flushSync();
+    const before = JSON.stringify(controller.sketch.rings);
+    const real = engine.latLngToContainerPoint;
+    engine.latLngToContainerPoint = vi.fn(real);
+    const corner = document.querySelector('.vertex[aria-label="Move vertex 1.1"]');
+    corner.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 410, clientY: 320, bubbles: true }));
+    for (let step = 1; step <= 30; step++) {
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 410 + step, clientY: 320 + step }));
+      nextFrame(); flushSync();
+    }
+    // drawn where the pointer has it, the shape itself untouched while it moves
+    expect(document.querySelector('.vertex[aria-label="Move vertex 1.1"]').style.left).toBe('430px');
+    expect(JSON.stringify(controller.sketch.rings)).toBe(before);
+    // the wall's 2000 corners looked at once, not at every one of the 30 steps
+    expect(engine.latLngToContainerPoint.mock.calls.length).toBeLessThan(2000 + 30 * 4);
+    window.dispatchEvent(new PointerEvent('pointerup')); flushSync();
+    expect(controller.sketch.rings[0][0]).toEqual([43, 33]);
+  });
+
+  it('puts a "+" only on sides long enough to take one, and no handle far off the map', async () => {
+    const { controller } = await setup(null, [round('dense', 400, 30, 30, 5), round('wide', 4, 30, 30, 20)]);
+    controller.select('dense'); controller.editGeometry(); flushSync();
+    // corners under a pixel apart: a "+" between them would hide them under a grey band
+    expect(document.querySelectorAll('.vertex')).toHaveLength(400);
+    expect(document.querySelectorAll('.midpoint')).toHaveLength(0);
+    controller.stop(); controller.select('wide'); controller.editGeometry(); flushSync();
+    expect(document.querySelectorAll('.midpoint')).toHaveLength(4);
+    controller.stop();
+    const long = { type: 'Feature', properties: { key: 'long', group: 'g' },
+      geometry: { type: 'LineString', coordinates: Array.from({ length: 31 }, (_, i) => [-100 + i * 10, 30]) } };
+    const { controller: other } = await setup(null, [long]);
+    other.select('long'); other.editGeometry(); flushSync();
+    // the map is 800 pixels wide: the corners from -1000 to 2000 beyond its edges are not drawn
+    const drawn = [...document.querySelectorAll('.vertex')].map((node) => parseFloat(node.style.left));
+    expect(drawn.length).toBeLessThan(31);
+    expect(Math.min(...drawn)).toBeGreaterThanOrEqual(-40);
+    expect(Math.max(...drawn)).toBeLessThanOrEqual(840);
+  });
+});
+
+describe('a pin picked', () => {
+  it('is ringed round its head, as its halo is, and its dragged copy is the size the map draws it', async () => {
+    const { controller, canvas } = await setup(null, [point('p', 20, 20, { symbol: 'pin' })]);
+    controller.select('p'); flushSync();
+    const halo = document.querySelector('circle.halo'), ring = document.querySelector('.ring circle');
+    // the tip on the point (200, 200), the head 12 pixels above it
+    expect([halo.getAttribute('cx'), halo.getAttribute('cy')]).toEqual(['200', '188']);
+    expect([ring.getAttribute('cx'), ring.getAttribute('cy'), ring.getAttribute('r')]).toEqual(['200', '188', '26']);
+    press(canvas, 210, 210);
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 240, clientY: 210 })); flushSync();
+    expect(document.querySelector('.ghost-mark svg').getAttribute('width')).toBe('25.6');
+    window.dispatchEvent(new PointerEvent('pointercancel'));
   });
 });

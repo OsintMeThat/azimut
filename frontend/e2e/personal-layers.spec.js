@@ -377,7 +377,8 @@ test('marker dragging and editable line and area vertices save geometry without 
   const knob = page.getByRole('button', { name: 'Set the direction', exact: true });
   const grip = await knob.boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down();
-  await page.mouse.move(tip.x + 90, tip.y + 2, { steps: 6 }); await page.mouse.up();
+  // the ring goes round the pin's head, 12 pixels over its tip: east of the head is east
+  await page.mouse.move(tip.x + 90, tip.y - 12 + 2, { steps: 6 }); await page.mouse.up();
   await expect.poll(() => features[0].properties.bearing).toBe(90);
   await expect(panel.getByRole('group', { name: 'Feature', exact: true })).toContainText('90° E');
   await expect(page.getByRole('button', { name: 'Direction 90° E', exact: true })).toBeVisible();
@@ -563,7 +564,9 @@ async function personalFixture(page, { imported = false, shared = false, count =
         features.splice(0, features.length, ...before.features); ownGroups.splice(0, ownGroups.length, ...before.groups); row.hidden = before.hidden;
         row.title = before.title; row.description = before.description;
       }
-      checkpoints.delete(name); changed(); row.edit_changed = false;
+      // as the server: the bytes move only when a discard put the layer back
+      const discarded = route.request().postDataJSON().discard;
+      checkpoints.delete(name); if (discarded) changed(); row.edit_changed = false;
       return route.fulfill({ json: answer() });
     }
     if (action === 'edit') {
@@ -574,7 +577,8 @@ async function personalFixture(page, { imported = false, shared = false, count =
     if (action === 'data') return route.fulfill({ json: { type: 'FeatureCollection', features: visibleFeatures().map((feature) => {
       const group = ownGroups?.find((group) => group.id === feature.properties.group);
       return { ...feature, properties: { ...feature.properties, icon_scale: group?.size ?? 1, stroke_width: group?.stroke ?? 2,
-        ...(group?.mode === 'uniform' ? { category: group.name, colour: group.colour, symbol: group.symbol, icon: '' } : {}) } };
+        ...(group?.mode === 'uniform' ? { category: group.name, colour: group.colour, symbol: group.symbol, icon: '' }
+          : group?.mode === 'colour' ? { colour: group.colour } : {}) } };
     }).sort((a, b) => (ownGroups?.findIndex((group) => group.id === b.properties.group) ?? 0) - (ownGroups?.findIndex((group) => group.id === a.properties.group) ?? 0))
       .map((feature, index) => ({ ...feature, id: index, properties: { ...feature.properties, index } })) } });
     if (action === 'features' && key === 'order') {
@@ -652,6 +656,8 @@ async function personalFixture(page, { imported = false, shared = false, count =
         properties: { key: `marker-${++serial}`, name: body.name || `Marker ${features.length + 1}`,
           colour: body.colour, symbol: body.symbol, group: body.group || 'markers', category: 'Markers', index: features.length,
           ...Object.fromEntries(['date', 'links', 'provenance'].filter((field) => body[field]).map((field) => [field, body[field]])) } };
+      // as the server: on a layer followed over time, a marker added on a day starts there
+      if (body.at && !marker.properties.date) marker.properties.date = body.at;
       features.push(marker);
       changed();
       return route.fulfill({ json: { layer: row, marker } });
@@ -818,7 +824,7 @@ test('groups share round icons, case places span layers, and popup removals can 
   await panel.getByRole('button', { name: 'Create group', exact: true }).click();
   await panel.getByRole('button', { name: 'Settings of group Verified', exact: true }).click();
   const settings = page.getByRole('group', { name: 'Settings of group Verified', exact: true });
-  await expect(settings.getByLabel('One style for the whole group')).toBeChecked();
+  await expect(settings.getByRole('button', { name: 'One style', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await settings.getByRole('button', { name: 'Group style', exact: true }).click();
   const palette = page.getByRole('group', { name: 'Group style icon palette', exact: true });
   await expect(palette.getByRole('button')).toHaveCount(66);
@@ -829,7 +835,7 @@ test('groups share round icons, case places span layers, and popup removals can 
   await settings.getByLabel('Group name', { exact: true }).press('Enter');
   await page.keyboard.press('Escape');
   await expect(palette).toHaveCount(0);
-  await expect(page.getByLabel('One style for the whole group')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'One style', exact: true })).toHaveCount(0);
   await expect.poll(() => fixture.groups.get(first.name)[1].name).toBe('Verified sites');
   await panel.getByRole('button', { name: 'Settings of group Verified sites', exact: true }).click();
   await page.getByRole('button', { name: 'Group style', exact: true }).click();
@@ -969,6 +975,32 @@ test('a right-click on a marker opens its menu, and its status and style change 
   await expect(menu).toHaveCount(0);
 });
 
+test('a group in one colour keeps each icon, its colour typed as a code', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Sides map');
+  const map = await page.locator('.map').boundingBox();
+  await chooseIcon(page, tools(page), 'Style', 'Tank');
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await page.mouse.click(map.x + map.width * .4, map.y + map.height * .5); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  const group = () => fixture.groups.get(fixture.rows[0].name)[0];
+  await panel.getByRole('button', { name: `Settings of group ${group().name}`, exact: true }).click();
+  const modes = page.getByRole('group', { name: `How ${group().name} is styled`, exact: true });
+  await modes.getByRole('button', { name: 'One colour', exact: true }).click();
+  await expect.poll(() => group().mode).toBe('colour');
+  await page.getByRole('button', { name: 'Group colour', exact: true }).click();
+  const code = page.getByRole('textbox', { name: 'Group colour colour code', exact: true });
+  await code.fill('rgb(204, 121, 167)');
+  await code.press('Enter');
+  await expect.poll(() => group().colour).toBe('#cc79a7');
+  // the marker keeps its tank, drawn in the group's colour
+  const features = fixture.collections.get(fixture.rows[0].name);
+  expect(features[0].properties.symbol).toBe('badge-tank');
+  await expect(panel.locator('.feature-symbol').first()).toHaveAttribute('style', /rgb\(204, 121, 167\)/);
+  await page.screenshot({ path: test.info().outputPath('group-one-colour.png') });
+});
+
 test('a layer followed over time dates a move to the day its cursor is on', async ({ page }) => {
   const fixture = await personalFixture(page);
   const moves = [];
@@ -1055,4 +1087,36 @@ test('a selection on a layer followed over time takes one first day for all its 
   await expect.poll(() => edits.at(-1)?.changes ?? null).toEqual({ end_unknown: true });
   await expect(leaves).toHaveText('Unknown');
   await expect(rows.nth(0).locator('.day')).toHaveText(/ → \?$/);
+});
+
+test('Done leaves a layer followed over time on its day, its track still marked', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Front');
+  await panel.getByRole('button', { name: 'Layer actions', exact: true }).click();
+  await page.getByRole('menu', { name: 'Layer actions', exact: true }).getByRole('menuitemcheckbox', { name: 'Track over time' }).click();
+  await expect.poll(() => fixture.rows[0].track?.on).toBe(true);
+  const slider = page.getByRole('group', { name: 'Time', exact: true }).getByRole('slider');
+  await slider.press('ArrowLeft');
+  await slider.press('ArrowLeft');
+  const day = await slider.getAttribute('aria-valuetext');
+  // a marker added there starts on that day, a tick on the layer's track
+  const map = await page.locator('.map').boundingBox();
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await page.mouse.click(map.x + map.width * .4, map.y + map.height * .45); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByRole('button', { name: 'Front, details', exact: true }).click();
+  const row = page.getByRole('slider', { name: 'Front: moment', exact: true });
+  const ticks = row.locator('xpath=..').locator('.tick');
+  await expect(row).toHaveAttribute('aria-valuetext', day);
+  await expect(ticks).toHaveCount(1);
+  // Edit then Done with nothing new: the server answers the same bytes, and the track keeps its tick
+  await page.getByRole('button', { name: 'Edit Front', exact: true }).click();
+  await expect(panel).toBeVisible();
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByRole('button', { name: 'Front, details', exact: true }).click();
+  await expect(ticks).toHaveCount(1);
 });

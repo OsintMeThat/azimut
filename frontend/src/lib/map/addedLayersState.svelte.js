@@ -338,7 +338,14 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
       .get(`/api/cases/${caseId}/map-layers`)
       .then((list) => {
         if (ticket !== asked) return;
-        rows = Array.isArray(list) ? list : [];
+        const next = Array.isArray(list) ? list : [];
+        // a layer written elsewhere meanwhile (a proof's save moves the markers
+        // that follow it) is read again rather than drawn from the copy in hand
+        for (const row of next) {
+          const before = rows.find((entry) => entry.name === row.name);
+          if (before && before.sha256 !== row.sha256) forget(row.name);
+        }
+        rows = next;
         if (Array.isArray(list) && restoredFor !== caseId) restore(rows);
       })
       .catch(() => {
@@ -611,7 +618,9 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
     },
     edited(caseId, row) {
       if (loadedFor !== caseId) return;
-      forget(row.name);
+      // an edit that left the bytes as they were (Done with nothing new) keeps the
+      // features in hand: no map reads them again, and the time strip needs them
+      if (rows.find((entry) => entry.name === row.name)?.sha256 !== row.sha256) forget(row.name);
       replace(row);
     },
     subscribe,

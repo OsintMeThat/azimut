@@ -69,6 +69,13 @@ FETCH_WORKERS = 8
 # laid side by side (`Sampler._sample_mosaic`), up to this many tiles (1 MiB each).
 MOSAIC_MIN_POINTS = 4096
 MOSAIC_MAX_TILES = 64
+# A sampler that keeps its mosaics (`Sampler.plates`) grows one to take in the next read's tiles up to this many
+# tiles, and holds this many bytes of them in all, the level read longest ago let go first.
+PLATE_GROW_TILES = 16
+PLATES_BYTES = 160 << 20
+# A ceiling stands this far over the highest ground it bounds, metres: a bilinear read in float32 may round
+# a hair past its highest neighbour.
+CEILING_SLACK_M = 0.05
 
 
 @dataclass(frozen=True)
@@ -448,6 +455,54 @@ def forget_decoded() -> None:
 
 
 @dataclass
+class _Plate:
+    """One level's tiles laid side by side and kept between reads (`Sampler.plates`): which slots hold their tile
+    yet, which tiles do not exist, and once asked, the highest-ground pyramid (`Sampler.ceiling`)."""
+
+    zoom: int
+    tx: int
+    ty: int
+    nx: int
+    ny: int
+    heights: np.ndarray
+    loaded: np.ndarray
+    absent: np.ndarray
+    tops: list[np.ndarray] | None = None
+    # the slots whose pyramid is up to date with the tiles laid in
+    ready: np.ndarray | None = None
+
+    def covers(self, tx: int, ty: int, nx: int, ny: int) -> bool:
+        return self.tx <= tx and self.ty <= ty and tx + nx <= self.tx + self.nx and ty + ny <= self.ty + self.ny
+
+
+# Levels of a plate's highest-ground pyramid: the last one's cell spans a whole tile.
+TOPS_LEVELS = _SHIFT + 1
+
+
+def _tops_tile(levels: list[np.ndarray], heights: np.ndarray, row: int, column: int) -> None:
+    """One tile's slot of the highest-ground pyramid: at the first level each pixel the highest of the four a
+    bilinear read there blends (the plate's last row and column standing for their own neighbours), each next
+    level the highest of four cells of the one before, down to the whole tile."""
+    height, width = heights.shape
+    y0, x0 = row * TILE, column * TILE
+    y1, x1 = y0 + TILE, x0 + TILE
+    window = heights[y0:min(y1 + 1, height), x0:min(x1 + 1, width)]
+    across = window[:, :TILE].copy()
+    np.maximum(across[:, :window.shape[1] - 1], window[:, 1:], out=across[:, :window.shape[1] - 1])
+    first = across[:TILE].copy()
+    np.maximum(first[:across.shape[0] - 1], across[1:], out=first[:across.shape[0] - 1])
+    levels[0][y0:y1, x0:x1] = first
+    for level in range(1, len(levels)):
+        size = TILE >> level
+        a, c = y0 >> level, x0 >> level
+        last = levels[level - 1][2 * a:2 * (a + size), 2 * c:2 * (c + size)]
+        out = levels[level][a:a + size, c:c + size]
+        np.maximum(last[0::2, 0::2], last[0::2, 1::2], out=out)
+        np.maximum(out, last[1::2, 0::2], out=out)
+        np.maximum(out, last[1::2, 1::2], out=out)
+
+
+@dataclass
 class Sampler:
     """Heights at many points at once, read from the tiles they fall in.
 
@@ -463,16 +518,23 @@ class Sampler:
     `keep` bounds the tiles held, the oldest let go first, for a computation
     that roams far (a search over thousands of square kilometres would hold
     gigabytes): a tile let go is read again from the disk cache when needed.
+
+    `plates` keeps each level's mosaic between reads rather than laying it out
+    again for every one, for a computation reading many sweeps over the same
+    ground (a search), and lets `ceiling` bound the ground ahead of a read.
     """
 
     fetch: Callable[[int, int, int], Fetched | None] | None = None
     sources: set[str] = field(default_factory=set)
     zooms: set[int] = field(default_factory=set)
     keep: int | None = None
+    plates: bool = False
     _held: OrderedDict[Key, np.ndarray | None] = field(default_factory=OrderedDict)
     # one sweep reads with several threads: what is held changes under one of them at a time (unlocked, a read
     # listing the tiles to let go met another's new tile: "OrderedDict mutated during iteration")
     _held_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+    _plates: OrderedDict[int, _Plate] = field(default_factory=OrderedDict, repr=False, compare=False)
+    _plates_lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     def heights(
         self, lat: np.ndarray | float, lon: np.ndarray | float, zoom: int
@@ -550,7 +612,7 @@ class Sampler:
         spread too wide to lay out, which the tile-by-tile read then takes.
         """
         world = TILE << zoom
-        if x0.size < MOSAIC_MIN_POINTS or x0.min() < 0 or x0.max() + 1 >= world:
+        if (x0.size < MOSAIC_MIN_POINTS and not self.plates) or x0.min() < 0 or x0.max() + 1 >= world:
             return False
         tx_lo, tx_hi = int(x0.min()) >> _SHIFT, (int(x0.max()) + 1) >> _SHIFT
         ty_lo, ty_hi = int(ya.min()) >> _SHIFT, int(yb.max()) >> _SHIFT
@@ -577,18 +639,26 @@ class Sampler:
                 for lx in (ex, ex + 1):
                     touched[(ly >> _SHIFT) * nx + (lx >> _SHIFT)] = True
         used = np.flatnonzero(touched)
-        tiles_across = 1 << zoom
-        held = self._load(zoom, (tx_lo + used % nx) * tiles_across + (ty_lo + used // nx), tiles_across)
-
-        mosaic = np.zeros((ny * TILE, width), dtype=np.float32)
-        absent = np.zeros((ny, nx), dtype=bool)
-        for slot in used:
-            row, column = divmod(int(slot), nx)
-            heights = held[(zoom, tx_lo + column, ty_lo + row)]
-            if heights is None:
-                absent[row, column] = True  # the sea at zero, or no survey this deep
-            else:
-                mosaic[row * TILE:(row + 1) * TILE, column * TILE:(column + 1) * TILE] = heights
+        if self.plates:
+            # the level's kept mosaic, its new tiles laid in: the same pixels at other offsets
+            plate = self._plate(zoom, tx_lo, ty_lo, nx, ny, used)
+            mosaic, absent = plate.heights, plate.absent
+            lx0 = x0 - plate.tx * TILE
+            ly0 = ya - plate.ty * TILE
+            nx, width = plate.nx, plate.nx * TILE
+            i00 = ly0 * width + lx0
+        else:
+            tiles_across = 1 << zoom
+            held = self._load(zoom, (tx_lo + used % nx) * tiles_across + (ty_lo + used // nx), tiles_across)
+            mosaic = np.zeros((ny * TILE, width), dtype=np.float32)
+            absent = np.zeros((ny, nx), dtype=bool)
+            for slot in used:
+                row, column = divmod(int(slot), nx)
+                heights = held[(zoom, tx_lo + column, ty_lo + row)]
+                if heights is None:
+                    absent[row, column] = True  # the sea at zero, or no survey this deep
+                else:
+                    mosaic[row * TILE:(row + 1) * TILE, column * TILE:(column + 1) * TILE] = heights
 
         flat = mosaic.ravel()
         i10 = i00 + down * width
@@ -614,6 +684,121 @@ class Sampler:
             self.zooms.add(zoom)
         self._sample(lat[climb], lon[climb], zoom - 1, out, where[climb])
         return True
+
+    def _plate(self, zoom: int, tx: int, ty: int, nx: int, ny: int, used: np.ndarray) -> _Plate:
+        """The level's kept mosaic holding the `used` slots of the box of tiles (tx, ty, nx, ny): the one kept
+        when it covers the box, grown to take it in while small, else laid out for the box alone."""
+        with self._plates_lock:
+            plate = self._plates.get(zoom)
+            if plate is None or not plate.covers(tx, ty, nx, ny):
+                gx, gy = tx, ty
+                gw, gh = nx, ny
+                if plate is not None:
+                    gx, gy = min(tx, plate.tx), min(ty, plate.ty)
+                    gw = max(tx + nx, plate.tx + plate.nx) - gx
+                    gh = max(ty + ny, plate.ty + plate.ny) - gy
+                old = plate if plate is not None and gw * gh <= PLATE_GROW_TILES else None
+                if old is None:
+                    gx, gy, gw, gh = tx, ty, nx, ny
+                plate = _Plate(
+                    zoom, gx, gy, gw, gh, np.zeros((gh * TILE, gw * TILE), dtype=np.float32),
+                    np.zeros((gh, gw), dtype=bool), np.zeros((gh, gw), dtype=bool),
+                )
+                if old is not None:
+                    # what the smaller one held, moved across rather than read again
+                    oy, ox = old.ty - gy, old.tx - gx
+                    plate.heights[oy * TILE:(oy + old.ny) * TILE, ox * TILE:(ox + old.nx) * TILE] = old.heights
+                    plate.loaded[oy:oy + old.ny, ox:ox + old.nx] = old.loaded
+                    plate.absent[oy:oy + old.ny, ox:ox + old.nx] = old.absent
+                self._plates.pop(zoom, None)
+                self._plates[zoom] = plate
+                # within the bytes kept, the level read longest ago let go first
+                while sum(p.heights.nbytes for p in self._plates.values()) > PLATES_BYTES and len(self._plates) > 1:
+                    self._plates.popitem(last=False)
+            else:
+                self._plates.move_to_end(zoom)
+            columns = tx - plate.tx + used % nx
+            rows = ty - plate.ty + used // nx
+            need = ~plate.loaded[rows, columns]
+            if need.any():
+                tiles_across = 1 << zoom
+                held = self._load(
+                    zoom, (plate.tx + columns[need]) * tiles_across + (plate.ty + rows[need]), tiles_across
+                )
+                for row, column in zip(rows[need].tolist(), columns[need].tolist()):
+                    heights = held[(zoom, plate.tx + column, plate.ty + row)]
+                    if heights is None:
+                        plate.absent[row, column] = True  # the sea at zero, or no survey this deep
+                    else:
+                        plate.heights[row * TILE:(row + 1) * TILE, column * TILE:(column + 1) * TILE] = heights
+                    plate.loaded[row, column] = True
+                    if plate.ready is not None:
+                        # its pyramid, and those of the tiles left of it and above it that read into it, to redo
+                        plate.ready[max(0, row - 1):row + 1, max(0, column - 1):column + 1] = False
+            return plate
+
+    def ceiling(
+        self, lat: np.ndarray, lon: np.ndarray, lat_end: np.ndarray, lon_end: np.ndarray, zoom: int,
+    ) -> np.ndarray:
+        """The highest a read at `zoom` can give anywhere between each pair of points a few dozen pixels apart
+        (a stretch of a ray): read off the plates' highest-ground pyramids, a level up where a tile does not
+        exist this deep, as `heights` climbs. Infinite where the plates cannot say (a stretch across the
+        antimeridian, or on more tiles than a mosaic takes). Needs `plates`."""
+        lat = np.asarray(lat, dtype=np.float64)
+        out = np.full(lat.shape, -np.inf)
+        world = TILE << zoom
+        xa, ya = _pixels(lat, np.asarray(lon, dtype=np.float64), zoom)
+        xb, yb = _pixels(np.asarray(lat_end, dtype=np.float64), np.asarray(lon_end, dtype=np.float64), zoom)
+        # a pixel either way for the arc between the ends, and the right and lower neighbours the pyramid holds
+        x_lo = np.floor(np.minimum(xa, xb)).astype(np.int64) - 1
+        x_hi = np.floor(np.maximum(xa, xb)).astype(np.int64) + 1
+        y_lo = np.clip(np.floor(np.minimum(ya, yb)).astype(np.int64) - 1, 0, world - 1)
+        y_hi = np.clip(np.floor(np.maximum(ya, yb)).astype(np.int64) + 1, 0, world - 1)
+        if not lat.size:
+            return out
+        if x_lo.min() < 0 or x_hi.max() + 1 >= world:
+            return np.full(lat.shape, np.inf)
+        tx_lo, tx_hi = int(x_lo.min()) >> _SHIFT, (int(x_hi.max()) + 1) >> _SHIFT
+        ty_lo, ty_hi = int(y_lo.min()) >> _SHIFT, (int(y_hi.max()) + 1) >> _SHIFT
+        nx, ny = tx_hi - tx_lo + 1, ty_hi - ty_lo + 1
+        if nx * ny > MOSAIC_MAX_TILES:
+            return np.full(lat.shape, np.inf)
+        # the tiles under each box's corners: a box spans fewer pixels than a tile
+        touched = np.zeros(nx * ny, dtype=bool)
+        for bx in (x_lo, x_hi + 1):
+            for by in (y_lo, np.minimum(y_hi + 1, world - 1)):
+                touched[((by >> _SHIFT) - ty_lo) * nx + ((bx >> _SHIFT) - tx_lo)] = True
+        with self._plates_lock:
+            plate = self._plate(zoom, tx_lo, ty_lo, nx, ny, np.flatnonzero(touched))
+            if plate.tops is None or plate.ready is None:
+                plate.tops = [np.empty((plate.ny * TILE >> level, plate.nx * TILE >> level), dtype=np.float32)
+                              for level in range(TOPS_LEVELS)]
+                plate.ready = np.zeros((plate.ny, plate.nx), dtype=bool)
+            # the pyramid made only where these stretches read it, tile by tile
+            for slot in np.flatnonzero(touched).tolist():
+                row, column = ty_lo - plate.ty + slot // nx, tx_lo - plate.tx + slot % nx
+                if not plate.ready[row, column]:
+                    _tops_tile(plate.tops, plate.heights, row, column)
+                    plate.ready[row, column] = True
+            tops = plate.tops
+            climb = zoom > PLANET_ZOOM and bool(plate.absent.any())
+        extent = int(max((x_hi - x_lo).max(), (y_hi - y_lo).max())) + 1
+        level = max(0, math.ceil(math.log2(extent)))
+        if level >= len(tops):
+            return np.full(lat.shape, np.inf)
+        top = tops[level]
+        lx_lo, lx_hi = (x_lo - plate.tx * TILE) >> level, (x_hi - plate.tx * TILE) >> level
+        ly_lo, ly_hi = (y_lo - plate.ty * TILE) >> level, (y_hi - plate.ty * TILE) >> level
+        rows, columns = top.shape
+        if lx_hi.max() >= columns or ly_hi.max() >= rows:
+            return np.full(lat.shape, np.inf)
+        for cy in (ly_lo, ly_hi):
+            for cx in (lx_lo, lx_hi):
+                out = np.maximum(out, top[cy, cx])
+        out = out + CEILING_SLACK_M
+        if climb:
+            out = np.maximum(out, self.ceiling(lat, lon, lat_end, lon_end, zoom - 1))
+        return out
 
     def _load(self, zoom: int, keys: np.ndarray, tiles_across: int) -> dict[Key, np.ndarray | None]:
         """The tiles asked for, loaded where they were not held: a mapping of its own, so another

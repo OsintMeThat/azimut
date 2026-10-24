@@ -91,6 +91,23 @@ describe('a source layer’s feature put in one of the analyst’s layers', () =
     expect(localStorage.getItem('azimut:layer-last:case')).toBe('b');
   });
 
+  it('asks only for the icon in a group in one colour, the marker taking the group’s colour', async () => {
+    const sides = { name: 'c', title: 'Sides', styles: [], markers: [], groups: [
+      { id: 'a', name: 'Side A', mode: 'colour', colour: '#cc79a7', symbol: 'pin' },
+      { id: 'b', name: 'Side B', mode: 'individual', colour: '#0072b2', symbol: 'pin' }] };
+    mocks.rows = [{ name: 'c', title: 'Sides', editable: true }];
+    mocks.api.get.mockImplementation(async (url) => (url.includes('layer-targets') ? [sides] : url.endsWith('/icons') ? [] : { colours: [] }));
+    const controller = { copying: job({ geometry: { type: 'Point', coordinates: [2, 48] }, properties: { name: 'Strike', colour: '#d55e00' } }),
+      copyTo: vi.fn(async () => ({})), cancelCopy: vi.fn() };
+    show(LayerCopyMenu, { controller }); await settle(); flushSync();
+    byText('Sides').click(); flushSync();
+    byText('Side A').click(); flushSync();
+    expect(document.querySelector('[aria-label="Point icon palette"]')).toBeNull();
+    document.querySelector('[aria-label="Point icon Tank icon"]').click(); flushSync();
+    byText('Add to Side A').click(); await settle();
+    expect(controller.copyTo).toHaveBeenCalledWith(mocks.rows[0], 'a', { symbol: 'badge-tank', icon: '', colour: '#cc79a7' }, '');
+  });
+
   it('keeps the icon its map dressed it in unless another is picked, the layer copying the picture', async () => {
     mocks.rows = [{ name: 'b', title: 'Second', editable: true }];
     mocks.api.get.mockImplementation(async (url) => (url.includes('layer-targets') ? [front] : url.endsWith('/icons') ? [] : { colours: [] }));

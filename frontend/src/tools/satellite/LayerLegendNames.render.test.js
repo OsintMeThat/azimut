@@ -37,7 +37,7 @@ describe('naming the case colours', () => {
     const onclose = vi.fn();
     held = mount(LayerPaletteEditor, { target: document.body, props: { caseId: 'case', onclose } }); flushSync();
     [...document.querySelectorAll('button')].find((node) => node.textContent.includes('Add a colour')).click(); flushSync();
-    const names = document.querySelectorAll('input:not([type="color"])');
+    const names = document.querySelectorAll('input[aria-label^="Name of colour"]');
     names[1].value = ' Unknown '; names[1].dispatchEvent(new Event('input', { bubbles: true })); flushSync();
     [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save colours').click(); await settle();
     expect(palette.save).toHaveBeenCalledWith('case', [{ name: 'Side A', colour: '#0072b2' }, { name: 'Unknown', colour: '#cc79a7' }]);

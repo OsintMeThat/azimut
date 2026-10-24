@@ -14,6 +14,7 @@
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
+  import LayerClock from './LayerClock.svelte';
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
   import { mergeable, splittable } from '../../lib/map/layerHit.js';
   import { DEFAULT_PLACE, barBox, loadPlace, loadTips, rowRoom, savePlace, saveTips, snapPlace, upright } from '../../lib/map/editBarPlace.js';
@@ -63,6 +64,10 @@
     if (!dated) controller.timeMode = 'new';
     else picking = !picking;
   }
+  /** On a layer dated to the minute, the time a day picked is given: the one edits are dated to. */
+  const timed = $derived(controller.editor?.track?.precision === 'time');
+  const clock = $derived(cursor?.includes('T') ? cursor.slice(11, 16) : '');
+  const retime = (value) => controller.changeOn(value ? `${(cursor ?? today).slice(0, 10)}T${value}` : (cursor ?? today).slice(0, 10));
   const hint = $derived(controller.lassoing ? 'Draw round what to select. Shift adds to the selection.'
     : controller.placing ? 'Click the map to add markers in the style shown. Esc to stop.'
       : sketch?.type === 'Selection' ? 'Drag the handle to move the selection. Enter to save, Esc to cancel.'
@@ -320,8 +325,9 @@
   <FloatingMenu anchor={dayButton} width={248} label="Date your edits from" onclose={() => (picking = false)}>
     <p class="fm-head">Date your edits from</p>
     <!-- a change is what was seen, so no day after today -->
+    {#if timed}<LayerClock value={clock} zone={controller.editor.track.zone || 'UTC'} label="Time your edits start from" onchange={retime} />{/if}
     <MonthGrid value={cursor ? cursor.slice(0, 10) : ''} max={today} label="Day your edits start from"
-      onpick={(iso) => { picking = false; if (iso) controller.changeOn(iso); }} />
+      onpick={(iso) => { picking = false; if (iso) controller.changeOn(timed && clock ? `${iso}T${clock}` : iso); }} />
     <p class="fm-note">The layer shows that day too.</p>
   </FloatingMenu>
 {/if}

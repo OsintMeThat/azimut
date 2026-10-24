@@ -53,6 +53,10 @@ WORKERS = 4
 # texture of a slope, not a skyline.
 RIDGE_GAP_M = 150.0
 RIDGE_GAP_RATIO = 0.04
+# A sweep without a picture whose sampler keeps its plates reads each ray this many samples at a time, outward,
+# and skips a stretch whose highest ground (`terrain.Sampler.ceiling`) cannot rise to the angle already reached:
+# out of sight, it changes neither the skyline nor a ridge.
+HIDDEN_BLOCK = 16
 
 Mode = Literal["ground", "drone", "aircraft"]
 
@@ -116,8 +120,11 @@ def ray_distances(far: float, near_step: float = NEAR_STEP, ratio: float = STEP_
 
 
 def lod_zooms(distances: np.ndarray, lat: float) -> np.ndarray:
-    """The terrain level each sample reads: pixel ≈ LOD_RATIO × distance."""
-    return np.array([terrain.zoom_for(max(d * LOD_RATIO, 1.0), lat) for d in distances])
+    """The terrain level each sample reads: pixel ≈ LOD_RATIO × distance (`terrain.zoom_for` for each, at once)."""
+    metres = np.maximum(np.asarray(distances, dtype=np.float64) * LOD_RATIO, 1.0)
+    pixel = np.array([terrain.metres_per_pixel(lat, zoom) for zoom in range(terrain.MAX_ZOOM + 1)])
+    # the levels' pixels shrink as they deepen: the first one fine enough is the count of those too coarse
+    return np.minimum((pixel[None, :] > metres[:, None]).sum(axis=1), terrain.MAX_ZOOM)
 
 
 def default_far(observer: Observer) -> float:
@@ -205,7 +212,11 @@ def sweep(
         normal_east = np.zeros((row_angles.size, az.size), dtype=np.float32)
         normal_north = np.zeros((row_angles.size, az.size), dtype=np.float32)
 
-    ground_all = _ground(observer, az, distances, bands, sampler, workers)
+    seen_all = None
+    if row_angles is None and sampler.plates:
+        seen_all = _seen_angles(observer, az, distances, bands, sampler, altitude, k)
+    else:
+        ground_all = _ground(observer, az, distances, bands, sampler, workers)
     if row_angles is not None:
         pixel = np.array([terrain.metres_per_pixel(observer.lat, int(z)) for z in zooms])
         east_all, north_all = _normals(ground_all, distances, az, pixel)
@@ -213,8 +224,10 @@ def sweep(
     def march(start: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """One block of azimuths: its skyline, ridges and picture columns."""
         chunk = az[start:start + CHUNK]
-        heights = ground_all[start:start + chunk.size]
-        angles = elevation_angle(distances[None, :], heights, altitude, k)
+        if seen_all is not None:
+            angles = seen_all[start:start + chunk.size]
+        else:
+            angles = elevation_angle(distances[None, :], ground_all[start:start + chunk.size], altitude, k)
         reach = np.maximum.accumulate(angles, axis=1)
 
         last = reach[:, -1]
@@ -300,6 +313,47 @@ def _ground(
         for item in bands:
             read(item)
     return ground
+
+
+def _seen_angles(
+    observer: Observer, azimuths: np.ndarray, distances: np.ndarray, bands: list[tuple[int, slice]],
+    sampler: terrain.Sampler, altitude: float, k: float,
+) -> np.ndarray:
+    """Every sample's elevation angle, (azimuths, distances), -inf where its stretch of ray is out of sight.
+
+    Each ray is read outward `HIDDEN_BLOCK` samples at a time. A stretch whose highest ground, read off the
+    sampler's plates, could not rise to the angle the ray has already reached is never read: none of its
+    samples is in sight, so the skyline, its distance, the cuts and the ridges are those of the full read.
+    """
+    angles = np.full((azimuths.size, distances.size), -np.inf)
+    reached = np.full(azimuths.size, -np.inf)
+    radius = effective_radius(k)
+    for zoom, band in bands:
+        starts = np.arange(band.start, band.stop, HIDDEN_BLOCK)
+        ends = np.minimum(starts + HIDDEN_BLOCK, band.stop) - 1
+        # the ends of every stretch of every ray, and the highest ground between them
+        lat0, lon0 = terrain.destination(observer.lat, observer.lon, azimuths[:, None], distances[None, starts])
+        lat1, lon1 = terrain.destination(observer.lat, observer.lon, azimuths[:, None], distances[None, ends])
+        top = sampler.ceiling(lat0, lon0, lat1, lon1, zoom).astype(np.float64)
+        # the highest angle that ground can stand at within the stretch: nearest when it stands over the eye,
+        # else where the earth's curve stops lifting it (cos δ = (R + h) / (R + eye))
+        near, far = distances[starts][None, :], distances[ends][None, :]
+        turn = radius * np.arccos(np.clip((radius + top) / (radius + altitude), -1.0, 1.0))
+        bound = np.where(np.isfinite(top), elevation_angle(np.clip(turn, near, far), top, altitude, k), np.inf)
+        for column, (first, last) in enumerate(zip(starts.tolist(), ends.tolist())):
+            # the stretch may hold the ray's next sight: a hair of slack for the bound's own rounding
+            live = np.flatnonzero(~(bound[:, column] + 1e-12 < reached))
+            if not live.size:
+                continue
+            stretch = slice(first, last + 1)
+            lat, lon = terrain.destination(
+                observer.lat, observer.lon, azimuths[live, None], distances[None, stretch]
+            )
+            ground = sampler.heights(lat, lon, zoom)
+            found = elevation_angle(distances[None, stretch], ground, altitude, k)
+            angles[live, stretch] = found
+            reached[live] = np.maximum(reached[live], found.max(axis=1))
+    return angles
 
 
 def _bands(zooms: np.ndarray) -> list[tuple[int, slice]]:

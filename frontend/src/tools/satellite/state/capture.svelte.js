@@ -440,10 +440,16 @@ export function createCaptureState({
     const w = Math.abs(dragged.x1 - dragged.x0);
     const h = Math.abs(dragged.y1 - dragged.y0);
     if (w < MIN_DRAG_PX || h < MIN_DRAG_PX) return; // a slipped click, not a box
-    const framedOn = engine().containerPointToLatLng({
-      x: (dragged.x0 + dragged.x1) / 2,
-      y: (dragged.y0 + dragged.y1) / 2,
-    });
+    // A tilted view shows sky, which holds no ground: a box whose middle is sky
+    // is filed on the ground under its bottom edge, the nearest it shows.
+    const middle = (dragged.x0 + dragged.x1) / 2;
+    const framedOn =
+      engine().containerPointToLatLng({ x: middle, y: (dragged.y0 + dragged.y1) / 2 }) ??
+      engine().containerPointToLatLng({ x: middle, y: Math.max(dragged.y0, dragged.y1) });
+    if (!framedOn) {
+      notify('That box shows only sky. Draw it over the ground', 'warn', 6000);
+      return;
+    }
     armed = false; // one box per arm — re-arm to draw another
     take(framedOn, Math.round(w), Math.round(h), {
       x: Math.min(dragged.x0, dragged.x1),

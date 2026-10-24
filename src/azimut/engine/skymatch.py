@@ -246,6 +246,8 @@ CLEAR_FREE = 0.02
 # the owner's hilltop view with every skyline line marked sank from fifth to eighteenth (its truth has 3% of a line
 # under a ridge 2.6 km out, the heights' own grain); at a tenth it rose to fourth.
 CLEAR_HARD = 0.10
+# What a place keeps of its score at worst, land over its sky-only lines past CLEAR_HARD: 0 rules it out.
+CLEAR_KEEP = 0.0
 # Left to Auto, a line with only sky above is laid on the top of the land out to CLEAR_NEAR times as far as the ground
 # it lies on, and land standing over it counts in full that far, then less and less out to CLEAR_FAR times it, haze
 # growing likelier to hide it (until the photo's own visibility is read: Koschmieder, FIND_SMART_PLAN §3). Measured
@@ -253,6 +255,16 @@ CLEAR_HARD = 0.10
 # fewest truths (2 of 34); 1.5 and 3 lost one, 2 and 4 ruled out four.
 CLEAR_NEAR = 3.0
 CLEAR_FAR = 6.0
+# Land over a line with only sky above counts only standing behind the ridge the place lays the line on, this many
+# times as far out. That ridge a few pixels over the trace is the line's own crest drawn a little low (30 m cells
+# round a cliff's top, a stroke's width, a lens a little off): the fit's give, which its loss already charges, not
+# a range behind. Measured on the owner's real cases (2026-10-24): at each truth's heading the land counted "over"
+# stood at the line's own distance (v01 2.9 km on a skyline 2.3–6.2 km out, v06 1.9 on 0.5–2.3, v09 3.1 on
+# 1.3–7.3), and ruled the truth out though nothing stands behind (the owner's 3D view of v01).
+BEHIND = 1.5
+# The ridge the line lies on standing over the trace counts as this share of land behind: the photo shows sky where
+# the terrain has land, some evidence against the place, though cells round a crest and a stroke has a width.
+OWN_SHARE = 0.0
 
 Verdict = Literal["match", "loose", "ambiguous", "none", "flat"]
 Projection = Literal["camera", "panorama"]
@@ -293,10 +305,25 @@ class Turn:
         object.__setattr__(self, "_ring", np.append(angles, angles[:1]))
         object.__setattr__(self, "_holes", bool(np.isnan(angles).any()))
 
+    def place(self, azimuth: np.ndarray | float) -> np.ndarray:
+        """Where each azimuth falls among the columns, in columns from the first: what `at` and `far` read off."""
+        turned = np.asarray(azimuth, dtype=np.float64) - self.start
+        if turned.size and -360.0 <= turned.min() and turned.max() < 720.0:
+            # `np.remainder(turned, 360.0)` to the bit, three times cheaper, on the span a slide reads: taking 360
+            # off [360, 720) is exact, adding it to [-360, 0) rounds as remainder's own fix-up does, and + 0.0
+            # gives its +0 for -0
+            wrapped = np.where(turned < 0.0, turned + 360.0, np.where(turned >= 360.0, turned - 360.0, turned)) + 0.0
+        else:
+            wrapped = np.remainder(turned, 360.0)
+        return wrapped / self.step
+
     def at(self, azimuth: np.ndarray | float) -> np.ndarray:
         """The skyline at any azimuth, between the two columns either side."""
+        return self.at_place(self.place(azimuth))
+
+    def at_place(self, place: np.ndarray) -> np.ndarray:
+        """`at`, the azimuths given by their `place`."""
         count = self.angles.size
-        place = np.remainder(np.asarray(azimuth, dtype=np.float64) - self.start, 360.0) / self.step
         below = np.floor(place)
         share = place - below
         # 360° itself can round onto the column past the last
@@ -316,8 +343,14 @@ class Turn:
         azimuth = np.asarray(azimuth, dtype=np.float64)
         if self.distance is None:
             return np.full(azimuth.shape, np.nan)
+        return self.far_place(self.place(azimuth))
+
+    def far_place(self, place: np.ndarray) -> np.ndarray:
+        """`far`, the azimuths given by their `place`."""
+        if self.distance is None:
+            return np.full(np.shape(place), np.nan)
         count = self.angles.size
-        column = np.rint(np.remainder(azimuth - self.start, 360.0) / self.step).astype(np.int64) % count
+        column = np.rint(place).astype(np.int64) % count
         return np.asarray(self.distance, dtype=np.float64)[column]
 
 
@@ -424,6 +457,37 @@ def bands_of(
             low[on] = float(nearest) / BAND_SLACK
             high[on] = float(farthest) * BAND_SLACK
     return low, high
+
+
+def _read(
+    turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray, far: bool,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """`_at`, and `_far` when asked, read off one placing of the azimuths: the turn's for every point, the top's
+    for the points of lines with only sky above (`sure`, along the last axis)."""
+    place = turn.place(azimuth)
+    ground = turn.at_place(place)
+    out = turn.far_place(place) if far else None
+    if top is None or sure is None or not sure.any():
+        return ground, out
+    held = place[..., sure] if (top.start, top.step) == (turn.start, turn.step) else top.place(azimuth[..., sure])
+    ground[..., sure] = top.at_place(held)
+    if out is not None:
+        out[..., sure] = top.far_place(held)
+    return ground, out
+
+
+def _gap(
+    elevation: np.ndarray, turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray,
+    low: np.ndarray | None, high: np.ndarray | None,
+) -> np.ndarray:
+    """How far each point stands over the skyline it is laid on (`_at`), NaN where that skyline's ground stands
+    outside the point's band (`_gate`): both read off one placing of the azimuths."""
+    gated = low is not None and high is not None and turn.distance is not None
+    ground, far = _read(turn, top, sure, azimuth, gated)
+    gap = elevation - ground
+    if far is not None:
+        gap = np.where((far < low) | (far > high), np.nan, gap)
+    return gap
 
 
 def _at(turn: Turn, top: Turn | None, sure: np.ndarray | None, azimuth: np.ndarray) -> np.ndarray:
@@ -701,8 +765,17 @@ def _median_tilt(asked: np.ndarray, lost: np.ndarray, found: np.ndarray) -> np.n
         return np.median(asked, axis=1)
     change = np.zeros(asked.shape[0])
     some = found > 0
-    change[some] = np.nanmedian(asked[some], axis=1)
+    change[some] = _nanmedian_rows(asked[some], found[some])
     return change
+
+
+def _nanmedian_rows(values: np.ndarray, count: np.ndarray) -> np.ndarray:
+    """`np.nanmedian(values, axis=1)` for rows holding `count` numbers each, every one at least one. Rows under
+    600 long send numpy's own through masked arrays, most of a telephoto's match time: a sort puts the NaN last,
+    and the middle of the numbers is read straight off it."""
+    ordered = np.sort(values, axis=1)
+    rows = np.arange(values.shape[0])
+    return (ordered[rows, (count - 1) // 2] + ordered[rows, count // 2]) / 2
 
 
 def _slide(
@@ -718,8 +791,7 @@ def _slide(
     for start in range(0, headings.size, BLOCK):
         block = headings[start:start + BLOCK]
         azimuth = block[:, None] + seen.azimuth[None, :]
-        gap = _gate(seen.elevation[None, :] - _at(turn, top, seen.sure, azimuth), turn, azimuth, seen.low, seen.high,
-                    top, seen.sure)
+        gap = _gap(seen.elevation[None, :], turn, top, seen.sure, azimuth, seen.low, seen.high)
         lost = np.isnan(gap)
         found = (~lost).sum(axis=1)
         change = _median_tilt(-gap / lift, lost, found)
@@ -834,9 +906,12 @@ def _refine(
         ease = ROLL_EASE if ease is None else ease / 2
     seen = _through(x, y, fov, tilt, roll, half_width, projection=projection, bands=bands, sure=sure)
     azimuth = heading + seen.azimuth
-    rise, ground = (_rounded(azimuth, seen.elevation, turn, rounding, top, sure) if rounding
-                    else (seen.elevation, _at(turn, top, sure, azimuth)))
-    gap = _gate(rise - ground, turn, azimuth, seen.low, seen.high, top, sure)
+    if rounding:
+        rise, ground = _rounded(azimuth, seen.elevation, turn, rounding, top, sure)
+        gap = _gate(rise - ground, turn, azimuth, seen.low, seen.high, top, sure)
+    else:
+        rise = seen.elevation
+        gap = _gap(seen.elevation, turn, top, sure, azimuth, seen.low, seen.high)
     hit = ~np.isnan(gap)
     if hit.sum() < MIN_POINTS:
         return None
@@ -882,8 +957,7 @@ def _pieces(
                             bands=None if bands is None else (bands[0][inside], bands[1][inside]),
                             sure=None if sure is None else sure[inside])
             azimuth = fit.heading + turns[:, None] + seen.azimuth[None, :]
-            base = _gate(seen.elevation[None, :] - _at(turn, top, seen.sure, azimuth), turn, azimuth, seen.low,
-                         seen.high, top, seen.sure)
+            base = _gap(seen.elevation[None, :], turn, top, seen.sure, azimuth, seen.low, seen.high)
             gap = base[:, None, :] + tilts[None, :, None] * seen.lift[None, None, :]
             lost = np.isnan(gap)
             cost = np.where(lost, LOST_LOSS, _loss(np.where(lost, 0.0, gap) * seen.per_degree))
@@ -922,10 +996,18 @@ def _over(
     stands, metres (the middle of it; None when none does). Read in full against `clear`, as far as the
     analyst says the photo sees; else against every cut of the turn, land within the place's own cut in full,
     land past it in full out to `CLEAR_NEAR` times as far as the ground the line lies on, then less and less out
-    to `CLEAR_FAR` times it."""
+    to `CLEAR_FAR` times it. Land `BEHIND` the ridge the place's own cut lays the line on counts in full, that
+    ridge itself `OWN_SHARE`."""
+    ridge = turn.far(azimuth)
+
+    def behind(land: np.ndarray) -> np.ndarray:
+        """Each point's weight: 1 for land behind the line's ridge, `OWN_SHARE` for that ridge itself."""
+        own = np.where(np.nan_to_num(land, nan=0.0) > BEHIND * ridge, 1.0, OWN_SHARE)
+        return np.where(np.isfinite(ridge), own, 1.0)
+
     if clear is not None:
-        weight = under_terrain(azimuth, elevation, clear, per_degree).astype(np.float64)
         far = clear.far(azimuth)
+        weight = under_terrain(azimuth, elevation, clear, per_degree) * behind(far)
     else:
         line = np.maximum((top or turn).far(azimuth), 1.0)
         own = math.inf if turn.reach is None else float(turn.reach)
@@ -934,8 +1016,8 @@ def _over(
         for one in turns or (turn,):
             land = one.far(azimuth)
             fade = np.clip((CLEAR_FAR * line - land) / ((CLEAR_FAR - CLEAR_NEAR) * line), 0.0, 1.0)
-            counted = under_terrain(azimuth, elevation, one, per_degree) * np.where(land <= own, 1.0,
-                                                                                     np.nan_to_num(fade, nan=0.0))
+            counted = under_terrain(azimuth, elevation, one, per_degree) * behind(land) * np.where(
+                land <= own, 1.0, np.nan_to_num(fade, nan=0.0))
             more = counted > weight
             weight = np.where(more, counted, weight)
             far = np.where(more, land, far)
@@ -1011,8 +1093,9 @@ def _judge(
     if sure is not None and sure.any():
         azimuth, elevation, per = through(x[sure], y[sure], None if piece is None else piece[sure])
         over, over_far = _over(azimuth, elevation, turn, top, clear, turns, per)
-        # past a fiftieth the place pays, past CLEAR_HARD it is ruled out
-        score *= float(np.clip(1.0 - (over - CLEAR_FREE) / (CLEAR_HARD - CLEAR_FREE), 0.0, 1.0))
+        # past a fiftieth the place pays, past CLEAR_HARD it keeps CLEAR_KEEP of its score (none: ruled out)
+        paid = float(np.clip((over - CLEAR_FREE) / (CLEAR_HARD - CLEAR_FREE), 0.0, 1.0))
+        score *= 1.0 - (1.0 - CLEAR_KEEP) * paid
     if piece is None and inner is None and kept is None and over is None:
         return fit
     eased = tuple((k, *offsets[k]) for k in sorted(offsets)) or None

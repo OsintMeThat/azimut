@@ -316,7 +316,7 @@ def run(case: Case, job: dict[str, Any]) -> None:
             lanes=lanes_for(record["ask"].get("speed")),
         )
     except finder.Cancelled as exc:
-        turncache.sweep()
+        turncache.sweep(since=started)
         if read(case, name) is not None:
             record.update(status="cancelled")
             write(case, name, record)
@@ -325,8 +325,8 @@ def run(case: Case, job: dict[str, Any]) -> None:
         record.update(status="failed", error=f"The terrain could not be loaded: {exc}")
         write(case, name, record)
         raise workqueue.JobRefused(record["error"]) from exc
-    # the turns this search kept, held under their budget
-    turncache.sweep()
+    # the turns this search kept, held under their budget, its first ones last to go
+    turncache.sweep(since=started)
     if read(case, name) is None:
         raise workqueue.JobCancelled(f"search {name!r} was deleted while it ran")
     total = record["progress"]["total"]

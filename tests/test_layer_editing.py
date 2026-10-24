@@ -181,6 +181,45 @@ def test_group_styles_override_without_destroying_individual_styles(client, owne
     assert places(owner) == []
 
 
+def test_a_group_with_one_colour_keeps_each_feature_icon(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    group = client.post(f"{url}/groups", json={"name": "Side A"}).json()["group"]
+    star = marker(client, owner, row, colour="#d55e00", symbol="star", group=group["id"])
+    marker(client, owner, row, colour="#009e73", symbol="circle", group=group["id"])
+    changed = client.patch(f"{url}/groups/{group['id']}", json={"mode": "colour", "colour": "#cc79a7", "symbol": "flag"})
+    assert changed.status_code == 200, changed.text
+    drawn = sorted((f["properties"]["colour"], f["properties"]["symbol"]) for f in client.get(f"{url}/data").json()["features"])
+    assert drawn == [("#cc79a7", "circle"), ("#cc79a7", "star")]
+    own = {f["properties"]["symbol"]: f["properties"]["colour"] for f in read(client, owner, row)["document"]["features"]}
+    assert own == {"star": "#d55e00", "circle": "#009e73"}
+    legend = next(entry for entry in client.get(f"{url}/edit").json()["layer"]["categories"] if entry["name"] == "Side A")
+    assert legend["colour"] == "#cc79a7" and "symbol" not in legend
+    # other tools offer the styles as drawn: each icon, in the group's colour
+    styles = next(one for one in client.get(f"/api/cases/{owner}/layer-targets").json() if one["name"] == row["name"])["styles"]
+    assert {"symbol": "star", "colour": "#cc79a7"} in styles
+    # ungrouped, the features keep the colour they were drawn in
+    kept = client.delete(f"{url}/groups/{group['id']}").json()["document"]["features"]
+    assert {f["properties"]["key"]: f["properties"]["colour"] for f in kept}[star["properties"]["key"]] == "#cc79a7"
+
+
+def test_an_edit_leaves_the_drawing_the_map_reads_next_already_made(client, owner, monkeypatch):
+    from azimut.engine import layerediting
+
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    marker(client, owner, row)
+    shape = client.post(f"{url}/shapes", json={"geometry": {"type": "LineString", "coordinates": [[2, 48], [3, 49]]}})
+    assert shape.status_code == 200, shape.text
+    # the shape added answers alone, as a marker does, not with the whole layer
+    assert set(shape.json()) == {"layer", "marker", "key", "groups", "icons"}
+    assert shape.json()["marker"]["properties"]["key"] == shape.json()["key"]
+    drawn = []
+    monkeypatch.setattr(layerediting, "drawing", lambda *args, **kwargs: drawn.append(1) or pytest.fail("drawn again"))
+    features = client.get(f"{url}/data").json()["features"]
+    assert [f["geometry"]["type"] for f in features] == ["Point", "LineString"] and drawn == []
+
+
 def test_removing_a_group_keeps_its_features_and_case_memberships(client, owner):
     row = create(client, owner)
     url = layer_url(owner, row)
@@ -666,7 +705,7 @@ def test_drawn_shapes_can_be_edited_removed_and_discarded(client, owner, geometr
     url = layer_url(owner, row)
     response = client.post(f"{url}/shapes", json={"geometry": geometry, "name": "Working shape"})
     assert response.status_code == 200, response.text
-    feature = response.json()["document"]["features"][0]
+    feature = response.json()["marker"]
     key = feature["properties"]["key"]
     assert feature["geometry"] == geometry
     client.post(f"{url}/edit", json={})
@@ -747,7 +786,7 @@ def test_lines_and_areas_are_numbered_apart_in_a_first_group_named_for_both(clie
 
     def named(geometry, **extra):
         answer = client.post(f"{url}/shapes", json={"geometry": geometry, **extra}).json()
-        return next(one["properties"]["name"] for one in answer["document"]["features"] if one["properties"]["key"] == answer["key"])
+        return answer["marker"]["properties"]["name"]
 
     assert [named(LINE), named(AREA), named(LINE)] == ["Line 1", "Area 1", "Line 2"]
     # a name given by hand that reads like the next one is not given twice

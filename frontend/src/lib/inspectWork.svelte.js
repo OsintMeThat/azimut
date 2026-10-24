@@ -128,6 +128,7 @@ export function collageSpec(collage) {
     transparent: collage.transparent,
     nodes: collage.nodes.map(pieceRecord),
     exported: collage.exported ?? null,
+    ...(collage.straightened ? { straightened: true } : {}),
   };
 }
 

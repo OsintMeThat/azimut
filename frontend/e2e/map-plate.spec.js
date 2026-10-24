@@ -126,8 +126,10 @@ test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
   await page.goto('/#plate');
   await page.getByRole('button', { name: 'New plate', exact: true }).click();
   await expect(page.locator('.plate-map')).toHaveCount(2);
-  await addOnPage(page, '3D view');
+  // there is one kind of map: its 3D box stands it on its heights
+  await addOnPage(page, 'Map');
   await expect(page.locator('.plate-map')).toHaveCount(3);
+  await page.getByText('Show the map in 3D', { exact: true }).click();
   // a map standing on its heights is drawn on the app's globe, the flat map under it
   await expect(page.locator('.plate-map canvas.globe')).toHaveCount(1);
   const tilted = () => lastSave(store)?.spec.elements.find((element) => element.kind === 'map' && (element.view?.pitch ?? 0) > 0);
@@ -148,7 +150,7 @@ test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
     return [Math.abs(view.lon - before.lon) > expected * 0.6, view.pitch];
   }).toEqual([true, before.pitch]);
   // laid flat again, the map is the flat engine's alone, framed where the hand left it
-  await page.getByText('Stand the map on its heights', { exact: true }).click();
+  await page.getByText('Show the map in 3D', { exact: true }).click();
   await expect(page.locator('.plate-map canvas.globe')).toHaveCount(0);
   await expect.poll(() => {
     const flat = lastSave(store).spec.elements.find((element) => element.id === id);

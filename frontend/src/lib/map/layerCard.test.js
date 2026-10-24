@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { readBlocks, readLinks, fillText, layerCard } from './layerCard.js';
+import { readBlocks, readLinks, fillText, layerCard, featureSize, sizeLine } from './layerCard.js';
 
 describe('readBlocks', () => {
   it('reads a labelled line as its label and its value', () => {
@@ -183,5 +183,50 @@ describe('what a personal feature says on its card', () => {
     shown[0].querySelector('img').dispatchEvent(new Event('error'));
     expect([...element.querySelectorAll('.layer-card-picture')].map((one) => one.textContent)).toEqual(['Proof']);
     expect(layerCard('Front', { pictures })({ name: 'Own' }, null).querySelector('.layer-card-pictures')).toBeNull();
+  });
+});
+
+describe('the size of a line or an area on its card', () => {
+  // about 1.11 km a side on the equator
+  const SQUARE = [[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]];
+  const HOLE = [[0.0025, 0.0025], [0.0075, 0.0025], [0.0075, 0.0075], [0.0025, 0.0075], [0.0025, 0.0025]];
+
+  it('measures a line, its parts added up', () => {
+    const one = featureSize({ type: 'LineString', coordinates: [[0, 0], [0.01, 0]] });
+    expect(one.length).toBeCloseTo(1113.2, 0);
+    expect(one.area).toBe(0);
+    const two = featureSize({ type: 'MultiLineString', coordinates: [[[0, 0], [0.01, 0]], [[0, 1], [0.01, 1]]] });
+    expect(two.length).toBeGreaterThan(2 * 1113);
+  });
+
+  it('measures an area with its hole taken out, and its perimeter on the outer ring', () => {
+    const full = featureSize({ type: 'Polygon', coordinates: [SQUARE] });
+    const holed = featureSize({ type: 'Polygon', coordinates: [SQUARE, HOLE] });
+    expect(full.area).toBeCloseTo(1.239e6, -3);
+    expect(holed.area).toBeCloseTo(full.area * 0.75, -3);
+    expect(holed.perimeter).toBeCloseTo(full.perimeter, 6);
+    expect(featureSize({ type: 'MultiPolygon', coordinates: [[SQUARE], [SQUARE]] }).area).toBeCloseTo(2 * full.area, 0);
+  });
+
+  it('has nothing to say about a point or a broken shape', () => {
+    expect(featureSize({ type: 'Point', coordinates: [0, 0] })).toBeNull();
+    expect(featureSize({ type: 'Polygon', coordinates: [[[0, 0], [1, 1]]] })).toBeNull();
+    expect(featureSize({ type: 'LineString', coordinates: [[0, 0], ['x', null]] })).toBeNull();
+    expect(featureSize(null)).toBeNull();
+    expect(sizeLine(null)).toBe('');
+  });
+
+  it("writes the size in the analyst's units", () => {
+    expect(sizeLine({ type: 'Polygon', coordinates: [SQUARE] })).toBe('Area 1.24 km² · Perimeter 4.45 km');
+    expect(sizeLine({ type: 'LineString', coordinates: [[0, 0], [0.01, 0]] }, 'imperial')).toBe('Length 3652 ft');
+  });
+
+  it('shows at the foot of the card for a line or an area, never for a pin', () => {
+    const card = layerCard('Front', { coords: () => '', units: () => 'metric' });
+    const area = card({ name: 'District' }, null, { type: 'Polygon', coordinates: [SQUARE] });
+    expect(area.querySelector('.layer-card-size').textContent).toBe('Area 1.24 km² · Perimeter 4.45 km');
+    expect(area.querySelector('.layer-card-size').nextElementSibling.className).toBe('layer-card-from');
+    const pin = card({ name: 'Gate' }, { lat: 0, lon: 0 }, { type: 'Point', coordinates: [0, 0] });
+    expect(pin.querySelector('.layer-card-size')).toBeNull();
   });
 });

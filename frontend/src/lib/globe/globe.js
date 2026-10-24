@@ -186,7 +186,11 @@ export function createGlobe(canvas, { onMetered = () => {}, onFailed = () => {} 
     }
   }
   measure();
+  // A tab put away hides the canvas: read at no size the view would say a zoom
+  // far out, which the app takes for where the analyst looks. It keeps its size
+  // until it shows again.
   const resizer = new ResizeObserver(() => {
+    if (!canvas.clientWidth || !canvas.clientHeight) return;
     measure();
     changed();
   });

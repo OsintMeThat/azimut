@@ -12,9 +12,14 @@ import { isBadge } from './markerGlyphs.js';
 
 /** How far, in pixels at size 1, a badge reaches round its point… */
 const BADGE_REACH = 14;
-/** …and how high a plain pin's head stands above its tip, and how wide it is. */
-const PIN_HEAD = 20;
-const PIN_REACH = 12;
+/**
+ * …and how high a plain pin's head stands above its tip, and how far it reaches,
+ * as the map draws it: the head's middle 11 units over the tip in the 24 of its
+ * glyph, which `markerGlyphs` scales 2.7 times into 64 pixels the map draws at
+ * 0.4; its radius 7 units, its white rim 2 more.
+ */
+const PIN_HEAD = 12;
+const PIN_REACH = 10;
 /** How close to a line's stroke a press still takes it. */
 const LINE_REACH = 7;
 

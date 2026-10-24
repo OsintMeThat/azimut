@@ -46,6 +46,17 @@ def test_a_column_without_ground_takes_its_neighbours_value():
     assert turn.at(np.array([135.0]))[0] == 3.0
 
 
+def test_the_rows_middle_is_numpys_nanmedian_exactly():
+    rng = np.random.default_rng(7)
+    values = rng.normal(size=(300, 41))
+    values[rng.random(values.shape) < 0.4] = np.nan
+    values[0, :] = np.nan
+    values[0, 5] = 2.5  # one number left in a row
+    values[1, :] = 1.0  # a row of ties
+    count = (~np.isnan(values)).sum(axis=1)
+    assert np.array_equal(skymatch._nanmedian_rows(values, count), np.nanmedian(values, axis=1))
+
+
 def test_a_lens_the_photo_says_is_the_only_one_tried():
     assert skymatch.lenses(52.0, known=True) == [52.0]
 
@@ -541,6 +552,27 @@ def test_a_line_with_only_sky_above_loses_the_place_where_land_stands_over_it():
     assert said((0,)).over == 0.0
 
 
+def test_the_lines_own_crest_off_the_trace_is_not_land_over_it(monkeypatch):
+    ridge = skyturn([(40, 2.0, 3), (52, 1.5, 1.5), (61, 2.2, 4)], base=0.5)
+    # nothing behind the ridge, 3 km out, however far the photo sees
+    cut = skymatch.Turn(0.0, STEP, ridge.angles, reach=5_000.0, distance=np.full(ridge.angles.size, 3_000.0))
+    whole = skymatch.Turn(0.0, STEP, ridge.angles, reach=50_000.0, distance=np.full(ridge.angles.size, 3_000.0))
+    # filmed through 40°, searched through a measured 46°: the crest stands off the trace towards the edges
+    x, y = trace_on(ridge, heading=50.0, fov=40.0)
+    line = np.zeros(x.size, dtype=np.int64)
+
+    def said(clear=(0,), seen=None):
+        return skymatch.match(x, y, [cut, whole], half_width=HALF, fov=46.0, known=True, facing=(50.0, 3.0),
+                              marks=skymatch.Marks(line=line, clear=clear), clear=seen).fits[0]
+
+    plain = said(clear=())
+    for fit in (said(), said(seen=whole)):
+        assert fit.over == 0.0 and fit.explained == pytest.approx(plain.explained, abs=1e-6)
+    # read as land over the line (owner's v01, 2026-10-24), the crest itself all but ruled the place out
+    monkeypatch.setattr(skymatch, "BEHIND", 0.0)
+    assert said().over > skymatch.CLEAR_FREE and said().explained < plain.explained - 0.25
+
+
 def test_a_line_with_only_sky_above_lies_on_the_top_of_the_land_it_would_show():
     ridge = skyturn([(50, 2.0, 4)], base=0.5)
     nearer = skymatch.Turn(0.0, STEP, ridge.angles, reach=5_000.0, distance=np.full(ridge.angles.size, 3_000.0))
@@ -602,3 +634,33 @@ def test_a_collage_cut_in_pieces_fits_each_a_little_on_its_own_and_no_more():
                            marks=skymatch.Marks(piece=right.astype(np.int64))).fits[0]
     assert loose.explained < cut.explained - 0.3
     assert all(abs(tilt) <= skymatch.PIECE_TILT + 1e-9 for _, _, tilt, _ in loose.pieces)
+
+
+def test_one_placing_reads_what_the_separate_reads_give():
+    """The slide reads the skyline and its distance off one placing of the azimuths (`_gap`), the top of the land
+    for the sky-only points: the very numbers `_at` and `_gate` give apart."""
+    rng = np.random.default_rng(11)
+    angles = rng.normal(2.0, 1.0, 720)
+    angles[rng.random(720) < 0.05] = np.nan
+    distance = rng.uniform(500.0, 40_000.0, 720)
+    turn = skymatch.Turn(0.0, 0.5, angles, reach=20_000.0, distance=distance)
+    top = skymatch.Turn(0.0, 0.5, angles + rng.uniform(0.0, 1.0, 720), reach=20_000.0, distance=distance * 1.5)
+    azimuth = rng.uniform(-400.0, 800.0, (64, 90))
+    elevation = rng.normal(2.0, 1.0, 90)
+    sure = rng.random(90) < 0.4
+    low, high = np.full(90, 1_000.0), np.full(90, 30_000.0)
+    apart = skymatch._gate(elevation - skymatch._at(turn, top, sure, azimuth), turn, azimuth, low, high, top, sure)
+    together = skymatch._gap(elevation, turn, top, sure, azimuth, low, high)
+    assert np.array_equal(apart, together, equal_nan=True)
+    assert np.array_equal(skymatch._gap(elevation, turn, None, None, azimuth, None, None),
+                          elevation - turn.at(azimuth), equal_nan=True)
+
+
+def test_a_turn_places_azimuths_as_remainder_does_to_the_bit():
+    turn = skymatch.Turn(0.25, 0.5, np.zeros(720))
+    rng = np.random.default_rng(2)
+    edges = np.array([-359.75, -0.25, 0.25, 0.2500000000000001, 359.75, 360.25, 719.75, -360.0, 1e-300, -1e-300])
+    for azimuth in (rng.uniform(-359.75, 720.25, 100_000), edges, rng.uniform(-2_000.0, 2_000.0, 10_000),
+                    np.array([np.nan, 10.0])):
+        plain = np.remainder(azimuth - 0.25, 360.0) / 0.5
+        assert np.array_equal(turn.place(azimuth).view(np.int64), plain.view(np.int64))

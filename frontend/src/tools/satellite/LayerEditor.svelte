@@ -309,7 +309,7 @@
           {#if open}
             <ul class="features" class:drop-end={featureDrop?.group === group.id && !featureDrop.before}>
               {#each members.slice(-(limits[group.id] ?? 100)).toReversed() as feature (feature.properties.key)}
-                {@const paint = group.mode === 'uniform' ? group.colour : feature.properties.colour || group.colour}
+                {@const paint = group.mode === 'uniform' || group.mode === 'colour' ? group.colour : feature.properties.colour || group.colour}
                 <li data-feature-key={feature.properties.key} draggable={controller.pending > 0 || !!controller.sketch ? 'false' : 'true'}
                   class:dragging={draggedFeatures.includes(feature.properties.key)}
                   class:drop-before={featureDrop?.group === group.id && featureDrop.before === feature.properties.key}

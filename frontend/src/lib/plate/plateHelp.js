@@ -46,7 +46,7 @@ export const PLATE_HELP = {
   Bearing: 'How far the map is turned from north, in degrees',
   'Map frame': 'A line round the map',
   'Frame weight': 'How thick the line round the map is',
-  'Stand the map on its heights': 'The map in 3D, tilted over its heights',
+  'Show the map in 3D': 'Stands it on its heights, tilted',
   'Map tilt': 'How far the map leans, from flat to the horizon',
   'Height exaggeration': 'The heights drawn as they are or up to three times as tall',
   'Ridge lines': 'The crests traced from the heights, over the map',

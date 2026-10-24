@@ -153,15 +153,16 @@ export function iconName(kind) {
 }
 
 /**
- * …and the one it knows a source's own icon by.
+ * …and the one it knows a source's own icon by: the address it is read from,
+ * which names its case and layer as well as its key.
  *
- * Shared between layers too, and safely: the key is the backend's content hash
- * of what the icon *is* — its address, its colour, its scale, its anchor — so
- * two layers naming the same key are asking for the same pixels. Two My Maps
- * that both use Google's red pin register it once.
+ * Never the key alone. The backend hashes what the source says of the icon, and
+ * a KMZ says `images/icon-3.png` whatever is drawn in it, so two My Maps give one
+ * key to two pictures. Named by key, the first layer loaded drew its picture on
+ * the other's markers.
  */
-export function sourceIconName(key) {
-  return `azimut-source-${key}`;
+export function sourceIconName(url) {
+  return `azimut-source-${url}`;
 }
 
 /** One composed icon, fetched from the case folder and decoded by the engine. */
@@ -442,8 +443,9 @@ export function sameFeatures(a, b) {
 /**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
- * @param {(properties: object, point: { lat: number, lon: number } | null) => HTMLElement} [opts.card]
+ * @param {(properties: object, point: { lat: number, lon: number } | null, geometry: object | null) => HTMLElement} [opts.card]
  *   the read-only popup's body, handed the feature's own point when it has one
+ *   and its geometry as the source wrote it, so a line or an area can be measured
  * @param {(offset: number) => object} [opts.popup] the card itself, swappable so
  *   the click path can be read off a test without standing up the engine's own popup
  * @param {(key: string) => string} [opts.iconUrl] where this case keeps the
@@ -525,7 +527,7 @@ export function createAddedLayer(
     [NEW_RING]: ['all', NOW, ['has', '$new'], POINT],
   };
   const badgeIcons = new Set();
-  /** The analyst's icons a personal layer wears, `{ image, box }` by key, for its discs and marks. */
+  /** The analyst's icons a personal layer wears, `{ image, box }` by address, for its discs and marks. */
   const pictures = new Map();
   // Features held off the map while the editor drags their copies (`hide`).
   let hiddenKeys = new Set();
@@ -819,9 +821,11 @@ export function createAddedLayer(
     if (!card) return;
     closeCard();
     const point = pointOf(feature);
+    // measured off the original, never the tile's copy: that one is clipped at the tile's edge
+    const geometry = featureAt(collection, feature.properties?.index)?.geometry ?? null;
     open = popup(point ? PIN_CARD_OFFSET : EDGE_CARD_OFFSET)
       .setLngLat(point ? [point.lon, point.lat] : at)
-      .setDOMContent(card(feature.properties ?? {}, point))
+      .setDOMContent(card(feature.properties ?? {}, point, geometry))
       .addTo(map);
     open.on('close', () => {
       open = null;
@@ -851,10 +855,10 @@ export function createAddedLayer(
     if (!iconUrl) return arrived;
     // a personal layer composes its own icons into discs and marks, so it keeps the pictures too
     if (editable) {
-      const wanted = new Set(features.map((feature) => feature?.properties?.icon).filter((key) => key && !pictures.has(key)));
+      const wanted = new Set(features.map((feature) => feature?.properties?.icon).filter((key) => key && !pictures.has(iconUrl(key))));
       await Promise.all([...wanted].map(async (key) => {
         const picture = await readPicture(iconUrl(key));
-        if (picture) pictures.set(key, picture);
+        if (picture) pictures.set(iconUrl(key), picture);
       }));
     }
     const keys = new Set();
@@ -864,7 +868,7 @@ export function createAddedLayer(
     }
     await Promise.all(
       [...keys].map(async (key) => {
-        const name = sourceIconName(key);
+        const name = sourceIconName(iconUrl(key));
         if (map.hasImage?.(name)) {
           arrived.add(key);
           return;
@@ -872,7 +876,7 @@ export function createAddedLayer(
         try {
           const image = await loadIcon(map, iconUrl(key));
           if (!image) return;
-          // checked again: two layers sharing an icon can both be loading it
+          // checked again: the same layer drawn twice can be loading it twice
           if (!map.hasImage?.(name)) map.addImage(name, image);
           arrived.add(key);
         } catch {
@@ -943,7 +947,7 @@ export function createAddedLayer(
       const colour = colourExpression(groups);
       // The same features handed again, as a layer read back after its own save is,
       // are not cut again: the engine would tile the whole layer anew to draw the same.
-      const style = JSON.stringify([groups, [...ready].sort()]);
+      const style = JSON.stringify([groups, [...ready].sort().map((key) => iconUrl(key))]);
       const unchanged = sent?.style === style && sameFeatures(sent.features, data?.features ?? []);
       sent = { style, features: [...(data?.features ?? [])] };
       // nothing to cut, but a frame still comes for whoever waits for the map to settle
@@ -966,7 +970,7 @@ export function createAddedLayer(
         if (own) feature = { ...feature, properties: { ...feature.properties, ...own } };
         const native = editable && !isBadge(symbol) && !ready.has(feature.properties?.icon);
         const wearing = editable && feature.geometry?.type === 'Point' && ready.has(feature.properties?.icon)
-          ? pictures.get(feature.properties.icon) : null;
+          ? pictures.get(iconUrl(feature.properties.icon)) : null;
         if (wearing) {
           // one of the analyst's icons: drawn plain when it can be, composed when a disc or a mark is asked for
           const mode = feature.properties.icon_mode === 'disc' ? 'disc' : 'image';
@@ -997,7 +1001,7 @@ export function createAddedLayer(
           // per feature when the source painted only some of them.
           $icon: markerIcon(feature.geometry, feature.properties?.symbol),
           ...(badge ? { $own: badge, ...(native ? { $native: true } : { $badge: true }) } : ready.has(feature.properties?.icon)
-            ? { $own: sourceIconName(feature.properties.icon) }
+            ? { $own: sourceIconName(iconUrl(feature.properties.icon)) }
             : null),
         },
       }; });

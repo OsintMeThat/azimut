@@ -28,6 +28,7 @@
   import { createDualEngine } from '../../lib/globe/dualEngine.js';
   import { createMirror } from '../../lib/globe/mirror.js';
   import { steadyZoom } from '../../lib/map/relief.js';
+  import { watchHand } from '../../lib/map/gestures.js';
   import { toast } from '../../lib/state.svelte.js';
   import { createBasemaps, imageryError, isGround, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
@@ -384,9 +385,35 @@
     if (!reliefOn) leanWhenReady = null;
     if (!reliefReady || deg == null || !engine) return;
     leanWhenReady = null;
-    // once the relief under the centre is in, or the centre is seated at sea level
-    engine.idle().then(() => engine?.setPitch(deg));
+    // once the relief under the centre is in, or the centre is seated at sea
+    // level; a view the hand has leaned or moved meanwhile is left as it is
+    settledUntouched().then((untouched) => untouched && engine?.setPitch(deg));
   });
+
+  // the analyst's own hand on the map, which a camera held until the view is still yields to
+  let wrapEl = $state();
+  let hand = null;
+  $effect(() => {
+    if (!wrapEl) return;
+    const watched = watchHand(wrapEl, (target) => Boolean(flat?.onSurface?.(target) || engine?.globe?.onSurface(target)));
+    hand = watched;
+    return () => {
+      watched.stop();
+      hand = null;
+    };
+  });
+
+  /**
+   * Resolves once the view is still and its tiles are in: true when the hand
+   * left the map alone meanwhile. A camera the app set aside until then (the
+   * 3D switch's lean, a tilted view being opened) lands only then, and never
+   * over one the analyst set themselves.
+   */
+  export async function settledUntouched() {
+    const before = hand?.count() ?? 0;
+    await engine?.idle();
+    return Boolean(engine) && (hand?.count() ?? 0) === before;
+  }
 
   // Only a tool that lays a second picture pays for one: the rest never ask.
   let laidAlternate = false;
@@ -461,6 +488,7 @@
 
 <div
   class="map-wrap dark-surface"
+  bind:this={wrapEl}
   data-guide="map.ground"
   class:measuring={armed === 'measuring'}
   class:selecting={armed === 'selecting'}

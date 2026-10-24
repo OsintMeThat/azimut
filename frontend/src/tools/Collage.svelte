@@ -3,11 +3,12 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
-    uid, initialQuad, quadFromCropRect, exportFrame, COLLAGE_DEFAULT_SIZE,
+    uid, initialQuad, quadFromCropRect, exportFrame, COLLAGE_DEFAULT_SIZE, COLLAGE_MAX_DIM,
   } from '../lib/inspect.js';
   import {
     workState, collageSpec, collageSignature, missingPieces, isFiled,
   } from '../lib/inspectWork.svelte.js';
+  import { exportBend } from '../lib/straighten.js';
   import { nextName } from '../lib/naming.js';
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { createHistory } from '../lib/history.js';
@@ -80,7 +81,11 @@
     transparent: true,
     nodes: [],
     exported: null,
+    // bent by hand along a level line (lib/straighten.js): Find then reads its picture as one
+    straightened: false,
   });
+  // The level line being drawn on the canvas to straighten the collage by, canvas pixels.
+  const level = $state({ drawing: false, points: [] });
   let docRun = 0;
   const blobs = new Set();
 
@@ -206,7 +211,7 @@
   let restoring = false; // plain: suppresses capture while a snapshot is put back
   let historyTimer = null;
   const layoutSnapshot = () =>
-    JSON.stringify({ width: doc.width, height: doc.height, nodes: doc.nodes });
+    JSON.stringify({ width: doc.width, height: doc.height, nodes: doc.nodes, straightened: doc.straightened });
 
   function syncHistory() {
     canUndo = history.canUndo;
@@ -235,6 +240,7 @@
     doc.width = snap.width;
     doc.height = snap.height;
     doc.nodes = snap.nodes;
+    doc.straightened = snap.straightened ?? false;
     selectedIds = [];
     // outlast the capture debounce so the restore itself is not recorded
     setTimeout(() => (restoring = false), 400);
@@ -254,6 +260,9 @@
 
   function onWindowKeydown(e) {
     if (uiState.tool !== 'collage' || !doc.open) return;
+    // while the level line is drawn, or still shown, Ctrl+Z takes its last point back (CollageCanvas)
+    if (level.drawing) return;
+    if (level.points.length && !e.shiftKey && e.key.toLowerCase() === 'z') return;
     const t = e.target;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
     if (!(e.ctrlKey || e.metaKey)) return;
@@ -362,8 +371,9 @@
     docRun += 1;
     Object.assign(doc, {
       open: false, caseId: null, name: null, title: '', ...COLLAGE_DEFAULT_SIZE,
-      background: '#12141c', transparent: true, nodes: [], exported: null,
+      background: '#12141c', transparent: true, nodes: [], exported: null, straightened: false,
     });
+    Object.assign(level, { drawing: false, points: [] });
     savedSignature = null;
     selectedIds = [];
     cropPieceNode = null;
@@ -415,6 +425,7 @@
         background: spec.background ?? '#12141c',
         transparent: spec.transparent ?? true,
         exported: spec.exported ?? null,
+        straightened: spec.straightened ?? false,
         // Marked lost up front, so the preview key reads as it did when last drawn.
         nodes: (spec.nodes ?? []).map((n) => ({
           ...n, url: null, baseUrl: null, missing: !mediaPaths.has(n.save?.path),
@@ -635,6 +646,48 @@
     }
   }
 
+  // Straighten: the whole collage drawn as one picture and bent along the level line, every column of its
+  // pixels moved by what the line is off there (lib/straighten.js). The bent picture is a new file in the case;
+  // it takes the pieces' place as one piece, where they lay, and Ctrl+Z puts the pieces back.
+  async function straightenCollage() {
+    const f = exportFrame(doc.nodes);
+    const bend = exportBend(level.points, f);
+    if (!bend) return;
+    if (bend.height > COLLAGE_MAX_DIM) {
+      toast('The bend would make the picture too tall. Draw the line across more of the collage', 'warn');
+      return;
+    }
+    const title = `${doc.title} straightened`;
+    try {
+      const nodes = doc.nodes.map((n) => ({
+        src: n.save, quad: n.quad.map(([x, y]) => [(x - f.minX) * f.scale, (y - f.minY) * f.scale + bend.pad]),
+      }));
+      const res = await api.post(`/api/cases/${doc.caseId}/inspect/compose`, {
+        width: f.width, height: bend.height, background: null, nodes, bend: bend.shifts, label: title,
+        folder: exportFolder || null,
+      });
+      const [left, top, right, bottom] = res.box;
+      const path = res.item.path;
+      const x0 = f.minX + left / f.scale;
+      const x1 = f.minX + right / f.scale;
+      const y0 = f.minY + (top - bend.pad) / f.scale;
+      const y1 = f.minY + (bottom - bend.pad) / f.scale;
+      const url = fileUrl(doc.caseId, path);
+      doc.nodes = [{
+        id: uid('nd'), frameId: null, url, baseUrl: url, w: right - left, h: bottom - top, frameOps: [], crop: null,
+        save: { path, time: null, ops: [] }, quad: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+      }];
+      doc.straightened = true;
+      selectedIds = [];
+      Object.assign(level, { drawing: false, points: [] });
+      await reloadCase();
+      await refresh();
+      toast(`Straightened into “${title}”. Ctrl+Z puts the pieces back`, 'ok');
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
   async function deleteCollage(row) {
     deleting = null;
     const caseId = caseState.current.id;
@@ -766,7 +819,7 @@
   {:else}
     <div class="workspace">
       <div class="viewer" data-guide="collage.canvas">
-        <CollageCanvas collage={doc} bind:selectedIds {requestCrop} />
+        <CollageCanvas collage={doc} bind:selectedIds {requestCrop} {level} />
       </div>
       <aside class="panel">
         <div class="section first" data-guide="collage.add">
@@ -782,7 +835,7 @@
           />
         </div>
         <div class="section" data-guide="collage.arrange">
-          <CollageMenu collage={doc} bind:selectedIds {requestCrop} {renderPiece} {fileTitles} />
+          <CollageMenu collage={doc} bind:selectedIds {requestCrop} {renderPiece} {fileTitles} {level} straighten={straightenCollage} />
         </div>
         <div class="section" data-guide="collage.save">
           <SaveToCase

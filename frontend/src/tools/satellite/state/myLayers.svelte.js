@@ -1,5 +1,5 @@
 import { changedBy, momentLabel, momentNow, moments as momentsOf, seenAt } from '../../../lib/map/layerHistory.js';
-import { landAt } from '../../../lib/map/landings.js';
+import { drawnAs, landAt } from '../../../lib/map/landings.js';
 import { attribution } from '../../../lib/map/addedLayers.js';
 import { destination } from '../../../lib/measure.js';
 
@@ -105,7 +105,16 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
    * moment, each in the shape and status it had then, its history kept, and the ones
    * not there yet or any more marked `$absent`. Otherwise as the layer holds them.
    */
-  const features = $derived(landAt(seenAt(stored, cursor()), landings.filter((landing) => !landing.saved)));
+  // one just added has no key of its own yet: the maps draw it, the editor waits for the save
+  const features = $derived(landAt(seenAt(stored, cursor()), landings.filter((landing) => !landing.saved && !landing.feature)));
+  /** Keys for what is drawn before the save names it. */
+  let provisional = 0;
+  /** A feature just added, drawn on the maps as the layer will draw it, under a key of its own until the save answers. */
+  function added(geometry, properties) {
+    const key = `$new-${++provisional}`;
+    const into = groups.find((item) => item.id === (properties.group || group)) ?? groups[0];
+    return { type: 'Feature', geometry, properties: drawnAs({ ...properties, key, group: into?.id }, into, icons) };
+  }
   /** The moments the layer changes at, read from the features the editor holds rather than
    *  from a map's drawing of it, which a layer switched off never has and each save drops. */
   const stateMoments = $derived(momentsOf({ features: stored }));
@@ -517,7 +526,10 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     }
     if (!placing || !editor || loading || caseId() !== editor.caseId) return false;
     const body = { lat: point.lat, lon: point.lon, ...draft, ...(group ? { group } : {}), ...stamp() };
-    enqueue((path) => api.post(`${path}/markers`, body), (answer) => {
+    // drawn where it was put down at once, the save catching up behind
+    const shown = added({ type: 'Point', coordinates: [point.lon, point.lat] },
+      { symbol: draft.symbol || 'pin', colour: draft.colour, icon: draft.icon || '', ...(group ? { group } : {}) });
+    land({ keys: [shown.properties.key], feature: shown }, (path) => api.post(`${path}/markers`, body), (answer) => {
       // the new marker is picked so its sheet opens, unless something else was picked or drawn since
       const key = answer?.marker?.properties.key;
       if (!key || sketch || lassoing || selection.length > 1 || (selected && selected.properties.key !== placed)) return;
@@ -573,12 +585,18 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     const label = before.type === 'Selection' ? 'move' : key ? 'reshape' : before.shape === 'circle' ? 'circle' : before.shape === 'rect' ? 'box'
       : before.type.includes('Polygon') ? 'area' : 'line';
     const offset = before.type === 'Selection' ? [before.rings[0][0][0] - before.origin[0], before.rings[0][0][1] - before.origin[1]] : null;
-    // a selection moved by its handle or a shape reshaped is drawn as it lands, under the
-    // outline kept until the save answers; a new shape has nothing to draw it on yet
-    const answer = await (offset ? land({ keys: before.keys, offset }, (path) => api.post(`${path}/selection`, { keys: before.keys, offset, ...stamp() }), null, { label })[1]
-      : key ? land({ keys: [key], geometry: shape }, (path) => api.patch(`${path}/markers/${key}`, { geometry: shape, ...stamp() }), null, { label })[1]
-        : enqueue((path) => api.post(`${path}/shapes`, body), null, null, { label }));
-    if (answer && sketch === before) sketch = null;
+    // drawn where it lands the moment it is ended, a new shape too, the save catching up behind
+    const [landing, task] = offset ? land({ keys: before.keys, offset }, (path) => api.post(`${path}/selection`, { keys: before.keys, offset, ...stamp() }), null, { label })
+      : key ? land({ keys: [key], geometry: shape }, (path) => api.patch(`${path}/markers/${key}`, { geometry: shape, ...stamp() }), null, { label })
+        : land({ keys: [], feature: added(shape, { colour: draft.colour, symbol: 'pin', ...(group ? { group } : {}) }) },
+          (path) => api.post(`${path}/shapes`, body), null, { label });
+    // the shape reshaped stays off the maps until they draw it where it landed (`landed`)
+    if (key && before.type !== 'Point') dragging = { name: editor.name, keys: [key], offset: null, landing };
+    sketch = null;
+    const answer = await task;
+    if (dragging?.landing === landing && (!landing.saved || !landing.claimed)) dragging = null;
+    // refused: the shape comes back as it was, to fix or drop
+    if (!answer && !sketch && editor?.name === landing.name) sketch = before;
     return answer;
   }
 
@@ -913,12 +931,13 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       }, null, { label: 'new group' });
     },
     /**
-     * Change a group. One that gives all its features one style restyles every one of
-     * them, so the toast says how many, with an Undo.
+     * Change a group. One that gives all its features one style (or one colour)
+     * restyles every one of them, so the toast says how many, with an Undo.
      */
     updateGroup(key, changes) {
       const target = groups.find((item) => item.id === key);
-      const many = target?.mode === 'uniform' && ['colour', 'symbol', 'icon'].some((field) => field in changes)
+      const drawn = { uniform: ['colour', 'symbol', 'icon'], colour: ['colour'] }[target?.mode] ?? [];
+      const many = drawn.some((field) => field in changes)
         ? features.filter((feature) => feature.properties.group === key).length : 0;
       return enqueue((path) => api.patch(`${path}/groups/${key}`, changes), () => {
         if (many > 1) undoable(`Restyled the ${many} features of ${target.name}`);

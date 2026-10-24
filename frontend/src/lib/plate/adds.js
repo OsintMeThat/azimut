@@ -6,8 +6,8 @@
 
 /** `[kind, label, icon, words]`, by group. */
 export const ADDS = [
-  { title: 'Maps', items: [['map', 'Map', 'satellite', 'ground'], ['detail', 'Detail', 'zoomInset', 'zoom magnifier closer'],
-    ['inset', 'Inset map', 'mapArea', 'locator overview'], ['view3d', '3D view', 'horizon', 'relief terrain tilt heights']] },
+  { title: 'Maps', items: [['map', 'Map', 'satellite', 'ground 3d relief terrain tilt heights'], ['detail', 'Detail', 'zoomInset', 'zoom magnifier closer'],
+    ['inset', 'Inset map', 'mapArea', 'locator overview']] },
   { title: 'On the map', note: 'Press the map to place it', items: [['label', 'Label', 'pin', 'callout name'],
     ['note', 'Map text', 'text', 'words title'], ['symbol', 'Symbol', 'star', 'icon marker pictogram badge tank vehicle drone'], ['number', 'Number', 'hash', 'count numbered'], ['arrow', 'Arrow', 'arrowRight', 'direction advance movement'],
     ['line', 'Line', 'curve', 'route path road front'], ['measure', 'Distance', 'line', 'length ruler measure'],

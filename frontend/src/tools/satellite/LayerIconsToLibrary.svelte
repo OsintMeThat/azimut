@@ -12,7 +12,7 @@
   import MarkerSymbol from './MarkerSymbol.svelte';
   import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
   import { ICON_HELP } from '../../lib/map/layerHelp.js';
-  import { layerIconUrl } from '../../lib/map/ownIcons.js';
+  import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { toast } from '../../lib/state.svelte.js';
 
   let { caseId, row, onclose } = $props();
@@ -70,7 +70,7 @@
           <label class="pick" class:on={ticked.has(icon.key)} title={icon.name ? `${icon.name}, worn ${icon.count} times` : `Worn ${icon.count} times`}>
             <input type="checkbox" checked={ticked.has(icon.key)} onchange={() => toggle(icon.key)}
               aria-label={`Add ${icon.name || 'this icon'}`} />
-            <MarkerSymbol colour="#0072b2" icon={{ src: layerIconUrl(caseId, row.name, icon.key), mode: icon.mode }} size={34} />
+            <MarkerSymbol colour="#0072b2" icon={{ src: layerIconUrl(caseId, row.name, icon.key, iconVersion(row)), mode: icon.mode }} size={34} />
             <span>{icon.name || ICON_HELP.layerIcon}</span>
           </label>
         {/each}

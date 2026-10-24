@@ -4,6 +4,10 @@
    * already shows, then the colours, then the icons with a search. Every pick
    * is handed back at once (`onpick`); where it lands is the caller's.
    *
+   * The colours are the case's (or the plain ones), then those the layer wears
+   * and those picked lately beyond them, so a colour made once is one press away
+   * after. Any other is the browser's picker or a code typed or pasted.
+   *
    * The icons run from the layer's own to the app's: the icons the layer holds
    * that the library does not (a copied map's), then the analyst's library,
    * group by group, then the app's badges. An own icon is picked as `{ icon }`,
@@ -15,6 +19,8 @@
   import Icon from '../../components/Icon.svelte';
   import MarkerSymbol from './MarkerSymbol.svelte';
   import LayerPaletteEditor from './LayerPaletteEditor.svelte';
+  import HexField from '../../components/HexField.svelte';
+  import { recentColours } from '../../lib/recentColours.svelte.js';
   import choices from '../../lib/map/layerSymbols.json';
   import { PLAIN_COLOURS, layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { DEFAULT_GROUP, iconLibrary } from '../../lib/iconLibrary.svelte.js';
@@ -32,6 +38,8 @@
     layer = null, meta = null,
     /** Whether own icons are offered at all: a plate's symbol is drawn from the app's only. */
     own = true,
+    /** Whether a colour is offered: a group in one colour gives its own. */
+    colours = true,
     onpick,
   } = $props();
   let query = $state('');
@@ -41,6 +49,22 @@
   const words = $derived(query.toLowerCase().trim().split(/\s+/).filter(Boolean));
   const matches = (text) => words.every((word) => text.toLowerCase().includes(word));
   const swatches = $derived(layerPalette.colours.length ? layerPalette.colours.map((entry) => [entry.colour, entry.name]) : PLAIN_COLOURS);
+  /** The colours the layer wears and those picked lately, beyond the palette's: `[hex, where]`. */
+  const more = $derived.by(() => {
+    const seen = new Set(swatches.map(([hex]) => hex.toLowerCase()));
+    const found = [];
+    for (const [hex, where] of [...used.map((style) => [style.colour, 'In this layer']), ...recentColours.list.map((hex) => [hex, 'Picked lately'])]) {
+      const key = String(hex ?? '').toLowerCase();
+      if (!/^#[0-9a-f]{6}$/.test(key) || seen.has(key)) continue;
+      seen.add(key);
+      found.push([key, where]);
+    }
+    return found.slice(0, 10);
+  });
+  function pickColour(hex) {
+    if (!swatches.some(([one]) => same(one, hex))) recentColours.keep(hex);
+    onpick?.({ colour: hex });
+  }
   const visible = $derived(choices.filter((choice) => matches(`${choice.label} ${choice.group} ${(choice.keywords ?? []).join(' ')}`)));
   // Themed while browsing; a search answers with one flat run of matches.
   const sections = $derived(words.length ? [{ group: '', items: visible }]
@@ -76,15 +100,27 @@
     {/each}
   </div>
 {/if}
+{#if colours}
 <p class="fm-head">Colour</p>
 <div class="palette" role="group" aria-label={`${label} palette`}>
   {#each swatches as [hex, name] (hex)}
     <button type="button" class="swatch" class:chosen={!mixed && same(hex, colour)} style={`--swatch:${hex}`}
-      aria-label={`${label} ${name.toLowerCase()}`} title={name} aria-pressed={!mixed && same(hex, colour)}
-      onclick={() => onpick?.({ colour: hex })}></button>
+      aria-label={`${label} ${name.toLowerCase()}`} title={`${name}, ${hex.toLowerCase()}`} aria-pressed={!mixed && same(hex, colour)}
+      onclick={() => pickColour(hex)}></button>
   {/each}
+  {#if more.length}
+    <span class="rule" aria-hidden="true"></span>
+    {#each more as [hex, where] (hex)}
+      <button type="button" class="swatch" class:chosen={!mixed && same(hex, colour)} style={`--swatch:${hex}`}
+        aria-label={`${label} ${hex}`} title={`${where}, ${hex}`} aria-pressed={!mixed && same(hex, colour)}
+        onclick={() => pickColour(hex)}></button>
+    {/each}
+  {/if}
+</div>
+<div class="code-row">
   <input type="color" aria-label={`${label} colour`} title="Any colour" value={colour}
-    onchange={(event) => onpick?.({ colour: event.currentTarget.value })} />
+    onchange={(event) => pickColour(event.currentTarget.value)} />
+  <HexField value={mixed ? '' : colour} label={`${label} colour code`} onpick={pickColour} />
   {#if caseId}
     <button type="button" class="name-colours" aria-label="Name the colours" title="Name what each colour means in this case"
       aria-expanded={naming} onclick={() => (naming = !naming)}><Icon name="tag" size={12} /></button>
@@ -93,6 +129,7 @@
 {#if colourName && !mixed}<p class="colour-name">{colourName}</p>{/if}
 {#if point && worn?.mode === 'image' && !mixed}<p class="colour-name keeps">{ICON_HELP.keepsColours}</p>{/if}
 {#if naming && caseId}<LayerPaletteEditor {caseId} defaults={PLAIN_COLOURS} onclose={() => (naming = false)} />{/if}
+{/if}
 {#if point}
   <p class="fm-head">Icon</p>
   <input type="search" class="find" aria-label={`${label} find icon`} bind:value={query} placeholder="Find an icon" />
@@ -144,6 +181,8 @@
   .palette { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 2px 6px 4px; }
   .swatch { width: 18px; height: 18px; border-radius: 50%; background: var(--swatch); border: 1px solid #0003; cursor: pointer; }
   .swatch.chosen { outline: 2px solid var(--text-1); outline-offset: 2px; }
+  .palette .rule { width: 1px; height: 14px; background: var(--border); }
+  .code-row { display: flex; align-items: center; gap: 6px; padding: 0 6px 4px; }
   input[type='color'] { width: 26px; height: 24px; padding: 1px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); cursor: pointer; }
   .name-colours { display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; border-radius: var(--r-sm); color: var(--text-3); cursor: pointer; }
   .name-colours:hover, .name-colours[aria-expanded='true'] { background: var(--bg-3); color: var(--text-1); }

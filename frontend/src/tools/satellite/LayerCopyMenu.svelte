@@ -14,7 +14,7 @@
   import { api } from '../../lib/api.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { UNNAMED } from '../../lib/map/addedLayers.js';
-  import { layerIconUrl } from '../../lib/map/ownIcons.js';
+  import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
 
   let { controller } = $props();
   // the feature it was opened on; another one opens the menu afresh (`LayerAddDialogs`)
@@ -24,7 +24,7 @@
   const colour = job.feature.properties?.colour;
   const worn = job.feature.properties?.icon;
   const ownIcon = worn && job.row?.icons && job.feature.geometry?.type === 'Point'
-    ? { key: worn, from: job.row.name, src: layerIconUrl(owner, job.row.name, worn),
+    ? { key: worn, from: job.row.name, src: layerIconUrl(owner, job.row.name, worn, iconVersion(job.row)),
         mode: job.feature.properties.icon_mode === 'disc' ? 'disc' : 'image', name: job.feature.properties.icon_name ?? '' }
     : null;
   let targets = $state.raw([]);

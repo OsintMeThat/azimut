@@ -270,7 +270,7 @@ def test_picking_an_icon_again_brings_the_way_the_library_draws_it_now(client, o
 # ---------------------------------------------------------------------------
 
 
-def dressed_kmz() -> bytes:
+def dressed_kmz(colour=(255, 255, 255)) -> bytes:
     """A map with its own pictogram inside it, the way a My Maps exports one."""
     kml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -285,7 +285,7 @@ def dressed_kmz() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("doc.kml", kml)
-        archive.writestr("images/pin.png", glyph(colour=(255, 255, 255)))
+        archive.writestr("images/pin.png", glyph(colour=colour))
     return buffer.getvalue()
 
 
@@ -339,6 +339,30 @@ def test_a_point_copied_out_of_a_map_can_keep_its_own_icon(client, owner, source
     assert marker["properties"]["icon"] == own
     assert own in zip_keys(owner, row)
     assert client.get(f"{url}/icons/{own}").status_code == 200
+
+
+def test_a_point_copied_from_another_map_keeps_its_picture_when_both_name_it_alike(client, owner, source):
+    # every My Maps export calls its icons images/icon-N.png, so two pictures get one key
+    other = client.post(f"/api/cases/{owner}/map-layers/upload",
+                        files={"file": ("other.kmz", io.BytesIO(dressed_kmz(colour=(30, 180, 60))), "application/octet-stream")},
+                        data={"title": "Other map", "icons": "true"}).json()
+    copy = client.post(f"/api/cases/{owner}/map-layers/{source['name']}/editable-copy", json={}).json()
+    url = f"/api/cases/{owner}/map-layers/{copy['name']}"
+    [mine] = client.get(f"{url}/icons").json()
+    [theirs] = client.get(f"/api/cases/{owner}/map-layers/{other['name']}/icons").json()
+    assert mine["key"] == theirs["key"]
+
+    marker = client.post(f"{url}/markers", json={"lat": 1, "lon": 1, "icon": theirs["key"],
+                                                  "icon_from": other["name"]}).json()["marker"]
+
+    worn = marker["properties"]["icon"]
+    assert worn != mine["key"]
+    picture = client.get(f"{url}/icons/{worn}").content
+    assert picture == client.get(f"/api/cases/{owner}/map-layers/{other['name']}/icons/{theirs['key']}").content
+    assert picture != client.get(f"{url}/icons/{mine['key']}").content
+    again = client.post(f"{url}/markers", json={"lat": 2, "lon": 2, "icon": theirs["key"],
+                                                 "icon_from": other["name"]}).json()["marker"]
+    assert again["properties"]["icon"] == worn and len(client.get(f"{url}/icons").json()) == 2
 
 
 def test_a_point_copied_from_a_map_that_lacks_the_icon_is_refused(client, owner, source):

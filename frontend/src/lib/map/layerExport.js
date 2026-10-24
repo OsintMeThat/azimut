@@ -1,7 +1,7 @@
 import { api, detailLine } from '../api.js';
 import { markerImageKey, ownMarkerImage, personalMarkerImage } from './addedLayer.js';
 import { momentLabel } from './layerHistory.js';
-import { layerIconUrl, loadPicture } from './ownIcons.js';
+import { iconVersion, layerIconUrl, loadPicture } from './ownIcons.js';
 
 export function iconData(symbol, colour, marks = {}) {
   return pixelsData(personalMarkerImage(symbol, colour, marks));
@@ -46,7 +46,7 @@ export async function downloadLayer(caseId, row, format, { at = null, history = 
         if (own && mode === 'image' && !marks.status && !marks.external) continue;
         const key = markerImageKey(own ? `own-${own}` : symbol, colour, marks);
         if (key in icons) continue;
-        const drawn = own ? await drawOwn(layerIconUrl(caseId, row.name, own), colour, { mode, ...marks }) : drawIcon(symbol, colour, marks);
+        const drawn = own ? await drawOwn(layerIconUrl(caseId, row.name, own, iconVersion(row)), colour, { mode, ...marks }) : drawIcon(symbol, colour, marks);
         if (drawn) icons[key] = drawn;
       }
     }

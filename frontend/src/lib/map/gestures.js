@@ -249,3 +249,40 @@ export function turnFromKey(engine, event) {
   engine.setBearing(turn.to);
   return true;
 }
+
+/**
+ * Count the analyst's hand on a map: a press or a wheel over what draws it
+ * (`onMap(target)`, the flat map's canvas or the globe's), or a key that tilts
+ * or turns it outside a field. A camera the app holds back until the view is
+ * still (the 3D switch's lean, a tilted view being opened) reads the count
+ * before and after, and stays away once the hand has moved the map meanwhile.
+ *
+ * Heard on the way down, ahead of the map that takes the press: a press a mode
+ * claimed further out (the capture marquee, on the window) never reaches here,
+ * and moves no camera.
+ *
+ * @param {HTMLElement} wrap the element holding both maps
+ * @param {(target: EventTarget) => boolean} onMap
+ * @returns {{ count: () => number, stop: () => void }}
+ */
+export function watchHand(wrap, onMap) {
+  let count = 0;
+  const touched = (event) => {
+    if (onMap(event.target)) count += 1;
+  };
+  const keyed = (event) => {
+    if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    if (keyTilt(event, 0) != null || keyTurn(event, 0)) count += 1;
+  };
+  wrap.addEventListener('pointerdown', touched, true);
+  wrap.addEventListener('wheel', touched, { capture: true, passive: true });
+  window.addEventListener('keydown', keyed, true);
+  return {
+    count: () => count,
+    stop() {
+      wrap.removeEventListener('pointerdown', touched, true);
+      wrap.removeEventListener('wheel', touched, { capture: true });
+      window.removeEventListener('keydown', keyed, true);
+    },
+  };
+}

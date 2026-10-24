@@ -492,7 +492,7 @@
       <label class="check"><input type="checkbox" checked={(element.terrain ?? 0) > 0}
         onchange={(event) => { const on = event.currentTarget.checked; element.terrain = on ? 1.5 : 0;
           onmapview(element, { ...framed.view, pitch: on ? Math.max(framed.view.pitch ?? 0, 55) : 0 }); if (!on) element.ridges = false; }} />
-        Stand the map on its heights</label>
+        Show the map in 3D</label>
       {#if (element.terrain ?? 0) > 0}
         <div class="rows">
           <span class="key">Tilt</span>

@@ -151,4 +151,11 @@ describe('collecting and sending', () => {
     expect(answer.skipped).toEqual([{ name: 'bad.txt', reason: 'no' }]);
     expect(progress).toHaveBeenLastCalledWith(BATCH + 3, BATCH + 3);
   });
+
+  it('files every icon in the group it is asked to, whatever folder it came in', async () => {
+    const items = [{ name: 'a.png', blob: new Blob(['x']), group: 'Pack' }, { name: 'b.png', blob: new Blob(['x']), group: '' }];
+    const api = { post: vi.fn(async () => ({ added: [], already: 0, skipped: [] })) };
+    await importIcons([], { api, group: 'Drones', collect: async () => ({ items, skipped: [] }) });
+    expect(api.post.mock.calls[0][1].getAll('groups')).toEqual(['Drones', 'Drones']);
+  });
 });

@@ -2,29 +2,24 @@
   /**
    * A colour of a plate, picked from what the plate already speaks in: the page's
    * ink, paper and accent, the case's named colours (its layer palette, so a front
-   * line on the page is the same red as on the map), and the last few picked here.
+   * line on the page is the same red as on the map), and the last few picked here
+   * or in a layer's palette (`lib/recentColours.svelte.js`).
    * Any other colour is the browser's own picker, eyedropper included.
    */
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
+  import { recentColours } from '../../lib/recentColours.svelte.js';
 
   let { value = '#000000', theme = {}, label = 'Colour', onpick, none = false } = $props();
 
-  const RECENT = 'azimut:plate-colours';
-  function recent() {
-    try { return JSON.parse(localStorage.getItem(RECENT) ?? '[]').filter((hex) => /^#[0-9a-f]{6}$/i.test(hex)); } catch { return []; }
-  }
-  let kept = $state(recent());
   const swatches = $derived([...new Map([
     ...[theme.ink, theme.paper, theme.accent].filter(Boolean).map((hex) => [hex.toLowerCase(), 'The page']),
     ...layerPalette.colours.map((entry) => [entry.colour.toLowerCase(), entry.name]),
-    ...kept.map((hex) => [hex.toLowerCase(), 'Picked lately']),
+    ...recentColours.list.slice(0, 6).map((hex) => [hex, 'Picked lately']),
   ]).entries()].slice(0, 14));
 
   function pick(hex) {
     onpick?.(hex);
-    const next = [hex.toLowerCase(), ...kept.filter((item) => item !== hex.toLowerCase())].slice(0, 6);
-    kept = next;
-    try { localStorage.setItem(RECENT, JSON.stringify(next)); } catch { /* this browser keeps nothing */ }
+    recentColours.keep(hex);
   }
 </script>
 

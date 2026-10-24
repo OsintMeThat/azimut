@@ -5,7 +5,7 @@ const source = readFileSync(new URL('./CollageMenu.svelte', import.meta.url), 'u
 
 describe('CollageMenu scope', () => {
   it('acts on the collage it is handed, and no longer switches between several', () => {
-    expect(source).toContain('let { collage: active, selectedIds = $bindable([]), requestCrop, renderPiece, fileTitles = new Map() } = $props();');
+    expect(source).toContain('collage: active, selectedIds = $bindable([]), requestCrop, renderPiece, fileTitles = new Map(), level = null,\n    straighten = null,\n  } = $props();');
     expect(source).not.toContain('session.');
     expect(source).not.toContain('addCollage');
   });

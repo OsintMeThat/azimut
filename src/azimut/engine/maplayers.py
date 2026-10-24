@@ -1715,7 +1715,8 @@ def _read_spec(case: "Case", name: str) -> dict[str, Any]:
 def _write_spec(case: "Case", name: str, spec: dict[str, Any]) -> None:
     case.subdir(layout.LAYERS_DIR)
     path = case.resolve_inside(layout.layer_spec_rel(name))
-    write_text_atomic(path, json.dumps(spec, indent=2, ensure_ascii=False) + "\n")
+    # compact: an indented dump goes through Python's own encoder, seconds on a layer of thousands of corners
+    write_text_atomic(path, json.dumps(spec, ensure_ascii=False) + "\n")
 
 
 def _free_name(case: "Case", title: str) -> str:

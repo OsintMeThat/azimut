@@ -974,7 +974,7 @@ def search(
     `Cancelled`. `lanes` points are scored at once, each on its own thread: the
     work is numpy's and lets the others run meanwhile.
     """
-    sampler = sampler or terrain.Sampler(keep=SEARCH_TILES)
+    sampler = sampler or terrain.Sampler(keep=SEARCH_TILES, plates=True)
     started = time.monotonic()
     spacing = coarse_spacing(plan)
     fine = fine_spacing(plan, sampler)
@@ -1052,7 +1052,7 @@ def _lane_start(plan: Plan, trace: Trace, fetch: Any) -> None:
     """A search's process made ready: its plan, its trace and a terrain reader of its own, its tiles bounded."""
     if fetch is not None:
         terrain.tile = fetch
-    _LANE.update(plan=plan, trace=trace, sampler=terrain.Sampler(keep=SEARCH_TILES))
+    _LANE.update(plan=plan, trace=trace, sampler=terrain.Sampler(keep=SEARCH_TILES, plates=True))
 
 
 def _lane_score(job: tuple[float, float, float, str, Sequence[float] | None]) -> dict[str, Any]:

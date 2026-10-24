@@ -186,16 +186,17 @@ export async function collectIcons(files, { svg = rasterSvg, zip = readZip } = {
 
 /**
  * Collect, then send in batches. `onprogress(sent, total)` follows the batches;
- * the answer adds them up: `{ added, already, skipped }`.
+ * the answer adds them up: `{ added, already, skipped }`. A `group` files every
+ * icon there, whatever folder it came in.
  */
-export async function importIcons(files, { api, onprogress = null, collect = collectIcons } = {}) {
+export async function importIcons(files, { api, onprogress = null, collect = collectIcons, group = '' } = {}) {
   const { items, skipped } = await collect(files);
   const answer = { added: [], already: 0, skipped: [...skipped] };
   for (let at = 0; at < items.length; at += BATCH) {
     const form = new FormData();
     for (const item of items.slice(at, at + BATCH)) {
       form.append('files', item.blob, item.name);
-      form.append('groups', item.group);
+      form.append('groups', group || item.group);
     }
     const body = await api.post('/api/icons', form);
     answer.added.push(...(body.added ?? []));

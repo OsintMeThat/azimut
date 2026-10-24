@@ -277,6 +277,42 @@ describe('drawing', () => {
     expect(reads()).toBe(2);
   });
 
+  it('keeps the features of a layer an edit left as it was, which no map would read again', async () => {
+    // Done on a session with nothing new answers the same bytes: the time strip still needs them
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    const drawn = await layers.drawing('c1', 'Sightings');
+
+    layers.edited('c1', { ...FILE_LAYER, editable: true });
+
+    expect(layers.collection('Sightings')).toBe(drawn);
+    layers.edited('c1', { ...FILE_LAYER, editable: true, sha256: 'edited' });
+    expect(layers.collection('Sightings')).toBeNull();
+  });
+
+  it('reads a layer again when a case reload finds it written elsewhere', async () => {
+    // a proof's save moves the markers that follow it: the map must not keep the old copy
+    const layers = store();
+    layers.load('c1', 0);
+    await settle();
+    await layers.drawing('c1', 'Sightings');
+    const reads = () => calls.filter(([, path]) => path.endsWith('/data')).length;
+
+    layers.load('c1', 1);
+    await settle();
+    await layers.drawing('c1', 'Sightings');
+    expect(reads()).toBe(1);
+
+    rows = [{ ...FILE_LAYER, sha256: 'moved' }];
+    const moved = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { date: '2026-09-01' } }] };
+    collection = moved;
+    layers.load('c1', 2);
+    await settle();
+    expect(await layers.drawing('c1', 'Sightings')).toBe(moved);
+    expect(reads()).toBe(2);
+  });
+
   it('draws only what is switched on', async () => {
     rows = [FILE_LAYER, followed({ refresh: { on_open: false } })];
     const layers = store();

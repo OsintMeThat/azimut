@@ -40,8 +40,9 @@ export function createIconLibrary({ api = defaultApi, send = importIcons } = {})
       return icons.some((icon) => icon.key === key || icon.key === digest
         || (digest && icon.aliases?.includes(digest)) || icon.aliases?.includes(key));
     },
-    async importFiles(files, onprogress = null) {
-      const answer = await send(files, { api, onprogress });
+    /** Import pictures, filed in `group` when one is named, else by the folder each came in. */
+    async importFiles(files, onprogress = null, group = '') {
+      const answer = await send(files, { api, onprogress, ...(group ? { group } : {}) });
       await this.load(true);
       return answer;
     },

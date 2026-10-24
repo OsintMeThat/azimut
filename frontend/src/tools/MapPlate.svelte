@@ -721,7 +721,7 @@
     const of = main?.id;
     const needsMap = ['inset', 'legend', 'scale', 'north', 'credits', 'detail'].includes(kind);
     if (needsMap && !of) { toast('Put a map on the page first', 'warn'); return; }
-    if (['map', 'view3d', 'detail', 'inset'].includes(kind) && mapCount(spec.elements) >= MAX_MAPS) { toast(TOO_MANY_MAPS, 'warn', 6000); return; }
+    if (['map', 'detail', 'inset'].includes(kind) && mapCount(spec.elements) >= MAX_MAPS) { toast(TOO_MANY_MAPS, 'warn', 6000); return; }
     const [mx, my, mw, mh] = main?.box ?? [10, 10, width - 20, height - 20];
     const box = (x, y, w, h) => [x, y, w, h].map((value) => Math.round(value * 10) / 10);
     const id = newId(kind);
@@ -729,14 +729,6 @@
     switch (kind) {
       case 'map': element = { id, kind: 'map', box: box(width * 0.3, height * 0.3, width * 0.4, height * 0.4), view: { ...(main?.view ?? mapGround()) },
         basemap: main?.basemap ?? 'plain', overlays: [...(main?.overlays ?? ['relief'])], layers: JSON.parse(JSON.stringify(main?.layers ?? [])), grid: 'none' }; break;
-      case 'view3d': {
-        // the main map's ground seen from the side, standing on its heights
-        const from = main ? framingFor(main).view : mapGround();
-        element = { id, kind: 'map', name: '3D view', box: box(width * 0.3, height * 0.3, width * 0.4, height * 0.4),
-          view: { ...from, zoom: Math.max(1, (from.zoom ?? 10) - 0.5), pitch: 60 }, terrain: 1.5, ridges: false,
-          basemap: main?.basemap ?? 'plain', overlays: [...(main?.overlays ?? ['relief'])], layers: JSON.parse(JSON.stringify(main?.layers ?? [])), grid: 'none' };
-        break;
-      }
       case 'detail': element = { id, kind: 'map', of, box: box(mx + mw - 64, my + 4, 60, 45), view: { ...main.view, zoom: Math.min(20, main.view.zoom + 2.5) },
         basemap: main.basemap, overlays: [...(main.overlays ?? [])], layers: JSON.parse(JSON.stringify(main.layers ?? [])), grid: 'none', name: 'Detail' }; break;
       case 'inset': element = { id, kind: 'inset', of, box: box(mx + mw - 52, my + mh - 42, 48, 38), border: true, zoom: null }; break;

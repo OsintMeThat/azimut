@@ -9,6 +9,7 @@ import {
   turnFromKey,
   swallowDoubleClick,
   turnFromPress,
+  watchHand,
 } from './gestures.js';
 
 /** The façade, as far as the gestures reach into it. */
@@ -334,5 +335,60 @@ describe('tilting from the keyboard', () => {
     select.remove();
     expect(tiltFromKey(null, keydown('PageUp'))).toBe(false);
     expect(engine.pitches).toEqual([]);
+  });
+});
+
+describe('the hand on the map, which a camera held until the view is still yields to', () => {
+  /** Two maps in one wrap, as the 3D view stands the globe beside the flat map, and a button over them. */
+  function surface() {
+    const wrap = document.createElement('div');
+    const flat = document.createElement('canvas');
+    const globe = document.createElement('canvas');
+    const button = document.createElement('button');
+    const field = document.createElement('input');
+    wrap.append(flat, globe, button, field);
+    document.body.append(wrap);
+    const hand = watchHand(wrap, (target) => target === flat || target === globe);
+    return { wrap, flat, globe, button, field, hand };
+  }
+  const press = (target) => target.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+  const key = (target, init) => target.dispatchEvent(new window.KeyboardEvent('keydown', { bubbles: true, ...init }));
+
+  it('counts a press or a wheel over either map, never one over what stands on it', () => {
+    const { wrap, flat, globe, button, hand } = surface();
+    press(globe);
+    press(flat);
+    globe.dispatchEvent(new window.WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+    press(button);
+    expect(hand.count()).toBe(3);
+    hand.stop();
+    wrap.remove();
+  });
+
+  it('counts the keys that tilt or turn the map, outside a field', () => {
+    const { wrap, field, hand } = surface();
+    key(document.body, { key: 'PageUp' });
+    key(document.body, { key: 'PageDown' });
+    key(document.body, { key: 'ArrowLeft', shiftKey: true });
+    key(document.body, { key: 'ArrowLeft' });
+    key(document.body, { key: 'a' });
+    key(field, { key: 'PageUp' });
+    expect(hand.count()).toBe(3);
+    hand.stop();
+    wrap.remove();
+  });
+
+  it('hears a press a mode claimed further out not at all, and nothing once stopped', () => {
+    const { wrap, globe, hand } = surface();
+    const claim = (event) => event.stopPropagation();
+    window.addEventListener('pointerdown', claim, true);
+    press(globe);
+    window.removeEventListener('pointerdown', claim, true);
+    expect(hand.count()).toBe(0);
+    hand.stop();
+    press(globe);
+    key(document.body, { key: 'PageUp' });
+    expect(hand.count()).toBe(0);
+    wrap.remove();
   });
 });

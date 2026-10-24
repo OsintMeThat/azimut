@@ -394,15 +394,20 @@ def test_a_line_with_only_sky_above_is_read_as_far_as_the_photo_is_said_to_see(m
     # said to see 5 km, the line has only sky above it as far as that: the mountain is haze's
     kept = scored(5_000.0, sure)
     assert kept["over"] == 0.0 and kept["explained"] == pytest.approx(found["explained"], abs=1e-3)
-    # said to see 10 km, the mountain stands over the line, read past where the line is searched: no place
-    lost = scored(10_000.0, sure)
+    # said to see 10 km, the mountain stands over the line where it was filmed, read past where the line is
+    # searched: no place there, and what is left elsewhere is the hill alone, a poor fit (its own crest off the
+    # trace there is not land over the line)
+    filmed = replace(trace, facing=((95.0, 3.0),))
+    lost = scored(10_000.0, sure, filmed)
     assert lost["over"] > 0.2 and lost["explained"] == 0.0 and lost["reach"] == found["reach"]
+    assert scored(10_000.0, sure)["explained"] < 0.3 * found["explained"]
     # left to Auto, the line is read on past the 3 km it is said to stand at, and a mountain under three times as
     # far still stands over it (owner, 2026-10-22): no place, and the place says how far out it stands
     for marks in (sure, skymatch.Marks(line=line, clear=(0,))):
-        auto = scored(None, marks)
+        auto = scored(None, marks, filmed)
         assert auto["over"] > 0.2 and auto["explained"] == 0.0
         assert auto["over_far"] == pytest.approx(8_000.0, rel=0.2)
+        assert scored(None, marks)["explained"] < 0.3 * found["explained"]
     # a range seven times as far haze may well hide: left to Auto the place keeps its score
     far, reader = photo(Peak(*offset(*eye, 100.0, 20_000.0), height=3_000.0, radius=2_500.0))
     plain = scored(None, skymatch.Marks(line=line), far, reader)

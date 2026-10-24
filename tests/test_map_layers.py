@@ -1104,6 +1104,29 @@ def test_a_refresh_composes_the_icons_the_layer_was_added_with(client, case_id, 
     assert moved["icons"] == 1
 
 
+def test_a_refresh_that_redraws_an_icon_under_its_key_moves_its_address(client, case_id, monkeypatch):
+    """A My Maps renumbers its images/icon-N.png, so a refresh can put another
+    picture under a key: only an address naming the snapshot is cached for good."""
+    served = [dressed_kmz()]
+    monkeypatch.setattr(maplayers, "fetch", lambda url: (served[0], "s.kmz"))
+    row = client.post(
+        f"/api/cases/{case_id}/map-layers", json={"url": "https://example.test/s.kmz"}
+    ).json()
+    url = f"/api/cases/{case_id}/map-layers/{row['name']}"
+    key = client.get(f"{url}/data").json()["features"][0]["properties"]["icon"]
+    before = client.get(f"{url}/icons/{key}", params={"v": row["sha256"][:16]})
+
+    served[0] = kmz(icon_kml(), extra={"images/pin.png": png(colour=(30, 180, 60))})
+    moved = client.post(f"{url}/refresh").json()
+
+    assert client.get(f"{url}/data").json()["features"][0]["properties"]["icon"] == key
+    assert moved["sha256"] != row["sha256"]
+    after = client.get(f"{url}/icons/{key}", params={"v": moved["sha256"][:16]})
+    assert after.content != before.content
+    assert "immutable" in after.headers["cache-control"]
+    assert client.get(f"{url}/icons/{key}").headers["cache-control"] == "no-cache"
+
+
 def _status_error(url: str, code: int) -> "maplayers.httpx.HTTPStatusError":
     request = maplayers.httpx.Request("GET", maplayers.feed_url(url))
     response = maplayers.httpx.Response(code, request=request)

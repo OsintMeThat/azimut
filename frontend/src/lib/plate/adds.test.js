@@ -21,6 +21,12 @@ describe('what can be added to a plate', () => {
     expect(kinds(findAdds('QR'))).toEqual(['qr']);
   });
 
+  it('offers one kind of map, which a word for 3D finds: its 3D is a box on it', () => {
+    expect(kinds(ADDS.filter((group) => group.title === 'Maps'))).toEqual(['map', 'detail', 'inset']);
+    expect(kinds(findAdds('3d'))).toEqual(['map']);
+    expect(kinds(findAdds('relief'))).toEqual(['map']);
+  });
+
   it('reads every word, accents and capitals aside', () => {
     expect(kinds(findAdds('map text'))).toEqual(['note']);
     expect(kinds(findAdds('Vidéo'))).toEqual(['video']);

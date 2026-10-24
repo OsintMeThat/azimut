@@ -41,8 +41,11 @@ export const LAYER_HELP = {
   toGroup: 'Back to what its group says',
   // a group's settings
   groupName: 'Its name in the list and the legend',
+  individual: 'Each feature keeps its own icon and colour',
+  oneColour: "Each feature keeps its icon and takes the group's colour",
   uniform: "Every feature in it takes the group's icon and colour",
   groupStyle: 'The icon and colour of all its features',
+  groupColour: 'The colour of all its features',
   labels: "Writes each feature's name beside it",
   events: 'Each one fades after its day, and stays unless the time cursor says how long',
   iconSize: 'Scales every marker in the group',

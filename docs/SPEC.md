@@ -177,6 +177,7 @@ proof for publication.
 | ✅ **Layer days** | Filters a personal layer by day on its time strip and draws its dated features on an optional Timeline track. |
 | ✅ **Layer downloads** | Download personal layers as KMZ with icons, KML or GeoJSON. |
 | ✅ **Own icons** | Imports the analyst's icons in Settings (files, folders, zipped packs, SVG) for every layer's palette, in a disc or as they are; a layer keeps its copy and a copied map keeps its own. |
+| ✅ **Layer colours** | Gives a group one colour while each feature keeps its icon, offers back the colours a layer wears and those picked lately, and takes a colour code typed or pasted. |
 | ✅ **Layers followed over time** | Keeps a layer's features as dated states read on any day, today until the cursor moves, so every edit is dated, with what changed that day ringed and each feature's days said in its editor. |
 | ✅ **Layers kept per case** | Reopens each case on the layers every map had on, fires and night lights excepted, and leaves off with a toast a layer that stopped the last session while drawing. |
 | ✅ **Send to My Maps** | Saves a layer as it stood on one day as a KMZ, opens the analyst's My Maps beside it and says the three steps that replace its layer. |
@@ -195,7 +196,7 @@ proof for publication.
 | ✅ **Find: zones, sun and speed** | Searches finer zones and leaves zones out, over areas up to 10,000 km², tries a point clicked on the map, turns where the sun stood on a day into headings, and searches large grids on several cores. |
 | ✅ **Find: sea, lens and decoys** | Traces the sea's horizon with its own pen, measures a video's lens on its pan, and checks a search's places against decoys of its trace. |
 | ✅ **Find: as searched** | Levels a collage as it is laid, lets one stretch of the trace miss, rounds near lines on coarse relief when asked, searches grids down to 20 m, and lays a photo looked from a place as the search read it. |
-| ✅ **Find: sky only** | A line marked with only sky above lies on the top of the land and rules out the places where land stands over it, saying how far out, read past the place's own reach on Auto; a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
+| ✅ **Find: sky only** | A line marked with only sky above lies on the top of the land and rules out the places where land stands behind it, saying how far out, read past the place's own reach on Auto; a grid picked is kept for hours of search, Auto goes down to 20 m on a small area. |
 | ✅ **Find: lattice and kept skylines** | Lays the search's points in a hex lattice, a quarter fewer for the same reach, and reads the skylines an earlier search swept back from a bounded cache. |
 | ✅ **3D map** | Stands Satellite's imagery on public relief, tilted by hand or key, and files a tilted view as a credited capture that reopens as it was taken. |
 | ✅ **Globe 3D view** | Draws Satellite's 3D and a plate's 3D maps on a globe of the app's own whose eye only the hand moves, so the view never jumps as the ground loads; the map engine's former 3D view and its code are gone. |
@@ -210,6 +211,7 @@ proof for publication.
 | ✅ **Home, Guide & tasks** | Opens recent case work and named task lists from Home, with contextual guidance for each tool. |
 | ✅ **Pictured guide** | Opens over any tool from the `?`: every tool photographed and numbered, numbers that open the next screen, a geolocation walked to its published thread, pictures remade by `npm run guide:shots`, and a welcome at each new version pointing at the `?`. |
 | ✅ **Inspect, Collage & Reverse Search** | Autosaves work per file, arranges extracted frames into collages and sends original or cropped pictures to reverse search. |
+| ✅ **Collage: straighten** | A line drawn along something level bends the whole collage flat as one picture, seams kept; Find then reads it as one. |
 | ✅ **Inspect player & panel** | Captures the very frame on screen, lays frames, marks, shots and sound along the bar, and keeps Capture and Save above Info, Adjust, Moments and Analyze tabs. |
 | ✅ **Proof annotations & publishing** | Adds numbered markers, blur boxes, box tags, callouts, zoom insets, view cones and line styles, puts marks free on the page or tied by their ends across panels, sets the proof in shipped fonts, keeps line widths and sizes the same on every panel, verifies proof points and carries proof dates into previewed post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |

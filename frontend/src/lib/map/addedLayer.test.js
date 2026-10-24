@@ -465,7 +465,7 @@ describe("a source's own icons", () => {
 
     const [stored] = [...engine.map.sources.values()];
     const [point] = stored.data.features;
-    expect(point.properties.$own).toBe('azimut-source-abc123');
+    expect(point.properties.$own).toBe('azimut-source-/icons/abc123');
     const { own } = symbolLayers(engine);
     expect(own.layout['icon-anchor']).toBe('center');
   });
@@ -538,6 +538,40 @@ describe("a source's own icons", () => {
     // and both still drop the hidden group
     expect(JSON.stringify(own.filter)).toContain('Damage');
     expect(JSON.stringify(fallback.filter)).toContain('Damage');
+  });
+
+  it('keeps one layer\'s picture off another\'s markers that share its key', async () => {
+    // two My Maps both say `images/icon-3.png`, so the backend gives two pictures one key
+    const engine = stubEngine();
+    const yemen = source('/api/cases/c1/map-layers/yemen/icons');
+    const venezuela = source('/api/cases/c2/map-layers/venezuela/icons');
+
+    await createAddedLayer(engine, yemen).set(DRESSED, { categories: CATEGORIES });
+    await createAddedLayer(engine, venezuela).set(DRESSED, { categories: CATEGORIES });
+
+    expect(venezuela.loadIcon.mock.calls[0][1]).toBe('/api/cases/c2/map-layers/venezuela/icons/abc123');
+    const [first, second] = [...engine.map.sources.values()].map((stored) => stored.data.features[0].properties.$own);
+    expect(first).not.toBe(second);
+    expect(engine.map.hasImage(second)).toBe(true);
+  });
+
+  it('reads the new picture of a layer refreshed in place, under the key it had', async () => {
+    // a My Maps renumbers its images/icon-N.png, so a refresh can redraw a key
+    const engine = stubEngine();
+    let version = 'one';
+    const opts = { iconUrl: (key) => `/icons/${key}?v=${version}`,
+      loadIcon: vi.fn(async () => ({ width: 8, height: 8, data: new Uint8ClampedArray(256) })) };
+    const layer = createAddedLayer(engine, opts);
+    await layer.set(DRESSED, { categories: CATEGORIES });
+    const before = [...engine.map.sources.values()][0].data.features[0].properties.$own;
+
+    version = 'two';
+    await layer.set(DRESSED, { categories: CATEGORIES });
+
+    expect(opts.loadIcon.mock.calls.map(([, url]) => url)).toEqual(['/icons/abc123?v=one', '/icons/abc123?v=two']);
+    const after = [...engine.map.sources.values()][0].data.features[0].properties.$own;
+    expect(after).not.toBe(before);
+    expect(engine.map.hasImage(after)).toBe(true);
   });
 
   it('lands nowhere when the layer was torn down while its icons loaded', async () => {
@@ -786,7 +820,7 @@ describe('an added layer on the map', () => {
     const [, , click] = engine.map.handlers.find(([type]) => type === 'click');
     click({ lngLat: [2.35, 48.85], features: [COLLECTION.features[0]] });
 
-    expect(card).toHaveBeenCalledWith(COLLECTION.features[0].properties, { lat: 48.85, lon: 2.35 });
+    expect(card).toHaveBeenCalledWith(COLLECTION.features[0].properties, { lat: 48.85, lon: 2.35 }, COLLECTION.features[0].geometry);
     // nothing to confirm, nothing to save, no path out of it into the case
     expect(popup.body.querySelectorAll('button, a, input, form')).toHaveLength(0);
   });
@@ -824,8 +858,20 @@ describe('an added layer on the map', () => {
 
     click({ lngLat: [2.3511, 48.8511], features: [ROUNDED_PIN] });
 
-    expect(card).toHaveBeenCalledWith(ROUNDED_PIN.properties, { lat: 48.85, lon: 2.35 });
+    expect(card).toHaveBeenCalledWith(ROUNDED_PIN.properties, { lat: 48.85, lon: 2.35 }, COLLECTION.features[0].geometry);
     expect(popup.at).toEqual([2.35, 48.85]);
+  });
+
+  it('hands the card the whole area to measure, not the piece a tile clipped', async () => {
+    const engine = stubEngine();
+    const { card, opts } = stubCard();
+    await createAddedLayer(engine, opts).set(COLLECTION, { categories: CATEGORIES });
+    const [, , click] = engine.map.handlers.find(([type]) => type === 'click');
+    const clipped = { ...COLLECTION.features[1], geometry: { type: 'Polygon', coordinates: [[[2, 48], [2.05, 48], [2.05, 48.05], [2, 48]]] } };
+
+    click({ lngLat: [2.03, 48.01], features: [clipped] });
+
+    expect(card).toHaveBeenCalledWith(COLLECTION.features[1].properties, null, COLLECTION.features[1].geometry);
   });
 });
 
@@ -996,7 +1042,7 @@ describe('going to one feature', () => {
       expect.objectContaining({ maxZoom: 17, animate: true })
     );
     // an area has no one point to state
-    expect(card).toHaveBeenCalledWith(COLLECTION.features[1].properties, null);
+    expect(card).toHaveBeenCalledWith(COLLECTION.features[1].properties, null, COLLECTION.features[1].geometry);
     // nothing to confirm, nothing to save: a found feature is not an adopted one
     expect(popup.body.querySelectorAll('button, a, input, form')).toHaveLength(0);
   });
@@ -1053,7 +1099,7 @@ describe("the analyst's own icons on a personal layer", () => {
     await createAddedLayer(engine, options).set(dressed({ icon_mode: 'image' }));
     expect(options.buildBadge).not.toHaveBeenCalled();
     expect(options.buildOwn).not.toHaveBeenCalled();
-    expect(drawn(engine).$own).toBe('azimut-source-abcdef0123456789');
+    expect(drawn(engine).$own).toBe('azimut-source-/icons/abcdef0123456789');
   });
 
   it('composes it into a disc of the marker colour', async () => {

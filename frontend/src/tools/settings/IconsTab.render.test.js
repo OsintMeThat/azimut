@@ -102,3 +102,44 @@ it('finds an icon by its name or its group', async () => {
   find.value = 'camp'; find.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
   expect([...document.querySelectorAll('.tile .name')].map((node) => node.value)).toEqual(['Camp']);
 });
+
+it('makes an empty group, imports a drop into it and offers it to move icons to', async () => {
+  await show();
+  [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === 'New group').click();
+  flushSync();
+  const name = byLabel('Name of the new group');
+  name.value = 'Drones'; name.dispatchEvent(new Event('input', { bubbles: true }));
+  name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  flushSync();
+  expect([...document.querySelectorAll('.group-name')].map((node) => node.value)).toEqual(['Armour', 'My icons', 'Drones']);
+  expect(byLabel('Group Drones').textContent).toContain('Empty.');
+  expect(mocks.api.patch).not.toHaveBeenCalled();
+
+  const drop = new Event('drop', { bubbles: true, cancelable: true });
+  const files = [new File(['x'], 'drone.png')];
+  Object.defineProperty(drop, 'dataTransfer', { value: { files, types: ['Files'] } });
+  byLabel('Group Drones').dispatchEvent(drop);
+  for (let round = 0; round < 6; round++) { await tick(); await Promise.resolve(); }
+  expect(mocks.send).toHaveBeenCalledWith(files, expect.objectContaining({ group: 'Drones' }));
+
+  byLabel('More for Camp').click();
+  flushSync();
+  const drones = [...document.querySelectorAll('.fm-item')].find((node) => node.textContent.trim() === 'Drones');
+  drones.click();
+  await tick();
+  expect(mocks.api.patch).toHaveBeenCalledWith('/api/icons/cccccccccccccccc', { group: 'Drones' });
+});
+
+it('drops an empty group without asking', async () => {
+  await show();
+  [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === 'New group').click();
+  flushSync();
+  const name = byLabel('Name of the new group');
+  name.value = 'Spare'; name.dispatchEvent(new Event('input', { bubbles: true }));
+  name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  flushSync();
+  byLabel('Remove group Spare').click();
+  flushSync();
+  expect(byLabel('Group Spare')).toBeNull();
+  expect(mocks.api.post).not.toHaveBeenCalled();
+});

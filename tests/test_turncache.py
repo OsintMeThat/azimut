@@ -107,3 +107,25 @@ def test_the_turns_read_least_recently_go_first_past_the_budget():
     # over it, the oldest go until 80% of it is left
     assert turncache.sweep(budget=5_000) == 6
     assert sorted(p.name[-6:-4] for p in folder.iterdir()) == ["06", "07", "08", "09"]
+
+
+def test_a_search_too_large_to_keep_whole_keeps_its_start():
+    """Past the budget, the turns of other searches go first, then the latest of the search just run: run again in
+    the same order, it finds its first points kept rather than sweeping over its last."""
+    folder = turncache.cache_dir() / "bb"
+    folder.mkdir(parents=True)
+    now = 1_000_000.0
+    for i in range(10):
+        path = folder / f"bb{i:038d}.npz"
+        path.write_bytes(b"x" * 1_000)
+        os.utime(path, (now + i, now + i))
+    # the search began at the fourth turn: the three before are another's, read longest ago
+    assert turncache.sweep(budget=6_000, since=now + 3) == 6
+    assert sorted(p.name[-6:-4] for p in folder.iterdir()) == ["03", "04", "05", "06"]
+
+
+def test_the_budget_shrinks_on_a_disk_nearly_full(monkeypatch):
+    monkeypatch.setattr(turncache.shutil, "disk_usage", lambda _path: type("U", (), {"free": 2 << 30})())
+    assert turncache.allowed() == int(turncache.FREE_SHARE * (2 << 30))
+    monkeypatch.setattr(turncache.shutil, "disk_usage", lambda _path: type("U", (), {"free": 1 << 40})())
+    assert turncache.allowed() == turncache.BUDGET_BYTES

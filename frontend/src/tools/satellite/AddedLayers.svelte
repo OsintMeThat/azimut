@@ -43,7 +43,7 @@
   import MarkerSymbol from './MarkerSymbol.svelte';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { caseState } from '../../lib/state.svelte.js';
-  import { layerIconUrl } from '../../lib/map/ownIcons.js';
+  import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { ICON_HELP } from '../../lib/map/layerHelp.js';
   import LayerIconsToLibrary from './LayerIconsToLibrary.svelte';
   import {
@@ -457,7 +457,7 @@
                       onclick={() => oncategory?.(row, entry.name)}
                     >
                       {#if entry.symbol}<MarkerSymbol symbol={entry.symbol} colour={entry.colour} size={14}
-                        icon={entry.icon ? { src: layerIconUrl(caseState.current?.id, row.name, entry.icon), mode: entry.iconMode } : null} />
+                        icon={entry.icon ? { src: layerIconUrl(caseState.current?.id, row.name, entry.icon, iconVersion(row)), mode: entry.iconMode } : null} />
                       {:else}<span class="swatch" style="--swatch: {entry.colour}"></span>{/if}
                       <span class="cat-name">{entry.name}</span>
                       <span class="cat-count">{entry.count}</span>

@@ -10,8 +10,21 @@
 import { inkBox } from './markerGlyphs.js';
 
 export const libraryIconUrl = (key) => `/api/icons/${key}.png`;
-export const layerIconUrl = (caseId, layer, key) =>
-  `/api/cases/${caseId}/map-layers/${encodeURIComponent(layer)}/icons/${key}`;
+/**
+ * A layer's copy of an icon. `version` is `iconVersion(row)`: a refresh can
+ * draw another picture under the same key, as a My Maps renumbers its
+ * `images/icon-N.png`, and a new address is what lets the browser and the map
+ * drop the old one. Without it the server asks the browser to check again.
+ */
+export const layerIconUrl = (caseId, layer, key, version = '') =>
+  `/api/cases/${caseId}/map-layers/${encodeURIComponent(layer)}/icons/${key}${version ? `?v=${encodeURIComponent(version)}` : ''}`;
+
+/**
+ * The version a row's icons are read at: the hash of a source's snapshot, which
+ * moves exactly when its bytes do. A personal layer never refreshes, so its
+ * icons keep one address wherever they are read.
+ */
+export const iconVersion = (row) => (row?.editable ? '' : String(row?.sha256 ?? '').slice(0, 16));
 
 /** How many decoded pictures are kept; the oldest goes first. */
 const KEEP = 400;

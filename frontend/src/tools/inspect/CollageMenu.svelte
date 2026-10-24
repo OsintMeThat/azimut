@@ -2,6 +2,7 @@
   import {
     scaleQuad, rotateQuad, quadCentroid, rotateQuads, scaleQuads, pinholeOps, stitchCanvas, clockTime,
   } from '../../lib/inspect.js';
+  import { LEVEL_MIN_POINTS } from '../../lib/straighten.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
@@ -9,7 +10,11 @@
   // The panel beside the canvas: the selected piece or block, and the auto
   // panorama. Adding pieces and exporting live in the Collage tool around it.
   // `fileTitles` names a piece's file as the case names it now.
-  let { collage: active, selectedIds = $bindable([]), requestCrop, renderPiece, fileTitles = new Map() } = $props();
+  // `level` is the line the canvas draws to straighten the collage by, `straighten` what bends the collage along it.
+  let {
+    collage: active, selectedIds = $bindable([]), requestCrop, renderPiece, fileTitles = new Map(), level = null,
+    straighten = null,
+  } = $props();
 
   // These controls act on one piece; a multi-piece block is transformed as a
   // whole on the canvas, so the section simply steps aside for it.
@@ -82,6 +87,26 @@
   function removeGroup() {
     active.nodes = active.nodes.filter((n) => !selectedIds.includes(n.id));
     selectedIds = [];
+  }
+
+  // ---- straighten -------------------------------------------------------------
+  // A line the analyst says is level in the world bends the whole collage flat along
+  // it as one picture (lib/straighten.js, the Collage tool's `straighten`): every
+  // column of pixels moves alike, so each frame bends with the line and the seams a
+  // stitch matched stay matched. Find then reads the straightened picture as one.
+  let bending = $state(false);
+  function toggleLevel() {
+    level.drawing = !level.drawing;
+    if (level.drawing) selectedIds = [];
+  }
+
+  async function bend() {
+    bending = true;
+    try {
+      await straighten();
+    } finally {
+      bending = false;
+    }
   }
 
   // ---- auto-stitch ----------------------------------------------------------
@@ -263,6 +288,39 @@
       </button>
     {/if}
   </div>
+
+  {#if level}
+    <div class="section" data-guide="collage.straighten">
+      <div class="section-head" title="Bend the whole collage so a line level in the world comes out straight">
+        <span>Straighten</span>
+        {#if active?.straightened}<span class="straightened">straightened</span>{/if}
+      </div>
+      <p class="say">Click point by point along something level that crosses the view, such as a shore or a field's far edge.</p>
+      <div class="straighten-row">
+        <button
+          class="btn btn-sm"
+          class:on={level.drawing}
+          disabled={!active || !active.nodes.length}
+          onclick={toggleLevel}
+          title={level.drawing ? 'Stop drawing the line (Esc)' : 'Draw the level line on the canvas'}
+        >
+          <Icon name="edit" size={13} />
+          {level.drawing ? 'Done' : level.points.length ? 'Draw more' : 'Draw the line'}
+        </button>
+        <button
+          class="btn btn-sm btn-primary"
+          disabled={level.points.length < LEVEL_MIN_POINTS || bending || !straighten}
+          onclick={bend}
+          title={level.points.length < LEVEL_MIN_POINTS ? 'Click two points or more along the line first' : 'Bend the whole collage as one picture so the line lies flat'}
+        >
+          {bending ? 'Straightening…' : 'Straighten'}
+        </button>
+        {#if level.points.length}
+          <button class="btn btn-ghost btn-xs" onclick={() => (level.points = [])} title="Take the line away">Clear</button>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -279,6 +337,27 @@
   .section + .section {
     border-top: 1px solid var(--border);
     padding-top: 12px;
+  }
+  .straighten-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .straighten-row .on {
+    border-color: #ffcc00;
+    color: #ffcc00;
+  }
+  .say {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .straightened {
+    margin-left: 6px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    font-weight: 400;
   }
   .identity {
     display: flex;

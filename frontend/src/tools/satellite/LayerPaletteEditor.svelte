@@ -6,6 +6,7 @@
    */
   import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import HexField from '../../components/HexField.svelte';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { toast } from '../../lib/state.svelte.js';
 
@@ -32,6 +33,7 @@
   {#each rows as row, index (index)}
     <div class="row">
       <input type="color" aria-label={`Colour ${index + 1}`} bind:value={row.colour} />
+      <HexField value={row.colour} label={`Code of colour ${index + 1}`} onpick={(hex) => (row.colour = hex)} />
       <input aria-label={`Name of colour ${index + 1}`} placeholder="Side A, Unknown…" maxlength="40" bind:value={row.name} />
       <button type="button" class="icon-act" aria-label={`Remove colour ${index + 1}`} title="Remove"
         onclick={() => (rows = rows.filter((_, at) => at !== index))}><Icon name="x" size={11} /></button>

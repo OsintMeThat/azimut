@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { drawnStyle, styleTarget, usedStyles } from './layerStyle.js';
+import { drawnStyle, splitPick, styleTarget, usedStyles } from './layerStyle.js';
 
 const groups = [
   { id: 'free', name: 'Sightings', mode: 'individual', colour: '#0072b2', symbol: 'pin' },
   { id: 'one', name: 'Checkpoints', mode: 'uniform', colour: '#009e73', symbol: 'star' },
+  { id: 'side', name: 'Side A', mode: 'colour', colour: '#cc79a7', symbol: 'flag' },
 ];
 const point = (key, properties = {}) => ({ geometry: { type: 'Point' }, properties: { key, group: 'free', ...properties } });
 const line = (key, properties = {}) => ({ geometry: { type: 'LineString' }, properties: { key, group: 'free', ...properties } });
@@ -13,6 +14,11 @@ describe('the style a feature is drawn in', () => {
     expect(drawnStyle(point('a', { symbol: 'badge-tank', colour: '#d55e00' }), groups[0])).toEqual({ symbol: 'badge-tank', colour: '#d55e00' });
     expect(drawnStyle(point('a'), groups[0])).toEqual({ symbol: 'pin', colour: '#0072b2' });
     expect(drawnStyle(point('a', { symbol: 'badge-tank', colour: '#d55e00' }), groups[1])).toEqual({ symbol: 'star', colour: '#009e73' });
+  });
+
+  it('keeps its own icon in a group with one colour, in the group’s colour', () => {
+    expect(drawnStyle(point('a', { group: 'side', symbol: 'badge-tank', colour: '#d55e00' }), groups[2])).toEqual({ symbol: 'badge-tank', colour: '#cc79a7' });
+    expect(drawnStyle(point('a', { group: 'side', icon: 'aaaaaaaaaaaaaaaa' }), groups[2])).toEqual({ symbol: 'pin', colour: '#cc79a7', icon: 'aaaaaaaaaaaaaaaa' });
   });
 
   it('lists the styles a layer shows once each, markers and lines apart', () => {
@@ -51,5 +57,23 @@ describe('what the style button edits', () => {
     const across = styleTarget({ groups, chosen: [point('a', { group: 'one' }), point('b')] });
     expect(across).toMatchObject({ group: '', uniform: null });
     expect(across.note).toBe('Features in a group with one style keep that style.');
+  });
+
+  it('recolours a one-colour group, its features keeping their icons', () => {
+    const target = styleTarget({ groups, chosen: [point('a', { group: 'side', symbol: 'badge-tank', colour: '#d55e00' })] });
+    expect(target).toMatchObject({ symbol: 'badge-tank', colour: '#cc79a7', group: 'side', uniform: null });
+    expect(target.tinted.id).toBe('side');
+    expect(target.note).toBe('Side A has one colour for all its features. A colour picked here recolours the whole group.');
+    const next = styleTarget({ groups, into: 'side', draft: { symbol: 'flag', colour: '#d55e00' } });
+    expect(next).toMatchObject({ symbol: 'flag', colour: '#cc79a7' });
+    expect(next.tinted.id).toBe('side');
+    expect(styleTarget({ groups, chosen: [point('a', { group: 'side' }), point('b')] }).note).toBe('Features in a group with one colour keep that colour.');
+  });
+
+  it('sends a colour alone to the group and an icon to the features', () => {
+    expect(splitPick({ colour: '#d55e00' })).toEqual({ group: { colour: '#d55e00' }, own: {} });
+    expect(splitPick({ symbol: 'flag', icon: '' })).toEqual({ group: {}, own: { symbol: 'flag', icon: '' } });
+    // a style of the layer's own brings its icon, not a recolouring of the whole group
+    expect(splitPick({ symbol: 'flag', icon: '', colour: '#d55e00' })).toEqual({ group: {}, own: { symbol: 'flag', icon: '' } });
   });
 });

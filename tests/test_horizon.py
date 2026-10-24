@@ -204,6 +204,83 @@ def test_one_bounded_reader_shared_by_many_threads_reads_the_same_turn(relief):
         assert np.allclose(shared.skyline, alone.skyline, equal_nan=True)
 
 
+def _no_survey_past_the_planet(relief):
+    """The relief as Mapterhorn serves most of the world: no tile deeper than the planet's level."""
+    def fetch(z, x, y):
+        return None if z > terrain.PLANET_ZOOM else relief(z, x, y)
+    return fetch
+
+
+@pytest.mark.parametrize("survey", [True, False])
+def test_a_sweep_skipping_hidden_ground_finds_what_a_full_read_finds(survey):
+    """A sweep whose reader keeps its plates reads only the stretches of ray that may rise into sight
+    (`horizon._seen_angles`): the skyline, its distances, the cuts and the ridges are the full read's, to the
+    bit, whether the deep levels exist or the reads climb to the planet's."""
+    relief = Relief(peaks=(NEAR, FAR, LONE), ripple=40.0)
+    fetch = relief if survey else _no_survey_past_the_planet(relief)
+    plain, kept = terrain.Sampler(fetch=fetch), terrain.Sampler(fetch=fetch, plates=True)
+    read = {"plain": 0, "kept": 0}
+    for name, sampler in (("plain", plain), ("kept", kept)):
+        heights = sampler.heights
+
+        def counted(lat, lon, zoom, heights=heights, name=name):
+            read[name] += np.size(lat)
+            return heights(lat, lon, zoom)
+
+        sampler.heights = counted  # type: ignore[method-assign]
+    for bearing, metres in ((0.0, 0.0), (60.0, 7_000.0), (250.0, 3_000.0)):
+        eye = horizon.Observer(*offset(*EYE, bearing, metres), "ground", 1.7)
+        kw = dict(azimuths=np.arange(0.0, 360.0, 1.0), far=50_000.0, cuts=(5_000.0, 20_000.0), near_step=25.0)
+        a = horizon.sweep(eye, sampler=plain, **kw)
+        b = horizon.sweep(eye, sampler=kept, **kw)
+        for field_ in ("skyline", "skyline_distance", "skyline_cuts", "skyline_cuts_distance", "ridge_column",
+                       "ridge_angle", "ridge_distance"):
+            assert np.array_equal(getattr(a, field_), getattr(b, field_), equal_nan=True), field_
+    # most of the ground stands behind nearer ground
+    assert read["kept"] < 0.6 * read["plain"]
+
+
+def test_a_kept_plate_reads_what_a_fresh_mosaic_reads():
+    """Plates kept between reads, grown and let go, give every height a mosaic laid out for the read alone gives."""
+    relief = Relief(peaks=(NEAR, FAR, LONE), ripple=40.0)
+    for fetch in (relief, _no_survey_past_the_planet(relief)):
+        plain, kept = terrain.Sampler(fetch=fetch), terrain.Sampler(fetch=fetch, plates=True)
+        rng = np.random.default_rng(3)
+        for step in range(12):
+            centre = offset(*EYE, 30.0 * step, 4_000.0 * (step % 4))
+            lat = centre[0] + rng.uniform(-0.03, 0.03, 5_000)
+            lon = centre[1] + rng.uniform(-0.03, 0.03, 5_000)
+            for zoom in (14, 12, 10):
+                assert np.array_equal(plain.heights(lat, lon, zoom), kept.heights(lat, lon, zoom))
+
+
+def test_a_ceiling_stands_over_every_read_between_its_ends():
+    relief = Relief(peaks=(NEAR, FAR, LONE), ripple=40.0)
+    for fetch in (relief, _no_survey_past_the_planet(relief)):
+        sampler = terrain.Sampler(fetch=fetch, plates=True)
+        rng = np.random.default_rng(5)
+        bearings = rng.uniform(0.0, 360.0, 400)
+        # each level over the ring a sweep reads it on
+        for zoom, (inner, outer) in ((14, (100.0, 1_500.0)), (11, (2_000.0, 15_000.0))):
+            near = rng.uniform(inner, outer, 400)
+            span = terrain.metres_per_pixel(EYE[0], zoom) * 30.0
+            lat0, lon0 = terrain.destination(*EYE, bearings, near)
+            lat1, lon1 = terrain.destination(*EYE, bearings, near + span)
+            top = sampler.ceiling(lat0, lon0, lat1, lon1, zoom)
+            between = near[:, None] + span * np.linspace(0.0, 1.0, 31)[None, :]
+            lat, lon = terrain.destination(*EYE, bearings[:, None], between)
+            assert (sampler.heights(lat, lon, zoom) <= top[:, None]).all()
+            # and close to it: a bound this loose would skip nothing
+            assert np.median(top - sampler.heights(lat, lon, zoom).max(axis=1)) < 60.0
+
+
+@pytest.mark.parametrize("lat", [0.0, 35.98, 60.1, -33.3])
+def test_each_sample_reads_the_level_zoom_for_names(lat):
+    distances = horizon.ray_distances(150_000.0, 25.0)
+    expected = [terrain.zoom_for(max(d * horizon.LOD_RATIO, 1.0), lat) for d in distances]
+    assert horizon.lod_zooms(distances, lat).tolist() == expected
+
+
 def test_bands_cover_every_sample_once():
     zooms = horizon.lod_zooms(horizon.ray_distances(150_000.0), 45.0)
     assert np.all(np.diff(zooms) <= 0)  # coarser with distance

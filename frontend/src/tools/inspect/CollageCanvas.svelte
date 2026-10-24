@@ -5,6 +5,7 @@
   } from '../../lib/inspect.js';
   import { uiState } from '../../lib/state.svelte.js';
   import { anyOverlayOpen } from '../../lib/overlayStack.js';
+  import { levelShift } from '../../lib/straighten.js';
   import Icon from '../../components/Icon.svelte';
 
   // Interactive collage surface. Each node is a piece (a frame or a case image)
@@ -16,7 +17,9 @@
   // Selection is a *set*: shift-click adds/removes a piece. One piece gets the
   // per-piece handles (warp corners, side resize, rotate, toolbar); several get
   // a single block frame that moves/rotates/scales them as one rigid unit.
-  let { collage, selectedIds = $bindable([]), requestCrop } = $props();
+  // `level` is the line drawn to straighten the collage by (lib/straighten.js): while it is drawn, a click
+  // anywhere adds a point to it instead of moving pieces.
+  let { collage, selectedIds = $bindable([]), requestCrop, level = null } = $props();
 
   let wrapEl = $state();
   let availW = $state(800);
@@ -234,6 +237,21 @@
   // and when typing in a field or when a modal (e.g. the crop editor) is open.
   function onKey(e) {
     if (uiState.tool !== 'collage') return;
+    // While the level line is drawn, or still shown, Ctrl+Z takes its last point back (Collage leaves
+    // the layout's undo alone then).
+    if (level && (level.drawing || level.points.length) && !anyOverlayOpen()) {
+      const t = e.target;
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      const undo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
+      const back = undo || (level.drawing && (e.key === 'Backspace' || e.key === 'Delete'));
+      if (!typing && (back || (level.drawing && (e.key === 'Escape' || e.key === 'Enter')))) {
+        if (back) level.points = level.points.slice(0, -1);
+        else level.drawing = false;
+        e.preventDefault();
+        return;
+      }
+      if (level.drawing) return;
+    }
     if (!selectedIds.length) return;
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
@@ -242,6 +260,65 @@
     e.preventDefault();
     collage.nodes = collage.nodes.filter((n) => !isSel(n.id));
     selectedIds = [];
+  }
+
+  // Where the pointer is over the canvas while the line is drawn: the curve runs on to it, as the
+  // next click would make it.
+  let levelHover = $state(null);
+  const LEVEL_GRAB = 8; // screen pixels around a point that pick it up instead of adding one
+
+  function levelPointAt([x, y]) {
+    return level.points.findIndex(([px, py]) => Math.hypot(px - x, py - y) * scale <= LEVEL_GRAB);
+  }
+
+  // The line as Straighten will read it: the rounded curve through the clicks (lib/straighten.js),
+  // not the clicks joined by straight strokes, and on across the whole collage, level past its ends.
+  const levelCurve = $derived.by(() => {
+    if (!level) return '';
+    const hover = level.drawing && levelHover && levelPointAt(levelHover) < 0 ? [levelHover] : [];
+    const bend = levelShift([...level.points, ...hover]);
+    if (!bend) return '';
+    const box = quadsBounds(collage.nodes.map((n) => n.quad));
+    const left = Math.min(bend.from, box?.minX ?? bend.from);
+    const right = Math.max(bend.to, box?.maxX ?? bend.to);
+    const steps = 160;
+    const xs = Array.from({ length: steps + 1 }, (_, i) => left + ((right - left) * i) / steps);
+    return [...new Set([...xs, bend.from, bend.to])]
+      .sort((a, b) => a - b)
+      .map((x) => `${x},${bend.level - bend.shift(x)}`)
+      .join(' ');
+  });
+
+  // A click puts the next point down; a press on a point already there drags it instead, so a
+  // double-click to finish does not add a second one.
+  function onLevelDown(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const at = toCanvas(e);
+    const i = levelPointAt(at);
+    if (i < 0) level.points = [...level.points, at];
+    else dragLevelPoint(i);
+  }
+
+  // A point of the line, drawn or done, follows the pointer until it is let go.
+  function grabLevelPoint(e, i) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragLevelPoint(i);
+  }
+
+  function dragLevelPoint(i) {
+    const move = (ev) => {
+      level.points = level.points.map((p, j) => (j === i ? toCanvas(ev) : p));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   // Rotate the piece around its centroid by dragging the rotate handle around
@@ -439,6 +516,18 @@
          lot, with corner handles that scale it and a knob that turns it — all
          about the box's centre, so the pieces hold their relative places. The
          box itself never listens, so the pieces under it stay clickable. -->
+    {#if level && level.points.length}
+      <svg class="level-line" width={cw} height={ch} viewBox={`0 0 ${cw} ${ch}`} aria-hidden="true">
+        {#if levelCurve}<polyline points={levelCurve} vector-effect="non-scaling-stroke" />{/if}
+        {#each level.points as [x, y], i (i)}
+          <circle cx={x} cy={y} r={5 / scale} vector-effect="non-scaling-stroke" />
+          {#if !level.drawing}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <circle class="grab" cx={x} cy={y} r={LEVEL_GRAB / scale} onpointerdown={(e) => grabLevelPoint(e, i)} />
+          {/if}
+        {/each}
+      </svg>
+    {/if}
     {#if groupBox}
       <div
         class="group-box"
@@ -484,12 +573,26 @@
     {/if}
   </div>
 
+  {#if level?.drawing}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="level-catch"
+      class:on-point={levelHover && levelPointAt(levelHover) >= 0}
+      onpointerdown={onLevelDown}
+      onpointermove={(e) => (levelHover = toCanvas(e))}
+      onpointerleave={() => (levelHover = null)}
+      ondblclick={() => (level.drawing = false)}
+    ></div>
+  {/if}
+
   <div class="view-ctl">
     {#if zoom !== 1}
       <span class="zoom-val">{Math.round(zoom * 100)}%</span>
       <button class="btn btn-ghost btn-sm" onclick={resetView} title="Fit the collage back in view">
         <Icon name="eye" size={14} /> Fit
       </button>
+    {:else if level?.drawing}
+      <span class="zoom-hint">click point by point along the level line · drag a point to move it · Ctrl+Z takes the last one back · double-click or Enter ends</span>
     {:else}
       <span class="zoom-hint">scroll to zoom · drag background to pan · pull corners to warp · shift-click to select several</span>
     {/if}
@@ -518,6 +621,38 @@
     position: relative;
     transform-origin: 0 0;
     flex-shrink: 0;
+  }
+  .level-line {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .level-line polyline {
+    fill: none;
+    stroke: #ffcc00;
+    stroke-width: 3;
+  }
+  .level-line circle {
+    fill: #ffcc00;
+    stroke: #12141c;
+    stroke-width: 1;
+  }
+  .level-line circle.grab {
+    fill: transparent;
+    stroke: none;
+    pointer-events: all;
+    cursor: grab;
+  }
+  .level-catch {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    cursor: crosshair;
+  }
+  .level-catch.on-point {
+    cursor: grab;
   }
   /* The working area fills the whole pane (no boxed canvas): a checkerboard
      across it signals the transparent alpha that will be exported. */
@@ -592,6 +727,8 @@
     border-radius: var(--r-md);
     background: rgba(22, 22, 22, 0.85);
     border: 1px solid var(--border);
+    /* over the level line's click catcher, so Fit still answers while it is drawn */
+    z-index: 7;
   }
   .zoom-val {
     font-size: var(--fs-xs);

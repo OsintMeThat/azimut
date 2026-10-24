@@ -1694,6 +1694,24 @@ piece whose file was deleted keeps its place as a hatched gap, and the export wa
 until it is removed. The selected piece is named by its file and, for a video, the time
 it was cut at.
 
+**Straighten lays a bent pan flat.** A pan stitched with its tilt a little off bends a
+level line into a slope or a smile. **Draw the line**, then click point by point along
+something level that crosses the view, such as a shore, a field's far edge or a road
+along the valley. The line is a rounded curve through every point, running on to the
+pointer as the next click would make it; a point added between two others bends only
+the stretch around it, and past the line's ends the picture moves as the end does. The
+curve is drawn across the whole collage, so that shows before anything bends. A point can
+be dragged while the line shows, drawing or done.
+Ctrl+Z takes the last point back while the line shows; a double-click, Enter or Esc ends
+the drawing. **Straighten** draws the whole collage as one picture and bends it so that
+line comes out flat: every column of pixels moves up or down by what the line is off
+there, so each frame's own pixels follow the line and the seams a stitch matched stay
+matched. The bent picture is a new file in the case ("… straightened"), and it takes the
+pieces' place in the collage as one piece; Ctrl+Z puts the pieces back. A line coming
+towards the eye curves in a pan for real, so it is no line to draw. Find reads a
+straightened collage's picture as one rather than frame by frame, since the stitch's own
+rotations are what bent it.
+
 **The export keeps full resolution without a setting.** It is a transparent PNG of the
 pieces trimmed to their bounds, enlarged until the sharpest piece is back at its own
 pixels, however small it sits on the canvas. It holds under 8192 px a side and 40
@@ -2025,9 +2043,11 @@ map's own point menu there (other formats, **Open in…**, **What is here?**),
 **Clear the direction**, **Reshape**, **Save as case place** and removal, for the
 selection it is part of. The map's menu leaves out the acts that arm a tool of the
 rail, put away while a layer is edited. **Add markers** accepts
-repeated map clicks, each new marker picked so its sheet opens; Escape stops adding. **Draw line** and **Draw area** collect
+repeated map clicks, each marker drawn where it is put down at once and picked so its
+sheet opens once saved; Escape stops adding. **Draw line** and **Draw area** collect
 map clicks; Enter or **Save** saves, Esc cancels, and **Undo last point** takes a
-corner back. A corner placed within ten pixels of one already in the layer lands on
+corner back. A shape ended is drawn at once and saves behind; one the layer refuses
+comes back to be finished or dropped. A corner placed within ten pixels of one already in the layer lands on
 it, so a line drawn to meet another meets it exactly; a white ring shows where, and
 Alt lets it go free. **Freehand**, while a line or an area is drawn, lays a stroke
 of the pointer instead of a corner per click. While a new line or area is drawn, a
@@ -2038,7 +2058,11 @@ typed there (`800 m`, `2.5 km`, a bare number in the unit shown) draws it, and E
 saves it. A new line is named **Line 1**, **Line 2**, an area **Area 1**, each
 counted apart; a new layer's first group is **Features**. A line being reshaped grows by a click
 on the map, from its end or, with the bar's other arrow, from its start. An area
-being reshaped takes no click: its corners are dragged, and **+** puts one in. A corner
+being reshaped takes no click: its corners are dragged, and **+** puts one in, on each
+side long enough on the screen to take one. The shape being reshaped leaves the map
+while its outline stands for it, and comes back drawn as it was let go. Handles are
+drawn for the corners in view only, and a corner dragged follows the pointer once a
+frame, the shape taking it when it is let go. A corner
 of a line being reshaped can be pressed, then **Cut the line here** splits it there.
 
 **Merge** makes the selected lines, or areas, one feature. Lines that meet end to
@@ -2056,7 +2080,16 @@ search by name, theme or keyword. Each pick applies at once and the palette stay
 open for the next. With nothing selected it sets the next markers and the group
 they go into; with a selection it restyles it and can move it to another group. A
 group with one style draws every feature in it, so a pick on its features
-restyles the group, and the palette says so.
+restyles the group, and the palette says so. A group with one colour does the same
+for the colour alone: each feature keeps its icon, and a colour picked recolours
+the group.
+
+The colours are the case's named ones (or five plain ones), then the colours the
+layer already wears and those picked lately anywhere, a layer's palette or a
+plate's, so a colour made once is one press away after. Any other comes from the
+browser's picker or the code field beside it, which shows the colour worn for
+copying and takes one typed or pasted as `#d55e00`, `d55e00` or `rgb(213, 94, 0)`.
+The case's named colours take a code the same way.
 
 The analyst's own icons come first in the palette's Icon part. **This layer's
 icons** are the ones the layer holds that the library does not, such as a copied
@@ -2075,12 +2108,13 @@ An unfolded layer row that holds icons says how many, with **Add these icons to
 my library**: a grid, all ticked, that files the chosen ones under the layer's
 name. A copy never fills the library on its own.
 
-**New group** creates a foldable group. Its ⋯ opens its settings: its name, **One
-style for the whole group** and that style, **Names on the map**, **Icon size**,
+**New group** creates a foldable group. Its ⋯ opens its settings: its name, how it
+styles its features (**Each its own**, **One colour** where each keeps its icon, or
+**One style**) and that colour or style, **Names on the map**, **Icon size**,
 **Line width**, how its lines are dashed and its areas filled when a feature says
 nothing of its own, **Name N after their place**, **Select all** and **Ungroup**.
-A pick on a group with one style restyles every feature in it, and the toast says
-how many, with **Undo**. **Name after their place** asks the app's reverse geocoder
+A pick on a group with one style or one colour restyles every feature in it, and
+the toast says how many, with **Undo**. **Name after their place** asks the app's reverse geocoder
 (OpenStreetMap's Nominatim, one point a second) for the village or town each
 feature stands in, for the features whose name says nothing ("Point 12",
 "Marker 3"), shows its progress with **Stop**, and writes the names in one edit
@@ -2289,8 +2323,8 @@ layers without another case entity.
 Geo Proof's coordinate rows offer the same from the proof. A point's ⋯ goes a
 step at a time: the case's layers, the one used last first; then the layer's
 groups, when it has several; then, for a group whose features each have their own
-style, the marker's icon and colour, the layer's own styles first, and **Add**. A
-group with one style takes the point at once. A tick marks where the point already
+style, the marker's icon and colour, the layer's own styles first, and **Add**; for
+a group in one colour, its icon alone. A group with one style takes the point at once. A tick marks where the point already
 is, and **New layer…** makes one and opens it. A proof with unsaved changes is
 saved first, and a point the imagery only proposed is checked on the map first. Under the point, each
 layer it is in reads as one line, with **Open** for the marker on the map and ×
@@ -2621,6 +2655,8 @@ nothing to confirm. **Create editable copy** opens the source's saved features i
 **My layers**, where a chosen point can be saved as a case place. A pin's card also states
 its point in the analyst's format, pressed to copy: read from the file rather
 than from what the map drew, which a tile rounds by tens of metres far out. A
+line's card states its length and an area's its area and perimeter, at its foot
+in the analyst's units, measured on the whole shape the file holds. A
 right-click on a pin opens the map's own point menu on that point, headed by the
 pin's name and its layer, since the pin is pressed on its head, well above the
 ground it names. On a line or inside an area it opens on the ground pressed. A
@@ -2972,9 +3008,11 @@ a place where land still stands over it loses its score as that share of the
 line grows, read as far as **Sees as far as** says, past where the line is
 searched if need be. Left to Auto, land counts in full out to three times as
 far as the ground the line lies on, then less and less out to six times as far,
-since haze grows likelier to hide it. A place keeps its score up to a fiftieth
-of the line under land and is ruled out past a tenth; it says the share and how
-far out that land stands, on its point of the map too.
+since haze grows likelier to hide it. Only land standing behind the ridge the
+line lies on counts, half as far again or more: that ridge a few pixels over the
+trace is its own crest drawn a little low, not land behind. A place keeps its
+score up to a fiftieth of the line under land and is ruled out past a tenth; it
+says the share and how far out that land stands, on its point of the map too.
 
 Find's side has two faces. **Prepare** numbers the three steps a search
 needs (Skyline, Area, Search), each lit once done; the warnings about the lens
@@ -4981,7 +5019,7 @@ where the page is. **Add** in the header (or the A key) opens a panel whose fiel
 finds an element by a word, Enter adding the first one found, and groups what
 goes on a page by where it goes:
 **Maps** (a map, a **Detail** of the main map with lines to the ground it shows,
-an inset, a **3D view** of the main map's ground), **On the map** (a label, a **Map
+an inset), **On the map** (a label, a **Map
 text**, a **Symbol**, a number, an arrow, a **Line**, a distance, range rings, a view cone, a zone, a
 spotlight, each placed by pressing the map), **Round the map**
 (legend, scale bar, north arrow, credits, a date strip), **Writing** (text, banner,
@@ -5059,8 +5097,8 @@ lowland green to rock and snow, shade them, trace contour lines every ten metres
 kilometre by the map's scale (every fifth one bolder and written with its height), and
 name the summits with theirs; each of the three can be left off.
 
-**3D** stands a map on its heights, tilted (from the bar, or to the degree in the
-inspector), the heights drawn as they are or up to three times as tall, said under it.
+There is one kind of map: its inspector's **Show the map in 3D** box stands it on its
+heights, tilted (from the bar, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
 It is drawn on Satellite's globe, its ground, tints, contour lines, names and the
 case's layers laid on the relief; a browser without WebGL2 draws it flat and says so.
 **Ridge lines** traces the crests over it. A tilted map has no scale bar and no grid;

@@ -520,7 +520,9 @@ def _frame_size(case: "Case", path: str) -> tuple[float, float] | None:
 def frames_of(case: "Case", path: str) -> tuple[Any, dict[str, Any]] | None:
     """A picture exported from a Collage document read as its frames (engine/frames.py).
 
-    Only for the picture the collage last exported while it is still that layout.
+    Only for the picture the collage last exported while it is still that layout, and not
+    once the analyst straightened it by hand: the stitch's rotations are what bent it, so
+    the straightened picture is read as one.
     Returns the frames' model and what the tool says of it: `{ collage, frames,
     stitched, lens, span, export }`, `lens` the frames' lens the stitch gives (None
     when no frame was stitched), `span` how many degrees the picture spans read so
@@ -532,6 +534,8 @@ def frames_of(case: "Case", path: str) -> tuple[Any, dict[str, Any]] | None:
         exported = spec.get("exported")
         if not isinstance(exported, dict) or exported.get("path") != path or not _export_current(case, spec):
             continue
+        if spec.get("straightened") is True:
+            return None
         nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict)]
         sources = {}
         for node in nodes:
@@ -598,6 +602,9 @@ def _clean_collage(spec: dict[str, Any]) -> dict[str, Any]:
     }
     if isinstance(spec.get("exported"), dict):
         out["exported"] = spec["exported"]
+    # bent by hand along a level line (frontend lib/straighten.js): its stitch is what bent it
+    if spec.get("straightened") is True:
+        out["straightened"] = True
     return out
 
 

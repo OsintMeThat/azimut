@@ -19,12 +19,14 @@ import AddedLayersOverlay from './AddedLayersOverlay.svelte';
 let landings = $state.raw([]);
 let dragging = $state.raw(null);
 let edited = $state.raw(null);
-Object.defineProperties(editor, { landings: { get: () => landings }, dragging: { get: () => dragging }, editor: { get: () => edited } });
+let sketch = $state.raw(null);
+Object.defineProperties(editor, { landings: { get: () => landings }, dragging: { get: () => dragging }, editor: { get: () => edited },
+  sketch: { get: () => sketch } });
 editor.claim = vi.fn((landing) => { landing.claimed = true; });
 editor.landed = vi.fn();
 
 let held = null;
-afterEach(() => { if (held) unmount(held); held = null; made.length = 0; landings = []; dragging = null; edited = null; vi.clearAllMocks(); });
+afterEach(() => { if (held) unmount(held); held = null; made.length = 0; landings = []; dragging = null; edited = null; sketch = null; vi.clearAllMocks(); });
 const settle = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); flushSync(); };
 
 describe('the layers drawn on a map', () => {
@@ -127,6 +129,39 @@ describe('the layers drawn on a map', () => {
       landings = [];
       await settle();
       expect(layer.set.mock.calls.at(-1)[0].features[0].properties.bearing).toBeUndefined();
+    });
+
+    it('keeps an area being reshaped off the map, and brings it back where it landed, never at its old shape', async () => {
+      const { layer } = await drawn();
+      edited = { name: 'front' };
+      sketch = { key: 'k', type: 'Polygon' };
+      await settle();
+      expect(layer.hide).toHaveBeenLastCalledWith(['k']);
+      const shape = { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] };
+      const landing = { name: 'front', keys: ['k'], geometry: shape, saved: false, sha: null };
+      layer.hide.mockClear();
+      landings = [landing]; dragging = { name: 'front', keys: ['k'], offset: null, landing }; sketch = null;
+      await settle();
+      expect(layer.hide).not.toHaveBeenCalled();
+      expect(layer.set.mock.calls.at(-1)[0].features[0].geometry).toBe(shape);
+      expect(layer.set.mock.calls.at(-1)[1].held).toEqual([]);
+      expect(editor.landed).toHaveBeenCalledWith(landing);
+    });
+
+    it('draws a pin or a shape just added at once, until a read of the layer holds it', async () => {
+      const { props, drawing, layer } = await drawn();
+      const added = { type: 'Feature', geometry: { type: 'Point', coordinates: [5, 48] }, properties: { key: '$new-1' } };
+      const landing = { name: 'front', keys: [], feature: added, saved: false, sha: null };
+      landings = [landing];
+      await settle();
+      expect(layer.set.mock.calls.at(-1)[0].features.map((one) => one.properties.key)).toEqual(['k', '$new-1']);
+      landing.saved = true; landing.sha = 'b';
+      const read = pin(2); read.features.push({ ...added, properties: { key: 'm1', index: 1 } });
+      drawing.mockResolvedValue(read);
+      props.layers = [{ ...props.layers[0], sha256: 'b' }];
+      landings = [];
+      await settle();
+      expect(layer.set.mock.calls.at(-1)[0].features.map((one) => one.properties.key)).toEqual(['k', 'm1']);
     });
 
     it('lets the dragged copies go when the map goes', async () => {

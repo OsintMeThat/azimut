@@ -568,3 +568,108 @@ test('a press on the globe reaches the page: a menu open over it closes, and a m
   await page.mouse.up({ button: 'middle' });
   expect(await page.evaluate(() => window.__middle)).toBe(1);
 });
+
+test('a box drawn over the globe captures that box and leaves the view where it stood', async ({ page }) => {
+  // reading the drawn picture waits for every tile, slow on a software renderer
+  test.slow();
+  const filed = [];
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13.37&t=30&p=esri-world-imagery');
+  await page.route('**/api/cases/*/satellite/oblique', (route) => {
+    filed.push(route.request().postDataBuffer().toString('latin1'));
+    return route.fulfill({ json: { path: 'media/tilted.png', title: 'Tilted', provider: 'esri-world-imagery' } });
+  });
+  await expect(tilt(page)).toHaveText(/Tilt 30°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  const ll = address(page).get('ll');
+
+  await page.getByRole('button', { name: 'Capture options' }).click();
+  await page.locator('.size-menu .chip', { hasText: 'Select area' }).click();
+  await page.locator('.capture-main').click();
+  await expect(page.locator('.capture-main')).toHaveText(/Draw box/);
+
+  // the press is the marquee's, never the globe's pan
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+  await page.mouse.move(x - 150, y - 80);
+  await page.mouse.down();
+  await page.mouse.move(x + 150, y + 80, { steps: 10 });
+  await expect(page.locator('.sel-rect')).toBeVisible();
+  await page.mouse.up();
+
+  await expect.poll(() => filed.length, { timeout: 30_000 }).toBe(1);
+  const field = (name) => new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)`).exec(filed[0])?.[1];
+  expect(field('pitch')).toBe('30');
+  expect(Number(field('lat'))).toBeCloseTo(46.6, 1);
+  expect(address(page).get('ll')).toBe(ll);
+});
+
+test('a box over the sky alone is refused with the reason, and the marquee stays armed', async ({ page }) => {
+  // a view leaning to the horizon is slow to draw on a software renderer
+  test.slow();
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&t=84&p=esri-world-imagery');
+  await expect(globe(page)).toBeVisible();
+  await expect(tilt(page)).toHaveText(/Tilt \d+°/, LEANS);
+  await page.getByRole('button', { name: 'Capture options' }).click();
+  await page.locator('.size-menu .chip', { hasText: 'Select area' }).click();
+  await page.locator('.capture-main').click();
+  // the top strip of a view leaning to the horizon is sky
+  const map = await page.locator('.map').boundingBox();
+  await page.mouse.move(map.x + map.width * 0.45, map.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(map.x + map.width * 0.65, map.y + 90, { steps: 3 });
+  await page.mouse.up();
+  await expect(page.getByText('That box shows only sky. Draw it over the ground')).toBeVisible();
+  await expect(page.locator('.capture-main')).toHaveText(/Draw box/);
+});
+
+test('a map plate asked of the 3D view opens on the ground it looks at', async ({ page }) => {
+  const saves = [];
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&t=30&p=esri-world-imagery');
+  await page.route('**/api/templates', (route) => route.fulfill({ json: { proof: [], post: [], map: [] } }));
+  await page.route(`**/api/cases/${CASE_ID}/map-plates**`, (route) => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: [] });
+    const body = route.request().postDataJSON();
+    saves.push(body);
+    return route.fulfill({ json: { name: body.title, title: body.title, spec_path: `.mapplates/${body.title}.json`, thumb: null } });
+  });
+  await expect(tilt(page)).toHaveText(/Tilt 30°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  await page.getByRole('button', { name: 'Capture options' }).click();
+  await page.locator('.size-menu .chip', { hasText: 'Map plate' }).click();
+  // the hidden globe has no size, which once read as a zoom a continent wide
+  await expect.poll(() => saves.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const view = saves.at(-1).spec.elements.find((element) => element.kind === 'map').view;
+  expect(view.zoom).toBeGreaterThan(10);
+  expect(view.lat).toBeCloseTo(46.6, 1);
+});
+
+test('a tilt the hand gives while the 3D switch still waits to lean is the one kept', async ({ page }) => {
+  await openMap(page, '#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  // the globe's pictures held back: its view is not still, so the switch's lean waits
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  await page.route('**/api/tiles/batch/**', async (route) => {
+    await held;
+    return route.fallback();
+  });
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  // unpictured, the globe shows what it has after a few seconds
+  await expect(globe(page)).toBeVisible({ timeout: 10_000 });
+  await expect(tilt(page)).toHaveText(/Tilt 0°/);
+
+  const map = await page.locator('.map').boundingBox();
+  const x = map.x + map.width / 2, y = map.y + map.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'middle' });
+  await page.mouse.move(x, y - 160, { steps: 8 });
+  await page.mouse.up({ button: 'middle' });
+  await expect(tilt(page)).not.toHaveText(/Tilt 0°/);
+  const leant = await tilt(page).textContent();
+  expect(leant).not.toMatch(/Tilt 20°/);
+
+  // the pictures land and the view comes to rest: the hand's tilt stays
+  release();
+  await expect.poll(() => page.locator('.globe canvas:not(.marks)').evaluate(() => true)).toBe(true);
+  await page.waitForTimeout(3000);
+  await expect(tilt(page)).toHaveText(leant);
+});

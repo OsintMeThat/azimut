@@ -23,6 +23,7 @@
   import { prefs } from '../../lib/state.svelte.js';
   import { layerIconUrl, readyPicture } from '../../lib/map/ownIcons.js';
   import { bearingToward, facingLabel, knobAt, screenNorth } from '../../lib/map/turnRing.js';
+  import { perFrame } from '../../lib/map/perFrame.js';
 
   /**
    * `bar`: whether this map carries the tool bar, false on the second of two side-by-side maps.
@@ -47,6 +48,12 @@
   const SNAP_PIXELS = 10;
   /** The corner a press would land on now, while a shape is drawn, in screen pixels. */
   let snapTarget = $state(null);
+  /** The corner being dragged, `{ ring, index, lon, lat }`: drawn where the pointer has it, the shape taking it once let go. */
+  let moving = $state(null);
+  /** A "+" is put between two corners at least this far apart on the screen: closer, it would hide them. */
+  const MID_ROOM = 28;
+  /** How far past the map's edges handles are still drawn, so one dragged to the edge stays under the pointer. */
+  const HANDLE_MARGIN = 40;
   let altHeld = false;
   /** Whether the last press was on this map: a Delete after a press on a button of the panel removes nothing. */
   let pressedOnMap = false;
@@ -54,7 +61,7 @@
   const editing = $derived(active && !!engine && !!controller.editor && !controller.loading);
   const groups = $derived(new Map((controller.groups ?? []).map((group) => [group.id, group])));
   const hiddenGroups = $derived(new Set(controller.editor?.hidden ?? []));
-  /** The features as the map draws them: a uniform group's style, its size, its visible
+  /** The features as the map draws them: a uniform group's style or colour, its size, its visible
    *  groups only, and in its order, the first group last so that it is on top. */
   const shown = $derived.by(() => {
     if (!editing) return [];
@@ -63,17 +70,45 @@
       const group = groups.get(feature.properties.group);
       // a tracked feature that was not there on the layer's day is not there to pick
       if (hiddenGroups.has(group?.name) || feature.properties.$absent) return [];
-      const style = group?.mode === 'uniform' ? { symbol: group.symbol, colour: group.colour } : {};
+      const style = group?.mode === 'uniform' ? { symbol: group.symbol, colour: group.colour }
+        : group?.mode === 'colour' ? { colour: group.colour } : {};
       return [{ ...feature, properties: { ...feature.properties, ...style, icon_scale: group?.size ?? 1 } }];
     }).sort((a, b) => (rank.get(b.properties.group) ?? 0) - (rank.get(a.properties.group) ?? 0));
   });
   const project = (lon, lat) => engine.latLngToContainerPoint({ lat, lon });
 
   const sketch = $derived(active ? controller.sketch : null);
-  const rings = $derived.by(() => {
+  /**
+   * The sketch's corners on the screen, each `{ x, y, ri, index }`, worked out again
+   * only as the map moves or the shape changes: a dragged corner changes neither
+   * until it is let go, so a shape of thousands of corners is not re-read at each step.
+   */
+  const projected = $derived.by(() => {
     frame;
-    return sketch && engine ? sketch.rings.map((ring) => ring.map(([lon, lat]) => engine.latLngToContainerPoint({ lat, lon }))) : [];
+    return sketch && engine ? sketch.rings.map((ring, ri) => ring.map(([lon, lat], index) => {
+      const at = engine.latLngToContainerPoint({ lat, lon });
+      return { x: at.x, y: at.y, ri, index };
+    })) : [];
   });
+  /** …with the corner being dragged where the pointer has it, every other corner the very same. */
+  const rings = $derived.by(() => {
+    const ring = moving && projected[moving.ring];
+    if (!ring?.[moving.index]) return projected;
+    const at = engine.latLngToContainerPoint({ lat: moving.lat, lon: moving.lon });
+    const moved = ring.slice();
+    moved[moving.index] = { x: at.x, y: at.y, ri: moving.ring, index: moving.index };
+    return projected.map((one, ri) => (ri === moving.ring ? moved : one));
+  });
+  /** The map's box, read as it moves: handles beyond it are not drawn. */
+  const box = $derived.by(() => {
+    frame;
+    const rect = engine?.container?.getBoundingClientRect?.();
+    return rect?.width ? { width: rect.width, height: rect.height } : null;
+  });
+  const inView = (x, y) => !box || (x >= -HANDLE_MARGIN && y >= -HANDLE_MARGIN && x <= box.width + HANDLE_MARGIN && y <= box.height + HANDLE_MARGIN);
+  /** The corners a handle is drawn on: those in view, and the one being dragged wherever it is. */
+  const handles = $derived(rings.flatMap((ring) => ring.filter((point) => inView(point.x, point.y)
+    || (moving && point.ri === moving.ring && point.index === moving.index))));
   const closed = $derived(['Polygon', 'MultiPolygon'].includes(sketch?.type));
   const path = $derived(rings.map((ring) => ring.length ? `M${ring.map((point) => `${point.x},${point.y}`).join(' L')}${closed ? ' Z' : ''}` : '').join(' '));
   /** The leg from the last corner to the pointer, closing back to the first on an area: the click not yet made. */
@@ -106,13 +141,26 @@
     }
     return { path: paths.join(' '), points };
   });
-  const mids = $derived.by(() => {
+  /**
+   * A "+" halfway along each side long enough on the screen to take one, in view,
+   * made as the map moves or the shape changes. While a corner is dragged, the two
+   * sides it pulls lose theirs and the others stay as they are.
+   */
+  const allMids = $derived.by(() => {
     if (!sketch?.key || ['Point', 'Selection'].includes(sketch.type)) return [];
-    const closed = ['Polygon', 'MultiPolygon'].includes(sketch.type);
-    return rings.flatMap((ring, ri) => ring.flatMap((point, index) => {
+    return projected.flatMap((ring, ri) => ring.flatMap((point, index) => {
       const next = ring[index + 1] ?? (closed ? ring[0] : null);
-      return next ? [{ ring: ri, index: index + 1, x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 }] : [];
+      if (!next || Math.hypot(next.x - point.x, next.y - point.y) < MID_ROOM) return [];
+      const x = (point.x + next.x) / 2, y = (point.y + next.y) / 2;
+      return inView(x, y) ? [{ key: `${ri}.${index + 1}`, ring: ri, index: index + 1, x, y }] : [];
     }));
+  });
+  const mids = $derived.by(() => {
+    if (!moving) return allMids;
+    const last = projected[moving.ring]?.length ?? 0;
+    const pulled = (mid) => mid.ring === moving.ring && (mid.index === moving.index || mid.index === moving.index + 1
+      || (moving.index === 0 && mid.index === last));
+    return allMids.filter((mid) => !pulled(mid));
   });
 
   /**
@@ -165,7 +213,8 @@
         const badge = isBadge(feature.properties.symbol);
         const icon = feature.properties.icon ? iconLibrary.look(feature.properties.icon,
           { caseId: controller.editor?.caseId, layer: controller.editor?.name, meta: controller.icons }) : null;
-        marks.push({ key: feature.properties.key, x: at.x, y: at.y, badge: badge || !!icon, size: (badge || icon ? 25.6 : 38.4) * scale, icon,
+        // the size the map draws them at (64 pixels at 0.4), a pin as much as a badge
+        marks.push({ key: feature.properties.key, x: at.x, y: at.y, badge: badge || !!icon, size: 25.6 * scale, icon,
           symbol: feature.properties.symbol || 'pin', colour: feature.properties.colour || '#0072b2',
           status: feature.properties.status ?? '', external: feature.properties.provenance === 'external' });
       } else for (const ring of linesOf(geometry)) {
@@ -186,10 +235,10 @@
     const feature = shown.find((one) => one.properties.key === keys[0]);
     if (feature?.geometry.type !== 'Point') return null;
     const [lon, lat] = feature.geometry.coordinates;
-    // round the icon a marker wears, as its halo is; round the point for the app's own
-    const disc = feature.properties.icon ? markerDisc(feature, project, ownReach) : null;
-    const centre = disc ? { x: disc.x, y: disc.y } : project(lon, lat);
-    const radius = disc ? disc.r + 16 : (isBadge(feature.properties.symbol) ? 14 : 22) * (Number(feature.properties.icon_scale) || 1) + 16;
+    // round what the marker draws, as its halo is: a badge's disc, a pin's head, an icon's ink
+    const disc = markerDisc(feature, project, ownReach);
+    const centre = { x: disc.x, y: disc.y };
+    const radius = disc.r + 16;
     const north = screenNorth(project, lon, lat);
     const held = turning?.key === feature.properties.key ? turning.bearing : feature.properties.bearing;
     const bearing = held === undefined || held === null || held === '' ? null : Number(held);
@@ -204,17 +253,40 @@
   function snapped(point, except = null) {
     if (altHeld || !engine) return point;
     const at = engine.latLngToContainerPoint(point);
+    const cells = cornersOnScreen(except);
+    const [column, row] = [Math.floor(at.x / SNAP_PIXELS), Math.floor(at.y / SNAP_PIXELS)];
     let best = null;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const corner of cells.get(`${column + dx},${row + dy}`) ?? []) {
+          const gap = Math.hypot(corner.x - at.x, corner.y - at.y);
+          if (gap <= SNAP_PIXELS && (!best || gap < best.gap)) best = { gap, ...corner };
+        }
+      }
+    }
+    return best ? { lon: best.lon, lat: best.lat, $snap: { x: best.x, y: best.y } } : point;
+  }
+  /**
+   * The layer's corners on the screen in cells `SNAP_PIXELS` wide, worked out once
+   * for a view, its features and the one left out: a drag asks at every step, and
+   * a layer can hold tens of thousands of corners.
+   */
+  let corners = null;
+  function cornersOnScreen(except) {
+    if (corners?.frame === frame && corners.shown === shown && corners.except === except) return corners.cells;
+    const cells = new Map();
     const walk = (node) => (typeof node?.[0] === 'number' ? [node] : (node ?? []).flatMap(walk));
     for (const feature of shown) {
       if (except && feature.properties.key === except) continue;
       for (const [lon, lat] of walk(feature.geometry.coordinates)) {
         const p = project(lon, lat);
-        const gap = Math.hypot(p.x - at.x, p.y - at.y);
-        if (gap <= SNAP_PIXELS && (!best || gap < best.gap)) best = { gap, lon, lat, x: p.x, y: p.y };
+        const cell = `${Math.floor(p.x / SNAP_PIXELS)},${Math.floor(p.y / SNAP_PIXELS)}`;
+        if (!cells.has(cell)) cells.set(cell, []);
+        cells.get(cell).push({ lon, lat, x: p.x, y: p.y });
       }
     }
-    return best ? { lon: best.lon, lat: best.lat, $snap: { x: best.x, y: best.y } } : point;
+    corners = { frame, shown, except, cells };
+    return cells;
   }
   const drawing = () => !!controller.sketch && !['Point', 'Selection'].includes(controller.sketch.type);
   /**
@@ -384,11 +456,9 @@
         point: ground && { lat: ground.lat, lon: ground.lon, x: at.x, y: at.y, feature: feature?.properties.name || 'Unnamed feature', layer: controller.editor?.title ?? '' } };
     }
     /** While a circle or a box is drawn, it follows the pointer; while a shape is drawn, the corner it would snap to shows. */
-    let hovering = 0;
-    function hover(event) {
-      // once a frame: a layer with long shapes has many corners to look at
-      if (hovering) return;
-      hovering = requestAnimationFrame(() => { hovering = 0; });
+    // once a frame at most: a layer with long shapes has many corners to look at
+    const hover = perFrame(hovered);
+    function hovered(event) {
       const sketch = controller.sketch;
       if (!onMap(event.target)) { if (!event.target?.closest?.('.vertex, .midpoint')) pointer = null; return; }
       if (!sketch || ['Point', 'Selection'].includes(sketch.type)) { snapTarget = null; pointer = null; return; }
@@ -408,6 +478,7 @@
       ['click', click], ['dblclick', dblclick], ['contextmenu', menu]];
     for (const [type, run] of listening) window.addEventListener(type, run, true);
     return () => {
+      hover.cancel();
       for (const [type, run] of listening) window.removeEventListener(type, run, true);
       snapTarget = null; pointer = null;
       dragCleanup?.();
@@ -430,7 +501,9 @@
     let offset = null;
     let told = false;
     dragCleanup?.();
-    const move = (event) => {
+    // the copies follow once a frame at most, whatever the mouse reports
+    const move = perFrame((event) => follow(event));
+    const follow = (event) => {
       const at = local(event);
       if (!offset && Math.hypot(at.x - start.x, at.y - start.y) < DRAG_PIXELS) return;
       if (!movable.length) { if (!told) { told = true; controller.heldBack?.(keys); } return; }
@@ -440,11 +513,13 @@
       controller.drag(movable, offset);
     };
     const end = () => {
+      move.flush();
       cleanup();
       if (offset) controller.moveFeatures(movable, offset);
       else if (keys.length > 1) controller.chooseKeys([key]);
     };
     const cleanup = () => {
+      move.cancel();
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
       dragCleanup = null;
     };
@@ -554,17 +629,31 @@
     vertex = ring === 0 ? index : null;
     dragCleanup?.();
     let stepped = false;
-    const move = (event) => {
+    // once a frame at most, whatever the mouse reports; the corner is drawn where the pointer has it
+    // and the shape only takes it once let go, so nothing else of the shape is worked out again meanwhile
+    const follow = (event) => {
       const ground = pointAt(event);
       if (!controller.sketch || !ground) return;
       if (!stepped) { stepped = true; controller.beginVertexMove(); }
       const near = snapped(ground, controller.sketch.key);
       snapTarget = near.$snap ?? null;
-      controller.moveVertex(ring, index, { lat: near.lat, lon: near.lon });
+      moving = { ring, index, lat: near.lat, lon: near.lon };
     };
-    const end = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); dragCleanup = null; };
-    dragCleanup = end;
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+    const move = perFrame(follow);
+    const cleanup = () => {
+      move.cancel();
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
+      dragCleanup = null;
+    };
+    const end = () => {
+      move.flush();
+      cleanup();
+      if (moving) controller.moveVertex(moving.ring, moving.index, { lat: moving.lat, lon: moving.lon });
+      moving = null;
+    };
+    const cancel = () => { cleanup(); moving = null; };
+    dragCleanup = cancel;
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel);
   }
   function vertexKey(event, ring, index, point) {
     const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -629,16 +718,14 @@
     </svg>
     {#if reading}<span class="reading" style:left={`${reading.x}px`} style:top={`${reading.y}px`}>{reading.text}</span>{/if}
     <!-- a circle or a box being drawn follows the pointer: a handle under it would take the press that closes it -->
-    {#each sketch.shape ? [] : rings as ring, ri}
-      {#each ring as point, index}
-        <button type="button" class="vertex" class:chosen={ri === 0 && index === vertex} style:left={`${point.x}px`} style:top={`${point.y}px`}
-          aria-label={`Move vertex ${ri + 1}.${index + 1}`} title={['Point', 'Selection'].includes(sketch.type) ? 'Drag to move' : 'Drag to move; Delete to remove'}
-          onpointerdown={(event) => drag(event, ri, index)} onclick={(event) => event.stopPropagation()}
-          onfocus={() => { if (ri === 0) vertex = index; }}
-          onkeydown={(event) => vertexKey(event, ri, index, point)}></button>
-      {/each}
+    {#each sketch.shape ? [] : handles as point (`${point.ri}.${point.index}`)}
+      <button type="button" class="vertex" class:chosen={point.ri === 0 && point.index === vertex} style:left={`${point.x}px`} style:top={`${point.y}px`}
+        aria-label={`Move vertex ${point.ri + 1}.${point.index + 1}`} title={['Point', 'Selection'].includes(sketch.type) ? 'Drag to move' : 'Drag to move; Delete to remove'}
+        onpointerdown={(event) => drag(event, point.ri, point.index)} onclick={(event) => event.stopPropagation()}
+        onfocus={() => { if (point.ri === 0) vertex = point.index; }}
+        onkeydown={(event) => vertexKey(event, point.ri, point.index, point)}></button>
     {/each}
-    {#each mids as point}
+    {#each mids as point (point.key)}
       <button type="button" class="midpoint" style:left={`${point.x}px`} style:top={`${point.y}px`}
         aria-label={`Add vertex ${point.ring + 1}.${point.index}`} title="Add a vertex"
         onclick={(event) => { event.stopPropagation(); controller.insertVertex(point.ring, point.index, engine.containerPointToLatLng(point)); }}>+</button>
@@ -668,7 +755,8 @@
   .pending { fill: none; stroke: #f5a623; stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .8; }
   .reading { position: absolute; transform: translate(14px, -150%); padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .72); color: #fff;
     font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
-  .ghost-mark { position: absolute; transform: translate(-50%, -100%); opacity: .9; }
+  /* a pin's tip, 7.7 of its 64 pixels above the bottom, on its point, as the map anchors it */
+  .ghost-mark { position: absolute; transform: translate(-50%, -88%); opacity: .9; }
   .ghost-mark.badge { transform: translate(-50%, -50%); }
   .vertex, .midpoint { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; border: 1px solid #fff; border-radius: 50%; background: #f5a623; width: 11px; height: 11px; padding: 0; box-shadow: 0 0 0 1px #222; cursor: grab; touch-action: none; }
   .vertex.chosen { width: 14px; height: 14px; background: #fff; box-shadow: 0 0 0 2px #f5a623; }

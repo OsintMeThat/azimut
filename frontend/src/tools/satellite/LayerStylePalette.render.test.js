@@ -5,7 +5,7 @@
  * go wrong in front of the analyst is an icon offered twice, a pick that leaves
  * the old icon on, and a colour pick read as recolouring an icon that keeps its own.
  */
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import LayerStylePalette from './LayerStylePalette.svelte';
 import choices from '../../lib/map/layerSymbols.json';
@@ -83,4 +83,61 @@ it("offers none of the analyst's icons where a symbol is the app's only", async 
   expect(themes()).not.toContain('Armour');
   pick(`Marker ${choices[0].label} icon`);
   expect(onpick).toHaveBeenLastCalledWith({ symbol: choices[0].id });
+});
+
+describe('the colours', () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    const { recentColours } = await import('../../lib/recentColours.svelte.js');
+    while (recentColours.list.length) recentColours.list.pop();
+  });
+
+  it('offers the colours the layer wears and those picked lately, beyond the palette, once each', async () => {
+    const { recentColours } = await import('../../lib/recentColours.svelte.js');
+    recentColours.keep('#123456');
+    recentColours.keep('#0072b2');
+    const onpick = vi.fn();
+    await show({ onpick, used: [{ symbol: 'pin', colour: '#ABCDEF' }, { symbol: 'star', colour: '#d55e00' }, { symbol: 'flag', colour: '#123456' }] });
+    const extra = [...document.querySelectorAll('.palette .swatch')].map((node) => node.title).filter((title) => /^(In this layer|Picked lately)/.test(title));
+    // the palette's own blue and orange are not offered twice
+    expect(extra).toEqual(['In this layer, #abcdef', 'In this layer, #123456']);
+    pick('Marker #abcdef');
+    expect(onpick).toHaveBeenLastCalledWith({ colour: '#abcdef' });
+    expect(recentColours.list[0]).toBe('#abcdef');
+    // a colour of the palette is one press already, so it is not kept as picked lately
+    pick('Marker orange');
+    expect(recentColours.list[0]).toBe('#abcdef');
+    // in another layer, the colours made here are one press away
+    unmount(held); held = null; document.body.innerHTML = '';
+    await show({ onpick, used: [] });
+    expect([...document.querySelectorAll('.palette .swatch')].map((node) => node.title).slice(5)).toEqual(['Picked lately, #abcdef', 'Picked lately, #123456']);
+  });
+
+  it('takes a colour code typed or pasted, and shows the one worn to copy out', async () => {
+    const onpick = vi.fn();
+    await show({ onpick, colour: '#D55E00' });
+    const code = document.querySelector('[aria-label="Marker colour code"]');
+    expect(code.value).toBe('#d55e00');
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    paste.clipboardData = { getData: () => 'rgb(0, 114, 178)' };
+    code.dispatchEvent(paste); flushSync();
+    expect(onpick).toHaveBeenLastCalledWith({ colour: '#0072b2' });
+    code.value = '009E73'; code.dispatchEvent(new Event('input', { bubbles: true }));
+    code.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); flushSync();
+    expect(onpick).toHaveBeenLastCalledWith({ colour: '#009e73' });
+    code.value = 'reddish'; code.dispatchEvent(new Event('input', { bubbles: true }));
+    code.dispatchEvent(new Event('blur')); flushSync();
+    expect(code.getAttribute('aria-invalid')).toBe('true');
+    expect(onpick).toHaveBeenCalledTimes(2);
+    code.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); flushSync();
+    expect(code.value).toBe('#d55e00');
+    expect(code.getAttribute('aria-invalid')).toBe('false');
+  });
+
+  it('offers no colour where the group paints its markers itself', async () => {
+    await show({ colours: false });
+    expect(document.querySelector('[aria-label="Marker palette"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Marker colour code"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Marker icon palette"]')).not.toBeNull();
+  });
 });

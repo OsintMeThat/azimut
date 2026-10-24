@@ -30,11 +30,13 @@ import tempfile
 import threading
 import uuid
 from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
 from PIL import Image, ImageChops, ImageEnhance, ImageOps
 
 from ..workspace import Case, CaseError, ensure_dir
@@ -229,7 +231,6 @@ def _apply_denoise(img: Image.Image, params: dict[str, Any]) -> Image.Image:
     barely finer result.
     """
     import cv2
-    import numpy as np
 
     amount = max(0.0, min(_p(params, "amount", 0), 20.0))
     if amount <= 0:
@@ -1282,6 +1283,38 @@ def _compose_canvas(
     return canvas, sources
 
 
+# Columns a bend reads at once: bounds its memory on the largest canvas.
+BEND_COLUMNS = 256
+
+
+def _bent(canvas: Image.Image, shifts: Sequence[float]) -> Image.Image:
+    """The canvas with each column moved down by its own shift in pixels (up when negative), read between two
+    rows, the colours weighed by their cover so an edge does not darken."""
+    pixels = np.asarray(canvas.convert("RGBA"))
+    height, width = pixels.shape[:2]
+    out = np.zeros_like(pixels)
+    rows = np.arange(height, dtype=np.float64)[:, None]
+    for start in range(0, width, BEND_COLUMNS):
+        columns = slice(start, min(width, start + BEND_COLUMNS))
+        block = pixels[:, columns].astype(np.float32)
+        block[..., :3] *= block[..., 3:4] / 255.0
+        source = rows - np.asarray(shifts[columns], dtype=np.float64)[None, :]
+        top = np.floor(source).astype(np.int64)
+        share = (source - top)[..., None].astype(np.float32)
+        across = np.arange(block.shape[1])[None, :]
+
+        def row(at: np.ndarray, block: np.ndarray = block, across: np.ndarray = across) -> np.ndarray:
+            read = block[np.clip(at, 0, height - 1), across]
+            read[(at < 0) | (at >= height)] = 0.0
+            return read
+
+        mixed = row(top) * (1.0 - share) + row(top + 1) * share
+        cover = mixed[..., 3:4] / 255.0
+        mixed[..., :3] = np.where(cover > 0, mixed[..., :3] / np.maximum(cover, 1e-6), 0.0)
+        out[:, columns] = np.clip(np.rint(mixed), 0, 255).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
 def compose_perspective(
     case: Case,
     *,
@@ -1292,6 +1325,7 @@ def compose_perspective(
     label: str | None = None,
     folder: str | None = None,
     notes: str | None = None,
+    bend: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Composite frames and case images, each warped into a 4-point quad, onto a canvas.
 
@@ -1299,14 +1333,33 @@ def compose_perspective(
     ``{"src": {path, time?, ops[]}, "quad": [[x,y]×4]}`` with the quad in canvas
     pixels (top-left, top-right, bottom-right, bottom-left). A falsy ``background``
     yields a transparent (RGBA) canvas so the saved PNG carries only the pieces.
+
+    ``bend``, one shift a column in pixels, bends the whole composite as one
+    picture (Collage → Straighten): each column moved down by its own, the
+    transparent canvas then trimmed to what it holds, the box kept (``box``:
+    left, top, right, bottom on the bent canvas).
     """
     canvas, sources = _compose_canvas(
         case, width=width, height=height, nodes=nodes, background=background
     )
-    source = _derivation("", None, op="collage", sources=sources, perspective=True)
+    box = None
+    if bend is not None:
+        if background:
+            raise ValueError("a collage is bent on a transparent canvas")
+        if len(bend) != canvas.width or not all(math.isfinite(s) for s in bend):
+            raise ValueError("a bend needs one shift for every column")
+        canvas = _bent(canvas, bend)
+        box = canvas.getchannel("A").getbbox()
+        if box is None:
+            raise ValueError("the bend left nothing on the canvas")
+        canvas = canvas.crop(box)
+    extra = {"straightened": True} if bend is not None else {}
+    source = _derivation("", None, op="collage", sources=sources, perspective=True, **extra)
     name = f"{_name_stem(label, 'collage')}.png"
     result = media_engine.import_image(case, canvas, name, source, by="inspect")
     _apply_meta(case, result, label=label, folder=folder, notes=notes)
+    if box is not None:
+        result["box"] = list(box)
     return result
 
 

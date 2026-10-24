@@ -422,6 +422,31 @@ def test_saving_a_collage_again_rewrites_it_in_place(client):
     assert len(_of_type(cid, "collage")) == 1
 
 
+def test_a_straightened_collage_says_so_and_find_reads_its_picture_as_one(client, monkeypatch):
+    from azimut.engine import frames, inspectwork
+
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Bent", [_piece(photo)], straightened=True)
+    _save_collage(client, cid, "Plain", [_piece(photo)], straightened="yes")
+    assert client.get(f"/api/cases/{cid}/collages/Bent").json()["spec"]["straightened"] is True
+    # only a plain true is kept
+    assert "straightened" not in client.get(f"/api/cases/{cid}/collages/Plain").json()["spec"]
+
+    # bent by hand along a level line, its stitch is what bent it: Find reads the picture, not the frames
+    def by_frames(*_args, **_kw):
+        raise AssertionError("read frame by frame")
+
+    monkeypatch.setattr(frames, "pieces_of", by_frames)
+    monkeypatch.setattr(inspectwork, "_export_current", lambda case, spec: True)
+    spec = {"exported": {"path": "media/pan.png"}, "nodes": [], "straightened": True}
+    monkeypatch.setattr(inspectwork, "_collage_specs", lambda case: [(".collages/Pan.json", spec)])
+    assert inspectwork.frames_of(None, "media/pan.png") is None
+    spec.pop("straightened")
+    with pytest.raises(AssertionError, match="frame by frame"):
+        inspectwork.frames_of(None, "media/pan.png")
+
+
 def test_renaming_a_collage_moves_its_file_and_keeps_its_entity(client):
     cid = _case(client)
     photo = _upload(client, cid, "roof.png")

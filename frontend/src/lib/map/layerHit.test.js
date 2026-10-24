@@ -58,7 +58,7 @@ describe("a marker wearing one of the analyst's icons", () => {
     properties: { key: 'k', symbol: 'pin', ...properties } });
 
   it('is ringed on its point, not where the pin it keeps underneath has its head', () => {
-    expect(markerDisc(marker({}), project)).toMatchObject({ x: 100, y: -120 });
+    expect(markerDisc(marker({}), project)).toMatchObject({ x: 100, y: -112 });
     expect(markerDisc(marker({ icon: 'abcdef0123456789' }), project)).toMatchObject({ x: 100, y: -100, r: 14 });
   });
 

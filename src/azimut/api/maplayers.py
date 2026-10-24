@@ -241,7 +241,7 @@ class GroupIn(BaseModel):
 
 class GroupUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    mode: Literal["uniform", "individual"] | None = None
+    mode: Literal["individual", "colour", "uniform"] | None = None
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     symbol: str | None = None
     size: float | None = Field(default=None, ge=0.5, le=3, allow_inf_nan=False)
@@ -771,12 +771,14 @@ def layer_data(case_id: str, name: str) -> FileResponse:
 
 
 @router.get("/{case_id}/map-layers/{name}/icons/{key}")
-def layer_icon(case_id: str, name: str, key: str) -> Response:
+def layer_icon(case_id: str, name: str, key: str, v: Annotated[str, Query(max_length=64)] = "") -> Response:
     """One of the source's own pictograms, as the PNG this app composed for it.
 
     Reads a zip in the case folder and nothing else — the address the source gave
-    was followed once, when the layer was added, and never from here. Cached hard
-    because the key is a content hash: a different icon is a different URL.
+    was followed once, when the layer was added, and never from here. The key
+    hashes what the KML says of the icon, not its pixels, so a refresh can put
+    another picture under it. Cached hard only when the address names the
+    snapshot it was read from (`v`); otherwise the browser checks again.
     """
     case = get_case(case_id)
     try:
@@ -788,7 +790,7 @@ def layer_icon(case_id: str, name: str, key: str) -> Response:
     return Response(
         content=png,
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        headers={"Cache-Control": "public, max-age=31536000, immutable" if v else "no-cache"},
     )
 
 

@@ -22,10 +22,36 @@ function show(group, extra = {}) {
 
 it('says what each setting of a group does on hover', () => {
   show({ id: 'h', name: 'Strikes', mode: 'uniform', colour: '#d55e00', symbol: 'pin', size: 1, stroke: 2 });
-  const settings = [...document.querySelectorAll('.float-menu .field, .float-menu .switch')];
-  expect(settings.length).toBe(9);
+  const settings = [...document.querySelectorAll('.float-menu .field, .float-menu .switch, .float-menu .modes button')];
+  expect(settings.length).toBe(11);
   expect(settings.filter((node) => !node.title)).toEqual([]);
   expect(document.querySelector('.float-menu [aria-label="Strikes are events"]').closest('label').title).toBe(LAYER_HELP.events);
+});
+
+it('styles a group three ways, each its own, one colour or one style', () => {
+  const modes = () => [...document.querySelectorAll('[aria-label="How Strikes is styled"] button')];
+  const { controller } = show({ id: 'h', name: 'Strikes', mode: 'individual', colour: '#d55e00', symbol: 'pin', size: 1, stroke: 2 });
+  expect(modes().map((node) => [node.textContent.trim(), node.getAttribute('aria-pressed')]))
+    .toEqual([['Each its own', 'true'], ['One colour', 'false'], ['One style', 'false']]);
+  expect(modes().map((node) => node.title)).toEqual([LAYER_HELP.individual, LAYER_HELP.oneColour, LAYER_HELP.uniform]);
+  expect(document.querySelector('[aria-label="Group style"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Group colour"]')).toBeNull();
+  modes()[1].click();
+  expect(controller.updateGroup).toHaveBeenCalledWith('h', { mode: 'colour' });
+});
+
+it('gives a group in one colour a colour alone, offered from every colour the layer wears', () => {
+  const features = [
+    { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] }, properties: { key: 'a', group: 'g', symbol: 'star', colour: '#123456' } },
+    { type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] }, properties: { key: 'b', group: 'g', colour: '#abcdef' } }];
+  const { controller } = show({ id: 'h', name: 'Strikes', mode: 'colour', colour: '#d55e00', symbol: 'pin', size: 1, stroke: 2 }, { features });
+  expect(document.querySelector('[aria-label="Group style"]')).toBeNull();
+  document.querySelector('[aria-label="Group colour"]').click(); flushSync();
+  // a colour alone: no icon to pick
+  expect(document.querySelector('[aria-label="Group colour icon palette"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Group colour #123456"]')).not.toBeNull();
+  document.querySelector('[aria-label="Group colour #abcdef"]').click();
+  expect(controller.updateGroup).toHaveBeenCalledWith('h', { colour: '#abcdef' });
 });
 
 it('ungroups as one edit, its features going to the first group', () => {

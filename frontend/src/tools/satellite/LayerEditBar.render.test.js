@@ -227,6 +227,25 @@ describe('what the bar dates an edit to', () => {
     vi.useRealTimers();
   });
 
+  it('keeps the time on a layer dated to the minute, and a time changed re-dates the edits that day', () => {
+    const controller = tracked({ cursor: '2026-10-12T14:30', editor: { title: 'Working map', caseId: 'case', track: { on: true, precision: 'time', zone: 'Europe/Paris' } } });
+    show(LayerEditBar, { controller, ondone: vi.fn() });
+    document.querySelector('.mode[aria-pressed="true"]').click(); flushSync();
+    const time = document.querySelector('.float-menu input[type="time"]');
+    expect(time.value).toBe('14:30');
+    expect(document.querySelector('.float-menu').textContent).toContain('Paris');
+    time.value = '09:05'; time.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(controller.changeOn).toHaveBeenCalledWith('2026-10-12T09:05');
+    document.querySelector('.float-menu button.day[title="2026-10-08"]').click(); flushSync();
+    expect(controller.changeOn).toHaveBeenLastCalledWith('2026-10-08T14:30');
+  });
+
+  it('offers no time on a layer dated by the day', () => {
+    show(LayerEditBar, { controller: tracked({ cursor: '2026-10-12' }), ondone: vi.fn() });
+    button('From 12 Oct 2026').click(); flushSync();
+    expect(document.querySelector('.float-menu input[type="time"]')).toBeNull();
+  });
+
   it('dates from the day shown until no date is chosen, and back again in one press', () => {
     const controller = tracked({ cursor: '2026-10-12' });
     show(LayerEditBar, { controller, ondone: vi.fn() });

@@ -1,7 +1,8 @@
 <script>
   /**
-   * A group's settings, from the ⋯ on its row: its name, whether all its
-   * features share one style, names on the map, sizes, and the group itself.
+   * A group's settings, from the ⋯ on its row: its name, whether its features
+   * each keep their own style, share one colour or share one style, names on the
+   * map, sizes, and the group itself.
    * Each setting is saved as it changes.
    */
   import Icon from '../../components/Icon.svelte';
@@ -14,6 +15,7 @@
   const busy = $derived(controller.loading);
   const DASHES = [['', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']];
   const FILLS = [['', 'Filled'], ['hatch', 'Hatched'], ['none', 'Outline']];
+  const MODES = [['individual', 'Each its own', HELP.individual], ['colour', 'One colour', HELP.oneColour], ['uniform', 'One style', HELP.uniform]];
   /** The group's features a name says little about, which a place can name. */
   const unnamed = $derived(controller.unnamed?.(group.id) ?? []);
   let naming = $state(null);
@@ -22,11 +24,12 @@
     await controller.nameAfterPlaces(unnamed.map((feature) => feature.properties.key), (done) => { if (naming) naming.done = done; }, () => naming?.stop);
     naming = null;
   }
-  const uniform = $derived(group.mode === 'uniform');
   // A slider shows where it is held while it moves, and saves where it is let go.
   let size = $state(null);
   let stroke = $state(null);
   const used = $derived(usedStyles(controller.features ?? [], controller.groups ?? []));
+  /** Every colour the layer wears, its markers' and its lines', for a group given one colour. */
+  const worn = $derived([...used, ...usedStyles(controller.features ?? [], controller.groups ?? [], { point: false })]);
 
   async function slide(field, value, reset) {
     const result = await controller.updateGroup(group.id, { [field]: value });
@@ -39,14 +42,21 @@
     <input aria-label="Group name" value={group.name} maxlength="200"
       onchange={(event) => controller.updateGroup(group.id, { name: event.currentTarget.value })}
       onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></label>
-  <label class="switch" title={HELP.uniform}><input type="checkbox" aria-label="One style for the whole group" checked={uniform} disabled={busy}
-    onchange={(event) => controller.updateGroup(group.id, { mode: event.currentTarget.checked ? 'uniform' : 'individual' })} />
-    One style for the whole group</label>
-  {#if uniform}
+  <div class="modes" role="group" aria-label={`How ${group.name} is styled`}>
+    {#each MODES as [value, label, said] (value)}
+      <button type="button" class="pill" aria-pressed={(group.mode ?? 'individual') === value} title={said} disabled={busy}
+        onclick={() => controller.updateGroup(group.id, { mode: value })}>{label}</button>
+    {/each}
+  </div>
+  {#if group.mode === 'uniform'}
     <div class="field" title={HELP.groupStyle}><span>Style</span>
       <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} icon={group.icon ?? ''} {used}
         caseId={controller.editor?.caseId ?? null} layer={controller.editor?.name ?? null} meta={controller.icons}
         disabled={busy} onpick={(changes) => controller.updateGroup(group.id, changes)} /></div>
+  {:else if group.mode === 'colour'}
+    <div class="field" title={HELP.groupColour}><span>Colour</span>
+      <LayerStyleButton label="Group colour" colour={group.colour} point={false} used={worn}
+        caseId={controller.editor?.caseId ?? null} disabled={busy} title="Colour" onpick={({ colour }) => colour && controller.updateGroup(group.id, { colour })} /></div>
   {/if}
   <label class="switch" title={HELP.labels}><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}
     onchange={(event) => controller.updateGroup(group.id, { labels: event.currentTarget.checked })} /> Names on the map</label>
@@ -108,6 +118,8 @@
   .slider input { flex: 1; min-width: 0; height: 18px; padding: 0; accent-color: var(--accent); }
   .slider output { width: 34px; text-align: right; color: var(--text-2); }
   .switch { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 6px; color: var(--text-1); font-size: var(--fs-xs); cursor: pointer; }
+  .modes { display: flex; gap: 3px; padding: 4px 6px; }
+  .modes .pill { flex: 1; padding: 2px 4px; }
   .field > .pills { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; width: auto; min-width: 0; }
   .pill { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2); font-size: 10.5px; cursor: pointer; }
   .pill[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }

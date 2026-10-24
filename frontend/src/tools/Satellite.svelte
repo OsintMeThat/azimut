@@ -753,6 +753,29 @@
     };
   });
 
+  /**
+   * The marquee over the 3D view. The globe's canvas stands beside the flat
+   * map, not in it, and starts its own pan on the pointer's press: an armed
+   * marquee is heard on the window and claims that press first, so the globe
+   * never hears it and the mouse press that follows draws the box.
+   */
+  $effect(() => {
+    if (!capture.armed) return;
+    const onGlobe = (e) => e.button === 0 && Boolean(engine?.globe?.onSurface(e.target));
+    const claim = (e) => {
+      if (onGlobe(e)) e.stopPropagation();
+    };
+    const draw = (e) => {
+      if (onGlobe(e)) onSelectDrag(e);
+    };
+    window.addEventListener('pointerdown', claim, true);
+    window.addEventListener('mousedown', draw, true);
+    return () => {
+      window.removeEventListener('pointerdown', claim, true);
+      window.removeEventListener('mousedown', draw, true);
+    };
+  });
+
   /** Alt let go, or the window left with it held: clicks land on what is there again. */
   function onKeyup(e) {
     if (e.type === 'blur' || e.key === 'Alt') altHeld = false;
@@ -994,9 +1017,14 @@
     // once the relief under the centre is in, or the centre is seated at sea
     // level; in one jump, so the camera settles once and where it was asked.
     // Held until then, so the address never names the view on its way there.
-    engine.idle().then(() => {
+    surface.settledUntouched().then((untouched) => {
       // a camera asked for meanwhile is the one that lands
       if (!engine || pendingCamera !== wanted) return;
+      // the hand moved the map meanwhile: the view it left is the one kept
+      if (!untouched) {
+        pendingCamera = null;
+        return;
+      }
       const now = engine.camera();
       engine.setCamera({
         lat: wanted.lat ?? now.lat,

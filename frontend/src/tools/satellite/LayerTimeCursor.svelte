@@ -19,6 +19,7 @@
   import Icon from '../../components/Icon.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
+  import LayerClock from './LayerClock.svelte';
   import { dayNumber, isoDay } from '../../lib/map/layerDates.js';
   import { EVENT_DAYS, moment, momentLabel, momentNow, stepMoment } from '../../lib/map/layerHistory.js';
 
@@ -158,12 +159,7 @@
       <span>{pastSaid}</span><Icon name="chevronDown" size={10} /></button>
   </div>
   {#if precision === 'time'}
-    <label class="clock">
-      <span>Time</span>
-      <input type="time" aria-label="Time of day" value={clock}
-        onchange={(event) => pickClock(event.currentTarget.value)} />
-      <span class="zone">{zone === 'UTC' ? 'UTC' : zone.split('/').at(-1).replaceAll('_', ' ')}</span>
-    </label>
+    <LayerClock value={clock} {zone} onchange={pickClock} />
   {/if}
 
   {#if picking}
@@ -234,9 +230,6 @@
   .icon-act:disabled { opacity: .35; cursor: default; }
   .text-act { padding: 2px 4px; color: var(--text-3); font-size: 10px; cursor: pointer; }
   .text-act:hover { color: var(--text-1); text-decoration: underline; }
-  .clock { display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 2px; color: var(--text-3); font-size: 10px; }
-  .clock input { height: 22px; padding: 1px 4px; font-size: 11px; }
-  .zone { color: var(--text-3); }
   .fm-label { margin: 4px 10px 2px; color: var(--text-3); font-size: 10px; }
   .tick-room { flex: none; width: 14px; }
   .window { display: flex; align-items: center; gap: 6px; padding: 5px 10px 6px; color: var(--text-2); font-size: var(--fs-xs); }

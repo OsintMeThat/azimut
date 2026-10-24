@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import shutil
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -26,8 +27,10 @@ import numpy as np
 from .. import config
 from . import horizon, terrain
 
-# What the turns may take on disk; a sweep brings it back under 80% of it.
-BUDGET_BYTES = 256 << 20
+# What the turns may take on disk, as the terrain's cache may (about 50 000 turns, a large search's), and never
+# more than this share of the disk's free space; a sweep brings it back under 80% of it.
+BUDGET_BYTES = 1 << 30
+FREE_SHARE = 0.05
 # Raised when what a turn holds, or how it is swept, changes: older turns are then never read.
 VERSION = 1
 
@@ -129,9 +132,22 @@ def swept(
     return turn
 
 
-def sweep(budget: int = BUDGET_BYTES) -> int:
-    """Hold the cache under its budget, the turns read least recently going first, down to 80% of it.
-    Returns how many went. Never raises: a file another process holds is left for next time."""
+def allowed() -> int:
+    """What the turns may take: `BUDGET_BYTES`, or less on a disk nearly full."""
+    try:
+        free = shutil.disk_usage(cache_dir() if cache_dir().is_dir() else config.internal_dir()).free
+    except OSError:
+        return BUDGET_BYTES
+    return int(min(BUDGET_BYTES, FREE_SHARE * free))
+
+
+def sweep(budget: int | None = None, since: float | None = None) -> int:
+    """Hold the cache under its budget, down to 80% of it: the turns read least recently go first, but the turns a
+    search read or swept from `since` on (a timestamp) go last, the latest of them first. A search run again reads
+    its points in the same order, so what is kept of a search too large to keep whole is its start, which the run
+    again finds, rather than its end, which it would sweep over. Returns how many went. Never raises: a file
+    another process holds is left for next time."""
+    budget = allowed() if budget is None else budget
     root = cache_dir()
     if not root.is_dir():
         return 0
@@ -155,7 +171,9 @@ def sweep(budget: int = BUDGET_BYTES) -> int:
     if total <= budget:
         return 0
     dropped = 0
-    for _, size, path in sorted(files):
+    older = sorted(one for one in files if since is None or one[0] < since)
+    searched = sorted((one for one in files if since is not None and one[0] >= since), reverse=True)
+    for _, size, path in [*older, *searched]:
         if total <= budget * 0.8:
             break
         try:

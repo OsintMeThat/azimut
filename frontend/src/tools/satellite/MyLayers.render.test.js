@@ -6,6 +6,7 @@ import LayerFeatureSheet from './LayerFeatureSheet.svelte';
 import NewLayerDialog from './NewLayerDialog.svelte';
 import { createMyLayersState } from './state/myLayers.svelte.js';
 import { shortMoment } from '../../lib/map/layerHistory.js';
+import choices from '../../lib/map/layerSymbols.json';
 
 // the case palette is read from the server; here, a case that names no colours
 vi.mock('../../lib/api.js', () => ({ api: { get: vi.fn(async () => ({ colours: [] })), post: vi.fn(), patch: vi.fn(), put: vi.fn(), del: vi.fn() } }));
@@ -374,6 +375,23 @@ describe('personal layers', () => {
     expect(saveForm).toHaveBeenCalledOnce();
   });
 
+  it('recolours a one-colour group from its feature, the icon staying the feature’s', () => {
+    const point = { properties: { key: 'm1', group: 'g1', name: 'Gate', symbol: 'flag', colour: '#d55e00' }, geometry: { type: 'Point' } };
+    const groups = [{ id: 'g1', name: 'Side A', colour: '#cc79a7', symbol: 'pin', mode: 'colour' }];
+    const updateGroup = vi.fn(), updateSelection = vi.fn();
+    show(MyLayers, { controller: picked(point, { groups, group: 'g1', updateGroup, updateSelection }) });
+    document.querySelector('[aria-label="Feature style"]').click(); flushSync();
+    expect(document.body.textContent).toContain('Side A has one colour for all its features. A colour picked here recolours the whole group.');
+    // the list draws it in the group's colour
+    expect(document.querySelector('.feature-symbol').getAttribute('style')).toContain('#cc79a7');
+    document.querySelector('[aria-label="Feature style orange"]').click();
+    expect(updateGroup).toHaveBeenCalledWith('g1', { colour: '#d55e00' });
+    expect(updateSelection).not.toHaveBeenCalled();
+    document.querySelector(`[aria-label="Feature style ${choices[1].label} icon"]`).click();
+    expect(updateSelection).toHaveBeenCalledWith({ symbol: choices[1].id, icon: '' });
+    expect(updateGroup).toHaveBeenCalledOnce();
+  });
+
   it('opens a large imported group list folded and lets its groups be unfolded', () => {
     const groups = Array.from({ length: 8 }, (_, index) => ({ id: `g${index}`, name: `Group ${index}`,
       colour: '#0072b2', symbol: 'pin', mode: 'individual' }));
@@ -409,7 +427,7 @@ describe('personal layers', () => {
     show(MyLayers, { controller: { editor: { title: 'Working map' }, groups: [group], features: [], pending: 0, updateGroup } });
     document.querySelector('[aria-label="Settings of group Markers"]').click(); flushSync();
     expect(document.querySelector('[aria-label="Group style"]')).toBeNull();
-    document.querySelector('[aria-label="One style for the whole group"]').click();
+    [...document.querySelectorAll('[aria-label="How Markers is styled"] button')].find((node) => node.textContent.trim() === 'One style').click();
     expect(updateGroup).toHaveBeenCalledWith('g1', { mode: 'uniform' });
   });
 });
@@ -534,6 +552,40 @@ describe('a feature with a history', () => {
     expect(document.querySelector('.float-menu button.day[title="2026-10-03"]').disabled).toBe(true);
     document.querySelector('.float-menu button.day[title="2026-10-08"]').click(); flushSync();
     expect(changeOn).toHaveBeenCalledWith('2026-10-08');
+  });
+
+  it('gives every calendar a time on a layer dated to the minute', () => {
+    const setStart = vi.fn(), setEnd = vi.fn(), changeOn = vi.fn();
+    const timed = { ...TRACKED, track: { on: true, precision: 'time', zone: 'UTC' } };
+    const dated = { ...front, properties: { ...front.properties, states: [
+      { at: '2026-10-03T08:15', geometry: line(0) }, { at: '2026-10-12T17:00', geometry: line(1), status: 'damaged' }] } };
+    show(MyLayers, { controller: picked(dated, { editor: timed, cursor: '2026-10-15T10:00', timeMode: 'new', setStart, setEnd, changeOn }) });
+    const time = () => document.querySelector('.float-menu input[type="time"]');
+    const retime = (value) => { time().value = value; time().dispatchEvent(new Event('change', { bubbles: true })); flushSync(); };
+    // the start opens on its own time, a time changed moves it that day and leaves the calendar open
+    document.querySelector('[aria-label="When it first shows"]').click(); flushSync();
+    expect(time().value).toBe('08:15');
+    retime('06:40');
+    expect(setStart).toHaveBeenCalledWith('f', '2026-10-03T06:40');
+    expect(document.querySelector('.float-menu')).not.toBeNull();
+    document.querySelector('.float-menu button.day[title="2026-10-05"]').click(); flushSync();
+    expect(setStart).toHaveBeenLastCalledWith('f', '2026-10-05T06:40');
+    // an end not set yet takes the time of the day shown with the day picked
+    document.querySelector('[aria-label="When it leaves the map"]').click(); flushSync();
+    expect(time().value).toBe('10:00');
+    retime('21:30');
+    expect(setEnd).not.toHaveBeenCalled();
+    document.querySelector('.float-menu button.day[title="2026-10-14"]').click(); flushSync();
+    expect(setEnd).toHaveBeenCalledWith('f', '2026-10-14T21:30');
+    document.querySelector('[aria-label="Change it from a day"]').click(); flushSync();
+    document.querySelector('.float-menu button.day[title="2026-10-08"]').click(); flushSync();
+    expect(changeOn).toHaveBeenCalledWith('2026-10-08T10:00');
+  });
+
+  it('offers no time on a layer dated by the day', () => {
+    show(MyLayers, { controller: picked(front, { editor: TRACKED, cursor: '2026-10-15', timeMode: 'new' }) });
+    document.querySelector('[aria-label="When it first shows"]').click(); flushSync();
+    expect(document.querySelector('.float-menu input[type="time"]')).toBeNull();
   });
 
   /** Several features picked on a tracked layer, the sheet shared by all of them. */

@@ -15,10 +15,14 @@
    * is said, else "Mixed", and one picked goes to all of them in one edit. The
    * calendars offer only the days every one of them can take; the history and
    * the changes from a day stay with one feature.
+   *
+   * On a layer dated to the minute each calendar has a time above it: a day
+   * picked carries it, and a time changed on a bound already dated moves it there.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
+  import LayerClock from './LayerClock.svelte';
   import { dayNumber, isoDay } from '../../lib/map/layerDates.js';
   import { lifeRows, momentLabel, momentNow, shortMoment, spanOf } from '../../lib/map/layerHistory.js';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
@@ -73,15 +77,37 @@
   let anchors = $state({});
   $effect(() => { void key; open = ''; });
 
-  function toggle(which) { open = open === which ? '' : which; }
-  function start(at) {
-    open = '';
+  const zone = $derived(controller.editor?.track?.zone || 'UTC');
+  const timed = $derived(controller.editor?.track?.precision === 'time');
+  /** The moment each calendar stands on: what its day picked replaces. */
+  const bound = (which) => ({ start: span.start, end: span.unknown ? '' : span.end, change: cursor }[which] ?? '');
+  const clockOf = (at) => (String(at ?? '').includes('T') ? String(at).slice(11, 16) : '');
+  /** The time the open calendar's day is given, `HH:MM` or ''. */
+  let clock = $state('');
+  const withClock = (iso) => (timed && clock ? `${iso}T${clock}` : iso);
+
+  function toggle(which) {
+    open = open === which ? '' : which;
+    clock = open ? clockOf(bound(open)) || clockOf(cursor) : '';
+  }
+  /** A time changed: a bound already dated moves to it, the calendar stays open. */
+  function retime(value) {
+    clock = value;
+    const day = String(bound(open) ?? '').slice(0, 10);
+    if (!day) return;
+    const at = value ? `${day}T${value}` : day;
+    if (open === 'start') start(at, true);
+    else if (open === 'end') end(at, true);
+    else if (open === 'change') controller.changeOn(at);
+  }
+  function start(at, stay = false) {
+    if (!stay) open = '';
     if (at === span.start) return;
     if (many) controller.setSelectionWhen({ start: at });
     else controller.setStart(key, at);
   }
-  function end(at) {
-    open = '';
+  function end(at, stay = false) {
+    if (!stay) open = '';
     if (at === span.end && !span.unknown) return;
     if (many) controller.setSelectionWhen({ end: at });
     else controller.setEnd(key, at);
@@ -152,7 +178,8 @@
         <Icon name="eye" size={14} /><span class="fm-grow">{momentLabel(cursor)}</span><span class="aside">day shown</span></button>
     {/if}
     <div class="fm-sep"></div>
-    <MonthGrid value={(span.start ?? '').slice(0, 10)} max={startMax} label="First day" onpick={(iso) => { if (iso) start(iso); }} />
+    {#if timed}<LayerClock value={clock} {zone} label="Time it first shows" onchange={retime} />{/if}
+    <MonthGrid value={(span.start ?? '').slice(0, 10)} max={startMax} label="First day" onpick={(iso) => { if (iso) start(withClock(iso)); }} />
   </FloatingMenu>
 {:else if open === 'end'}
   <FloatingMenu anchor={anchors.end} width={248} label="When it leaves the map" onclose={() => (open = '')}>
@@ -165,14 +192,16 @@
         <Icon name="eye" size={14} /><span class="fm-grow">{momentLabel(cursor)}</span><span class="aside">day shown</span></button>
     {/if}
     <div class="fm-sep"></div>
-    <MonthGrid value={(span.end ?? '').slice(0, 10)} min={endMin} max={today} label="Day it leaves" onpick={(iso) => { if (iso) end(iso); }}
+    {#if timed}<LayerClock value={clock} {zone} label="Time it leaves" onchange={retime} />{/if}
+    <MonthGrid value={(span.end ?? '').slice(0, 10)} min={endMin} max={today} label="Day it leaves" onpick={(iso) => { if (iso) end(withClock(iso)); }}
       also={{ label: 'Unknown', title: 'Nobody knows when it left: drawn as still there', pressed: span.unknown, onclick: unknown }} />
     <p class="fm-note">{many ? `Gone from that day on, for all ${list.length}.` : 'Gone from that day on.'}</p>
   </FloatingMenu>
 {:else if open === 'change'}
   <FloatingMenu anchor={anchors.change} align="end" width={248} label="Change it from a day" onclose={() => (open = '')}>
     <p class="fm-head">Changes from</p>
-    <MonthGrid value={cursor ? cursor.slice(0, 10) : ''} min={changeMin} max={changeMax} label="Day it changes" onpick={(iso) => { if (iso) change(iso); }} />
+    {#if timed}<LayerClock value={clock} {zone} label="Time it changes" onchange={retime} />{/if}
+    <MonthGrid value={cursor ? cursor.slice(0, 10) : ''} min={changeMin} max={changeMax} label="Day it changes" onpick={(iso) => { if (iso) change(withClock(iso)); }} />
     <p class="fm-note">Then move it or set its status.</p>
   </FloatingMenu>
 {/if}
